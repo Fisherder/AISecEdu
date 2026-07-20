@@ -297,6 +297,10 @@ services:
       - WORKSPACE_SECRET=${WORKSPACE_SECRET}
     volumes:
       - /data/acme:/var/cache/nginx/acme-letsencrypt
+      - /data/local-tls:/etc/nginx/local-tls:ro
+      - ./ops/nginx-local/server-https.conf:/etc/nginx/conf.d/server-https.prod.conf:ro
+      - ./ops/nginx-local/server-https-future.conf:/etc/nginx/conf.d/server-https-future.prod.conf:ro
+      - ./ops/nginx-local/workspace-https.conf:/etc/nginx/conf.d/workspace-https.prod.conf:ro
     networks:
       default:
       workspace_net:
@@ -340,6 +344,7 @@ services:
     image: prom/node-exporter
     command:
       - "--path.rootfs=/host"
+      - "--path.udev.data=/host/host-run-udev/data"
     network_mode: host
     pid: host
     volumes:
@@ -391,6 +396,7 @@ services:
       - -c
       - |
         import json
+        import os
         main_node_ip = "192.168.42.1"
         workspace_nodes = json.load(open("/var/workspace_nodes.json"))
         workspace_node_ips = [f"192.168.42.{int(node_id) + 1}" for node_id in workspace_nodes]
@@ -402,10 +408,15 @@ services:
             "labels": {"job": "node_exporter"},
             "targets": [f"{ip}:9100" for ip in [main_node_ip] + workspace_node_ips]
         }]
-        with open("/etc/prometheus/targets/cadvisor.json", "w") as f:
-            json.dump(cadvisor_targets, f, indent=2)
-        with open("/etc/prometheus/targets/node_exporter.json", "w") as f:
-            json.dump(node_exporter_targets, f, indent=2)
+        for name, targets in {
+            "cadvisor": cadvisor_targets,
+            "node_exporter": node_exporter_targets,
+        }.items():
+            path = f"/etc/prometheus/targets/{name}.json"
+            temporary_path = f"{path}.tmp"
+            with open(temporary_path, "w") as f:
+                json.dump(targets, f, indent=2)
+            os.replace(temporary_path, path)
     volumes:
       - /data/workspace_nodes.json:/var/workspace_nodes.json:ro
       - prometheus_targets:/etc/prometheus/targets
@@ -461,6 +472,7 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
       GF_AUTH_DISABLE_SIGNOUT_MENU: "true"
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_PLUGINS_PREINSTALL_AUTO_UPDATE: "false"
     volumes:
       - ./grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
     depends_on:

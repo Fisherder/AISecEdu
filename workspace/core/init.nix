@@ -19,7 +19,7 @@ let
       ln -sfT $path /run/dojo/$(basename $path)
     done
 
-    mkdir -pm 1777 /run/dojo/var /tmp
+    mkdir -pm 1777 /run/dojo/var /tmp /tmp/.X11-unix
     mkdir /run/dojo/var/root
 
     if [ ! -e /run/challenge/bin ]; then

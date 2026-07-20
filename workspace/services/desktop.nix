@@ -44,7 +44,8 @@ let
         -depth 24
 
     ${service}/bin/dojo-service start desktop-service/novnc \
-      ${novnc}/bin/novnc \
+      ${pkgs.coreutils}/bin/env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+        ${novnc}/bin/novnc \
         --vnc --unix-target=/run/dojo/var/desktop-service/Xvnc.sock \
         --listen 6080
 
