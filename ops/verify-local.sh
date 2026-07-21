@@ -153,35 +153,51 @@ lan_health=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/lan-heal
 [[ $lan_health == "pwn.college LAN endpoint ready" ]]
 downloaded_fingerprint=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/local-tls.crt" \
     | openssl x509 -noout -fingerprint -sha256)
-local_fingerprint=$(openssl x509 -in "$repo_dir/data/local-tls/fullchain.pem" \
+local_fingerprint=$(openssl x509 -in "$repo_dir/data/local-tls/ca.crt" \
     -noout -fingerprint -sha256)
 [[ $downloaded_fingerprint == "$local_fingerprint" ]]
-pass "LAN health and public certificate endpoints are ready"
+pass "LAN health and local CA certificate endpoints are ready"
 
-body=$(curl -ksS --fail \
+body=$(curl -sS --fail \
     --noproxy '*' \
+    --cacert "$repo_dir/data/local-tls/ca.crt" \
     --resolve "$dojo_host:$https_port:$listen_address" \
     "https://$dojo_host:$https_port/")
 grep -qi 'pwn' <<<"$body"
-pass "HTTPS application page renders"
+pass "HTTPS application page renders with the local CA"
 
 for host in "$dojo_host" "$workspace_host" "$future_host"; do
     openssl x509 -in "$repo_dir/data/local-tls/fullchain.pem" -noout -checkhost "$host" \
         | grep -Fq 'does match certificate'
+    openssl verify -CAfile "$repo_dir/data/local-tls/ca.crt" \
+        -purpose sslserver -verify_hostname "$host" \
+        "$repo_dir/data/local-tls/fullchain.pem" | grep -Fq ': OK'
 done
-pass "local TLS certificate matches all local hostnames"
+pass "CA-signed TLS certificate matches all local hostnames"
 
 if [[ -n ${DOJO_TLS_IPS:-} ]]; then
     IFS=, read -r -a tls_ip_addresses <<<"$DOJO_TLS_IPS"
     for address in "${tls_ip_addresses[@]}"; do
         openssl x509 -in "$repo_dir/data/local-tls/fullchain.pem" -noout -checkip "$address" \
             | grep -Fq 'does match certificate'
+        openssl verify -CAfile "$repo_dir/data/local-tls/ca.crt" \
+            -purpose sslserver -verify_ip "$address" \
+            "$repo_dir/data/local-tls/fullchain.pem" | grep -Fq ': OK'
     done
     pass "local TLS certificate matches configured IP addresses"
 fi
 
-unsigned_code=$(curl -ksS -o /dev/null -w '%{http_code}' \
+workspace_trust=$(curl -sS --fail \
     --noproxy '*' \
+    --cacert "$repo_dir/data/local-tls/ca.crt" \
+    --resolve "$workspace_host:$https_port:$listen_address" \
+    "https://$workspace_host:$https_port/trust-check")
+[[ $workspace_trust == "pwn.college Workspace TLS is trusted and reachable" ]]
+pass "workspace hostname is reachable with the local CA"
+
+unsigned_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+    --noproxy '*' \
+    --cacert "$repo_dir/data/local-tls/ca.crt" \
     --resolve "$workspace_host:$https_port:$listen_address" \
     "https://$workspace_host:$https_port/workspace/fake/invalid/7681/")
 [[ $unsigned_code == 404 ]]

@@ -10,10 +10,10 @@
 - Workspace：`https://workspace.192-168-3-111.nip.io`
 - SSH：`192.168.3.111:2223`
 - 无 TLS 健康探针：`http://192.168.3.111/lan-health`
-- 公开证书下载：`http://192.168.3.111/local-tls.crt`
+- 公开本地 CA 下载：`http://192.168.3.111/local-tls.crt`
 - 持久数据：`./data/`
 - 构建缓存：`./cache/`
-- 本地 TLS 证书：`./data/local-tls/fullchain.pem`
+- 本地 CA / 服务器证书：`./data/local-tls/ca.crt`、`./data/local-tls/fullchain.pem`
 
 `data/` 与 `cache/` 已由上游 `.gitignore` 排除。不要提交 `data/config.env`、数据库、SSH 密钥或管理员凭据。
 
@@ -65,24 +65,45 @@ cat data/manual-test-account.txt
 `--replace-dojo` 重新发布。详细题目范围见
 [`local-dojos/README.md`](../local-dojos/README.md)。
 
-入口使用自签名证书，SAN 包含 LAN 主域名、Workspace/Future 子域名、`192.168.3.111` IP 以及原有的三个 localhost 域名。证书 SHA-256 指纹为：
+入口服务器证书由持久的 `pwn.college Local LAN CA` 签发，SAN 包含 LAN 主域名、
+Workspace/Future 子域名、`192.168.3.111` IP 以及原有的三个 localhost 域名。
+客户端应信任下载的 CA，而不是只在主站绕过一次证书告警；后者不会让跨域 iframe
+信任 Workspace 子域。CA 证书 SHA-256 指纹为：
 
 ```text
-E5:97:C8:A1:24:C0:80:53:F3:AC:6F:7A:E0:B7:89:AD:28:01:14:D6:CC:0F:C3:D8:69:F1:B8:4A:6F:2E:50:73
+BF:18:E8:69:16:E1:8D:0D:DF:7D:C0:14:CC:9F:89:D9:71:93:20:B6:5B:BB:08:FA:7F:78:5B:6E:E4:C3:4F:3B
 ```
 
 在 `192.168.200.17` 上可以先执行：
 
 ```bash
 curl http://192.168.3.111/lan-health
-curl http://192.168.3.111/local-tls.crt -o pwncollege-local.crt
+curl http://192.168.3.111/local-tls.crt -o pwncollege-local-ca.crt
 ```
 
-第一个命令应输出 `pwn.college LAN endpoint ready`。将第二个命令下载的证书导入该客户端的系统或浏览器信任库后，再访问 Web 地址；也可以仅在浏览器验收时接受自签名证书。若客户端 DNS 拦截指向私网的 wildcard DNS，请在其 hosts 文件加入：
+第一个命令应输出 `pwn.college LAN endpoint ready`。macOS/Edge 客户端可将 CA
+导入“钥匙串访问”的“系统”钥匙串，打开证书的“信任”区域并设为“始终信任”；
+也可由管理员执行：
+
+```bash
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain pwncollege-local-ca.crt
+```
+
+随后必须完全退出并重新打开 Edge。访问
+`https://workspace.192-168-3-111.nip.io/trust-check` 应显示
+`pwn.college Workspace TLS is trusted and reachable`。若暂时不能安装 CA，可先打开
+`http://192-168-3-111.nip.io/workspace-trust`，在 Workspace 子域的顶层页面手动允许
+证书，再刷新 Terminal、Code 或 Desktop 页面；这只是当前浏览器的临时例外。
+
+若客户端 DNS 拦截指向私网的 wildcard DNS，请在其 hosts 文件加入：
 
 ```text
 192.168.3.111 192-168-3-111.nip.io workspace.192-168-3-111.nip.io future.192-168-3-111.nip.io
 ```
+
+CA 私钥只保存在服务器被 Git 忽略且权限为 `0600` 的
+`data/local-tls/ca-key.pem`，不通过 Web 提供。只应在受控的测试客户端信任该 CA。
 
 创建数据库备份：
 

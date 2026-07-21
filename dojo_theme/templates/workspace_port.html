@@ -48,13 +48,33 @@
 <script>
     const channel = new BroadcastChannel("Challenge-Sync-Channel");
     channel.addEventListener("message", () => window.location.reload());
+
+    async function workspaceTlsReady(url) {
+        const trustUrl = new URL("/trust-check", url.origin);
+        try {
+            await fetch(trustUrl, { mode: "no-cors", cache: "no-store" });
+            return true;
+        } catch (error) {
+            const status = document.querySelector("h1");
+            status.innerHTML =
+                "Workspace 子域的 TLS 证书尚未受信任。" +
+                `<br><a href="${trustUrl}" target="_blank">打开证书检测页并允许访问</a>` +
+                "，或" +
+                '<a href="/local-tls.crt">下载并信任本地 CA 证书</a>，然后刷新此页。';
+            return false;
+        }
+    }
+
     let response = fetch("/pwncollege_api/v1/workspace?port={{ port }}")
         .then((response) => response.json())
-        .then((data) => {
+        .then(async (data) => {
             if (data.active) {
                 let url = new URL(data.iframe_src);
                 if (data.setPort) {
                     url.port = window.location.port;
+                }
+                if (!(await workspaceTlsReady(url))) {
+                    return;
                 }
                 document.getElementById("workspace_iframe").src =
                     url.toString();

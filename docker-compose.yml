@@ -298,7 +298,7 @@ services:
     volumes:
       - /data/acme:/var/cache/nginx/acme-letsencrypt
       - /data/local-tls:/etc/nginx/local-tls:ro
-      - /data/local-tls/fullchain.pem:/usr/share/nginx/html/pwncollege-local.crt:ro
+      - /data/local-tls/ca.crt:/usr/share/nginx/html/pwncollege-local-ca.crt:ro
       - ./ops/nginx-local/server-http.conf:/etc/nginx/conf.d/server-http.prod.conf:ro
       - ./ops/nginx-local/server-https.conf:/etc/nginx/conf.d/server-https.prod.conf:ro
       - ./ops/nginx-local/server-https-future.conf:/etc/nginx/conf.d/server-https-future.prod.conf:ro
