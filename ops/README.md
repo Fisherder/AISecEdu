@@ -42,6 +42,29 @@ docker exec pwncollege-dojo dojo compose ps
 docker exec pwncollege-dojo cat /data/admin-password.txt
 ```
 
+## 人工功能验收账号
+
+`local-dojos/manual-platform-check.yml` 提供四道不依赖外部服务的本地验收题，覆盖
+Terminal、Code、Desktop、SSH、home 持久化、文件权限、动态 flag 提交以及挑战内
+Web 服务。创建或复用普通账号、验收 dojo 和成员关系：
+
+```bash
+./ops/provision-manual-test.py
+cat data/manual-test-account.txt
+```
+
+账号凭据只保存在被 Git 忽略且权限为 `0600` 的
+`data/manual-test-account.txt`。执行以下命令可做逐题启动检查；它不会读取、提交
+或求解 flag，且会确认 solve/submission 计数没有变化：
+
+```bash
+./ops/provision-manual-test.py --verify-startup
+```
+
+修改题目 YAML 后，如确认可以删除该验收 dojo 已有的进度，可使用
+`--replace-dojo` 重新发布。详细题目范围见
+[`local-dojos/README.md`](../local-dojos/README.md)。
+
 入口使用自签名证书，SAN 包含 LAN 主域名、Workspace/Future 子域名、`192.168.3.111` IP 以及原有的三个 localhost 域名。证书 SHA-256 指纹为：
 
 ```text

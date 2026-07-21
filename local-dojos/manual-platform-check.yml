@@ -1,0 +1,380 @@
+id: manual-platform-check
+name: 手动功能验收场
+type: public
+description: |
+  这个 dojo 用于人工验证平台，而不是教学课程。四道题分别覆盖终端、文件检索、
+  home 持久化和浏览器 Web 接口。每道题都使用平台动态生成的个人 flag。
+image: pwncollege/challenge-legacy:latest
+privileged: true
+interfaces:
+  - name: SSH
+  - name: Terminal
+    port: 7681
+  - name: Code
+    port: 8080
+  - name: Desktop
+    port: 6080
+modules:
+  - id: manual
+    name: 平台手动验收
+    description: |
+      建议按顺序测试，但题目没有强制解锁关系。提交每道题显示的完整
+      `pwn.college{...}` flag，即可验证计分和进度功能。
+    challenges:
+      - id: terminal-handshake
+        name: 终端握手
+        description: |
+          启动题目并打开 Terminal。查看 `/challenge/motd.txt`，从中找到
+          `response=` 后面的值，再将该值作为唯一参数传给 `/challenge/check`。
+
+          这道题用于验证工作区启动、终端输入输出和 flag 提交。
+      - id: log-search
+        name: 日志检索
+        description: |
+          `/challenge/records.log` 中只有一条记录同时满足
+          `component=workspace` 和 `status=ready`。找出该行的 `code` 值，
+          将它作为唯一参数传给 `/challenge/check`。
+
+          可以使用 Terminal，也可以用 Code 编辑器查看文件。
+      - id: persistent-home
+        name: Home 持久化与权限
+        description: |
+          在 `/home/hacker/manual-proof.txt` 创建一个普通文件，内容必须恰好为
+          `persistent-workspace-ok`，权限必须为 `0600`。随后停止题目并再次启动
+          同一道题，确认文件仍存在，最后运行 `/challenge/check`。
+
+          这道题用于验证 home 持久化、文件权限和工作区停止/重启。
+      - id: web-service
+        name: 浏览器 Web 服务
+        description: |
+          启动题目后点击 **Web** 接口。根据首页提示访问状态 API，再按照状态
+          API 返回的 `next` 路径继续访问。正确页面会显示本题的动态 flag。
+
+          这道题用于验证 Workspace HTTPS 子域、反向代理和挑战内 HTTP 服务。
+        interfaces:
+          - name: Web
+            port: 80
+          - name: Terminal
+            port: 7681
+          - name: Code
+            port: 8080
+          - name: Desktop
+            port: 6080
+          - name: SSH
+files:
+  - type: text
+    path: manual/terminal-handshake/motd.txt
+    content: |
+      manual platform handshake
+      response=terminal-ready-2026
+  - type: text
+    path: manual/terminal-handshake/check
+    content: |
+      #!/usr/local/bin/python3
+      import socket
+      import sys
+
+      client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      try:
+          client.connect("/run/manual-check.sock")
+          client.sendall("\0".join(sys.argv[1:]).encode())
+          client.shutdown(socket.SHUT_WR)
+          response = b""
+          while block := client.recv(4096):
+              response += block
+      except OSError as error:
+          print(f"检查服务不可用：{error}", file=sys.stderr)
+          raise SystemExit(2)
+      finally:
+          client.close()
+
+      success = response[:1] == b"\0"
+      print(response[1:].decode(), end="", file=sys.stdout if success else sys.stderr)
+      raise SystemExit(0 if success else 1)
+  - type: text
+    path: manual/terminal-handshake/.init
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      python3 /challenge/check-server.py >/tmp/manual-check-server.log 2>&1 &
+      for _ in {1..100}; do
+          [[ -S /run/manual-check.sock ]] && exit 0
+          sleep 0.05
+      done
+      echo "manual check server did not start" >&2
+      exit 1
+  - type: text
+    path: manual/terminal-handshake/check-server.py
+    content: |
+      #!/usr/local/bin/python3
+      import os
+      import socket
+
+      socket_path = "/run/manual-check.sock"
+      try:
+          os.unlink(socket_path)
+      except FileNotFoundError:
+          pass
+
+      server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      server.bind(socket_path)
+      os.chmod(socket_path, 0o666)
+      server.listen()
+
+      while True:
+          connection, _ = server.accept()
+          with connection:
+              request = b""
+              while block := connection.recv(4096):
+                  request += block
+              arguments = request.decode().split("\0") if request else []
+              try:
+                  if len(arguments) != 1:
+                      raise ValueError("用法：/challenge/check <握手值>\n")
+                  with open("/challenge/motd.txt") as source:
+                      expected = next(
+                          line.removeprefix("response=").strip()
+                          for line in source
+                          if line.startswith("response=")
+                      )
+                  if arguments[0] != expected:
+                      raise ValueError("握手值不正确，请重新查看 /challenge/motd.txt。\n")
+                  with open("/flag") as flag_file:
+                      message = flag_file.read().strip() + "\n"
+                  status = b"\0"
+              except (OSError, UnicodeError, ValueError) as error:
+                  status = b"\1"
+                  message = str(error)
+              connection.sendall(status + message.encode())
+  - type: text
+    path: manual/log-search/records.log
+    content: |
+      component=database status=ready code=db-green-11
+      component=workspace status=starting code=workspace-warmup-18
+      component=cache status=ready code=cache-green-04
+      component=workspace status=ready code=orbit-lan-27
+      component=metrics status=ready code=metrics-green-09
+  - type: text
+    path: manual/log-search/check
+    content: |
+      #!/usr/local/bin/python3
+      import socket
+      import sys
+
+      client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      try:
+          client.connect("/run/manual-check.sock")
+          client.sendall("\0".join(sys.argv[1:]).encode())
+          client.shutdown(socket.SHUT_WR)
+          response = b""
+          while block := client.recv(4096):
+              response += block
+      except OSError as error:
+          print(f"检查服务不可用：{error}", file=sys.stderr)
+          raise SystemExit(2)
+      finally:
+          client.close()
+
+      success = response[:1] == b"\0"
+      print(response[1:].decode(), end="", file=sys.stdout if success else sys.stderr)
+      raise SystemExit(0 if success else 1)
+  - type: text
+    path: manual/log-search/.init
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      python3 /challenge/check-server.py >/tmp/manual-check-server.log 2>&1 &
+      for _ in {1..100}; do
+          [[ -S /run/manual-check.sock ]] && exit 0
+          sleep 0.05
+      done
+      echo "manual check server did not start" >&2
+      exit 1
+  - type: text
+    path: manual/log-search/check-server.py
+    content: |
+      #!/usr/local/bin/python3
+      import os
+      import socket
+
+      socket_path = "/run/manual-check.sock"
+      try:
+          os.unlink(socket_path)
+      except FileNotFoundError:
+          pass
+
+      server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      server.bind(socket_path)
+      os.chmod(socket_path, 0o666)
+      server.listen()
+
+      while True:
+          connection, _ = server.accept()
+          with connection:
+              request = b""
+              while block := connection.recv(4096):
+                  request += block
+              arguments = request.decode().split("\0") if request else []
+              try:
+                  if len(arguments) != 1:
+                      raise ValueError("用法：/challenge/check <code>\n")
+                  with open("/challenge/records.log") as source:
+                      expected = next(
+                          line.rsplit("code=", 1)[1].strip()
+                          for line in source
+                          if "component=workspace" in line and "status=ready" in line
+                      )
+                  if arguments[0] != expected:
+                      raise ValueError("code 不正确，请筛选 workspace 的 ready 记录。\n")
+                  with open("/flag") as flag_file:
+                      message = flag_file.read().strip() + "\n"
+                  status = b"\0"
+              except (OSError, UnicodeError, ValueError) as error:
+                  status = b"\1"
+                  message = str(error)
+              connection.sendall(status + message.encode())
+  - type: text
+    path: manual/persistent-home/check
+    content: |
+      #!/usr/local/bin/python3
+      import socket
+      import sys
+
+      client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      try:
+          client.connect("/run/manual-check.sock")
+          client.sendall("\0".join(sys.argv[1:]).encode())
+          client.shutdown(socket.SHUT_WR)
+          response = b""
+          while block := client.recv(4096):
+              response += block
+      except OSError as error:
+          print(f"检查服务不可用：{error}", file=sys.stderr)
+          raise SystemExit(2)
+      finally:
+          client.close()
+
+      success = response[:1] == b"\0"
+      print(response[1:].decode(), end="", file=sys.stdout if success else sys.stderr)
+      raise SystemExit(0 if success else 1)
+  - type: text
+    path: manual/persistent-home/.init
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      python3 /challenge/check-server.py >/tmp/manual-check-server.log 2>&1 &
+      for _ in {1..100}; do
+          [[ -S /run/manual-check.sock ]] && exit 0
+          sleep 0.05
+      done
+      echo "manual check server did not start" >&2
+      exit 1
+  - type: text
+    path: manual/persistent-home/check-server.py
+    content: |
+      #!/usr/local/bin/python3
+      import os
+      import socket
+      import stat
+
+      socket_path = "/run/manual-check.sock"
+      try:
+          os.unlink(socket_path)
+      except FileNotFoundError:
+          pass
+
+      server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      server.bind(socket_path)
+      os.chmod(socket_path, 0o666)
+      server.listen()
+
+      while True:
+          connection, _ = server.accept()
+          with connection:
+              request = b""
+              while block := connection.recv(4096):
+                  request += block
+              arguments = request.decode().split("\0") if request else []
+              try:
+                  if arguments:
+                      raise ValueError("用法：/challenge/check\n")
+                  target = "/home/hacker/manual-proof.txt"
+                  if not os.path.isfile(target):
+                      raise ValueError(f"{target} 不存在。\n")
+                  if stat.S_IMODE(os.stat(target).st_mode) != 0o600:
+                      raise ValueError("文件权限必须为 0600。\n")
+                  with open(target) as proof_file:
+                      if proof_file.read().strip() != "persistent-workspace-ok":
+                          raise ValueError("文件内容不正确。\n")
+                  with open("/flag") as flag_file:
+                      message = flag_file.read().strip() + "\n"
+                  status = b"\0"
+              except (OSError, UnicodeError, ValueError) as error:
+                  status = b"\1"
+                  message = str(error)
+              connection.sendall(status + message.encode())
+  - type: text
+    path: manual/web-service/.init
+    content: |
+      #!/bin/bash
+      python3 /challenge/server.py >/tmp/manual-web-service.log 2>&1 &
+  - type: text
+    path: manual/web-service/server.py
+    content: |
+      #!/usr/bin/python3
+      import html
+      import json
+      import urllib.parse
+      from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+      class Handler(BaseHTTPRequestHandler):
+          def send(self, status, content_type, body):
+              encoded = body.encode()
+              self.send_response(status)
+              self.send_header("Content-Type", content_type)
+              self.send_header("Content-Length", str(len(encoded)))
+              self.send_header("Cache-Control", "no-store")
+              self.end_headers()
+              self.wfile.write(encoded)
+
+          def do_GET(self):
+              request = urllib.parse.urlsplit(self.path)
+              if request.path == "/":
+                  self.send(
+                      200,
+                      "text/html; charset=utf-8",
+                      "<h1>Manual Web Check</h1>"
+                      "<p>服务已启动。下一步请访问 <code>/status</code>。</p>",
+                  )
+                  return
+              if request.path == "/status":
+                  self.send(
+                      200,
+                      "application/json",
+                      json.dumps(
+                          {
+                              "service": "manual-web",
+                              "state": "ready",
+                              "next": "/verify?token=browser-path-ok",
+                          }
+                      ),
+                  )
+                  return
+              query = urllib.parse.parse_qs(request.query)
+              if request.path == "/verify" and query.get("token") == ["browser-path-ok"]:
+                  with open("/flag") as flag_file:
+                      flag = html.escape(flag_file.read().strip())
+                  self.send(
+                      200,
+                      "text/html; charset=utf-8",
+                      f"<h1>Web path verified</h1><p><code>{flag}</code></p>",
+                  )
+                  return
+              self.send(404, "text/plain; charset=utf-8", "not found\n")
+
+          def log_message(self, format, *args):
+              return
+
+
+      ThreadingHTTPServer(("0.0.0.0", 80), Handler).serve_forever()
