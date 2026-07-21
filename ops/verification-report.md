@@ -1,6 +1,7 @@
 # 本机部署验收报告
 
-- 验收时间：2026-07-20（UTC）
+- 初始验收时间：2026-07-20（UTC）
+- LAN 访问追加验收：2026-07-21（UTC）
 - 项目目录：`/mnt/HDD1/LLM/AISecEdu-dojo/dojo`
 - 本地分支：`local/deployment`
 - 上游基线：`b830d74339000c0fd8408558a13328ae8b1919b6`
@@ -8,15 +9,17 @@
 
 ## 验收结论
 
-单节点部署的核心功能全部通过实机验证。平台可供本机开发和功能扩展；源码以读写方式挂载到 `/opt/pwn.college`，运行数据与源码分离并由 Git 忽略。测试只创建了一次性 dojo 和工作区，没有读取、提交或求解任何 flag。验收完成后的数据库计数为：管理员用户 `1`、dojo `0`、solve `0`、submission `0`，且不存在 `deployment-smoke-*` 测试用户或 dojo。
+单节点部署的核心功能全部通过实机验证，并已从仅回环访问调整为供客户端 `192.168.200.17` 使用的 LAN 部署。平台可供本机开发和功能扩展；源码以读写方式挂载到 `/opt/pwn.college`，运行数据与源码分离并由 Git 忽略。测试只创建了一次性 dojo 和工作区，没有读取、提交或求解任何 flag。LAN 验收完成后的数据库计数为：管理员用户 `1`、dojo `0`、solve `0`、submission `0`，且不存在 `deployment-smoke-*` 测试用户或 dojo。
 
 ## 运行配置
 
 | 项目 | 验收值 |
 | --- | --- |
-| Web | `https://localhost.pwn.college`，仅监听 `127.0.0.1:443` |
-| HTTP | `127.0.0.1:80`，跳转到 HTTPS |
-| SSH | `127.0.0.1:2223` |
+| Web | `https://192-168-3-111.nip.io`，监听 `192.168.3.111:443` |
+| Workspace | `https://workspace.192-168-3-111.nip.io` |
+| HTTP | `192.168.3.111:80`；健康/证书端点除外，其余跳转到 HTTPS |
+| SSH | `192.168.3.111:2223` |
+| 目标客户端 | `192.168.200.17`，经网关 `192.168.3.1` 可达 |
 | 外层 Docker | `29.1.3` |
 | 内层 Docker | `27.5.1` |
 | 宿主 Compose | `2.36.2` |
@@ -29,11 +32,15 @@
 
 本机证书为带以下 SAN 的自签名证书：
 
+- `192-168-3-111.nip.io`
+- `workspace.192-168-3-111.nip.io`
+- `future.192-168-3-111.nip.io`
 - `localhost.pwn.college`
 - `workspace.localhost.pwn.college`
 - `future.localhost.pwn.college`
+- IP `192.168.3.111`
 
-证书 SHA-256 指纹为 `1B:BD:44:7A:66:CF:DF:69:21:4A:04:AF:3C:36:57:EC:8B:97:CC:00:AA:FA:FC:0A:A9:31:45:4F:01:12:39:1D`，有效期至 2027-08-21。管理员密码、本地 TLS 私钥和数据根目录权限分别验证为 `0600`、`0600` 和 `0700`。
+证书 SHA-256 指纹为 `E5:97:C8:A1:24:C0:80:53:F3:AC:6F:7A:E0:B7:89:AD:28:01:14:D6:CC:0F:C3:D8:69:F1:B8:4A:6F:2E:50:73`，有效期至 2027-08-22。管理员密码、本地 TLS 私钥和数据根目录权限分别验证为 `0600`、`0600` 和 `0700`。
 
 ## 功能测试结果
 
@@ -41,7 +48,7 @@
 | --- | --- | --- |
 | 基础设施 | 通过 | 外层容器、systemd 单元、全部长期服务和一次性初始化服务 |
 | 数据层 | 通过 | PostgreSQL 就绪、Redis `PONG`、连接池、后台统计冷启动 |
-| Web 与 TLS | 通过 | HTTP 跳转、HTTPS 页面、三个本地域名的证书匹配、管理员登录和管理页 |
+| Web 与 TLS | 通过 | 真实 LAN DNS、HTTP 跳转、HTTPS 页面、六个 DNS SAN 与 LAN IP SAN、管理员登录和管理页 |
 | 监控 | 通过 | Prometheus 健康，`node_exporter` 与 `cadvisor` 的 `up=1`；Grafana 数据库状态 `ok` |
 | 用户与认证 | 通过 | 注册、登录、设置页、SSH 公钥添加和删除 |
 | dojo 流程 | 通过 | 临时 dojo 创建、列表显示、加入与删除 |
@@ -50,24 +57,35 @@
 | SSH 工作区 | 通过 | 公钥认证、用户路由和远程命令执行 |
 | 持久化 | 通过 | 工作区停止并再次启动后，home 测试文件仍存在 |
 | 清理与解题边界 | 通过 | 临时用户、dojo、密钥、home 和容器均删除；solve/submission 始终为零 |
-| 重启恢复 | 通过 | 外层容器多次重建后数据库、TLS 和 SSH 主机密钥保持不变，服务自动恢复 |
+| 重启恢复 | 通过 | 外层容器重建后数据库和 SSH 主机密钥保持不变；TLS 按 LAN SAN 受控轮换，服务自动恢复 |
 | Kata 独立性 | 通过 | `kata-runtime` 实际启动隔离 guest；guest 内核为 Linux `6.12.36` |
 
 `./ops/verify-local.sh` 的全部非题目健康检查通过；`./ops/smoke-user-flow.py` 的全部非解题用户流程检查通过。日志审计未发现服务崩溃、fatal 或 unhealthy 状态。cAdvisor 对本机未安装 CRI-O/Podman 的探测失败是可选运行时发现信息；CTFd 在一次已经成功完成的 Docker HTTP 流对象回收时输出过一条 `Exception ignored`，对应请求及其后续功能均为成功，不影响平台行为。
+
+## LAN 与目标客户端验收
+
+- Docker 端口绑定精确验证为 `192.168.3.111:80`、`:443` 和 `:2223`，不是回环地址。
+- 主域名、Workspace 域名与 Future 域名均通过真实 DNS 解析为 `192.168.3.111`。
+- 使用真实域名和证书信任链访问 HTTPS 返回 `200`；HTTP 返回 `307` 并跳转到同一 LAN 域名；无效 Workspace HMAC 返回预期的 `404`。
+- 从外层容器的独立网络命名空间回连 LAN HTTPS 入口返回 `200`，验证并非依赖宿主回环路径。
+- 到 `192.168.200.17` 的路由使用 `eno1`、网关 `192.168.3.1` 和源地址 `192.168.3.111`；三次 ICMP 全部成功，丢包率 `0%`。
+- UFW 配置为 `ENABLED=no`，没有阻止 Docker 发布端口。当前绑定对所有经路由可达 `192.168.3.111` 的客户端开放，并非只允许单一源 IP。
+- `192.168.200.17:22` 明确拒绝 SSH 连接，因此无法在该客户端上自动执行最终 `curl`；没有尝试密码或绕过认证。客户端可用 `http://192.168.3.111/lan-health` 做无 DNS/无 TLS 的最终探测，并从 `/local-tls.crt` 获取公开证书。
 
 ## 持久化与备份
 
 数据库、Redis、Docker、workspace Nix store、homefs、SSH 主机密钥和 TLS 材料均位于 `data/`。已创建并验证 PostgreSQL 17 自定义格式备份：
 
-`data/backups/db-2026-07-20T17:12:29+00:00.dump`
+`data/backups/db-2026-07-21T01:01:27+00:00.dump`
 
-备份大小为 `97881` 字节，并已在 PostgreSQL 17 容器内通过 `pg_restore -l` 成功解析。部署早期数据库未就绪时生成的 0 字节文件已删除。
+该 LAN 变更前备份大小为 `97929` 字节，并已由 PostgreSQL 17.5 的 `pg_restore -l` 成功解析（自定义格式 1.16，302 个 TOC 条目）。部署早期数据库未就绪时生成的 0 字节文件已删除。
 
 ## 为本机环境实施的修正
 
 - 使用固定提交的 Kata、CTFd 和 Moby seccomp 构建上下文，替代不稳定的远程 Dockerfile `ADD`；下载内容带 SHA-256 校验。
 - 增加宿主机下载后导入内层 Docker 的通用镜像导入脚本，并预载平台及烟雾测试镜像；正常运行启用离线模式。
-- 增加本机 TLS 配置、持久证书、管理员密码轮换、只监听回环地址的默认设置。
+- 增加持久 TLS、管理员密码轮换和 LAN 部署配置；域名、Workspace 域名、LAN IP SAN、监听地址与已验证镜像标签均由 `ops/deployment.env` 固化。
+- 增加无 TLS 的 LAN 健康探针与公开证书下载端点，同时保持私钥目录和私钥权限不变。
 - 将 Prometheus target 文件改为临时文件加原子替换，避免重启竞争期间读取半写 JSON。
 - 关闭 Grafana 插件自动更新，避免离线部署产生无意义的更新失败。
 - 为 Desktop 创建正确的 X11 socket 目录，并仅限制 noVNC 进程的 OpenBLAS/OMP 线程数，避免高核数主机上 fork 时触发 guest 内存提交限制。
@@ -88,4 +106,4 @@
 
 ## 未启用的外部集成
 
-本次是仅回环地址的单节点本机部署。需要外部凭据或额外基础设施的可选能力未配置，因此不在本次实机验收范围内，包括 Discord/OAuth、SMTP、Splunk profile、macOS 或远程 workspace nodes、公网 DNS 与受信任 CA 证书。这些不影响已启用的本机核心平台功能；启用时应分别提供凭据或节点并追加专项测试。
+本次是绑定私有 LAN 地址的单节点部署。需要外部凭据或额外基础设施的可选能力未配置，因此不在本次实机验收范围内，包括 Discord/OAuth、SMTP、Splunk profile、macOS 或远程 workspace nodes、公网 DNS 与受信任 CA 证书。这些不影响已启用的 LAN 核心平台功能；启用时应分别提供凭据或节点并追加专项测试。

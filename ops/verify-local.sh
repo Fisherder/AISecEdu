@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-container=${DOJO_CONTAINER:-pwncollege-dojo}
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=load-deployment-env.sh
+source "$repo_dir/ops/load-deployment-env.sh"
+
+container=${DOJO_CONTAINER:-pwncollege-dojo}
 listen_address=${DOJO_LISTEN_ADDRESS:-127.0.0.1}
 http_port=${DOJO_HTTP_PORT:-80}
 https_port=${DOJO_HTTPS_PORT:-443}
@@ -10,6 +13,7 @@ ssh_port=${DOJO_SSH_PORT:-2223}
 dojo_host=${DOJO_HOST:-localhost.pwn.college}
 workspace_host=${WORKSPACE_HOST:-workspace.localhost.pwn.college}
 future_host=${FUTURE_HOST:-future.localhost.pwn.college}
+client_address=${DOJO_CLIENT_ADDRESS:-}
 wait_timeout=${DOJO_VERIFY_TIMEOUT:-180}
 
 pass() {
@@ -37,6 +41,13 @@ service_is_healthy() {
     [[ $health == healthy ]]
 }
 
+one_shot_completed() {
+    local service=$1
+    local state
+    state=$(docker exec "$container" docker inspect -f '{{.State.Status}} {{.State.ExitCode}}' "$service" 2>/dev/null || true)
+    [[ $state == "exited 0" ]]
+}
+
 stats_are_ready() {
     local logs
     logs=$(docker exec "$container" docker logs stats-worker 2>&1)
@@ -45,6 +56,27 @@ stats_are_ready() {
 
 docker inspect -f '{{if .State.Running}}true{{else}}false{{end}}' "$container" | grep -qx true
 pass "outer container is running"
+
+for mapping in "80/tcp:$http_port" "443/tcp:$https_port" "22/tcp:$ssh_port"; do
+    container_port=${mapping%%:*}
+    host_port=${mapping#*:}
+    binding=$(docker inspect -f \
+        "{{(index (index .HostConfig.PortBindings \"$container_port\") 0).HostIp}}:{{(index (index .HostConfig.PortBindings \"$container_port\") 0).HostPort}}" \
+        "$container")
+    [[ $binding == "$listen_address:$host_port" ]]
+done
+pass "HTTP, HTTPS, and SSH are bound to the configured address"
+
+for host in "$dojo_host" "$workspace_host" "$future_host"; do
+    getent ahostsv4 "$host" | awk '{print $1}' | grep -Fxq "$listen_address"
+done
+pass "public and workspace hostnames resolve to the configured address"
+
+if [[ -n $client_address ]]; then
+    ip route get "$client_address" | grep -Fq "src $listen_address"
+    ping -c 1 -W 3 "$client_address" >/dev/null
+    pass "configured client address is reachable through the LAN route"
+fi
 
 wait_for "pwn.college systemd service" \
     docker exec "$container" systemctl is-active --quiet pwn.college.service
@@ -64,6 +96,7 @@ done
 pass "all long-running inner services are running"
 
 for service in pwncollege-create-workspace-net-1 pwncollege-prometheus-generate-targets-1 workspace-builder; do
+    wait_for "$service completion" one_shot_completed "$service"
     state=$(docker exec "$container" docker inspect -f '{{.State.Status}} {{.State.ExitCode}}' "$service")
     if [[ $state != "exited 0" ]]; then
         echo "$service did not complete successfully: $state" >&2
@@ -116,6 +149,15 @@ http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
 [[ $http_code == 301 || $http_code == 302 || $http_code == 307 || $http_code == 308 ]]
 pass "HTTP redirects to HTTPS"
 
+lan_health=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/lan-health")
+[[ $lan_health == "pwn.college LAN endpoint ready" ]]
+downloaded_fingerprint=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/local-tls.crt" \
+    | openssl x509 -noout -fingerprint -sha256)
+local_fingerprint=$(openssl x509 -in "$repo_dir/data/local-tls/fullchain.pem" \
+    -noout -fingerprint -sha256)
+[[ $downloaded_fingerprint == "$local_fingerprint" ]]
+pass "LAN health and public certificate endpoints are ready"
+
 body=$(curl -ksS --fail \
     --noproxy '*' \
     --resolve "$dojo_host:$https_port:$listen_address" \
@@ -128,6 +170,15 @@ for host in "$dojo_host" "$workspace_host" "$future_host"; do
         | grep -Fq 'does match certificate'
 done
 pass "local TLS certificate matches all local hostnames"
+
+if [[ -n ${DOJO_TLS_IPS:-} ]]; then
+    IFS=, read -r -a tls_ip_addresses <<<"$DOJO_TLS_IPS"
+    for address in "${tls_ip_addresses[@]}"; do
+        openssl x509 -in "$repo_dir/data/local-tls/fullchain.pem" -noout -checkip "$address" \
+            | grep -Fq 'does match certificate'
+    done
+    pass "local TLS certificate matches configured IP addresses"
+fi
 
 unsigned_code=$(curl -ksS -o /dev/null -w '%{http_code}' \
     --noproxy '*' \

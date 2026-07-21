@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=load-deployment-env.sh
+source "$repo_dir/ops/load-deployment-env.sh"
+
 container=${DOJO_CONTAINER:-pwncollege-dojo}
 default_image="pwncollege/dojo:local-$(git -C "$repo_dir" rev-parse --short=8 HEAD)"
 if [[ -f "$repo_dir/cache/local-image" ]]; then
@@ -13,6 +16,25 @@ listen_address=${DOJO_LISTEN_ADDRESS:-127.0.0.1}
 http_port=${DOJO_HTTP_PORT:-80}
 https_port=${DOJO_HTTPS_PORT:-443}
 ssh_port=${DOJO_SSH_PORT:-2223}
+dojo_host=${DOJO_HOST:-localhost.pwn.college}
+workspace_host=${WORKSPACE_HOST:-workspace.localhost.pwn.college}
+future_host=${FUTURE_HOST:-future.localhost.pwn.college}
+
+if [[ ! $listen_address =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "DOJO_LISTEN_ADDRESS must be an IPv4 address: $listen_address" >&2
+    exit 1
+fi
+if [[ $listen_address != 0.0.0.0 ]] && \
+    ! ip -o -4 address show | grep -Eq "[[:space:]]${listen_address//./\\.}/"; then
+    echo "DOJO_LISTEN_ADDRESS is not assigned to this host: $listen_address" >&2
+    exit 1
+fi
+for host in "$dojo_host" "$workspace_host" "$future_host"; do
+    if [[ ! $host =~ ^[A-Za-z0-9.-]+$ ]]; then
+        echo "Invalid deployment hostname: $host" >&2
+        exit 1
+    fi
+done
 
 find "$repo_dir" \
     \( -path "$repo_dir/.git" -o -path "$repo_dir/data" -o -path "$repo_dir/cache" \) -prune -o \
@@ -22,6 +44,15 @@ mkdir -p "$data_dir" "$repo_dir/cache"
 DOJO_TLS_DIR="$data_dir/local-tls" "$repo_dir/ops/prepare-local-tls.sh" >/dev/null
 
 if docker container inspect "$container" >/dev/null 2>&1; then
+    current_listen_address=$(docker inspect -f '{{index .Config.Labels "local.pwncollege.listen-address"}}' "$container")
+    current_dojo_host=$(docker inspect -f '{{index .Config.Labels "local.pwncollege.dojo-host"}}' "$container")
+    current_workspace_host=$(docker inspect -f '{{index .Config.Labels "local.pwncollege.workspace-host"}}' "$container")
+    if [[ $current_listen_address != "$listen_address" || \
+        $current_dojo_host != "$dojo_host" || \
+        $current_workspace_host != "$workspace_host" ]]; then
+        echo "$container exists with different deployment settings; back up data, then recreate it" >&2
+        exit 1
+    fi
     docker start "$container" >/dev/null
     echo "$container is running"
     exit 0
@@ -33,7 +64,11 @@ if [[ ! -e /proc/sys/net/bridge/bridge-nf-call-iptables ]]; then
     docker run --rm --privileged -v /lib/modules:/lib/modules:ro "$image" modprobe br_netfilter
 fi
 
-env_args=(-e DOJO_ENV=production)
+env_args=(
+    -e DOJO_ENV=production
+    -e "DOJO_HOST=$dojo_host"
+    -e "WORKSPACE_HOST=$workspace_host"
+)
 proxy_mount_args=()
 udev_mount_args=()
 if [[ -d /run/udev ]]; then
@@ -68,6 +103,9 @@ docker run \
     --name "$container" \
     --restart unless-stopped \
     --privileged \
+    --label "local.pwncollege.listen-address=$listen_address" \
+    --label "local.pwncollege.dojo-host=$dojo_host" \
+    --label "local.pwncollege.workspace-host=$workspace_host" \
     -d \
     "${env_args[@]}" \
     "${proxy_mount_args[@]}" \
@@ -80,5 +118,5 @@ docker run \
     -p "$listen_address:$ssh_port:22" \
     "$image"
 
-echo "HTTPS: https://localhost.pwn.college:$https_port"
+echo "HTTPS: https://$dojo_host:$https_port"
 echo "SSH:   $listen_address:$ssh_port"

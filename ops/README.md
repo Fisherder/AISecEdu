@@ -4,10 +4,13 @@
 
 完整的实机测试范围、结果和边界见 [`verification-report.md`](./verification-report.md)。
 
-服务仅绑定回环地址：
+服务绑定到本机 LAN 地址 `192.168.3.111`，目标客户端为 `192.168.200.17`：
 
-- Web：`https://localhost.pwn.college`
-- SSH：`127.0.0.1:2223`
+- Web：`https://192-168-3-111.nip.io`
+- Workspace：`https://workspace.192-168-3-111.nip.io`
+- SSH：`192.168.3.111:2223`
+- 无 TLS 健康探针：`http://192.168.3.111/lan-health`
+- 公开证书下载：`http://192.168.3.111/local-tls.crt`
 - 持久数据：`./data/`
 - 构建缓存：`./cache/`
 - 本地 TLS 证书：`./data/local-tls/fullchain.pem`
@@ -39,7 +42,24 @@ docker exec pwncollege-dojo dojo compose ps
 docker exec pwncollege-dojo cat /data/admin-password.txt
 ```
 
-本机入口使用带 `localhost.pwn.college`、`workspace.localhost.pwn.college` 和 `future.localhost.pwn.college` SAN 的自签名证书。首次用浏览器访问会出现信任提示；可以把 `data/local-tls/fullchain.pem` 导入本机信任库，或只在本机验收时接受该证书。
+入口使用自签名证书，SAN 包含 LAN 主域名、Workspace/Future 子域名、`192.168.3.111` IP 以及原有的三个 localhost 域名。证书 SHA-256 指纹为：
+
+```text
+E5:97:C8:A1:24:C0:80:53:F3:AC:6F:7A:E0:B7:89:AD:28:01:14:D6:CC:0F:C3:D8:69:F1:B8:4A:6F:2E:50:73
+```
+
+在 `192.168.200.17` 上可以先执行：
+
+```bash
+curl http://192.168.3.111/lan-health
+curl http://192.168.3.111/local-tls.crt -o pwncollege-local.crt
+```
+
+第一个命令应输出 `pwn.college LAN endpoint ready`。将第二个命令下载的证书导入该客户端的系统或浏览器信任库后，再访问 Web 地址；也可以仅在浏览器验收时接受自签名证书。若客户端 DNS 拦截指向私网的 wildcard DNS，请在其 hosts 文件加入：
+
+```text
+192.168.3.111 192-168-3-111.nip.io workspace.192-168-3-111.nip.io future.192-168-3-111.nip.io
+```
 
 创建数据库备份：
 
@@ -60,7 +80,7 @@ docker exec pwncollege-dojo systemctl show pwn.college.service -p ActiveState -p
 ./ops/set-offline-mode.sh enable
 ```
 
-`run-local.sh` 会准备源码读取权限和本地 TLS 证书。源码以可写、非递归 bind mount 挂载；非递归设置可防止内层 Docker 的 overlay 挂载反向泄漏到源码树。首次初始化会构建所有内层服务和 Nix 工作区，可能需要较长时间。如果预载前 `pwn.college.service` 因拉取超时失败，预载脚本会导入固定的基础镜像、清除失败状态并重新启动服务。只有首次构建成功后才启用离线模式；它让后续开机复用已验证镜像，不受 Registry 波动影响。查看进度：
+`ops/deployment.env` 固化了当前机器的非秘密 LAN 地址、访问域名、目标客户端和已验证镜像标签；显式进程环境变量优先于该文件，也可用 `DOJO_DEPLOYMENT_ENV` 指向另一份配置。`run-local.sh` 会读取该配置、准备源码读取权限和本地 TLS 证书。源码以可写、非递归 bind mount 挂载；非递归设置可防止内层 Docker 的 overlay 挂载反向泄漏到源码树。首次初始化会构建所有内层服务和 Nix 工作区，可能需要较长时间。如果预载前 `pwn.college.service` 因拉取超时失败，预载脚本会导入固定的基础镜像、清除失败状态并重新启动服务。只有首次构建成功后才启用离线模式；它让后续开机复用已验证镜像，不受 Registry 波动影响。查看进度：
 
 ```bash
 docker exec pwncollege-dojo systemctl show pwn.college.service -p ActiveState -p SubState -p Result
@@ -132,7 +152,9 @@ docker exec pwncollege-dojo dojo compose restart ctfd
 
 ## 访问范围
 
-当前端口只监听 `127.0.0.1`，不会直接暴露给局域网或公网。需要从另一台机器访问时，先建立 SSH 端口转发，或在配置域名、TLS 和网络访问策略后显式修改 `DOJO_LISTEN_ADDRESS` 并重建外层容器。
+当前端口只监听物理 LAN 地址 `192.168.3.111`，不监听 Docker bridge 或其他主机地址。已验证到 `192.168.200.17` 的路由经 `192.168.3.1`，源地址为 `192.168.3.111`，客户端连续响应 ICMP；UFW 当前为禁用状态，因此经路由可达该 LAN 地址的其他客户端也能连接这三个端口。若要求“仅允许 `192.168.200.17`”，应由有 root 权限的管理员在不中断宿主机其他业务的前提下添加源地址防火墙策略。
+
+外层端口为 Web `80/443` 和 Workspace SSH `2223`。网页及浏览器内 Terminal、Code、Desktop 必须使用上面的主域名与 Workspace 域名，不能只把主页面改成一个任意 Host 名；这些服务依赖独立的 TLS/SNI 与签名路由。
 
 `verify-local.sh` 执行基础设施与 HTTP/SSH 只读检查；`smoke-user-flow.py` 临时注册用户、创建 smoke dojo、启动 Kata 工作区，检查 Terminal、Code、Desktop、SSH 和 home 持久化，然后删除测试用户与 dojo；测试不会读取或提交任何 flag。
 

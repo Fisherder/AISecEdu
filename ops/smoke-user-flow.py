@@ -16,6 +16,26 @@ import yaml
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 REPO_DIR = pathlib.Path(__file__).resolve().parent.parent
+
+
+def load_deployment_env():
+    path = pathlib.Path(
+        os.getenv("DOJO_DEPLOYMENT_ENV", REPO_DIR / "ops/deployment.env")
+    )
+    if not path.is_file():
+        return
+    for number, raw_line in enumerate(path.read_text().splitlines(), 1):
+        line = raw_line.rstrip("\r")
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            raise ValueError(f"Invalid deployment environment line {number}: {line}")
+        os.environ.setdefault(key, value)
+
+
+load_deployment_env()
+
 CONTAINER = os.getenv("DOJO_CONTAINER", "pwncollege-dojo")
 LISTEN_ADDRESS = os.getenv("DOJO_LISTEN_ADDRESS", "127.0.0.1")
 HTTPS_PORT = int(os.getenv("DOJO_HTTPS_PORT", "443"))
