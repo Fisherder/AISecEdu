@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% set commitment_text = "I have read the ground rules and commit to not publish pwn.college writeups on the internet." %}
+{% set commitment_text = "I will use AISecEdu responsibly and will not publish restricted exercise solutions." %}
 
 {% block content %}
 <div class="jumbotron">
@@ -15,14 +15,10 @@
 
 			<h2>Ground Rules</h2>
 			<p>When using this platform, please keep several ground rules in mind!</p>
-			<h3>Writeups</h3>
-			<p>The challenges created for pwn.college are educational material, and are used to grade students at Arizona State University.
-      Because of this, we would appreciate that writeups, walkthrough videos, and livestreams of challenge solutions are not posted to the internet.
-      Obviously, we can't stop you from posting things to the internet, but we worked hard to make all of this public, and we would appreciate your help in keeping pwn.college a viable educational platform.</p>
-      <h3>Bug Bounties</h3>
-      <p>Even master hackers have vulnerabilities in their software!
-      If you find a vulnerability in this platform, please <a href="mailto:pwn-college@asu.edu">email</a> us rather than pwn us.
-      We'll appreciate it, and you'll get extra credit (if you're an ASU student) or an awesome scoreboard award!</p>
+			<h3>Course material</h3>
+			<p>Exercises may be used for active teaching and assessment. Follow the sharing policy set by your teacher, and do not publish restricted solutions, answer tokens, walkthrough videos, or live solution streams.</p>
+      <h3>Responsible use</h3>
+      <p>Use the provided environments and targets only as authorized. If you discover a security issue in AISecEdu itself, report it privately to the administrator of this deployment instead of testing it against other users or production data.</p>
 
 			<div class="form-group" id="commitment-section">
 				<div class="alert alert-warning">
@@ -137,7 +133,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 commitmentVerifiedField.value = 'verified';
                 commitmentInput.classList.remove('is-invalid');
                 commitmentInput.classList.add('is-valid');
-                commitmentFeedback.textContent = 'Thank you for helping keep pwn.college viable!';
+                commitmentFeedback.textContent = 'Thank you for using AISecEdu responsibly!';
                 commitmentFeedback.classList.remove('text-muted', 'text-danger');
                 commitmentFeedback.classList.add('text-success');
                 

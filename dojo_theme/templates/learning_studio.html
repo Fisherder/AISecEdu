@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="jumbotron">
+  <div class="container">
+    <h1 class="brand-white brand-mono-bold">{{ dojo.name or dojo.id }}<span class="brand-dot">.</span></h1>
+    <br>
+    <h2 class="brand-white">Teacher Studio</h2>
+  </div>
+</div>
+
+<div id="learning-studio" class="container" data-dojo-id="{{ dojo.reference_id }}">
+  <div class="row text-center">
+    <div class="col-lg-auto m-3">
+      <figure>
+        <a class="text-decoration-none" href="/{{ dojo.reference_id }}">
+          <i class="fas fa-graduation-cap fa-3x"></i>
+          <figcaption><b>Course</b></figcaption>
+        </a>
+      </figure>
+    </div>
+    <div class="col-lg-auto m-3">
+      <figure>
+        <a class="text-decoration-none" href="/dojo/{{ dojo.reference_id }}/learning">
+          <i class="fas fa-chart-line fa-3x"></i>
+          <figcaption><b>Learning View</b></figcaption>
+        </a>
+      </figure>
+    </div>
+  </div>
+
+  <div id="learning-studio-notice" class="alert alert-warning" role="alert">Loading teacher data...</div>
+
+  <h2 class="row">Course Analytics</h2>
+  <div class="stats-dashboard">
+    {% for key, title in [("participants", "Participants"), ("attempts", "Attempts"), ("averageScore", "Average Score"), ("drafts", "Drafts"), ("openAppeals", "Open Appeals")] %}
+    <div class="stat-card">
+      <div class="stat-card-header">{{ title }}</div>
+      <div class="stat-container">
+        <div class="stat-box"><div class="stat-label">{{ title }}</div><div id="studio-stat-{{ key }}" class="stat-value">0</div></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <br>
+  <ul class="nav nav-tabs" id="learning-studio-tabs" role="tablist">
+    <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#studio-author" role="tab">Author</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-drafts" role="tab">Drafts</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-catalog" role="tab">Published Exercises</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-analytics" role="tab">Students</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-import" role="tab">Import</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-appeals" role="tab">Appeals</a></li>
+  </ul>
+
+  <div class="tab-content pt-4">
+    <div id="studio-author" class="tab-pane fade show active" role="tabpanel">
+      <div class="row">
+        <div class="col-lg-5">
+          <h2>Teaching Intent</h2>
+          <div class="form-group">
+            <label for="studio-module">Target Unit</label>
+            <select id="studio-module" class="form-control">
+              {% for module in dojo.modules %}<option value="{{ module.id }}">{{ module.name or module.id }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group col-md-6">
+              <label for="studio-level">Authoring Strategy</label>
+              <select id="studio-level" class="form-control"><option value="L1">Reuse</option><option value="L2" selected>Adapt</option><option value="L3">Create New</option></select>
+            </div>
+            <div class="form-group col-md-6">
+              <label for="studio-category">Category</label>
+              <select id="studio-category" class="form-control"><option>GENERAL</option><option>WEB</option><option>PWN</option><option>REV</option><option>CRYPTO</option><option>FORENSICS</option></select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="studio-difficulty">Difficulty</label>
+            <select id="studio-difficulty" class="form-control">{% for value in range(1, 6) %}<option value="{{ value }}" {% if value == 2 %}selected{% endif %}>{{ value }} / 5</option>{% endfor %}</select>
+          </div>
+          <div class="form-group">
+            <label for="studio-brief">Exercise Requirements</label>
+            <textarea id="studio-brief" class="form-control" rows="10" placeholder="Describe learner background, target vulnerability, runtime constraints, and a verifiable completion standard."></textarea>
+          </div>
+          <button id="studio-create" type="button" class="btn btn-primary btn-block">Generate Draft</button>
+        </div>
+        <div class="col-lg-7">
+          <h2>Draft Workbench</h2>
+          <div id="studio-workbench-empty" class="alert alert-info">Generate or select a draft to begin.</div>
+          <div id="studio-workbench" hidden>
+            <div class="d-flex justify-content-between align-items-start">
+              <div><h3 id="studio-draft-name"></h3><p id="studio-draft-meta"></p></div>
+              <span id="studio-draft-status" class="badge badge-secondary"></span>
+            </div>
+            <p id="studio-draft-description"></p>
+            <h3>Best Catalog Matches</h3>
+            <div id="studio-draft-candidates"></div>
+            <h3>Publication Gate</h3>
+            <p id="studio-validation-summary"></p>
+            <div id="studio-validation-checks" class="table-responsive"></div>
+            <button id="studio-validate" type="button" class="btn btn-outline-secondary">Validate</button>
+            <button id="studio-publish" type="button" class="btn btn-primary">Publish</button>
+            <hr>
+            <div class="form-group">
+              <label for="studio-revision">Revision Request</label>
+              <textarea id="studio-revision" class="form-control" rows="4" placeholder="Adjust the audience, scenario, objectives, or runtime constraints."></textarea>
+            </div>
+            <button id="studio-revise" type="button" class="btn btn-outline-secondary">Revise Draft</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="studio-drafts" class="tab-pane fade" role="tabpanel">
+      <h2>Authoring Drafts</h2>
+      <ul id="studio-draft-list" class="card-list"></ul>
+    </div>
+
+    <div id="studio-catalog" class="tab-pane fade" role="tabpanel">
+      <h2>Published Exercise Catalog</h2>
+      <ul id="studio-catalog-list" class="card-list"></ul>
+    </div>
+
+    <div id="studio-analytics" class="tab-pane fade" role="tabpanel">
+      <h2>Student Analysis</h2>
+      <div id="studio-student-list"></div>
+      <div id="studio-students-empty" class="alert alert-info" hidden>Student skill evidence will appear after the first attempt.</div>
+    </div>
+
+    <div id="studio-import" class="tab-pane fade" role="tabpanel">
+      <h2>External Exercise Package</h2>
+      <p>Paste an AISecEdu or compatible JSON package. It will become a new exercise draft and pass through the same publication gate.</p>
+      <div class="form-group">
+        <label for="studio-import-module">Target Unit</label>
+        <select id="studio-import-module" class="form-control">
+          {% for module in dojo.modules %}<option value="{{ module.id }}">{{ module.name or module.id }}</option>{% endfor %}
+        </select>
+      </div>
+      <textarea id="studio-package" class="form-control brand-mono" rows="16" placeholder='{"apiVersion":"aisecedu.io/v2","kind":"ChallengePackage","metadata":{},"spec":{}}'></textarea>
+      <button id="studio-import-submit" type="button" class="btn btn-primary mt-3">Import and Validate</button>
+    </div>
+
+    <div id="studio-appeals" class="tab-pane fade" role="tabpanel">
+      <h2>Assessment Appeals</h2>
+      <div id="studio-appeal-list"></div>
+      <div id="studio-appeals-empty" class="alert alert-info" hidden>No assessment appeal has been submitted.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-studio.js') }}"></script>
+{% endblock %}

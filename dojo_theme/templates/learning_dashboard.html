@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="jumbotron">
+  <div class="container">
+    <h1 class="brand-white brand-mono-bold">{{ dojo.name or dojo.id }}<span class="brand-dot">.</span></h1>
+    <br>
+    <h2 class="brand-white">Learning Analysis</h2>
+  </div>
+</div>
+
+<div id="learning-dashboard" class="container" data-dojo-id="{{ dojo.reference_id }}">
+  <div class="row text-center">
+    <div class="col-lg-auto m-3">
+      <figure>
+        <a class="text-decoration-none" href="/{{ dojo.reference_id }}">
+          <i class="fas fa-torii-gate fa-3x"></i>
+          <figcaption><b>Course</b></figcaption>
+        </a>
+      </figure>
+    </div>
+    {% if dojo.is_admin() %}
+    <div class="col-lg-auto m-3">
+      <figure>
+        <a class="text-decoration-none" href="/dojo/{{ dojo.reference_id }}/studio">
+          <i class="fas fa-chalkboard-teacher fa-3x"></i>
+          <figcaption><b>Teacher Studio</b></figcaption>
+        </a>
+      </figure>
+    </div>
+    {% endif %}
+  </div>
+
+  <div id="learning-dashboard-notice" class="alert alert-warning" role="alert">Loading course analysis...</div>
+
+  <h2 class="row">Learning Status</h2>
+  <div class="stats-dashboard">
+    <div class="stat-card">
+      <div class="stat-card-header">Course Progress</div>
+      <div class="stat-container">
+        <div class="stat-box">
+          <div class="stat-label">Required Exercises</div>
+          <div id="learning-progress-value" class="stat-value">0 / 0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Completion</div>
+          <div id="learning-progress-percent" class="stat-value">0%</div>
+        </div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-header">Evidence Standard</div>
+      <p class="m-0">Hash-chained S1–S4 events keep runtime observations, Tutor interactions, reflections, and flag checks reviewable.</p>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-header">Assessment Standard</div>
+      <p class="m-0">Objective result: 60 points.<br>Trusted process: 40 points.</p>
+    </div>
+  </div>
+
+  <br>
+  <ul class="nav nav-tabs" id="learning-dashboard-tabs" role="tablist">
+    <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#learning-path" role="tab">Recommended</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-skills" role="tab">Skills</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-attempts" role="tab">Attempts</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-catalog" role="tab">Exercise Catalog</a></li>
+  </ul>
+
+  <div class="tab-content pt-4">
+    <div id="learning-path" class="tab-pane fade show active" role="tabpanel">
+      <h2>Recommended Next Exercises</h2>
+      <ul id="learning-recommendations" class="card-list"></ul>
+      <div id="learning-recommendations-empty" class="alert alert-info" hidden>No unfinished recommendation is available for this course.</div>
+    </div>
+
+    <div id="learning-skills" class="tab-pane fade" role="tabpanel">
+      <h2>Six-Dimension Skill Profile</h2>
+      <div id="learning-skills-list" class="row"></div>
+    </div>
+
+    <div id="learning-attempts" class="tab-pane fade" role="tabpanel">
+      <h2>Evidence-Backed Attempts</h2>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead><tr><th>Exercise</th><th>Unit</th><th>Session</th><th>Status</th><th>Score</th><th>Started</th></tr></thead>
+          <tbody id="learning-attempt-list"></tbody>
+        </table>
+      </div>
+      <div id="learning-attempts-empty" class="alert alert-info" hidden>Start an exercise to create the first learning attempt.</div>
+    </div>
+
+    <div id="learning-catalog" class="tab-pane fade" role="tabpanel">
+      <h2>Course Exercise Catalog</h2>
+      <ul id="learning-catalog-list" class="card-list"></ul>
+    </div>
+  </div>
+</div>
+
+<div id="learning-attempt-modal" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="learning-attempt-title" aria-hidden="true">
+  <div class="modal-dialog modal-xl" role="document">
+    <div class="modal-content bg-dark text-white">
+      <div class="modal-header">
+        <div>
+          <h2 id="learning-attempt-title" class="modal-title">Learning Attempt</h2>
+          <small id="learning-attempt-meta"></small>
+        </div>
+        <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body">
+        <div id="learning-attempt-notice" class="alert" role="alert" hidden></div>
+        <div class="row">
+          <div class="col-lg-6">
+            <h3>Evidence Timeline</h3>
+            <p id="learning-evidence-chain"></p>
+            <div class="table-responsive" style="max-height: 18rem; overflow: auto;">
+              <table class="table table-sm table-striped"><tbody id="learning-evidence-list"></tbody></table>
+            </div>
+            <h3>Reflection and Assessment</h3>
+            <textarea id="learning-reflection" class="form-control" rows="7" placeholder="Describe your initial judgment, tested hypotheses, key evidence, root cause, and remediation."></textarea>
+            <button id="learning-reflection-submit" type="button" class="btn btn-primary mt-3">Save and Reassess</button>
+          </div>
+          <div class="col-lg-6">
+            <h3>Assessment</h3>
+            <div id="learning-assessment-empty" class="alert alert-info">Submit a reflection to generate an assessment.</div>
+            <div id="learning-assessment" hidden>
+              <h2 id="learning-assessment-score"></h2>
+              <p id="learning-assessment-summary"></p>
+              <p id="learning-assessment-feedback"></p>
+              <div id="learning-assessment-criteria"></div>
+              <hr>
+              <h3>Request Review</h3>
+              <textarea id="learning-appeal-reason" class="form-control" rows="4" placeholder="Identify the evidence or scoring criterion that should be reviewed."></textarea>
+              <button id="learning-appeal-submit" type="button" class="btn btn-outline-secondary mt-3">Submit Appeal</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-dashboard.js') }}"></script>
+{% endblock %}

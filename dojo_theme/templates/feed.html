@@ -3,12 +3,7 @@
 {% macro render_user(event) %}
     <strong>
         <a href="/hacker/{{ event.user_name }}">
-            {% if event.get('user_belt') %}
-                <img src="{{ url_for('pwncollege_belts.view_belt', color=event.user_belt) }}" 
-                     class="scoreboard-belt" 
-                     style="height: 1.5em; vertical-align: middle; margin-right: 0.25em;"
-                     title="{{ event.user_belt.title() }} Belt">
-            {% endif %}
+            {% if event.get('user_belt') %}<i class="fas fa-award mr-1" title="{{ event.user_belt.title() }} achievement level"></i>{% endif %}
             {{ event.user_name }}
             {% if event.get('user_emojis') %}
                 {% for emoji in event.user_emojis[:3] %}
@@ -99,10 +94,10 @@
                                 
                                 {% elif event.type == "challenge_solve" %}
                                     {{ render_user(event) }}
-                                    solved 
+                                    completed
                                     {{ render_dojo_module_challenge(event.data) }}
                                     {% if event.data.first_blood %}
-                                        <span class="badge bg-danger">FIRST BLOOD!</span>
+                                        <span class="badge bg-danger">FIRST COMPLETION!</span>
                                     {% endif %}
                                 
                                 {% elif event.type == "emoji_earned" %}
@@ -116,7 +111,7 @@
                                 
                                 {% elif event.type == "belt_earned" %}
                                     {{ render_user(event) }}
-                                    earned their <strong>{{ event.data.belt_name }}</strong>!
+                                    reached the <strong>{{ event.data.belt_name }}</strong> achievement level!
                                     {% if event.data.dojo_name or event.data.dojo_id %}
                                         <br><small class="text-muted">Completed {{ render_dojo_link(event.data) }}</small>
                                     {% endif %}

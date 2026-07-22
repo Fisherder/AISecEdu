@@ -4,33 +4,32 @@
 {% block content %}
 <div class="jumbotron">
     <div class="container">
-        <h1>Create Dojo</h1>
+        <h1>Create Course</h1>
     </div>
 </div>
 <div class="container">
-  <p>pwn.college dojos are defined in a git repository. You can use the example repositories listed below, or our <a href="https://github.com/pwncollege/official-dojos">official dojo repositories</a>, for examples on how to build a dojo!</p>
+  <p>Courses are defined in Git repositories so their units, exercises, files, and runtime configuration can be reviewed and versioned together. You can start from one of the examples below or connect your own repository.</p>
     <ul class="card-list">
       {% for dojo in example_dojos %}
       {% set num_challenges = (dojo.challenges | length) %}
       {{ card(url_for("pwncollege_dojo.view_dojo", dojo=dojo.reference_id),
       title=dojo.name,
       text_lines = [
-        "{} Modules".format(dojo.modules | length),
-        "{} Challenges".format(num_challenges),
+        "{} Units".format(dojo.modules | length),
+        "{} Exercises".format(num_challenges),
       ],
-      icon=url_for("pwncollege_belts.view_belt", color=dojo.award.belt) if (dojo.award.belt and dojo.official) else None,
       emoji=dojo.award.emoji,
       solve_percent=(((dojo.solves(user=user, ignore_visibility=True, ignore_admins=False).count() if user else 0) / num_challenges) * 100) if num_challenges else 0,
       ) }}
       {% endfor %}
     </ul>
-  <p>When you are ready, create your dojo from your repository using the form below!</p>
+  <p>When the repository is ready, connect it using the form below. AISecEdu will synchronize its course hierarchy and content.</p>
     <form method="post" id="dojo-create-form" autocomplete="off">
         <div class="form-group">
-            <b><label>GitHub Repository</label></b>
-            <small class="form-text text-muted">https://github.com/<b>pwncollege/example-dojo</b></small>
+            <b><label>Git Repository</label></b>
+            <small class="form-text text-muted">For GitHub, enter the repository as <b>owner/course-repository</b>.</small>
             <br>
-            <input class="form-control" name="repository" type="text" placeholder="pwncollege/example-dojo" value="">
+            <input class="form-control" name="repository" type="text" placeholder="organization/security-course" value="">
 
             <br>
 
@@ -57,7 +56,7 @@
         </div>
 
         <div class="form-group text-right">
-            <input class="btn btn-md btn-primary btn-outlined" id="_submit" name="_submit" type="submit" value="Create">
+            <input class="btn btn-md btn-primary btn-outlined" id="_submit" name="_submit" type="submit" value="Create Course">
         </div>
     </form>
 </div>

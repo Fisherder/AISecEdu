@@ -5,6 +5,7 @@ from CTFd.utils.decorators import authed_only
 from CTFd.utils.user import get_current_user
 from CTFd.models import Users
 from ...config import DOJO_SSH_SERVICE_KEY
+from ...models import DojoAdmins
 from ...utils import get_current_container
 
 user_namespace = Namespace("user", description="User management endpoints")
@@ -102,5 +103,7 @@ class CurrentUser(Resource):
             "hidden": user.hidden,
             "banned": user.banned,
             "verified": user.verified,
-            "admin": user.type == "admin"
+            "admin": user.type == "admin",
+            "course_teacher": user.type == "admin"
+            or DojoAdmins.query.filter_by(user_id=user.id).first() is not None,
         }

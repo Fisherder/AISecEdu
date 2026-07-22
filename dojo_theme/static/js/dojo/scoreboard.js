@@ -55,17 +55,13 @@ function buildHackerRow(user, me, crew) {
       <td class="col-md-4">
         <a class="scoreboard-name brand-mono"></a>
       </td>
-      <td class="scoreboard-completions col-md-4">
-      </td>
-      <td class="col-md-1">
-        <img class="scoreboard-belt">
+      <td class="scoreboard-completions col-md-5">
       </td>
       <td class="col-md-1"><b class="scoreboard-score"></b></td>
     </tr>
     `);
     row.find(".scoreboard-rank").text(`#${user.rank}`);
     row.find(".scoreboard-symbol").attr("src", user.symbol);
-    row.find(".scoreboard-belt").attr("src", user.belt);
     row.find(".scoreboard-score").text(user.solves);
     const name = row.find(".scoreboard-name").attr("href", user.url).attr("title", user.name);
     if (crew) {
@@ -101,10 +97,7 @@ function buildCrewRow(crew, myCrewKey) {
       </td>
       <td class="col-md-4 crew-name-cell">
       </td>
-      <td class="col-md-4 crew-facepile">
-      </td>
-      <td class="col-md-1">
-        <img class="scoreboard-belt">
+      <td class="col-md-5 crew-facepile">
       </td>
       <td class="col-md-1"><b class="crew-score"></b></td>
     </tr>
@@ -128,13 +121,11 @@ function buildCrewRow(crew, myCrewKey) {
     }
     const names = crew.members.slice(0, 5).map(member => member.name).join(", ");
     facepile.attr("title", crew.members.length > 5 ? `${names}, …` : names);
-    const top = crew.members[0];
-    row.find(".scoreboard-belt").attr("src", top.belt).attr("title", `Top member: ${top.name}`);
     const unique = crew.unique === null || crew.unique === undefined ? "—" : crew.unique.toLocaleString();
     const scoreCell = row.find(".crew-score");
     if (scoreboardState.crewMode === "unique") scoreCell.text(unique);
     else scoreCell.text(crew.score.toLocaleString());
-    scoreCell.attr("title", `Cumulative: ${crew.score.toLocaleString()} · Unique challenges: ${unique}`);
+    scoreCell.attr("title", `Cumulative completions: ${crew.score.toLocaleString()} · Unique exercises: ${unique}`);
     if (myCrewKey && crew.key === myCrewKey) row.addClass("scoreboard-row-me");
 
     let memberRows = null;
@@ -146,7 +137,7 @@ function buildCrewRow(crew, myCrewKey) {
         const rest = rows.slice(10);
         memberRows = head.slice();
         if (rest.length) {
-            const moreRow = $(`<tr class="crew-more-row"><td colspan="6"><a role="button" tabindex="0"></a></td></tr>`);
+            const moreRow = $(`<tr class="crew-more-row"><td colspan="5"><a role="button" tabindex="0"></a></td></tr>`);
             moreRow.find("a").text(`▾ show ${rest.length} more member${rest.length === 1 ? "" : "s"}`);
             const showRest = () => {
                 rest.forEach(memberRow => memberRow.insertBefore(moreRow));
@@ -192,10 +183,10 @@ function setScoreboardControls(view, duration) {
     if (controls[duration]) $(controls[duration]).addClass("scoreboard-page-selected");
     const crews = view === "crews";
     const unique = scoreboardState.crewMode === "unique";
-    $("#scoreboard-heading").text(`${labels[duration] || ""}${crews ? " Crew" : ""} Scoreboard:`);
-    $("#scoreboard-th-name").text(crews ? "Crew" : "Hacker");
-    $("#scoreboard-th-badges").text(crews ? "Members" : "Badges");
-    $("#scoreboard-th-score").text(crews && unique ? "Unique" : "Score");
+    $("#scoreboard-heading").text(`${labels[duration] || ""}${crews ? " Team" : " Student"} Leaderboard`);
+    $("#scoreboard-th-name").text(crews ? "Team" : "Student");
+    $("#scoreboard-th-badges").text(crews ? "Members" : "Achievements");
+    $("#scoreboard-th-score").text(crews && unique ? "Unique" : "Completed");
     $("#scoreboard-view-hackers").toggleClass("scoreboard-view-selected", !crews).attr("aria-selected", String(!crews));
     $("#scoreboard-view-crews").toggleClass("scoreboard-view-selected", crews).attr("aria-selected", String(crews));
     $("#scoreboard-crew-mode-toggle").prop("hidden", !crews);
@@ -218,14 +209,14 @@ function renderPagination(duration, page, pages) {
 }
 
 function renderNoteRow(text) {
-    const row = $(`<tr class="crew-note-row"><td colspan="6" class="crew-note"></td></tr>`);
+    const row = $(`<tr class="crew-note-row"><td colspan="5" class="crew-note"></td></tr>`);
     row.find(".crew-note").text(text);
     $("#scoreboard").append(row);
     return row;
 }
 
 function renderLoadingRow() {
-    $("#scoreboard").empty().append($(`<tr class="scoreboard-loading"><td colspan="6">Loading...</td></tr>`));
+    $("#scoreboard").empty().append($(`<tr class="scoreboard-loading"><td colspan="5">Loading...</td></tr>`));
     $("#scoreboard-pages").empty();
 }
 
@@ -240,10 +231,10 @@ function renderErrorRow(duration, page, message) {
 
 function renderCrewEmptyState() {
     const row = $(`
-      <tr class="crew-empty"><td colspan="6">
-        <div><span class="crew-tag crew-tag-ghost"><span class="crew-tag-bracket">[</span><bdi class="crew-tag-text">YOUR-CREW</bdi><span class="crew-tag-bracket">]</span></span></div>
-        <div class="crew-empty-title">No crews yet.</div>
-        <div class="crew-empty-hint">Start one: add a tag in brackets to your display name in <a>Settings</a> — e.g. <b>Zardus [Shellphish]</b> — and your crew appears here.</div>
+      <tr class="crew-empty"><td colspan="5">
+        <div><span class="crew-tag crew-tag-ghost"><span class="crew-tag-bracket">[</span><bdi class="crew-tag-text">YOUR-TEAM</bdi><span class="crew-tag-bracket">]</span></span></div>
+        <div class="crew-empty-title">No teams yet.</div>
+        <div class="crew-empty-hint">Create one by adding a tag in brackets to your display name in <a>Settings</a>; students with the same tag are grouped together.</div>
       </td></tr>
     `);
     row.find("a").attr("href", `${init.urlRoot}/settings`);
@@ -261,7 +252,7 @@ function renderCrewView(duration, page, gen) {
         const myCrewKey = myCrew ? myCrew.key : null;
 
         if (!crews.length) {
-            if (result.board_empty) renderNoteRow("No solves yet — no crews to show.");
+            if (result.board_empty) renderNoteRow("No exercise completions yet — no teams to show.");
             else renderCrewEmptyState();
             renderPagination(duration, 1, []);
             return;
@@ -279,7 +270,7 @@ function renderCrewView(duration, page, gen) {
         renderPagination(duration, page, result.pages);
     }).catch(() => {
         if (gen !== scoreboardState.generation) return;
-        renderErrorRow(duration, page, "Failed to load the crew scoreboard.");
+        renderErrorRow(duration, page, "Failed to load the team leaderboard.");
     });
 }
 
@@ -297,7 +288,7 @@ function renderHackerView(duration, page, gen) {
                 standings.splice(standings.length, 0, result.me);
         }
         if (!standings.length) {
-            renderNoteRow("No solves yet.");
+            renderNoteRow("No exercise completions yet.");
         }
         standings.forEach(user => {
             scoreboard.append(buildHackerRow(user, result.me, null));
@@ -305,7 +296,7 @@ function renderHackerView(duration, page, gen) {
         renderPagination(duration, page, result.pages);
     }).catch(() => {
         if (gen !== scoreboardState.generation) return;
-        renderErrorRow(duration, page, "Failed to load the scoreboard.");
+        renderErrorRow(duration, page, "Failed to load the student leaderboard.");
     });
 }
 

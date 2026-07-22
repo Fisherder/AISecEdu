@@ -1,17 +1,128 @@
-import datetime
-from flask import request, session
-from flask_restx import Namespace, Resource
-from CTFd.models import Users, UserFieldEntries, UserFields, db
-from CTFd.utils import validators, email, get_config
-from CTFd.utils.crypto import verify_password
-from CTFd.utils.config.visibility import registration_visible
-from CTFd.utils.validators import ValidationError
-from CTFd.utils.config import can_send_mail
-from CTFd.utils.security.signing import unserialize
-from itsdangerous.exc import BadSignature, BadTimeSignature, SignatureExpired
 import base64
 
+from flask import request, session
+from flask_restx import Namespace, Resource
+from itsdangerous.exc import BadSignature, BadTimeSignature, SignatureExpired
+from sqlalchemy.exc import IntegrityError
+
+from CTFd.cache import clear_user_session
+from CTFd.models import UserFieldEntries, UserFields, Users, db
+from CTFd.utils import email, get_config, validators
+from CTFd.utils.config import can_send_mail
+from CTFd.utils.config.integrations import mlc
+from CTFd.utils.config.visibility import registration_visible
+from CTFd.utils.crypto import verify_password
+from CTFd.utils.decorators import authed_only, ratelimit
+from CTFd.utils.logging import log
+from CTFd.utils.security.auth import login_user, logout_user
+from CTFd.utils.security.signing import unserialize
+from CTFd.utils.user import get_current_user
+from CTFd.utils.validators import ValidationError
+
 auth_namespace = Namespace("auth", description="Authentication endpoints")
+
+REGISTRATION_COMMITMENT = (
+    "我已阅读并同意遵守平台公约，不公开 AISecEdu 课程题目的解题过程或答案。"
+)
+
+
+def _message(message):
+    return {"success": True, "data": {"message": message}}
+
+
+def _auth_user_data(user):
+    from ...models import DojoAdmins
+
+    return {
+        "user_id": user.id,
+        "username": user.name,
+        "email": user.email,
+        "type": user.type,
+        "verified": user.verified,
+        "team_id": user.team_id,
+        "course_teacher": user.type == "admin"
+        or DojoAdmins.query.filter_by(user_id=user.id).first() is not None,
+    }
+
+
+def _payload():
+    payload = request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _text(payload, key):
+    value = payload.get(key, "")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _legal_document(name):
+    if name == "terms":
+        return get_config("tos_url"), get_config("tos_text")
+    if name == "privacy":
+        return get_config("privacy_url"), get_config("privacy_text")
+    return None, None
+
+
+@auth_namespace.route("/config")
+class AuthConfig(Resource):
+    def get(self):
+        """Return public authentication configuration for compatibility clients."""
+        terms_url, terms_text = _legal_document("terms")
+        privacy_url, privacy_text = _legal_document("privacy")
+        return {
+            "success": True,
+            "data": {
+                "registrationEnabled": bool(registration_visible()),
+                "registrationCodeRequired": bool(get_config("registration_code")),
+                "emailVerificationRequired": bool(
+                    get_config("verify_emails") and can_send_mail()
+                ),
+                "mailEnabled": bool(can_send_mail()),
+                "oauthEnabled": bool(mlc()),
+                "commitment": {
+                    "required": True,
+                    "text": REGISTRATION_COMMITMENT,
+                },
+                "customFields": [
+                    {
+                        "id": field.id,
+                        "name": field.name,
+                        "description": field.description,
+                        "type": field.field_type,
+                        "required": bool(field.required),
+                    }
+                    for field in UserFields.query.order_by(UserFields.id).all()
+                ],
+                "legal": {
+                    "terms": {
+                        "enabled": bool(terms_url or terms_text),
+                        "href": terms_url or "/terms",
+                    },
+                    "privacy": {
+                        "enabled": bool(privacy_url or privacy_text),
+                        "href": privacy_url or "/privacy",
+                    },
+                },
+            },
+        }
+
+
+@auth_namespace.route("/legal/<string:document>")
+class LegalDocument(Resource):
+    def get(self, document):
+        if document not in {"terms", "privacy"}:
+            return {"success": False, "errors": ["Document not found"]}, 404
+        external_url, content = _legal_document(document)
+        if not external_url and not content:
+            return {"success": False, "errors": ["Document not configured"]}, 404
+        return {
+            "success": True,
+            "data": {
+                "document": document,
+                "externalUrl": external_url,
+                "content": content,
+            },
+        }
 
 
 @auth_namespace.route("/register")
@@ -24,26 +135,38 @@ class Register(Resource):
             403: ("Registration disabled", "ErrorResponse"),
         },
     )
+    @ratelimit(method="POST", limit=10, interval=5)
     def post(self):
         if not registration_visible():
-            return {"success": False, "errors": ["Registration is currently disabled"]}, 403
+            return {
+                "success": False,
+                "errors": ["Registration is currently disabled"],
+            }, 403
+        if get_current_user():
+            return {"success": False, "errors": ["Already authenticated"]}, 409
 
-        req = request.get_json()
+        req = _payload()
         errors = []
 
         # Get registration data
-        name = req.get("name", "").strip()
-        email_address = req.get("email", "").strip().lower()
-        password = req.get("password", "").strip()
-        website = req.get("website")
-        affiliation = req.get("affiliation")
-        country = req.get("country")
+        name = _text(req, "name")
+        email_address = _text(req, "email").lower()
+        password = _text(req, "password")
+        website = _text(req, "website")
+        affiliation = _text(req, "affiliation")
+        country = _text(req, "country")
+
+        if req.get("commitment_accepted") is not True:
+            errors.append("Please accept the platform ground rules")
 
         # Check user limit
         num_users_limit = int(get_config("num_users", default=0))
         num_users = Users.query.filter_by(banned=False, hidden=False).count()
         if num_users_limit and num_users >= num_users_limit:
-            return {"success": False, "errors": [f"Reached maximum users ({num_users_limit})"]}, 403
+            return {
+                "success": False,
+                "errors": [f"Reached maximum users ({num_users_limit})"],
+            }, 403
 
         # Validation
         if len(name) == 0:
@@ -79,15 +202,29 @@ class Register(Resource):
 
         # Check registration code if required
         if get_config("registration_code"):
-            registration_code = req.get("registration_code", "")
-            if registration_code.lower() != str(get_config("registration_code", "")).lower():
+            registration_code = _text(req, "registration_code")
+            if (
+                registration_code.lower()
+                != str(get_config("registration_code", "")).lower()
+            ):
                 errors.append("Invalid registration code")
 
         # Process custom fields
         fields = {}
         for field in UserFields.query.all():
-            field_value = req.get(f"fields[{field.id}]", "").strip()
-            if field.required and not field_value:
+            field_value = req.get(
+                f"fields[{field.id}]", False if field.field_type == "boolean" else ""
+            )
+            if field.field_type == "boolean":
+                field_value = field_value is True or str(field_value).lower() in {
+                    "1",
+                    "true",
+                    "on",
+                    "yes",
+                }
+            else:
+                field_value = str(field_value).strip()
+            if field.required and (field_value is False or field_value == ""):
                 errors.append(f"Field '{field.name}' is required")
             fields[field.id] = field_value
 
@@ -103,45 +240,42 @@ class Register(Resource):
         if country:
             user.country = country
 
-        db.session.add(user)
-        db.session.commit()
+        verification_required = bool(get_config("verify_emails") and can_send_mail())
+        user.verified = not verification_required
 
-        # Add custom field entries
-        for field_id, value in fields.items():
-            entry = UserFieldEntries(
-                field_id=field_id,
-                value=value,
-                user_id=user.id
-            )
-            db.session.add(entry)
-        db.session.commit()
-
-        # Send verification email if configured
-        if get_config("verify_emails") and can_send_mail():
-            email.verify_email_address(user.email)
-            verified = False
-        else:
-            user.verified = True
+        try:
+            db.session.add(user)
+            db.session.flush()
+            for field_id, value in fields.items():
+                db.session.add(
+                    UserFieldEntries(field_id=field_id, value=value, user_id=user.id)
+                )
             db.session.commit()
-            verified = True
+        except IntegrityError:
+            db.session.rollback()
+            return {
+                "success": False,
+                "errors": ["The username or email address is already registered"],
+            }, 409
+
+        session.regenerate()
+        login_user(user)
+        log(
+            "registrations",
+            "[{date}] {ip} - {name} registered with {email}",
+            name=user.name,
+            email=user.email,
+        )
+
+        if verification_required:
+            email.verify_email_address(user.email)
+        else:
             if can_send_mail():
                 email.successful_registration_notification(user.email)
 
-        # Set session
-        session["id"] = user.id
-        session["name"] = user.name
-        session["type"] = user.type
-        session["verified"] = verified
-        session.permanent = True
-
         return {
             "success": True,
-            "data": {
-                "user_id": user.id,
-                "username": user.name,
-                "email": user.email,
-                "verified": verified
-            }
+            "data": _auth_user_data(user),
         }
 
 
@@ -154,10 +288,11 @@ class Login(Resource):
             401: ("Invalid credentials", "ErrorResponse"),
         },
     )
+    @ratelimit(method="POST", limit=10, interval=5)
     def post(self):
-        req = request.get_json()
-        name = req.get("name", "").strip()
-        password = req.get("password", "").strip()
+        req = _payload()
+        name = _text(req, "name")
+        password = _text(req, "password")
 
         # Check if email or username
         if validators.validate_email(name):
@@ -169,29 +304,23 @@ class Login(Resource):
             if user.password is None:
                 return {
                     "success": False,
-                    "errors": ["Account registered via OAuth. Please use OAuth to login"]
+                    "errors": [
+                        "Account registered via OAuth. Please use OAuth to login"
+                    ],
                 }, 401
 
             if verify_password(password, user.password):
-                # Set session
-                session["id"] = user.id
-                session["name"] = user.name
-                session["type"] = user.type
-                session["verified"] = user.verified
-                session.permanent = req.get("remember_me", False)
+                session.regenerate()
+                login_user(user)
+                session.permanent = req.get("remember_me") is True
+                log("logins", "[{date}] {ip} - {name} logged in", name=user.name)
 
                 return {
                     "success": True,
-                    "data": {
-                        "user_id": user.id,
-                        "username": user.name,
-                        "email": user.email,
-                        "type": user.type,
-                        "verified": user.verified,
-                        "team_id": user.team_id
-                    }
+                    "data": _auth_user_data(user),
                 }
 
+        log("logins", "[{date}] {ip} - submitted invalid account information")
         return {"success": False, "errors": ["Invalid credentials"]}, 401
 
 
@@ -204,11 +333,8 @@ class Logout(Resource):
         },
     )
     def post(self):
-        session.clear()
-        return {
-            "success": True,
-            "data": {"message": "Successfully logged out"}
-        }
+        logout_user()
+        return {"success": True, "data": {"message": "Successfully logged out"}}
 
 
 @auth_namespace.route("/verify/<token>")
@@ -225,9 +351,15 @@ class VerifyEmail(Resource):
         try:
             user_email = unserialize(token, max_age=1800)
         except (BadTimeSignature, SignatureExpired):
-            return {"success": False, "errors": ["Your confirmation link has expired"]}, 400
+            return {
+                "success": False,
+                "errors": ["Your confirmation link has expired"],
+            }, 400
         except (BadSignature, TypeError, base64.binascii.Error):
-            return {"success": False, "errors": ["Your confirmation token is invalid"]}, 400
+            return {
+                "success": False,
+                "errors": ["Your confirmation token is invalid"],
+            }, 400
 
         user = Users.query.filter_by(email=user_email).first()
         if not user:
@@ -238,14 +370,12 @@ class VerifyEmail(Resource):
 
         user.verified = True
         db.session.commit()
+        clear_user_session(user_id=user.id)
 
         if can_send_mail():
             email.successful_registration_notification(user.email)
 
-        return {
-            "success": True,
-            "data": {"message": "Email successfully verified"}
-        }
+        return {"success": True, "data": {"message": "Email successfully verified"}}
 
 
 @auth_namespace.route("/forgot-password")
@@ -256,26 +386,24 @@ class ForgotPassword(Resource):
             200: ("Success", "SuccessResponse"),
         },
     )
+    @ratelimit(method="POST", limit=10, interval=60)
     def post(self):
         """Request password reset"""
         if not can_send_mail():
             return {
                 "success": False,
-                "errors": ["Email functionality is not configured"]
+                "errors": ["Email functionality is not configured"],
             }, 400
 
-        req = request.get_json()
-        email_address = req.get("email", "").strip()
+        req = _payload()
+        email_address = _text(req, "email").lower()
 
         user = Users.query.filter_by(email=email_address).first()
         if user and not user.oauth_id:
             email.forgot_password(email_address)
 
         # Always return success to avoid user enumeration
-        return {
-            "success": True,
-            "data": {"message": "If the account exists, a reset email has been sent"}
-        }
+        return _message("If the account exists, a reset email has been sent")
 
 
 @auth_namespace.route("/reset-password/<token>")
@@ -287,6 +415,7 @@ class ResetPassword(Resource):
             400: ("Invalid token or request", "ErrorResponse"),
         },
     )
+    @ratelimit(method="POST", limit=10, interval=60)
     def post(self, token):
         """Reset password with token"""
         try:
@@ -296,8 +425,8 @@ class ResetPassword(Resource):
         except (BadSignature, TypeError, base64.binascii.Error):
             return {"success": False, "errors": ["Your reset token is invalid"]}, 400
 
-        req = request.get_json()
-        password = req.get("password", "").strip()
+        req = _payload()
+        password = _text(req, "password")
 
         if len(password) == 0:
             return {"success": False, "errors": ["Please provide a password"]}, 400
@@ -312,16 +441,36 @@ class ResetPassword(Resource):
         if user.oauth_id:
             return {
                 "success": False,
-                "errors": ["Account registered via OAuth cannot reset password"]
+                "errors": ["Account registered via OAuth cannot reset password"],
             }, 400
 
         user.password = password
         db.session.commit()
+        clear_user_session(user_id=user.id)
+        log(
+            "logins",
+            "[{date}] {ip} - successful password reset for {name}",
+            name=user.name,
+        )
 
         if can_send_mail():
             email.password_change_alert(user.email)
 
-        return {
-            "success": True,
-            "data": {"message": "Password successfully reset"}
-        }
+        return _message("Password successfully reset")
+
+
+@auth_namespace.route("/resend-verification")
+class ResendVerification(Resource):
+    @authed_only
+    @ratelimit(method="POST", limit=5, interval=300)
+    def post(self):
+        user = get_current_user()
+        if user.verified:
+            return _message("Email address is already verified")
+        if not can_send_mail():
+            return {
+                "success": False,
+                "errors": ["Email functionality is not configured"],
+            }, 400
+        email.verify_email_address(user.email)
+        return _message(f"Confirmation email sent to {user.email}")

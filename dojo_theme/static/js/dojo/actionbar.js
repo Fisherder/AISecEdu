@@ -68,77 +68,256 @@ function getRecentService(root) {
     return match;
 }
 
-function showWorkspaceLoadError(content, result) {
-    content.src = "";
+function workspaceLoadingPanel(content) {
+    return $(content).closest(".challenge-workspace-surface").find("[data-workspace-loading]").first();
+}
+
+function workspaceModeLabel(service) {
+    return {
+        terminal: "Terminal",
+        code: "VS Code",
+        desktop: "Desktop",
+    }[serviceName(service)] || serviceName(service) || `Port ${servicePort(service)}`;
+}
+
+function beginWorkspaceLoad(content, service) {
+    const loadId = String((Number(content.dataset.workspaceLoadSequence) || 0) + 1);
+    const panel = workspaceLoadingPanel(content);
+    const mode = workspaceModeLabel(service);
+    const settleDelay = {
+        terminal: 650,
+        code: 1600,
+        desktop: 1800,
+    }[serviceName(service)] || 650;
+    content.dataset.workspaceLoadSequence = loadId;
+    content.dataset.workspaceLoadId = loadId;
+    content.dataset.workspaceLoadSettle = String(settleDelay);
+    content.setAttribute("aria-busy", "true");
+    clearTimeout(content.workspaceLoadSlowTimer);
+    clearTimeout(content.workspaceLoadReadyTimer);
+    $(content).off("load.workspaceLoading");
+    panel.removeClass("is-error").addClass("is-active");
+    panel.find("[data-workspace-loading-title]").text(`Loading ${mode}`);
+    panel.find("[data-workspace-loading-detail]").text(
+        serviceName(service) === "desktop"
+            ? "Starting the remote desktop and preparing keyboard capture…"
+            : "Starting the service and preparing your exercise…"
+    );
+    content.workspaceLoadSlowTimer = setTimeout(function () {
+        if (content.dataset.workspaceLoadId === loadId) {
+            panel.find("[data-workspace-loading-detail]").text(`${mode} is still starting. The first launch can take a little longer.`);
+        }
+    }, 8000);
+    return loadId;
+}
+
+function finishWorkspaceLoad(content, loadId) {
+    if (content.dataset.workspaceLoadId !== loadId) return;
+    clearTimeout(content.workspaceLoadSlowTimer);
+    const settleDelay = Number(content.dataset.workspaceLoadSettle) || 650;
+    content.workspaceLoadReadyTimer = setTimeout(function () {
+        if (content.dataset.workspaceLoadId !== loadId) return;
+        workspaceLoadingPanel(content).removeClass("is-active is-error");
+        content.setAttribute("aria-busy", "false");
+        try {
+            content.focus({preventScroll: true});
+            content.contentWindow.postMessage({type: "aisecedu:focus-remote-keyboard"}, "*");
+        } catch (error) {}
+    }, settleDelay);
+}
+
+function setDesktopClipboardControls(root, active) {
+    root.find(".workspace-clipboard").prop("hidden", !active);
+}
+
+function workspaceIframe(root) {
+    return root.closest(".challenge-workspace").find("#workspace-iframe")[0] || null;
+}
+
+function sendDesktopClipboard(root, text) {
+    const iframe = workspaceIframe(root);
+    if (!iframe || !iframe.contentWindow) return false;
+    iframe.contentWindow.postMessage({type: "aisecedu:clipboard-to-remote", text: String(text).slice(0, 1048576)}, "*");
+    iframe.focus({preventScroll: true});
+    return true;
+}
+
+async function pasteDesktopClipboard(event) {
+    const root = context(event);
+    let text = "";
+    try {
+        if (!navigator.clipboard || !navigator.clipboard.readText) throw new Error("Clipboard read is unavailable");
+        text = await navigator.clipboard.readText();
+    } catch (error) {
+        const fallback = window.prompt("Paste text to send to the remote desktop:", "");
+        if (fallback === null) return;
+        text = fallback;
+    }
+    if (!sendDesktopClipboard(root, text)) {
+        animateBanner(event, "Remote desktop is not ready.", "warn");
+        return;
+    }
+    animateBanner(event, "Clipboard text sent to the remote desktop.", "success");
+}
+
+async function copyDesktopClipboard(event) {
+    const root = context(event);
+    const iframe = workspaceIframe(root);
+    if (!iframe || !iframe.contentWindow) {
+        animateBanner(event, "Remote desktop is not ready.", "warn");
+        return;
+    }
+    let text = iframe.workspaceRemoteClipboard;
+    if (typeof text !== "string") {
+        text = await new Promise(resolve => {
+            const timeout = setTimeout(() => resolve(null), 1200);
+            iframe.workspaceClipboardResolver = value => {
+                clearTimeout(timeout);
+                resolve(value);
+            };
+            iframe.contentWindow.postMessage({type: "aisecedu:clipboard-request"}, "*");
+        });
+    }
+    if (typeof text !== "string") {
+        animateBanner(event, "Copy text in the remote desktop first, then try again.", "warn");
+        return;
+    }
+    try {
+        if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error("Clipboard write is unavailable");
+        await navigator.clipboard.writeText(text);
+        animateBanner(event, "Remote desktop clipboard copied to this device.", "success");
+    } catch (error) {
+        window.prompt("Copy the remote desktop text:", text);
+    }
+}
+
+window.addEventListener("message", function (event) {
+    if (!event.data || event.data.type !== "aisecedu:remote-clipboard") return;
+    const iframe = Array.from(document.querySelectorAll("#workspace-iframe")).find(candidate => candidate.contentWindow === event.source);
+    if (!iframe) return;
+    iframe.workspaceRemoteClipboard = String(event.data.text || "").slice(0, 1048576);
+    if (iframe.workspaceClipboardResolver) {
+        const resolve = iframe.workspaceClipboardResolver;
+        delete iframe.workspaceClipboardResolver;
+        resolve(iframe.workspaceRemoteClipboard);
+    }
+    const root = $(iframe).closest(".challenge-workspace").find(".workspace-controls");
+    const bannerTarget = root[0];
+    if (bannerTarget) {
+        animateBanner({target: bannerTarget}, "Remote desktop clipboard is ready to copy.", "success");
+    }
+});
+
+function cancelWorkspaceLoad(content) {
+    content.dataset.workspaceLoadId = "cancelled";
+    clearTimeout(content.workspaceLoadSlowTimer);
+    clearTimeout(content.workspaceLoadReadyTimer);
+    $(content).off("load.workspaceLoading");
+    workspaceLoadingPanel(content).removeClass("is-active is-error");
+    content.setAttribute("aria-busy", "false");
+}
+
+function showWorkspaceLoadError(content, result, loadId) {
+    if (content.dataset.workspaceLoadId !== loadId) return;
+    const message = result.error || "The workspace service could not be loaded.";
+    clearTimeout(content.workspaceLoadSlowTimer);
+    $(content).off("load.workspaceLoading");
+    const panel = workspaceLoadingPanel(content);
+    panel.addClass("is-active is-error");
+    panel.find("[data-workspace-loading-title]").text("Workspace unavailable");
+    panel.find("[data-workspace-loading-detail]").text(message);
+    content.setAttribute("aria-busy", "false");
     animateBanner(
         {target: $(content).closest(".challenge-workspace").find(".workspace-controls")[0]},
-        result.error,
+        message,
         "error"
     );
 }
 
-function specialSelect(name, content) {
-    const url = new URL("/pwncollege_api/v1/workspace", window.location.origin);
-    url.searchParams.set("service", name);
+function requestWorkspace(url, content, loadId) {
     fetch(url, {
         method: "GET",
         credentials: "same-origin"
     })
     .then(response => response.json())
     .then(result => {
-        if (result.success) {
-            const url = new URL(result["iframe_src"]);
-            // Set the port if in dev environment (may be forwarded via a server)
-            if (result["setPort"]) {
-                url.port = window.location.port;
-            }
-
-            content.src = url.toString();
+        if (content.dataset.workspaceLoadId !== loadId) return;
+        if (!result.success || !result["iframe_src"]) {
+            showWorkspaceLoadError(content, result, loadId);
+            return;
         }
-        else {
-            showWorkspaceLoadError(content, result);
+        const iframeUrl = new URL(result["iframe_src"]);
+        if (result["setPort"]) {
+            iframeUrl.port = window.location.port;
         }
+        $(content).off("load.workspaceLoading").one("load.workspaceLoading", function () {
+            finishWorkspaceLoad(content, loadId);
+        });
+        content.src = iframeUrl.toString();
+    })
+    .catch(error => {
+        showWorkspaceLoadError(content, {error: error.message || "The workspace request failed."}, loadId);
     });
 }
 
-function portSelect(port, content) {
+function specialSelect(name, content, loadId) {
+    const url = new URL("/pwncollege_api/v1/workspace", window.location.origin);
+    url.searchParams.set("service", name);
+    requestWorkspace(url, content, loadId);
+}
+
+function portSelect(port, content, loadId) {
     const url = new URL("/pwncollege_api/v1/workspace", window.location.origin);
     url.searchParams.set("port", port);
-    fetch(url, {
-        method: "GET",
-        credentials: "same-origin"
-    })
-    .then(response => response.json())
-    .then(result => {
-        if (result.success) {
-            const url = new URL(result["iframe_src"]);
-            // Set the port if in dev environment (may be forwarded via a server)
-            if (result["setPort"]) {
-                url.port = window.location.port;
-            }
-
-            content.src = url.toString();
-        }
-        else {
-            showWorkspaceLoadError(content, result);
-        }
-    });
+    requestWorkspace(url, content, loadId);
 }
 
 function loadIframe(service, content) {
+    const loadId = beginWorkspaceLoad(content, service);
     if (isSpecialService(service)) {
-        specialSelect(serviceName(service), content);
+        specialSelect(serviceName(service), content, loadId);
     }
     else {
-        portSelect(servicePort(service), content);
+        portSelect(servicePort(service), content, loadId);
     }
 }
 
-function popoutUrl(service) {
+function workspaceModeUrl(service) {
+    const url = new URL("/workspace", window.location.origin);
     if (isSpecialService(service)) {
-        return "/workspace/" + encodeURIComponent(serviceName(service));
+        url.searchParams.set("service", serviceName(service));
     }
-    return "/workspace/" + encodeURIComponent(servicePort(service));
+    else {
+        url.searchParams.set("port", servicePort(service));
+    }
+    return url.pathname + url.search;
+}
+
+function requestedWorkspaceService(root) {
+    const params = new URLSearchParams(window.location.search);
+    const requestedName = params.get("service");
+    const requestedPort = params.get("port");
+    let match = null;
+    root.find(".workspace-service").each(function () {
+        const candidate = $(this).attr("data-service");
+        if (
+            match === null &&
+            ((requestedName && serviceName(candidate) === requestedName) ||
+             (requestedPort && servicePort(candidate) === requestedPort))
+        ) {
+            match = candidate;
+        }
+    });
+    return match;
+}
+
+function updateWorkspaceModeUrl(service) {
+    const requested = new URL(workspaceModeUrl(service), window.location.origin);
+    const current = new URL(window.location.href);
+    if (current.searchParams.has("hide-navbar")) {
+        requested.searchParams.set("hide-navbar", "");
+    }
+    window.history.replaceState({}, "", requested.pathname + requested.search + current.hash);
 }
 
 function selectService(service, log=true) {
@@ -149,13 +328,15 @@ function selectService(service, log=true) {
     }
     if (log) {logService(service);}
     const root = $(content).closest(".challenge-workspace").find(".workspace-controls");
+    setDesktopClipboardControls(root, serviceName(service) === "desktop" && servicePort(service) !== "");
     root.find(".workspace-service").each(function () {
         const active = $(this).attr("data-service") === service;
         $(this).toggleClass("active", active);
         $(this).attr("aria-pressed", active ? "true" : "false");
     });
     if (serviceName(service) == "ssh" && servicePort(service) == "") {
-        content.src = "";
+        cancelWorkspaceLoad(content);
+        content.removeAttribute("src");
         $(content).addClass("SSH");
         $(".workspace-ssh").show();
         return;
@@ -163,6 +344,9 @@ function selectService(service, log=true) {
     else {
         $(content).removeClass("SSH");
         $(".workspace-ssh").hide();
+    }
+    if (!isPopout(root)) {
+        updateWorkspaceModeUrl(service);
     }
     loadIframe(service, content);
 }
@@ -211,17 +395,11 @@ function serviceClickCallback(event) {
         }
         return;
     }
-    const popout = window.open("", "workspace-" + popoutUrl(service).split("/").pop());
+    const targetUrl = workspaceModeUrl(service);
+    const popout = window.open(targetUrl, "workspace-" + (serviceName(service) || servicePort(service)));
     if (!popout) {
         animateBanner(event, "Pop-up blocked — please allow pop-ups for this site.", "warn");
         return;
-    }
-    let needsNavigation = true;
-    try {
-        needsNavigation = popout.location.pathname !== popoutUrl(service);
-    } catch (error) {}
-    if (needsNavigation) {
-        popout.location = popoutUrl(service);
     }
     popout.focus();
 }
@@ -246,7 +424,7 @@ function actionSubmitFlag(event) {
     const submission = $(event.target).val();
 
     if (submission == "pwn.college{practice}") {
-        animateBanner(event, "This is the practice flag! Find the real flag by restarting the challenge in unprivileged mode.", "warn");
+        animateBanner(event, "This is the practice flag. Find the real flag by restarting the exercise without elevated privileges.", "warn");
         return;
     }
 
@@ -272,7 +450,7 @@ function actionSubmitFlag(event) {
             }
         }
         else if (response.data.status == "already_solved") {
-            animateBanner(event, `&#127881 You've already solved <b>${challengeName}</b>! &#127881`, "success");
+            animateBanner(event, `&#127881 You have already completed <b>${challengeName}</b>! &#127881`, "success");
         }
         else {
             animateBanner(event, "Submission failed.", "warn");
@@ -301,7 +479,7 @@ function postStartChallenge(event, channel) {
 }
 
 function setActionbarBusy(root, busy) {
-    root.find(".btn-challenge-start")
+    root.find(".btn-challenge-busy")
         .toggleClass("disabled", busy)
         .toggleClass("btn-disabled", busy)
         .prop("disabled", busy);
@@ -318,7 +496,7 @@ function actionStartChallenge(event, privileged) {
     function startFailed(message) {
         setActionbarBusy(root, false);
         privilegeControl.find("input").prop("checked", privilegeControl.attr("data-privileged") === "true");
-        animateBanner(event, message || "Failed to start challenge.", "error");
+        animateBanner(event, message || "Failed to start exercise.", "error");
     }
 
     CTFd.fetch("/pwncollege_api/v1/docker", {
@@ -369,6 +547,7 @@ function actionStartChallenge(event, privileged) {
 
             refreshWorkspace(root);
             postStartChallenge(event, channel);
+            window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
 
             setActionbarBusy(root, false);
         });
@@ -386,12 +565,49 @@ function actionStartCallback(event) {
 function privilegeChangeCallback(event) {
     const checkbox = event.currentTarget;
     const mode = checkbox.checked ? "with sudo access" : "without sudo access";
-    if (!window.confirm(`Restart the challenge ${mode}? The running container will be replaced.`)) {
+    if (!window.confirm(`Restart the exercise ${mode}? The running container will be replaced.`)) {
         checkbox.checked = !checkbox.checked;
         return;
     }
     setActionbarBusy(context(event), true);
     actionStartChallenge(event, checkbox.checked);
+}
+
+function actionResetCallback(event) {
+    event.preventDefault();
+    if (!window.confirm("Completely reset this exercise? This permanently erases /home/hacker and all container changes, then recreates the exercise from its original state.")) {
+        return;
+    }
+
+    const root = context(event);
+    setActionbarBusy(root, true);
+    CTFd.fetch("/pwncollege_api/v1/docker/reset", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        },
+        body: "{}"
+    }).then(function (response) {
+        if (response.status === 403) {
+            window.location = CTFd.config.urlRoot + "/login?next=" + CTFd.config.urlRoot + window.location.pathname + window.location.search;
+        }
+        return response.json();
+    }).then(function (result) {
+        if (!result.success) {
+            animateBanner(event, result.error || "Failed to reset exercise.", "error");
+            return;
+        }
+        refreshWorkspace(root);
+        postStartChallenge(event, channel);
+        window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
+        animateBanner(event, "Exercise reset to its original state.", "success");
+    }).catch(function () {
+        animateBanner(event, "Failed to reset exercise.", "error");
+    }).finally(function () {
+        setActionbarBusy(root, false);
+    });
 }
 
 function loadWorkspace(log=true) {
@@ -412,7 +628,7 @@ function loadWorkspace(log=true) {
         }
         return;
     }
-    var recent = getRecentService(root);
+    var recent = requestedWorkspaceService(root) || getRecentService(root);
     if (recent == null) {
         recent = root.find(".workspace-service").first().attr("data-service");
     }
@@ -454,12 +670,15 @@ $(() => {
         });
 
         $(this).find(".btn-challenge-start").click(actionStartCallback);
+        $(this).find("#challenge-reset").click(actionResetCallback);
 
         $(this).find("#workspace-change-privilege input").on("change", privilegeChangeCallback);
 
+        $(this).find("[data-clipboard-action='paste']").on("click", pasteDesktopClipboard);
+        $(this).find("[data-clipboard-action='copy']").on("click", copyDesktopClipboard);
+
         $(this).find("#fullscreen").click((event) => {
             event.preventDefault();
-            context(event).find("#fullscreen i").toggleClass("fa-compress fa-expand");
             doFullscreen(event);
         })
     });

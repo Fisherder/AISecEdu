@@ -38,12 +38,13 @@ define () {
     echo "${name}=${value}" >> /data/.config.env
 }
 DEFAULT_DOJO_HOST=localhost.pwn.college
+dojo_workspace_from_environment="${DOJO_WORKSPACE+x}"
 
 define DOJO_HOST "${DEFAULT_DOJO_HOST}"
 define WORKSPACE_HOST workspace."${DEFAULT_DOJO_HOST}"
 define DOJO_ENV development
 define DOJO_OFFLINE false
-define DOJO_WORKSPACE core
+define DOJO_WORKSPACE full
 define WORKSPACE_KEY
 define WORKSPACE_SECRET $(openssl rand -hex 16)
 define WORKSPACE_NODE 0
@@ -74,9 +75,19 @@ define AWS_SECRET_ACCESS_KEY
 define MAC_HOSTNAME
 define MAC_USERNAME
 define ENABLE_SPLUNK false
+define DOJO_AI_ENABLED false
+define DOJO_AI_BASE_URL https://api.openai.com/v1
+define DOJO_AI_API_KEY
+define DOJO_AI_MODEL gpt-4o-mini
+define DOJO_AI_TIMEOUT_SECONDS 30
 
 mv /data/.config.env /data/config.env
 . /data/config.env
+
+if [ -z "$dojo_workspace_from_environment" ] && [ "$DOJO_WORKSPACE" = "core" ]; then
+    DOJO_WORKSPACE=full
+    sed -i 's/^DOJO_WORKSPACE=core$/DOJO_WORKSPACE=full/' /data/config.env
+fi
 
 # Configure Docker daemon for Splunk logging if enabled
 if [ "${ENABLE_SPLUNK}" = "true" ]; then

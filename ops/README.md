@@ -1,6 +1,6 @@
 # 本机部署与运维
 
-本目录记录 `/mnt/HDD1/LLM/AISecEdu-dojo/dojo` 的单节点 pwn.college 部署。当前代码基线为上游提交 `b830d74339000c0fd8408558a13328ae8b1919b6`，外层镜像为 `pwncollege/dojo:local-b830d743`，容器名为 `pwncollege-dojo`。
+本目录记录 `/mnt/HDD1/LLM/AISecEdu-dojo/dojo` 的单节点 AISecEdu 学生题目平台部署。它在 pwn.college 原生服务拓扑内完成单系统改造；外层镜像和容器继续使用 `pwncollege/dojo:*` 与 `pwncollege-dojo` 兼容名，不代表并存第二套平台。
 
 完整的实机测试范围、结果和边界见 [`verification-report.md`](./verification-report.md)。
 
@@ -8,6 +8,7 @@
 
 - Web：`https://192-168-3-111.nip.io`
 - Workspace：`https://workspace.192-168-3-111.nip.io`
+- 旧 Future 别名：`https://future.192-168-3-111.nip.io`（308 到 Web 主域，不再是独立入口）
 - SSH：`192.168.3.111:2223`
 - 无 TLS 健康探针：`http://192.168.3.111/lan-health`
 - 公开本地 CA 下载：`http://192.168.3.111/local-tls.crt`
@@ -27,6 +28,7 @@ docker exec pwncollege-dojo dojo logs -n 200
 docker exec pwncollege-dojo dojo compose ps
 ./ops/verify-local.sh
 ./ops/smoke-user-flow.py
+./ops/verify-learning-flow.py
 ./ops/set-offline-mode.sh enable
 ```
 
@@ -65,6 +67,17 @@ cat data/manual-test-account.txt
 `--replace-dojo` 重新发布。详细题目范围见
 [`local-dojos/README.md`](../local-dojos/README.md)。
 
+## 教师验收账号
+
+教师账号应保持为普通 CTFd 用户，并通过目标课程的 `DojoAdmins` 关系获得课程教师权限；不要为人工教师验收直接分配平台超级管理员权限。以下命令会幂等创建或更新账号，并授予 `manual-platform-check` 课程教师身份：
+
+```bash
+AISECEDU_TEACHER_PASSWORD='replace-with-a-strong-password' \
+  ./ops/provision-teacher-account.sh
+```
+
+可通过 `AISECEDU_TEACHER_USERNAME`、`AISECEDU_TEACHER_EMAIL` 和 `AISECEDU_TEACHER_COURSE` 修改账号与课程。脚本不会把密码写入仓库或日志；教师可从课程首页进入教师工作台。
+
 入口服务器证书由持久的 `pwn.college Local LAN CA` 签发，SAN 包含 LAN 主域名、
 Workspace/Future 子域名、`192.168.3.111` IP 以及原有的三个 localhost 域名。
 客户端应信任下载的 CA，而不是只在主站绕过一次证书告警；后者不会让跨域 iframe
@@ -81,7 +94,7 @@ curl http://192.168.3.111/lan-health
 curl http://192.168.3.111/local-tls.crt -o pwncollege-local-ca.crt
 ```
 
-第一个命令应输出 `pwn.college LAN endpoint ready`。macOS/Edge 客户端可将 CA
+第一个命令应输出 `AISecEdu LAN endpoint ready`。macOS/Edge 客户端可将 CA
 导入“钥匙串访问”的“系统”钥匙串，打开证书的“信任”区域并设为“始终信任”；
 也可由管理员执行：
 
@@ -92,7 +105,7 @@ sudo security add-trusted-cert -d -r trustRoot \
 
 随后必须完全退出并重新打开 Edge。访问
 `https://workspace.192-168-3-111.nip.io/trust-check` 应显示
-`pwn.college Workspace TLS is trusted and reachable`。若暂时不能安装 CA，可先打开
+`AISecEdu Workspace TLS is trusted and reachable`。若暂时不能安装 CA，可先打开
 `http://192-168-3-111.nip.io/workspace-trust`，在 Workspace 子域的顶层页面手动允许
 证书，再刷新 Terminal、Code 或 Desktop 页面；这只是当前浏览器的临时例外。
 
@@ -155,13 +168,13 @@ docker exec pwncollege-dojo dojo backup
 可以直接扩展的主要区域包括：
 
 - `dojo_plugin/`：后端 API、数据模型、工作区编排和后台任务；
-- `dojo_theme/`：服务端模板、页面脚本和样式；
-- `frontend/`：独立前端资源；
+- `dojo_theme/`：规范 Web UI；直接扩展上游服务端模板、原生组件、页面脚本和样式；
+- `frontend/`：上游实验性前端源码，仅为跟随 pwn.college 上游保留，正常部署不启动，也不承载本项目页面；
 - `workspace/`：Kata 工作区的 Nix 软件、Terminal、Code 和 Desktop 服务；
 - `docker-compose.yml` 及各服务目录：新增或替换平台服务；
 - dojo 定义：通过管理界面或独立 dojo 仓库添加课程和模块。
 
-建议每项定制使用独立 Git 提交，并在提交前运行 `./ops/verify-local.sh`；涉及用户流程、工作区或认证的改动还应运行 `./ops/smoke-user-flow.py`。后者只操作一次性测试对象，不读取或提交 flag。
+建议每项定制使用独立 Git 提交，并在提交前运行 `./ops/verify-local.sh`；涉及基础 Workspace 或认证的改动还应运行 `./ops/smoke-user-flow.py`，涉及智能出题、证据、Tutor、评分或推荐的改动应运行 `./ops/verify-learning-flow.py`。智能学习域的架构、模型配置和升级说明见 [`../docs/learning.md`](../docs/learning.md)。
 
 生产实例默认启用 `DOJO_OFFLINE=true`。改动 `dojo_plugin/` 或 `dojo_theme/` 后，同步源码并重启相关服务：
 
@@ -170,11 +183,11 @@ docker exec pwncollege-dojo dojo sync
 docker exec pwncollege-dojo dojo compose restart ctfd stats-worker image-pull-worker
 ```
 
-改动前端、服务 Dockerfile、依赖或 `docker-compose.yml` 后，只重建受影响的模块：
+改动 Nginx、服务 Dockerfile、依赖或 `docker-compose.yml` 后，只重建受影响的模块：
 
 ```bash
-docker exec pwncollege-dojo dojo compose build frontend
-docker exec pwncollege-dojo dojo compose up -d --no-build frontend
+docker exec pwncollege-dojo dojo compose build nginx
+docker exec pwncollege-dojo dojo compose up -d --no-build nginx
 ```
 
 需要完整重建时，临时关闭离线模式，成功后立即恢复：
@@ -200,6 +213,6 @@ docker exec pwncollege-dojo dojo compose restart ctfd
 
 外层端口为 Web `80/443` 和 Workspace SSH `2223`。网页及浏览器内 Terminal、Code、Desktop 必须使用上面的主域名与 Workspace 域名，不能只把主页面改成一个任意 Host 名；这些服务依赖独立的 TLS/SNI 与签名路由。
 
-`verify-local.sh` 执行基础设施与 HTTP/SSH 只读检查；`smoke-user-flow.py` 临时注册用户、创建 smoke dojo、启动 Kata 工作区，检查 Terminal、Code、Desktop、SSH 和 home 持久化，然后删除测试用户与 dojo；测试不会读取或提交任何 flag。
+`verify-local.sh` 执行基础设施、HTTP/SSH、AISecEdu 首页/课程列表/认证页面、Future 域跳转和可选前端停用状态的只读检查；`smoke-user-flow.py` 临时注册用户、创建 smoke 课程、启动 Kata 工作区，检查 `/challenge` 默认目录、完整工具集、Terminal、Code、Desktop、SSH 和 Home 持久化。在宿主存在 Chromium/ChromeDriver 时，它还会验证真实加载动画、Code 根目录、noVNC 完整键盘输入、双向剪贴板、终端静默证据记录和统一 Tutor；非标准安装位置可通过 `DOJO_BROWSER_BINARY` 和 `DOJO_CHROMEDRIVER_BINARY` 指定，可用 `DOJO_SKIP_BROWSER_SMOKE=true` 显式跳过浏览器部分。脚本最后删除测试用户与课程，且不会读取或提交 flag。
 
-本部署的验收只启动测试用工作区并检查服务，不读取 flag、不提交 flag，也不完成任何课程题目。
+`verify-learning-flow.py` 使用一次性课程、用户和由验证器随机生成的 L3 教学挑战，在真实 Kata workspace 中专门验证动态 flag Oracle、证据链和评分。它会提交且只会提交该一次性挑战的随机 flag，并在结束时删除对应 workspace、home、用户、课程、生成包、solve 与 submission；脚本同时断言运行前后的全局 solve/submission 数量一致，不读取或完成任何现有课程题目。

@@ -5,17 +5,7 @@
   <div class="jumbotron">
     <div class="container">
       <h1 class="brand-mono">{{ user.name }}</h1>
-      <h1>
-        <a href="{{ url_for('pwncollege_belts.view_belts') }}">
-          {% if belts.users[user.id] %}
-          <span title="Earned on {{belts.users[user.id].date}}">
-            <img src="{{ url_for('pwncollege_belts.view_belt', color=belts.users[user.id].color) }}", class="scoreboard-belt">
-          </span>
-          {% else %}
-          <img src="{{ url_for('pwncollege_belts.view_belt', color='white') }}" class="scoreboard-belt">
-          {% endif %}
-        </a>
-      </h1>
+      <p><a href="{{ url_for('pwncollege_belts.view_belts') }}"><i class="fas fa-award mr-2"></i>View AISecEdu Achievements</a></p>
       <h2>
         {% for badge in badges[user.id] %}
         <span title="{{badge.text}}" {% if badge.stale %}style="opacity: 0.4; filter: grayscale(100%);"{% endif %}>
@@ -88,7 +78,7 @@
       <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.listing', dojo=dojo.reference_id) }}">
         <h2>{{ dojo.name }}</h2>
         <h4>
-          <i class="fas fa-flag pt-3 pr-3" title="Solves"></i>
+          <i class="fas fa-flag pt-3 pr-3" title="Completed Exercises"></i>
           <td>{{ solves }} / {{ dojo.challenges | length }}</td>
           <i class="fas fa-trophy pt-3 pr-3 pl-5 " title="Rank"></i>
           <td>{{ rank or "-" }} / {{ max_rank or "-" }}</td>
@@ -106,7 +96,7 @@
             {% if header %}
               <h4 class="accordion-item-name">{{ module.name }}</h4>
               <span class="challenge-header-right">
-                <i class="fas fa-flag pr-1" title="Solves"></i>
+                <i class="fas fa-flag pr-1" title="Completed Exercises"></i>
                 <td>{{ solves }} / {{ module.challenges | length }}</td>
                 <i class="fas fa-trophy pr-1 pl-3 " title="Rank"></i>
                 <td>{{ rank or "-" }} / {{ max_rank or "-" }}</td>
@@ -123,12 +113,12 @@
                           <i class="fas fa-flag pr-3 {{ solved }}"></i>{{ challenge.name or challenge.id }}
                           {% if not challenge.visible() %}
                           <small><small><small>
-                                <i>hidden</i> &mdash; you can see this because you are this dojo's administrator
+                                <i>hidden</i> &mdash; visible because you are a teacher for this course
                           </small></small></small>
                           {% endif %}
                         </span>
                       </h4>
-                      <h6>Time of First Successful Submission: {{user_solves[dojo.id][module.id][challenge.challenge_id]}}</h6>
+                      <h6>First Successful Submission: {{user_solves[dojo.id][module.id][challenge.challenge_id]}}</h6>
                       </div>
                     </div>
                     <br>

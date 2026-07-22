@@ -1,34 +1,26 @@
 {% extends "base.html" %}
-{% from "macros/widgets.html" import card %}
-{% from "macros/widgets.html" import dojo_grid %}
-
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1 class="brand-mono-bold wordmark-large"><span class="brand-white">pwn</span><span class="brand-dot brand-blink">.</span><span class="brand-green">sensei</span></h1>
+    <h1 class="brand-mono-bold wordmark-large"><span class="brand-white">About </span><span class="brand-green">AISecEdu</span><span class="brand-dot brand-blink">.</span></h1>
   </div>
 </div>
 
 <div class="container">
-  <p>Team work makes the dream work, and the team behind pwn.college is full of dreamers!  They are:
+  <p>AISecEdu is a hands-on cybersecurity course platform. It organizes learning as <strong>courses → units → exercises</strong> and keeps instructions, an isolated workspace, guided hints, submissions, and progress in one continuous workflow.</p>
 
+  <h2>For students</h2>
+  <p>Choose a course, work through its units, and launch each exercise directly into Terminal, Code, or Desktop mode. Progress and accepted submissions are recorded at the course and unit levels.</p>
+
+  <h2>For teachers</h2>
+  <p>Create versioned courses, add units and exercises, review class progress, and use evidence-backed learning analytics without interrupting the practical workspace.</p>
+
+  <h2>Learning principles</h2>
   <ul>
-    <li><a href="https://yancomm.net">Zardus (Yan Shoshitaishvili)</a> originated the idea, created the initial prototype and many of the challenges, and continues to cajole everyone else into a shared vision!
-    <li><a href="https://connornelson.com">kanak (Connor Nelson)</a> made the mistake of signing up to TA an “easy A” course and quickly found himself reimplementing Yan’s insane code into the amazing dojo you see today, along with the creation of many challenges.
-    <li><a href="https://github.com/robwaz">robwaz (Robert Wasinger)</a> for the creation of the Software Exploitation dojo.
-    <li><a href="https://adamdoupe.com">Adam Doupe</a> for helping in the brainstorming of the initial concept and helping develop the pwn.college platform.
-    <li><a href="https://www.zionbasque.com">mahaloz (Zion Basque)</a> for contributing ROP challenges and embryoasm to pwn.college.
-    <li><a href="https://twitter.com/eriktrickel">Erik Trickel</a> for helping in the development of pedagogical concepts underlying pwn.college.
-    <li>redgate, for contributing to embryoasm.
-    <li><a href="https://twitter.com/pascal_0x90">Pascal-0x90</a>, for contributing to embryoasm.
-    <li><a href="https://twitter.com/frqmod">frqmod</a>, for contributing embryogdb.
-    <li><a href="https://www.kylebot.net">kylebot</a>, for contributing babyfmt, Kernel Exploitation, and the inaugural Quarterly Quiz!
-    <li>ramen, for contributing babyfile.
-    <li>zolutal, for contributing babyarch.
-    <li>spencerpogo, for contributing Windows support.
-    <li><a href="https://github.com/sinamhdv">sinamhdv</a> for contributing V8 Exploitation.
-    <li>smcxdeathburger, for contributing Windows Injection and Hijacking.
-    <li>sammy177, for contributing to Reverse Engineering.
+    <li>Practice in clean, reproducible exercise environments.</li>
+    <li>Keep navigation and progress visible at every level.</li>
+    <li>Offer guided questions and next-step prompts without exposing complete solutions.</li>
+    <li>Make course content reviewable, reusable, and straightforward to maintain.</li>
   </ul>
 </div>
 {% endblock %}

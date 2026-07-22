@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
+import base64
+import json
 import os
 import pathlib
 import re
 import secrets
+import shlex
+import shutil
 import subprocess
 import tempfile
 import time
@@ -68,30 +72,24 @@ def new_session():
     return session
 
 
-def csrf_nonce(text):
-    match = re.search(r"'csrfNonce': \"(\w+)\"", text)
-    if not match:
-        raise AssertionError("CSRF nonce was not present in the page")
-    return match.group(1)
-
-
 def authenticate(name, password, register=False):
     session = new_session()
     endpoint = "register" if register else "login"
-    page = require(session.get(f"{BASE_URL}/{endpoint}", timeout=20))
+    session.headers["Authorization"] = "Bearer frontend-session"
     payload = {
         "name": name,
         "password": password,
-        "nonce": csrf_nonce(page.text),
     }
     if register:
         payload["email"] = f"{name}@example.invalid"
+        payload["commitment_accepted"] = True
     response = session.post(
-        f"{BASE_URL}/{endpoint}", data=payload, allow_redirects=False, timeout=20
+        f"{BASE_URL}/pwncollege_api/v1/auth/{endpoint}",
+        json=payload,
+        allow_redirects=False,
+        timeout=20,
     )
-    require(response, (302,))
-    home = require(session.get(f"{BASE_URL}/", timeout=20))
-    session.headers["CSRF-Token"] = csrf_nonce(home.text)
+    require(response, (200,))
     return session
 
 
@@ -228,6 +226,10 @@ def signed_service(session, service, workspace):
         workspace_service_diagnostics(workspace, service)
         raise AssertionError(f"{service} did not return a signed workspace URL")
     parsed = urllib.parse.urlsplit(payload["iframe_src"])
+    if service == "code" and urllib.parse.parse_qs(parsed.query).get("folder") != [
+        "/challenge"
+    ]:
+        raise AssertionError("Code service did not open the challenge directory")
     target = urllib.parse.urlunsplit(
         (
             "https",
@@ -245,8 +247,28 @@ def signed_service(session, service, workspace):
             timeout=15,
             allow_redirects=False,
         )
-        if response.status_code in (200, 301, 302, 307, 308):
-            return
+        if response.status_code == 200:
+            if service == "terminal" and "aisecedu-terminal-keyboard-guard" not in response.text:
+                raise AssertionError("Terminal proxy did not serve the Escape-key guard")
+            if service == "desktop" and "aisecedu-workspace-bridge.js" not in response.text:
+                raise AssertionError("Desktop proxy did not serve the keyboard and clipboard bridge")
+            return payload, response
+        if response.status_code in (301, 302, 307, 308) and response.headers.get(
+            "Location"
+        ):
+            redirected = urllib.parse.urlsplit(
+                urllib.parse.urljoin(payload["iframe_src"], response.headers["Location"])
+            )
+            target = urllib.parse.urlunsplit(
+                (
+                    "https",
+                    f"{LISTEN_ADDRESS}:{HTTPS_PORT}",
+                    redirected.path,
+                    redirected.query,
+                    "",
+                )
+            )
+            continue
         time.sleep(2)
     raise AssertionError(f"{service} proxy returned {response.status_code}")
 
@@ -267,14 +289,379 @@ def verify_ssh(private_key):
         "-p",
         str(SSH_PORT),
         f"hacker@{LISTEN_ADDRESS}",
-        "id -un",
+        "printf '%s:%s' \"$(id -un)\" \"$PWD\"",
     ]
     for _ in range(15):
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
-        if result.returncode == 0 and result.stdout.strip() == "hacker":
+        if result.returncode == 0 and result.stdout.strip() == "hacker:/challenge":
             return
         time.sleep(2)
     raise AssertionError("key-authenticated SSH command did not succeed")
+
+
+def verify_browser_workspace(session, workspace):
+    if os.getenv("DOJO_SKIP_BROWSER_SMOKE", "false").lower() == "true":
+        return False
+    browser_binary = os.getenv("DOJO_BROWSER_BINARY") or next(
+        (
+            path
+            for path in (
+                shutil.which("chromium"),
+                shutil.which("chromium-browser"),
+                shutil.which("google-chrome"),
+            )
+            if path
+        ),
+        None,
+    )
+    driver_binary = os.getenv("DOJO_CHROMEDRIVER_BINARY") or shutil.which(
+        "chromedriver"
+    )
+    if not browser_binary or not driver_binary:
+        return False
+
+    from selenium.webdriver import Chrome, ChromeOptions
+    from selenium.common.exceptions import TimeoutException
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.common.action_chains import ActionChains
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+    from selenium.webdriver.support.ui import WebDriverWait
+
+    options = ChromeOptions()
+    options.binary_location = browser_binary
+    for argument in (
+        "--headless=new",
+        "--ignore-certificate-errors",
+        "--no-proxy-server",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--window-size=1600,1000",
+    ):
+        options.add_argument(argument)
+    options.set_capability("goog:loggingPrefs", {"browser": "ALL", "performance": "ALL"})
+    browser = Chrome(options=options, service=Service(driver_binary))
+    origin = f"https://{DOJO_HOST}"
+    if HTTPS_PORT != 443:
+        origin += f":{HTTPS_PORT}"
+    wait = WebDriverWait(browser, 45)
+
+    try:
+        browser.get(f"{origin}/")
+        for cookie in session.cookies:
+            browser.add_cookie(
+                {
+                    "name": cookie.name,
+                    "value": cookie.value,
+                    "path": cookie.path or "/",
+                    "secure": True,
+                }
+            )
+        browser.get(f"{origin}/workspace?service=terminal")
+        wait.until(lambda driver: driver.find_elements(By.CSS_SELECTOR, ".workspace-shell"))
+
+        tutor = browser.find_element(By.CSS_SELECTOR, "[data-learning-tutor]")
+        if tutor.find_elements(By.CSS_SELECTOR, "[data-tutor-level]"):
+            raise AssertionError("Tutor still exposes guidance levels")
+        tutor.find_element(By.CSS_SELECTOR, ".learning-tutor-toggle").click()
+        wait.until(lambda driver: "is-collapsed" not in tutor.get_attribute("class"))
+
+        browser.execute_script(
+            """
+            window.__workspaceSmokeFetch = window.fetch.bind(window);
+            window.fetch = function(input, init) {
+                if (String(input).includes('/pwncollege_api/v1/workspace')) {
+                    return new Promise(resolve => setTimeout(
+                        () => resolve(window.__workspaceSmokeFetch(input, init)), 900
+                    ));
+                }
+                return window.__workspaceSmokeFetch(input, init);
+            };
+            """
+        )
+        loading = browser.find_element(By.CSS_SELECTOR, "[data-workspace-loading]")
+        iframe = browser.find_element(By.ID, "workspace-iframe")
+
+        code = browser.find_element(
+            By.CSS_SELECTOR,
+            '.workspace-service[data-service="code: 8080"]',
+        )
+        code.click()
+        wait.until(lambda driver: loading.is_displayed())
+        if "Loading VS Code" not in loading.text:
+            raise AssertionError("VS Code loading state was not visible")
+        wait.until(lambda driver: "/8080/" in (iframe.get_attribute("src") or ""))
+        code_url = iframe.get_attribute("src")
+        if "folder=%2Fchallenge" not in code_url and "folder=/challenge" not in code_url:
+            raise AssertionError("VS Code browser URL did not open /challenge")
+        wait.until(lambda driver: not loading.is_displayed())
+        browser.switch_to.frame(iframe)
+        code_surface = WebDriverWait(browser, 60).until(
+            lambda driver: (
+                driver.find_elements(By.CSS_SELECTOR, ".monaco-workbench")
+                or driver.find_elements(By.CSS_SELECTOR, "div.getting-started-step")
+                or driver.find_elements(By.CSS_SELECTOR, "button.getting-started-step")
+            )[-1]
+        )
+        trust_prompts = [
+            element
+            for element in browser.find_elements(By.CSS_SELECTOR, "[role='dialog'], .monaco-dialog-box")
+            if element.is_displayed() and "trust the authors" in element.text.lower()
+        ]
+        if trust_prompts:
+            raise AssertionError("VS Code displayed a workspace trust prompt for /challenge")
+        code_surface.click()
+
+        def open_code_terminal():
+            browser.execute_script("if (document.activeElement) document.activeElement.blur();")
+            ActionChains(browser).key_down(Keys.CONTROL).key_down(Keys.SHIFT).send_keys("`").key_up(Keys.SHIFT).key_up(Keys.CONTROL).perform()
+
+        open_code_terminal()
+        code_terminal = None
+        for _ in range(5):
+            try:
+                code_terminal = WebDriverWait(browser, 12).until(
+                    lambda driver: (driver.find_elements(By.CSS_SELECTOR, "textarea.xterm-helper-textarea") or [None])[-1]
+                )
+                break
+            except TimeoutException:
+                if not browser.execute_script(
+                    "return document.activeElement !== null && document.activeElement.tagName === 'IFRAME';"
+                ):
+                    break
+                open_code_terminal()
+        if code_terminal is None:
+            try:
+                browser.execute_script(
+                    "document.querySelector('.monaco-workbench').click(); if (document.activeElement) document.activeElement.blur();"
+                )
+                ActionChains(browser).key_down(Keys.CONTROL).key_down(Keys.SHIFT).send_keys("p").key_up(Keys.SHIFT).key_up(Keys.CONTROL).perform()
+                command_input = WebDriverWait(browser, 15).until(
+                    lambda driver: driver.find_element(By.CSS_SELECTOR, ".quick-input-box input")
+                )
+                command_input.send_keys("Terminal: Create New Terminal")
+                time.sleep(1)
+                command_input.send_keys(Keys.ENTER)
+                code_terminal = WebDriverWait(browser, 45).until(
+                    lambda driver: (driver.find_elements(By.CSS_SELECTOR, "textarea.xterm-helper-textarea") or [None])[-1]
+                )
+            except TimeoutException as error:
+                browser.save_screenshot("/tmp/aisecedu-code-terminal-failure.png")
+                active_html = browser.execute_script(
+                    "return document.activeElement ? document.activeElement.outerHTML : '';"
+                )
+                menu_labels = [
+                    element.text
+                    for element in browser.find_elements(
+                        By.CSS_SELECTOR,
+                        ".menubar-menu-button, [role='menuitem'], .action-label",
+                    )
+                    if element.is_displayed() and element.text
+                ]
+                print(
+                    f"VS Code diagnostics: title={browser.title!r} active={active_html[:500]!r} "
+                    f"menus={menu_labels[:30]!r}",
+                    flush=True,
+                )
+                raise AssertionError("VS Code integrated terminal did not open") from error
+        browser.execute_script("arguments[0].focus();", code_terminal)
+        code_terminal.send_keys("vim -Nu NONE -n /tmp/code-escape-check", Keys.ENTER)
+        time.sleep(1.5)
+        code_terminal.send_keys("iCODE_ESCAPE_OK", Keys.ESCAPE, ":wq", Keys.ENTER)
+        for _ in range(20):
+            code_escape = inner(
+                "exec", "--user=1000", workspace, "sh", "-c",
+                "cat /tmp/code-escape-check 2>/dev/null || true",
+                check=False,
+            ).stdout.strip()
+            if code_escape == "CODE_ESCAPE_OK":
+                break
+            time.sleep(0.25)
+        if code_escape != "CODE_ESCAPE_OK":
+            raise AssertionError("Escape did not leave Vim insert mode in VS Code")
+        browser.switch_to.default_content()
+
+        desktop = browser.find_element(
+            By.CSS_SELECTOR,
+            '.workspace-service[data-service="desktop: 6080"]',
+        )
+        desktop.click()
+        wait.until(lambda driver: loading.is_displayed())
+        if "Loading Desktop" not in loading.text:
+            raise AssertionError("Desktop loading state was not visible")
+        wait.until(lambda driver: "/6080/" in (iframe.get_attribute("src") or ""))
+        wait.until(lambda driver: not loading.is_displayed())
+        browser.switch_to.frame(iframe)
+        wait.until(
+            lambda driver: driver.find_elements(
+                By.CSS_SELECTOR,
+                'script[src*="aisecedu-workspace-bridge.js"]',
+            )
+        )
+        try:
+            wait.until(
+                lambda driver: driver.execute_script(
+                    "return document.documentElement.dataset.aiseceduWorkspaceBridge;"
+                )
+                == "ready"
+            )
+        except TimeoutException as error:
+            console = [entry["message"] for entry in browser.get_log("browser")]
+            raise AssertionError(
+                f"Remote desktop keyboard bridge did not initialize: {console[-10:]}"
+            ) from error
+        container = wait.until(
+            lambda driver: driver.find_element(By.ID, "noVNC_container")
+        )
+        ActionChains(browser).move_to_element(container).click().perform()
+        browser.execute_script("window.AISecEduWorkspaceBridge.focusRemoteKeyboard();")
+        wait.until(
+            lambda driver: driver.execute_script(
+                "return document.activeElement && "
+                "(document.activeElement.id === 'noVNC_keyboardinput' || "
+                "document.activeElement.tagName === 'CANVAS');"
+            )
+        )
+        remote_input = browser.find_element(By.ID, "noVNC_keyboardinput")
+        inner(
+            "exec", "--user=1000", workspace, "/run/current-system/sw/bin/bash", "-lc",
+            "DISPLAY=:0 xfce4-terminal >/tmp/aisecedu-desktop-terminal.log 2>&1 &",
+        )
+        time.sleep(2)
+        ActionChains(browser).move_to_element(container).click().perform()
+        browser.execute_script(
+            """
+            window.AISecEduWorkspaceBridge.focusRemoteKeyboard();
+            window.__aiseceduDesktopKeysStolen = [];
+            window.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape' || event.key.toLowerCase() === 'f') {
+                    window.__aiseceduDesktopKeysStolen.push(event.key);
+                }
+            }, true);
+            """
+        )
+        remote_input.send_keys("vim -Nu NONE -n /tmp/desktop-escape-check", Keys.ENTER)
+        time.sleep(1.5)
+        remote_input.send_keys("iDESKTOP_ESCAPE_OK", Keys.ESCAPE, ":wq", Keys.ENTER)
+        for _ in range(20):
+            desktop_escape = inner(
+                "exec", "--user=1000", workspace, "sh", "-c",
+                "cat /tmp/desktop-escape-check 2>/dev/null || true",
+                check=False,
+            ).stdout.strip()
+            if desktop_escape == "DESKTOP_ESCAPE_OK":
+                break
+            time.sleep(0.25)
+        if desktop_escape != "DESKTOP_ESCAPE_OK":
+            raise AssertionError("Escape did not leave Vim insert mode on the remote desktop")
+        if browser.execute_script("return window.__aiseceduDesktopKeysStolen.length"):
+            raise AssertionError("Remote desktop keys propagated to a browser-level shortcut handler")
+        browser.switch_to.default_content()
+
+        clipboard_in = "AISecEdu browser-to-desktop clipboard"
+        if not browser.execute_script(
+            "return sendDesktopClipboard($('.workspace-controls'), arguments[0]);",
+            clipboard_in,
+        ):
+            raise AssertionError("Desktop clipboard bridge rejected local text")
+        for _ in range(20):
+            copied = inner(
+                "exec", "--user=1000", workspace, "/run/current-system/sw/bin/bash", "-lc",
+                "DISPLAY=:0 xclip -selection clipboard -o 2>/dev/null || true",
+                check=False,
+            ).stdout
+            if copied == clipboard_in:
+                break
+            time.sleep(0.25)
+        if copied != clipboard_in:
+            raise AssertionError("Browser clipboard text did not reach the remote desktop")
+
+        clipboard_out = "AISecEdu desktop-to-browser clipboard"
+        inner(
+            "exec", "--user=1000", workspace, "/run/current-system/sw/bin/bash", "-lc",
+            f"printf %s {shlex.quote(clipboard_out)} | DISPLAY=:0 xclip -selection clipboard",
+        )
+        wait.until(
+            lambda driver: driver.execute_script(
+                "return document.getElementById('workspace-iframe').workspaceRemoteClipboard;"
+            ) == clipboard_out
+        )
+
+        terminal = browser.find_element(
+            By.CSS_SELECTOR,
+            '.workspace-service[data-service="terminal: 7681"]',
+        )
+        terminal.click()
+        wait.until(lambda driver: loading.is_displayed())
+        wait.until(lambda driver: "/7681/" in (iframe.get_attribute("src") or ""))
+        wait.until(lambda driver: not loading.is_displayed())
+        browser.switch_to.frame(iframe)
+        terminal_input = wait.until(
+            lambda driver: driver.find_element(By.CSS_SELECTOR, ".xterm-helper-textarea")
+        )
+        if not browser.find_elements(By.ID, "aisecedu-terminal-keyboard-guard"):
+            raise AssertionError("Terminal Escape-key guard was not injected")
+        browser.execute_script(
+            """
+            window.__aiseceduEscapeStolen = false;
+            window.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape') {
+                    window.__aiseceduEscapeStolen = true;
+                    document.activeElement.blur();
+                }
+            }, true);
+            """
+        )
+        terminal_input.send_keys("vim -Nu NONE -n /tmp/terminal-escape-check", Keys.ENTER)
+        time.sleep(1.5)
+        terminal_input.send_keys("iTERMINAL_ESCAPE_OK", Keys.ESCAPE, ":wq", Keys.ENTER)
+        for _ in range(20):
+            terminal_escape = inner(
+                "exec", "--user=1000", workspace, "sh", "-c",
+                "cat /tmp/terminal-escape-check 2>/dev/null || true",
+                check=False,
+            ).stdout.strip()
+            if terminal_escape == "TERMINAL_ESCAPE_OK":
+                break
+            time.sleep(0.25)
+        if terminal_escape != "TERMINAL_ESCAPE_OK":
+            raise AssertionError("Escape did not leave Vim insert mode in Terminal")
+        if browser.execute_script("return window.__aiseceduEscapeStolen"):
+            raise AssertionError("Terminal Escape propagated to a browser-level handler")
+        if browser.execute_script("return document.activeElement") != terminal_input:
+            raise AssertionError("Terminal lost keyboard focus after Escape")
+        browser.get_log("performance")
+        terminal_input.send_keys("echo workspace-browser-ready", Keys.ENTER)
+
+        terminal_frames = bytearray()
+
+        def terminal_output(driver):
+            for entry in driver.get_log("performance"):
+                try:
+                    message = json.loads(entry["message"])["message"]
+                    if message["method"] != "Network.webSocketFrameReceived":
+                        continue
+                    response = message["params"]["response"]
+                    payload = response.get("payloadData", "")
+                    if response.get("opcode") == 2:
+                        terminal_frames.extend(base64.b64decode(payload))
+                    else:
+                        terminal_frames.extend(payload.encode())
+                except (KeyError, TypeError, ValueError):
+                    continue
+            return terminal_frames.decode(errors="replace")
+
+        wait.until(lambda driver: "workspace-browser-ready" in terminal_output(driver))
+        time.sleep(1)
+        output = terminal_output(browser)
+        if "dojo evidence" in output or re.search(
+            r"\[\d+\]\s+\d+",
+            output,
+        ):
+            raise AssertionError("Terminal displayed evidence recording job output")
+    finally:
+        browser.quit()
+    return True
 
 
 def cleanup_home(user_id, username):
@@ -398,7 +785,7 @@ def main():
             )
             dojo = response.json()["dojo"]
             require(user.get(f"{BASE_URL}/dojo/{dojo}/join/", timeout=30))
-            require(user.get(f"{BASE_URL}/{dojo}/", timeout=30))
+            require(user.get(f"{BASE_URL}/dojo/{dojo}", timeout=30))
             passed("local smoke dojo creation, listing, and enrollment")
 
             start_workspace(user, dojo)
@@ -423,6 +810,39 @@ def main():
                 raise AssertionError("workspace home mount is not nosuid")
             passed("Kata workspace startup, labels, and nosuid home mount")
 
+            cwd = inner(
+                "exec", "--user=1000", workspace, "pwd"
+            ).stdout.strip()
+            if cwd != "/challenge":
+                raise AssertionError(f"workspace started in {cwd}, not /challenge")
+            tool_probe = inner(
+                "exec",
+                "--user=1000",
+                workspace,
+                "/run/dojo/bin/bash",
+                "-lc",
+                "set -e; for tool in gcc clang make nasm vim nvim gdb gef strace ltrace "
+                "python3 pwn file strings objdump readelf burpsuite ghidra cutter nmap "
+                "wireshark tshark tcpdump radare2 r2 tmux curl wget; "
+                "do command -v \"$tool\"; done; "
+                "command -v ida || command -v ida64 || command -v idat64",
+            )
+            if len(tool_probe.stdout.splitlines()) < 29:
+                raise AssertionError("full workspace tool probe returned incomplete output")
+            ida_icon = inner(
+                "exec",
+                "--user=1000",
+                workspace,
+                "/run/dojo/bin/bash",
+                "-lc",
+                "set -e; test -s /run/dojo/share/icons/hicolor/64x64/apps/ida-free.png; "
+                "grep -qx 'Icon=ida-free' /run/dojo/share/applications/ida-free.desktop; "
+                "file -L /run/dojo/share/icons/hicolor/64x64/apps/ida-free.png",
+            ).stdout
+            if "128 x 128" not in ida_icon:
+                raise AssertionError("IDA desktop icon is not the expected high-visibility size")
+            passed("clean /challenge start, full security toolchain, and clear IDA launcher")
+
             active = require(user.get(f"{BASE_URL}/active-module", timeout=20)).json()
             if active["c_current"]["challenge_reference_id"] != "service":
                 raise AssertionError("active-module did not report the smoke workspace")
@@ -433,7 +853,10 @@ def main():
                 passed(f"signed {service} service proxy")
 
             verify_ssh(private_key)
-            passed("key-authenticated SSH routing and command execution")
+            passed("key-authenticated SSH routing, /challenge start, and command execution")
+
+            if verify_browser_workspace(user, workspace):
+                passed("browser loading, clean Code root, Vim Escape in all modes, Desktop clipboard, quiet Terminal, and unified Tutor")
 
             inner(
                 "exec",

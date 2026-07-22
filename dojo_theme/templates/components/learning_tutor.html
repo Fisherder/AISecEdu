@@ -1,0 +1,24 @@
+{% if user %}
+<aside class="learning-tutor-panel is-collapsed" data-learning-tutor>
+  <button type="button" class="learning-tutor-toggle" aria-expanded="false" title="Open Learning Tutor">
+    <i class="fas fa-user-ninja"></i>
+    <span class="sr-only">Toggle Learning Tutor</span>
+  </button>
+  <div class="learning-tutor-content">
+    <div class="learning-tutor-header">
+      <div>
+        <h4>Learning Tutor</h4>
+        <small data-tutor-context>Start an exercise to create an evidence-bound attempt.</small>
+      </div>
+      <a href="/dojo/{{ dojo.reference_id }}/learning" title="Open learning analysis"><i class="fas fa-chart-line"></i></a>
+    </div>
+    <div class="alert alert-info learning-tutor-notice" data-tutor-notice>Ask about your current approach. The Tutor will suggest what to think about, try, or inspect next.</div>
+    <div class="learning-tutor-messages" data-tutor-messages></div>
+    <label class="learning-tutor-field learning-tutor-question">
+      <span>Question</span>
+      <textarea class="form-control" rows="4" data-tutor-question placeholder="What are you trying to understand or test next?"></textarea>
+    </label>
+    <button type="button" class="btn btn-primary btn-block" data-tutor-send>Send</button>
+  </div>
+</aside>
+{% endif %}

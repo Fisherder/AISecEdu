@@ -126,7 +126,20 @@ let
       PS1="\[\e]0;\u@\h: \w\a\]$PS1"
     fi
 
-    PROMPT_COMMAND="history -a; $PROMPT_COMMAND"
+    __dojo_record_command() {
+      local command_status=$?
+      local history_entry history_number command_text
+      history_entry="$(history 1 2>/dev/null)" || return "$command_status"
+      history_number="$(printf '%s' "$history_entry" | awk '{print $1}')"
+      command_text="$(printf '%s' "$history_entry" | sed -E 's/^[[:space:]]*[0-9]+[[:space:]]+//')"
+      if [[ -n "$history_number" && "$history_number" != "''${__DOJO_LAST_HISTORY:-}" && -n "$command_text" ]]; then
+        __DOJO_LAST_HISTORY="$history_number"
+        (/run/dojo/bin/dojo evidence --exit-code "$command_status" --command "$command_text" </dev/null >/dev/null 2>&1 &)
+      fi
+      return "$command_status"
+    }
+
+    PROMPT_COMMAND="__dojo_record_command; history -a''${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
   '';
 
 in pkgs.stdenv.mkDerivation {

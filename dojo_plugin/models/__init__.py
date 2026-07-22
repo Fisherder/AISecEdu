@@ -693,13 +693,13 @@ class DojoChallenges(db.Model):
         return f"{self.dojo.reference_id}/{self.module.id}/{self.id}"
 
     def resolve(self):
-        # TODO: We should probably refactor to correctly store a reference to the DojoChallenge
         if not self.path_override:
             return self
-        return (DojoChallenges.query
-                .filter(DojoChallenges.challenge_id == self.challenge_id,
-                        DojoChallenges.data["path_override"] == None)
-                .first())
+        canonical = (DojoChallenges.query
+                     .filter(DojoChallenges.challenge_id == self.challenge_id,
+                             DojoChallenges.data["path_override"] == None)
+                     .first())
+        return canonical or self
 
     __repr__ = columns_repr(["module", "id", "challenge_id"])
 
@@ -944,3 +944,16 @@ class WorkspaceTokens(db.Model):
 for deferral in deferred_definitions:
     deferral()
 del deferred_definitions
+
+from .learning import (
+    LearningAppeals,
+    LearningAssessments,
+    LearningAttempts,
+    LearningAuditEvents,
+    LearningChallengeProfiles,
+    LearningDrafts,
+    LearningEvidenceEvents,
+    LearningRecommendations,
+    LearningSkillStates,
+    LearningTutorMessages,
+)

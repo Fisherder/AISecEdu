@@ -3,17 +3,17 @@
 {% block content %}
 <div class="jumbotron">
     <div class="container">
-        <h1>Dojo Activity</h1>
+        <h1>Course Activity</h1>
     </div>
 </div>
 <div class="container">
-    <h2>Active Challenges</h2>
+    <h2>Active Exercises</h2>
     {% if actives %}
     <table class="table">
         <thead>
             <tr>
                 <th>User</th>
-                <th>Challenge</th>
+                <th>Exercise</th>
                 <th>Uptime</th>
             </tr>
         </thead>
@@ -28,7 +28,7 @@
         </tbody>
     </table>
     {% else %}
-    <p>No active challenges at the moment.</p>
+    <p>No active exercises at the moment.</p>
     {% endif %}
 </div>
 {% endblock %}

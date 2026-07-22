@@ -2,8 +2,8 @@ id: manual-platform-check
 name: 手动功能验收场
 type: public
 description: |
-  这个 dojo 用于人工验证平台，而不是教学课程。四道题分别覆盖终端、文件检索、
-  home 持久化和浏览器 Web 接口。每道题都使用平台动态生成的个人 flag。
+  这门实践课程用于人工验证学生题目平台。四道题分别覆盖终端、文件检索、
+  Home 持久化和浏览器 Web 接口，每道题都使用平台动态生成的个人答案凭证。
 image: pwncollege/challenge-legacy:latest
 privileged: true
 interfaces:
@@ -18,8 +18,8 @@ modules:
   - id: manual
     name: 平台手动验收
     description: |
-      建议按顺序测试，但题目没有强制解锁关系。提交每道题显示的完整
-      `pwn.college{...}` flag，即可验证计分和进度功能。
+      建议按顺序完成，但题目没有强制解锁关系。提交检查程序显示的完整
+      答案凭证，即可验证作答结果和学习进度功能。
     challenges:
       - id: terminal-handshake
         name: 终端握手
@@ -27,7 +27,7 @@ modules:
           启动题目并打开 Terminal。查看 `/challenge/motd.txt`，从中找到
           `response=` 后面的值，再将该值作为唯一参数传给 `/challenge/check`。
 
-          这道题用于验证工作区启动、终端输入输出和 flag 提交。
+          这道题用于验证工作区启动、终端输入输出和答案提交。
       - id: log-search
         name: 日志检索
         description: |
@@ -48,7 +48,7 @@ modules:
         name: 浏览器 Web 服务
         description: |
           启动题目后点击 **Web** 接口。根据首页提示访问状态 API，再按照状态
-          API 返回的 `next` 路径继续访问。正确页面会显示本题的动态 flag。
+          API 返回的 `next` 路径继续访问。正确页面会显示本题的动态答案凭证。
 
           这道题用于验证 Workspace HTTPS 子域、反向代理和挑战内 HTTP 服务。
         interfaces:

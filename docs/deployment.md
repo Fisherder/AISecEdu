@@ -1,6 +1,8 @@
 # Deployment
 
-While we recommend using the [pwn.college](https://pwn.college) deployment, you can also run the DOJO locally.
+This repository deploys one AISecEdu application on the proven upstream service topology and serves the AISecEdu-branded `dojo_theme` on the canonical host. Intelligent learning extends that same theme and does not require a second API, frontend, database, or terminal gateway. After the base deployment is working, see [Intelligent Learning and Evidence Assessment](./learning.md) for optional model configuration, workspace rebuilds, migration, and end-to-end verification.
+
+The following example runs AISecEdu locally while retaining the upstream-compatible environment-variable and container names:
 
 ```sh
 curl -fsSL https://get.docker.com | /bin/sh
@@ -8,7 +10,7 @@ curl -fsSL https://get.docker.com | /bin/sh
 DOJO_PATH="./dojo"
 DATA_PATH="./dojo/data"
 
-git clone https://github.com/pwncollege/dojo "$DOJO_PATH"
+git clone https://github.com/Fisherder/AISecEdu "$DOJO_PATH"
 docker build -t pwncollege/dojo "$DOJO_PATH"
 
 # this is needed for the dojo's networking

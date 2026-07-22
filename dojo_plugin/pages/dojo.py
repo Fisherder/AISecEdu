@@ -1,4 +1,5 @@
 import collections
+import shutil
 import subprocess
 from pathlib import Path
 import logging
@@ -11,7 +12,7 @@ from flask import Blueprint, render_template, abort, send_file, redirect, url_fo
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import or_
 from CTFd.plugins import bypass_csrf_protection
-from CTFd.models import db, Solves, Users
+from CTFd.models import Challenges, db, Solves, Users
 from CTFd.utils.decorators import authed_only
 from CTFd.utils.user import get_current_user, is_admin
 from CTFd.utils.helpers import get_infos
@@ -21,7 +22,15 @@ from ..utils.stats import get_container_stats, get_dojo_stats, get_challenge_sol
 from ..utils.dojo import dojo_route, get_current_dojo_challenge, dojo_update, dojo_admins_only
 from ..utils.image_pulls import enqueue_dojo_image_pulls
 from ..utils.query_timer import query_timeout
-from ..models import Dojos, DojoUsers, DojoStudents, DojoModules, DojoMembers, DojoChallenges
+from ..models import (
+    Dojos,
+    DojoChallenges,
+    DojoMembers,
+    DojoModules,
+    DojoStudents,
+    DojoUsers,
+)
+from ..config import DOJOS_DIR
 
 dojo = Blueprint("pwncollege_dojo", __name__)
 #pylint:disable=redefined-outer-name
@@ -259,10 +268,35 @@ def delete_dojo(dojo):
     if not is_admin():
         abort(403)
 
+    learning_path = DOJOS_DIR / ".learning" / dojo.hex_dojo_id
     try:
+        challenge_ids = [
+            challenge_id
+            for challenge_id, in (
+                db.session.query(DojoChallenges.challenge_id)
+                .filter(DojoChallenges.dojo_id == dojo.dojo_id)
+                .all()
+            )
+        ]
         DojoUsers.query.filter(DojoUsers.dojo_id == dojo.dojo_id).delete()
         Dojos.query.filter(Dojos.dojo_id == dojo.dojo_id).delete()
+        db.session.flush()
+        if challenge_ids:
+            referenced_ids = {
+                challenge_id
+                for challenge_id, in (
+                    db.session.query(DojoChallenges.challenge_id)
+                    .filter(DojoChallenges.challenge_id.in_(challenge_ids))
+                    .all()
+                )
+            }
+            orphan_ids = set(challenge_ids) - referenced_ids
+            if orphan_ids:
+                Challenges.query.filter(Challenges.id.in_(orphan_ids)).delete(
+                    synchronize_session=False
+                )
         db.session.commit()
+        shutil.rmtree(learning_path, ignore_errors=True)
     except Exception as e:
         db.session.rollback()
         print(f"ERROR: Dojo failed for {dojo}", file=sys.stderr, flush=True)

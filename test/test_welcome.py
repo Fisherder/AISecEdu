@@ -1,11 +1,10 @@
 import contextlib
+import re
 import time
 import string
 import random
 
-import pytest
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
-from selenium.webdriver import Firefox, FirefoxOptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -19,10 +18,12 @@ def vscode_terminal(browser):
     module_window = browser.current_window_handle
 
     browser.switch_to.new_window("tab")
-    browser.get(f"{DOJO_URL}/workspace/code")
+    browser.get(f"{DOJO_URL}/workspace?service=code")
 
     wait = WebDriverWait(browser, 30)
-    workspace_iframe = wait.until(EC.presence_of_element_located((By.ID, "workspace_iframe")))
+    workspace_iframe = wait.until(EC.presence_of_element_located((By.ID, "workspace-iframe")))
+    iframe_src = workspace_iframe.get_attribute("src") or ""
+    assert "folder=%2Fchallenge" in iframe_src or "folder=/challenge" in iframe_src
     browser.switch_to.frame(workspace_iframe)
 
     def wait_for_selector(*selectors):
@@ -79,7 +80,7 @@ def desktop_terminal(browser, user_id):
     module_window = browser.current_window_handle
 
     browser.switch_to.new_window("tab")
-    browser.get(f"{DOJO_URL}/workspace/desktop")
+    browser.get(f"{DOJO_URL}/workspace?service=desktop")
     time.sleep(10)
     workspace_run("DISPLAY=:0 xfce4-terminal &", user=user_id)
     wait = WebDriverWait(browser, 30)
@@ -90,6 +91,25 @@ def desktop_terminal(browser, user_id):
         except NoSuchElementException:
             return driver.find_element(By.ID, "keyboardinput")
     e = wait.until(locate_input)
+    wait.until(
+        lambda driver: driver.execute_script(
+            "return document.documentElement.dataset.aiseceduWorkspaceBridge;"
+        )
+        == "ready"
+    )
+    container = browser.find_element(By.ID, "noVNC_container")
+    container.click()
+    browser.execute_script("window.AISecEduWorkspaceBridge.focusRemoteKeyboard();")
+    wait.until(
+        lambda driver: driver.execute_script(
+            "return document.activeElement && "
+            "(document.activeElement.id === 'noVNC_keyboardinput' || "
+            "document.activeElement.id === 'keyboardinput' || "
+            "document.activeElement.tagName === 'CANVAS');"
+        )
+    )
+    assert e.tag_name.lower() == "textarea"
+    assert browser.find_elements(By.CSS_SELECTOR, 'script[src*="aisecedu-workspace-bridge.js"]')
     time.sleep(2)
 
     yield e
@@ -103,10 +123,10 @@ def ttyd_terminal(browser):
     module_window = browser.current_window_handle
 
     browser.switch_to.new_window("tab")
-    browser.get(f"{DOJO_URL}/workspace/terminal")
+    browser.get(f"{DOJO_URL}/workspace?service=terminal")
 
     wait = WebDriverWait(browser, 30)
-    workspace_iframe = wait.until(EC.presence_of_element_located((By.ID, "workspace_iframe")))
+    workspace_iframe = wait.until(EC.presence_of_element_located((By.ID, "workspace-iframe")))
     browser.switch_to.frame(workspace_iframe)
 
     # Wait for ttyd to be ready and find the terminal input
@@ -173,6 +193,44 @@ def test_welcome_desktop(random_user_browser, random_user_name, welcome_dojo):
 
     challenge_start(random_user_browser, idx)
     with desktop_terminal(random_user_browser, random_user_name) as vs:
+        vs.send_keys("vim -Nu NONE -n /tmp/desktop-escape-check\n")
+        time.sleep(2)
+        vs.send_keys("iDESKTOP_ESCAPE_OK")
+        vs.send_keys(Keys.ESCAPE)
+        vs.send_keys(":wq\n")
+        time.sleep(2)
+        assert workspace_run("cat /tmp/desktop-escape-check", user=random_user_name).stdout.strip() == "DESKTOP_ESCAPE_OK"
+
+        clipboard_in = "AISecEdu clipboard into desktop"
+        random_user_browser.switch_to.parent_frame()
+        assert random_user_browser.execute_script(
+            "return sendDesktopClipboard($('.workspace-controls'), arguments[0]);",
+            clipboard_in,
+        )
+        random_user_browser.switch_to.frame("workspace")
+        for _ in range(20):
+            copied = workspace_run(
+                "DISPLAY=:0 xclip -selection clipboard -o 2>/dev/null || true",
+                user=random_user_name,
+            ).stdout
+            if copied == clipboard_in:
+                break
+            time.sleep(0.25)
+        assert copied == clipboard_in
+
+        clipboard_out = "AISecEdu clipboard out of desktop"
+        workspace_run(
+            f"printf %s {clipboard_out!r} | DISPLAY=:0 xclip -selection clipboard",
+            user=random_user_name,
+        )
+        random_user_browser.switch_to.parent_frame()
+        WebDriverWait(random_user_browser, 10).until(
+            lambda driver: driver.execute_script(
+                "return document.getElementById('workspace-iframe').workspaceRemoteClipboard;"
+            ) == clipboard_out
+        )
+        random_user_browser.switch_to.frame("workspace")
+
         vs.send_keys("/challenge/solve; cat /flag | tee /tmp/out\n")
         time.sleep(5)
         flag = read_flag(random_user_name)
@@ -186,6 +244,13 @@ def test_welcome_vscode(random_user_browser, random_user_name, welcome_dojo):
 
     challenge_start(random_user_browser, idx)
     with vscode_terminal(random_user_browser) as vs:
+        vs.send_keys("vim -Nu NONE -n /tmp/code-escape-check\n")
+        time.sleep(2)
+        vs.send_keys("iCODE_ESCAPE_OK")
+        vs.send_keys(Keys.ESCAPE)
+        vs.send_keys(":wq\n")
+        time.sleep(2)
+        assert workspace_run("cat /tmp/code-escape-check", user=random_user_name).stdout.strip() == "CODE_ESCAPE_OK"
         vs.send_keys("/challenge/solve | tee /tmp/out\n")
         time.sleep(5)
         flag = read_flag(random_user_name)
@@ -199,9 +264,19 @@ def test_welcome_ttyd(random_user_browser, random_user_name, welcome_dojo):
 
     challenge_start(random_user_browser, idx)
     with ttyd_terminal(random_user_browser) as terminal:
-        terminal.send_keys("/challenge/solve; cat /flag | tee /tmp/out\n")
+        terminal.send_keys("vim -Nu NONE -n /tmp/terminal-escape-check\n")
+        time.sleep(2)
+        terminal.send_keys("iTERMINAL_ESCAPE_OK")
+        terminal.send_keys(Keys.ESCAPE)
+        terminal.send_keys(":wq\n")
+        time.sleep(2)
+        assert workspace_run("cat /tmp/terminal-escape-check", user=random_user_name).stdout.strip() == "TERMINAL_ESCAPE_OK"
+        terminal.send_keys("pwd > /tmp/terminal-cwd; /challenge/solve; cat /flag | tee /tmp/out\n")
         time.sleep(5)
         flag = read_flag(random_user_name)
+        assert "dojo evidence" not in terminal.text
+        assert not re.search(r"\[\d+\]\s+\d+", terminal.text)
+    assert workspace_run("cat /tmp/terminal-cwd", user=random_user_name).stdout.strip() == "/challenge"
     challenge_submit(random_user_browser, idx, flag)
     random_user_browser.close()
 
@@ -282,7 +357,7 @@ def test_actionbar_service_buttons(random_user_browser, random_user_name, interf
     wait.until(lambda driver: len(driver.window_handles) == len(handles) + 1)
     popout_handle = (set(random_user_browser.window_handles) - handles).pop()
     random_user_browser.switch_to.window(popout_handle)
-    wait.until(lambda driver: driver.current_url.rstrip("/").endswith("/workspace/terminal"))
+    wait.until(lambda driver: driver.current_url.endswith("/workspace?service=terminal"))
 
     random_user_browser.switch_to.window(module_handle)
     random_user_browser.find_element("id", f"challenges-body-{idx}") \
@@ -290,18 +365,34 @@ def test_actionbar_service_buttons(random_user_browser, random_user_name, interf
     time.sleep(2)
     assert len(random_user_browser.window_handles) == len(handles) + 1
     random_user_browser.switch_to.window(popout_handle)
-    assert random_user_browser.current_url.rstrip("/").endswith("/workspace/terminal")
+    assert random_user_browser.current_url.endswith("/workspace?service=terminal")
     random_user_browser.switch_to.window(module_handle)
 
     random_user_browser.get(f"{DOJO_URL}/workspace")
     controls = random_user_browser.find_element(By.CSS_SELECTOR, ".workspace-controls")
     terminal_button = controls.find_element(By.CSS_SELECTOR, '.workspace-service[data-service="terminal: 7681"]')
+    ssh_button = controls.find_element(By.CSS_SELECTOR, '.workspace-service[data-service="ssh: "]')
+    ssh_button.click()
+    wait.until(lambda driver: driver.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed())
+    random_user_browser.execute_script("""
+        window.__workspaceFetch = window.fetch.bind(window);
+        window.fetch = function(input, init) {
+            if (String(input).includes('/pwncollege_api/v1/workspace')) {
+                return new Promise(resolve => setTimeout(() => resolve(window.__workspaceFetch(input, init)), 800));
+            }
+            return window.__workspaceFetch(input, init);
+        };
+    """)
     terminal_button.click()
+    loading = random_user_browser.find_element(By.CSS_SELECTOR, "[data-workspace-loading]")
+    wait.until(lambda driver: loading.is_displayed())
+    assert "Loading Terminal" in loading.text
     wait.until(lambda driver: "/7681/" in (driver.find_element(By.ID, "workspace-iframe").get_attribute("src") or ""))
+    wait.until(lambda driver: not loading.is_displayed())
     assert "active" in terminal_button.get_attribute("class")
     assert not random_user_browser.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed()
 
-    controls.find_element(By.CSS_SELECTOR, '.workspace-service[data-service="ssh: "]').click()
+    ssh_button.click()
     wait.until(lambda driver: driver.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed())
     assert "SSH" in random_user_browser.find_element(By.ID, "workspace-iframe").get_attribute("class")
 
@@ -322,7 +413,7 @@ def test_actionbar_port_popout(random_user_browser, random_user_name, interfaces
     wait.until(lambda driver: len(driver.window_handles) == len(handles) + 1)
     popout_handle = (set(random_user_browser.window_handles) - handles).pop()
     random_user_browser.switch_to.window(popout_handle)
-    wait.until(lambda driver: driver.current_url.rstrip("/").endswith("/workspace/80"))
+    wait.until(lambda driver: driver.current_url.endswith("/workspace?port=80"))
     random_user_browser.close()
 
 def test_actionbar_ssh_only_challenge(random_user_browser, random_user_name, interfaces_dojo):
@@ -489,7 +580,7 @@ def test_actionbar_popout_reload(random_user_browser, random_user_name, interfac
     wait.until(lambda driver: len(driver.window_handles) == len(handles) + 1)
     popout_handle = (set(random_user_browser.window_handles) - handles).pop()
     random_user_browser.switch_to.window(popout_handle)
-    wait.until(lambda driver: driver.current_url.rstrip("/").endswith("/workspace/terminal"))
+    wait.until(lambda driver: driver.current_url.endswith("/workspace?service=terminal"))
     popout_page = random_user_browser.find_element(By.TAG_NAME, "body")
 
     random_user_browser.switch_to.window(module_handle)
@@ -499,7 +590,7 @@ def test_actionbar_popout_reload(random_user_browser, random_user_name, interfac
 
     random_user_browser.switch_to.window(popout_handle)
     wait.until(EC.staleness_of(popout_page))
-    assert random_user_browser.current_url.rstrip("/").endswith("/workspace/terminal")
+    assert random_user_browser.current_url.endswith("/workspace?service=terminal")
     random_user_browser.close()
     random_user_browser.switch_to.window(module_handle)
     random_user_browser.close()
@@ -561,7 +652,9 @@ def test_registration_commitment(browser_fixture):
     alert.accept()
 
     commitment_input = browser_fixture.find_element(By.ID, "commitment-input")
-    commitment_input.send_keys("i have read the ground rules and commit to not publish pwn.college writeups on the internet")
+    commitment_input.send_keys(
+        "I will use AISecEdu responsibly and will not publish restricted exercise solutions."
+    )
 
     time.sleep(0.5)
 
@@ -601,7 +694,7 @@ def test_welcome_graded_lecture(random_user_browser, random_user_name, example_d
 
     challenge_window = random_user_browser.current_window_handle
     random_user_browser.switch_to.new_window("tab")
-    random_user_browser.get(f"{DOJO_URL}/workspace/80/")
+    random_user_browser.get(f"{DOJO_URL}/workspace?port=80")
 
     time.sleep(2)
 

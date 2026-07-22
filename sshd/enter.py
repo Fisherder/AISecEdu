@@ -105,7 +105,7 @@ def main():
 
         attempts = 0
         print("\r", " " * 80, "\rConnected!")
-        child_pid = os.fork();
+        child_pid = os.fork()
         if not child_pid:
             ssh_entrypoint = "/run/dojo/bin/ssh-entrypoint"
             if is_mac:
@@ -121,7 +121,7 @@ def main():
                         "exec",
                         "-it" if tty else "-i",
                         "--user=1000",
-                        "--workdir=/home/hacker",
+                        "--workdir=/challenge",
                         "--detach-keys=ctrl-q,ctrl-q",
                         *environ,
                         container_name,

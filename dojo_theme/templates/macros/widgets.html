@@ -77,17 +77,15 @@
 {% macro dojo_grid(dojos, dojo_container_counts, create_icon=None) -%}
   <ul class="card-list">
     {% for dojo, solves in dojos %}
-      {% set icon = url_for("pwncollege_belts.view_belt", color=dojo.award.belt) if (dojo.award.belt and dojo.official) else None %}
       {% set solve_percent = (solves / dojo.required_challenges_count) * 100 if dojo.required_challenges_count else 0 %}
       {{ card(
         url_for("pwncollege_dojo.view_dojo", dojo=dojo.reference_id),
         title=dojo.name or dojo.id,
         text_lines=[
-          "{} Hacking".format(dojo_container_counts.get(dojo.reference_id, 0)) if dojo_container_counts.get(dojo.reference_id, 0) else "",
-          "{} Module{}".format(dojo.modules_count, "" if dojo.modules_count == 1 else "s"),
-          "{} Challenge{}".format(dojo.required_challenges_count, "" if dojo.required_challenges_count == 1 else "s"),
+          "{} Active".format(dojo_container_counts.get(dojo.reference_id, 0)) if dojo_container_counts.get(dojo.reference_id, 0) else "",
+          "{} Unit{}".format(dojo.modules_count, "" if dojo.modules_count == 1 else "s"),
+          "{} Exercise{}".format(dojo.required_challenges_count, "" if dojo.required_challenges_count == 1 else "s"),
         ],
-        icon=icon,
         emoji=dojo.award.emoji,
         solve_percent=solve_percent,
         course=dojo.course,
@@ -95,6 +93,7 @@
     {% endfor %}
     {% if create_icon %}
       {% call card(url_for("pwncollege_dojos.dojo_create"), custom=True) %}
+        <span class="sr-only">Create a new course</span>
         {{ svg_add_icon }}
       {% endcall %}
     {% endif %}

@@ -14,6 +14,11 @@ let
   novnc = pkgs.novnc.overrideAttrs (oldAttrs: {
     postInstall = (oldAttrs.postInstall or "") + ''
       patch -p1 -d $out < ${reconnectPatch}
+      cp ${./desktop/keyboard-capture.js} $out/share/webapps/novnc/app/aisecedu-workspace-bridge.js
+      substituteInPlace $out/share/webapps/novnc/vnc.html \
+        --replace-fail \
+        '<script type="module" crossorigin="anonymous" src="app/error-handler.js"></script>' \
+        '<script type="module" crossorigin="anonymous" src="app/aisecedu-workspace-bridge.js"></script><script type="module" crossorigin="anonymous" src="app/error-handler.js"></script>'
     '';
   });
 
@@ -25,6 +30,7 @@ let
     export DISPLAY=:0
     export XDG_DATA_DIRS="/run/dojo/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
     export XDG_CONFIG_DIRS="/run/dojo/etc/xdg:''${XDG_CONFIG_DIRS:-/etc/xdg}"
+    cd /challenge
 
     auth_token="$(cat /run/dojo/var/auth_token)"
     password_interact="$(printf 'desktop-interact' | ${pkgs.openssl}/bin/openssl dgst -sha256 -hmac "$auth_token" | awk '{print $2}' | head -c 8)"
@@ -90,6 +96,7 @@ in pkgs.stdenv.mkDerivation {
   propagatedBuildInputs = with pkgs; [
     tigervnc
     novnc
+    xclip
     xfce
     elementary-xfce-icon-theme  # If we include this in `xfce`, we get a "Permission denied" error related to `nix-support/propagated-build-inputs`.
   ];
@@ -107,6 +114,7 @@ in pkgs.stdenv.mkDerivation {
     mkdir -p $out/bin
     cp ${serviceScript} $out/bin/dojo-desktop
     ln -s ${pkgs.xfce.xfce4-terminal}/bin/xfce4-terminal $out/bin/x-terminal-emulator
+    ln -s ${pkgs.xclip}/bin/xclip $out/bin/xclip
     rsync -a --ignore-existing $src/. ${xfce}/. ${pkgs.elementary-xfce-icon-theme}/. $out
     runHook postInstall
   '';

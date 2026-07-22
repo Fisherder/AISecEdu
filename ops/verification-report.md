@@ -4,6 +4,13 @@
 - LAN 访问追加验收：2026-07-21（UTC）
 - 持久人工验收场追加验收：2026-07-21（UTC）
 - Workspace 客户端 TLS 修复验收：2026-07-21（UTC）
+- AISecEdu 单系统融合验收：2026-07-21（UTC）
+- 统一学生与认证界面验收：2026-07-22（UTC）
+- 课程领域语言与教师工作台验收：2026-07-22（UTC）
+- AISecEdu 课程界面全面接管验收：2026-07-22（UTC）
+- Workspace 导航、Tutor 与完全重置验收：2026-07-22（UTC）
+- Workspace 加载、题目目录、输入与完整工具链验收：2026-07-22（UTC）
+- AISecEdu 品牌、Esc、双向剪贴板与 IDA 图标验收：2026-07-22（UTC）
 - 项目目录：`/mnt/HDD1/LLM/AISecEdu-dojo/dojo`
 - 本地分支：`local/deployment`
 - 上游基线：`b830d74339000c0fd8408558a13328ae8b1919b6`
@@ -11,13 +18,16 @@
 
 ## 验收结论
 
-单节点部署的核心功能全部通过实机验证，并已从仅回环访问调整为供客户端 `192.168.200.17` 使用的 LAN 部署。平台可供本机开发和功能扩展；源码以读写方式挂载到 `/opt/pwn.college`，运行数据与源码分离并由 Git 忽略。基础测试只创建了一次性 dojo 和工作区，没有读取、提交或求解任何 flag。LAN 基础验收完成当时的数据库计数为：管理员用户 `1`、dojo `0`、solve `0`、submission `0`，且不存在 `deployment-smoke-*` 测试用户或 dojo。随后按人工验收需求保留了普通账号 `manualtester` 和本地验收 dojo；其四道题的无解题启动检查全部通过，solve/submission 仍保持为零。
+单节点部署的核心功能和 AISecEdu 智能学习闭环全部通过实机验证，并已从仅回环访问调整为供客户端 `192.168.200.17` 使用的 LAN 部署。主域是唯一规范 Web 入口，旧 Future 域只做 308 兼容跳转；公开 UI 已统一为 AISecEdu，课程列表、课程简介/学习状态/单元/学生排行榜、单元题目、Workspace 与认证页都由同一个 CTFd 主题直接渲染。Terminal、Code、Desktop 统一进入 `/workspace?service=`，带明确加载状态并直接落在 `/challenge`；Esc 等完整键盘输入、桌面双向剪贴板、静默证据记录、完整安全工具 profile、清晰的 IDA 启动图标、统一提示式 Tutor 和完全重置均已通过真实浏览器与 Kata 容器验证。学习能力复用同一主题、CTFd 身份、PostgreSQL 和 Kata/Nix workspace，没有第二套 API、前端、认证、数据库或终端网关。平台可供本机开发和功能扩展；源码以读写方式挂载到 `/opt/pwn.college`，运行数据与源码分离并由 Git 忽略。
+
+基础与 smoke 测试只创建一次性 dojo 和工作区，没有读取、提交或求解任何 flag。专项学习验证器另行创建随机 L3 教学挑战，并只提交该一次性挑战的动态 flag，以验证客观 Oracle、证据和评分；结束后会删除课程、用户、工作区、home、生成包、challenge/profile、solve/submission 和测试审计，并断言全局 solve/submission 计数不变。当前不存在 `deployment-smoke-*` 或 `learning-e2e-*` 测试用户、dojo、生成题孤儿和测试审计残留。
 
 ## 运行配置
 
 | 项目 | 验收值 |
 | --- | --- |
 | Web | `https://192-168-3-111.nip.io`，监听 `192.168.3.111:443` |
+| 旧 Future 域 | 308 跳转至 Web 主域，不作为独立入口 |
 | Workspace | `https://workspace.192-168-3-111.nip.io` |
 | HTTP | `192.168.3.111:80`；健康/证书端点除外，其余跳转到 HTTPS |
 | SSH | `192.168.3.111:2223` |
@@ -53,18 +63,26 @@ CA 证书 SHA-256 指纹为 `BF:18:E8:69:16:E1:8D:0D:DF:7D:C0:14:CC:9F:89:D9:71:
 | 数据层 | 通过 | PostgreSQL 就绪、Redis `PONG`、连接池、后台统计冷启动 |
 | Web 与 TLS | 通过 | 本地 CA 链、真实 LAN DNS、HTTP 跳转、HTTPS 页面、六个 DNS SAN 与 LAN IP SAN、管理员登录和管理页 |
 | 监控 | 通过 | Prometheus 健康，`node_exporter` 与 `cadvisor` 的 `up=1`；Grafana 数据库状态 `ok` |
-| 用户与认证 | 通过 | 注册、登录、设置页、SSH 公钥添加和删除 |
+| 用户与认证 | 通过 | AISecEdu 登录、注册、密码恢复、邮箱验证、原生 session 登录态与防枚举恢复流程 |
+| 课程题目界面 | 通过 | AISecEdu `/dojos` 分组列表、课程简介、学习状态、单元、学生排行榜、单元资源/题目手风琴和选课流程 |
+| 教师工作台 | 通过 | 普通 CTFd 用户通过课程教师关系获得工作台权限，可直接新建课程、单元和题目，并使用学生分析与评价复核；无平台超级管理员越权 |
 | dojo 流程 | 通过 | 临时 dojo 创建、列表显示、加入与删除 |
-| 隔离工作区 | 通过 | Kata v2 启动、运行时标签、home 的 `nosuid` 挂载、活动工作区 API |
-| 交互服务 | 通过 | 带签名的 Terminal、Code、Desktop 代理；无效 HMAC 被拒绝 |
+| 隔离工作区 | 通过 | Kata v2 启动、运行时标签、home 的 `nosuid` 挂载、默认工作目录和 Code 根目录均为干净的 `/challenge`、活动工作区 API |
+| 交互服务 | 通过 | 带签名的 Terminal、Code、Desktop 代理；三种模式均有加载提示/动画；无效 HMAC 被拒绝 |
+| Workspace 交互 | 通过 | 统一 `/workspace?service=` 路由、左侧课程/单元/题目切换、两处右侧可收起 Tutor、保留 Home 的重启与容器/Home 完全重置 |
+| Workspace 输入与工具 | 通过 | Terminal/Code/Desktop 的 Esc 不被页面抢占；noVNC 对画布与隐藏输入框统一捕获完整键盘、全屏 Keyboard Lock 和浏览器↔远端双向剪贴板；终端命令输出不显示 evidence job；GCC/Clang、Vim/Neovim、GDB/GEF、Nmap/Wireshark、Burp、IDA、Ghidra、Cutter、radare2、Firefox、tmux 等 full profile 可执行；IDA 使用独立高辨识度图标 |
 | SSH 工作区 | 通过 | 公钥认证、用户路由和远程命令执行 |
 | 持久化 | 通过 | 工作区停止并再次启动后，home 测试文件仍存在 |
 | 持久人工验收场 | 通过 | 四道题均使用 Kata 启动；文件、端口和签名 Web 代理可用；未读取或提交 flag |
-| 清理与解题边界 | 通过 | 临时用户、dojo、密钥、home 和容器均删除；solve/submission 始终为零 |
+| 智能出题 | 通过 | L1/L2/L3 设计、多轮草稿、发布门、稳定挑战身份、不可变版本、L1/L2 源包快照、digest/history 和原生模块发布 |
+| 证据与 Tutor | 通过 | 当前 epoch、CLI 自动命令、allowlist、脱敏、S1–S4、SHA-256 哈希链；Tutor 无 L1/L2/L3 选择，只提供统一、委婉、提示式防泄露问答 |
+| 学习评测 | 通过 | 动态 flag Oracle 60 分、可信过程 40 分、回放、六维能力、推荐、申诉和确定性复评 |
+| 单系统与单入口 | 通过 | CTFd + `dojo_theme` 统一学生、认证与管理 UI；可选 frontend 未运行，Future 域 308 回主域 |
+| 清理与解题边界 | 通过 | 临时用户、dojo、密钥、home、容器、原生/生成 challenge、版本包和审计均删除；有符号 dojo ID 目录换算与 solve/submission 边界均通过 |
 | 重启恢复 | 通过 | 外层容器重建后数据库和 SSH 主机密钥保持不变；TLS 按 LAN SAN 受控轮换，服务自动恢复 |
 | Kata 独立性 | 通过 | `kata-runtime` 实际启动隔离 guest；guest 内核为 Linux `6.12.36` |
 
-`./ops/verify-local.sh` 的全部非题目健康检查通过；`./ops/smoke-user-flow.py` 的全部非解题用户流程检查通过。日志审计未发现服务崩溃、fatal 或 unhealthy 状态。cAdvisor 对本机未安装 CRI-O/Podman 的探测失败是可选运行时发现信息；CTFd 在一次已经成功完成的 Docker HTTP 流对象回收时输出过一条 `Exception ignored`，对应请求及其后续功能均为成功，不影响平台行为。
+`./ops/verify-local.sh` 的全部非题目健康检查通过；`./ops/smoke-user-flow.py` 的全部非解题用户流程检查通过；`./ops/verify-learning-flow.py` 的单点身份、角色边界、课程单元创建权限、L1/L2/L3 出题、两版稳定发布、源包快照、真实 workspace、容器与 Home 完全重置、新 epoch、证据、Tutor、动态 flag、60/40、六维能力、申诉、分析和清理检查全部通过。AISecEdu UI 完成匿名与管理员登录态逐页验证，并以匹配版本的真实 headless Chrome-for-Testing/ChromeDriver 验证 Workspace 三种加载动画、Code `/challenge` 根目录和无信任弹窗、Terminal/Code/Desktop 中的 Vim Esc、noVNC 完整键盘事件不会传播到模拟浏览器快捷键处理器、浏览器与远端双向剪贴板、Terminal WebSocket 可见输出中没有 evidence 后台任务信息，以及无等级的统一 Tutor；随后验证停止/启动后的 Home 持久化，且全局 solve/submission 计数保持不变。主题脚本同时按 `.js` / `.dev.js` / `.min.js` 软链接约定验收，避免生产资源 URL 404；JavaScript、Python 3.12、Shell、XML、关键 Ruff 规则与 Git whitespace 检查通过。可选 frontend 容器和旧镜像已删除且不属于 `main` profile。日志审计未发现服务崩溃、fatal 或 unhealthy 状态。cAdvisor 对本机未安装 CRI-O/Podman 的探测失败是可选运行时发现信息；CTFd 在验证期间回收已成功完成的 Docker HTTP 日志流时输出过若干 `Exception ignored`，均为 Python 3.13 `HTTPResponse.close()` 对已关闭流再次 flush 的 `ValueError`，对应启动请求全部返回 `200` 且后续功能均成功，不影响平台行为。
 
 ## LAN 与目标客户端验收
 
@@ -75,6 +93,7 @@ CA 证书 SHA-256 指纹为 `BF:18:E8:69:16:E1:8D:0D:DF:7D:C0:14:CC:9F:89:D9:71:
 - TLS 已改为持久本地 CA 签发结构，并增加 CA 下载、Workspace `/trust-check` 端点和页面预检提示。使用该 CA 对当前用户的 Terminal、Code、Desktop 三个真实签名代理逐项复测，均返回 `200 text/html`。
 - 从外层容器的独立网络命名空间回连 LAN HTTPS 入口返回 `200`，验证并非依赖宿主回环路径。
 - 到 `192.168.200.17` 的路由使用 `eno1`、网关 `192.168.3.1` 和源地址 `192.168.3.111`；三次 ICMP 全部成功，丢包率 `0%`。
+- 主域 `/`、`/dojos`、课程、单元、Workspace、登录、注册、密码恢复、邮箱验证与 `/learning` 均由 CTFd 的 AISecEdu 主题提供；Future 域返回主域的 `308`，已移除的前端别名只跳转到对应规范页面。
 - UFW 配置为 `ENABLED=no`，没有阻止 Docker 发布端口。当前绑定对所有经路由可达 `192.168.3.111` 的客户端开放，并非只允许单一源 IP。
 - `192.168.200.17:22` 明确拒绝 SSH 连接，因此无法在该客户端上自动执行最终 `curl`；没有尝试密码或绕过认证。客户端可用 `http://192.168.3.111/lan-health` 做无 DNS/无 TLS 的最终探测，并从 `/local-tls.crt` 获取公开证书。
 
@@ -97,13 +116,21 @@ CA 证书 SHA-256 指纹为 `BF:18:E8:69:16:E1:8D:0D:DF:7D:C0:14:CC:9F:89:D9:71:
 - 为 Desktop 创建正确的 X11 socket 目录，并仅限制 noVNC 进程的 OpenBLAS/OMP 线程数，避免高核数主机上 fork 时触发 guest 内存提交限制。
 - 使用非递归源码 bind mount，防止嵌套 overlay2 挂载泄漏和卸载冲突。
 - 向 node-exporter 暴露宿主 udev 数据库并指定稳定读取路径，保留完整磁盘设备属性采集。
+- 在 CTFd/DOJO 原生模型中加入出题草稿、学习档案、attempt epoch、可信证据、Tutor、60/40 评测、六维能力、推荐、申诉和审计，并把课程删除与生成 challenge/profile/package 生命周期统一。
+- 在现有 Nix workspace CLI 与 Bash profile 中加入脱敏命令证据采集；本机只对 Docker 私网开放内部 API 代理，LAN 请求明确拒绝。
+- 将主域收敛到直接从上游源码演进的 AISecEdu `dojo_theme`，停用自研橙白前端及其 Nginx 路由；学习中心、课程分析、教师工作台和 Tutor 复用同一套组件，历史 Future 域收敛为 308 兼容入口。
+- 将题目内嵌工作区的模式按钮收敛到统一 Workspace，通过可收起的左右侧栏提供课程树和 Tutor，并增加带确认、审计及新 attempt epoch 的容器/Home 完全重置。
+- 为 Terminal、Code、Desktop 模式切换增加可见的加载动画、慢启动说明和失败状态；Code 直接以 `/challenge` 为唯一根目录，Terminal、Desktop 与 SSH 同样从该目录开始。
+- 将 Bash 命令证据采集改为完全重定向的后台子进程，保留既有 `PROMPT_COMMAND`，避免每次回车显示 job/记录提示；Tutor 移除 L1/L2/L3 选择，统一为防泄露的苏格拉底式提示。
+- 为 noVNC 注入原生键盘焦点恢复、Esc 捕获和双向剪贴板桥接脚本，并在 Workspace 全屏时使用 Keyboard Lock，避免 Vimium 等浏览器快捷键吞掉远程桌面输入。
+- 将默认 Workspace profile 切换为 `full`，构建并实测 AISecEdu 的完整安全工具集合；IDA Free 固定使用 Hex-Rays 官方 8.4 安装器及校验哈希，并安装独立 128×128 高分辨率应用图标；移除不可稳定获取的 Binary Ninja Free 与其桌面残留入口。
 
 ## 二次开发能力
 
 当前部署支持直接个性化修改代码和添加功能模块：
 
 - 修改 `dojo_plugin/`、`dojo_theme/` 后执行 `dojo sync` 并重启相关服务；
-- 修改 `frontend/`、服务依赖或 Dockerfile 后仅重建受影响的 Compose 服务；
+- 修改 `dojo_theme/` 后同步并重启 CTFd；上游实验性 `frontend/` 不参与正常产品部署；
 - 可在 `docker-compose.yml` 增加服务，并用 `ops/import-inner-image.sh` 导入额外镜像；
 - 修改 `workspace/` 可扩展 Kata 工作区软件和 Terminal、Code、Desktop 服务，Nix 输入由 `workspace/flake.lock` 固定；
 - 所有定制保存在 `local/deployment` 分支，可用普通 Git 提交、对比、回退和合并上游更新。

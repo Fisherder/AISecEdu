@@ -37,7 +37,7 @@
                         <div class="flex-grow-1">
                             <div class="event-content">
                                 <span class="event-user"></span>
-                                <span> solved </span>
+                                <span> completed </span>
                                 <span class="event-location"></span>
                                 <span class="event-first-blood"></span>
                             </div>
@@ -78,9 +78,9 @@
                         <div class="flex-grow-1">
                             <div class="event-content">
                                 <span class="event-user"></span>
-                                <span> earned their </span>
+                                <span> reached the </span>
                                 <strong class="event-belt-name"></strong>
-                                <span>!</span>
+                                <span> achievement level!</span>
                                 <span class="event-belt-detail"></span>
                             </div>
                             <small class="text-muted event-time"></small>
@@ -238,7 +238,7 @@
             
             const firstBloodElem = card.querySelector('.event-first-blood');
             if (event.data.first_blood) {
-                firstBloodElem.innerHTML = ' <span class="badge bg-danger">FIRST BLOOD!</span>';
+                firstBloodElem.innerHTML = ' <span class="badge bg-danger">FIRST COMPLETION!</span>';
             } else {
                 firstBloodElem.remove();
             }

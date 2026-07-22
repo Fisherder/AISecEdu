@@ -13,7 +13,7 @@ function submitChallenge(event) {
     answer_input.prop("disabled", true);
 
     if (submission == "pwn.college{practice}") {
-        var message = "This is the practice flag! Find the real flag by pressing the Start button above to launch the challenge in unprivileged mode."
+        var message = "This is the practice flag. Find the real flag by pressing Start above to launch the exercise without elevated privileges."
         return renderSubmissionResponse({"data": {"status": "practice", "message": message}}, item);
     }
 
@@ -84,7 +84,7 @@ function renderSubmissionResponse(response, item) {
         }
 
         total_solves.text(
-            (parseInt(total_solves.text().trim().split(" ")[0]) + 1) + " solves"
+            (parseInt(total_solves.text().trim().split(" ")[0]) + 1) + " completions"
         );
 
         answer_input.val("");
@@ -241,7 +241,7 @@ function startChallenge(event) {
         result_notification.removeClass();
 
         if (result.success) {
-            var message = "Challenge successfully started!";
+            var message = "Exercise successfully started!";
             result_message.html(message);
             result_notification.addClass('alert alert-info alert-dismissable text-center');
 
@@ -263,7 +263,7 @@ function startChallenge(event) {
         $(".challenge-workspace").addClass("challenge-hidden");
         $(".iframe-wrapper").html("");
         if (result.success) {
-            item.find(".iframe-wrapper").html("<iframe id=\"workspace-iframe\" class=\"challenge-iframe\" src=\"\" allow=\"clipboard-read *; clipboard-write *\"></iframe>");
+            item.find(".iframe-wrapper").html("<iframe id=\"workspace-iframe\" class=\"challenge-iframe\" src=\"about:blank\" allow=\"clipboard-read *; clipboard-write *; fullscreen *\" allowfullscreen></iframe>");
             loadWorkspace();
             item.find(".challenge-init").addClass("challenge-hidden");
             item.find(".challenge-workspace").removeClass("challenge-hidden");
@@ -273,6 +273,7 @@ function startChallenge(event) {
                     .prop("checked", practice);
             windowResizeCallback("");
             moduleStartChallenge(event, channel);
+            window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
         }
 
         setTimeout(function() {
@@ -347,7 +348,7 @@ function markChallengeAsSolved(item) {
 
     const total_solves = item.find(".total-solves");
     total_solves.text(
-        (parseInt(total_solves.text().trim().split(" ")[0]) + 1) + " solves"
+        (parseInt(total_solves.text().trim().split(" ")[0]) + 1) + " completions"
     );
 
     const answer_input = item.find("#challenge-input");

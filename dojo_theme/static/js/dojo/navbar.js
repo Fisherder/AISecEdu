@@ -41,7 +41,10 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape") {
+        const modal = document.getElementById("searchModal");
+        if (e.key === "Escape" && modal && modal.classList.contains("show")) {
+            e.preventDefault();
+            e.stopPropagation();
             $('#searchModal').modal('hide');
         }
     });
@@ -272,9 +275,9 @@ const handleInput = () => {
             renderItem(`${c.dojo.name} / ${c.module.name} / ${c.name}`, c.link, c.description)
         );
 
-        if (dojoItems.length) renderSection("Dojos", dojoItems);
-        if (moduleItems.length) renderSection("Modules", moduleItems);
-        if (challengeItems.length) renderSection("Challenges", challengeItems);
+        if (dojoItems.length) renderSection("Courses", dojoItems);
+        if (moduleItems.length) renderSection("Units", moduleItems);
+        if (challengeItems.length) renderSection("Exercises", challengeItems);
         });
 };
   

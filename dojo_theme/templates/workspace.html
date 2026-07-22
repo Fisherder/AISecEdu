@@ -50,18 +50,52 @@
 
 
 {% block content %}
-<div class="challenge-workspace">
-  <iframe src="" id="workspace-iframe" allow="clipboard-read *; clipboard-write *"></iframe>
-  <div class="workspace-ssh" style="display: none;">
-    <h3>Connect with SSH</h3>
-    Link your <a href="/settings#ssh-key" target="_blank">SSH key</a>, then connect with: <code>ssh hacker@dojo.pwn.college</code>
+<div class="workspace-shell">
+  <aside class="workspace-navigation" data-workspace-navigation
+      data-current-dojo="{{ dojo.reference_id }}"
+      data-current-module="{{ module.id }}"
+      data-current-challenge="{{ challenge.id }}">
+    <div class="workspace-navigation-rail">
+      <button type="button" class="workspace-navigation-toggle" aria-expanded="true" title="Collapse course navigation">
+        <i class="fas fa-sitemap"></i>
+        <span class="sr-only">Toggle course navigation</span>
+      </button>
+    </div>
+    <div class="workspace-navigation-content">
+      <h2 class="workspace-navigation-title">Course Navigator</h2>
+      <label class="workspace-navigation-field">
+        <span>Course</span>
+        <select class="form-control" data-workspace-course></select>
+      </label>
+      <label class="workspace-navigation-field">
+        <span>Unit</span>
+        <select class="form-control" data-workspace-module></select>
+      </label>
+      <div class="workspace-navigation-challenges" data-workspace-challenges aria-label="Exercises"></div>
+      <div class="workspace-navigation-status" data-workspace-navigation-status>Loading courses…</div>
+    </div>
+  </aside>
+  <div class="challenge-workspace">
+    <div class="challenge-workspace-body">
+      <div class="challenge-workspace-surface">
+        <iframe src="about:blank" id="workspace-iframe" name="workspace" allow="clipboard-read *; clipboard-write *; fullscreen *" allowfullscreen></iframe>
+        {% include "components/workspace_loading.html" %}
+        <div class="workspace-ssh" style="display: none;">
+          <h3>Connect with SSH</h3>
+          Link your <a href="/settings#ssh-key" target="_blank">SSH key</a>, then connect with: <code>ssh hacker@{{ request.host.split(':')[0] }}</code>
+        </div>
+      </div>
+      {% include "components/learning_tutor.html" %}
+    </div>
+    {% include "components/actionbar.html" %}
   </div>
-  {% include "components/actionbar.html" %}
 </div>
 {% endblock %}
 
 
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/actionbar.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/workspace.js') }}"></script>
 {% endblock %}

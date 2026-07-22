@@ -87,19 +87,19 @@ function button_fetch_and_show(name, endpoint, method,data, success_message, abo
 $(() => {
     form_fetch_and_show("ssh-key", "/pwncollege_api/v1/ssh_key", "POST", "Your public key has been updated");
     form_fetch_and_show("discord", "/pwncollege_api/v1/discord", "DELETE", "Your discord account has been disconnected");
-    form_fetch_and_show("dojo-create", "/pwncollege_api/v1/dojos/create", "POST", "Your dojo has been created");
-    form_fetch_and_show("dojo-promote-admin", `/pwncollege_api/v1/dojos/${init.dojo}/admins/promote`, "POST", "User has been promoted to admin.", confirm_msg = (form, params) => {
+    form_fetch_and_show("dojo-create", "/pwncollege_api/v1/dojos/create", "POST", "Your course has been created");
+    form_fetch_and_show("dojo-promote-admin", `/pwncollege_api/v1/dojos/${init.dojo}/admins/promote`, "POST", "User has been promoted to teacher.", confirm_msg = (form, params) => {
         var user_name = form.find(`#name-for-${params["user_id"]}`)
-        return `Promote ${user_name.text()} (UID ${params["user_id"]}) to admin?`;
+        return `Promote ${user_name.text()} (UID ${params["user_id"]}) to teacher?`;
     });
-    form_fetch_and_show("dojo-promote-dojo", `/pwncollege_api/v1/dojos/${init.dojo}/promote`, "POST", "Dojo has been made official!", confirm_msg = (form, params) => {
-        return "Make this dojo official? Official dojos are accessible by their ID, without the hex differentiator, and show up in more dojo listings.";
+    form_fetch_and_show("dojo-promote-dojo", `/pwncollege_api/v1/dojos/${init.dojo}/promote`, "POST", "Course has been featured!", confirm_msg = (form, params) => {
+        return "Feature this course? Featured courses use their public slug and appear in additional course catalog sections.";
     });
     form_fetch_and_show("dojo-award-prune", `/pwncollege_api/v1/dojos/${init.dojo}/awards/prune`, "POST", "Legacy awards have been pruned.", confirm_msg = (form, params) => {
         return `Prune all awarded emoji based on updated completion requirements?`;
     });
-    button_fetch_and_show("dojo-delete",  `/dojo/${init.dojo}/delete/`, "POST", {dojo: init.dojo} ,"Dojo has been deleted.", "Deletion has been canceled.", confirm_msg = (x)=> {
-        var confirmation = prompt(`Are you sure you want to delete the dojo?\nEnter the dojo name\n\n${x.dojo}\n\nto confirm this action.\nThis action cannot be undone.`);
+    button_fetch_and_show("dojo-delete",  `/dojo/${init.dojo}/delete/`, "POST", {dojo: init.dojo} ,"Course has been deleted.", "Deletion has been canceled.", confirm_msg = (x)=> {
+        var confirmation = prompt(`Are you sure you want to delete the course?\nEnter the course slug\n\n${x.dojo}\n\nto confirm this action.\nThis action cannot be undone.`);
         return confirmation === x.dojo
     });
     button_fetch_and_show("reset-home", "/pwncollege_api/v1/workspace/reset_home", "POST", {}, "Home directory reset successfully", "Home directory reset canceled", function() {

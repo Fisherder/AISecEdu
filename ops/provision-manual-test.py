@@ -62,35 +62,26 @@ def session():
     return result
 
 
-def csrf_nonce(text):
-    match = re.search(r"'csrfNonce': \"(\w+)\"", text)
-    if not match:
-        raise RuntimeError("CSRF nonce was not present")
-    return match.group(1)
-
-
 def authenticate(name, password, register=False):
     client = session()
     endpoint = "register" if register else "login"
-    page = require(client.get(f"{BASE_URL}/{endpoint}", timeout=20))
+    client.headers["Authorization"] = "Bearer frontend-session"
     payload = {
         "name": name,
         "password": password,
-        "nonce": csrf_nonce(page.text),
     }
     if register:
         payload["email"] = f"{name}@example.invalid"
+        payload["commitment_accepted"] = True
     require(
         client.post(
-            f"{BASE_URL}/{endpoint}",
-            data=payload,
+            f"{BASE_URL}/pwncollege_api/v1/auth/{endpoint}",
+            json=payload,
             allow_redirects=False,
             timeout=20,
         ),
-        (302,),
+        (200,),
     )
-    home = require(client.get(f"{BASE_URL}/", timeout=20))
-    client.headers["CSRF-Token"] = csrf_nonce(home.text)
     return client
 
 

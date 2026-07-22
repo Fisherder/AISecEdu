@@ -60,8 +60,10 @@ def exec_run(cmd, *, shell=False, assert_success=True, workspace_user="root", us
         assert exit_code in (0, None), output
     return exit_code, output
 
-def reset_home(user_id):
-    exec_run("/bin/tar cvzf /tmp/home-backup.tar.gz /home/hacker", user_id=user_id, shell=True, workspace_user="hacker")
+def reset_home(user_id, *, backup=True):
+    if backup:
+        exec_run("/bin/tar cvzf /tmp/home-backup.tar.gz /home/hacker", user_id=user_id, shell=True, workspace_user="hacker")
     exec_run("find /home/hacker -mindepth 1 -delete", user_id=user_id, shell=True, workspace_user="root")
     exec_run("chown hacker:hacker /home/hacker", user_id=user_id, shell=True, workspace_user="root")
-    exec_run("cp /tmp/home-backup.tar.gz /home/hacker/", user_id=user_id, shell=True, workspace_user="hacker")
+    if backup:
+        exec_run("cp /tmp/home-backup.tar.gz /home/hacker/", user_id=user_id, shell=True, workspace_user="hacker")

@@ -4,7 +4,7 @@ import hashlib
 import base64
 
 from flask_restx import Namespace, Resource
-from flask import request, url_for, abort
+from flask import abort, request
 from CTFd.models import Users
 from CTFd.utils.user import get_current_user, is_admin
 from CTFd.utils.decorators import authed_only
@@ -57,7 +57,7 @@ class view_desktop(Resource):
         message = container_id
 
         node = user_node(user)
-        if not node == None and not node == 0:
+        if node is not None and node != 0:
             message = f"{container_id}:192.168.42.{node + 1}"
 
         digest = hmac.new(
@@ -110,6 +110,14 @@ class view_desktop(Resource):
                     "password": "password",
                 }
                 iframe_src = forward_workspace(service=service_param, service_path="vnc.html", signature=signature, message=message, **vnc_params)
+            elif service == "code":
+                iframe_src = forward_workspace(
+                    service=service,
+                    service_path="",
+                    signature=signature,
+                    message=message,
+                    folder="/challenge",
+                )
             else:
                 iframe_src = forward_workspace(service=service, service_path="", signature=signature, message=message)
 

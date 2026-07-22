@@ -14,25 +14,25 @@
 
 <div id="stats-dashboard" class="stats-dashboard">
   <div class="stat-card">
-    <div class="stat-card-header">Dojo Stats</div>
+    <div class="stat-card-header">Course Progress</div>
     <div class="stat-container">
       <div class="stat-box">
-        <div class="stat-label">Total Solves</div>
+        <div class="stat-label">Completed Exercises</div>
         <div class="stat-value">{{ render_stat_value(stats, "solves", show_neutral=False) }}</div>
       </div>
 
       <div class="stat-box">
-        <div class="stat-label">Hacking Now</div>
+        <div class="stat-label">Active Learners</div>
         <div class="stat-value">{{ render_stat_value(stats, "active", show_neutral=False) }}</div>
       </div>
 
       <div class="stat-box">
-        <div class="stat-label">Unique Hackers</div>
+        <div class="stat-label">Participating Students</div>
         <div class="stat-value">{{ render_stat_value(stats, "users", show_neutral=False) }}</div>
       </div>
 
       <div class="stat-box">
-        <div class="stat-label">Challenges</div>
+        <div class="stat-label">Exercises</div>
         <div class="stat-value">{{ render_stat_value(stats, "challenges", show_neutral=False) }}</div>
       </div>
     </div>
@@ -50,7 +50,7 @@
   </div>
 
   <div class="stat-card">
-    <div class="stat-card-header">Recent Awardees</div>
+    <div class="stat-card-header">Recent Achievements</div>
     <div class="recent-awards">
       {% if awards %}
         {% for award in awards[:3] %}
@@ -64,23 +64,23 @@
         </div>
         {% endfor %}
       {% else %}
-        <div class="recent-item">No awards yet</div>
+        <div class="recent-item">No achievements yet</div>
       {% endif %}
     </div>
   </div>
 
   <div class="stat-card">
-    <div class="stat-card-header">Recent Solves</div>
+    <div class="stat-card-header">Recent Completions</div>
     <div class="recent-activity">
       {% if stats and stats.recent_solves and stats.recent_solves|length > 0 %}
         {% for solve in stats.recent_solves %}
         <div class="recent-item">
-          {{ solve.challenge_name if solve.challenge_name else 'Unknown Challenge' }}
+          {{ solve.challenge_name if solve.challenge_name else 'Unknown Exercise' }}
           <div class="recent-time">{{ solve.date_display if solve.date_display else 'Unknown time' }}</div>
         </div>
         {% endfor %}
       {% else %}
-        <div class="recent-item">No recent solves</div>
+        <div class="recent-item">No recent completions</div>
       {% endif %}
     </div>
   </div>
@@ -119,14 +119,14 @@ function initializeChart() {
       labels: labels,
       datasets: [
         {
-          label: 'Daily Solves',
+          label: 'Daily Completions',
           data: solvesData,
           backgroundColor: 'rgba(120, 190, 32, 0.7)',
           borderColor: '#78be20',
           borderWidth: 1
         },
         {
-          label: 'Daily Users',
+          label: 'Daily Learners',
           data: usersData,
           backgroundColor: 'rgba(0, 163, 224, 0.7)',
           borderColor: '#00a3e0',

@@ -71,7 +71,7 @@
 
   {% if module.resources or module.challenges %}
   {% if is_dojo_admin and not module.show_challenges %}
-  <p><i>This module's challenges are hidden from view. You can see them as the dojo's administrator.</i></p>
+  <p><i>This unit's exercises are hidden from students. They remain visible to course teachers.</i></p>
   {% endif %}
 
   {% set previous_challenge = None %}
@@ -156,7 +156,7 @@
                 {% if lock_challenge %}
                 <div class="challenge-text-wrapper">
                   <span class="challenge-name-text">{{ challenge.name or challenge.id }}</span>
-                  <span class="challenge-locked-text">Solve <strong></string><span style="color: white">{{ previous_challenge.name or previous_challenge.id }}</span></strong> to unlock this challenge</span>
+                  <span class="challenge-locked-text">Complete <strong><span style="color: white">{{ previous_challenge.name or previous_challenge.id }}</span></strong> to unlock this exercise</span>
                   <span class="invisible-placeholder pr-2">{{ challenge.name or challenge.id }}</span>
                 </div>
                 {% else %}
@@ -169,26 +169,26 @@
                         {% if progression_locked and hidden %} & {% endif %}
                         {% if hidden %}hidden{% endif %}
                       </i>
-                      &mdash; this challenge is accessible because you are this dojo's administrator
+                      &mdash; this exercise is visible because you teach this course
                 </small></small></small>
                 {% endif %}
             </h4>
             <span class="challenge-header-right">
               {% if challenge_container_counts.get(challenge.id, 0) > 0 %}
               <span class="total-hackers">
-                {{ challenge_container_counts.get(challenge.id, 0) }} hacking,
+                {{ challenge_container_counts.get(challenge.id, 0) }} active,
               </span>
               {% endif %}
               <span class="total-solves">
-                {{ total_solves.get(challenge.challenge_id, 0) }} solves
+                {{ total_solves.get(challenge.challenge_id, 0) }} completions
               </span>
             </span>
           {% else %}
             <div class="embed-responsive challenge-description">
               {% if lock_challenge %}
-                <p><em>This challenge is locked</em></p>
+                <p><em>This exercise is locked</em></p>
               {% else %}
-                {% if not challenge.required %}<small>This challenge is optional, it will not count towards dojo completion.</small><br><br>{% endif %}
+                {% if not challenge.required %}<small>This exercise is optional and does not count toward course completion.</small><br><br>{% endif %}
                 {% if challenge_description_edit_urls.get(challenge.id) %}
                   <a href="{{ challenge_description_edit_urls[challenge.id] }}"
                      target="_blank"
@@ -201,13 +201,13 @@
               {% endif %}
             </div>
             <div class="challenge-init row{% if active %} challenge-hidden{% endif %}">
-              <div class="col-md-3 form=group text-center">
+              <div class="col-md-3 form-group text-center">
                 <button id="challenge-start" type="submit" class="btn btn-md btn-outline-secondary challenge-init">
                   <i class="fas fa-play fa-lg"></i>Start
                 </button>
               </div>
               {% if challenge.allow_privileged %}
-              <div class="col-md-3 form=group text-center">
+              <div class="col-md-3 form-group text-center">
                 <button id="challenge-priv" type="submit" class="btn btn-md btn-outline-secondary challenge-init">
                   <i class="fas fa-unlock fa-lg"></i>Privileged
                 </button>
@@ -221,14 +221,20 @@
               </div>
             </div>
             <div class="challenge-workspace {{ "challenge-hidden" if not active }}">
-              <div class="iframe-wrapper">
-                {% if active %}
-                <iframe id="workspace-iframe" class="challenge-iframe" src="" allow="clipboard-read *; clipboard-write *"></iframe>
-                {% endif %}
-              </div>
-              <div class="workspace-ssh" style="display: none;">
-                <h3>Connect with SSH</h3>
-                Link your <a href="/settings#ssh-key" target="_blank">SSH key</a>, then connect with: <code>ssh hacker@dojo.pwn.college</code>
+              <div class="challenge-workspace-body">
+                <div class="challenge-workspace-surface">
+                  <div class="iframe-wrapper">
+                    {% if active %}
+                    <iframe id="workspace-iframe" class="challenge-iframe" src="about:blank" allow="clipboard-read *; clipboard-write *; fullscreen *" allowfullscreen></iframe>
+                    {% endif %}
+                  </div>
+                  {% include "components/workspace_loading.html" %}
+                  <div class="workspace-ssh" style="display: none;">
+                    <h3>Connect with SSH</h3>
+                    Link your <a href="/settings#ssh-key" target="_blank">SSH key</a>, then connect with: <code>ssh hacker@{{ request.host.split(':')[0] }}</code>
+                  </div>
+                </div>
+                {% include "components/learning_tutor.html" %}
               </div>
               {% with popout=true %}
               {% include "components/actionbar.html" %}
@@ -259,10 +265,20 @@
   <br>
   {% endif %}
 
+  {% if is_dojo_admin %}
+  <a class="teacher-add-exercise" href="/dojo/{{ dojo.reference_id }}/studio?module={{ module.id | urlencode }}&amp;author=1">
+    <i class="fas fa-plus-circle" aria-hidden="true"></i>
+    <span><strong>Add an Exercise</strong><small>Create and publish a new exercise directly into this unit.</small></span>
+  </a>
+  <br>
+  {% elif not module.resources and not module.challenges %}
+  <p class="text-muted">No exercises have been published in this unit yet.</p>
+  {% endif %}
+
   {% if visible_challenges and module.show_scoreboard %}
 
-  <h2 class="row" id="scoreboard-heading">30-Day Scoreboard:</h2>
-  <p>This scoreboard reflects solves for challenges in this module after the module launched in this dojo.</p>
+  <h2 class="row" id="scoreboard-heading">30-Day Student Leaderboard</h2>
+  <p>This leaderboard reflects exercise completions in this unit.</p>
   {% from "macros/scoreboard.html" import scoreboard %}
   {{ scoreboard() }}
 
@@ -274,6 +290,8 @@
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/actionbar.js') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/challenges.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js') }}"></script>
 <script defer onload="loadScoreboard(30, 1);" src="{{ url_for('views.themes', path='js/dojo/scoreboard.js') }}"></script>
 {% if scroll_to_challenge %}
 <script>

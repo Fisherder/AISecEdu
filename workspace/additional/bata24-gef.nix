@@ -44,6 +44,7 @@ python3.pkgs.buildPythonPackage rec {
           pkgs.ps
         ]
       }
+    ln -s bata24-gef $out/bin/gef
   '';
 
   meta = with lib; {

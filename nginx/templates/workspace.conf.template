@@ -27,6 +27,15 @@ location ~ ^/workspace/(?P<container_id>[^/:]+)/(?P<sig>[^/]+)/(?P<port>\d+)(?:/
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 
+    set $workspace_accept_encoding $http_accept_encoding;
+    if ($port = 7681) {
+        set $workspace_accept_encoding "";
+    }
+    proxy_set_header Accept-Encoding $workspace_accept_encoding;
+    gunzip on;
+    sub_filter_once on;
+    sub_filter '</head>' '<script id="aisecedu-terminal-keyboard-guard">(function(){if(location.pathname.indexOf("/7681/")===-1)return;var NativeWebSocket=window.WebSocket;var terminalSocket=null;window.WebSocket=new Proxy(NativeWebSocket,{construct:function(Target,args){var socket=new Target(...args);var protocols=args[1];if(protocols==="tty"||(Array.isArray(protocols)&&protocols.indexOf("tty")!==-1))terminalSocket=socket;return socket;}});function guardEscape(event){var target=event.target;if(event.key!=="Escape"||!target||!target.classList||!target.classList.contains("xterm-helper-textarea"))return;event.preventDefault();event.stopImmediatePropagation();if(event.type==="keydown"&&!event.repeat&&terminalSocket&&terminalSocket.readyState===NativeWebSocket.OPEN)terminalSocket.send(new Uint8Array([48,27]));setTimeout(function(){target.focus({preventScroll:true});},0);}window.addEventListener("keydown",guardEscape,true);window.addEventListener("keyup",guardEscape,true);})();</script></head>';
+
     proxy_intercept_errors on;
     error_page 502 = @workspace_not_found;
 
@@ -56,6 +65,15 @@ location ~ ^/workspace/(?P<container_id>[^/]+):(?P<target_host>[^/]+)/(?P<sig>[^
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+
+    set $workspace_accept_encoding $http_accept_encoding;
+    if ($port = 7681) {
+        set $workspace_accept_encoding "";
+    }
+    proxy_set_header Accept-Encoding $workspace_accept_encoding;
+    gunzip on;
+    sub_filter_once on;
+    sub_filter '</head>' '<script id="aisecedu-terminal-keyboard-guard">(function(){if(location.pathname.indexOf("/7681/")===-1)return;var NativeWebSocket=window.WebSocket;var terminalSocket=null;window.WebSocket=new Proxy(NativeWebSocket,{construct:function(Target,args){var socket=new Target(...args);var protocols=args[1];if(protocols==="tty"||(Array.isArray(protocols)&&protocols.indexOf("tty")!==-1))terminalSocket=socket;return socket;}});function guardEscape(event){var target=event.target;if(event.key!=="Escape"||!target||!target.classList||!target.classList.contains("xterm-helper-textarea"))return;event.preventDefault();event.stopImmediatePropagation();if(event.type==="keydown"&&!event.repeat&&terminalSocket&&terminalSocket.readyState===NativeWebSocket.OPEN)terminalSocket.send(new Uint8Array([48,27]));setTimeout(function(){target.focus({preventScroll:true});},0);}window.addEventListener("keydown",guardEscape,true);window.addEventListener("keyup",guardEscape,true);})();</script></head>';
 
     proxy_intercept_errors on;
     error_page 502 = @workspace_not_found;

@@ -98,6 +98,11 @@ DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID")
 INTERNET_FOR_ALL = bool(ast.literal_eval(os.getenv("INTERNET_FOR_ALL") or "False"))
 MAC_HOSTNAME = os.getenv("MAC_HOSTNAME")
 MAC_USERNAME = os.getenv("MAC_USERNAME")
+DOJO_AI_ENABLED = (os.getenv("DOJO_AI_ENABLED") or "false").lower() in {"1", "true", "yes"}
+DOJO_AI_BASE_URL = (os.getenv("DOJO_AI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+DOJO_AI_API_KEY = os.getenv("DOJO_AI_API_KEY")
+DOJO_AI_MODEL = os.getenv("DOJO_AI_MODEL") or "gpt-4o-mini"
+DOJO_AI_TIMEOUT_SECONDS = float(os.getenv("DOJO_AI_TIMEOUT_SECONDS") or "30")
 
 missing_errors = ["DOJO_HOST", "HOST_DATA_PATH"]
 for config_option in missing_errors:
@@ -106,8 +111,11 @@ for config_option in missing_errors:
         raise RuntimeError(f"Configuration Error: {config_option} must be set in the environment")
 
 def bootstrap():
-    set_config("ctf_name", "pwn.college")
-    set_config("ctf_description", "pwn.college")
+    set_config("ctf_name", "AISecEdu")
+    set_config(
+        "ctf_description",
+        "Hands-on cybersecurity courses, guided practice, and isolated workspaces.",
+    )
     set_config("user_mode", "users")
 
     set_config("challenge_visibility", "public")

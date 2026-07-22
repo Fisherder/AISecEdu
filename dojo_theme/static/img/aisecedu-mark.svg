@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">AISecEdu</title>
+  <rect width="128" height="128" rx="24" fill="#111111"/>
+  <path d="M24 91 49 34h15L39 91Zm54 0L58 34h16l8 27 10-27h16L87 91Z" fill="#f7f7f7"/>
+  <circle cx="102" cy="96" r="9" fill="#78be20"/>
+  <path d="M26 103h76" stroke="#ffc627" stroke-width="7" stroke-linecap="round"/>
+</svg>

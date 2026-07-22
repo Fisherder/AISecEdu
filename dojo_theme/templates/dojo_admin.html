@@ -3,7 +3,7 @@
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1>Dojo Admin</h1>
+    <h1>Course Administration</h1>
     <br>
     <h2>{{ dojo.name }}</h2>
   </div>
@@ -11,7 +11,7 @@
 <div class="container">
   <div id="dojo-delete-results" class="form-group">
   <div class="row text-center">
-    <p style="margin-left: 1rem;">Share the dojo using this link!</p>
+    <p style="margin-left: 1rem;">Share this enrollment link with students.</p>
     <div class="input-group mx-3 mb-2">
       <input type="text" id="user-token-result" class="form-control" value="{{ url_for('pwncollege_dojo.join_dojo', dojo=dojo.reference_id, password=dojo.password, _external=True) }}" readonly>
       <div class="input-group-append">
@@ -42,7 +42,7 @@
       <figure>
       <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.dojo_solves', dojo=dojo.reference_id, solves_code=dojo.solves_code, format='csv') }}">
         <i class="fas fa-file-csv fa-3x"></i>
-        <figcaption><b>Solves</b></figcaption>
+        <figcaption><b>Completions</b></figcaption>
       </a>
       </figure>
     </div>
@@ -80,28 +80,28 @@
     {% if is_admin() %}
     <form method="post" id="dojo-promote-dojo-form" autocomplete="off">
       <div class="form-group">
-        <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="Make This Dojo Official">
+        <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="Feature This Course">
       </div>
       <div id="dojo-promote-dojo-results" class="form-group">
       </div>
     </form>
     {% endif %}
   </div>
-  <b>Reference ID: </b><code>{{ dojo.reference_id }}</code>
+  <b>Course Slug: </b><code>{{ dojo.reference_id }}</code>
   <br>
-  <b>Dojo ID: </b><code>{{ dojo.hex_dojo_id }}</code>
+  <b>Internal Course ID: </b><code>{{ dojo.hex_dojo_id }}</code>
   <br>
   <!-- <b>Update Code: </b><code>{{ dojo.update_code }}</code>
   <br> -->
   <b>Git Hash: </b><code>{{ dojo.hash[:8] }}</code>
   <br>
-  <b>Admins</b>
+  <b>Teachers</b>
   <ul>
     {% for admin in dojo.admins %}
     <li>{{ admin.user.name }}</li>
     {% endfor %}
   </ul>
-  <b>Members</b>
+  <b>Students</b>
   <form method="post" id="dojo-promote-admin-form" autocomplete="off">
     <div class="form-group">
       {% for member in dojo.members %}
@@ -109,7 +109,7 @@
       <label for="{{ member.user.id }}"><a href="{{ url_for('pwncollege_users.view_other', user_id=member.user.id) }}"><span id="name-for-{{member.user.id}}">{{ member.user.name }}</span></a></label>
       <br>
       {% endfor %}
-      <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="Promote to Admin">
+      <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="Promote to Teacher">
     </div>
     <div id="dojo-promote-admin-results" class="form-group">
     </div>

@@ -24,6 +24,11 @@ x-ctfd-env: &ctfd-env
   INTERNET_FOR_ALL: ${INTERNET_FOR_ALL}
   MAC_HOSTNAME: ${MAC_HOSTNAME}
   MAC_USERNAME: ${MAC_USERNAME}
+  DOJO_AI_ENABLED: ${DOJO_AI_ENABLED:-false}
+  DOJO_AI_BASE_URL: ${DOJO_AI_BASE_URL:-https://api.openai.com/v1}
+  DOJO_AI_API_KEY: ${DOJO_AI_API_KEY:-}
+  DOJO_AI_MODEL: ${DOJO_AI_MODEL:-gpt-4o-mini}
+  DOJO_AI_TIMEOUT_SECONDS: ${DOJO_AI_TIMEOUT_SECONDS:-30}
 
 x-ctfd-volumes: &ctfd-volumes
   - /data/dojos:/var/dojos
@@ -68,11 +73,12 @@ services:
   workspace-builder:
     container_name: workspace-builder
     hostname: workspace-builder
+    network_mode: host
     profiles:
       - workspace
     build: ./workspace
     environment:
-      - DOJO_WORKSPACE=${DOJO_WORKSPACE}
+      - DOJO_WORKSPACE=${DOJO_WORKSPACE:-full}
       - NIX_GARBAGE_COLLECT=${NIX_GARBAGE_COLLECT:-false}
     volumes:
       - /data/workspace/nix:/nix
@@ -143,7 +149,7 @@ services:
       SERVER_SENT_EVENTS: "false"
       SECRET_KEY: ${SECRET_KEY}
       DOJO_ENV: ${DOJO_ENV}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://future.${DOJO_HOST}}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://${DOJO_HOST}}
       DOCKER_USERNAME: ${DOCKER_USERNAME}
       DOCKER_TOKEN: ${DOCKER_TOKEN}
     volumes:
@@ -426,7 +432,7 @@ services:
   frontend:
     container_name: frontend
     profiles:
-      - main
+      - future
     restart: always
     build:
       context: ./frontend

@@ -1,12 +1,19 @@
-# DOJO Architecture
+# AISecEdu 学生题目平台架构
 
-We created the pwn.college DOJO specifically to facilitate hands-on cybersecurity education.
-DOJO adopts principles from the realm of Capture The Flag competitions, wherein learners are tasked with solving challenges and obtaining flags as evidence of their newfound skills.
-Instead of imposing the onus of environment setup on learners, DOJO offers a pre-configured environment, available through browsers or SSH and allowing students to dive into hands-on cybersecurity challenges instantly.
-In contrast to existing platforms, our primary focus is to allow students to execute _every step_---discovery, implementation, and debugging---of even the most advanced and technical challenges directly within the DOJO environment.
+AISecEdu 是一套面向网络安全实践教学的课程与题目平台。学生在同一个入口中加入课程、按教学单元学习、完成教师发布的题目，并查看自己的作答结果和学习证据；教师在同一个身份体系下完成课程管理、题目发布、学习分析与申诉复核。浏览器工作区和 SSH 为题目提供预配置、相互隔离且可持续保存个人目录的实验环境。
 
-Of course, this all means that the DOJO is insanely complex, despite only comprising about 5,000 lines of actual code.
-This document is an attempt to clarify this complexity and enable new admins or contributors to get up to speed quickly.
+系统直接沿用 pwn.college 的运行时、CTFd 数据层和 `dojo_theme` Web 界面。`Dojos` 等类名和 `pwncollege_api` API 前缀保持上游兼容；新增学习功能在同一课程、教学单元、题目和作答结果上扩展。平台只有一套 CTFd 身份与权限、一个 Flask/Jinja Web 应用、一套 API 和一个 PostgreSQL 数据库。
+
+## 领域模型对应关系
+
+| 产品概念 | 兼容实现 | 语义边界 |
+| --- | --- | --- |
+| 课程 | `Dojos` / 单个 `dojo` | 教师、成员、可见性、教学单元与总体进度的聚合根 |
+| 教学单元 | `DojoModules` / 单个 `module` | 课程内有序组织的教学内容和题目集合 |
+| 题库发布项 | `DojoChallenges` / 单个 `DojoChallenge` | 教师把一道底层 CTFd `Challenge` 发布到指定课程与教学单元后的稳定关联；可携带必做、顺序、版本和学习档案 |
+| 作答结果 | CTFd `Submissions` 与 `Solves` | `Submission` 记录每次答案提交及其正确性，`Solve` 记录首次成功完成；二者共同构成学生的题目作答结果 |
+
+`LearningAttempts`、证据事件、反思和评测是作答过程的扩展记录，不替代 CTFd 的 `Submission/Solve` 事实源。首页和学习中心只从这些真实关系汇总“已加入课程、教学单元、当前题目、已完成题目、提交次数”等信息，不生成模拟学习数据。
 
 ## High Level Overview
 
@@ -21,6 +28,8 @@ Alternatively, students may choose to connect to the workspace via SSH after pro
 Their home directory is persisted across workspace instances, allowing students to save their work and return to it later.
 The workspace may also situationally start a virtual machine, if the challenge requires it (e.g., for kernel exploitation), or configure custom networking (e.g., for network exploitation).
 Additionally, the workspace comes with a suite of tools pre-installed, including debuggers, disassemblers, and exploit development tools.
+
+AISecEdu's learning capabilities are implemented inside this same boundary. The Flask plugin owns identity, server-rendered pages, authoring, attempts, evidence, Tutor policy, assessment, skills, recommendations, appeals, and analytics; the existing workspace emits authenticated evidence. The original `dojo_theme` remains the only canonical learner and authentication UI, including the grouped dojo catalog, dojo stats/modules/scoreboard, module challenge accordion, and workspace surfaces. Learning overview, analysis, teacher, and Tutor views extend those same templates and components. The historical `future` host redirects to the main origin, and its optional upstream frontend service is not part of the normal deployment. There is no parallel API service, web application, authentication system, terminal gateway, or learning database. See [Intelligent Learning and Evidence Assessment](./learning.md) for the domain design.
 
 The challenge objective is always to *capture the flag*.
 More specifically, the learner runs as the `hacker` user (UID 1000), and there is a flag file located at `/flag`, which is only readable by the `root` user (UID 0).
@@ -108,7 +117,7 @@ Each entry in this list is the node's wireguard public key.
 
 ## DOJO database
 
-The DOJO uses mysql.
+The DOJO uses PostgreSQL. CTFd, the original DOJO models, and the intelligent learning tables all share this one database and SQLAlchemy transaction boundary.
 
 The DOJO database lives in the `db` container by default.
 You can use an external database by setting `DB_HOST` in `config.env`.

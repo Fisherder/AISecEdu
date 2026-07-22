@@ -33,7 +33,7 @@ let
 
     compress = [ gnutar gzip unzip zip ];
 
-    debug = [ bata24-gef gdb gef ltrace pwndbg strace ];
+    debug = [ bata24-gef gdb ltrace strace ];
 
     documentation = [ man-pages man-pages-posix ];
 
@@ -49,7 +49,7 @@ let
 
     network = [ burpsuite netcat-openbsd nmap tcpdump termshark tshark wireshark ];
 
-    reverse = [ angr-management binaryninja-free cutter file ghidra ida-free radare2 ];
+    reverse = [ angr-management cutter file ghidra ida-free radare2 ];
 
     shells = [ fish nushell oh-my-zsh starship zsh ];
 

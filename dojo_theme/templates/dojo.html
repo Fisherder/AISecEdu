@@ -26,22 +26,50 @@
   {% endif %}
 
   <div class="row text-center">
+    {% if user %}
+    <div class="col-lg-auto m-3">
+      <figure>
+        <a class="text-decoration-none" href="/dojo/{{ dojo.reference_id }}/learning">
+          <i class="fas fa-chart-line fa-3x"></i>
+          <figcaption><b>My Progress</b></figcaption>
+        </a>
+      </figure>
+    </div>
+    {% endif %}
     {% if dojo.course and user %}
     <div class="col-lg-auto m-3">
       <figure>
         <a class="text-decoration-none" href="{{ url_for('course.view_course', dojo=dojo.reference_id) }}">
           <i class="fas fa-graduation-cap fa-3x"></i>
-          <figcaption><b>Course</b></figcaption>
+          <figcaption><b>Class Information</b></figcaption>
         </a>
       </figure>
     </div>
     {% endif %}
-    {% if dojo_user.type == "admin" or user.type == "admin" %}
+    {% if dojo.is_admin(user) %}
     <div class="col-lg-auto m-3">
       <figure>
         <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.view_dojo_admin', dojo=dojo.reference_id) }}">
           <i class="fas fa-users-cog fa-3x"></i>
-          <figcaption><b>Admin</b></figcaption>
+          <figcaption><b>Roster &amp; Settings</b></figcaption>
+        </a>
+      </figure>
+    </div>
+    <div class="col-lg-auto m-3">
+      <figure>
+        <a class="text-decoration-none" href="/dojo/{{ dojo.reference_id }}/studio">
+          <i class="fas fa-chalkboard-teacher fa-3x"></i>
+          <figcaption><b>Teacher Studio</b></figcaption>
+        </a>
+      </figure>
+    </div>
+    {% endif %}
+    {% if user and not dojo_user and not dojo.is_admin(user) %}
+    <div class="col-lg-auto m-3">
+      <figure>
+        <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.join_dojo', dojo=dojo.reference_id) }}">
+          <i class="fas fa-user-plus fa-3x"></i>
+          <figcaption><b>Join Course</b></figcaption>
         </a>
       </figure>
     </div>
@@ -55,14 +83,14 @@
   <br>
   {% endif %}
 
-  {% if dojo.modules %}
-  <h2 class="row">Stats</h2>
+  {% if dojo.modules or dojo.is_admin(user) %}
+  <h2 class="row">Learning Status</h2>
   {% include "components/stat_dashboard.html" %}
   <div class="row"></div>
 
   <br>
 
-  <h2 class="row">Modules</h2>
+  <h2 class="row">Units</h2>
   <br>
   <ul class="card-list">
     {% for module in dojo.modules %}
@@ -74,8 +102,8 @@
         url_for('pwncollege_dojo.view_dojo_path', dojo=dojo_id, path=module.id),
 	title=module.name or module.id,
         text_lines = [
-          "{} Hacking".format(container_count) if container_count > 0 else "",
-          "{} / {}".format(
+	  "{} Active".format(container_count) if container_count > 0 else "",
+          "{} / {} Exercises completed".format(
             num_solved_required,
             num_challs
           ),
@@ -85,12 +113,20 @@
       ) }}
     {% endif %}
     {% endfor %}
+    {% if dojo.is_admin(user) %}
+    <li class="card card-small course-add-unit-card">
+      <button type="button" data-toggle="modal" data-target="#create-unit-modal" title="Add a unit to this course">
+        <i class="fas fa-plus-circle" aria-hidden="true"></i>
+        <span>Add Unit</span>
+      </button>
+    </li>
+    {% endif %}
   </ul>
 
   {% if dojo.show_scoreboard %}
   <br>
 
-  <h2 class="row" id="scoreboard-heading">30-Day Scoreboard:</h2>
+  <h2 class="row" id="scoreboard-heading">30-Day Student Leaderboard</h2>
   <br>
   {% from "macros/scoreboard.html" import scoreboard %}
   {{ scoreboard() }}
@@ -99,10 +135,46 @@
 
   {% endif %}
 </div>
+
+{% if dojo.is_admin(user) %}
+<div class="modal fade" id="create-unit-modal" tabindex="-1" role="dialog" aria-labelledby="create-unit-title" aria-hidden="true" data-course-id="{{ dojo.reference_id }}">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content bg-dark text-white">
+      <form id="create-unit-form">
+        <div class="modal-header">
+          <h3 class="modal-title" id="create-unit-title">Add a Unit</h3>
+          <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+        <div class="modal-body">
+          <div id="create-unit-notice" class="alert" role="alert" hidden></div>
+          <div class="form-group">
+            <label for="create-unit-name">Unit name</label>
+            <input id="create-unit-name" class="form-control" maxlength="128" required placeholder="Web Security Foundations">
+          </div>
+          <div class="form-group">
+            <label for="create-unit-id">Unit ID</label>
+            <input id="create-unit-id" class="form-control" maxlength="32" required pattern="[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?" placeholder="web-security-foundations">
+            <small class="form-text text-muted">Lowercase letters, numbers, and hyphens. This becomes part of the unit URL.</small>
+          </div>
+          <div class="form-group mb-0">
+            <label for="create-unit-description">Description</label>
+            <textarea id="create-unit-description" class="form-control" rows="5" maxlength="24000" placeholder="What students will learn and practice in this unit."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">Cancel</button>
+          <button id="create-unit-submit" type="submit" class="btn btn-primary">Create Unit</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script defer onload="loadScoreboard(30, 1);" src="{{ url_for('views.themes', path='js/dojo/scoreboard.js') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/copy.js') }}"></script>
+{% if dojo.is_admin(user) %}<script defer src="{{ url_for('views.themes', path='js/dojo/course-admin.js') }}"></script>{% endif %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}

@@ -3,11 +3,7 @@
 <nav class="navbar navbar-expand-md navbar-dark fixed-top">
   <div class="container">
     <a href="{{ url_for('views.static_html', route='/') }}" class="brand-mono-bold wordmark">
-      {% if Configs.ctf_name == "pwn.college" %}
-      <span class="brand-white">pwn</span><span class="brand-dot-white">.</span><span class="brand-white">college</span>
-      {% else %}
       <span class="brand-white">{{ Configs.ctf_name }}</span>
-      {% endif %}
     </a>
     <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#base-navbars"
             aria-controls="base-navbars" aria-expanded="false" aria-label="Toggle navigation">
@@ -16,10 +12,10 @@
     <div class="collapse navbar-collapse" id="base-navbars">
       <div class="d-none d-md-block" style="border-left: 2px solid white; height: 20px; margin: 0 20px;"></div>
       <ul class="navbar-nav mr-auto">
-        {{ navitem("Dojos", url_for("pwncollege_dojos.listing"), "fa-torii-gate") }}
+        {{ navitem("Courses", url_for("pwncollege_dojos.listing"), "fa-graduation-cap") }}
+        {{ navitem("My Learning", "/learning", "fa-brain") }}
         {{ navitem("Workspace", url_for("pwncollege_workspace.view_workspace"), "fa-desktop") }}
-        {{ navitem("Help", url_for("pwncollege_sensai.view_sensai"), "fa-question", new=True) }}
-        {{ navitem("Chat", "https://discord.gg/pwncollege", "fa-comments", new=True) }}
+        {{ navitem("Guide", url_for("pwncollege_sensai.view_sensai"), "fa-question") }}
         {{ navitem("Search", "#", "fa-search") }}
       </ul>
       <hr class="d-sm-flex d-md-flex d-lg-none">

@@ -3,14 +3,14 @@ import pytest
 import json
 import re
 
-from utils import DOJO_URL, dojo_run, workspace_run, start_challenge, solve_challenge, db_sql, get_user_id
+from utils import DOJO_URL, workspace_run, start_challenge, solve_challenge, get_user_id
 
 def check_mount(path, *, user, fstype=None, check_nosuid=True):
     try:
         result = workspace_run(f"findmnt -J {path}", user=user)
     except subprocess.CalledProcessError as e:
         assert False, f"'{path}' not mounted: {(e.stdout, e.stderr)}"
-    assert result, f"'{path}' not mounted: {(e.stdout, e.stderr)}"
+    assert result, f"'{path}' not mounted"
 
     mount_info = json.loads(result.stdout)
     assert len(mount_info.get("filesystems", [])) == 1, f"Expected exactly one filesystem, but got: {mount_info}"
@@ -26,6 +26,26 @@ def check_mount(path, *, user, fstype=None, check_nosuid=True):
 
 def test_start_challenge(admin_session, example_dojo):
     start_challenge(example_dojo, "hello", "apple", session=admin_session)
+
+
+def test_workspace_starts_in_challenge_directory(admin_session, example_dojo):
+    start_challenge(example_dojo, "hello", "apple", session=admin_session)
+    result = workspace_run("pwd", user="admin")
+    assert result.stdout.strip() == "/challenge"
+
+
+def test_workspace_full_security_toolchain(admin_session, example_dojo):
+    start_challenge(example_dojo, "hello", "apple", session=admin_session)
+    result = workspace_run(
+        "set -e; "
+        "for tool in gcc clang make nasm vim nvim gdb gef pwndbg strace ltrace "
+        "python3 pwn file strings objdump readelf burpsuite ghidra cutter nmap "
+        "wireshark tshark tcpdump radare2 r2 tmux curl wget; "
+        'do command -v "$tool"; done; '
+        "command -v ida || command -v ida64 || command -v idat64",
+        user="admin",
+    )
+    assert len(result.stdout.splitlines()) >= 30
 
 
 def test_active_module_endpoint(random_user_session, example_dojo):
@@ -90,11 +110,11 @@ def test_workspace_path_exists(path):
 
 def test_workspace_flag_permission():
     try:
-        workspace_run("cat /flag", user="admin")
+        result = workspace_run("cat /flag", user="admin")
     except subprocess.CalledProcessError as e:
         assert "Permission denied" in e.stderr, f"Expected permission denied, but got: {(e.stdout, e.stderr)}"
     else:
-        assert False, f"Expected permission denied, but got no error: {(e.stdout, e.stderr)}"
+        assert False, f"Expected permission denied, but got no error: {(result.stdout, result.stderr)}"
 
 
 def test_workspace_challenge():
@@ -184,6 +204,47 @@ def test_reset_home_directory(random_user_name, random_user_session, example_doj
         workspace_run("[ ! -f '/home/hacker/testfile' ]", user=random_user_name)
     except subprocess.CalledProcessError as e:
         assert False, f"Expected test file to be wiped, but got: {(e.stdout, e.stderr)}"
+
+
+def test_complete_challenge_reset(random_user_name, random_user_session, example_dojo):
+    start_challenge(example_dojo, "hello", "apple", session=random_user_session)
+    workspace_run(
+        "touch /home/hacker/full-reset-home /tmp/full-reset-container",
+        user=random_user_name,
+    )
+
+    response = random_user_session.post(
+        f"{DOJO_URL}/pwncollege_api/v1/docker/reset",
+        json={},
+    )
+    assert response.status_code == 200
+    assert response.json()["success"], response.json()
+    workspace_run(
+        "test ! -e /home/hacker/full-reset-home && test ! -e /tmp/full-reset-container",
+        user=random_user_name,
+    )
+
+
+@pytest.mark.parametrize(
+    ("legacy_path", "canonical_query"),
+    [
+        ("/workspace/terminal", "service=terminal"),
+        ("/workspace/code", "service=code"),
+        ("/workspace/desktop", "service=desktop"),
+        ("/workspace/7681", "port=7681"),
+    ],
+)
+def test_legacy_workspace_pages_redirect(
+    random_user_session,
+    legacy_path,
+    canonical_query,
+):
+    response = random_user_session.get(
+        f"{DOJO_URL}{legacy_path}",
+        allow_redirects=False,
+    )
+    assert response.status_code == 308
+    assert response.headers["Location"].endswith(f"/workspace?{canonical_query}")
 
 
 def test_unprivileged_challenge(random_user_name, random_user_session, example_dojo):

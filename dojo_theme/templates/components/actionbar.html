@@ -42,6 +42,22 @@
     padding-right: 0.75em;
   }
 
+  button.workspace-control.workspace-reset {
+    width: auto;
+    padding-left: 0.75em;
+    padding-right: 0.75em;
+  }
+
+  button.workspace-control.workspace-clipboard {
+    width: auto;
+    padding-left: 0.75em;
+    padding-right: 0.75em;
+  }
+
+  .workspace-clipboard span {
+    margin-left: 0.4em;
+  }
+
   .workspace-service .workspace-service-name {
     margin-left: 0.4em;
   }
@@ -217,18 +233,28 @@
     {% if popout and not service.port %}<i class="fas fa-question-circle hint-icon"></i>{% endif %}
   </button>
   {% endfor %}
+  <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="paste" title="Paste text from this device into the remote desktop" hidden>
+    <i class="fas fa-paste"></i><span>Paste</span>
+  </button>
+  <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="copy" title="Copy the latest remote desktop clipboard text to this device" hidden>
+    <i class="fas fa-copy"></i><span>Copy</span>
+  </button>
   <div title="Enter flag" class="workspace-control workspace-input">
     <i class="fas fa-flag workspace-highlight input-icon"></i>
     <input id="flag-input" type="text" placeholder="Flag">
     <input type="hidden" id="current-challenge-id" value="{{ challenge.challenge_id }}" data-challenge-name="{{ challenge.name }}">
   </div>
   <div class="workspace-control-spacer"></div>
-  <button id="challenge-restart" title="Restart challenge" class="workspace-control btn btn-md btn-outline-secondary btn-challenge-start">
+  <button id="challenge-restart" title="Restart exercise and keep home files" class="workspace-control btn btn-md btn-outline-secondary btn-challenge-start btn-challenge-busy">
     <i class="fas fa-redo"></i>
+  </button>
+  <button id="challenge-reset" title="Erase home files and reset the exercise to its original state" class="workspace-control workspace-reset btn btn-md btn-outline-danger btn-challenge-busy">
+    <i class="fas fa-eraser"></i>
+    <span class="workspace-service-name">Reset</span>
   </button>
   {% if challenge.allow_privileged %}
   <label id="workspace-change-privilege"
-      title="Restart the challenge with or without sudo access"
+      title="Restart the exercise with or without sudo access"
       class="workspace-control btn btn-md btn-outline-secondary"
       data-privileged="{{'true' if practice else 'false'}}">
     <input type="checkbox" {{'checked' if practice}}>
@@ -236,7 +262,7 @@
   </label>
   {% endif %}
   {% if not popout %}
-  <button id="fullscreen" title="Toggle fullscreen" class="workspace-control btn btn-md btn-outline-secondary">
+  <button id="fullscreen" title="Toggle fullscreen keyboard capture" class="workspace-control btn btn-md btn-outline-secondary">
     <i class="fas fa-expand"></i>
   </button>
   {% endif %}

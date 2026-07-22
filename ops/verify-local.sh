@@ -78,12 +78,12 @@ if [[ -n $client_address ]]; then
     pass "configured client address is reachable through the LAN route"
 fi
 
-wait_for "pwn.college systemd service" \
+wait_for "application systemd service" \
     docker exec "$container" systemctl is-active --quiet pwn.college.service
-pass "pwn.college systemd service is active"
+pass "application systemd service is active"
 
 required_services=(
-    frontend prometheus grafana node-exporter db pgbouncer cache homefs
+    prometheus grafana node-exporter db pgbouncer cache homefs
     image-pull-worker nginx sshd dojofs watchdog cadvisor stats-worker ctfd
 )
 for service in "${required_services[@]}"; do
@@ -94,6 +94,12 @@ for service in "${required_services[@]}"; do
     fi
 done
 pass "all long-running inner services are running"
+
+if docker exec "$container" docker inspect -f '{{.State.Running}}' frontend 2>/dev/null | grep -qx true; then
+    echo "The optional frontend container must not run on the canonical AISecEdu UI deployment" >&2
+    exit 1
+fi
+pass "the optional frontend service is not running"
 
 for service in pwncollege-create-workspace-net-1 pwncollege-prometheus-generate-targets-1 workspace-builder; do
     wait_for "$service completion" one_shot_completed "$service"
@@ -150,7 +156,7 @@ http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
 pass "HTTP redirects to HTTPS"
 
 lan_health=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/lan-health")
-[[ $lan_health == "pwn.college LAN endpoint ready" ]]
+[[ $lan_health == "AISecEdu LAN endpoint ready" ]]
 downloaded_fingerprint=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/local-tls.crt" \
     | openssl x509 -noout -fingerprint -sha256)
 local_fingerprint=$(openssl x509 -in "$repo_dir/data/local-tls/ca.crt" \
@@ -163,8 +169,82 @@ body=$(curl -sS --fail \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
     --resolve "$dojo_host:$https_port:$listen_address" \
     "https://$dojo_host:$https_port/")
-grep -qi 'pwn' <<<"$body"
-pass "HTTPS application page renders with the local CA"
+grep -Fq 'brand-mono-bold wordmark-large' <<<"$body"
+grep -Fq 'Learn cybersecurity by doing.' <<<"$body"
+grep -Fq '<span class="brand-white">AISecEdu</span>' <<<"$body"
+if grep -Fiq 'pwn.college' <<<"$body"; then
+    echo "Legacy pwn.college branding remains on the AISecEdu homepage" >&2
+    exit 1
+fi
+pass "the AISecEdu course homepage renders with the local CA"
+
+for path in /login /register /reset_password; do
+    learner_page=$(curl -sS --fail \
+        --noproxy '*' \
+        --cacert "$repo_dir/data/local-tls/ca.crt" \
+        --resolve "$dojo_host:$https_port:$listen_address" \
+        "https://$dojo_host:$https_port$path")
+    grep -Fq 'brand-mono-bold wordmark' <<<"$learner_page"
+    grep -Fq '>AISecEdu</span>' <<<"$learner_page"
+    if grep -Fiq 'pwn.college' <<<"$learner_page"; then
+        echo "Legacy pwn.college branding remains on $path" >&2
+        exit 1
+    fi
+done
+pass "authentication pages use AISecEdu branding"
+
+for asset in learning-common learning-overview learning-dashboard learning-studio learning-tutor; do
+    curl -sS --fail -o /dev/null \
+        --noproxy '*' \
+        --cacert "$repo_dir/data/local-tls/ca.crt" \
+        --resolve "$dojo_host:$https_port:$listen_address" \
+        "https://$dojo_host:$https_port/themes/dojo_theme/static/js/dojo/$asset.min.js"
+done
+pass "all native learning theme scripts are served"
+
+dojo_listing=$(curl -sS --fail \
+    --noproxy '*' \
+    --cacert "$repo_dir/data/local-tls/ca.crt" \
+    --resolve "$dojo_host:$https_port:$listen_address" \
+    "https://$dojo_host:$https_port/dojos")
+grep -Fq 'AISecEdu</span><span class="brand-dot brand-blink">.</span><span class="brand-green">Courses</span>' <<<"$dojo_listing"
+grep -Fq 'class="container course-catalog"' <<<"$dojo_listing"
+grep -Fq 'class="card-list"' <<<"$dojo_listing"
+if grep -Fiq 'pwn.college' <<<"$dojo_listing"; then
+    echo "Legacy pwn.college branding remains in the course catalog" >&2
+    exit 1
+fi
+pass "the grouped AISecEdu course catalog renders directly"
+
+forgot_redirect=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' \
+    --noproxy '*' \
+    --cacert "$repo_dir/data/local-tls/ca.crt" \
+    --resolve "$dojo_host:$https_port:$listen_address" \
+    "https://$dojo_host:$https_port/forgot-password")
+[[ $forgot_redirect == "308 https://$dojo_host/reset_password" || $forgot_redirect == "308 https://$dojo_host:$https_port/reset_password" ]]
+pass "the removed frontend password URL redirects to the canonical authentication page"
+
+future_redirect=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' \
+    --noproxy '*' \
+    --cacert "$repo_dir/data/local-tls/ca.crt" \
+    --resolve "$future_host:$https_port:$listen_address" \
+    "https://$future_host:$https_port/dojos")
+[[ $future_redirect == "308 https://$dojo_host/dojos" || $future_redirect == "308 https://$dojo_host:$https_port/dojos" ]]
+pass "the historical Future host redirects to the canonical AISecEdu UI"
+
+auth_config=$(curl -sS --fail \
+    --noproxy '*' \
+    --cacert "$repo_dir/data/local-tls/ca.crt" \
+    --resolve "$dojo_host:$https_port:$listen_address" \
+    "https://$dojo_host:$https_port/pwncollege_api/v1/auth/config")
+grep -Fq 'registrationEnabled' <<<"$auth_config"
+commitment=$(jq -r '.data.commitment.text' <<<"$auth_config")
+grep -Fq 'AISecEdu 课程题目' <<<"$commitment"
+if grep -Fq 'AISecEdu DOJO' <<<"$commitment"; then
+    echo "Legacy product name was returned by authentication configuration" >&2
+    exit 1
+fi
+pass "authentication compatibility API is ready"
 
 for host in "$dojo_host" "$workspace_host" "$future_host"; do
     openssl x509 -in "$repo_dir/data/local-tls/fullchain.pem" -noout -checkhost "$host" \
@@ -192,7 +272,7 @@ workspace_trust=$(curl -sS --fail \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
     --resolve "$workspace_host:$https_port:$listen_address" \
     "https://$workspace_host:$https_port/trust-check")
-[[ $workspace_trust == "pwn.college Workspace TLS is trusted and reachable" ]]
+[[ $workspace_trust == "AISecEdu Workspace TLS is trusted and reachable" ]]
 pass "workspace hostname is reachable with the local CA"
 
 unsigned_code=$(curl -sS -o /dev/null -w '%{http_code}' \
@@ -214,6 +294,10 @@ docker exec "$container" docker run --rm --network none \
 pass "Kata v2 runtime launches an isolated container"
 
 docker exec "$container" test -L /data/workspace/nix/var/nix/profiles/dojo-workspace
-pass "workspace Nix profile is installed"
+docker exec "$container" grep -qx 'DOJO_WORKSPACE=full' /data/config.env
+workspace_profile=$(docker exec "$container" readlink /data/workspace/nix/var/nix/profiles/dojo-workspace)
+docker exec "$container" readlink "/data/workspace/nix${workspace_profile#/nix}" \
+    | grep -Fq 'dojo-workspace-full'
+pass "full workspace Nix profile is installed and persistent"
 
 echo "All non-challenge health checks passed"

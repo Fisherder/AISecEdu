@@ -34,7 +34,7 @@ function handleAwardPopup(response) {
 function showAwardPopup(award) {
     const isBelt = ["orange", "yellow", "green", "blue"].includes(award.name);
     if (isBelt) {
-        return renderPopup(`You have officially been awarded your ${award.name} belt!`, `<img src="/belt/${award.name}.svg" class="belt-image">`)
+        return renderPopup(`You reached the ${award.name} AISecEdu achievement level!`, `<i class="fas fa-award fa-5x brand-green" aria-hidden="true"></i>`)
     }
 
     var icon = award.icon
@@ -48,11 +48,11 @@ function showAwardPopup(award) {
                     icon = entry["award"]["emoji"]
                 }
             })
-            renderPopup(`You have officially been awarded the ${icon} badge!`, `<div class="emoji-display">${icon}</div>`)
+            renderPopup(`You earned the ${icon} achievement!`, `<div class="emoji-display">${icon}</div>`)
         })
     }
     else {
-        renderPopup(`You have officially been awarded the ${icon} badge!`, `<div class="emoji-display">${icon}</div>`)
+        renderPopup(`You earned the ${icon} achievement!`, `<div class="emoji-display">${icon}</div>`)
     }
 }
 
@@ -62,7 +62,7 @@ function renderPopup(message, image) {
         body: message,
         image: image,
         logos: {
-            ninja: `${CTFd.config.urlRoot}/themes/dojo_theme/static/img/dojo/ninja.png`,
+            platform: `${CTFd.config.urlRoot}/themes/dojo_theme/static/img/aisecedu-mark.svg`,
             linkedin: `${CTFd.config.urlRoot}/themes/dojo_theme/static/img/dojo/linkedin_logo.svg`,
             x: `${CTFd.config.urlRoot}/themes/dojo_theme/static/img/dojo/x_logo.svg`
         },
@@ -77,7 +77,7 @@ function renderPopup(message, image) {
             ${popupContent.image}
             <h1>${popupContent.header}</h1>
             <p>${popupContent.body}</p>
-            <img src="${popupContent.logos.ninja}" class="logo-image">
+            <img src="${popupContent.logos.platform}" class="logo-image" alt="AISecEdu">
             <div class="social-share">
                 <a href="https://linkedin.com/share?url=${popupContent.profileUrl}"
                     class="share-button"

@@ -9,7 +9,8 @@ let
     until [ -f /run/dojo/var/ready ]; do sleep 0.1; done
 
     export TERM=xterm-256color
-    
+    cd /challenge
+
     ${service}/bin/dojo-service start terminal-service/ttyd \
       ${pkgs.ttyd}/bin/ttyd \
         --port 7681 \

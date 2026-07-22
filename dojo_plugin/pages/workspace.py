@@ -1,15 +1,14 @@
 import hmac
 import os
 
-from flask import request, Blueprint, Response, render_template, abort
+from flask import request, Blueprint, render_template, abort, redirect, url_for
 from CTFd.models import Users
 from CTFd.utils.user import get_current_user
 from CTFd.utils.decorators import authed_only
-from CTFd.plugins import bypass_csrf_protection
 from urllib.parse import urlencode
 
 from ..models import Dojos
-from ..utils import user_ipv4, get_current_container, container_password
+from ..utils import get_current_container, container_password
 from ..utils.dojo import get_current_dojo_challenge
 
 
@@ -26,15 +25,18 @@ port_names = {
 @workspace.route("/workspace", methods=["GET"])
 @authed_only
 def view_workspace():
-
     current_challenge = get_current_dojo_challenge()
     if not current_challenge:
         return render_template("error.html", error="No active challenge session; start a challenge!")
 
-    practice = get_current_container().labels.get("dojo.mode") == "privileged"
+    user = get_current_user()
+    practice = get_current_container(user).labels.get("dojo.mode") == "privileged"
 
     return render_template(
         "workspace.html",
+        dojo=current_challenge.dojo,
+        module=current_challenge.module,
+        user=user,
         practice=practice,
         challenge=current_challenge,
     )
@@ -42,12 +44,18 @@ def view_workspace():
 @workspace.route("/workspace/<int:port>", strict_slashes=False)
 @authed_only
 def view_workspace_port(port):
-    return render_template("workspace_port.html", iframe_name="workspace", port=port)
+    return redirect(
+        url_for("pwncollege_workspace.view_workspace", port=port),
+        code=308,
+    )
 
 @workspace.route("/workspace/<string:service>", strict_slashes=False)
 @authed_only
 def view_workspace_service(service):
-    return render_template("workspace_service.html", iframe_name="workspace", service=service)
+    return redirect(
+        url_for("pwncollege_workspace.view_workspace", service=service),
+        code=308,
+    )
 
 def forward_workspace(service, signature, message, service_path="", include_host=True, **kwargs):
     if service.count("~") == 0:

@@ -12,22 +12,26 @@ from CTFd.utils.decorators import admins_only, authed_only, ratelimit
 from CTFd.utils.user import get_current_user, get_ip, is_admin
 from flask import request
 from flask_restx import Namespace, Resource
-from sqlalchemy.sql import and_
 
 from .user import authed_only_cli, authed_only_ssh
-from ...models import (DojoChallenges, DojoModules, Dojos, DojoStudents,
-                       DojoUsers, Emojis, SurveyResponses)
+from ...models import (DojoChallenges, DojoMembers, DojoModules, Dojos,
+                       DojoStudents, DojoUsers, Emojis, SurveyResponses)
 from ...utils import is_challenge_locked, render_markdown
-from ...utils.dojo import dojo_admins_only, dojo_create, dojo_route, dojo_from_spec
+from ...utils.dojo import (
+    dojo_admins_only,
+    dojo_create,
+    dojo_from_spec,
+    dojo_route,
+    generate_ssh_keypair,
+)
 from ...utils.image_pulls import enqueue_dojo_image_pulls
-from ...utils.stats import get_dojo_stats
 from ...utils.events import publish_dojo_stats_event, publish_scoreboard_event
 from ...utils.awards import dojo_gives_awards, grant_award
 
 logger = logging.getLogger(__name__)
 
 dojos_namespace = Namespace(
-    "dojos", description="Endpoint to retrieve Dojos"
+    "dojos", description="Course catalog and enrollment services"
 )
 
 
@@ -52,11 +56,35 @@ class DojoList(Resource):
                  type=dojo.type,
                  official=dojo.official,
                  award=dojo.award,
+                 moduleCount=dojo.modules_count,
+                 publishedItemCount=dojo.challenges_count,
+                 requiredItemCount=dojo.required_challenges_count,
                  modules_count=dojo.modules_count,
                  challenges_count=dojo.required_challenges_count)
             for dojo in dojo_query
         ]
         return {"success": True, "dojos": dojos}
+
+
+@dojos_namespace.route("/<dojo>/enrollment")
+class CourseEnrollment(Resource):
+    @authed_only
+    @dojo_route
+    def post(self, dojo):
+        user = get_current_user()
+        membership = DojoUsers.query.filter_by(dojo=dojo, user=user).first()
+        if membership:
+            return {
+                "success": True,
+                "enrollment": {"courseId": dojo.reference_id, "role": membership.type},
+            }
+        membership = DojoMembers(dojo=dojo, user=user)
+        db.session.add(membership)
+        db.session.commit()
+        return {
+            "success": True,
+            "enrollment": {"courseId": dojo.reference_id, "role": membership.type},
+        }, 201
 
 
 @dojos_namespace.route("/<dojo>/awards/prune")
@@ -105,6 +133,33 @@ class PromoteAdmin(Resource):
 
 @dojos_namespace.route("/create")
 class CreateDojo(Resource):
+    @authed_only
+    def get(self):
+        public_key, private_key = generate_ssh_keypair()
+        examples = (
+            Dojos.viewable(user=get_current_user())
+            .where(Dojos.data["type"].astext == "example")
+            .options(
+                db.undefer(Dojos.modules_count),
+                db.undefer(Dojos.challenges_count),
+            )
+            .all()
+        )
+        return {
+            "success": True,
+            "publicKey": public_key,
+            "privateKey": private_key,
+            "examples": [
+                {
+                    "id": dojo.reference_id,
+                    "name": dojo.name,
+                    "modules": dojo.modules_count,
+                    "challenges": dojo.challenges_count,
+                }
+                for dojo in examples
+            ],
+        }
+
     @authed_only
     def post(self):
         data = request.get_json()

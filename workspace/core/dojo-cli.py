@@ -58,6 +58,27 @@ def solve(args : argparse.Namespace):
     else:
         sys.exit("Incorrect flag.")
 
+def record_evidence(args: argparse.Namespace):
+    event_type = args.type
+    payload = {}
+    if args.command_text is not None:
+        payload["command"] = args.command_text
+        payload["exitCode"] = args.exit_code
+        event_type = "terminal.command.completed" if args.exit_code == 0 else "terminal.command.failed"
+    if args.note:
+        payload["note"] = args.note
+    try:
+        response = requests.post(
+            f"{DOJO_API}/learning/evidence",
+            headers={"Authorization": f"Bearer {DOJO_AUTH_TOKEN}"},
+            json={"type": event_type, "payload": payload},
+            timeout=2.0,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        return 1
+    return 0
+
 def start_challenge(dojo:str, module:str, challenge:str, privileged:bool):
     response = requests.post(
         f"{DOJO_API}/docker",
@@ -356,6 +377,15 @@ def main():
         nargs="?",
         type=str
     )
+    evidence_parser = subparsers.add_parser(name="evidence", help=argparse.SUPPRESS)
+    evidence_parser.add_argument("--type", default="milestone.observed", choices=[
+        "milestone.observed",
+        "runtime.state.snapshot",
+        "workspace.file.saved",
+    ])
+    evidence_parser.add_argument("--command", dest="command_text")
+    evidence_parser.add_argument("--exit-code", type=int, default=0)
+    evidence_parser.add_argument("--note")
     args = parser.parse_args()
     if not DOJO_AUTH_TOKEN:
         sys.exit("Missing DOJO_AUTH_TOKEN.")
@@ -372,10 +402,12 @@ def main():
         return start(args)
     if args.command.lower() == "list":
         return list(args)
+    if args.command.lower() == "evidence":
+        return record_evidence(args)
     else:
         parser.print_help()
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main() or 0)

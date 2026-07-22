@@ -1,11 +1,10 @@
 {
-  description = "DOJO Workspace Flake";
+  description = "AISecEdu Workspace Flake";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     nixpkgs-24-11.url = "github:NixOS/nixpkgs/nixos-24.11";
     nixpkgs-pr-angr-management.url = "github:NixOS/nixpkgs/pull/360310/head";
-    pwndbg.url = "github:pwndbg/pwndbg";
   };
 
   outputs =
@@ -14,7 +13,6 @@
       nixpkgs,
       nixpkgs-24-11,
       nixpkgs-pr-angr-management,
-      pwndbg,
     }:
     {
       packages = {
@@ -30,13 +28,44 @@
               angr-management = (import nixpkgs-pr-angr-management { inherit system config; }).angr-management;
             };
 
-            ida-free-overlay = self: super: {
-              ida-free = (import nixpkgs-24-11 { inherit system config; }).ida-free;
-            };
-
-            pwndbg-overlay = self: super: {
-              pwndbg = pwndbg.packages.${system}.pwndbg;
-            };
+            ida-free-overlay = final: prev:
+              let
+                legacyIda = (import nixpkgs-24-11 { inherit system config; }).ida-free.override {
+                  fetchurl = args:
+                    if (args.hash or "") == "sha256-widkv2VGh+eOauUK/6Sz/e2auCNFAsc8n9z0fdrSnW0=" then
+                      final.writeText "ida-free-bootstrap-icon.svg" ''
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+                          <rect width="64" height="64" rx="12" fill="#111827"/>
+                          <path d="M7 42 19 14h8L15 42zm17 0V14h12c12 0 20 5 20 14s-8 14-20 14zm9-7h4c7 0 11-2 11-7s-4-7-11-7h-4z" fill="#58c4dc"/>
+                        </svg>
+                      ''
+                    else
+                      final.fetchurl args;
+                };
+                desktopItem = final.makeDesktopItem {
+                  name = "ida-free";
+                  exec = "ida64";
+                  icon = "ida-free";
+                  comment = "Freeware interactive disassembler";
+                  desktopName = "IDA Free";
+                  genericName = "Interactive Disassembler";
+                  categories = [ "Development" ];
+                  startupWMClass = "IDA";
+                };
+              in
+              {
+                ida-free = legacyIda.overrideAttrs (oldAttrs: {
+                  src = final.fetchurl {
+                    url = "https://out7.hex-rays.com/files/idafree84_linux.run";
+                    hash = "sha256-lB8ijOSJvwoUJomA7a0WFAvil+B0kkXXg5oqOwIHCmI=";
+                  };
+                  postInstall = (oldAttrs.postInstall or "") + ''
+                    install -Dm644 "$out/opt/appico64.png" "$out/share/icons/hicolor/64x64/apps/ida-free.png"
+                  '';
+                  inherit desktopItem;
+                  desktopItems = [ desktopItem ];
+                });
+              };
 
             sage-overlay = final: prev: {
               sage = prev.sage.override {
@@ -54,7 +83,6 @@
                 angr-management-overlay
                 ida-free-overlay
                 sage-overlay
-                pwndbg-overlay
               ];
             };
 

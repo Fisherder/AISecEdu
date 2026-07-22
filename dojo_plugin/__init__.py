@@ -37,6 +37,7 @@ from .pages.research import research
 from .pages.feed import feed
 from .pages.index import static_html_override
 from .pages.test_error import test_error_pages
+from .pages.learning import learning as learning_pages
 from .api import api
 from .utils.events import publish_queued_events
 from .utils import listeners
@@ -52,14 +53,38 @@ class DojoChallenge(BaseChallenge):
         super().solve(user, team, challenge, request)
         update_awards(user)
 
-        dojo_challenge = DojoChallenges.query.filter_by(challenge_id=challenge.id).first()
+        active_dojo_challenge = get_current_dojo_challenge(user)
+        dojo_challenge = (
+            active_dojo_challenge
+            if active_dojo_challenge and active_dojo_challenge.challenge_id == challenge.id
+            else DojoChallenges.query.filter_by(challenge_id=challenge.id).first()
+        )
         if dojo_challenge:
+            from .learning.assessment import assess_attempt
+            from .learning.evidence import record_flag_check
+
+            learning_attempt = record_flag_check(user, dojo_challenge, True)
+            assess_attempt(learning_attempt)
             dojo = dojo_challenge.module.dojo
             if dojo.official or dojo.data.get("type") == "public":
                 module = dojo_challenge.module
                 points = challenge.value
                 first_blood = Solves.query.filter_by(challenge_id=challenge.id).count() == 1
                 publish_challenge_solve(user, dojo_challenge, dojo, module, points, first_blood)
+
+    @classmethod
+    def fail(cls, user, team, challenge, request):
+        super().fail(user, team, challenge, request)
+        active_dojo_challenge = get_current_dojo_challenge(user)
+        dojo_challenge = (
+            active_dojo_challenge
+            if active_dojo_challenge and active_dojo_challenge.challenge_id == challenge.id
+            else DojoChallenges.query.filter_by(challenge_id=challenge.id).first()
+        )
+        if dojo_challenge:
+            from .learning.evidence import record_flag_check
+
+            record_flag_check(user, dojo_challenge, False)
 
 
 class DojoFlag(BaseFlag):
@@ -191,12 +216,13 @@ def load(app):
     app.register_blueprint(research)
     app.register_blueprint(feed)
     app.register_blueprint(test_error_pages)
+    app.register_blueprint(learning_pages)
     app.register_blueprint(api, url_prefix="/pwncollege_api/v1")
 
     app.jinja_env.filters["markdown"] = render_markdown
 
-    register_admin_plugin_menu_bar("Dojos", "/admin/dojos")
-    register_admin_plugin_menu_bar("Desktops", "/admin/desktops")
+    register_admin_plugin_menu_bar("Courses", "/admin/dojos")
+    register_admin_plugin_menu_bar("Workspaces", "/admin/desktops")
 
     before_request_funcs = app.before_request_funcs[None]
     tokens_handler = next(func for func in before_request_funcs if func.__name__ == "tokens")

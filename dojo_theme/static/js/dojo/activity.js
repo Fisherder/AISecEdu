@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const userID = tracker.getAttribute('user-id');
     const container = document.createElement('div');
     container.className = 'activity-graph';
-    container.innerHTML = `<h3>Hacking Activity</h3>
+    container.innerHTML = `<h3>Learning Activity</h3>
         <div class="streak"></div>
         <div class="grid-wrapper">
         <div class="month-labels" style="font-size:0.7rem; height: 16px; position: relative;"></div>
@@ -42,7 +42,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         cell.dataset.count = 0;
         cell.dataset.date = formattedDate;
         cell.dataset.displayDate = displayDate;
-        cell.title = `${displayDate}: 0 solves`;
+        cell.title = `${displayDate}: 0 completions`;
         grid.appendChild(cell);
         const currentMonth = cellDate.toLocaleDateString('en-US', { month: 'short' });
         if(currentMonth !== monthLabels.lastChild?.textContent &&
@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (cell) {
                 const count = dailyActivityData[date];
                 const displayDate = cell.dataset.displayDate;
-                const solveText = count === 1 ? 'solve' : 'solves';
+                const solveText = count === 1 ? 'completion' : 'completions';
                 cell.dataset.count = count;
                 cell.title = `${displayDate}: ${count} ${solveText}`;
                 let level = 0;

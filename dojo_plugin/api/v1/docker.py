@@ -3,7 +3,6 @@ import hashlib
 import pathlib
 import logging
 import time
-import os
 import re
 
 import docker
@@ -15,7 +14,7 @@ from flask import abort, request, current_app
 from itsdangerous.url_safe import URLSafeTimedSerializer
 from flask_restx import Namespace, Resource
 from CTFd.cache import cache
-from CTFd.models import Users, Solves
+from CTFd.models import Users, db
 from CTFd.utils.user import get_current_user, is_admin
 from CTFd.utils.decorators import authed_only
 from CTFd.exceptions import UserNotFoundException, UserTokenExpiredException
@@ -34,10 +33,11 @@ from ...utils import (
     is_challenge_locked,
 )
 from ...utils.dojo import dojo_accessible, get_current_dojo_challenge
-from ...utils.workspace import exec_run
+from ...utils.workspace import exec_run, reset_home
 from ...utils.feed import publish_container_start
 from ...utils.background_stats import publish_stat_event
 from ...utils.request_logging import get_trace_id, log_generator_output
+from ...learning.evidence import active_attempt, append_evidence, start_attempt
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +149,12 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
         name=container_name(user),
         hostname=hostname,
         user="0",
-        working_dir="/home/hacker",
+        working_dir="/challenge",
         environment={
             "HOME": "/home/hacker",
             "PATH": env_path,
             "SHELL": f"{dojo_bin_path}/bash",
+            "DOJO_CHALLENGE_DIR": "/challenge",
             "DOJO_AUTH_TOKEN": auth_token,
         },
         labels={
@@ -273,9 +274,11 @@ def start_challenge(user, dojo_challenge, practice, *, as_user=None):
     node_id = user_node(user)
     if node_id is None:
         node_id = -1
-    logger.info(f"starting challenge dojo={
-        dojo_challenge.dojo.reference_id
-    } module={dojo_challenge.module.id} challenge={dojo_challenge.id} {practice=} {as_user=} node_id={node_id+1}")
+    logger.info(
+        f"starting challenge dojo={dojo_challenge.dojo.reference_id} "
+        f"module={dojo_challenge.module.id} challenge={dojo_challenge.id} "
+        f"{practice=} {as_user=} node_id={node_id + 1}"
+    )
     remove_container(user)
 
     user_mounts = []
@@ -340,7 +343,67 @@ def start_challenge(user, dojo_challenge, practice, *, as_user=None):
             cause = message.split(b"DOJO_INIT_FAILED:")[1].split(b"\n")[0]
             raise RuntimeError(f"DOJO_INIT_FAILED: {cause}")
     else:
-        raise RuntimeError(f"Workspace failed to become ready.")
+        raise RuntimeError("Workspace failed to become ready.")
+    return container
+
+
+def start_challenge_session(user, dojo_challenge, practice, *, as_user=None):
+    max_attempts = 3
+    for attempt_number in range(1, max_attempts + 1):
+        try:
+            logger.info(
+                f"Starting challenge for user {user.id} "
+                f"(attempt {attempt_number}/{max_attempts})..."
+            )
+            container = start_challenge(
+                user,
+                dojo_challenge,
+                practice,
+                as_user=as_user,
+            )
+            actual_user = as_user or user
+            node_id = user_node(actual_user)
+            start_attempt(
+                actual_user,
+                dojo_challenge,
+                "PRACTICE" if practice else "ASSESSMENT",
+                {
+                    "containerId": container.id[:12],
+                    "image": dojo_challenge.image,
+                    "nodeId": node_id + 1 if node_id is not None else 0,
+                    "interfaces": dojo_challenge.interfaces,
+                },
+            )
+            db.session.commit()
+
+            dojo = dojo_challenge.dojo
+            if dojo.official or dojo.data.get("type") == "public":
+                challenge_data = {
+                    "challenge_id": dojo_challenge.challenge_id,
+                    "challenge_name": dojo_challenge.name,
+                    "module_id": dojo_challenge.module.id if dojo_challenge.module else None,
+                    "module_name": dojo_challenge.module.name if dojo_challenge.module else None,
+                    "dojo_id": dojo.reference_id,
+                    "dojo_name": dojo.name,
+                }
+                mode = "practice" if practice else "assessment"
+                publish_container_start(actual_user, mode, challenge_data)
+
+            publish_stat_event("container_stats_update", {})
+            return container
+        except Exception as error:
+            logger.warning(
+                f"Attempt {attempt_number} failed for user {user.id} with error: {error}"
+            )
+            if attempt_number < max_attempts:
+                logger.info(
+                    f"Retrying... ({attempt_number}/{max_attempts})"
+                )
+                time.sleep(2)
+
+    raise RuntimeError(
+        f"Docker failed for {user.id} after {max_attempts} attempts."
+    )
 
 def docker_locked(func):
     def wrapper(*args, **kwargs):
@@ -366,8 +429,6 @@ class NextChallenge(Resource):
         dojo_challenge = get_current_dojo_challenge()
         if not dojo_challenge:
             return {"success": False, "error": "No active challenge"}
-
-        user = get_current_user()
 
         # Get all challenges in the current module
         module_challenges = DojoChallenges.query.filter_by(
@@ -492,35 +553,15 @@ class RunDocker(Resource):
                     return {"success": False, "error": f"Not an official student in this dojo ({as_user_id})"}
                 as_user = student.user
 
-        max_attempts = 3
-        for attempt in range(1, max_attempts+1):
-            try:
-                logger.info(f"Starting challenge for user {user.id} (attempt {attempt}/{max_attempts})...")
-                start_challenge(user, dojo_challenge, practice, as_user=as_user)
-
-                if dojo.official or dojo.data.get("type") == "public":
-                    challenge_data = {
-                        "challenge_id": dojo_challenge.challenge_id,
-                        "challenge_name": dojo_challenge.name,
-                        "module_id": dojo_challenge.module.id if dojo_challenge.module else None,
-                        "module_name": dojo_challenge.module.name if dojo_challenge.module else None,
-                        "dojo_id": dojo.reference_id,
-                        "dojo_name": dojo.name
-                    }
-                    mode = "practice" if practice else "assessment"
-                    actual_user = as_user or user
-                    publish_container_start(actual_user, mode, challenge_data)
-
-                publish_stat_event("container_stats_update", {})
-
-                break
-            except Exception as e:
-                logger.warning(f"Attempt {attempt} failed for user {user.id} with error: {e}")
-                if attempt < max_attempts:
-                    logger.info(f"Retrying... ({attempt}/{max_attempts})")
-                    time.sleep(2)
-        else:
-            logger.error(f"ERROR: Docker failed for {user.id} after {max_attempts} attempts.")
+        try:
+            start_challenge_session(
+                user,
+                dojo_challenge,
+                practice,
+                as_user=as_user,
+            )
+        except RuntimeError as error:
+            logger.error(str(error))
             return {"success": False, "error": "Docker failed"}
 
         return {"success": True}
@@ -556,9 +597,67 @@ class RunDocker(Resource):
             return {"success": False, "error": "No active challenge container"}
 
         try:
+            attempt = active_attempt(user.id)
+            if attempt:
+                append_evidence(
+                    attempt,
+                    "lab.stopped",
+                    {"reason": "user-requested"},
+                    source="RUNTIME",
+                    trust_level=3,
+                )
+                attempt.status = "STOPPED"
+                attempt.completed = datetime.datetime.utcnow()
+                db.session.commit()
             remove_container(user)
             publish_stat_event("container_stats_update", {})
             return {"success": True, "message": "Challenge container terminated"}
         except Exception as e:
             logger.error(f"Failed to terminate container for user {user.id}: {e}")
             return {"success": False, "error": "Failed to terminate container"}
+
+
+@docker_namespace.route("/reset")
+class ResetDocker(Resource):
+    @authed_only
+    @docker_locked
+    def post(self):
+        user = get_current_user()
+        container = get_current_container(user)
+        dojo_challenge = get_current_dojo_challenge(user)
+        if not container or not dojo_challenge:
+            return {"success": False, "error": "No active challenge container"}
+
+        practice = container.labels.get("dojo.mode") == "privileged"
+        as_user_id = int(container.labels.get("dojo.as_user_id", user.id))
+        as_user = Users.query.get(as_user_id) if as_user_id != user.id else None
+        attempt = active_attempt((as_user or user).id, dojo_challenge)
+        if attempt:
+            append_evidence(
+                attempt,
+                "lab.reset.requested",
+                {"scope": "container-and-home", "homeErased": True},
+                source="PLATFORM",
+                trust_level=3,
+            )
+            db.session.commit()
+
+        try:
+            reset_home(user.id, backup=False)
+            start_challenge_session(
+                user,
+                dojo_challenge,
+                practice,
+                as_user=as_user,
+            )
+        except Exception as error:
+            db.session.rollback()
+            logger.exception(
+                f"Failed to completely reset challenge for user {user.id}: {error}"
+            )
+            return {"success": False, "error": "Failed to completely reset challenge"}
+
+        return {
+            "success": True,
+            "message": "Challenge reset to its original state",
+        }

@@ -31,7 +31,7 @@
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1>{{ dojo.name }} User Info for {{ user.name }}</h1>
+    <h1>{{ dojo.name }} · Student Information</h1>
   </div>
 </div>
 <div class="container">
@@ -39,7 +39,7 @@
     <div class="col-md-8 offset-md-1">
       <ul>
         <li>
-          pwn.college User Name: {{ user.name }}
+          AISecEdu Username: {{ user.name }}
         </li>
         <li>
           {{ identity_name }} : {{ identity_value }}
@@ -55,4 +55,3 @@
   </div>
 </div>
 {% endblock %}
-
