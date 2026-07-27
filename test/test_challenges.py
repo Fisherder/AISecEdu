@@ -93,7 +93,7 @@ def test_progression_locked(progression_locked_dojo, random_user_name, random_us
     assert random_user_session.get(f"{DOJO_URL}/dojo/{progression_locked_dojo}/join/").status_code == 200
     start_challenge(progression_locked_dojo, "progression-locked-module", "unlocked-challenge", session=random_user_session)
 
-    with pytest.raises(AssertionError, match="Failed to start challenge: This challenge is locked"):
+    with pytest.raises(AssertionError, match="Failed to start challenge: 此题目尚未解锁"):
         start_challenge(progression_locked_dojo, "progression-locked-module", "locked-challenge", session=random_user_session)
 
     solve_challenge(progression_locked_dojo, "progression-locked-module", "unlocked-challenge", session=random_user_session, user=random_user_name)

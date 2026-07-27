@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block body_class %}guide-page-body{% endblock %}
+
+{% block content %}
+<div id="learning-guide" class="guide-shell">
+  <aside class="guide-sidebar" aria-label="Guide 对话列表">
+    <div class="guide-sidebar-header">
+      <a href="/guide" class="guide-wordmark">AISecEdu<span>.</span>Guide</a>
+      <button id="guide-new" type="button" class="btn guide-new-button">
+        <i class="fas fa-plus"></i><span>新建对话</span>
+      </button>
+    </div>
+    <div id="guide-thread-list" class="guide-thread-list"></div>
+    <div class="guide-sidebar-footer">
+      <a href="/learning"><i class="fas fa-chart-line"></i> 学习概览</a>
+      <a href="/dojos"><i class="fas fa-graduation-cap"></i> 课程</a>
+    </div>
+  </aside>
+
+  <main class="guide-main">
+    <header class="guide-header">
+      <button id="guide-sidebar-toggle" class="guide-mobile-toggle" type="button" aria-label="展开或收起对话列表">
+        <i class="fas fa-bars"></i>
+      </button>
+      <div class="guide-header-copy">
+        <h1>Guide</h1>
+        <p>基于真实学习证据的个人学习顾问</p>
+      </div>
+      <div class="guide-model-state">
+        <span class="guide-live-dot"></span>
+        <span>DeepSeek V4 Flash 已连接</span>
+      </div>
+    </header>
+
+    <div id="guide-notice" class="guide-notice alert alert-info" role="alert" hidden></div>
+    <div id="guide-profile-strip" class="guide-profile-strip" aria-live="polite"></div>
+    <section id="guide-conversation" class="guide-conversation" aria-live="polite">
+      <div id="guide-empty" class="guide-empty">
+        <div class="guide-orb"><i class="fas fa-compass"></i></div>
+        <h2>今天想推进什么？</h2>
+        <p>我会结合你的课程进度、近期尝试、评估结果和能力证据，帮助你规划、复盘并选择下一步。</p>
+        <div id="guide-quick-prompts" class="guide-quick-prompts"></div>
+      </div>
+      <div id="guide-messages" class="guide-messages"></div>
+      <div id="guide-thinking" class="guide-message-row is-assistant" hidden>
+        <div class="guide-avatar"><i class="fas fa-compass"></i></div>
+        <div class="guide-message">
+          <div class="guide-thinking-dots"><span></span><span></span><span></span></div>
+          <small>正在分析你的学习证据…</small>
+        </div>
+      </div>
+    </section>
+
+    <footer class="guide-composer-wrap">
+      <div class="guide-composer">
+        <div id="guide-selected-references" class="guide-selected-references" aria-label="本对话引用题目" hidden></div>
+        <button id="guide-reference-toggle" class="guide-reference-toggle" type="button"
+            aria-expanded="false" aria-controls="guide-reference-picker" title="引用题目">
+          <i class="fas fa-paperclip" aria-hidden="true"></i>
+          <span class="sr-only">引用题目</span>
+        </button>
+        <textarea id="guide-question" rows="1" maxlength="6000" placeholder="向 Guide 发送消息；输入 @ 可引用题目…"></textarea>
+        <button id="guide-send" class="guide-send" type="button" aria-label="发送消息">
+          <i class="fas fa-arrow-up"></i>
+        </button>
+        <section id="guide-reference-picker" class="guide-reference-picker" aria-label="选择要引用的题目" hidden>
+          <div class="guide-reference-picker-header">
+            <div>
+              <strong>选择本对话题目</strong>
+              <small>选中后持续生效；Guide 只会围绕这些题目的真实记录回答</small>
+            </div>
+            <span>最多 6 题</span>
+          </div>
+          <label class="guide-reference-search">
+            <i class="fas fa-search" aria-hidden="true"></i>
+            <input id="guide-reference-search" type="search" autocomplete="off" placeholder="搜索课程、单元或题目">
+          </label>
+          <div id="guide-reference-options" class="guide-reference-options" role="listbox" aria-multiselectable="true"></div>
+        </section>
+      </div>
+    </footer>
+  </main>
+</div>
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-20260726-pwn-notices') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-guide.js', v='aisecedu-20260726-guide-reference-scope-v2') }}"></script>
+{% endblock %}

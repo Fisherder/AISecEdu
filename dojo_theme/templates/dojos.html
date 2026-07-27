@@ -4,58 +4,58 @@
 {% block content %}
 <div class="jumbotron aisecedu-hero aisecedu-catalog-hero">
   <div class="container">
-    <h1 class="brand-mono-bold wordmark-large"><span class="brand-white">AISecEdu</span><span class="brand-dot brand-blink">.</span><span class="brand-green">Courses</span></h1>
-    <p class="lead">Choose a course, move through its units, and complete each hands-on exercise in an isolated workspace.</p>
+    <h1 class="brand-mono-bold wordmark-large"><span class="brand-white">AISecEdu</span><span class="brand-dot brand-blink">.</span><span class="brand-green">课程</span></h1>
+    <p class="lead">选择课程，完成其中的单元，并在隔离工作区中动手解决每一道题。</p>
   </div>
 </div>
 
 <div class="container course-catalog">
   {% if categorized_dojos["welcome"] %}
   <section class="course-catalog-section">
-    <h2>Getting Started</h2>
-    <p>Learn the platform workflow and establish the foundations needed by later courses.</p>
+    <h2>入门课程</h2>
+    <p>熟悉平台流程，并建立后续课程所需的基础。</p>
     {{ dojo_grid(categorized_dojos["welcome"], dojo_container_counts) }}
   </section>
   {% endif %}
 
   {% if categorized_dojos["topic"] %}
   <section class="course-catalog-section">
-    <h2>Core Curriculum</h2>
-    <p>Build cybersecurity skills in a recommended sequence. Progress is tracked per course, unit, and exercise.</p>
+    <h2>核心课程</h2>
+    <p>按照推荐顺序构建网络安全能力。系统会按课程、单元和题目记录进度。</p>
     {{ dojo_grid(categorized_dojos["topic"], dojo_container_counts) }}
   </section>
   {% endif %}
 
   {% if categorized_dojos["public"] %}
   <section class="course-catalog-section" id="specialized-courses">
-    <h2>Specialized Courses</h2>
-    <p>Explore focused topics and additional practice published for the AISecEdu community.</p>
+    <h2>专题课程</h2>
+    <p>探索面向 AISecEdu 社区发布的专题与额外练习。</p>
     {{ dojo_grid(categorized_dojos["public"], dojo_container_counts) }}
   </section>
   {% endif %}
 
   {% if categorized_dojos["course"] %}
   <section class="course-catalog-section">
-    <h2>Classroom Courses</h2>
-    <p>Instructor-led courses may include schedules, assessments, private materials, and class-specific learning paths.</p>
+    <h2>课堂课程</h2>
+    <p>教师主导的课程可能包括课表、评估、私有资料和班级专属学习路径。</p>
     {{ dojo_grid(categorized_dojos["course"], dojo_container_counts) }}
   </section>
   {% endif %}
 
   {% if categorized_dojos["member"] %}
   <section class="course-catalog-section">
-    <h2>Your Enrolled Courses</h2>
-    <p>Private courses shared with your account appear here.</p>
+    <h2>我已加入的课程</h2>
+    <p>与你的账号共享的私有课程会显示在这里。</p>
     {{ dojo_grid(categorized_dojos["member"], dojo_container_counts) }}
   </section>
   {% endif %}
 
   {% if authed() %}
   <section class="course-catalog-section" id="teacher-courses">
-    <h2>Courses You Teach</h2>
-    <p>Create a course or continue managing units, exercises, students, and assessment data.</p>
+    <h2>我教授的课程</h2>
+    <p>创建课程，或继续管理单元、题目、学生和评估数据。</p>
     {{ dojo_grid(categorized_dojos["admin"], dojo_container_counts, create_icon=True) }}
-    <p><a href="/dojos/create"><b>Create a new course</b></a> from a course repository.</p>
+    <p>从课程仓库<a href="/dojos/create"><b>创建新课程</b></a>。</p>
   </section>
   {% endif %}
 </div>

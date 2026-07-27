@@ -28,9 +28,9 @@ def settings_override():
         confirm_url = markup(url_for("auth.confirm"))
         infos.append(
             markup(
-                "Your email address isn't confirmed!<br>"
-                "Please check your email to confirm your email address.<br><br>"
-                f'To have the confirmation email resent please <a href="{confirm_url}">click here</a>.'
+                "你的电子邮箱尚未验证。<br>"
+                "请查收邮件并完成电子邮箱验证。<br><br>"
+                f'如需重新发送验证邮件，请<a href="{confirm_url}">点击这里</a>。'
             )
         )
 

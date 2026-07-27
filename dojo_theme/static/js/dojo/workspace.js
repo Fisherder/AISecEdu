@@ -78,6 +78,7 @@ function initializeWorkspaceNavigation() {
     }
 
     const toggle = navigation.querySelector(".workspace-navigation-toggle");
+    const toggleIcon = navigation.querySelector("[data-workspace-navigation-toggle-icon]");
     const courseSelect = navigation.querySelector("[data-workspace-course]");
     const moduleSelect = navigation.querySelector("[data-workspace-module]");
     const challengeList = navigation.querySelector("[data-workspace-challenges]");
@@ -90,7 +91,9 @@ function initializeWorkspaceNavigation() {
     function setCollapsed(collapsed) {
         navigation.classList.toggle("is-collapsed", collapsed);
         toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
-        toggle.setAttribute("title", collapsed ? "Expand course navigation" : "Collapse course navigation");
+        toggle.setAttribute("title", collapsed ? "展开课程导航" : "收起课程导航");
+        toggle.setAttribute("aria-label", collapsed ? "展开课程导航" : "收起课程导航");
+        toggleIcon.className = collapsed ? "fas fa-sitemap" : "fas fa-chevron-left";
         localStorage.setItem("workspace_navigation_collapsed", collapsed ? "true" : "false");
     }
 
@@ -127,12 +130,18 @@ function initializeWorkspaceNavigation() {
         if (button.dataset.active === "true" || button.dataset.locked === "true") {
             return;
         }
-        if (!window.confirm(`Switch to ${challenge.name || challenge.id}? The running container will be replaced; home files are kept unless you use Reset.`)) {
-            return;
-        }
+        const confirmed = window.AISecEduUI && await window.AISecEduUI.confirm(
+            `当前运行中的题目容器会被替换。切换到“${challenge.name || challenge.id}”后，/home/hacker 文件仍会保留。`,
+            {
+                title: "切换题目",
+                subtitle: `${course.name || course.id} · ${module.name || module.id}`,
+                confirmLabel: "切换并启动",
+            }
+        );
+        if (!confirmed) return;
 
         setNavigationBusy(true);
-        setStatus(`Starting ${challenge.name || challenge.id}…`);
+        setStatus(`正在启动 ${challenge.name || challenge.id}…`);
         try {
             const response = await CTFd.fetch("/pwncollege_api/v1/docker", {
                 method: "POST",
@@ -154,12 +163,12 @@ function initializeWorkspaceNavigation() {
             }
             const result = await response.json();
             if (!result.success) {
-                throw new Error(result.error || "Failed to switch exercise.");
+                throw new Error(result.error || "切换练习失败。");
             }
             window.location.reload();
         } catch (error) {
             setNavigationBusy(false);
-            setStatus(error.message || "Failed to switch exercise.", true);
+            setStatus(error.message || "切换练习失败。", true);
         }
     }
 
@@ -168,7 +177,7 @@ function initializeWorkspaceNavigation() {
         const module = selectedModule();
         challengeList.replaceChildren();
         if (!course || !module) {
-            setStatus("No exercises are available in this unit.");
+            setStatus("此单元没有可用练习。");
             return;
         }
 
@@ -191,7 +200,7 @@ function initializeWorkspaceNavigation() {
             });
             challengeList.appendChild(button);
         });
-        setStatus(items.length ? `${items.length} exercise${items.length === 1 ? "" : "s"}` : "No exercises are available in this unit.");
+        setStatus(items.length ? `${items.length} 个练习` : "此单元没有可用练习。");
     }
 
     function renderModules(preferredModule) {
@@ -221,7 +230,7 @@ function initializeWorkspaceNavigation() {
             }
             renderModules(activeCourse ? currentModule : null);
         } catch (error) {
-            setStatus(error.message || "Course navigation could not be loaded.", true);
+            setStatus(error.message || "无法加载课程导航。", true);
         }
     }
 

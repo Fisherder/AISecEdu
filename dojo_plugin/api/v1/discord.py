@@ -12,15 +12,15 @@ from ...config import DISCORD_CLIENT_SECRET
 from ...models import DiscordUsers, DiscordUserActivity
 from ...utils.dojo import get_current_dojo_challenge, dojo_route
 
-discord_namespace = Namespace("discord", description="Endpoint to manage discord")
+discord_namespace = Namespace("discord", description="管理 Discord 关联与活动")
 
 def auth_check(authorization):
     if not authorization or not authorization.startswith("Bearer "):
-        return {"success": False, "error": "Unauthorized"}, 401
+        return {"success": False, "error": "未授权。"}, 401
 
     token = authorization.split(" ")[1]
     if not hmac.compare_digest(token, DISCORD_CLIENT_SECRET):
-        return {"success": False, "error": "Unauthorized"}, 401
+        return {"success": False, "error": "未授权。"}, 401
 
     return None, None
 
@@ -46,7 +46,7 @@ class DiscordActivity(Resource):
 
         discord_user = DiscordUsers.query.filter_by(discord_id=discord_id).first()
         if not discord_user:
-            return {"success": False, "error": "Discord user not found"}, 404
+            return {"success": False, "error": "未找到关联的 Discord 用户。"}, 404
 
         dojo_challenge = get_current_dojo_challenge(discord_user.user)
         if not dojo_challenge:
@@ -90,12 +90,12 @@ def get_user_activity(discord_id, activity, request):
         try:
             start = datetime.fromisoformat(start_stamp)
         except:
-            return {"success": False, "error": "invalid start format"}, 400
+            return {"success": False, "error": "开始时间格式无效。"}, 400
     if end_stamp:
         try:
             end = datetime.fromisoformat(start_stamp)
         except:
-            return {"success": False, "error": "invalid end format"}, 400
+            return {"success": False, "error": "结束时间格式无效。"}, 400
 
     return get_user_activity_prop(discord_id, activity, start, end)
 
@@ -116,7 +116,7 @@ def post_user_activity(discord_id, activity, request):
 
     for ev in expected_vals:
         if ev not in data:
-            return {"success": False, "error": f"Invalid JSON data - {ev} not found!"}, 400
+            return {"success": False, "error": f"JSON 数据缺少必填字段：{ev}。"}, 400
 
     kwargs = {
             'user_id' : discord_id,
@@ -158,10 +158,10 @@ class CourseMemes(Resource):
         discord_user = DiscordUsers.query.filter_by(user_id=get_current_user().id).first()
 
         if not discord_user:
-            return {"success": False, "error": "Discord not linked"}
+            return {"success": False, "error": "尚未关联 Discord 账号。"}
         course_start = dojo.course.get("start_date", None)
         if course_start is None:
-            return {"success": False, "error": "No course start"}
+            return {"success": False, "error": "课程尚未设置开始时间。"}
         course_start = datetime.fromisoformat(course_start).astimezone(timezone.utc)
 
         memes = (
@@ -184,11 +184,11 @@ class CourseMemes(Resource):
         user = get_current_user()
         discord_user = DiscordUsers.query.filter_by(user_id=user.id).first()
         if discord_user is None:
-            return {"success": False, "error": "Discord not linked"}
+            return {"success": False, "error": "尚未关联 Discord 账号。"}
 
         course_start = dojo.course.get("start_date", None)
         if course_start is None:
-            return {"success": False, "error": "No course start"}
+            return {"success": False, "error": "课程尚未设置开始时间。"}
         course_start = datetime.fromisoformat(course_start)
         request = Request.from_values(query_string={"start": course_start})
 
@@ -225,7 +225,7 @@ class GetDiscordLeaderBoard(Resource):
         try:
             start = datetime.fromisoformat(request.args.get("start", f"{date.today().year}-01-01"))
         except ValueError:
-            return {"success": False, "error": "Invalid start format"}, 400
+            return {"success": False, "error": "开始时间格式无效。"}, 400
 
         score = db.func.count(db.distinct(db.func.concat(DiscordUserActivity.message_id, "-", DiscordUserActivity.source_user_id))).label("score")
         leaderboard_query = (

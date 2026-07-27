@@ -82,9 +82,9 @@
         url_for("pwncollege_dojo.view_dojo", dojo=dojo.reference_id),
         title=dojo.name or dojo.id,
         text_lines=[
-          "{} Active".format(dojo_container_counts.get(dojo.reference_id, 0)) if dojo_container_counts.get(dojo.reference_id, 0) else "",
-          "{} Unit{}".format(dojo.modules_count, "" if dojo.modules_count == 1 else "s"),
-          "{} Exercise{}".format(dojo.required_challenges_count, "" if dojo.required_challenges_count == 1 else "s"),
+          "{} 个正在运行".format(dojo_container_counts.get(dojo.reference_id, 0)) if dojo_container_counts.get(dojo.reference_id, 0) else "",
+          "{} 个单元".format(dojo.modules_count),
+          "{} 道必修题目".format(dojo.required_challenges_count),
         ],
         emoji=dojo.award.emoji,
         solve_percent=solve_percent,
@@ -93,7 +93,7 @@
     {% endfor %}
     {% if create_icon %}
       {% call card(url_for("pwncollege_dojos.dojo_create"), custom=True) %}
-        <span class="sr-only">Create a new course</span>
+        <span class="sr-only">创建新课程</span>
         {{ svg_add_icon }}
       {% endcall %}
     {% endif %}

@@ -26,7 +26,8 @@
     margin: 2px 2px;
     border-width: 0px;
     border-radius: 1em;
-    background-color: var(--foreground);
+    color: var(--ui-text);
+    background-color: var(--ui-surface-raised);
   }
 
   button.workspace-control {
@@ -46,6 +47,20 @@
     width: auto;
     padding-left: 0.75em;
     padding-right: 0.75em;
+  }
+
+  button.workspace-control.workspace-lifecycle {
+    width: auto;
+    padding-left: 0.75em;
+    padding-right: 0.75em;
+  }
+
+  .workspace-lifecycle span {
+    margin-left: 0.4em;
+  }
+
+  button.workspace-control.workspace-stop {
+    color: var(--brand-gold);
   }
 
   button.workspace-control.workspace-clipboard {
@@ -70,8 +85,8 @@
   }
 
   .workspace-service.active {
-    color: #fff;
-    background-color: var(--foreground) !important;
+    color: var(--ui-text);
+    background-color: var(--ui-surface-hover) !important;
     box-shadow: inset 0 0 0 1px var(--highlight) !important;
   }
 
@@ -84,8 +99,8 @@
     box-sizing: border-box;
     padding-left: 0.5em;
     padding-right: 1em;
-    color: #fff;
-    background-color: var(--foreground);
+    color: var(--ui-text);
+    background-color: var(--ui-field);
     border: 0;
     border-color: #000 !important;
     border-radius: 1em;
@@ -156,7 +171,7 @@
   .workspace-ssh {
     padding: 1em;
     margin-bottom: 1em;
-    background-color: var(--foreground);
+    background-color: var(--ui-surface);
     border-radius: 0.5em;
   }
 
@@ -187,74 +202,158 @@
   }
 
   .animate-banner {
+    display: block !important;
     animation-name: banner-animation;
     animation-duration: 20s;
     animation-fill-mode: forwards;
-    display: block !important;
   }
 
   .animate-banner-fast {
+    display: block !important;
     animation-name: banner-animation;
     animation-duration: 5s;
     animation-fill-mode: forwards;
-    display: block !important;
   }
 
   #workspace-notification-banner {
     position: absolute;
-    background-color: var(--foreground);
-    color: #fff;
-    border-color: var(--brand-green);
-    border-style: solid;
-    border-width: 2px;
-    border-radius: 1em;
-    padding: 1em;
-    height: 4em;
     bottom: 4em;
-    white-space: normal;
-    text-align: center;
-    overflow: hidden;
+    z-index: 20;
     display: none;
+    min-height: 4em;
+    height: auto;
+    padding: 1em;
+    overflow: hidden;
+    color: var(--ui-text);
+    background-color: var(--ui-surface-raised);
+    border: 2px solid var(--brand-green);
+    border-radius: 1em;
+    pointer-events: none;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .workspace-banner-message {
+    vertical-align: middle;
+  }
+
+  .workspace-banner-action {
+    margin-left: 0.8rem;
+    color: #111 !important;
+    background: var(--brand-green);
+    border-color: var(--brand-green);
+    pointer-events: auto;
+    vertical-align: middle;
+  }
+
+  .workspace-banner-action:hover,
+  .workspace-banner-action:focus {
+    color: #111 !important;
+    background: #8fdb39;
+    border-color: #8fdb39;
+  }
+
+  .workspace-web-address {
+    display: flex;
+    min-width: min(100%, 28rem);
+    max-width: 100%;
+    flex: 1 1 34rem;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0.35rem 0.5rem;
+    padding: 0.45rem 0.7rem;
+    color: var(--ui-text);
+    background: var(--ui-surface);
+    border: 1px solid var(--ui-border);
+    border-radius: 0.55rem;
+  }
+
+  .workspace-web-address-label {
+    color: var(--ui-text-muted);
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+
+  .workspace-web-address-value {
+    min-width: 0;
+    overflow: visible;
+    color: var(--brand-blue);
+    font-size: 0.78rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .workspace-web-address-copy {
+    flex: none;
+    padding: 0.15rem 0.35rem;
+    color: var(--ui-text-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 0.25rem;
+  }
+
+  .workspace-web-address-copy:hover,
+  .workspace-web-address-copy:focus {
+    color: var(--ui-text);
+    background: var(--ui-surface-hover);
+  }
+
+  .challenge-score-action {
+    margin-left: 0.75rem;
   }
 </style>
 
 {% set service_icons = {"terminal": "fa-terminal", "code": "fa-code", "desktop": "fa-desktop", "ssh": "fa-key", "lecture": "fa-video"} %}
 <div class="workspace-controls" data-popout="{{ 'true' if popout else 'false' }}">
-  <div id="workspace-notification-banner"></div>
+  <div id="workspace-notification-banner" role="status"></div>
   {% for service in challenge.interfaces %}
   {% set service_key = service.name | lower %}
   <button class="workspace-control workspace-service btn btn-md btn-outline-secondary"
       data-service="{{ service_key }}: {{ service.port }}"
       aria-pressed="false"
-      title="{% if not popout %}Switch to {{ service.name }}{% elif service.port %}Open {{ service.name }} in a new tab{% else %}Show {{ service.name }} connection info{% endif %}">
+      title="{% if not popout %}切换到 {{ service.name }}{% elif service.port %}在新标签页打开 {{ service.name }}{% else %}显示 {{ service.name }} 连接信息{% endif %}">
     <i class="fas {{ service_icons.get(service_key, 'fa-network-wired') }}"></i>
     <span class="workspace-service-name">{{ service.name }}</span>
     {% if popout and service.port %}<i class="fas fa-external-link-alt popout-icon"></i>{% endif %}
     {% if popout and not service.port %}<i class="fas fa-question-circle hint-icon"></i>{% endif %}
   </button>
   {% endfor %}
-  <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="paste" title="Paste text from this device into the remote desktop" hidden>
-    <i class="fas fa-paste"></i><span>Paste</span>
+  <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="paste" title="将本机剪贴板文本粘贴到远程桌面" hidden>
+    <i class="fas fa-paste"></i><span>粘贴</span>
   </button>
-  <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="copy" title="Copy the latest remote desktop clipboard text to this device" hidden>
-    <i class="fas fa-copy"></i><span>Copy</span>
+  <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="copy" title="将远程桌面的最新剪贴板文本复制到本机" hidden>
+    <i class="fas fa-copy"></i><span>复制</span>
   </button>
-  <div title="Enter flag" class="workspace-control workspace-input">
+  <div title="提交 Flag" class="workspace-control workspace-input">
     <i class="fas fa-flag workspace-highlight input-icon"></i>
-    <input id="flag-input" type="text" placeholder="Flag">
-    <input type="hidden" id="current-challenge-id" value="{{ challenge.challenge_id }}" data-challenge-name="{{ challenge.name }}">
+    <input id="flag-input" type="text" placeholder="输入 Flag">
+    <input type="hidden" id="current-challenge-id" value="{{ challenge.challenge_id }}"
+        data-challenge-name="{{ challenge.name }}"
+        data-dojo-id="{{ dojo.reference_id }}"
+        data-module-id="{{ module.id }}"
+        data-challenge-reference-id="{{ challenge.id }}">
   </div>
   <div class="workspace-control-spacer"></div>
-  <button id="challenge-restart" title="Restart exercise and keep home files" class="workspace-control btn btn-md btn-outline-secondary btn-challenge-start btn-challenge-busy">
+  <button id="challenge-restart"
+      title="重新创建题目容器；保留 /home/hacker，运行中的进程和其他容器修改会丢失"
+      class="workspace-control workspace-lifecycle btn btn-md btn-outline-secondary btn-challenge-start btn-challenge-busy">
     <i class="fas fa-redo"></i>
+    <span>重启</span>
   </button>
-  <button id="challenge-reset" title="Erase home files and reset the exercise to its original state" class="workspace-control workspace-reset btn btn-md btn-outline-danger btn-challenge-busy">
+  <button id="challenge-stop"
+      title="停止并删除当前题目容器；保留 /home/hacker，之后可点击“重启”再次创建"
+      class="workspace-control workspace-lifecycle workspace-stop btn btn-md btn-outline-warning btn-challenge-busy">
+    <i class="fas fa-stop"></i>
+    <span>停止</span>
+  </button>
+  <button id="challenge-reset" title="清除 Home 文件并恢复题目初始状态" class="workspace-control workspace-reset btn btn-md btn-outline-danger btn-challenge-busy">
     <i class="fas fa-eraser"></i>
-    <span class="workspace-service-name">Reset</span>
+    <span class="workspace-service-name">重置</span>
   </button>
   {% if challenge.allow_privileged %}
   <label id="workspace-change-privilege"
-      title="Restart the exercise with or without sudo access"
+      title="以启用或禁用 sudo 的方式重启题目"
       class="workspace-control btn btn-md btn-outline-secondary"
       data-privileged="{{'true' if practice else 'false'}}">
     <input type="checkbox" {{'checked' if practice}}>
@@ -262,8 +361,14 @@
   </label>
   {% endif %}
   {% if not popout %}
-  <button id="fullscreen" title="Toggle fullscreen keyboard capture" class="workspace-control btn btn-md btn-outline-secondary">
+  <button id="fullscreen" title="切换全屏键盘捕获" class="workspace-control btn btn-md btn-outline-secondary">
     <i class="fas fa-expand"></i>
   </button>
   {% endif %}
+  <div class="workspace-web-address" data-workspace-web-address hidden>
+    <i class="fas fa-globe" aria-hidden="true"></i>
+    <span class="workspace-web-address-label">Web 服务</span>
+    <a class="workspace-web-address-value" data-workspace-web-link target="_blank" rel="noopener noreferrer"></a>
+    <button type="button" class="workspace-web-address-copy" data-workspace-web-copy title="复制 Web 地址" aria-label="复制 Web 地址"><i class="fas fa-copy" aria-hidden="true"></i></button>
+  </div>
 </div>

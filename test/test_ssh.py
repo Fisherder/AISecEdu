@@ -157,7 +157,7 @@ def test_add_invalid_ssh_key(random_user_session):
         response = add_ssh_key(random_user_session, invalid_key)
         assert response.status_code == 400
         assert response.json().get("success") is False
-        assert "Invalid SSH Key" in response.json().get("error", "")
+        assert "无效的 SSH 密钥" in response.json().get("error", "")
 
 def test_add_duplicate_ssh_key(random_user_session, temp_ssh_keys):
     
@@ -166,13 +166,13 @@ def test_add_duplicate_ssh_key(random_user_session, temp_ssh_keys):
     
     response = add_ssh_key(random_user_session, temp_ssh_keys['rsa']['public'])
     assert response.status_code == 400
-    assert "already in use" in response.json().get("error", "")
+    assert "已被使用" in response.json().get("error", "")
 
 def test_delete_nonexistent_ssh_key(random_user_session, temp_ssh_keys):
     
     response = delete_ssh_key(random_user_session, temp_ssh_keys['rsa']['public'])
     assert response.status_code == 400
-    assert "does not exist" in response.json().get("error", "")
+    assert "不存在" in response.json().get("error", "")
 
 def test_ssh_command_execution(random_user_name, random_user_session, temp_ssh_keys, example_dojo):
     

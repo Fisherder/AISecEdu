@@ -6,7 +6,7 @@ from CTFd.utils.user import get_current_user
 
 from ...models import Dojos, DojoModules, DojoChallenges
 
-search_namespace = Namespace("search", description="Search across dojos, modules, and challenges")
+search_namespace = Namespace("search", description="搜索课程、单元和题目")
 
 @search_namespace.route("")
 class Search(Resource):
@@ -16,7 +16,7 @@ class Search(Resource):
         user = get_current_user()
 
         if not query or len(query) < 2:
-            return {"success": False, "error": "Query too short."}, 400
+            return {"success": False, "error": "搜索关键词至少需要两个字符。"}, 400
 
         like_query = f"%{query}%"
 

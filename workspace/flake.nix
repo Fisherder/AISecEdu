@@ -30,6 +30,7 @@
 
             ida-free-overlay = final: prev:
               let
+                idaIcon = ./services/desktop/share/icons/aisecedu/ida-free.svg;
                 legacyIda = (import nixpkgs-24-11 { inherit system config; }).ida-free.override {
                   fetchurl = args:
                     if (args.hash or "") == "sha256-widkv2VGh+eOauUK/6Sz/e2auCNFAsc8n9z0fdrSnW0=" then
@@ -45,7 +46,9 @@
                 desktopItem = final.makeDesktopItem {
                   name = "ida-free";
                   exec = "ida64";
-                  icon = "ida-free";
+                  # Use an absolute, high-contrast icon so XFCE launchers do not
+                  # depend on a stale icon-theme cache inside an exercise.
+                  icon = "${idaIcon}";
                   comment = "Freeware interactive disassembler";
                   desktopName = "IDA Free";
                   genericName = "Interactive Disassembler";
@@ -61,6 +64,7 @@
                   };
                   postInstall = (oldAttrs.postInstall or "") + ''
                     install -Dm644 "$out/opt/appico64.png" "$out/share/icons/hicolor/64x64/apps/ida-free.png"
+                    install -Dm644 ${idaIcon} "$out/share/icons/hicolor/scalable/apps/ida-free.svg"
                   '';
                   inherit desktopItem;
                   desktopItems = [ desktopItem ];

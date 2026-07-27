@@ -80,6 +80,11 @@ USER_FIREWALL_ALLOWED = {
 }
 
 DOJO_HOST = os.getenv("DOJO_HOST")
+DOJO_IP_MODE = (os.getenv("DOJO_IP_MODE") or "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
 WORKSPACE_SECRET = os.environ.get("WORKSPACE_SECRET")
 DOJO_SSH_SERVICE_KEY = os.environ.get("DOJO_SSH_SERVICE_KEY")
 HOST_DATA_PATH = os.getenv("HOST_DATA_PATH")
@@ -98,11 +103,36 @@ DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID")
 INTERNET_FOR_ALL = bool(ast.literal_eval(os.getenv("INTERNET_FOR_ALL") or "False"))
 MAC_HOSTNAME = os.getenv("MAC_HOSTNAME")
 MAC_USERNAME = os.getenv("MAC_USERNAME")
-DOJO_AI_ENABLED = (os.getenv("DOJO_AI_ENABLED") or "false").lower() in {"1", "true", "yes"}
-DOJO_AI_BASE_URL = (os.getenv("DOJO_AI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
-DOJO_AI_API_KEY = os.getenv("DOJO_AI_API_KEY")
-DOJO_AI_MODEL = os.getenv("DOJO_AI_MODEL") or "gpt-4o-mini"
-DOJO_AI_TIMEOUT_SECONDS = float(os.getenv("DOJO_AI_TIMEOUT_SECONDS") or "30")
+DOJO_AI_API_KEY = os.getenv("DEEPSEEK_API_KEY") or os.getenv("DOJO_AI_API_KEY")
+_dojo_ai_enabled = (os.getenv("DOJO_AI_ENABLED") or "auto").strip().lower()
+DOJO_AI_ENABLED = (
+    bool(DOJO_AI_API_KEY)
+    if _dojo_ai_enabled == "auto"
+    else _dojo_ai_enabled in {"1", "true", "yes"}
+)
+DOJO_AI_BASE_URL = (
+    os.getenv("DOJO_AI_BASE_URL") or "https://api.deepseek.com"
+).rstrip("/")
+DOJO_AI_TUTOR_MODEL = os.getenv("DOJO_AI_TUTOR_MODEL") or "deepseek-v4-flash"
+DOJO_AI_GUIDE_MODEL = os.getenv("DOJO_AI_GUIDE_MODEL") or "deepseek-v4-flash"
+DOJO_AI_GRADER_MODEL = os.getenv("DOJO_AI_GRADER_MODEL") or "deepseek-v4-pro"
+DOJO_AI_SOLUTION_MODEL = os.getenv("DOJO_AI_SOLUTION_MODEL") or "deepseek-v4-pro"
+DOJO_AI_AUTHORING_PLAN_MODEL = (
+    os.getenv("DOJO_AI_AUTHORING_PLAN_MODEL") or "deepseek-v4-flash"
+)
+DOJO_AI_AUTHORING_BUILD_MODEL = (
+    os.getenv("DOJO_AI_AUTHORING_BUILD_MODEL") or "deepseek-v4-pro"
+)
+DOJO_AI_AUTHORING_VALIDATE_MODEL = (
+    os.getenv("DOJO_AI_AUTHORING_VALIDATE_MODEL") or "deepseek-v4-pro"
+)
+DOJO_AI_TIMEOUT_SECONDS = float(os.getenv("DOJO_AI_TIMEOUT_SECONDS") or "120")
+DOJO_AI_MAX_CONTEXT_CHARS = max(
+    32000, int(os.getenv("DOJO_AI_MAX_CONTEXT_CHARS") or "180000")
+)
+DOJO_AI_MAX_FILE_CHARS = max(
+    4000, int(os.getenv("DOJO_AI_MAX_FILE_CHARS") or "32000")
+)
 
 missing_errors = ["DOJO_HOST", "HOST_DATA_PATH"]
 for config_option in missing_errors:

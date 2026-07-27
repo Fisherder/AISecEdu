@@ -30,20 +30,20 @@
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1>Course</h1>
+    <h1>课程</h1>
   </div>
 </div>
 <div class="container">
   <div class="row">
     <div class="col-md-2 offset-md-1">
       <div class="nav flex-column nav-pills" role="tablist">
-        <a class="nav-link active" id="course-syllabus-tab" data-toggle="pill" href="#syllabus" role="tab">Syllabus</a>
+        <a class="nav-link active" id="course-syllabus-tab" data-toggle="pill" href="#syllabus" role="tab">课程大纲</a>
         {% if user %}
           {% if dojo.course.scripts and dojo.course.scripts.grade %}
-          <a class="nav-link" id="course-grades-tab" data-toggle="pill" href="#grades" role="tab">Grades</a>
+          <a class="nav-link" id="course-grades-tab" data-toggle="pill" href="#grades" role="tab">成绩</a>
           {% endif %}
-          <a class="nav-link" id="course-identity-tab" data-toggle="pill" href="#identity" role="tab">Identity</a>
-          <a class="nav-link" id="course-setup-tab" data-toggle="pill" href="#setup" role="tab">Setup</a>
+          <a class="nav-link" id="course-identity-tab" data-toggle="pill" href="#identity" role="tab">身份信息</a>
+          <a class="nav-link" id="course-setup-tab" data-toggle="pill" href="#setup" role="tab">设置</a>
         {% endif %}
       </div>
     </div>
@@ -58,7 +58,7 @@
         {% if user %}
           {% if dojo.course.scripts and dojo.course.scripts.grade %}
           <div class="tab-pane fade show" id="grades" role="tabpanel">
-            <p>Loading...</p>
+            <p>正在加载…</p>
           </div>
           {% endif %}
 
@@ -66,7 +66,7 @@
             <form method="post" id="identity-form" autocomplete="off">
               <div class="form-group">
                 <b><label for="enter-name">{{ identity.name }}</label></b>
-                <small class="form-text text-muted">This will be shared with this course's teachers.</small>
+                <small class="form-text text-muted">此信息会共享给本课程的教师。</small>
                 <br>
                 <input class="form-control" id="identity" name="identity" type="text" value="{{ identity.value or '' }}">
               </div>
@@ -75,28 +75,28 @@
               </div>
 
               <div class="form-group text-right">
-                <input class="btn btn-md btn-primary btn-outlined" id="_submit" name="_submit" type="submit" value="Update">
+                <input class="btn btn-md btn-primary btn-outlined" id="_submit" name="_submit" type="submit" value="更新">
               </div>
             </form>
           </div>
         {% endif %}
         <div class="tab-pane fade" id="setup" role="tabpanel">
           <ol>
-            <li class="setup-{{ setup.create_account }}">Create an AISecEdu account <a href="/register">here</a>, or use your existing account. Your username can appear on course leaderboards, so choose it with that visibility in mind.</li>
+            <li class="setup-{{ setup.create_account }}">在<a href="/register">此处</a>创建 AISecEdu 账号，或使用已有账号。用户名可能显示在课程排行榜中，请注意其可见性。</li>
             {% if discord_role %}
-              <li class="setup-{{ setup.create_discord }}">Create a Discord account <a href="https://discord.com/register">here</a>. You can use an existing account, or create a new one specifically for the course.</li>
-              <li class="setup-{{ setup.join_discord }}">Join the communication space provided by your teacher. This is where course announcements and permitted peer discussion take place.</li>
-              <li class="setup-{{ setup.link_discord }}">Link your AISecEdu account with Discord <a href="/settings#discord">here</a> so the course can assign the correct student role.</li>
+              <li class="setup-{{ setup.create_discord }}">在<a href="https://discord.com/register">此处</a>创建 Discord 账号。你可以使用已有账号，或专门为本课程创建一个账号。</li>
+              <li class="setup-{{ setup.join_discord }}">加入教师提供的交流空间。课程公告和允许的同伴讨论都会在这里进行。</li>
+              <li class="setup-{{ setup.link_discord }}">在<a href="/settings#discord">此处</a>关联 AISecEdu 与 Discord 账号，以便课程分配正确的学生角色。</li>
             {% endif %}
-            <li class="setup-{{ setup.link_student }}">Link your AISecEdu account with your {{ identity.name }} <a href="identity">here</a>. Teachers use this value to associate progress and grades with the correct student record.</li>
+            <li class="setup-{{ setup.link_student }}">在<a href="identity">此处</a>将 AISecEdu 账号与 {{ identity.name }} 关联。教师会用此信息将进度和成绩关联到正确的学生记录。</li>
           </ol>
           {% if setup_complete %}
-            <p>Setup complete!</p>
+            <p>设置已完成！</p>
             {% if discord_role %}
-              <p>If you are missing your official course role in Discord, you can force it to update by updating your course identity <a href="identity">here</a>.</p>
+              <p>若 Discord 中缺少正式课程角色，可在<a href="identity">此处</a>更新课程身份信息以强制刷新。</p>
             {% endif %}
           {% else %}
-            <p>Setup incomplete.</p>
+            <p>设置尚未完成。</p>
           {% endif %}
           <p></p>
         </div>
@@ -107,8 +107,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/course.js') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/grades.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/course.js', v='aisecedu-20260726-pwn-notices') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/grades.js', v='aisecedu-20260725-ui3') }}"></script>
 {% if dojo.course.scripts and dojo.course.scripts.grade %}
 <script>
   document.addEventListener("DOMContentLoaded", () => loadGrades("#grades"));

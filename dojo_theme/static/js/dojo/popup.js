@@ -3,7 +3,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     checkUserAwards()
         .then(handleAwardPopup)
-        .catch(error => console.error("Award check failed:", error));
+        .catch(error => console.error("成就检查失败：", error));
 });
 
 function checkUserAwards() {
@@ -34,7 +34,7 @@ function handleAwardPopup(response) {
 function showAwardPopup(award) {
     const isBelt = ["orange", "yellow", "green", "blue"].includes(award.name);
     if (isBelt) {
-        return renderPopup(`You reached the ${award.name} AISecEdu achievement level!`, `<i class="fas fa-award fa-5x brand-green" aria-hidden="true"></i>`)
+        return renderPopup(`你已获得 ${award.name} AISecEdu 成就等级！`, `<i class="fas fa-award fa-5x brand-green" aria-hidden="true"></i>`)
     }
 
     var icon = award.icon
@@ -48,17 +48,17 @@ function showAwardPopup(award) {
                     icon = entry["award"]["emoji"]
                 }
             })
-            renderPopup(`You earned the ${icon} achievement!`, `<div class="emoji-display">${icon}</div>`)
+            renderPopup(`你已获得 ${icon} 徽章！`, `<div class="emoji-display">${icon}</div>`)
         })
     }
     else {
-        renderPopup(`You earned the ${icon} achievement!`, `<div class="emoji-display">${icon}</div>`)
+        renderPopup(`你已获得 ${icon} 徽章！`, `<div class="emoji-display">${icon}</div>`)
     }
 }
 
 function renderPopup(message, image) {
     const popupContent = {
-        header: "Congratulations!",
+        header: "恭喜！",
         body: message,
         image: image,
         logos: {
@@ -82,16 +82,16 @@ function renderPopup(message, image) {
                 <a href="https://linkedin.com/share?url=${popupContent.profileUrl}"
                     class="share-button"
                     target="_blank"
-                    aria-label="Post on LinkedIn">
+                    aria-label="分享到 LinkedIn">
                     <img src="${popupContent.logos.linkedin}">
-                    <span title="Post on LinkedIn"></span>Post
+                    <span title="分享到 LinkedIn"></span>分享
                 </a>
                 <a href="https://twitter.com/intent/tweet?url=${popupContent.profileUrl}"
                     class="share-button"
                     target="_blank"
-                    aria-label="Post on X">
+                    aria-label="分享到 X">
                     <img src="${popupContent.logos.x}">
-                    <span title="Post on X"></span>Post
+                    <span title="分享到 X"></span>分享
                 </a>
             </div>
         </div>

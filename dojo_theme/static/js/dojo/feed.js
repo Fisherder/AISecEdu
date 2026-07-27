@@ -16,9 +16,9 @@
                         <div class="flex-grow-1">
                             <div class="event-content">
                                 <span class="event-user"></span>
-                                <span> started a </span>
+                                <span> 启动了一个 </span>
                                 <span class="event-mode badge"></span>
-                                <span> container for </span>
+                                <span> 工作区，题目为 </span>
                                 <span class="event-location"></span>
                             </div>
                             <small class="text-muted event-time"></small>
@@ -37,7 +37,7 @@
                         <div class="flex-grow-1">
                             <div class="event-content">
                                 <span class="event-user"></span>
-                                <span> completed </span>
+                                <span> 完成了 </span>
                                 <span class="event-location"></span>
                                 <span class="event-first-blood"></span>
                             </div>
@@ -57,9 +57,9 @@
                         <div class="flex-grow-1">
                             <div class="event-content">
                                 <span class="event-user"></span>
-                                <span> earned the </span>
+                                <span> 获得了 </span>
                                 <strong class="event-emoji"></strong>
-                                <span> emoji!</span>
+                                <span> 徽章！</span>
                                 <span class="event-emoji-detail"></span>
                             </div>
                             <small class="text-muted event-time"></small>
@@ -78,9 +78,9 @@
                         <div class="flex-grow-1">
                             <div class="event-content">
                                 <span class="event-user"></span>
-                                <span> reached the </span>
+                                <span> 达到了 </span>
                                 <strong class="event-belt-name"></strong>
-                                <span> achievement level!</span>
+                                <span> 成就等级！</span>
                                 <span class="event-belt-detail"></span>
                             </div>
                             <small class="text-muted event-time"></small>
@@ -99,7 +99,7 @@
                         <div class="flex-grow-1">
                             <div class="event-content">
                                 <span class="event-user"></span>
-                                <span> updated </span>
+                                <span> 更新了 </span>
                                 <a class="event-dojo-link" href="#"></a>
                                 <span class="event-update-detail"></span>
                             </div>
@@ -131,7 +131,7 @@
             img.src = `/belt/${belt}.svg`;
             img.className = 'scoreboard-belt';
             img.style.cssText = 'height: 1.5em; vertical-align: middle; margin-right: 0.25em;';
-            img.title = belt.charAt(0).toUpperCase() + belt.slice(1) + ' Belt';
+            img.title = ({orange: '橙色', yellow: '黄色', green: '绿色', blue: '蓝色'})[belt] || belt;
             link.appendChild(img);
         }
         
@@ -222,7 +222,7 @@
             
             const modeElem = card.querySelector('.event-mode');
             modeElem.classList.add(`bg-${event.data.mode === 'practice' ? 'warning' : 'primary'}`);
-            modeElem.textContent = event.data.mode;
+            modeElem.textContent = event.data.mode === 'practice' ? '练习模式' : '标准模式';
             
             const locationElem = card.querySelector('.event-location');
             locationElem.replaceWith(createLocationElement(event.data));
@@ -238,7 +238,7 @@
             
             const firstBloodElem = card.querySelector('.event-first-blood');
             if (event.data.first_blood) {
-                firstBloodElem.innerHTML = ' <span class="badge bg-danger">FIRST COMPLETION!</span>';
+                firstBloodElem.innerHTML = ' <span class="badge bg-danger">首个完成！</span>';
             } else {
                 firstBloodElem.remove();
             }
@@ -257,7 +257,7 @@
                 const br = document.createElement('br');
                 const small = document.createElement('small');
                 small.className = 'text-muted';
-                small.appendChild(document.createTextNode('Completed '));
+                small.appendChild(document.createTextNode('已完成 '));
                 small.appendChild(createLink(`/dojos/${event.data.dojo_id}`, event.data.dojo_name || event.data.dojo_id));
                 
                 detailElem.appendChild(br);
@@ -287,7 +287,7 @@
                 const br = document.createElement('br');
                 const small = document.createElement('small');
                 small.className = 'text-muted';
-                small.appendChild(document.createTextNode('Completed '));
+                small.appendChild(document.createTextNode('已完成 '));
                 small.appendChild(createLink(`/dojos/${event.data.dojo_id}`, event.data.dojo_name || event.data.dojo_id));
                 
                 detailElem.appendChild(br);
@@ -363,7 +363,7 @@
     function updateConnectionStatus(status, message) {
         const statusDiv = document.getElementById('connection-status');
         const messageSpan = document.getElementById('connection-message');
-        
+
         if (status === 'connected') {
             statusDiv.style.display = 'none';
         } else {
@@ -389,7 +389,7 @@
     function connectSSE(allowedUserIds) {
         if (eventSource) eventSource.close();
         
-        updateConnectionStatus('connecting', 'Connecting to live feed...');
+        updateConnectionStatus('connecting', '正在连接实时动态…');
         eventSource = new EventSource('/pwncollege_api/v1/feed/stream');
         
         eventSource.onopen = () => {
@@ -406,16 +406,16 @@
                     addEvent(data);
                 }
             } catch (e) {
-                console.error('Failed to parse event:', e);
+                console.error('无法解析实时动态事件：', e);
             }
         };
         
         eventSource.onerror = () => {
             eventSource.close();
             if (++reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
-                updateConnectionStatus('error', 'Connection lost. Please refresh the page.');
+                updateConnectionStatus('error', '连接已断开，请刷新页面后重试。');
             } else {
-                updateConnectionStatus('error', `Connection lost. Reconnecting in ${RECONNECT_DELAY / 1000} seconds...`);
+                updateConnectionStatus('error', `连接已断开，${RECONNECT_DELAY / 1000} 秒后重连…`);
                 setTimeout(connectSSE, RECONNECT_DELAY);
             }
         };

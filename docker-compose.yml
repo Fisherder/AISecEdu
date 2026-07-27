@@ -9,6 +9,8 @@ x-ctfd-env: &ctfd-env
   REDIS_URL: redis://cache:6379
   DOJO_HOST: ${DOJO_HOST}
   WORKSPACE_HOST: ${WORKSPACE_HOST}
+  WORKSPACE_HTTPS_PORT: ${WORKSPACE_HTTPS_PORT:-443}
+  DOJO_IP_MODE: ${DOJO_IP_MODE:-false}
   WORKSPACE_SECRET: ${WORKSPACE_SECRET}
   DOJO_SSH_SERVICE_KEY: ${DOJO_SSH_SERVICE_KEY}
   HOST_DATA_PATH: /data
@@ -24,11 +26,20 @@ x-ctfd-env: &ctfd-env
   INTERNET_FOR_ALL: ${INTERNET_FOR_ALL}
   MAC_HOSTNAME: ${MAC_HOSTNAME}
   MAC_USERNAME: ${MAC_USERNAME}
-  DOJO_AI_ENABLED: ${DOJO_AI_ENABLED:-false}
-  DOJO_AI_BASE_URL: ${DOJO_AI_BASE_URL:-https://api.openai.com/v1}
+  DOJO_AI_ENABLED: ${DOJO_AI_ENABLED:-auto}
+  DOJO_AI_BASE_URL: ${DOJO_AI_BASE_URL:-https://api.deepseek.com}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
   DOJO_AI_API_KEY: ${DOJO_AI_API_KEY:-}
-  DOJO_AI_MODEL: ${DOJO_AI_MODEL:-gpt-4o-mini}
-  DOJO_AI_TIMEOUT_SECONDS: ${DOJO_AI_TIMEOUT_SECONDS:-30}
+  DOJO_AI_TUTOR_MODEL: ${DOJO_AI_TUTOR_MODEL:-deepseek-v4-flash}
+  DOJO_AI_GUIDE_MODEL: ${DOJO_AI_GUIDE_MODEL:-deepseek-v4-flash}
+  DOJO_AI_GRADER_MODEL: ${DOJO_AI_GRADER_MODEL:-deepseek-v4-pro}
+  DOJO_AI_SOLUTION_MODEL: ${DOJO_AI_SOLUTION_MODEL:-deepseek-v4-pro}
+  DOJO_AI_AUTHORING_PLAN_MODEL: ${DOJO_AI_AUTHORING_PLAN_MODEL:-deepseek-v4-flash}
+  DOJO_AI_AUTHORING_BUILD_MODEL: ${DOJO_AI_AUTHORING_BUILD_MODEL:-deepseek-v4-pro}
+  DOJO_AI_AUTHORING_VALIDATE_MODEL: ${DOJO_AI_AUTHORING_VALIDATE_MODEL:-deepseek-v4-pro}
+  DOJO_AI_TIMEOUT_SECONDS: ${DOJO_AI_TIMEOUT_SECONDS:-120}
+  DOJO_AI_MAX_CONTEXT_CHARS: ${DOJO_AI_MAX_CONTEXT_CHARS:-180000}
+  DOJO_AI_MAX_FILE_CHARS: ${DOJO_AI_MAX_FILE_CHARS:-32000}
 
 x-ctfd-volumes: &ctfd-volumes
   - /data/dojos:/var/dojos
@@ -142,6 +153,11 @@ services:
       <<: *ctfd-env
       UPLOAD_FOLDER: /var/uploads
       WORKERS: 8
+      # DeepSeek Pro authoring can run several bounded build/review/repair
+      # calls in one request. Keep Gunicorn aligned with the 3600-second
+      # learning API proxy window instead of killing a healthy worker at the
+      # default timeout.
+      GUNICORN_CMD_ARGS: ${GUNICORN_CMD_ARGS:---timeout 3600 --graceful-timeout 3600}
       LOG_FOLDER: /var/log/CTFd
       ACCESS_LOG: "-"
       ERROR_LOG: "-"
@@ -296,10 +312,12 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "4443:4443"
     environment:
       - DOJO_HOST=${DOJO_HOST}
       - DOJO_ENV=${DOJO_ENV}
       - WORKSPACE_HOST=${WORKSPACE_HOST}
+      - WORKSPACE_HTTPS_PORT=${WORKSPACE_HTTPS_PORT:-443}
       - WORKSPACE_SECRET=${WORKSPACE_SECRET}
     volumes:
       - /data/acme:/var/cache/nginx/acme-letsencrypt
@@ -307,8 +325,11 @@ services:
       - /data/local-tls/ca.crt:/usr/share/nginx/html/pwncollege-local-ca.crt:ro
       - ./ops/nginx-local/server-http.conf:/etc/nginx/conf.d/server-http.prod.conf:ro
       - ./ops/nginx-local/server-https.conf:/etc/nginx/conf.d/server-https.prod.conf:ro
-      - ./ops/nginx-local/server-https-future.conf:/etc/nginx/conf.d/server-https-future.prod.conf:ro
+      - ./ops/nginx-local/disabled.conf:/etc/nginx/conf.d/server-http-future.prod.conf:ro
+      - ./ops/nginx-local/disabled.conf:/etc/nginx/conf.d/server-https-future.prod.conf:ro
+      - ./ops/nginx-local/disabled.conf:/etc/nginx/conf.d/workspace-http.prod.conf:ro
       - ./ops/nginx-local/workspace-https.conf:/etc/nginx/conf.d/workspace-https.prod.conf:ro
+      - ./nginx/conf.d/location-learning-ai.conf:/etc/nginx/conf.d/location-learning-ai.conf:ro
     networks:
       default:
       workspace_net:

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="IDA Free">
+  <defs>
+    <linearGradient id="ida-bg" x1="14" y1="8" x2="112" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="24" fill="url(#ida-bg)" stroke="#67e8f9" stroke-width="6"/>
+  <path d="M24 31h16v66H24z" fill="#f8fafc"/>
+  <path d="M49 31h24c22 0 36 13 36 33S95 97 73 97H49zm16 15v36h8c12 0 20-6 20-18s-8-18-20-18z" fill="#38bdf8"/>
+  <path d="M91 82h15l9 15H97z" fill="#fbbf24"/>
+</svg>

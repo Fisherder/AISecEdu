@@ -34,7 +34,7 @@ class UpdateKey(Resource):
                 return (
                     {
                         "success": False,
-                        "error": f"Invalid SSH Key, error: <code>{markupsafe.escape(e)}</code> <br>Refer below for how to generate a valid ssh key"
+                        "error": f"无效的 SSH 密钥：<code>{markupsafe.escape(e)}</code><br>请参考下方说明生成有效的 SSH 密钥。"
                     },
                     400,
                 )
@@ -48,7 +48,7 @@ class UpdateKey(Resource):
         except IntegrityError:
             db.session.rollback()
             return (
-                {"success": False, "error": "SSH Key already in use"},
+                {"success": False, "error": "该 SSH 密钥已被使用。"},
                 400,
             )
 
@@ -64,7 +64,7 @@ class UpdateKey(Resource):
         key = SSHKeys.query.filter_by(user=user, value=key_value).first()
         if not key:
             return (
-                {"success": False, "error": "SSH Key does not exist"},
+                {"success": False, "error": "该 SSH 密钥不存在。"},
                 400,
             )
 

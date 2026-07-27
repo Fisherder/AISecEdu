@@ -121,13 +121,13 @@ class PromoteAdmin(Resource):
     def post(self, dojo):
         data = request.get_json()
         if 'user_id' not in data:
-            return {"success": False, "error": "User not specified."}, 400
+            return {"success": False, "error": "未指定用户。"}, 400
         new_admin_id = data['user_id']
         u = DojoUsers.query.filter_by(dojo=dojo, user_id=new_admin_id).first()
         if u:
             u.type = 'admin'
         else:
-            return {"success": False, "error": "User is not currently a dojo member."}, 400
+            return {"success": False, "error": "该用户当前不是本课程成员。"}, 400
         db.session.commit()
         return {"success": True}
 
@@ -174,7 +174,7 @@ class CreateDojo(Resource):
         timeout = int(datetime.timedelta(days=1).total_seconds())
 
         if not is_admin() and cache.get(key) is not None:
-            return {"success": False, "error": "You can only create 1 dojo per day."}, 429
+            return {"success": False, "error": "每天最多只能创建 1 门课程。"}, 429
 
         try:
             dojo = dojo_create(user, repository, public_key, private_key, spec)
@@ -197,7 +197,7 @@ class UpdateDojo(Resource):
     def post(self, dojo):
         data = request.get_json()
         if not data:
-            return {"success": False, "error": "Missing dojo spec."}, 400
+            return {"success": False, "error": "缺少课程配置。"}, 400
 
         try:
             dojo_from_spec(data, dojo=dojo)
@@ -279,7 +279,7 @@ class DojoSolveList(Resource):
         username = request.args.get("username")
         user = Users.query.filter_by(name=username, hidden=False).first() if username else get_current_user()
         if not user:
-            return {"error": "User not found"}, 400
+            return {"error": "未找到用户。"}, 400
 
         solves_query = dojo.solves(user=user, ignore_visibility=True, ignore_admins=False)
 
@@ -287,7 +287,7 @@ class DojoSolveList(Resource):
             try:
                 after_date = datetime.datetime.fromisoformat(after).astimezone(datetime.timezone.utc)
             except ValueError:
-                return {"success": False, "error": "Invalid after date format"}, 400
+                return {"success": False, "error": "after 日期格式无效。"}, 400
             solves_query = solves_query.filter(Solves.date > after_date)
 
         solves_query = solves_query.order_by(Solves.date.asc()).with_entities(Solves.date, DojoModules.id, DojoChallenges.id)
@@ -338,7 +338,7 @@ class DojoCourseSolveList(Resource):
             try:
                 after_date = datetime.datetime.fromisoformat(after).astimezone(datetime.timezone.utc)
             except ValueError:
-                return {"success": False, "error": "Invalid after date format"}, 400
+                return {"success": False, "error": "after 日期格式无效。"}, 400
             solves_query = solves_query.filter(Solves.date > after_date)
 
         if students:
@@ -367,7 +367,7 @@ class DojoChallengeSolve(Resource):
         dojo_challenge = (DojoChallenges.from_id(dojo.reference_id, module.id, challenge_id)
                           .filter(DojoChallenges.visible()).first())
         if not dojo_challenge:
-            return {"success": False, "error": "Challenge not found"}, 404
+            return {"success": False, "error": "未找到题目。"}, 404
 
         solve = Solves.query.filter_by(user=user, challenge=dojo_challenge.challenge).first()
         if solve:
@@ -390,7 +390,7 @@ class DojoSurvey(Resource):
         dojo_challenge = (DojoChallenges.from_id(dojo.reference_id, module.id, challenge_id)
                           .filter(DojoChallenges.visible()).first())
         if not dojo_challenge:
-            return {"success": False, "error": "Challenge not found"}, 404
+            return {"success": False, "error": "未找到题目。"}, 404
         survey = dojo_challenge.survey
         if not survey:
             return {"success": True, "type": "none"}
@@ -412,12 +412,12 @@ class DojoSurvey(Resource):
         dojo_challenge = (DojoChallenges.from_id(dojo.reference_id, module.id, challenge_id)
                           .filter(DojoChallenges.visible()).first())
         if not dojo_challenge:
-            return {"success": False, "error": "Challenge not found"}, 404
+            return {"success": False, "error": "未找到题目。"}, 404
         survey = dojo_challenge.survey
         if not survey:
-            return {"success": False, "error": "Survey not found"}, 404
+            return {"success": False, "error": "未找到问卷。"}, 404
         if "response" not in data:
-            return {"success": False, "error": "Missing response"}, 400
+            return {"success": False, "error": "缺少问卷回答。"}, 400
 
         response = SurveyResponses(
             user_id=user.id,
@@ -441,12 +441,12 @@ class DojoChallengeDescription(Resource):
         dojo_challenge = DojoChallenges.from_id(dojo.reference_id, module.id, challenge_id).first()
 
         if dojo_challenge is None or not (dojo_challenge.visible() or dojo.is_admin()):
-            return {"success": False, "error": "Invalid challenge id"}, 404
+            return {"success": False, "error": "题目标识无效。"}, 404
 
         if is_challenge_locked(dojo_challenge, user):
             return {
                 "success": False,
-                "error": "This challenge is locked"
+                "error": "此题目尚未解锁。"
             }, 403
 
         return {
@@ -466,11 +466,11 @@ class GrantAward(Resource):
         emoji = data.get("emoji")
         description = data.get("description")
         if None in [user_id, emoji, description]:
-            return {"success": False, "error": "Must supply user_id, emoji, and description."}, 400
+            return {"success": False, "error": "必须提供 user_id、emoji 和 description。"}, 400
         if not emojilib.is_emoji(emoji):
-            return {"success": False, "error": "emoji must be emoji."}, 400
+            return {"success": False, "error": "emoji 字段必须是表情符号。"}, 400
         user = Users.query.filter_by(id=user_id).first()
         if not user:
-            return {"success": False, "error": "User not found."}, 404
+            return {"success": False, "error": "未找到用户。"}, 404
         grant_award(user, emoji, description, dojo.hex_dojo_id)
         return {"success": True}

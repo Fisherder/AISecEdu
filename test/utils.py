@@ -34,7 +34,7 @@ def _get_dojo_container():
         if result.returncode == 0:
             return os.path.basename(result.stdout.strip())
 
-    raise RuntimeError(f"Unable to determine the container the dojo is running in. Please set DOJO_CONTAINER.")
+    raise RuntimeError("Unable to determine the container the dojo is running in. Please set DOJO_CONTAINER.")
 
 DOJO_CONTAINER = _get_dojo_container()
 
@@ -171,9 +171,16 @@ def remove_workspace_container(user):
 def workspace_run(cmd, *, user, root=False, **kwargs):
     container_name = f"user_{get_user_id(user)}"
     outer_container = get_outer_container_for(container_name)
-    user_arg = f"--user=1000" if not root else f"--user=0"
+    user_arg = "--user=1000" if not root else "--user=0"
     args = [ "docker", "exec", user_arg, container_name, "bash", "-c", cmd ]
-    return dojo_run(*args, stdin=subprocess.DEVNULL, check=True, container=outer_container, **kwargs)
+    check = kwargs.pop("check", True)
+    return dojo_run(
+        *args,
+        stdin=subprocess.DEVNULL,
+        check=check,
+        container=outer_container,
+        **kwargs,
+    )
 
 
 def start_challenge(dojo, module, challenge, practice=False, *, session, as_user=None, wait=0):

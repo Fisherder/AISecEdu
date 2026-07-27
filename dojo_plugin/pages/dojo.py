@@ -210,10 +210,10 @@ def join_dojo(dojo, password=None):
 def update_dojo(dojo, update_code=None):
     dojo = Dojos.from_id(dojo).first()
     if not dojo:
-        return {"success": False, "error": "Not Found"}, 404
+        return {"success": False, "error": "未找到课程。"}, 404
 
     if dojo.update_code != update_code:
-        return {"success": False, "error": "Forbidden"}, 403
+        return {"success": False, "error": "无权执行此操作。"}, 403
 
     try:
         dojo_update(dojo)
@@ -226,7 +226,7 @@ def update_dojo(dojo, update_code=None):
         if not match:
             print(f"ERROR: Dojo update failed with unparsed IntegrityError for {dojo}", file=sys.stderr, flush=True)
             traceback.print_exc(file=sys.stderr)
-            return {"success": False, "error": "Database integrity error: A challenge ID is likely duplicated."}, 400
+            return {"success": False, "error": "课程数据完整性错误：可能存在重复的题目 ID。"}, 400
 
         module_index_str, challenge_id = match.groups()
         module_index = int(module_index_str)
@@ -234,14 +234,14 @@ def update_dojo(dojo, update_code=None):
 
         if module_index >= len(dojo.modules):
             print(f"ERROR: IntegrityError for {dojo} references out-of-bounds module_index {module_index}", file=sys.stderr, flush=True)
-            return {"success": False, "error": "Database integrity error: Inconsistent module data."}, 400
+            return {"success": False, "error": "课程数据完整性错误：单元数据不一致。"}, 400
 
         module = dojo.modules[module_index]
         challenge = next((c for c in module.challenges if c.id == challenge_id), None)
 
         module_name = module.name
         challenge_name = challenge.name if challenge else challenge_id
-        error_message = f"Duplicate ID '{challenge_id}' used in module '{module_name}'."
+        error_message = f"单元“{module_name}”中重复使用了题目 ID “{challenge_id}”。"
 
         return {"success": False, "error": error_message}, 400
 
@@ -249,7 +249,7 @@ def update_dojo(dojo, update_code=None):
         db.session.rollback()
         print(f"ERROR: Dojo update failed for {dojo}", file=sys.stderr, flush=True)
         traceback.print_exc(file=sys.stderr)
-        return {"success": False, "error": str(e)}, 400
+        return {"success": False, "error": "更新课程失败，请检查课程配置。"}, 400
 
     try:
         enqueue_dojo_image_pulls(dojo)
@@ -262,7 +262,7 @@ def update_dojo(dojo, update_code=None):
 def delete_dojo(dojo):
     dojo = Dojos.from_id(dojo).first()
     if not dojo:
-        return {"success": False, "error": "Not Found"}, 404
+        return {"success": False, "error": "未找到课程。"}, 404
 
     # Check if the current user is an admin of the dojo
     if not is_admin():
@@ -301,7 +301,7 @@ def delete_dojo(dojo):
         db.session.rollback()
         print(f"ERROR: Dojo failed for {dojo}", file=sys.stderr, flush=True)
         traceback.print_exc(file=sys.stderr)
-        return {"success": False, "error": str(e)}, 400
+        return {"success": False, "error": "删除课程失败，请稍后重试。"}, 400
     return {"success": True}
 
 @dojo.route("/dojo/<dojo>/admin/")
@@ -345,10 +345,10 @@ def view_dojo_activity(dojo):
 def dojo_solves(dojo, solves_code=None, format="csv"):
     dojo = Dojos.from_id(dojo).first()
     if not dojo:
-        return {"success": False, "error": "Not Found"}, 404
+        return {"success": False, "error": "未找到课程。"}, 404
 
     if dojo.solves_code != solves_code:
-        return {"success": False, "error": "Forbidden"}, 403
+        return {"success": False, "error": "无权访问此资源。"}, 403
 
     solves_query = (
         dojo
@@ -375,7 +375,7 @@ def dojo_solves(dojo, solves_code=None, format="csv"):
             if username_filter is None or row[1] == username_filter
         ]
     else:
-        return {"success": False, "error": "Invalid format"}, 400
+        return {"success": False, "error": "导出格式无效。"}, 400
 
 
 def view_module(dojo, module, scroll_to_challenge=None):

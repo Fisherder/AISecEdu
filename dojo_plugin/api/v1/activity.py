@@ -30,7 +30,7 @@ class UserActivity(Resource):
     def get(self, user_id):
         user = Users.query.get(user_id)
         if not user:
-            return {"success": False, "error": "User not found"}, 404
+            return {"success": False, "error": "未找到用户。"}, 404
 
         activity = get_activity_for_user(user_id)
 

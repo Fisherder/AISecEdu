@@ -28,14 +28,14 @@ def view_course(dojo, resource=None):
         if not dojo.is_admin():
             abort(403)
         user = Users.query.filter_by(id=request.args.get("user")).first_or_404()
-        name = f"{user.name}'s"
+        name = f"{user.name} 的"
     else:
         user = get_current_user()
-        name = "Your"
+        name = "你的"
 
     student = DojoStudents.query.filter_by(dojo=dojo, user=user).first()
 
-    identity = dict(name=dojo.course.get("student_id", "Identity"),
+    identity = dict(name=dojo.course.get("student_id", "身份标识"),
                     value=student.token if student else None)
 
     setup = {}
@@ -77,7 +77,7 @@ def update_identity(dojo):
     dojo_user = DojoUsers.query.filter_by(dojo=dojo, user=user).first()
 
     if dojo_user and dojo_user.type == "admin":
-        return {"success": False, "error": "Cannot identify admin"}
+        return {"success": False, "error": "管理员无需绑定学生身份标识。"}
 
     if dojo_user:
         db.session.delete(dojo_user)
@@ -88,17 +88,17 @@ def update_identity(dojo):
     db.session.commit()
 
     if not student.official:
-        identity_name = dojo.course.get("student_id", "Identity")
-        return {"success": True, "warning": f"Your {identity_name} is not on the official student roster"}
+        identity_name = dojo.course.get("student_id", "身份标识")
+        return {"success": True, "warning": f"你的 {identity_name} 不在官方学生名单中。"}
 
     discord_role = dojo.course.get("discord_role")
     if discord_role:
         discord_user = DiscordUsers.query.filter_by(user=user).first()
         if not discord_user:
-            return {"success": True, "warning": "Your Discord account is not linked"}
+            return {"success": True, "warning": "你的 Discord 账号尚未关联。"}
         discord_member = get_discord_member(discord_user.discord_id)
         if not discord_member:
-            return {"success": True, "warning": "Your Discord account has not joined the official Discord server"}
+            return {"success": True, "warning": "你的 Discord 账号尚未加入官方 Discord 服务器。"}
         add_role(discord_user.discord_id, discord_role)
 
     return {"success": True}
@@ -129,7 +129,7 @@ def view_user_info(dojo, user_id):
 
     user = Users.query.filter_by(id=user_id).first_or_404()
     student = DojoStudents.query.filter_by(dojo=dojo, user=user).first()
-    identity = dict(identity_name=dojo.course.get("student_id", "Identity"),
+    identity = dict(identity_name=dojo.course.get("student_id", "身份标识"),
                     identity_value=student.token if student else None)
     discord_member = (get_discord_member(DiscordUsers.query.filter_by(user=user)
                                          .with_entities(DiscordUsers.discord_id).scalar())

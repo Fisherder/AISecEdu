@@ -13,7 +13,7 @@ function submitChallenge(event) {
     answer_input.prop("disabled", true);
 
     if (submission == "pwn.college{practice}") {
-        var message = "This is the practice flag. Find the real flag by pressing Start above to launch the exercise without elevated privileges."
+        var message = "这是练习 Flag。请点击上方“启动”以普通学习者权限运行题目，并找到真实 Flag。"
         return renderSubmissionResponse({"data": {"status": "practice", "message": message}}, item);
     }
 
@@ -37,6 +37,16 @@ function renderSubmissionResponse(response, item) {
     result_notification.removeClass();
     result_message.text(result.message);
 
+    function appendScoreAction() {
+        const challengeId = Number(item.find("#challenge-id").val());
+        if (!Number.isInteger(challengeId) || challengeId < 1) return;
+        $("<a>")
+            .addClass("btn btn-sm btn-outline-success challenge-score-action")
+            .attr("href", `/learning/scores/latest/${challengeId}`)
+            .text("查看评分")
+            .appendTo(result_message);
+    }
+
     if (result.status === "authentication_required") {
         window.location =
             CTFd.config.urlRoot +
@@ -46,11 +56,9 @@ function renderSubmissionResponse(response, item) {
             window.location.hash;
         return;
     } else if (result.status === "incorrect") {
-        // Incorrect key
         result_notification.addClass(
             "alert alert-danger alert-dismissable text-center"
         );
-        result_notification.slideDown();
 
         answer_input.removeClass("correct");
         answer_input.addClass("wrong");
@@ -58,11 +66,9 @@ function renderSubmissionResponse(response, item) {
             answer_input.removeClass("wrong");
         }, 10000);
     } else if (result.status === "practice") {
-        // Incorrect key
         result_notification.addClass(
             "alert alert-danger alert-dismissable text-center"
         );
-        result_notification.slideDown();
 
         answer_input.removeClass("correct");
         answer_input.addClass("wrong");
@@ -70,11 +76,9 @@ function renderSubmissionResponse(response, item) {
             answer_input.removeClass("wrong");
         }, 10000);
     } else if (result.status === "correct") {
-        // Challenge Solved
         result_notification.addClass(
             "alert alert-success alert-dismissable text-center"
         );
-        result_notification.slideDown();
 
         unsolved_flag.removeClass("challenge-unsolved");
         unsolved_flag.addClass("challenge-solved");
@@ -84,12 +88,13 @@ function renderSubmissionResponse(response, item) {
         }
 
         total_solves.text(
-            (parseInt(total_solves.text().trim().split(" ")[0]) + 1) + " completions"
+            (parseInt(total_solves.text().trim().split(" ")[0]) + 1) + " 次完成"
         );
 
         answer_input.val("");
         answer_input.removeClass("wrong");
         answer_input.addClass("correct");
+        appendScoreAction();
         const challenge_name = item.find('#challenge').val()
         const module_name = item.find('#module').val()
         const dojo_name = init.dojo
@@ -119,31 +124,27 @@ function renderSubmissionResponse(response, item) {
         .then(handleAwardPopup)
         .catch(error => console.error("Award check failed:", error));
     } else if (result.status === "already_solved") {
-        // Challenge already solved
         result_notification.addClass(
             "alert alert-info alert-dismissable text-center"
         );
-        result_notification.slideDown();
 
         answer_input.addClass("correct");
+        appendScoreAction();
     } else if (result.status === "paused") {
-        // CTF is paused
         result_notification.addClass(
             "alert alert-warning alert-dismissable text-center"
         );
-        result_notification.slideDown();
     } else if (result.status === "ratelimited") {
-        // Keys per minute too high
         result_notification.addClass(
             "alert alert-warning alert-dismissable text-center"
         );
-        result_notification.slideDown();
 
         answer_input.addClass("too-fast");
         setTimeout(function() {
             answer_input.removeClass("too-fast");
         }, 10000);
     }
+    result_notification.slideDown();
     setTimeout(function() {
         item.find(".alert").slideUp();
         answer_input.prop("disabled", false);
@@ -169,12 +170,25 @@ function unlockChallenge(challenge_button) {
 }
 
 
-function startChallenge(event) {
+async function startChallenge(event) {
     event.preventDefault();
     const item = $(event.currentTarget).closest(".accordion-item");
     const module = item.find("#module").val()
     const challenge = item.find("#challenge").val()
     const practice = event.currentTarget.id == "challenge-priv";
+    const activeChallenge = $(".challenge-name.challenge-active").first();
+    const selectedChallenge = item.find(".challenge-name").first();
+    if (activeChallenge.length && !activeChallenge.is(selectedChallenge)) {
+        const confirmed = window.AISecEduUI && await window.AISecEduUI.confirm(
+            `当前运行中的题目容器会被替换。切换到“${selectedChallenge.data("challenge-name") || challenge}”后，/home/hacker 文件仍会保留。`,
+            {
+                title: "切换题目",
+                subtitle: "保留 Home，替换当前运行环境",
+                confirmLabel: "切换并启动",
+            }
+        );
+        if (!confirmed) return;
+    }
 
     item.find(".challenge-init")
         .addClass("disabled-button")
@@ -197,18 +211,18 @@ function startChallenge(event) {
     var result_message = item.find('#result-message');
     result_notification.removeClass('alert-danger');
     result_notification.addClass('alert alert-warning alert-dismissable text-center');
-    result_message.html("Loading.");
+    result_message.html("正在加载。");
     result_notification.slideDown();
     var dot_max = 5;
     var dot_counter = 0;
     setTimeout(function loadmsg() {
-        if (result_message.html().startsWith("Loading")) {
+        if (result_message.html().startsWith("正在加载")) {
             if (dot_counter < dot_max - 1){
                 result_message.append(".");
                 dot_counter++;
             }
             else {
-                result_message.html("Loading.");
+                result_message.html("正在加载。");
                 dot_counter = 0;
             }
             setTimeout(loadmsg, 500);
@@ -241,7 +255,7 @@ function startChallenge(event) {
         result_notification.removeClass();
 
         if (result.success) {
-            var message = "Exercise successfully started!";
+            var message = "题目已成功启动！";
             result_message.html(message);
             result_notification.addClass('alert alert-info alert-dismissable text-center');
 
@@ -249,8 +263,8 @@ function startChallenge(event) {
             item.find(".challenge-name").addClass("challenge-active");
         }
         else {
-            var message = "Error:<br><code>" + result.error + "</code><br>"
-            result_message.html(message);
+            var message = "无法启动题目：" + result.error;
+            result_message.text(message);
             result_notification.addClass('alert alert-warning alert-dismissable text-center');
         }
 
@@ -282,8 +296,13 @@ function startChallenge(event) {
     }).catch(function (error) {
         console.error(error);
         var result_message = item.find('#result-message');
-        result_message.html("Submission request failed: " + ((error || {}).message || error));
+        const message = "题目启动请求失败：" + ((error || {}).message || error);
+        result_message.text(message);
         result_notification.addClass('alert alert-warning alert-dismissable text-center');
+        result_notification.slideDown();
+        item.find(".challenge-init")
+            .removeClass("disabled-button")
+            .prop("disabled", false);
     })
 }
 

@@ -11,7 +11,7 @@ from CTFd.utils.decorators import authed_only
 
 from ...utils import get_current_container, container_password, user_node
 from ...utils.workspace import start_on_demand_service, reset_home
-from ...pages.workspace import forward_workspace, forward_port
+from ...pages.workspace import forward_workspace, forward_port, forward_short_port
 from ...config import WORKSPACE_SECRET
 
 
@@ -69,6 +69,7 @@ class view_desktop(Resource):
         signature = base64.urlsafe_b64encode(digest).decode()
 
         iframe_src = None
+        web_url = None
         if not service == "desktop":
             if user_id and not is_admin():
                 abort(403)
@@ -122,11 +123,26 @@ class view_desktop(Resource):
                 iframe_src = forward_workspace(service=service, service_path="", signature=signature, message=message)
 
             if start_on_demand_service(user, service) is False:
-                return {"success": False, "active": True, "error": f"Failed to start service {service}"}
+                return {"success": False, "active": True, "error": f"无法启动工作区服务：{service}"}
         elif port:
-            iframe_src = forward_port(port=port, service_path="", user=user, signature=signature, message=message)
+            iframe_src, web_url = forward_short_port(
+                port=port,
+                service_path="",
+                user=user,
+                signature=signature,
+                message=message,
+            )
 
-        return {"success": True, "active": True, "iframe_src": iframe_src, "service": service, "port": port, "setPort": os.getenv("DOJO_ENV") == "development", "current_challenge": challenge_info}
+        return {
+            "success": True,
+            "active": True,
+            "iframe_src": iframe_src,
+            "web_url": web_url,
+            "service": service,
+            "port": port,
+            "setPort": os.getenv("DOJO_ENV") == "development",
+            "current_challenge": challenge_info,
+        }
 
 
 @workspace_namespace.route("/reset_home")
@@ -136,11 +152,11 @@ class ResetHome(Resource):
         user = get_current_user()
 
         if not get_current_container(user):
-            return {"success": False, "error": "No running container found. Please start a container and try again."}
+            return {"success": False, "error": "未找到正在运行的工作区。请先启动题目后重试。"}
 
         try:
             reset_home(user.id)
         except AssertionError as e:
-            return {"success": False, "error": f"Reset failed with error: {e}"}
+            return {"success": False, "error": f"重置失败：{e}"}
 
-        return {"success": True, "message": "Home directory reset successfully"}
+        return {"success": True, "message": "Home 目录已成功重置。"}

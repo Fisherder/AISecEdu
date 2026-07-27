@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% set commitment_text = "I will use AISecEdu responsibly and will not publish restricted exercise solutions." %}
+{% set commitment_text = "我会负责任地使用 AISecEdu，并且不会发布受限题目的解法。" %}
 
 {% block content %}
 <div class="jumbotron">
 	<div class="container">
-		<h1>Register</h1>
+		<h1>注册</h1>
 	</div>
 </div>
 <div class="container">
@@ -13,48 +13,48 @@
 		<div class="col-md-6 offset-md-3">
 			{% include "components/errors.html" %}
 
-			<h2>Ground Rules</h2>
-			<p>When using this platform, please keep several ground rules in mind!</p>
-			<h3>Course material</h3>
-			<p>Exercises may be used for active teaching and assessment. Follow the sharing policy set by your teacher, and do not publish restricted solutions, answer tokens, walkthrough videos, or live solution streams.</p>
-      <h3>Responsible use</h3>
-      <p>Use the provided environments and targets only as authorized. If you discover a security issue in AISecEdu itself, report it privately to the administrator of this deployment instead of testing it against other users or production data.</p>
+			<h2>使用准则</h2>
+			<p>使用本平台时，请牢记以下准则。</p>
+			<h3>课程资料</h3>
+			<p>题目可能用于真实教学和评估。请遵守教师设置的共享政策，不要发布受限解法、答案令牌、讲解视频或实时解题直播。</p>
+      <h3>负责任地使用</h3>
+      <p>仅在获授权的范围内使用提供的环境和目标。如果发现 AISecEdu 自身的安全问题，请私下报告给当前部署的管理员，不要对其他用户或生产数据进行测试。</p>
 
 			<div class="form-group" id="commitment-section">
 				<div class="alert alert-warning">
-					To register, please type the following commitment exactly as shown:
+					要注册，请完全按照下方显示内容输入承诺：
 					<br><br>
 					<strong id="commitment-text">{{ commitment_text }}</strong>
 				</div>
-				<input type="text" id="commitment-input" class="form-control" placeholder="Type the commitment above" autocomplete="off">
+				<input type="text" id="commitment-input" class="form-control" placeholder="输入上方的承诺内容" autocomplete="off">
 				<small class="form-text text-muted" id="commitment-feedback">
-					Please type the commitment exactly as shown above to enable registration
+					请完全按照上方显示内容输入承诺，以启用注册。
 				</small>
 			</div>
 
-      <h2>Sign Up!</h2>
+      <h2>创建账号</h2>
 			{% with form = Forms.auth.RegistrationForm() %}
 			{% from "macros/forms.html" import render_extra_fields %}
 			<form method="post" accept-charset="utf-8" autocomplete="off" role="form" id="registration-form">
 				<div class="form-group">
-					<b>{{ form.name.label }}</b>
+					<b>用户名</b>
 					{{ form.name(class="form-control", value=name) }}
 					<small class="form-text text-muted">
-						Your username on the site
+						该用户名会显示在平台中。
 					</small>
 				</div>
 				<div class="form-group">
-					<b>{{ form.email.label }}</b>
+					<b>电子邮箱</b>
 					{{ form.email(class="form-control", value=email) }}
 					<small class="form-text text-muted">
-						Never shown to the public
+						不会向公众展示。
 					</small>
 				</div>
 				<div class="form-group">
-					<b>{{ form.password.label }}</b>
+					<b>密码</b>
 					{{ form.password(class="form-control", value=password) }}
 					<small class="form-text text-muted">
-						Password used to log into your account
+						用于登录账号的密码。
 					</small>
 				</div>
 
@@ -66,7 +66,7 @@
 
 				<div class="row pt-3">
 					<div class="col-md-12">
-						{{ form.submit(class="btn btn-md btn-primary btn-outlined float-right btn-disabled", id="register-submit", style="opacity: 0.5; cursor: not-allowed;") }}
+						{{ form.submit(class="btn btn-md btn-primary btn-outlined float-right btn-disabled", id="register-submit", value="注册", style="opacity: 0.5; cursor: not-allowed;") }}
 					</div>
 				</div>
 
@@ -74,9 +74,9 @@
 				<div class="row pt-3">
 					<div class="col-md-12 text-center">
 						<small class="text-muted text-center">
-							By registering, you agree to the
-							<a href="{{ Configs.privacy_link }}" rel="noopener" target="_blank">privacy policy</a>
-							and <a href="{{ Configs.tos_link }}" rel="noopener" target="_blank">terms of service</a>
+							注册即表示你同意
+							<a href="{{ Configs.privacy_link }}" rel="noopener" target="_blank">隐私政策</a>
+							和<a href="{{ Configs.tos_link }}" rel="noopener" target="_blank">服务条款</a>
 						</small>
 					</div>
 				</div>
@@ -107,7 +107,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let commitmentValid = false;
     
     function normalizeText(text) {
-        return text.toLowerCase().replace(/[^a-z]/g, '').split('').sort().join('');
+        return text.normalize('NFKC').replace(/\s+/g, '').trim();
     }
     
     function validateCommitment() {
@@ -117,7 +117,7 @@ document.addEventListener('DOMContentLoaded', function() {
             commitmentValid = false;
             commitmentVerifiedField.value = '';
             commitmentInput.classList.remove('is-valid', 'is-invalid');
-            commitmentFeedback.textContent = 'Please type the commitment exactly as shown above to enable registration';
+            commitmentFeedback.textContent = '请完全按照上方显示内容输入承诺，以启用注册。';
             commitmentFeedback.classList.remove('text-success', 'text-danger');
             commitmentFeedback.classList.add('text-muted');
             
@@ -133,7 +133,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 commitmentVerifiedField.value = 'verified';
                 commitmentInput.classList.remove('is-invalid');
                 commitmentInput.classList.add('is-valid');
-                commitmentFeedback.textContent = 'Thank you for using AISecEdu responsibly!';
+                commitmentFeedback.textContent = '感谢你负责任地使用 AISecEdu！';
                 commitmentFeedback.classList.remove('text-muted', 'text-danger');
                 commitmentFeedback.classList.add('text-success');
                 
@@ -145,7 +145,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 commitmentVerifiedField.value = '';
                 commitmentInput.classList.remove('is-valid');
                 commitmentInput.classList.add('is-invalid');
-                commitmentFeedback.textContent = 'Please type the commitment as shown above';
+                commitmentFeedback.textContent = '请按照上方显示内容输入承诺。';
                 commitmentFeedback.classList.remove('text-muted', 'text-success');
                 commitmentFeedback.classList.add('text-danger');
                 
@@ -157,7 +157,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     function showCommitmentReminder() {
-        alert('Please type the commitment exactly as shown to enable registration.');
+        alert('请完全按照上方显示内容输入承诺，以启用注册。');
         document.getElementById('commitment-section').scrollIntoView({ behavior: 'smooth', block: 'center' });
         commitmentInput.focus();
         commitmentInput.style.animation = 'shake 0.5s';

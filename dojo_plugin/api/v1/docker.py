@@ -416,7 +416,7 @@ def docker_locked(func):
                                    raise_on_release_error=False):
                 return func(*args, **kwargs)
         except redis.exceptions.LockError:
-            return {"success": False, "error": "Already starting a challenge; try again in 20 seconds."}
+            return {"success": False, "error": "题目正在启动中，请在 20 秒后重试。"}
     return wrapper
 
 
@@ -428,7 +428,7 @@ class NextChallenge(Resource):
     def get(self):
         dojo_challenge = get_current_dojo_challenge()
         if not dojo_challenge:
-            return {"success": False, "error": "No active challenge"}
+            return {"success": False, "error": "当前没有活动题目。"}
 
         # Get all challenges in the current module
         module_challenges = DojoChallenges.query.filter_by(
@@ -440,7 +440,7 @@ class NextChallenge(Resource):
         current_idx = next((i for i, c in enumerate(module_challenges) if c.challenge_index == dojo_challenge.challenge_index), None)
 
         if current_idx is None:
-            return {"success": False, "error": "Current challenge not found in module"}
+            return {"success": False, "error": "当前题目不在此单元中。"}
 
         # Check if there's a next challenge in the current module
         if current_idx + 1 < len(module_challenges):
@@ -477,7 +477,7 @@ class NextChallenge(Resource):
                 }
 
         # No next challenge available
-        return {"success": False, "error": "No next challenge available"}
+        return {"success": False, "error": "没有可启动的下一道题目。"}
 
 
 @docker_namespace.route("")
@@ -513,7 +513,7 @@ class RunDocker(Resource):
 
         dojo = dojo_accessible(dojo_id)
         if not dojo:
-            return {"success": False, "error": "Invalid dojo"}
+            return {"success": False, "error": "课程不存在或无权访问。"}
 
         dojo_challenge = (
             DojoChallenges.query.filter_by(id=challenge_id)
@@ -521,36 +521,36 @@ class RunDocker(Resource):
             .first()
         )
         if not dojo_challenge:
-            return {"success": False, "error": "Invalid challenge"}
+            return {"success": False, "error": "题目不存在或无权访问。"}
 
         if not dojo_challenge.visible() and not dojo.is_admin():
-            return {"success": False, "error": "Invalid challenge"}
+            return {"success": False, "error": "题目不存在或无权访问。"}
 
         if practice and not dojo_challenge.allow_privileged:
             return {
                 "success": False,
-                "error": "This challenge does not support practice mode.",
+                "error": "此题目不支持练习模式。",
             }
 
         if is_challenge_locked(dojo_challenge, user):
             return {
                 "success": False,
-                "error": "This challenge is locked"
+                "error": "此题目尚未解锁。"
             }
 
         if dojo.is_admin(user) and "as_user" in data:
             try:
                 as_user_id = int(data["as_user"])
             except ValueError:
-                return {"success": False, "error": f"Invalid user ID ({data['as_user']})"}
+                return {"success": False, "error": f"无效的用户 ID（{data['as_user']}）。"}
             if is_admin():
                 as_user = Users.query.get(as_user_id)
             else:
                 student = next((student for student in dojo.students if student.user_id == as_user_id), None)
                 if student is None:
-                    return {"success": False, "error": f"Not a student in this dojo ({as_user_id})"}
+                    return {"success": False, "error": f"该用户不是此课程的学生（{as_user_id}）。"}
                 if not student.official:
-                    return {"success": False, "error": f"Not an official student in this dojo ({as_user_id})"}
+                    return {"success": False, "error": f"该用户不是此课程的正式学生（{as_user_id}）。"}
                 as_user = student.user
 
         try:
@@ -562,7 +562,7 @@ class RunDocker(Resource):
             )
         except RuntimeError as error:
             logger.error(str(error))
-            return {"success": False, "error": "Docker failed"}
+            return {"success": False, "error": "工作区容器启动失败。"}
 
         return {"success": True}
 
@@ -571,12 +571,12 @@ class RunDocker(Resource):
     def get(self):
         dojo_challenge = get_current_dojo_challenge()
         if not dojo_challenge:
-            return {"success": False, "error": "No active challenge"}
+            return {"success": False, "error": "当前没有活动题目。"}
 
         user = get_current_user()
         container = get_current_container(user)
         if not container:
-            return {"success": False, "error": "No challenge container"}
+            return {"success": False, "error": "未找到题目工作区容器。"}
 
         practice = container.labels.get("dojo.mode") == "privileged"
 
@@ -589,12 +589,13 @@ class RunDocker(Resource):
         }
 
     @authed_only
+    @docker_locked
     def delete(self):
         user = get_current_user()
         container = get_current_container(user)
 
         if not container:
-            return {"success": False, "error": "No active challenge container"}
+            return {"success": False, "error": "未找到活动题目的工作区容器。"}
 
         try:
             attempt = active_attempt(user.id)
@@ -611,10 +612,10 @@ class RunDocker(Resource):
                 db.session.commit()
             remove_container(user)
             publish_stat_event("container_stats_update", {})
-            return {"success": True, "message": "Challenge container terminated"}
+            return {"success": True, "message": "题目工作区容器已停止。"}
         except Exception as e:
             logger.error(f"Failed to terminate container for user {user.id}: {e}")
-            return {"success": False, "error": "Failed to terminate container"}
+            return {"success": False, "error": "停止工作区容器失败。"}
 
 
 @docker_namespace.route("/reset")
@@ -626,7 +627,7 @@ class ResetDocker(Resource):
         container = get_current_container(user)
         dojo_challenge = get_current_dojo_challenge(user)
         if not container or not dojo_challenge:
-            return {"success": False, "error": "No active challenge container"}
+            return {"success": False, "error": "未找到活动题目的工作区容器。"}
 
         practice = container.labels.get("dojo.mode") == "privileged"
         as_user_id = int(container.labels.get("dojo.as_user_id", user.id))
@@ -655,9 +656,9 @@ class ResetDocker(Resource):
             logger.exception(
                 f"Failed to completely reset challenge for user {user.id}: {error}"
             )
-            return {"success": False, "error": "Failed to completely reset challenge"}
+            return {"success": False, "error": "无法完全重置题目。"}
 
         return {
             "success": True,
-            "message": "Challenge reset to its original state",
+            "message": "题目已恢复到初始状态。",
         }

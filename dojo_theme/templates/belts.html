@@ -3,30 +3,30 @@
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1 class="brand-mono-bold wordmark-large"><span class="brand-white">AISecEdu</span><span class="brand-dot brand-blink">.</span><span class="brand-green">achievements</span></h1>
+    <h1 class="brand-mono-bold wordmark-large"><span class="brand-white">AISecEdu</span><span class="brand-dot brand-blink">.</span><span class="brand-green">成就</span></h1>
   </div>
 </div>
 
 <div class="container">
   <p>
-  Achievement levels recognize sustained progress across the course catalog. They complement course scores by showing broad, cumulative completion.
+  成就等级用于认可你在课程目录中的持续进步；它通过展示广泛、累计的完成情况，补充课程成绩。
   </p>
 
   <p>
-  The learners below have completed the requirements associated with each level.
+  下列学习者已完成各等级对应的要求。
   </p>
 
   {% for belt_color in ("blue", "green", "yellow", "orange") %}
-    <h2>{{belt_color.title()}} Achievement Level</h2>
+    <h2>{{ {"blue": "蓝色", "green": "绿色", "yellow": "黄色", "orange": "橙色"}[belt_color] }}成就等级</h2>
     <p>
     {% if belt_color == "blue" %}
-    Advanced learners who have completed the broadest set of required material.
+    已完成最广泛必修内容的进阶学习者。
     {% elif belt_color == "green" %}
-    Learners who have built consistent practical skill across several technical areas.
+    已在多个技术方向建立稳定实战能力的学习者。
     {% elif belt_color == "yellow" %}
-    Learners who have completed the core foundations and are progressing into applied work.
+    已完成核心基础，并正在进入应用实践的学习者。
     {% elif belt_color == "orange" %}
-    Learners who have established an initial record of hands-on course completion.
+    已建立初步动手课程完成记录的学习者。
     {% endif %}
     </p>
 
@@ -51,14 +51,14 @@
           </i>
         </a>
         {% endif %}
-        <em>(earned {{ user.date }})</em>
+        <em>（获得于 {{ user.date }}）</em>
       </li>
       {% endfor %}
     </ul>
     <br>
   {% endfor %}
 
-  <h2>How achievement levels are earned</h2>
-  Complete the required exercises in the relevant <a href="{{url_for('pwncollege_dojos.listing')}}">AISecEdu courses</a>. Progress is recorded automatically when an exercise answer is accepted.
+  <h2>如何获得成就等级</h2>
+  完成相关 <a href="{{url_for('pwncollege_dojos.listing')}}">AISecEdu 课程</a>中的必修题目。题目答案被接受后，进度会自动记录。
 </div>
 {% endblock %}

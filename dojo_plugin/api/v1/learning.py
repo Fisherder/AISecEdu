@@ -1,7 +1,9 @@
 import datetime
+import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 
-from flask import abort, request
+from flask import abort, current_app, request
 from flask_restx import Namespace, Resource
 from sqlalchemy import func
 
@@ -16,12 +18,12 @@ from ...learning.assessment import (
     skill_states,
 )
 from ...learning.authoring import (
+    autonomously_validate_draft,
     catalog_item_view,
     create_draft,
     draft_view,
     publish_draft,
     revise_draft,
-    validate_draft,
 )
 from ...learning.evidence import (
     ALLOWED_WORKSPACE_EVENTS,
@@ -31,7 +33,19 @@ from ...learning.evidence import (
     save_reflection,
     verify_evidence_chain,
 )
-from ...learning.intelligence import tutor_reply
+from ...learning.context import guide_reference_catalog, learning_profile_context
+from ...learning.intelligence import (
+    GuideReferenceSelectionError,
+    guide_reply,
+    guide_thread_view,
+    new_guide_thread,
+    tutor_reply,
+)
+from ...learning.solution_agent import (
+    enqueue_solution_run,
+    latest_solution_run,
+    solution_run_view,
+)
 from ...models import (
     DojoChallenges,
     DojoModules,
@@ -39,10 +53,12 @@ from ...models import (
     LearningAppeals,
     LearningAssessments,
     LearningAttempts,
+    LearningAuthoringJobs,
     LearningAuditEvents,
     LearningChallengeProfiles,
     LearningDrafts,
     LearningEvidenceEvents,
+    LearningGuideThreads,
     LearningTutorMessages,
 )
 from ...utils import is_challenge_locked
@@ -53,6 +69,22 @@ from .user import authed_only_cli
 
 learning_namespace = Namespace("learning", description="AISecEdu course learning services")
 UNIT_ID_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+logger = logging.getLogger(__name__)
+_authoring_executor = ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="aisecedu-authoring",
+)
+AUTHORING_JOB_STEPS = (
+    ("catalog", "检索可复用题目"),
+    ("strategy", "Agent 自动选择出题策略"),
+    ("plan", "Flash 生成教学方案"),
+    ("build", "Pro 构建题目与私有解法"),
+    ("review", "Pro 独立红队审查"),
+    ("preflight-repair", "预审修复与独立复验"),
+    ("draft", "建立可验证草稿"),
+    ("validate-1", "第 1 轮独立验证"),
+    ("ready", "保存已通过草稿"),
+)
 
 
 def _dojo_challenge_for_attempt(attempt):
@@ -82,6 +114,257 @@ def _draft_or_404(draft_id):
     return draft
 
 
+def _authoring_job_or_404(job_id):
+    job = LearningAuthoringJobs.query.get_or_404(job_id)
+    if not job.dojo.is_admin(get_current_user()):
+        abort(403)
+    return job
+
+
+def _authoring_job_view(job):
+    module = DojoModules.query.filter_by(
+        dojo_id=job.dojo_id,
+        module_index=job.module_index,
+    ).first()
+    return {
+        "id": job.id,
+        "dojoId": job.dojo.reference_id,
+        "moduleId": module.id if module else None,
+        "authorId": job.author_id,
+        "draftId": job.draft_id,
+        "kind": job.kind,
+        "status": job.status,
+        "stage": job.stage,
+        "progress": max(0, min(100, int(job.progress or 0))),
+        "title": job.title,
+        "steps": job.steps or [],
+        "error": job.error,
+        "created": job.created.isoformat() + "Z",
+        "updated": job.updated.isoformat() + "Z",
+        "completed": job.completed.isoformat() + "Z" if job.completed else None,
+    }
+
+
+def _update_authoring_job(
+    job_id,
+    *,
+    stage,
+    status,
+    message,
+    progress,
+    label=None,
+    details=None,
+):
+    job = LearningAuthoringJobs.query.get(job_id)
+    if not job or job.status in {"COMPLETED", "FAILED"}:
+        return
+    steps = [dict(item) for item in (job.steps or [])]
+    target = None
+    for step in steps:
+        if step.get("id") != stage:
+            continue
+        target = step
+        break
+    if target is None:
+        target = {
+            "id": str(stage)[:80],
+            "label": str(label or stage)[:240],
+            "status": "PENDING",
+            "message": "",
+        }
+        ready_index = next(
+            (
+                index
+                for index, step in enumerate(steps)
+                if step.get("id") == "ready"
+            ),
+            len(steps),
+        )
+        steps.insert(ready_index, target)
+    if label:
+        target["label"] = str(label)[:240]
+    target["status"] = status
+    target["message"] = str(message or "")[:1000]
+    target["details"] = details if isinstance(details, dict) else {}
+    target["updated"] = datetime.datetime.utcnow().isoformat() + "Z"
+    job.status = "RUNNING"
+    job.stage = stage
+    job.progress = max(job.progress or 0, max(0, min(100, int(progress))))
+    job.steps = steps
+    db.session.commit()
+
+
+def _run_authoring_job(app, job_id):
+    with app.app_context():
+        try:
+            job = LearningAuthoringJobs.query.get(job_id)
+            if not job or job.status != "QUEUED":
+                return
+            job.status = "RUNNING"
+            job.stage = "catalog"
+            job.progress = 1
+            db.session.commit()
+
+            dojo = job.dojo
+            module = DojoModules.query.filter_by(
+                dojo_id=job.dojo_id,
+                module_index=job.module_index,
+            ).one()
+            author = Users.query.get(job.author_id)
+            payload = dict(job.request_json or {})
+
+            def progress_callback(**progress):
+                _update_authoring_job(job_id, **progress)
+
+            if job.kind == "REVISE":
+                draft = LearningDrafts.query.get(job.draft_id)
+                if not draft:
+                    raise ValueError("要修订的草稿不存在。")
+                revise_draft(
+                    draft,
+                    str(payload.get("message") or ""),
+                    progress_callback=progress_callback,
+                )
+            else:
+                draft = create_draft(
+                    dojo,
+                    module,
+                    author,
+                    str(payload.get("brief") or ""),
+                    constraints=payload.get("constraints"),
+                    progress_callback=progress_callback,
+                )
+            job = LearningAuthoringJobs.query.get(job_id)
+            job.draft_id = draft.id
+            db.session.commit()
+            report = autonomously_validate_draft(
+                draft,
+                progress_callback=progress_callback,
+            )
+            blocked = int((report.get("summary") or {}).get("blocked") or 0)
+            if report.get("status") != "PASS":
+                _update_authoring_job(
+                    job_id,
+                    stage="ready",
+                    status="FAILED",
+                    message=(
+                        "自主验证已达到安全轮次上限，"
+                        f"仍有 {blocked} 项发布门阻断。"
+                    ),
+                    progress=99,
+                    details={
+                        "blocked": blocked,
+                        "rounds": len(
+                            (report.get("autonomousLoop") or {}).get(
+                                "rounds"
+                            )
+                            or []
+                        ),
+                    },
+                )
+                job = LearningAuthoringJobs.query.get(job_id)
+                job.status = "FAILED"
+                job.stage = "ready"
+                job.progress = 99
+                job.error = (
+                    "Agent 已自主执行验证、修改和复验，但在安全轮次上限内"
+                    f"仍有 {blocked} 项阻断。草稿和完整轮次记录已保留。"
+                )
+                job.completed = datetime.datetime.utcnow()
+                db.session.commit()
+                return
+            _update_authoring_job(
+                job_id,
+                stage="ready",
+                status="COMPLETED",
+                message=(
+                    "全部模型复核和确定性发布门已通过，草稿可由教师审阅并发布。"
+                ),
+                progress=100,
+                details={
+                    "rounds": len(
+                        (report.get("autonomousLoop") or {}).get("rounds")
+                        or []
+                    ),
+                    "warnings": int(
+                        (report.get("summary") or {}).get("warnings") or 0
+                    ),
+                },
+            )
+            job = LearningAuthoringJobs.query.get(job_id)
+            job.status = "COMPLETED"
+            job.stage = "complete"
+            job.progress = 100
+            job.completed = datetime.datetime.utcnow()
+            job.error = None
+            db.session.commit()
+        except Exception as exception:
+            logger.exception("Background authoring job %s failed", job_id)
+            db.session.rollback()
+            job = LearningAuthoringJobs.query.get(job_id)
+            if job:
+                steps = [dict(item) for item in (job.steps or [])]
+                for step in steps:
+                    if step.get("id") == job.stage:
+                        step["status"] = "FAILED"
+                        step["message"] = "该阶段执行失败，已保留此前的完整进度。"
+                        break
+                job.steps = steps
+                job.status = "FAILED"
+                job.error = str(exception)[:4000]
+                job.completed = datetime.datetime.utcnow()
+                if job.draft_id:
+                    draft = LearningDrafts.query.get(job.draft_id)
+                    if draft and draft.status == "BUILDING":
+                        draft.status = "DRAFT"
+                db.session.commit()
+        finally:
+            db.session.remove()
+
+
+def _queue_authoring_job(
+    *,
+    dojo,
+    module,
+    author,
+    title,
+    request_json,
+    kind="CREATE",
+    draft_id=None,
+):
+    steps = [
+        {
+            "id": step_id,
+            "label": label,
+            "status": "PENDING",
+            "message": "",
+        }
+        for step_id, label in AUTHORING_JOB_STEPS
+    ]
+    job = LearningAuthoringJobs(
+        dojo_id=dojo.dojo_id,
+        module_index=module.module_index,
+        author_id=author.id,
+        draft_id=draft_id,
+        kind=kind,
+        title=str(title or "题目生成")[:240],
+        request_json=request_json,
+        steps=steps,
+    )
+    db.session.add(job)
+    db.session.commit()
+    app = current_app._get_current_object()
+    try:
+        _authoring_executor.submit(_run_authoring_job, app, job.id)
+    except Exception as exception:
+        job.status = "FAILED"
+        job.error = str(exception)[:4000]
+        job.completed = datetime.datetime.utcnow()
+        db.session.commit()
+        return job, exception
+    return job, None
+
+
 def _attempt_view(attempt, *, include_evidence=False):
     challenge = _dojo_challenge_for_attempt(attempt)
     latest = (
@@ -97,7 +380,13 @@ def _attempt_view(attempt, *, include_evidence=False):
         "moduleId": challenge.module.id,
         "moduleName": challenge.module.name,
         "challengeId": challenge.id,
+        "challengeDatabaseId": challenge.challenge_id,
         "challengeName": challenge.name,
+        "challengeUrl": (
+            f"/{challenge.dojo.reference_id}/{challenge.module.id}/{challenge.id}"
+        ),
+        "courseLearningUrl": f"/dojo/{challenge.dojo.reference_id}/learning",
+        "scoreUrl": f"/learning/attempts/{attempt.id}/score",
         "challengeVersion": ((attempt.data or {}).get("runtime") or {}).get(
             "challengeVersion", 1
         ),
@@ -352,14 +641,76 @@ class LearningCatalog(Resource):
     @dojo_route
     def get(self, dojo):
         include_private = dojo.is_admin(get_current_user())
+        items = []
+        for challenge in dojo.challenges:
+            if not include_private and not challenge.visible():
+                continue
+            item = catalog_item_view(challenge, include_private=include_private)
+            if include_private:
+                run = latest_solution_run(challenge)
+                item["solutionRun"] = (
+                    solution_run_view(run, include_trace=True) if run else None
+                )
+            items.append(item)
         return {
             "success": True,
-            "items": [
-                catalog_item_view(challenge, include_private=include_private)
-                for challenge in dojo.challenges
-                if include_private or challenge.visible()
-            ],
+            "items": items,
         }
+
+
+@learning_namespace.route(
+    "/dojos/<dojo>/solutions/<module_id>/<challenge_id>"
+)
+class LearningVerifiedSolution(Resource):
+    @authed_only
+    @dojo_route
+    @dojo_admins_only
+    def get(self, dojo, module_id, challenge_id):
+        challenge = next(
+            (
+                item
+                for module in dojo.modules
+                if module.id == module_id
+                for item in module.challenges
+                if item.id == challenge_id
+            ),
+            None,
+        )
+        if not challenge:
+            return {"success": False, "error": "未找到题目。"}, 404
+        run = latest_solution_run(challenge)
+        return {
+            "success": True,
+            "solutionRun": solution_run_view(run) if run else None,
+        }
+
+    @authed_only
+    @dojo_route
+    @dojo_admins_only
+    def post(self, dojo, module_id, challenge_id):
+        challenge = next(
+            (
+                item
+                for module in dojo.modules
+                if module.id == module_id
+                for item in module.challenges
+                if item.id == challenge_id
+            ),
+            None,
+        )
+        if not challenge:
+            return {"success": False, "error": "未找到题目。"}, 404
+        data = request.get_json(silent=True) or {}
+        run = enqueue_solution_run(
+            challenge,
+            get_current_user(),
+            app=current_app._get_current_object(),
+            force=bool(data.get("force")),
+        )
+        return {
+            "success": True,
+            "solutionRun": solution_run_view(run),
+        }, 202
 
 
 @learning_namespace.route("/dojos/<dojo>/units")
@@ -376,22 +727,22 @@ class LearningUnits(Resource):
         if not UNIT_ID_PATTERN.fullmatch(unit_id):
             return {
                 "success": False,
-                "error": "Unit ID must be 1–32 lowercase letters, numbers, or hyphens.",
+                "error": "单元 ID 必须由 1–32 个小写字母、数字或连字符组成。",
             }, 400
         if not 1 <= len(name) <= 128:
             return {
                 "success": False,
-                "error": "Unit name must contain 1–128 characters.",
+                "error": "单元名称必须包含 1–128 个字符。",
             }, 400
         if len(description) > 24000:
             return {
                 "success": False,
-                "error": "Unit description must not exceed 24,000 characters.",
+                "error": "单元简介不能超过 24,000 个字符。",
             }, 400
         if DojoModules.query.filter_by(dojo_id=dojo.dojo_id, id=unit_id).first():
             return {
                 "success": False,
-                "error": "A unit with this ID already exists in the course.",
+                "error": "课程中已存在使用该 ID 的单元。",
             }, 409
 
         last_index = (
@@ -452,11 +803,131 @@ class LearningAuthoring(Resource):
             module,
             get_current_user(),
             brief,
-            level=data.get("level", "L2"),
             constraints=data.get("constraints"),
         )
+        validation = autonomously_validate_draft(draft)
         db.session.commit()
-        return {"success": True, "draft": draft_view(draft)}, 201
+        return {
+            "success": validation["status"] == "PASS",
+            "draft": draft_view(draft),
+            "validation": validation,
+        }, 201
+
+
+@learning_namespace.route("/dojos/<dojo>/authoring/jobs")
+class LearningAuthoringJobCollection(Resource):
+    @authed_only
+    @dojo_route
+    @dojo_admins_only
+    def get(self, dojo):
+        jobs = (
+            LearningAuthoringJobs.query.filter_by(dojo_id=dojo.dojo_id)
+            .order_by(LearningAuthoringJobs.created.desc())
+            .limit(100)
+            .all()
+        )
+        return {
+            "success": True,
+            "jobs": [_authoring_job_view(job) for job in jobs],
+        }
+
+    @authed_only
+    @dojo_route
+    @dojo_admins_only
+    def post(self, dojo):
+        data = request.get_json(silent=True) or {}
+        brief = str(data.get("brief") or "").strip()
+        module_id = str(data.get("moduleId") or "")
+        if len(brief) < 12:
+            return {"success": False, "error": "题目需求至少需要 12 个字符"}, 400
+        module = next((item for item in dojo.modules if item.id == module_id), None)
+        if not module:
+            return {"success": False, "error": "目标模块不存在"}, 404
+        constraints = data.get("constraints")
+        if not isinstance(constraints, dict):
+            constraints = {}
+        title = next((line.strip() for line in brief.splitlines() if line.strip()), brief)
+        job, error = _queue_authoring_job(
+            dojo=dojo,
+            module=module,
+            author=get_current_user(),
+            title=title,
+            request_json={
+                "brief": brief[:24000],
+                "constraints": constraints,
+            },
+        )
+        if error:
+            return {
+                "success": False,
+                "error": "无法启动出题后台任务。",
+                "job": _authoring_job_view(job),
+            }, 503
+        return {
+            "success": True,
+            "job": _authoring_job_view(job),
+        }, 202
+
+
+@learning_namespace.route("/authoring/jobs/<job_id>")
+class LearningAuthoringJobDetail(Resource):
+    @authed_only
+    def get(self, job_id):
+        return {
+            "success": True,
+            "job": _authoring_job_view(_authoring_job_or_404(job_id)),
+        }
+
+
+@learning_namespace.route("/drafts/<draft_id>/authoring/jobs")
+class LearningDraftRevisionJob(Resource):
+    @authed_only
+    def post(self, draft_id):
+        draft = _draft_or_404(draft_id)
+        if draft.status == "PUBLISHED":
+            return {"success": False, "error": "已发布草稿不能继续修订。"}, 409
+        active_job = LearningAuthoringJobs.query.filter(
+            LearningAuthoringJobs.draft_id == draft.id,
+            LearningAuthoringJobs.status.in_(("QUEUED", "RUNNING")),
+        ).first()
+        if active_job:
+            return {
+                "success": False,
+                "error": "该草稿已有自主修订任务正在进行。",
+                "job": _authoring_job_view(active_job),
+            }, 409
+        data = request.get_json(silent=True) or {}
+        message = str(data.get("message") or "").strip()
+        if not message:
+            return {"success": False, "error": "修订要求不能为空。"}, 400
+        prior_status = draft.status
+        prior_validation = draft.validation
+        draft.status = "BUILDING"
+        draft.validation = {}
+        db.session.commit()
+        module = DojoModules.query.filter_by(
+            dojo_id=draft.dojo_id,
+            module_index=draft.module_index,
+        ).one()
+        job, error = _queue_authoring_job(
+            dojo=draft.dojo,
+            module=module,
+            author=get_current_user(),
+            title=f"修订：{(draft.spec or {}).get('name') or draft.brief}",
+            kind="REVISE",
+            draft_id=draft.id,
+            request_json={"message": message[:12000]},
+        )
+        if error:
+            draft.status = prior_status
+            draft.validation = prior_validation
+            db.session.commit()
+            return {
+                "success": False,
+                "error": "无法启动自主修订任务。",
+                "job": _authoring_job_view(job),
+            }, 503
+        return {"success": True, "job": _authoring_job_view(job)}, 202
 
 
 @learning_namespace.route("/dojos/<dojo>/imports")
@@ -505,7 +976,7 @@ class LearningPackageImport(Resource):
             level="L3",
             constraints={key: value for key, value in constraints.items() if value is not None},
         )
-        report = validate_draft(draft)
+        report = autonomously_validate_draft(draft)
         db.session.commit()
         return {"success": True, "draft": draft_view(draft), "validation": report}, 201
 
@@ -524,8 +995,13 @@ class LearningDraftDetail(Resource):
         if not message:
             return {"success": False, "error": "教师消息不能为空"}, 400
         revise_draft(draft, message)
+        validation = autonomously_validate_draft(draft)
         db.session.commit()
-        return {"success": True, "draft": draft_view(draft)}
+        return {
+            "success": validation["status"] == "PASS",
+            "draft": draft_view(draft),
+            "validation": validation,
+        }
 
 
 @learning_namespace.route("/drafts/<draft_id>/validate")
@@ -533,7 +1009,7 @@ class LearningDraftValidation(Resource):
     @authed_only
     def post(self, draft_id):
         draft = _draft_or_404(draft_id)
-        report = validate_draft(draft)
+        report = autonomously_validate_draft(draft)
         db.session.commit()
         return {"success": report["status"] == "PASS", "validation": report}
 
@@ -543,17 +1019,24 @@ class LearningDraftPublish(Resource):
     @authed_only
     def post(self, draft_id):
         draft = _draft_or_404(draft_id)
+        actor = get_current_user()
         try:
-            challenge = publish_draft(draft, get_current_user())
+            challenge = publish_draft(draft, actor)
             db.session.commit()
         except ValueError as error:
             db.session.rollback()
             return {"success": False, "error": str(error), "validation": draft.validation}, 400
         if not challenge.image.startswith(("mac:", "pwncollege-", "pwncollege/", "challenges.pwn.college/")):
             publish_image_pull(challenge.image, dojo_reference_id=challenge.dojo.reference_id)
+        solution_run = enqueue_solution_run(
+            challenge,
+            actor,
+            app=current_app._get_current_object(),
+        )
         return {
             "success": True,
             "challenge": catalog_item_view(challenge, include_private=True),
+            "solutionRun": solution_run_view(solution_run),
             "workspaceUrl": (
                 f"/{challenge.dojo.reference_id}/{challenge.module.id}/{challenge.id}"
             ),
@@ -641,6 +1124,120 @@ class LearningTutor(Resource):
         reply = tutor_reply(attempt, user, question, profile)
         db.session.commit()
         return {"success": True, "reply": reply}
+
+
+def _guide_thread_or_404(thread_id, user):
+    thread = LearningGuideThreads.query.get_or_404(thread_id)
+    if thread.user_id != user.id:
+        abort(403)
+    return thread
+
+
+@learning_namespace.route("/guide")
+class LearningGuide(Resource):
+    @authed_only
+    def get(self):
+        user = get_current_user()
+        threads = (
+            LearningGuideThreads.query.filter_by(user_id=user.id, status="ACTIVE")
+            .order_by(LearningGuideThreads.updated.desc())
+            .limit(60)
+            .all()
+        )
+        requested = str(request.args.get("threadId") or "").strip()
+        selected = (
+            _guide_thread_or_404(requested, user)
+            if requested
+            else threads[0]
+            if threads
+            else None
+        )
+        profile = learning_profile_context(user)
+        active = next(
+            (
+                attempt
+                for attempt in profile.get("recentAttempts") or []
+                if attempt.get("status") == "ACTIVE"
+            ),
+            None,
+        )
+        quick_prompts = [
+            "根据我最近的学习情况，帮我安排下一次 45 分钟练习。",
+            "我目前最薄弱的能力是什么？应该怎样补强？",
+            "总结我最近几次练习的进步和重复出现的问题。",
+        ]
+        if active:
+            quick_prompts.insert(
+                0,
+                f"我正在做“{active.get('exercise')}”，帮我梳理当前思路，但不要直接给答案。",
+            )
+        return {
+            "success": True,
+            "threads": [guide_thread_view(thread) for thread in threads],
+            "thread": (
+                guide_thread_view(selected, include_messages=True)
+                if selected
+                else None
+            ),
+            "profile": {
+                "summary": profile.get("summary") or {},
+                "activeAttempt": active,
+                "weakestSkills": sorted(
+                    profile.get("skills") or [],
+                    key=lambda item: item.get("mastery", 0),
+                )[:3],
+                "recommendations": (profile.get("recommendations") or [])[:4],
+            },
+            "referenceOptions": guide_reference_catalog(profile),
+            "quickPrompts": quick_prompts,
+        }
+
+    @authed_only
+    def post(self):
+        user = get_current_user()
+        data = request.get_json(silent=True) or {}
+        question = str(data.get("question") or "").strip()
+        if not question:
+            return {"success": False, "error": "问题不能为空"}, 400
+        thread_id = str(data.get("threadId") or "").strip()
+        thread = _guide_thread_or_404(thread_id, user) if thread_id else None
+        try:
+            result = guide_reply(
+                user,
+                question,
+                thread,
+                references=(
+                    data.get("references")
+                    if "references" in data
+                    else None
+                ),
+            )
+        except GuideReferenceSelectionError as exception:
+            return {"success": False, "error": str(exception)}, 400
+        db.session.commit()
+        return {"success": True, **result}
+
+
+@learning_namespace.route("/guide/threads")
+class LearningGuideThreadCollection(Resource):
+    @authed_only
+    def post(self):
+        thread = new_guide_thread(get_current_user())
+        db.session.commit()
+        return {
+            "success": True,
+            "thread": guide_thread_view(thread, include_messages=True),
+        }, 201
+
+
+@learning_namespace.route("/guide/threads/<thread_id>")
+class LearningGuideThreadDetail(Resource):
+    @authed_only
+    def delete(self, thread_id):
+        thread = _guide_thread_or_404(thread_id, get_current_user())
+        db.session.delete(thread)
+        db.session.commit()
+        return {"success": True}
 
 
 @learning_namespace.route("/evidence")

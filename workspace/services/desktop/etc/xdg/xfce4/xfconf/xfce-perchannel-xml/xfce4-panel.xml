@@ -8,8 +8,8 @@
       <property name="position" type="string" value="p=6;x=0;y=0"/>
       <property name="length" type="uint" value="100"/>
       <property name="position-locked" type="bool" value="true"/>
-      <property name="icon-size" type="uint" value="16"/>
-      <property name="size" type="uint" value="26"/>
+      <property name="icon-size" type="uint" value="22"/>
+      <property name="size" type="uint" value="32"/>
       <property name="plugin-ids" type="array">
         <value type="int" value="1"/>  <!-- Applications Menu -->
         <value type="int" value="10"/> <!-- Show Desktop -->
@@ -70,7 +70,7 @@
     <property name="plugin-12" type="string" value="clock"/>
     <property name="plugin-13" type="string" value="launcher">
       <property name="items" type="array">
-        <value type="string" value="ida-free.desktop"/>
+        <value type="string" value="aisecedu-ida-free.desktop"/>
       </property>
     </property>
     <property name="plugin-15" type="string" value="separator"/>

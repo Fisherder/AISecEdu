@@ -56,23 +56,23 @@
       data-current-module="{{ module.id }}"
       data-current-challenge="{{ challenge.id }}">
     <div class="workspace-navigation-rail">
-      <button type="button" class="workspace-navigation-toggle" aria-expanded="true" title="Collapse course navigation">
-        <i class="fas fa-sitemap"></i>
-        <span class="sr-only">Toggle course navigation</span>
+      <button type="button" class="workspace-navigation-toggle" aria-expanded="true" title="收起课程导航">
+        <i class="fas fa-chevron-left" data-workspace-navigation-toggle-icon></i>
+        <span class="sr-only">展开或收起课程导航</span>
       </button>
     </div>
     <div class="workspace-navigation-content">
-      <h2 class="workspace-navigation-title">Course Navigator</h2>
+      <h2 class="workspace-navigation-title">课程导航</h2>
       <label class="workspace-navigation-field">
-        <span>Course</span>
+        <span>课程</span>
         <select class="form-control" data-workspace-course></select>
       </label>
       <label class="workspace-navigation-field">
-        <span>Unit</span>
+        <span>单元</span>
         <select class="form-control" data-workspace-module></select>
       </label>
-      <div class="workspace-navigation-challenges" data-workspace-challenges aria-label="Exercises"></div>
-      <div class="workspace-navigation-status" data-workspace-navigation-status>Loading courses…</div>
+      <div class="workspace-navigation-challenges" data-workspace-challenges aria-label="练习"></div>
+      <div class="workspace-navigation-status" data-workspace-navigation-status>正在加载课程…</div>
     </div>
   </aside>
   <div class="challenge-workspace">
@@ -81,8 +81,8 @@
         <iframe src="about:blank" id="workspace-iframe" name="workspace" allow="clipboard-read *; clipboard-write *; fullscreen *" allowfullscreen></iframe>
         {% include "components/workspace_loading.html" %}
         <div class="workspace-ssh" style="display: none;">
-          <h3>Connect with SSH</h3>
-          Link your <a href="/settings#ssh-key" target="_blank">SSH key</a>, then connect with: <code>ssh hacker@{{ request.host.split(':')[0] }}</code>
+          <h3>通过 SSH 连接</h3>
+          先绑定你的<a href="/settings#ssh-key" target="_blank"> SSH 密钥</a>，然后连接：<code>ssh hacker@{{ request.host.split(':')[0] }}</code>
         </div>
       </div>
       {% include "components/learning_tutor.html" %}
@@ -94,8 +94,8 @@
 
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/actionbar.js') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/workspace.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/actionbar.js') }}?v=aisecedu-20260726-score-short-web"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}?v=aisecedu-20260726-pwn-notices"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js') }}?v=aisecedu-20260726-guided-workspace"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/workspace.js') }}?v=aisecedu-20260726-guided-workspace"></script>
 {% endblock %}

@@ -173,7 +173,7 @@ const handleInput = () => {
         if ((!dojos || !dojos.length) && (!modules || !modules.length) && (!challenges || !challenges.length)) {
             const noResult = document.createElement("div");
             noResult.className = "text-light mt-2";
-            noResult.textContent = "No results found";
+            noResult.textContent = "没有找到匹配结果。";
             resultsEl.appendChild(noResult);
             return;
         }
@@ -275,9 +275,9 @@ const handleInput = () => {
             renderItem(`${c.dojo.name} / ${c.module.name} / ${c.name}`, c.link, c.description)
         );
 
-        if (dojoItems.length) renderSection("Courses", dojoItems);
-        if (moduleItems.length) renderSection("Units", moduleItems);
-        if (challengeItems.length) renderSection("Exercises", challengeItems);
+        if (dojoItems.length) renderSection("课程", dojoItems);
+        if (moduleItems.length) renderSection("单元", moduleItems);
+        if (challengeItems.length) renderSection("题目", challengeItems);
         });
 };
   

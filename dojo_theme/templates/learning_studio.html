@@ -5,7 +5,7 @@
   <div class="container">
     <h1 class="brand-white brand-mono-bold">{{ dojo.name or dojo.id }}<span class="brand-dot">.</span></h1>
     <br>
-    <h2 class="brand-white">Teacher Studio</h2>
+    <h2 class="brand-white">教师工作台</h2>
   </div>
 </div>
 
@@ -15,7 +15,7 @@
       <figure>
         <a class="text-decoration-none" href="/{{ dojo.reference_id }}">
           <i class="fas fa-graduation-cap fa-3x"></i>
-          <figcaption><b>Course</b></figcaption>
+          <figcaption><b>课程</b></figcaption>
         </a>
       </figure>
     </div>
@@ -23,17 +23,17 @@
       <figure>
         <a class="text-decoration-none" href="/dojo/{{ dojo.reference_id }}/learning">
           <i class="fas fa-chart-line fa-3x"></i>
-          <figcaption><b>Learning View</b></figcaption>
+          <figcaption><b>学习视图</b></figcaption>
         </a>
       </figure>
     </div>
   </div>
 
-  <div id="learning-studio-notice" class="alert alert-warning" role="alert">Loading teacher data...</div>
+  <div id="learning-studio-notice" role="status" hidden></div>
 
-  <h2 class="row">Course Analytics</h2>
+  <h2 class="row">课程数据</h2>
   <div class="stats-dashboard">
-    {% for key, title in [("participants", "Participants"), ("attempts", "Attempts"), ("averageScore", "Average Score"), ("drafts", "Drafts"), ("openAppeals", "Open Appeals")] %}
+    {% for key, title in [("participants", "学习者"), ("attempts", "练习尝试"), ("averageScore", "平均得分"), ("drafts", "草稿"), ("openAppeals", "待处理申诉")] %}
     <div class="stat-card">
       <div class="stat-card-header">{{ title }}</div>
       <div class="stat-container">
@@ -43,113 +43,224 @@
     {% endfor %}
   </div>
 
+  <section id="studio-job-section" class="studio-job-section" hidden>
+    <div class="d-flex flex-wrap align-items-end justify-content-between">
+      <div>
+        <h2>题目生成任务</h2>
+        <p class="text-muted mb-2">任务会在后台持续运行；打开任务卡片可查看完整的 Agent 流水线和质量关卡。</p>
+      </div>
+      <span id="studio-job-active-count" class="badge badge-secondary mb-2"></span>
+    </div>
+    <div id="studio-job-list" class="studio-job-grid"></div>
+  </section>
+
   <br>
   <ul class="nav nav-tabs" id="learning-studio-tabs" role="tablist">
-    <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#studio-author" role="tab">Author</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-drafts" role="tab">Drafts</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-catalog" role="tab">Published Exercises</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-analytics" role="tab">Students</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-import" role="tab">Import</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-appeals" role="tab">Appeals</a></li>
+    <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#studio-author" role="tab">出题</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-drafts" role="tab">草稿</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-catalog" role="tab">已发布题目</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-analytics" role="tab">学生</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-import" role="tab">导入</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#studio-appeals" role="tab">申诉</a></li>
   </ul>
 
   <div class="tab-content pt-4">
     <div id="studio-author" class="tab-pane fade show active" role="tabpanel">
       <div class="row">
         <div class="col-lg-5">
-          <h2>Teaching Intent</h2>
+          <h2>教学意图</h2>
+          <div class="alert alert-info">
+            Agent 会先比较题库并自动选择复用、改编或新建，再持续执行“独立验证—自主修复—重新验证”，直至通过发布门。若确实要指定策略，请直接写在题目需求中。
+          </div>
           <div class="form-group">
-            <label for="studio-module">Target Unit</label>
+            <label for="studio-module">目标单元</label>
             <select id="studio-module" class="form-control">
               {% for module in dojo.modules %}<option value="{{ module.id }}">{{ module.name or module.id }}</option>{% endfor %}
             </select>
           </div>
           <div class="form-row">
             <div class="form-group col-md-6">
-              <label for="studio-level">Authoring Strategy</label>
-              <select id="studio-level" class="form-control"><option value="L1">Reuse</option><option value="L2" selected>Adapt</option><option value="L3">Create New</option></select>
+              <label for="studio-category">类别</label>
+              <select id="studio-category" class="form-control"><option value="GENERAL">综合</option><option value="WEB">Web 安全</option><option value="PWN">二进制利用</option><option value="REV">逆向工程</option><option value="CRYPTO">密码学</option><option value="FORENSICS">取证</option></select>
             </div>
             <div class="form-group col-md-6">
-              <label for="studio-category">Category</label>
-              <select id="studio-category" class="form-control"><option>GENERAL</option><option>WEB</option><option>PWN</option><option>REV</option><option>CRYPTO</option><option>FORENSICS</option></select>
+              <label for="studio-difficulty">难度</label>
+              <select id="studio-difficulty" class="form-control">{% for value in range(1, 6) %}<option value="{{ value }}" {% if value == 2 %}selected{% endif %}>{{ value }} / 5</option>{% endfor %}</select>
             </div>
           </div>
           <div class="form-group">
-            <label for="studio-difficulty">Difficulty</label>
-            <select id="studio-difficulty" class="form-control">{% for value in range(1, 6) %}<option value="{{ value }}" {% if value == 2 %}selected{% endif %}>{{ value }} / 5</option>{% endfor %}</select>
+            <label for="studio-brief">题目需求</label>
+            <textarea id="studio-brief" class="form-control" rows="10" placeholder="描述学习者基础、目标漏洞、运行约束，以及可验证的完成标准。Agent 会自动选择策略；如需强制复用、改编或从零新建，请在这里明确说明。"></textarea>
           </div>
-          <div class="form-group">
-            <label for="studio-brief">Exercise Requirements</label>
-            <textarea id="studio-brief" class="form-control" rows="10" placeholder="Describe learner background, target vulnerability, runtime constraints, and a verifiable completion standard."></textarea>
-          </div>
-          <button id="studio-create" type="button" class="btn btn-primary btn-block">Generate Draft</button>
+          <button id="studio-create" type="button" class="btn btn-primary btn-block">生成题目草稿</button>
         </div>
         <div class="col-lg-7">
-          <h2>Draft Workbench</h2>
-          <div id="studio-workbench-empty" class="alert alert-info">Generate or select a draft to begin.</div>
+          <h2>题目工作台</h2>
+          <div id="studio-workbench-empty" class="alert alert-info">请生成或选择一个草稿以开始编辑。</div>
           <div id="studio-workbench" hidden>
             <div class="d-flex justify-content-between align-items-start">
               <div><h3 id="studio-draft-name"></h3><p id="studio-draft-meta"></p></div>
               <span id="studio-draft-status" class="badge badge-secondary"></span>
             </div>
-            <p id="studio-draft-description"></p>
-            <h3>Best Catalog Matches</h3>
-            <div id="studio-draft-candidates"></div>
-            <h3>Publication Gate</h3>
-            <p id="studio-validation-summary"></p>
-            <div id="studio-validation-checks" class="table-responsive"></div>
-            <button id="studio-validate" type="button" class="btn btn-outline-secondary">Validate</button>
-            <button id="studio-publish" type="button" class="btn btn-primary">Publish</button>
+            <details id="studio-pipeline-details" class="studio-disclosure" open>
+              <summary>Agent 出题流水线</summary>
+              <div id="studio-agent-pipeline" class="alert alert-secondary"></div>
+            </details>
+            <details id="studio-description-details" class="studio-disclosure" open>
+              <summary>题目概述</summary>
+              <p id="studio-draft-description"></p>
+            </details>
+            <div class="row">
+              <div class="col-md-6">
+                <details id="studio-implementation-details" class="studio-disclosure">
+                  <summary>实现与运行环境</summary>
+                  <p id="studio-implementation-summary" class="text-muted"></p>
+                </details>
+              </div>
+              <div class="col-md-6">
+                <details id="studio-solution-details" class="studio-disclosure">
+                  <summary>私有解题参考</summary>
+                  <p id="studio-solution-summary" class="text-muted"></p>
+                </details>
+              </div>
+            </div>
+            <details id="studio-preflight-details" class="studio-disclosure">
+              <summary>预检结果</summary>
+              <div id="studio-preflight-summary" class="alert alert-secondary"></div>
+            </details>
+            <details id="studio-candidates-details" class="studio-disclosure">
+              <summary>最佳题库匹配</summary>
+              <div id="studio-draft-candidates"></div>
+            </details>
+            <details id="studio-validation-details" class="studio-disclosure" open>
+              <summary>发布关卡</summary>
+              <p id="studio-validation-summary"></p>
+              <div id="studio-validation-checks" class="table-responsive"></div>
+              <button id="studio-publish" type="button" class="btn btn-primary">发布</button>
+            </details>
             <hr>
             <div class="form-group">
-              <label for="studio-revision">Revision Request</label>
-              <textarea id="studio-revision" class="form-control" rows="4" placeholder="Adjust the audience, scenario, objectives, or runtime constraints."></textarea>
+              <label for="studio-revision">修订要求</label>
+              <textarea id="studio-revision" class="form-control" rows="4" placeholder="调整受众、场景、目标或运行约束。"></textarea>
             </div>
-            <button id="studio-revise" type="button" class="btn btn-outline-secondary">Revise Draft</button>
+            <button id="studio-revise" type="button" class="btn btn-outline-secondary">修订草稿</button>
           </div>
         </div>
       </div>
     </div>
 
     <div id="studio-drafts" class="tab-pane fade" role="tabpanel">
-      <h2>Authoring Drafts</h2>
+      <h2>出题草稿</h2>
       <ul id="studio-draft-list" class="card-list"></ul>
     </div>
 
     <div id="studio-catalog" class="tab-pane fade" role="tabpanel">
-      <h2>Published Exercise Catalog</h2>
+      <h2>已发布题库</h2>
       <ul id="studio-catalog-list" class="card-list"></ul>
     </div>
 
     <div id="studio-analytics" class="tab-pane fade" role="tabpanel">
-      <h2>Student Analysis</h2>
+      <h2>学生分析</h2>
       <div id="studio-student-list"></div>
-      <div id="studio-students-empty" class="alert alert-info" hidden>Student skill evidence will appear after the first attempt.</div>
+      <div id="studio-students-empty" class="alert alert-info" hidden>学生完成首次练习后，这里会显示能力证据。</div>
     </div>
 
     <div id="studio-import" class="tab-pane fade" role="tabpanel">
-      <h2>External Exercise Package</h2>
-      <p>Paste an AISecEdu or compatible JSON package. It will become a new exercise draft and pass through the same publication gate.</p>
+      <h2>外部题目包</h2>
+      <p>粘贴 AISecEdu 或兼容的 JSON 题目包。系统会创建草稿，并自主完成验证、修复和复验闭环。</p>
       <div class="form-group">
-        <label for="studio-import-module">Target Unit</label>
+        <label for="studio-import-module">目标单元</label>
         <select id="studio-import-module" class="form-control">
           {% for module in dojo.modules %}<option value="{{ module.id }}">{{ module.name or module.id }}</option>{% endfor %}
         </select>
       </div>
       <textarea id="studio-package" class="form-control brand-mono" rows="16" placeholder='{"apiVersion":"aisecedu.io/v2","kind":"ChallengePackage","metadata":{},"spec":{}}'></textarea>
-      <button id="studio-import-submit" type="button" class="btn btn-primary mt-3">Import and Validate</button>
+      <button id="studio-import-submit" type="button" class="btn btn-primary mt-3">导入并自主验证</button>
     </div>
 
     <div id="studio-appeals" class="tab-pane fade" role="tabpanel">
-      <h2>Assessment Appeals</h2>
+      <h2>评估申诉</h2>
       <div id="studio-appeal-list"></div>
-      <div id="studio-appeals-empty" class="alert alert-info" hidden>No assessment appeal has been submitted.</div>
+      <div id="studio-appeals-empty" class="alert alert-info" hidden>目前没有待处理的评估申诉。</div>
+    </div>
+  </div>
+</div>
+
+<div id="studio-job-modal" class="modal fade studio-job-modal" tabindex="-1" role="dialog" aria-labelledby="studio-job-modal-title" aria-hidden="true">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <div class="d-flex align-items-center">
+            <h2 id="studio-job-modal-title" class="modal-title mb-0">题目生成</h2>
+            <span id="studio-job-modal-status" class="badge badge-secondary ml-3">排队中</span>
+          </div>
+          <p id="studio-job-modal-meta" class="mb-0 mt-1 text-muted"></p>
+        </div>
+        <button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body">
+        <div class="studio-job-overall">
+          <div class="d-flex justify-content-between mb-2">
+            <strong>总体进度</strong>
+            <strong id="studio-job-modal-percent">0%</strong>
+          </div>
+          <div class="progress">
+            <div id="studio-job-modal-progress" class="progress-bar" role="progressbar" style="width:0%" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+          </div>
+        </div>
+        <ol id="studio-job-modal-steps" class="studio-job-steps"></ol>
+        <div id="studio-job-modal-error" class="studio-job-error" hidden></div>
+      </div>
+      <div class="modal-footer">
+        <span class="mr-auto text-muted"><i class="fas fa-info-circle"></i> 关闭此窗口不会中断题目生成。</span>
+        <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">关闭</button>
+        <button id="studio-job-open-draft" type="button" class="btn btn-primary" hidden>查看草稿</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="studio-solution-modal" class="modal fade studio-solution-modal" tabindex="-1" role="dialog" aria-labelledby="studio-solution-title" aria-hidden="true">
+  <div class="modal-dialog modal-xl" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <div class="d-flex flex-wrap align-items-center">
+            <h2 id="studio-solution-title" class="modal-title mb-0">已验证教师解题步骤</h2>
+            <span id="studio-solution-status" class="badge badge-secondary ml-3"></span>
+          </div>
+          <p id="studio-solution-meta" class="mb-0 mt-1 text-muted"></p>
+        </div>
+        <button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body">
+        <div id="studio-solution-running" class="studio-solution-running" hidden>
+          <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+          <div>
+            <strong>DeepSeek V4 Pro 正在真实学习者容器中解题。</strong>
+            <p id="studio-solution-running-detail" class="mb-0"></p>
+          </div>
+        </div>
+        <div id="studio-solution-verification" class="studio-solution-verification"></div>
+        <p id="studio-solution-overview" class="studio-solution-overview"></p>
+        <ol id="studio-solution-steps" class="studio-solution-steps"></ol>
+        <details id="studio-solution-trace-wrap" class="studio-solution-trace">
+          <summary>已审计的执行轨迹</summary>
+          <div id="studio-solution-trace"></div>
+        </details>
+        <div id="studio-solution-error" class="studio-job-error" hidden></div>
+      </div>
+      <div class="modal-footer">
+        <span class="mr-auto text-muted"><i class="fas fa-shield-alt"></i> 动态 Flag 已验证并脱敏；策略会阻止直接读取秘密。</span>
+        <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">关闭</button>
+      </div>
     </div>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-studio.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}?v=aisecedu-20260726-pwn-notices"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-studio.js') }}?v=aisecedu-20260726-pwn-notices"></script>
 {% endblock %}

@@ -42,6 +42,8 @@ dojo_workspace_from_environment="${DOJO_WORKSPACE+x}"
 
 define DOJO_HOST "${DEFAULT_DOJO_HOST}"
 define WORKSPACE_HOST workspace."${DEFAULT_DOJO_HOST}"
+define WORKSPACE_HTTPS_PORT 443
+define DOJO_IP_MODE false
 define DOJO_ENV development
 define DOJO_OFFLINE false
 define DOJO_WORKSPACE full
@@ -75,11 +77,20 @@ define AWS_SECRET_ACCESS_KEY
 define MAC_HOSTNAME
 define MAC_USERNAME
 define ENABLE_SPLUNK false
-define DOJO_AI_ENABLED false
-define DOJO_AI_BASE_URL https://api.openai.com/v1
+define DOJO_AI_ENABLED auto
+define DOJO_AI_BASE_URL https://api.deepseek.com
+define DEEPSEEK_API_KEY
 define DOJO_AI_API_KEY
-define DOJO_AI_MODEL gpt-4o-mini
-define DOJO_AI_TIMEOUT_SECONDS 30
+define DOJO_AI_TUTOR_MODEL deepseek-v4-flash
+define DOJO_AI_GUIDE_MODEL deepseek-v4-flash
+define DOJO_AI_GRADER_MODEL deepseek-v4-pro
+define DOJO_AI_SOLUTION_MODEL deepseek-v4-pro
+define DOJO_AI_AUTHORING_PLAN_MODEL deepseek-v4-flash
+define DOJO_AI_AUTHORING_BUILD_MODEL deepseek-v4-pro
+define DOJO_AI_AUTHORING_VALIDATE_MODEL deepseek-v4-pro
+define DOJO_AI_TIMEOUT_SECONDS 120
+define DOJO_AI_MAX_CONTEXT_CHARS 180000
+define DOJO_AI_MAX_FILE_CHARS 32000
 
 mv /data/.config.env /data/config.env
 . /data/config.env

@@ -220,7 +220,7 @@ async function loadGrades(selector) {
     letterGrade.textContent = gradesData.overall.letter;
     letterGrade.style.fontSize = "2em";
     h3.append(
-        document.createTextNode("Your current grade in the class: "),
+        document.createTextNode("你当前的课程成绩："),
         letterGrade,
         document.createTextNode(` (${(gradesData.overall.credit * 100).toFixed(2)}%)`)
     );
@@ -266,7 +266,7 @@ async function loadAllGrades(selector) {
     const downloadButton = document.createElement("button");
     downloadButton.type = "button";
     downloadButton.classList.add("btn", "btn-primary", "mb-3");
-    downloadButton.textContent = "Download CSV";
+    downloadButton.textContent = "下载 CSV";
     downloadButton.addEventListener("click", () => downloadGradesCsv(table));
     gradesElement.appendChild(downloadButton);
     gradesElement.appendChild(table);
@@ -274,10 +274,10 @@ async function loadAllGrades(selector) {
     const thead = document.createElement("thead");
     const headerRow = document.createElement("tr");
     const studentHeaderCell = document.createElement("td");
-    studentHeaderCell.textContent = "Student";
+    studentHeaderCell.textContent = "学生";
     headerRow.appendChild(studentHeaderCell);
     const gradeHeaderCell = document.createElement("td");
-    gradeHeaderCell.textContent = "Grade";
+    gradeHeaderCell.textContent = "成绩";
     gradeHeaderCell.style.width = "80%";
     headerRow.appendChild(gradeHeaderCell);
     thead.appendChild(headerRow);

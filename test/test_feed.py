@@ -37,14 +37,14 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
         start_challenge(welcome_dojo, "welcome", "flag", session=random_user_session)
         wait_for_background_worker(timeout=1)
 
-        # make sure past events show up at load timej
+        # 确认页面初次加载时会显示已有事件。
         watcher.get(f"{DOJO_URL}/feed")
         events_after_start = watcher.find_element(By.ID, "events-list").find_elements(By.CLASS_NAME, "event-card")
 
         found_start_event = False
         for event in events_after_start:
             event_text = event.text
-            if random_user_name in event_text and "started a" in event_text and "container" in event_text:
+            if random_user_name in event_text and "启动了一个" in event_text and "工作区" in event_text:
                 found_start_event = True
                 assert "Start Here" in event_text, \
                     f"Dojo name 'Start Here' not found in event: {event_text}"
@@ -70,9 +70,9 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
         for event in events_after_solve:
             event_text = event.text
             if random_user_name in event_text:
-                if "started a" in event_text and "container" in event_text:
+                if "启动了一个" in event_text and "工作区" in event_text:
                     container_events += 1
-                elif "solved" in event_text.lower():
+                elif "完成了" in event_text:
                     solve_events += 1
                     found_solve_event = True
                     assert "Start Here" in event_text, \
@@ -98,7 +98,7 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
         found_emoji_event = False
         for event in events_with_emoji:
             event_text = event.text
-            if random_user_name in event_text and "earned" in event_text.lower() and "🧪" in event_text:
+            if random_user_name in event_text and "获得了" in event_text and "🧪" in event_text:
                 found_emoji_event = True
                 break
         

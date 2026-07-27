@@ -3,20 +3,20 @@
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1>User Settings</h1>
+    <h1>用户设置</h1>
   </div>
 </div>
 <div class="container">
   <div class="row">
     <div class="col-md-2 offset-md-1">
       <div class="nav flex-column nav-pills" role="tablist">
-        <a class="nav-link active" id="settings-profile-tab" data-toggle="pill" href="#profile" role="tab">Profile</a>
-        <a class="nav-link" id="settings-ssh-key-tab" data-toggle="pill" href="#ssh-key" role="tab">SSH Key</a>
+        <a class="nav-link active" id="settings-profile-tab" data-toggle="pill" href="#profile" role="tab">个人资料</a>
+        <a class="nav-link" id="settings-ssh-key-tab" data-toggle="pill" href="#ssh-key" role="tab">SSH 密钥</a>
         {% if discord_enabled %}
         <a class="nav-link" id="settings-discord-tab" data-toggle="pill" href="#discord" role="tab">Discord</a>
         {% endif %}
-	      <a class="nav-link" id="settings-tokens-tab" data-toggle="pill" href="#tokens" role="tab">Access Tokens</a>
-        <a class="nav-link" id="settings-reset-home-tab" data-toggle="pill" href="#reset-home" role="tab">Reset Home</a>
+	      <a class="nav-link" id="settings-tokens-tab" data-toggle="pill" href="#tokens" role="tab">访问令牌</a>
+        <a class="nav-link" id="settings-reset-home-tab" data-toggle="pill" href="#reset-home" role="tab">重置 Home 目录</a>
       </div>
     </div>
     <div class="col-md-8">
@@ -30,45 +30,23 @@
           <form id="user-profile-form" method="post" accept-charset="utf-8" autocomplete="off" role="form"
                 class="form-horizontal">
             <div class="form-group">
-              <b>{{ form.name.label }}</b>
+              <b>用户名</b>
               {{ form.name(class="form-control", value=user.name) }}
             </div>
             <div class="form-group">
-              <b>{{ form.email.label }}</b>
+              <b>电子邮箱</b>
               {{ form.email(class="form-control", value=user.email) }}
             </div>
 
             <hr>
 
             <div class="form-group">
-              <b>{{ form.confirm.label }}</b>
+              <b>确认当前密码</b>
               {{ form.confirm(class="form-control") }}
             </div>
             <div class="form-group">
-              <b>{{ form.password.label }}</b>
+              <b>新密码</b>
               {{ form.password(class="form-control") }}
-            </div>
-
-            <hr>
-
-            <div class="form-group">
-              <b>{{ form.affiliation.label }}</b>
-              {{ form.affiliation(class="form-control", value=user.affiliation or "") }}
-            </div>
-            <div class="form-group">
-              <b>{{ form.website.label }}</b>
-              {{ form.website(class="form-control", value=user.website or "") }}
-            </div>
-            <div class="form-group">
-              <b>{{ form.country.label }}</b>
-              {{ form.country(class="form-control custom-select", value=user.country) }}
-            </div>
-            <div class="form-group">
-              <b><label for="hidden">Visibility</label></b>
-              <select class="form-control custom-select" id="hidden" name="hidden" value="{{ user.hidden }}">
-                <option value="False" {{ "selected" if not user.hidden else "" }}>Visible</option>
-                <option value="True" {{ "selected" if user.hidden else "" }}>Hidden</option>
-              </select>
             </div>
 
 	    {{ render_extra_fields(form.extra) }}
@@ -86,7 +64,7 @@
         <div class="tab-pane fade" id="ssh-key" role="tabpanel">
 
           {% if ssh_keys %}
-            <b><label for="enter-name">Current SSH Keys</label></b>
+            <b><label for="enter-name">当前 SSH 密钥</label></b>
             <br>
 
             {% for key in ssh_keys %}
@@ -108,7 +86,7 @@
 
             <script>
               document.addEventListener('DOMContentLoaded', function() {
-                form_fetch_and_show("delete-ssh-key-{{ loop.index }}", "/pwncollege_api/v1/ssh_key", "DELETE", "Your public key has been deleted");
+                form_fetch_and_show("delete-ssh-key-{{ loop.index }}", "/pwncollege_api/v1/ssh_key", "DELETE", "SSH 公钥已删除。");
               });
             </script>
             {% endfor %}
@@ -117,8 +95,8 @@
 
           <form method="post" id="ssh-key-form" autocomplete="off">
             <div class="form-group">
-              <b><label for="enter-name">Add New SSH Key</label></b>
-              <small class="form-text text-muted">Required for accessing exercises over SSH</small>
+              <b><label for="enter-name">添加 SSH 密钥</label></b>
+              <small class="form-text text-muted">通过 SSH 访问题目时必需。</small>
               <br>
               <input class="form-control" id="ssh-key" name="ssh_key" type="text" value="">
             </div>
@@ -127,12 +105,12 @@
             </div>
 
             <div class="form-group text-right">
-              <input class="btn btn-md btn-primary btn-outlined" id="_submit" name="_submit" type="submit" value="Add">
+              <input class="btn btn-md btn-primary btn-outlined" id="_submit" name="_submit" type="submit" value="添加">
             </div>
-          </form><b><label for="ssh-key-create">How To Create a SSH Key</label></b>
-          <p id="ssh-key-create">You can quickly generate an ssh key by running <code>ssh-keygen -f key -N ''</code> in a terminal on your (unix-friendly) host machine.
-          This will generate files <code>key</code> and <code>key.pub</code>, which are your private and public keys respectively.
-          Once you have linked your <em>public</em> SSH key to your account, you can connect to the active exercise with <code>ssh -i key hacker@{{ request.host.split(':')[0] }}</code>.</p>
+          </form><b><label for="ssh-key-create">如何创建 SSH 密钥</label></b>
+          <p id="ssh-key-create">在你的本机终端中运行 <code>ssh-keygen -f key -N ''</code>，即可快速生成 SSH 密钥。
+          此命令会生成 <code>key</code> 和 <code>key.pub</code> 文件，它们分别是私钥与公钥。
+          将<em>公钥</em>关联到账号后，可使用 <code>ssh -i key hacker@{{ request.host.split(':')[0] }}</code> 连接当前题目。</p>
         </div>
 
         {% if discord_enabled %}
@@ -144,14 +122,14 @@
               <br>
               <form method="post" id="discord-form" autocomplete="off">
                 <div class="form-group">
-                  <input type="submit" class="btn btn-danger" value="Disconnect Discord Account">
+                  <input type="submit" class="btn btn-danger" value="断开 Discord 账号">
                 </div>
                 <div id="discord-results" class="form-group">
                 </div>
               </form>
             {% else %}
               <br>
-              <a href="/discord/connect" class="btn btn-primary">Connect Discord Account</a>
+              <a href="/discord/connect" class="btn btn-primary">连接 Discord 账号</a>
             {% endif %}
           </div>
         </div>
@@ -173,13 +151,13 @@
 
           {% if tokens %}
           <hr>
-          <h4 class="text-center">Active Tokens</h4>
+          <h4 class="text-center">有效令牌</h4>
           <table class="table table-striped">
             <thead>
               <tr>
-                <td class="text-center"><b>Created</b></td>
-                <td class="text-center"><b>Expiration</b></td>
-                <td class="text-center"><b>Delete</b></td>
+                <td class="text-center"><b>创建时间</b></td>
+                <td class="text-center"><b>到期时间</b></td>
+                <td class="text-center"><b>删除</b></td>
               </tr>
             </thead>
             <tbody>
@@ -201,9 +179,9 @@
 
         <div class="tab-pane fade" id="reset-home" role="tabpanel">
           <div class="text-center">
-            <h2>Reset Home Directory</h2>
-            <p>Click the button below to reset your home directory. This will zip your current home directory and wipe everything else.</p>
-            <button id="reset-home-button" class="btn btn-danger">Reset Home Directory</button>
+            <h2>重置 Home 目录</h2>
+            <p>点击下方按钮重置 Home 目录。系统会打包当前目录，并清除其余内容。</p>
+            <button id="reset-home-button" class="btn btn-danger">重置 Home 目录</button>
           </div>
           <br>
           <div id="reset-home-results" class="form-group"></div>
@@ -220,5 +198,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js', v='aisecedu-20260726-guided-workspace') }}"></script>
 {% endblock %}

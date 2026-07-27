@@ -57,10 +57,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             );
             const result = await response.json();
-            if (!response.ok || !result.success) throw new Error(result.error || "The unit could not be created.");
+            if (!response.ok || !result.success) throw new Error(result.error || "无法创建课程单元。");
             window.location.assign(result.unit.url);
         } catch (error) {
-            showNotice(error.message || "The unit could not be created.");
+            showNotice(error.message || "无法创建课程单元。");
             submit.disabled = false;
         }
     });

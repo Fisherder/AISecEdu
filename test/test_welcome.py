@@ -154,8 +154,11 @@ def challenge_start(browser, idx, practice=False):
     body = browser.find_element("id", f"challenges-body-{idx}")
 
     body.find_element("id", "challenge-priv" if practice else "challenge-start").click()
-    while "started" not in body.find_element("id", "result-message").text:
-        time.sleep(0.5)
+    WebDriverWait(browser, 120).until(
+        lambda driver: "challenge-hidden" not in (
+            body.find_element(By.CSS_SELECTOR, ".challenge-workspace").get_attribute("class") or ""
+        )
+    )
     time.sleep(1)
 
 
@@ -163,12 +166,18 @@ def challenge_submit(browser, idx, flag):
     body = browser.find_element("id", f"challenges-body-{idx}")
     body.find_element("id", "flag-input").send_keys(flag)
 
-    counter = 0
-    matches = ["Solved", "completed"]
-    while not any(x in body.find_element("id", "workspace-notification-banner").get_attribute("innerHTML") for x in matches) and counter < 20:
-        time.sleep(0.5)
-        counter = counter + 1
-    assert counter != 20
+    banner = WebDriverWait(browser, 20).until(
+        lambda driver: next(
+            (
+                element
+                for element in body.find_elements(By.CSS_SELECTOR, "#workspace-notification-banner")
+                if element.is_displayed() and element.text.strip()
+            ),
+            False,
+        )
+    )
+    assert banner.text.strip()
+    assert not browser.find_elements(By.CSS_SELECTOR, ".aisecedu-dialog-layer.is-visible")
 
 # Gets the accordion entry index
 def challenge_idx(browser, name):
@@ -386,7 +395,7 @@ def test_actionbar_service_buttons(random_user_browser, random_user_name, interf
     terminal_button.click()
     loading = random_user_browser.find_element(By.CSS_SELECTOR, "[data-workspace-loading]")
     wait.until(lambda driver: loading.is_displayed())
-    assert "Loading Terminal" in loading.text
+    assert "正在加载终端" in loading.text
     wait.until(lambda driver: "/7681/" in (driver.find_element(By.ID, "workspace-iframe").get_attribute("src") or ""))
     wait.until(lambda driver: not loading.is_displayed())
     assert "active" in terminal_button.get_attribute("class")
@@ -414,6 +423,10 @@ def test_actionbar_port_popout(random_user_browser, random_user_name, interfaces
     popout_handle = (set(random_user_browser.window_handles) - handles).pop()
     random_user_browser.switch_to.window(popout_handle)
     wait.until(lambda driver: driver.current_url.endswith("/workspace?port=80"))
+    address = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-workspace-web-address]")))
+    link = address.find_element(By.CSS_SELECTOR, "[data-workspace-web-link]")
+    assert link.get_attribute("href").startswith("https://")
+    assert "https://" in link.text
     random_user_browser.close()
 
 def test_actionbar_ssh_only_challenge(random_user_browser, random_user_name, interfaces_dojo):
@@ -540,6 +553,64 @@ def test_actionbar_sudo_checkbox(random_user_browser, random_user_name, interfac
     assert "nosudo" in workspace_output("sudo id -u || echo nosudo")
     random_user_browser.close()
 
+
+def test_actionbar_stop_and_restart(random_user_browser, random_user_name, interfaces_dojo):
+    random_user_browser.get(f"{DOJO_URL}/testing-interfaces/test")
+    idx = challenge_idx(random_user_browser, "test1")
+    challenge_start(random_user_browser, idx)
+    body = random_user_browser.find_element("id", f"challenges-body-{idx}")
+    controls = body.find_element(By.CSS_SELECTOR, ".workspace-controls")
+    wait = WebDriverWait(random_user_browser, 60)
+
+    restart_button = controls.find_element(By.ID, "challenge-restart")
+    stop_button = controls.find_element(By.ID, "challenge-stop")
+    reset_button = controls.find_element(By.ID, "challenge-reset")
+    assert restart_button.text.strip() == "重启"
+    assert stop_button.text.strip() == "停止"
+    assert reset_button.text.strip() == "重置"
+
+    workspace_run(
+        "touch /home/hacker/actionbar-home /tmp/actionbar-container",
+        user=random_user_name,
+    )
+    stop_button.click()
+    wait.until(EC.alert_is_present())
+    alert = random_user_browser.switch_to.alert
+    assert "/home/hacker" in alert.text
+    alert.accept()
+    wait.until(
+        lambda driver: controls.get_attribute("data-workspace-running") == "false"
+        and restart_button.is_enabled()
+    )
+    stopped_title = body.find_element(
+        By.CSS_SELECTOR,
+        "[data-workspace-loading-title]",
+    )
+    assert stopped_title.text == "题目容器已停止"
+    assert not stop_button.is_enabled()
+    assert not reset_button.is_enabled()
+
+    restart_button.click()
+    wait.until(
+        lambda driver: controls.get_attribute("data-workspace-running") == "true"
+        and stop_button.is_enabled()
+    )
+    for _ in range(30):
+        result = workspace_run(
+            "test -f /home/hacker/actionbar-home "
+            "&& test ! -e /tmp/actionbar-container",
+            user=random_user_name,
+            check=False,
+        )
+        if result.returncode == 0:
+            break
+        time.sleep(1)
+    else:
+        raise AssertionError("restart did not preserve Home while replacing container state")
+    workspace_run("rm -f /home/hacker/actionbar-home", user=random_user_name)
+    random_user_browser.close()
+
+
 def test_actionbar_popout_mode(random_user_browser, random_user_name, interfaces_dojo):
     random_user_browser.get(f"{DOJO_URL}/testing-interfaces/test")
     idx = challenge_idx(random_user_browser, "test1")
@@ -613,10 +684,18 @@ def test_actionbar_popup_blocked(random_user_browser, random_user_name, interfac
     random_user_browser.execute_script("window.open = function() { return null; };")
 
     body.find_element(By.CSS_SELECTOR, '.workspace-service[data-service="terminal: 7681"]').click()
-    banner = body.find_element(By.ID, "workspace-notification-banner")
-    WebDriverWait(random_user_browser, 30).until(
-        lambda driver: "Pop-up blocked" in (banner.get_attribute("innerHTML") or ""))
+    banner = WebDriverWait(random_user_browser, 30).until(
+        lambda driver: next(
+            (
+                element
+                for element in body.find_elements(By.CSS_SELECTOR, "#workspace-notification-banner")
+                if element.is_displayed() and "浏览器阻止" in element.text
+            ),
+            False,
+        )
+    )
     assert banner.is_displayed()
+    assert not random_user_browser.find_elements(By.CSS_SELECTOR, ".aisecedu-dialog-layer.is-visible")
     assert len(random_user_browser.window_handles) == handles
     random_user_browser.close()
 
@@ -647,13 +726,13 @@ def test_registration_commitment(browser_fixture):
     submit_button = browser_fixture.find_element(By.ID, "register-submit")
     submit_button.click()
 
-    alert = browser_fixture.switch_to.alert
-    assert "Please type the commitment" in alert.text
-    alert.accept()
+    reminder = wait.until(EC.alert_is_present())
+    assert "完全按照上方显示内容" in reminder.text
+    reminder.accept()
 
     commitment_input = browser_fixture.find_element(By.ID, "commitment-input")
     commitment_input.send_keys(
-        "I will use AISecEdu responsibly and will not publish restricted exercise solutions."
+        "我会负责任地使用 AISecEdu，并且不会发布受限题目的解法。"
     )
 
     time.sleep(0.5)
@@ -674,8 +753,11 @@ def test_welcome_graded_lecture(random_user_browser, random_user_name, example_d
     body = random_user_browser.find_element("id", f"challenges-body-{idx}")
 
     body.find_element("id", "challenge-start").click()
-    while "started" not in body.find_element("id", "result-message").text:
-        time.sleep(0.5)
+    WebDriverWait(random_user_browser, 120).until(
+        lambda driver: "challenge-hidden" not in (
+            body.find_element(By.CSS_SELECTOR, ".challenge-workspace").get_attribute("class") or ""
+        )
+    )
     time.sleep(1)
 
     wait = WebDriverWait(random_user_browser, 30)

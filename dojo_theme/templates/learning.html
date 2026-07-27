@@ -3,51 +3,51 @@
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1 class="brand-mono-bold wordmark-large"><span class="brand-white">AISecEdu</span><span class="brand-dot brand-blink">.</span><span class="brand-green">Learning</span></h1>
+    <h1 class="brand-mono-bold wordmark-large"><span class="brand-white">AISecEdu</span><span class="brand-dot brand-blink">.</span><span class="brand-green">学习中心</span></h1>
     <br>
-    <h2 class="brand-white">Course Progress and Learning Evidence</h2>
+    <h2 class="brand-white">课程进度与学习证据</h2>
   </div>
 </div>
 
 <div id="learning-overview" class="container">
-  <p>Track enrolled courses, active exercise sessions, completed exercises, submissions, and evidence-backed assessments from one place.</p>
+  <p>在这里统一查看已加入课程、当前练习、已完成题目、提交记录和基于证据的评估。</p>
 
-  <div id="learning-overview-notice" class="alert alert-warning" role="alert">Loading learning data...</div>
+  <div id="learning-overview-notice" role="status" hidden></div>
 
-  <h2 class="row">Learning Stats</h2>
+  <h2 class="row">学习数据</h2>
   <div class="stats-dashboard">
     <div class="stat-card">
-      <div class="stat-card-header">Enrolled Courses</div>
+      <div class="stat-card-header">已加入课程</div>
       <div class="stat-container">
         <div class="stat-box">
-          <div class="stat-label">Courses</div>
+          <div class="stat-label">课程</div>
           <div id="learning-stat-courses" class="stat-value">0</div>
         </div>
       </div>
     </div>
     <div class="stat-card">
-      <div class="stat-card-header">Course Units</div>
+      <div class="stat-card-header">课程单元</div>
       <div class="stat-container">
         <div class="stat-box">
-          <div class="stat-label">Units</div>
+          <div class="stat-label">单元</div>
           <div id="learning-stat-modules" class="stat-value">0</div>
         </div>
       </div>
     </div>
     <div class="stat-card">
-      <div class="stat-card-header">Completed Exercises</div>
+      <div class="stat-card-header">已完成题目</div>
       <div class="stat-container">
         <div class="stat-box">
-          <div class="stat-label">Completions</div>
+          <div class="stat-label">完成数</div>
           <div id="learning-stat-completed" class="stat-value">0</div>
         </div>
       </div>
     </div>
     <div class="stat-card">
-      <div class="stat-card-header">Submissions</div>
+      <div class="stat-card-header">提交次数</div>
       <div class="stat-container">
         <div class="stat-box">
-          <div class="stat-label">Attempts</div>
+          <div class="stat-label">尝试</div>
           <div id="learning-stat-submissions" class="stat-value">0</div>
         </div>
       </div>
@@ -56,21 +56,21 @@
 
   <br>
   <section id="learning-active-section" hidden>
-    <h2 class="row">Active Exercise</h2>
+    <h2 class="row">当前练习</h2>
     <div id="learning-active-attempt"></div>
     <br>
   </section>
 
-  <h2 class="row">My Courses</h2>
+  <h2 class="row">我的课程</h2>
   <br>
   <ul id="learning-course-list" class="card-list"></ul>
   <div id="learning-course-empty" class="alert alert-info" hidden>
-    You have not joined a course yet. Browse the <a href="/dojos">course catalog</a> to get started.
+    你还没有加入课程。请浏览<a href="/dojos">课程目录</a>开始学习。
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-overview.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-20260726-pwn-notices') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-overview.js', v='aisecedu-20260725-ui3') }}"></script>
 {% endblock %}

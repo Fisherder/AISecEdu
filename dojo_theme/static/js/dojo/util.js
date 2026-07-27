@@ -5,7 +5,7 @@ function copyToClipboard(event) {
   document.execCommand("copy");
 
   $(event.target).tooltip({
-    title: "Copied!",
+    title: "已复制！",
     trigger: "manual"
   });
   $(event.target).tooltip("show");

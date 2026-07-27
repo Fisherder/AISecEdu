@@ -1,36 +1,20 @@
-from urllib.parse import quote
-
-from flask import request, Blueprint, Response, render_template
-from CTFd.utils.user import get_current_user, is_admin
-from CTFd.utils.decorators import authed_only, admins_only
-from CTFd.plugins import bypass_csrf_protection
-
-from ..utils.dojo import get_current_dojo_challenge
+from flask import Blueprint, redirect, render_template
+from CTFd.utils.decorators import authed_only
 
 
 sensai = Blueprint("pwncollege_sensai", __name__)
 
 
-@sensai.route("/sensai")
+@sensai.route("/guide")
+@sensai.route("/guide/")
 @authed_only
-def view_sensai():
-    active = bool(get_current_dojo_challenge())
-    return render_template("iframe.html", iframe_name="sensai", iframe_src="/sensai/", active=active)
+def view_guide():
+    return render_template("guide.html")
 
 
-@sensai.route("/sensai/", methods=["GET", "POST"])
-@sensai.route("/sensai/<path:path>", methods=["GET", "POST"])
-@sensai.route("/sensai/", websocket=True)
-@sensai.route("/sensai/<path:path>", websocket=True)
+@sensai.route("/sensai", defaults={"path": ""})
+@sensai.route("/sensai/", defaults={"path": ""})
+@sensai.route("/sensai/<path:path>")
 @authed_only
-@bypass_csrf_protection
-def forward_sensai(path=""):
-    user = get_current_user()
-    path = quote(request.full_path.lstrip("/"), safe="/?=&")
-    user_type = "User" if not is_admin() else "Admin"
-    return Response(headers={
-        "X-Accel-Redirect": "@sensai",
-        "X-Forwarded-Prefix": "/sensai",
-        "redirect_uri": f"http://sensai/{path}",
-        "redirect_auth": f"{user_type} {user.id}"
-    })
+def view_sensai(path=""):
+    return redirect("/guide", code=308)

@@ -87,6 +87,106 @@ class LearningDrafts(db.Model):
     published_challenge = db.relationship("Challenges")
 
 
+class LearningAuthoringJobs(db.Model):
+    __tablename__ = "learning_authoring_jobs"
+
+    id = db.Column(db.String(48), primary_key=True, default=lambda: learning_id("author"))
+    dojo_id = db.Column(
+        db.Integer,
+        db.ForeignKey("dojos.dojo_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    module_index = db.Column(db.Integer, nullable=False)
+    author_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    draft_id = db.Column(
+        db.String(48),
+        db.ForeignKey("learning_drafts.id", ondelete="SET NULL"),
+        index=True,
+    )
+    kind = db.Column(db.String(24), default="CREATE", nullable=False)
+    status = db.Column(db.String(24), default="QUEUED", nullable=False, index=True)
+    stage = db.Column(db.String(48), default="queued", nullable=False)
+    progress = db.Column(db.Integer, default=0, nullable=False)
+    title = db.Column(db.String(240), nullable=False)
+    request_json = db.Column("request", JSONB, default=dict, nullable=False)
+    steps = db.Column(JSONB, default=list, nullable=False)
+    error = db.Column(db.Text)
+    created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated = db.Column(
+        db.DateTime,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow,
+        nullable=False,
+        index=True,
+    )
+    completed = db.Column(db.DateTime)
+
+    dojo = db.relationship("Dojos")
+    author = db.relationship("Users")
+    draft = db.relationship("LearningDrafts")
+
+
+class LearningSolutionRuns(db.Model):
+    __tablename__ = "learning_solution_runs"
+    __table_args__ = (
+        db.Index(
+            "ix_learning_solution_challenge",
+            "dojo_id",
+            "module_index",
+            "challenge_index",
+            "created",
+        ),
+    )
+
+    id = db.Column(db.String(48), primary_key=True, default=lambda: learning_id("solve"))
+    dojo_id = db.Column(
+        db.Integer,
+        db.ForeignKey("dojos.dojo_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    module_index = db.Column(db.Integer, nullable=False)
+    challenge_index = db.Column(db.Integer, nullable=False)
+    challenge_id = db.Column(
+        db.Integer,
+        db.ForeignKey("challenges.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    requested_by = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
+    package_version = db.Column(db.Integer, default=1, nullable=False)
+    status = db.Column(db.String(24), default="QUEUED", nullable=False, index=True)
+    phase = db.Column(db.String(48), default="queued", nullable=False)
+    progress = db.Column(db.Integer, default=0, nullable=False)
+    model = db.Column(db.String(128), nullable=False)
+    steps = db.Column(JSONB, default=list, nullable=False)
+    solution = db.Column(JSONB, default=dict, nullable=False)
+    verification = db.Column(JSONB, default=dict, nullable=False)
+    error = db.Column(db.Text)
+    created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated = db.Column(
+        db.DateTime,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow,
+        nullable=False,
+        index=True,
+    )
+    completed = db.Column(db.DateTime)
+
+    dojo = db.relationship("Dojos")
+    requester = db.relationship("Users")
+
+
 class LearningAttempts(db.Model):
     __tablename__ = "learning_attempts"
     __table_args__ = (
@@ -187,6 +287,62 @@ class LearningTutorMessages(db.Model):
     created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
 
     attempt = db.relationship("LearningAttempts")
+    user = db.relationship("Users")
+
+
+class LearningGuideThreads(db.Model):
+    __tablename__ = "learning_guide_threads"
+
+    id = db.Column(db.String(48), primary_key=True, default=lambda: learning_id("guide"))
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title = db.Column(db.String(160), default="New conversation", nullable=False)
+    status = db.Column(db.String(24), default="ACTIVE", nullable=False, index=True)
+    context = db.Column(JSONB, default=dict, nullable=False)
+    created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated = db.Column(
+        db.DateTime,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow,
+        nullable=False,
+        index=True,
+    )
+
+    user = db.relationship("Users")
+    messages = db.relationship(
+        "LearningGuideMessages",
+        order_by="LearningGuideMessages.id",
+        cascade="all, delete-orphan",
+        back_populates="thread",
+    )
+
+
+class LearningGuideMessages(db.Model):
+    __tablename__ = "learning_guide_messages"
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    thread_id = db.Column(
+        db.String(48),
+        db.ForeignKey("learning_guide_threads.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role = db.Column(db.String(16), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    metadata_json = db.Column("metadata", JSONB, default=dict, nullable=False)
+    created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    thread = db.relationship("LearningGuideThreads", back_populates="messages")
     user = db.relationship("Users")
 
 

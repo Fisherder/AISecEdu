@@ -115,6 +115,7 @@ def forward_port(port, signature, message, user, service_path="", include_host=T
         print(f"User {current_user.id} is accessing User {user.id}'s workspace (port {port})", flush=True)
 
     workspace_host = os.environ.get("WORKSPACE_HOST")
+    workspace_https_port = int(os.environ.get("WORKSPACE_HTTPS_PORT", "443"))
 
     if not workspace_host:
         abort(500)
@@ -125,7 +126,10 @@ def forward_port(port, signature, message, user, service_path="", include_host=T
     scheme = request.scheme if request else "http"
 
     if include_host:
-        url = f"{scheme}://{workspace_host}{url}"
+        workspace_authority = workspace_host
+        if workspace_https_port != 443:
+            workspace_authority = f"{workspace_host}:{workspace_https_port}"
+        url = f"{scheme}://{workspace_authority}{url}"
 
     params = dict(kwargs or {})
 
@@ -134,3 +138,35 @@ def forward_port(port, signature, message, user, service_path="", include_host=T
         url = f"{url}?{args}"
 
     return url
+
+
+def forward_short_port(port, signature, message, user, service_path="", **kwargs):
+    if ":" in message:
+        fallback = forward_port(
+            port,
+            signature,
+            message,
+            user,
+            service_path=service_path,
+            **kwargs,
+        )
+        return fallback, fallback
+
+    workspace_host = os.environ.get("WORKSPACE_HOST")
+    workspace_https_port = int(os.environ.get("WORKSPACE_HTTPS_PORT", "443"))
+    if not workspace_host:
+        abort(500)
+
+    authority = workspace_host
+    if workspace_https_port != 443:
+        authority = f"{workspace_host}:{workspace_https_port}"
+    scheme = request.scheme if request else "http"
+    path = str(service_path or "").lstrip("/")
+    bootstrap = f"{scheme}://{authority}/w/{message}/auth/{signature}/{port}/{path}"
+    public = f"{scheme}://{authority}/w/{message}/{port}/{path}"
+    params = dict(kwargs or {})
+    if params:
+        args = urlencode(params)
+        bootstrap = f"{bootstrap}?{args}"
+        public = f"{public}?{args}"
+    return bootstrap, public

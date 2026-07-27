@@ -2,15 +2,29 @@
 {% set module_id = module.id if module else None %}
 
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN" data-aisecedu-theme="dark">
   <head>
     <title>{{ Configs.ctf_name }}</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <meta property="og:title" content="AISecEdu">
-    <meta property="og:description" content="Hands-on cybersecurity courses with isolated learning workspaces.">
+    <meta property="og:description" content="提供隔离学习工作区的动手网络安全课程平台。">
     <meta property="og:image" content="{{ url_for('views.themes', path='img/aisecedu-mark.svg', _external=True) }}">
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("aisecedu-theme");
+          var theme = saved === "light" || saved === "dark"
+            ? saved
+            : (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+          document.documentElement.dataset.aiseceduTheme = theme;
+          document.documentElement.style.colorScheme = theme;
+        } catch (error) {
+          document.documentElement.dataset.aiseceduTheme = "dark";
+        }
+      })();
+    </script>
 
     <link rel="icon" type="image/svg+xml" href="{{ url_for('views.themes', path='img/aisecedu-mark.svg') }}">
     <link rel="stylesheet" href="{{ url_for('views.themes', path='css/fonts.css') }}">
@@ -44,7 +58,7 @@
         font-display: swap;
       }
     </style>
-    <link rel="stylesheet" href="{{ url_for('views.themes', path='css/custom.css') }}">
+    <link rel="stylesheet" href="{{ url_for('views.themes', path='css/custom.css', v='aisecedu-20260726-guide-reference-scope-v2') }}">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
     {% block stylesheets %}
     {% endblock %}
@@ -65,7 +79,7 @@
     </script>
     {{ Configs.theme_header }}
   </head>
-  <body>
+  <body class="{% block body_class %}{% endblock %}">
     {% include "components/navbar.html" %}
 
     <main role="main">
@@ -74,14 +88,16 @@
       {% endblock %}
     </main>
 
+    {% block footer %}
     <footer class="footer">
       <div class="container text-center" style="line-height: 20px; opacity: 0.7">
         <small>
-          <strong>AISecEdu</strong> &middot; Hands-on cybersecurity learning<br>
-          Learn through structured courses, focused units, and reproducible exercises.
+          <strong>AISecEdu</strong> &middot; 实践式网络安全学习<br>
+          通过结构化课程、聚焦单元与可复现实验掌握网络安全技能。
         </small>
       </div>
     </footer>
+    {% endblock %}
 
     <script defer src="{{ url_for('views.themes', path='js/vendor.bundle.js') }}"></script>
     <script defer src="{{ url_for('views.themes', path='js/core.js') }}"></script>
@@ -93,6 +109,7 @@
 
     <script defer src="{{ url_for('views.themes', path='js/dojo/util.js') }}"></script>
     <script defer src="{{ url_for('views.themes', path='js/dojo/navbar.js') }}"></script>
+    <script defer src="{{ url_for('views.themes', path='js/dojo/ui.js', v='aisecedu-20260726-short-score-guide') }}"></script>
     <script defer src="{{ url_for('views.themes', path='js/dojo/popup.js') }}"></script>
 
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>

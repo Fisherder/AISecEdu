@@ -20,7 +20,7 @@ class ValidateUser(Resource):
         username = request.args.get("username")
         email = request.args.get("email")
         if not username or not email:
-            return {"error": "`username` and `email` parameters are required"}, 400
+            return {"error": "必须提供 `username` 和 `email` 参数。"}, 400
 
         return int(bool(Users.query.filter_by(name=username, email=email, hidden=False).first()))
 
@@ -34,11 +34,11 @@ class ScoreUser(Resource):
     def get(self):
         username = request.args.get("username")
         if not username:
-            return {"error": "`username` parameter is required"}, 400
+            return {"error": "必须提供 `username` 参数。"}, 400
 
         user = Users.query.filter_by(name=username, hidden=False).first()
         if not user:
-            return {"error": "user does not exist"}, 400
+            return {"error": "用户不存在。"}, 400
 
         official_challenges = (
             Challenges.query
@@ -63,7 +63,7 @@ class ScoreUser(Resource):
         user_count = len(scoreboard)
         user_ranking = next((ranking for ranking in scoreboard if ranking.user_id == user.id), None)
         if not user_ranking:
-            return {"error": "user is not ranked"}, 400
+            return {"error": "该用户暂无排行。"}, 400
 
         # rank:score:max_score:challs_solved:chall_count:user_count
         return f"{user_ranking.rank}:{user_ranking.solves}:{max_score}:{user_ranking.solves}:{max_score}:{user_count}"

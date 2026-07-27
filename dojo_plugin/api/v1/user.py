@@ -27,10 +27,10 @@ def authed_only_ssh(func):
             user_id, token_tag = URLSafeTimedSerializer(DOJO_SSH_SERVICE_KEY).loads(token, max_age=300)
             assert token_tag == "ssh-tui"
         except Exception:
-            return {"success": False, "error": "Failed to authenticate ssh service token."}, 401
+            return {"success": False, "error": "SSH 服务令牌验证失败。"}, 401
         user = Users.query.filter_by(id=user_id).first()
         if not user:
-            return {"success": False, "error": "User not found."}, 404
+            return {"success": False, "error": "未找到用户。"}, 404
         try:
             session.update({
                 "id": user.id,
@@ -64,13 +64,13 @@ def authed_only_cli(func):
             ).loads(token, max_age=21600)
             assert token_tag == "cli-auth-token"
         except Exception:
-            return {"success": False, "error": "Failed to authenticate container token."}, 401
+            return {"success": False, "error": "工作区令牌验证失败。"}, 401
         user = Users.query.filter_by(id=user_id).one()
         container = get_current_container(user)
         if container is None:
-            return {"success": False, "error": "No active challenge container."}, 403
+            return {"success": False, "error": "当前没有运行中的题目工作区。"}, 403
         if container.labels["dojo.challenge_id"] != challenge_id:
-            return {"success": False, "error": "Token failed to authenticate active challenge container."}, 403
+            return {"success": False, "error": "该令牌无法验证当前运行中的题目工作区。"}, 403
         try:
             session.update({
                 "id": user.id,

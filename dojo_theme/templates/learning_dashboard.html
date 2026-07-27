@@ -5,7 +5,7 @@
   <div class="container">
     <h1 class="brand-white brand-mono-bold">{{ dojo.name or dojo.id }}<span class="brand-dot">.</span></h1>
     <br>
-    <h2 class="brand-white">Learning Analysis</h2>
+    <h2 class="brand-white">学习分析</h2>
   </div>
 </div>
 
@@ -15,7 +15,7 @@
       <figure>
         <a class="text-decoration-none" href="/{{ dojo.reference_id }}">
           <i class="fas fa-torii-gate fa-3x"></i>
-          <figcaption><b>Course</b></figcaption>
+          <figcaption><b>课程</b></figcaption>
         </a>
       </figure>
     </div>
@@ -24,73 +24,73 @@
       <figure>
         <a class="text-decoration-none" href="/dojo/{{ dojo.reference_id }}/studio">
           <i class="fas fa-chalkboard-teacher fa-3x"></i>
-          <figcaption><b>Teacher Studio</b></figcaption>
+          <figcaption><b>教师工作台</b></figcaption>
         </a>
       </figure>
     </div>
     {% endif %}
   </div>
 
-  <div id="learning-dashboard-notice" class="alert alert-warning" role="alert">Loading course analysis...</div>
+  <div id="learning-dashboard-notice" role="status" hidden></div>
 
-  <h2 class="row">Learning Status</h2>
+  <h2 class="row">学习状态</h2>
   <div class="stats-dashboard">
     <div class="stat-card">
-      <div class="stat-card-header">Course Progress</div>
+      <div class="stat-card-header">课程进度</div>
       <div class="stat-container">
         <div class="stat-box">
-          <div class="stat-label">Required Exercises</div>
+          <div class="stat-label">必修题目</div>
           <div id="learning-progress-value" class="stat-value">0 / 0</div>
         </div>
         <div class="stat-box">
-          <div class="stat-label">Completion</div>
+          <div class="stat-label">完成度</div>
           <div id="learning-progress-percent" class="stat-value">0%</div>
         </div>
       </div>
     </div>
     <div class="stat-card">
-      <div class="stat-card-header">Evidence Standard</div>
-      <p class="m-0">Hash-chained S1–S4 events keep runtime observations, Tutor interactions, reflections, and flag checks reviewable.</p>
+      <div class="stat-card-header">证据标准</div>
+      <p class="m-0">通过哈希链关联 S1–S4 事件，让运行时观察、Tutor 交互、复盘和 Flag 校验都可复核。</p>
     </div>
     <div class="stat-card">
-      <div class="stat-card-header">Assessment Standard</div>
-      <p class="m-0">Objective result: 60 points.<br>Trusted process: 40 points.</p>
+      <div class="stat-card-header">评估标准</div>
+      <p class="m-0">客观结果：60 分。<br>可信过程：40 分。</p>
     </div>
   </div>
 
   <br>
   <ul class="nav nav-tabs" id="learning-dashboard-tabs" role="tablist">
-    <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#learning-path" role="tab">Recommended</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-skills" role="tab">Skills</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-attempts" role="tab">Attempts</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-catalog" role="tab">Exercise Catalog</a></li>
+    <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#learning-path" role="tab">推荐路径</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-skills" role="tab">能力</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-attempts" role="tab">尝试记录</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-catalog" role="tab">题目目录</a></li>
   </ul>
 
   <div class="tab-content pt-4">
     <div id="learning-path" class="tab-pane fade show active" role="tabpanel">
-      <h2>Recommended Next Exercises</h2>
+      <h2>推荐的下一道题目</h2>
       <ul id="learning-recommendations" class="card-list"></ul>
-      <div id="learning-recommendations-empty" class="alert alert-info" hidden>No unfinished recommendation is available for this course.</div>
+      <div id="learning-recommendations-empty" class="alert alert-info" hidden>本课程暂时没有未完成的推荐题目。</div>
     </div>
 
     <div id="learning-skills" class="tab-pane fade" role="tabpanel">
-      <h2>Six-Dimension Skill Profile</h2>
+      <h2>六维能力画像</h2>
       <div id="learning-skills-list" class="row"></div>
     </div>
 
     <div id="learning-attempts" class="tab-pane fade" role="tabpanel">
-      <h2>Evidence-Backed Attempts</h2>
+      <h2>有证据支撑的尝试记录</h2>
       <div class="table-responsive">
         <table class="table table-striped">
-          <thead><tr><th>Exercise</th><th>Unit</th><th>Session</th><th>Status</th><th>Score</th><th>Started</th></tr></thead>
+          <thead><tr><th>题目</th><th>单元</th><th>会话</th><th>状态</th><th>得分</th><th>开始时间</th></tr></thead>
           <tbody id="learning-attempt-list"></tbody>
         </table>
       </div>
-      <div id="learning-attempts-empty" class="alert alert-info" hidden>Start an exercise to create the first learning attempt.</div>
+      <div id="learning-attempts-empty" class="alert alert-info" hidden>启动一个题目即可创建第一条学习尝试记录。</div>
     </div>
 
     <div id="learning-catalog" class="tab-pane fade" role="tabpanel">
-      <h2>Course Exercise Catalog</h2>
+      <h2>课程题目目录</h2>
       <ul id="learning-catalog-list" class="card-list"></ul>
     </div>
   </div>
@@ -101,36 +101,37 @@
     <div class="modal-content bg-dark text-white">
       <div class="modal-header">
         <div>
-          <h2 id="learning-attempt-title" class="modal-title">Learning Attempt</h2>
+          <h2 id="learning-attempt-title" class="modal-title">学习尝试记录</h2>
           <small id="learning-attempt-meta"></small>
         </div>
-        <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <button type="button" class="close text-white" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
       </div>
       <div class="modal-body">
-        <div id="learning-attempt-notice" class="alert" role="alert" hidden></div>
+        <div id="learning-attempt-notice" role="status" hidden></div>
         <div class="row">
           <div class="col-lg-6">
-            <h3>Evidence Timeline</h3>
+            <h3>证据时间线</h3>
             <p id="learning-evidence-chain"></p>
             <div class="table-responsive" style="max-height: 18rem; overflow: auto;">
               <table class="table table-sm table-striped"><tbody id="learning-evidence-list"></tbody></table>
             </div>
-            <h3>Reflection and Assessment</h3>
-            <textarea id="learning-reflection" class="form-control" rows="7" placeholder="Describe your initial judgment, tested hypotheses, key evidence, root cause, and remediation."></textarea>
-            <button id="learning-reflection-submit" type="button" class="btn btn-primary mt-3">Save and Reassess</button>
+            <h3>复盘与评估</h3>
+            <textarea id="learning-reflection" class="form-control" rows="7" placeholder="说明你的初始判断、验证过的假设、关键证据、根因和修复建议。"></textarea>
+            <button id="learning-reflection-submit" type="button" class="btn btn-primary mt-3">保存并重新评估</button>
           </div>
           <div class="col-lg-6">
-            <h3>Assessment</h3>
-            <div id="learning-assessment-empty" class="alert alert-info">Submit a reflection to generate an assessment.</div>
+            <h3>评估</h3>
+            <div id="learning-assessment-empty" class="alert alert-info">提交复盘后即可生成评估。</div>
             <div id="learning-assessment" hidden>
               <h2 id="learning-assessment-score"></h2>
               <p id="learning-assessment-summary"></p>
+              <div id="learning-assessment-agent" class="learning-assessment-agent"></div>
               <p id="learning-assessment-feedback"></p>
               <div id="learning-assessment-criteria"></div>
               <hr>
-              <h3>Request Review</h3>
-              <textarea id="learning-appeal-reason" class="form-control" rows="4" placeholder="Identify the evidence or scoring criterion that should be reviewed."></textarea>
-              <button id="learning-appeal-submit" type="button" class="btn btn-outline-secondary mt-3">Submit Appeal</button>
+              <h3>申请复核</h3>
+              <textarea id="learning-appeal-reason" class="form-control" rows="4" placeholder="指出需要复核的证据或评分标准。"></textarea>
+              <button id="learning-appeal-submit" type="button" class="btn btn-outline-secondary mt-3">提交复核申请</button>
             </div>
           </div>
         </div>
@@ -141,6 +142,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-dashboard.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-20260726-pwn-notices') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-dashboard.js', v='aisecedu-20260726-pwn-notices') }}"></script>
 {% endblock %}

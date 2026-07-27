@@ -3,7 +3,7 @@
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1>All Grades</h1>
+    <h1>全部成绩</h1>
   </div>
 </div>
 <div class="container">
@@ -13,8 +13,8 @@
         <table class="table table-striped">
           <thead>
             <tr>
-              <td scope="col"><b>Student</b></td>
-              <td scope="col" style="width: 80%;"><b>Grade</b></td>
+              <td scope="col"><b>学生</b></td>
+              <td scope="col" style="width: 80%;"><b>成绩</b></td>
             </tr>
           </thead>
           <tbody>
@@ -31,14 +31,14 @@
                   <table>
                     <thead>
                       <tr>
-                        <td>Name</td>
-                        <td>Date</td>
+                        <td>名称</td>
+                        <td>日期</td>
                         {% if user_grades.show_extra_late_date %}
-                        <td>Extra Late After</td>
+                        <td>额外迟交截止</td>
                         {% endif %}
-                        <td>Weight</td>
-                        <td>Progress</td>
-                        <td>Credit</td>
+                        <td>权重</td>
+                        <td>进度</td>
+                        <td>计分</td>
                       </tr>
                     </thead>
                     <tbody>
@@ -72,7 +72,7 @@
                 {{ missing_student }}
               </td>
               <td>
-                Missing
+                缺失
               </td>
             </tr>
             {% endfor %}
@@ -110,7 +110,7 @@
         </table>
       </div>
     {% else %}
-      <p>Loading...</p>
+      <p>正在加载…</p>
     {% endif %}
   </div>
 </div>

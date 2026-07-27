@@ -5,7 +5,7 @@
   <div class="jumbotron">
     <div class="container">
       <h1 class="brand-mono">{{ user.name }}</h1>
-      <p><a href="{{ url_for('pwncollege_belts.view_belts') }}"><i class="fas fa-award mr-2"></i>View AISecEdu Achievements</a></p>
+      <p><a href="{{ url_for('pwncollege_belts.view_belts') }}"><i class="fas fa-award mr-2"></i>查看 AISecEdu 成就</a></p>
       <h2>
         {% for badge in badges[user.id] %}
         <span title="{{badge.text}}" {% if badge.stale %}style="opacity: 0.4; filter: grayscale(100%);"{% endif %}>
@@ -51,16 +51,16 @@
       <a href="https://linkedin.com/share?url={{ url_for('pwncollege_users.view_other', user_id=user.id, _external=True) }}"
           class="share-button"
           target="_blank"
-          aria-label="Post on LinkedIn">
+          aria-label="分享到 LinkedIn">
           <img src="{{ url_for('views.themes', path='img/dojo/linkedin_logo.svg') }}">
-          <span title="Post on LinkedIn"></span>Post
+          <span title="分享到 LinkedIn"></span>分享
       </a>
       <a href="https://twitter.com/intent/tweet?url={{ url_for('pwncollege_users.view_other', user_id=user.id, _external=True) }}" 
           class="share-button"
           target="_blank"
-          aria-label="Post on X">
+          aria-label="分享到 X">
           <img src="{{ url_for('views.themes', path='img/dojo/x_logo.svg') }}">
-          <span title="Post on X"></span>Post
+          <span title="分享到 X"></span>分享
       </a>
       {% endif %}
     </div>
@@ -78,9 +78,9 @@
       <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.listing', dojo=dojo.reference_id) }}">
         <h2>{{ dojo.name }}</h2>
         <h4>
-          <i class="fas fa-flag pt-3 pr-3" title="Completed Exercises"></i>
+          <i class="fas fa-flag pt-3 pr-3" title="已完成题目"></i>
           <td>{{ solves }} / {{ dojo.challenges | length }}</td>
-          <i class="fas fa-trophy pt-3 pr-3 pl-5 " title="Rank"></i>
+          <i class="fas fa-trophy pt-3 pr-3 pl-5 " title="排名"></i>
           <td>{{ rank or "-" }} / {{ max_rank or "-" }}</td>
         </h4>
       </a>
@@ -96,9 +96,9 @@
             {% if header %}
               <h4 class="accordion-item-name">{{ module.name }}</h4>
               <span class="challenge-header-right">
-                <i class="fas fa-flag pr-1" title="Completed Exercises"></i>
+                <i class="fas fa-flag pr-1" title="已完成题目"></i>
                 <td>{{ solves }} / {{ module.challenges | length }}</td>
-                <i class="fas fa-trophy pr-1 pl-3 " title="Rank"></i>
+                <i class="fas fa-trophy pr-1 pl-3 " title="排名"></i>
                 <td>{{ rank or "-" }} / {{ max_rank or "-" }}</td>
               </span>
             {% else %}
@@ -113,12 +113,12 @@
                           <i class="fas fa-flag pr-3 {{ solved }}"></i>{{ challenge.name or challenge.id }}
                           {% if not challenge.visible() %}
                           <small><small><small>
-                                <i>hidden</i> &mdash; visible because you are a teacher for this course
+                                <i>隐藏</i> &mdash; 因你是本课程教师而可见
                           </small></small></small>
                           {% endif %}
                         </span>
                       </h4>
-                      <h6>First Successful Submission: {{user_solves[dojo.id][module.id][challenge.challenge_id]}}</h6>
+                      <h6>首次成功提交：{{user_solves[dojo.id][module.id][challenge.challenge_id]}}</h6>
                       </div>
                     </div>
                     <br>

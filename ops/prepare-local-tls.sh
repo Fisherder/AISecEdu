@@ -8,31 +8,51 @@ source "$repo_dir/ops/load-deployment-env.sh"
 tls_dir=${DOJO_TLS_DIR:-$repo_dir/data/local-tls}
 dojo_host=${DOJO_HOST:-localhost.pwn.college}
 workspace_host=${WORKSPACE_HOST:-workspace.localhost.pwn.college}
-future_host=${FUTURE_HOST:-future.localhost.pwn.college}
+future_host=${FUTURE_HOST-}
 
-dns_names=("$dojo_host" "$workspace_host" "$future_host")
+dns_names=()
+ip_addresses=()
+endpoint_names=("$dojo_host" "$workspace_host")
+if [[ -n $future_host ]]; then
+    endpoint_names+=("$future_host")
+fi
+for endpoint_name in "${endpoint_names[@]}"; do
+    if [[ $endpoint_name =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || $endpoint_name == *:* ]]; then
+        ip_addresses+=("$endpoint_name")
+    else
+        dns_names+=("$endpoint_name")
+    fi
+done
 if [[ -n ${DOJO_TLS_EXTRA_DNS:-} ]]; then
     IFS=, read -r -a extra_dns_names <<<"$DOJO_TLS_EXTRA_DNS"
     dns_names+=("${extra_dns_names[@]}")
 fi
-ip_addresses=()
 if [[ -n ${DOJO_TLS_IPS:-} ]]; then
-    IFS=, read -r -a ip_addresses <<<"$DOJO_TLS_IPS"
+    IFS=, read -r -a extra_ip_addresses <<<"$DOJO_TLS_IPS"
+    ip_addresses+=("${extra_ip_addresses[@]}")
 fi
 
 san_entries=()
+declare -A seen_dns_names=()
 for name in "${dns_names[@]}"; do
+    [[ -n $name ]] || continue
     [[ $name =~ ^[A-Za-z0-9.-]+$ ]] || {
         echo "Invalid TLS DNS name: $name" >&2
         exit 1
     }
+    [[ -z ${seen_dns_names[$name]+x} ]] || continue
+    seen_dns_names[$name]=1
     san_entries+=("DNS:$name")
 done
+declare -A seen_ip_addresses=()
 for address in "${ip_addresses[@]}"; do
+    [[ -n $address ]] || continue
     [[ $address =~ ^[0-9A-Fa-f:.]+$ ]] || {
         echo "Invalid TLS IP address: $address" >&2
         exit 1
     }
+    [[ -z ${seen_ip_addresses[$address]+x} ]] || continue
+    seen_ip_addresses[$address]=1
     san_entries+=("IP:$address")
 done
 printf -v subject_alt_names '%s,' "${san_entries[@]}"
@@ -70,6 +90,13 @@ if [[ ! -s "$tls_dir/fullchain.pem" || ! -s "$tls_dir/privkey.pem" ]] || \
     ! openssl verify -CAfile "$tls_dir/ca.crt" -purpose sslserver \
         "$tls_dir/fullchain.pem" 2>/dev/null | grep -Fq ': OK'; then
     regenerate_server=true
+fi
+if [[ $regenerate_server == false ]]; then
+    certificate_subject=$(openssl x509 -in "$tls_dir/fullchain.pem" \
+        -noout -subject -nameopt RFC2253)
+    if [[ $certificate_subject != "subject=CN=$dojo_host" ]]; then
+        regenerate_server=true
+    fi
 fi
 if [[ $regenerate_server == false ]]; then
     for name in "${dns_names[@]}"; do
@@ -122,7 +149,12 @@ chmod 600 "$tls_dir/privkey.pem"
 chmod 644 "$tls_dir/fullchain.pem"
 openssl x509 -in "$tls_dir/ca.crt" -noout -checkend 86400 >/dev/null
 openssl x509 -in "$tls_dir/fullchain.pem" -noout -checkend 86400 >/dev/null
-openssl verify -CAfile "$tls_dir/ca.crt" -purpose sslserver \
-    -verify_hostname "$dojo_host" "$tls_dir/fullchain.pem"
+if [[ $dojo_host =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || $dojo_host == *:* ]]; then
+    openssl verify -CAfile "$tls_dir/ca.crt" -purpose sslserver \
+        -verify_ip "$dojo_host" "$tls_dir/fullchain.pem"
+else
+    openssl verify -CAfile "$tls_dir/ca.crt" -purpose sslserver \
+        -verify_hostname "$dojo_host" "$tls_dir/fullchain.pem"
+fi
 openssl x509 -in "$tls_dir/ca.crt" -noout -fingerprint -sha256
 openssl x509 -in "$tls_dir/fullchain.pem" -noout -ext subjectAltName

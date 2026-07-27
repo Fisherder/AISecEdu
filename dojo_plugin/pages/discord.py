@@ -55,7 +55,7 @@ def discord_redirect():
         discord_id = get_discord_id(code)
     except Exception as e:
         print(f"ERROR: Discord redirect failed: {e}", file=sys.stderr, flush=True)
-        return {"success": False, "error": "Discord redirect failed; OAuth may have taken too long, try again"}, 400
+        return {"success": False, "error": "Discord 跳转失败；OAuth 授权可能超时，请重试。"}, 400
 
     try:
         existing_discord_user = DiscordUsers.query.filter_by(user_id=user_id).first()
@@ -70,6 +70,6 @@ def discord_redirect():
             update_awards(user)
     except IntegrityError:
         db.session.rollback()
-        return {"success": False, "error": "Discord user already in use"}, 400
+        return {"success": False, "error": "该 Discord 账号已被其他用户关联。"}, 400
 
     return redirect("/settings#discord")

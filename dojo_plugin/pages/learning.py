@@ -1,8 +1,10 @@
-from flask import Blueprint, abort, redirect, render_template
+from flask import Blueprint, abort, redirect, render_template, url_for
 
 from CTFd.utils import get_config
 from CTFd.utils.decorators import authed_only
+from CTFd.utils.user import get_current_user
 
+from ..models import DojoChallenges, LearningAttempts
 from ..utils.dojo import dojo_admins_only, dojo_route
 
 
@@ -22,6 +24,44 @@ def overview():
 @dojo_route
 def dashboard(dojo):
     return render_template("learning_dashboard.html", dojo=dojo)
+
+
+@learning.route("/learning/scores/latest/<int:challenge_id>")
+@authed_only
+def latest_score(challenge_id):
+    attempts = LearningAttempts.query.filter_by(
+        user_id=get_current_user().id,
+        challenge_id=challenge_id,
+    )
+    attempt = (
+        attempts.filter_by(status="SOLVED")
+        .order_by(LearningAttempts.completed.desc())
+        .first()
+        or attempts.order_by(LearningAttempts.started.desc()).first_or_404()
+    )
+    return redirect(
+        url_for("pwncollege_learning.score", attempt_id=attempt.id),
+        code=302,
+    )
+
+
+@learning.route("/learning/attempts/<attempt_id>/score")
+@authed_only
+def score(attempt_id):
+    attempt = LearningAttempts.query.get_or_404(attempt_id)
+    challenge = DojoChallenges.query.filter_by(
+        dojo_id=attempt.dojo_id,
+        module_index=attempt.module_index,
+        challenge_index=attempt.challenge_index,
+    ).first_or_404()
+    user = get_current_user()
+    if attempt.user_id != user.id and not challenge.dojo.is_admin(user):
+        abort(403)
+    return render_template(
+        "learning_score.html",
+        attempt_id=attempt.id,
+        challenge=challenge,
+    )
 
 
 @learning.route("/dojo/<dojo>/studio")

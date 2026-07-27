@@ -17,7 +17,7 @@ from CTFd.plugins.challenges import CHALLENGE_CLASSES, BaseChallenge
 from CTFd.plugins.flags import FLAG_CLASSES, BaseFlag, FlagException
 
 from .models import Dojos, DojoChallenges, Belts, Emojis
-from .config import DOJO_HOST, bootstrap
+from .config import DOJO_HOST, DOJO_IP_MODE, bootstrap
 from .utils import unserialize_user_flag, render_markdown
 from .utils.dojo import get_current_dojo_challenge
 from .utils.awards import update_awards
@@ -63,8 +63,15 @@ class DojoChallenge(BaseChallenge):
             from .learning.assessment import assess_attempt
             from .learning.evidence import record_flag_check
 
-            learning_attempt = record_flag_check(user, dojo_challenge, True)
-            assess_attempt(learning_attempt)
+            try:
+                learning_attempt = record_flag_check(user, dojo_challenge, True)
+                assess_attempt(learning_attempt, run_model=False)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                logging.getLogger(__name__).exception(
+                    "Failed to record deterministic learning assessment"
+                )
             dojo = dojo_challenge.module.dojo
             if dojo.official or dojo.data.get("type") == "public":
                 module = dojo_challenge.module
@@ -84,7 +91,14 @@ class DojoChallenge(BaseChallenge):
         if dojo_challenge:
             from .learning.evidence import record_flag_check
 
-            record_flag_check(user, dojo_challenge, False)
+            try:
+                record_flag_check(user, dojo_challenge, False)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                logging.getLogger(__name__).exception(
+                    "Failed to record rejected Flag evidence"
+                )
 
 
 class DojoFlag(BaseFlag):
@@ -174,6 +188,12 @@ def handle_authorization(default_handler):
 
 
 def load(app):
+    if DOJO_IP_MODE:
+        app.config["SESSION_COOKIE_NAME"] = "__Host-aisecedu-session"
+        app.config["SESSION_COOKIE_SECURE"] = True
+        app.config["SESSION_COOKIE_HTTPONLY"] = True
+        app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
     db.create_all()
 
     init_query_timer()

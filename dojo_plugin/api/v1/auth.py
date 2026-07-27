@@ -19,7 +19,7 @@ from CTFd.utils.security.signing import unserialize
 from CTFd.utils.user import get_current_user
 from CTFd.utils.validators import ValidationError
 
-auth_namespace = Namespace("auth", description="Authentication endpoints")
+auth_namespace = Namespace("auth", description="认证接口")
 
 REGISTRATION_COMMITMENT = (
     "我已阅读并同意遵守平台公约，不公开 AISecEdu 课程题目的解题过程或答案。"
@@ -111,10 +111,10 @@ class AuthConfig(Resource):
 class LegalDocument(Resource):
     def get(self, document):
         if document not in {"terms", "privacy"}:
-            return {"success": False, "errors": ["Document not found"]}, 404
+            return {"success": False, "errors": ["未找到该文档。"]}, 404
         external_url, content = _legal_document(document)
         if not external_url and not content:
-            return {"success": False, "errors": ["Document not configured"]}, 404
+            return {"success": False, "errors": ["该文档尚未配置。"]}, 404
         return {
             "success": True,
             "data": {
@@ -140,10 +140,10 @@ class Register(Resource):
         if not registration_visible():
             return {
                 "success": False,
-                "errors": ["Registration is currently disabled"],
+                "errors": ["当前未开放注册。"],
             }, 403
         if get_current_user():
-            return {"success": False, "errors": ["Already authenticated"]}, 409
+            return {"success": False, "errors": ["当前已登录。"]}, 409
 
         req = _payload()
         errors = []
@@ -157,7 +157,7 @@ class Register(Resource):
         country = _text(req, "country")
 
         if req.get("commitment_accepted") is not True:
-            errors.append("Please accept the platform ground rules")
+            errors.append("请先同意平台公约。")
 
         # Check user limit
         num_users_limit = int(get_config("num_users", default=0))
@@ -165,40 +165,40 @@ class Register(Resource):
         if num_users_limit and num_users >= num_users_limit:
             return {
                 "success": False,
-                "errors": [f"Reached maximum users ({num_users_limit})"],
+                "errors": [f"平台用户数量已达到上限（{num_users_limit}）。"],
             }, 403
 
         # Validation
         if len(name) == 0:
-            errors.append("Please provide a username")
+            errors.append("请填写用户名。")
         if Users.query.filter_by(name=name).first():
-            errors.append("That username is already taken")
+            errors.append("该用户名已被使用。")
         if validators.validate_email(name):
-            errors.append("Username cannot be an email address")
+            errors.append("用户名不能是电子邮箱地址。")
 
         if not validators.validate_email(email_address):
-            errors.append("Please enter a valid email address")
+            errors.append("请输入有效的电子邮箱地址。")
         if Users.query.filter_by(email=email_address).first():
-            errors.append("That email is already registered")
+            errors.append("该电子邮箱已注册。")
         if not email.check_email_is_whitelisted(email_address):
-            errors.append("Email address is not from an allowed domain")
+            errors.append("该电子邮箱域名不在允许范围内。")
 
         if len(password) == 0:
-            errors.append("Please provide a password")
+            errors.append("请填写密码。")
         if len(password) > 128:
-            errors.append("Password is too long")
+            errors.append("密码过长。")
 
         if website and not validators.validate_url(website):
-            errors.append("Website must be a valid URL")
+            errors.append("个人网站必须是有效的 URL。")
 
         if country:
             try:
                 validators.validate_country_code(country)
             except ValidationError:
-                errors.append("Invalid country")
+                errors.append("国家或地区代码无效。")
 
         if affiliation and len(affiliation) > 128:
-            errors.append("Affiliation is too long")
+            errors.append("所属机构名称过长。")
 
         # Check registration code if required
         if get_config("registration_code"):
@@ -207,7 +207,7 @@ class Register(Resource):
                 registration_code.lower()
                 != str(get_config("registration_code", "")).lower()
             ):
-                errors.append("Invalid registration code")
+                errors.append("注册码无效。")
 
         # Process custom fields
         fields = {}
@@ -225,7 +225,7 @@ class Register(Resource):
             else:
                 field_value = str(field_value).strip()
             if field.required and (field_value is False or field_value == ""):
-                errors.append(f"Field '{field.name}' is required")
+                errors.append(f"必须填写字段“{field.name}”。")
             fields[field.id] = field_value
 
         if errors:
@@ -255,7 +255,7 @@ class Register(Resource):
             db.session.rollback()
             return {
                 "success": False,
-                "errors": ["The username or email address is already registered"],
+                "errors": ["该用户名或电子邮箱已注册。"],
             }, 409
 
         session.regenerate()
@@ -305,7 +305,7 @@ class Login(Resource):
                 return {
                     "success": False,
                     "errors": [
-                        "Account registered via OAuth. Please use OAuth to login"
+                        "该账号通过 OAuth 注册，请使用对应的 OAuth 方式登录。"
                     ],
                 }, 401
 
@@ -321,7 +321,7 @@ class Login(Resource):
                 }
 
         log("logins", "[{date}] {ip} - submitted invalid account information")
-        return {"success": False, "errors": ["Invalid credentials"]}, 401
+        return {"success": False, "errors": ["用户名或密码不正确。"]}, 401
 
 
 @auth_namespace.route("/logout")
@@ -334,7 +334,7 @@ class Logout(Resource):
     )
     def post(self):
         logout_user()
-        return {"success": True, "data": {"message": "Successfully logged out"}}
+        return {"success": True, "data": {"message": "已成功退出登录。"}}
 
 
 @auth_namespace.route("/verify/<token>")
@@ -353,20 +353,20 @@ class VerifyEmail(Resource):
         except (BadTimeSignature, SignatureExpired):
             return {
                 "success": False,
-                "errors": ["Your confirmation link has expired"],
+                "errors": ["验证链接已过期。"],
             }, 400
         except (BadSignature, TypeError, base64.binascii.Error):
             return {
                 "success": False,
-                "errors": ["Your confirmation token is invalid"],
+                "errors": ["验证令牌无效。"],
             }, 400
 
         user = Users.query.filter_by(email=user_email).first()
         if not user:
-            return {"success": False, "errors": ["User not found"]}, 404
+            return {"success": False, "errors": ["未找到用户。"]}, 404
 
         if user.verified:
-            return {"success": True, "data": {"message": "Email already verified"}}
+            return {"success": True, "data": {"message": "电子邮箱已验证。"}}
 
         user.verified = True
         db.session.commit()
@@ -375,7 +375,7 @@ class VerifyEmail(Resource):
         if can_send_mail():
             email.successful_registration_notification(user.email)
 
-        return {"success": True, "data": {"message": "Email successfully verified"}}
+        return {"success": True, "data": {"message": "电子邮箱验证成功。"}}
 
 
 @auth_namespace.route("/forgot-password")
@@ -392,7 +392,7 @@ class ForgotPassword(Resource):
         if not can_send_mail():
             return {
                 "success": False,
-                "errors": ["Email functionality is not configured"],
+                "errors": ["平台尚未配置邮件功能。"],
             }, 400
 
         req = _payload()
@@ -403,7 +403,7 @@ class ForgotPassword(Resource):
             email.forgot_password(email_address)
 
         # Always return success to avoid user enumeration
-        return _message("If the account exists, a reset email has been sent")
+        return _message("若该账号存在，重置密码邮件已发送。")
 
 
 @auth_namespace.route("/reset-password/<token>")
@@ -421,27 +421,27 @@ class ResetPassword(Resource):
         try:
             email_address = unserialize(token, max_age=1800)
         except (BadTimeSignature, SignatureExpired):
-            return {"success": False, "errors": ["Your reset link has expired"]}, 400
+            return {"success": False, "errors": ["密码重置链接已过期。"]}, 400
         except (BadSignature, TypeError, base64.binascii.Error):
-            return {"success": False, "errors": ["Your reset token is invalid"]}, 400
+            return {"success": False, "errors": ["密码重置令牌无效。"]}, 400
 
         req = _payload()
         password = _text(req, "password")
 
         if len(password) == 0:
-            return {"success": False, "errors": ["Please provide a password"]}, 400
+            return {"success": False, "errors": ["请填写密码。"]}, 400
 
         if len(password) > 128:
-            return {"success": False, "errors": ["Password is too long"]}, 400
+            return {"success": False, "errors": ["密码过长。"]}, 400
 
         user = Users.query.filter_by(email=email_address).first()
         if not user:
-            return {"success": False, "errors": ["User not found"]}, 404
+            return {"success": False, "errors": ["未找到用户。"]}, 404
 
         if user.oauth_id:
             return {
                 "success": False,
-                "errors": ["Account registered via OAuth cannot reset password"],
+                "errors": ["通过 OAuth 注册的账号无法在此重置密码。"],
             }, 400
 
         user.password = password
@@ -456,7 +456,7 @@ class ResetPassword(Resource):
         if can_send_mail():
             email.password_change_alert(user.email)
 
-        return _message("Password successfully reset")
+        return _message("密码重置成功。")
 
 
 @auth_namespace.route("/resend-verification")
@@ -466,11 +466,11 @@ class ResendVerification(Resource):
     def post(self):
         user = get_current_user()
         if user.verified:
-            return _message("Email address is already verified")
+            return _message("电子邮箱已验证。")
         if not can_send_mail():
             return {
                 "success": False,
-                "errors": ["Email functionality is not configured"],
+                "errors": ["平台尚未配置邮件功能。"],
             }, 400
         email.verify_email_address(user.email)
-        return _message(f"Confirmation email sent to {user.email}")
+        return _message(f"验证邮件已发送至 {user.email}。")

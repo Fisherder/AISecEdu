@@ -178,15 +178,15 @@ function buildCrewRow(crew, myCrewKey) {
 
 function setScoreboardControls(view, duration) {
     $("#scoreboard-control-week, #scoreboard-control-month, #scoreboard-control-all").removeClass("scoreboard-page-selected");
-    const labels = { 7: "7-Day", 30: "30-Day", 0: "All-Time" };
+    const labels = { 7: "近 7 天", 30: "近 30 天", 0: "全部时间" };
     const controls = { 7: "#scoreboard-control-week", 30: "#scoreboard-control-month", 0: "#scoreboard-control-all" };
     if (controls[duration]) $(controls[duration]).addClass("scoreboard-page-selected");
     const crews = view === "crews";
     const unique = scoreboardState.crewMode === "unique";
-    $("#scoreboard-heading").text(`${labels[duration] || ""}${crews ? " Team" : " Student"} Leaderboard`);
-    $("#scoreboard-th-name").text(crews ? "Team" : "Student");
-    $("#scoreboard-th-badges").text(crews ? "Members" : "Achievements");
-    $("#scoreboard-th-score").text(crews && unique ? "Unique" : "Completed");
+    $("#scoreboard-heading").text(`${labels[duration] || ""}${crews ? "团队" : "学习者"}排行榜`);
+    $("#scoreboard-th-name").text(crews ? "团队" : "学习者");
+    $("#scoreboard-th-badges").text(crews ? "成员" : "成就");
+    $("#scoreboard-th-score").text(crews && unique ? "去重完成数" : "完成数");
     $("#scoreboard-view-hackers").toggleClass("scoreboard-view-selected", !crews).attr("aria-selected", String(!crews));
     $("#scoreboard-view-crews").toggleClass("scoreboard-view-selected", crews).attr("aria-selected", String(crews));
     $("#scoreboard-crew-mode-toggle").prop("hidden", !crews);
@@ -216,7 +216,7 @@ function renderNoteRow(text) {
 }
 
 function renderLoadingRow() {
-    $("#scoreboard").empty().append($(`<tr class="scoreboard-loading"><td colspan="5">Loading...</td></tr>`));
+    $("#scoreboard").empty().append($(`<tr class="scoreboard-loading"><td colspan="5">正在加载…</td></tr>`));
     $("#scoreboard-pages").empty();
 }
 
@@ -224,7 +224,7 @@ function renderErrorRow(duration, page, message) {
     $("#scoreboard").empty();
     const warning = renderNoteRow(`${message} `);
     warning.find(".crew-note").addClass("crew-note-warn");
-    const retry = $(`<a role="button" tabindex="0" href="javascript:void(0)">Retry</a>`);
+    const retry = $(`<a role="button" tabindex="0" href="javascript:void(0)">重试</a>`);
     retry.on("click", () => loadScoreboard(duration, page));
     warning.find(".crew-note").append(retry);
 }
@@ -232,9 +232,9 @@ function renderErrorRow(duration, page, message) {
 function renderCrewEmptyState() {
     const row = $(`
       <tr class="crew-empty"><td colspan="5">
-        <div><span class="crew-tag crew-tag-ghost"><span class="crew-tag-bracket">[</span><bdi class="crew-tag-text">YOUR-TEAM</bdi><span class="crew-tag-bracket">]</span></span></div>
-        <div class="crew-empty-title">No teams yet.</div>
-        <div class="crew-empty-hint">Create one by adding a tag in brackets to your display name in <a>Settings</a>; students with the same tag are grouped together.</div>
+        <div><span class="crew-tag crew-tag-ghost"><span class="crew-tag-bracket">[</span><bdi class="crew-tag-text">我的团队</bdi><span class="crew-tag-bracket">]</span></span></div>
+        <div class="crew-empty-title">暂时还没有团队。</div>
+        <div class="crew-empty-hint">在<a>设置</a>中为显示名称添加方括号标签，即可创建团队；使用相同标签的学习者会自动分组。</div>
       </td></tr>
     `);
     row.find("a").attr("href", `${init.urlRoot}/settings`);
@@ -252,7 +252,7 @@ function renderCrewView(duration, page, gen) {
         const myCrewKey = myCrew ? myCrew.key : null;
 
         if (!crews.length) {
-            if (result.board_empty) renderNoteRow("No exercise completions yet — no teams to show.");
+            if (result.board_empty) renderNoteRow("尚无题目完成记录，因此没有可显示的团队。");
             else renderCrewEmptyState();
             renderPagination(duration, 1, []);
             return;
@@ -270,7 +270,7 @@ function renderCrewView(duration, page, gen) {
         renderPagination(duration, page, result.pages);
     }).catch(() => {
         if (gen !== scoreboardState.generation) return;
-        renderErrorRow(duration, page, "Failed to load the team leaderboard.");
+        renderErrorRow(duration, page, "加载团队排行榜失败。");
     });
 }
 
@@ -288,7 +288,7 @@ function renderHackerView(duration, page, gen) {
                 standings.splice(standings.length, 0, result.me);
         }
         if (!standings.length) {
-            renderNoteRow("No exercise completions yet.");
+            renderNoteRow("尚无题目完成记录。");
         }
         standings.forEach(user => {
             scoreboard.append(buildHackerRow(user, result.me, null));
@@ -296,7 +296,7 @@ function renderHackerView(duration, page, gen) {
         renderPagination(duration, page, result.pages);
     }).catch(() => {
         if (gen !== scoreboardState.generation) return;
-        renderErrorRow(duration, page, "Failed to load the student leaderboard.");
+        renderErrorRow(duration, page, "加载学习者排行榜失败。");
     });
 }
 

@@ -1,10 +1,44 @@
+import base64
+import json
 import secrets
+import shlex
 
 from utils import DOJO_URL, solve_challenge, start_challenge, workspace_run
 
 
 API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/learning"
 COURSES_API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/dojos"
+
+
+def satisfying_report(contract):
+    document = {}
+
+    def assign(field, value):
+        current = document
+        parts = field.split(".")
+        for part in parts[:-1]:
+            current = current.setdefault(part, {})
+        current[parts[-1]] = value
+
+    for field in contract["requiredFields"]:
+        assign(field, "observed")
+    for assertion in contract["assertions"]:
+        operator = assertion["operator"]
+        if operator == "exists":
+            continue
+        expected = assertion.get("value")
+        if operator == "equals":
+            actual = expected
+        elif operator == "not_equals":
+            actual = "__different__" if expected != "__different__" else "__other__"
+        elif operator == "contains":
+            actual = f"observed:{expected}"
+        elif operator == "one_of":
+            actual = expected[0]
+        else:
+            raise AssertionError(f"unsupported Oracle operator: {operator}")
+        assign(assertion["field"], actual)
+    return document
 
 
 def test_learning_overview_and_teacher_permissions(
@@ -134,7 +168,7 @@ def test_teacher_can_add_course_unit(
     page = admin_session.get(f"{DOJO_URL.rstrip('/')}/{simple_award_dojo}/{unit_id}")
     assert page.status_code == 200
     assert "Teacher Created Unit" in page.text
-    assert "Add an Exercise" in page.text
+    assert "添加题目" in page.text
 
 
 def test_native_authoring_workspace_evidence_assessment_and_appeal(
@@ -169,11 +203,26 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     assert draft["spec"]["mode"] == "GENERATE_CUSTOM"
     assert draft["spec"]["sourceChallengeId"] is None
     assert draft["spec"]["verificationAnswer"] == verification_answer
+    assert draft["spec"]["authoringPipeline"]["plan"]["model"] == "deepseek-v4-flash"
+    assert draft["spec"]["authoringPipeline"]["build"]["model"] == "deepseek-v4-pro"
+    assert draft["spec"]["authoringPipeline"]["review"]["model"] == "deepseek-v4-pro"
+    assert (
+        draft["spec"]["authoringPipeline"]["postReview"]["model"]
+        == "deepseek-v4-pro"
+    )
+    assert (
+        draft["spec"]["authoringPipeline"]["validate"]["model"]
+        == "deepseek-v4-pro"
+    )
 
     validated = admin_session.post(f"{API}/drafts/{draft['id']}/validate", json={})
     assert validated.status_code == 200
     assert validated.json()["success"]
     assert validated.json()["validation"]["summary"]["blocked"] == 0
+    assert (
+        validated.json()["validation"]["agentReview"]["model"]
+        == "deepseek-v4-pro"
+    )
 
     published = admin_session.post(f"{API}/drafts/{draft['id']}/publish", json={})
     assert published.status_code == 200
@@ -258,11 +307,83 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     assert verification_answer not in tutor.json()["reply"]["answer"]
     if tutor.json()["reply"]["provider"] == "DETERMINISTIC":
         assert "trustworthy" in tutor.json()["reply"]["answer"]
+        assert tutor.json()["reply"]["model"] is None
+    else:
+        assert tutor.json()["reply"]["model"] == "deepseek-v4-flash"
 
-    flag = workspace_run(
-        f"/challenge/check {verification_answer}",
+    reference_id = f"{simple_award_dojo}/hello/{challenge_id}"
+    guide_boot = user_session.get(f"{API}/guide")
+    assert guide_boot.status_code == 200
+    reference_option = next(
+        item
+        for item in guide_boot.json()["referenceOptions"]
+        if item["id"] == reference_id
+    )
+    assert reference_option["exercise"] == "Evidence Chain Verification"
+    assert reference_option["recentAttempts"] >= 1
+
+    guide = user_session.post(
+        f"{API}/guide",
+        json={
+            "question": "Use the referenced exercise history to plan the next 30 minutes.",
+            "references": [reference_id],
+        },
+    )
+    assert guide.status_code == 200
+    assert guide.json()["profileSummary"]["attempts"] >= 1
+    assert guide.json()["contextCoverage"]["referencedExercises"] == 1
+    assert guide.json()["contextCoverage"]["referencedAttempts"] >= 1
+    assert guide.json()["contextCoverage"]["referencedEvidenceEvents"] >= 1
+    assert guide.json()["contextCoverage"]["scopeMode"] == "REFERENCED"
+    assert guide.json()["message"]["metadata"]["references"][0]["id"] == reference_id
+    assert guide.json()["message"]["metadata"]["scope"]["referenceIds"] == [reference_id]
+    assert guide.json()["message"]["metadata"]["scopeValidation"]["status"] in {
+        "VALIDATED",
+        "BLOCKED",
+        "DETERMINISTIC",
+    }
+    if guide.json()["provider"] != "DETERMINISTIC":
+        assert guide.json()["model"] == "deepseek-v4-flash"
+    guide_thread_id = guide.json()["thread"]["id"]
+    guide_reload = user_session.get(
+        f"{API}/guide",
+        params={"threadId": guide_thread_id},
+    )
+    assert guide_reload.status_code == 200
+    assert guide_reload.json()["thread"]["referenceIds"] == [reference_id]
+    rejected_reference = user_session.post(
+        f"{API}/guide",
+        json={
+            "threadId": guide_thread_id,
+            "question": "This must not silently fall back to another exercise.",
+            "references": ["not/available/exercise"],
+        },
+    )
+    assert rejected_reference.status_code == 400
+    assert "引用题目" in rejected_reference.json()["error"]
+
+    oracle = republished.json()["challenge"]["package"]["oracleContract"]
+    report = json.dumps(satisfying_report(oracle), sort_keys=True).encode()
+    encoded_report = base64.b64encode(report).decode()
+    workspace_run(
+        (
+            f"printf %s {shlex.quote(encoded_report)} | base64 -d "
+            "> /home/hacker/solution.json"
+        ),
         user=user_name,
-    ).stdout.strip()
+    )
+    unreadable = workspace_run(
+        "test ! -r /challenge/check-server.py",
+        user=user_name,
+    )
+    assert unreadable.returncode == 0
+    legacy = workspace_run(
+        f"/challenge/check {shlex.quote(verification_answer)}",
+        user=user_name,
+        check=False,
+    )
+    assert legacy.returncode != 0
+    flag = workspace_run("/challenge/check", user=user_name).stdout.strip()
     assert flag.startswith("pwn.college{")
     solve_challenge(
         simple_award_dojo,
@@ -270,6 +391,25 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
         challenge_id,
         session=user_session,
         flag=flag,
+    )
+    solved_attempt = user_session.get(f"{API}/attempts/{current['id']}").json()["attempt"]
+    baseline_assessment = solved_attempt["assessment"]
+    assert solved_attempt["scoreUrl"] == f"/learning/attempts/{current['id']}/score"
+    score_page = user_session.get(solved_attempt["scoreUrl"])
+    assert score_page.status_code == 200
+    assert current["id"] in score_page.text
+    latest_score = user_session.get(
+        f"/learning/scores/latest/{challenge['challengeId']}",
+        allow_redirects=False,
+    )
+    assert latest_score.status_code == 302
+    assert latest_score.headers["Location"].endswith(solved_attempt["scoreUrl"])
+    assert solved_attempt["objectiveScore"] == 60
+    assert baseline_assessment["revision"] == 1
+    assert baseline_assessment["source"] == "DETERMINISTIC"
+    assert (
+        baseline_assessment["criteria"][0]["evidence"]["grader"]["provider"]
+        == "DETERMINISTIC"
     )
 
     reflection = (
@@ -290,6 +430,11 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     assert attempt["evidenceChain"]["valid"]
     assert submitted.json()["assessment"]["revision"] >= 2
     assert len(submitted.json()["assessment"]["abilities"]) == 6
+    grader = submitted.json()["assessment"]["criteria"][0]["evidence"]["grader"]
+    if grader["provider"] == "MODEL":
+        assert grader["model"] == "deepseek-v4-pro"
+        assert grader["liveContext"]
+        assert grader["solutionProvider"]
 
     assessment_id = submitted.json()["assessment"]["id"]
     appealed = user_session.post(

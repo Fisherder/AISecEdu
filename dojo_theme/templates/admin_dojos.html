@@ -3,21 +3,21 @@
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1>All Courses</h1>
+    <h1>全部课程</h1>
   </div>
 </div>
 <div class="container">
     {% for dojo in dojos %}
     <h2><a href="{{ url_for('pwncollege_dojo.view_dojo', dojo=dojo.reference_id) }}">{{ dojo.name }}</a></h2>
-    <b>Course Slug: </b><code>{{ dojo.reference_id }}</code>
+    <b>课程标识：</b><code>{{ dojo.reference_id }}</code>
     <br>
-    <b>Internal Course ID: </b><code>{{ dojo.hex_dojo_id }}</code>
+    <b>内部课程 ID：</b><code>{{ dojo.hex_dojo_id }}</code>
     <br>
-    <b>Git Hash: </b><code>{{ dojo.hash[:8] }}</code>
+    <b>Git 提交哈希：</b><code>{{ dojo.hash[:8] }}</code>
     <br>
-    <b>Last Commit: </b><code>{{ dojo.last_commit_time }}</code>
+    <b>最近提交：</b><code>{{ dojo.last_commit_time }}</code>
     <br>
-    <b>Teachers</b>
+    <b>教师</b>
     <ul>
         {% for admin in dojo.admins %}
         <li>{{ admin.user.name }}</li>

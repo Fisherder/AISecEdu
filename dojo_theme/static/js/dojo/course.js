@@ -1,34 +1,34 @@
 var error_template =
     '<div class="alert alert-danger alert-dismissable" role="alert">\n' +
-    '  <span class="sr-only">Error:</span>\n' +
+    '  <span class="sr-only">错误：</span>\n' +
     '  <span id="message"></span>' +
-    '  <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">×</span></button>\n' +
+    '  <button type="button" class="close" data-dismiss="alert" aria-label="关闭"><span aria-hidden="true">×</span></button>\n' +
     '</div>';
 
 var warning_template =
     '<div class="alert alert-warning alert-dismissable" role="alert">\n' +
-    '  <span class="sr-only">Warning:</span>\n' +
+    '  <span class="sr-only">警告：</span>\n' +
     '  <span id="message"></span>' +
-    '  <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">×</span></button>\n' +
+    '  <button type="button" class="close" data-dismiss="alert" aria-label="关闭"><span aria-hidden="true">×</span></button>\n' +
     '</div>';
 
 var success_template =
     '<div class="alert alert-success alert-dismissable submit-row" role="alert">\n' +
-    '  <strong>Success!</strong>\n' +
+    '  <strong>成功！</strong>\n' +
     '  <span id="message"></span>' +
-    '  <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">×</span></button>\n' +
+    '  <button type="button" class="close" data-dismiss="alert" aria-label="关闭"><span aria-hidden="true">×</span></button>\n' +
     '</div>';
 
 function form_fetch_and_show(name, endpoint, method, success_message) {
     const form = $(`#${name}-form`);
     const results = $(`#${name}-results`);
-    form.submit(e => {
-        e.preventDefault();
+    form.submit(event => {
+        event.preventDefault();
         results.empty();
         const params = form.serializeJSON();
 
         CTFd.fetch(endpoint, {
-            method: method,
+            method,
             credentials: "same-origin",
             headers: {
                 Accept: "application/json",
@@ -36,7 +36,7 @@ function form_fetch_and_show(name, endpoint, method, success_message) {
             },
             body: JSON.stringify(params)
         }).then(response => {
-            return response.json()
+            return response.json();
         }).then(result => {
             if (!result.success) {
                 results.html(error_template);
@@ -53,43 +53,32 @@ function form_fetch_and_show(name, endpoint, method, success_message) {
 }
 
 $(() => {
-    form_fetch_and_show("identity", `/dojo/${init.dojo}/course/identity`, "PATCH", "Your identity has been updated");
+    form_fetch_and_show("identity", `/dojo/${init.dojo}/course/identity`, "PATCH", "课程身份信息已更新。");
 
-    let navLinks = document.querySelectorAll('.nav-link');
+    const navLinks = document.querySelectorAll(".nav-link");
     navLinks.forEach(link => {
-        link.addEventListener('click', function(e) {
-            let pathSegments = window.location.pathname.split('/');
-            let clickedSegment = this.id.split('-')[1];
-            let courseIndexFromEnd = [...pathSegments].reverse().findIndex(seg => seg === 'course');
-            let coursePosition = pathSegments.length - courseIndexFromEnd - 1;
-            let newUrl = [...pathSegments.slice(0, coursePosition + 1), clickedSegment].join('/');
-            history.pushState({}, '', newUrl);
+        link.addEventListener("click", function () {
+            const pathSegments = window.location.pathname.split("/");
+            const clickedSegment = this.id.split("-")[1];
+            const courseIndexFromEnd = [...pathSegments].reverse().findIndex(segment => segment === "course");
+            const coursePosition = pathSegments.length - courseIndexFromEnd - 1;
+            const newUrl = [...pathSegments.slice(0, coursePosition + 1), clickedSegment].join("/");
+            history.pushState({}, "", newUrl);
         });
     });
 
-    let pathSegments = window.location.pathname.split('/');
-    let lastSegment = pathSegments[pathSegments.length - 1];
-    let secondLastSegment = pathSegments[pathSegments.length - 2];
-
-    if (lastSegment === 'course') return;
-
-    if (secondLastSegment === 'course' && lastSegment) {
-        let targetTab = document.querySelector(`#${lastSegment}`);
-        let targetNav = document.querySelector(`#course-${lastSegment}-tab`);
-
-        if (targetTab) {
-            let activeTabs = document.querySelectorAll('.tab-pane.active');
-            activeTabs.forEach(tab => {
-                tab.classList.remove('active');
-            });
-            targetTab.classList.add('active');
-            targetTab.classList.add('show');
-
-            let activeNavs = document.querySelectorAll('.nav-link.active');
-            activeNavs.forEach(nav => {
-                nav.classList.remove('active');
-            });
-            targetNav.classList.add('active');
+    const pathSegments = window.location.pathname.split("/");
+    const lastSegment = pathSegments[pathSegments.length - 1];
+    const secondLastSegment = pathSegments[pathSegments.length - 2];
+    if (lastSegment === "course") return;
+    if (secondLastSegment === "course" && lastSegment) {
+        const targetTab = document.querySelector(`#${lastSegment}`);
+        const targetNav = document.querySelector(`#course-${lastSegment}-tab`);
+        if (targetTab && targetNav) {
+            document.querySelectorAll(".tab-pane.active").forEach(tab => tab.classList.remove("active"));
+            targetTab.classList.add("active", "show");
+            document.querySelectorAll(".nav-link.active").forEach(nav => nav.classList.remove("active"));
+            targetNav.classList.add("active");
         }
     }
 });

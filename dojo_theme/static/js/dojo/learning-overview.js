@@ -7,7 +7,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   try {
     const response = await learning.request("/learning/overview");
-    if (!response.success) throw new Error(learning.errorMessage(response, "Learning data could not be loaded."));
+    if (!response.success) throw new Error(learning.errorMessage(response, "无法加载学习数据。"));
 
     const summary = response.summary || {};
     document.getElementById("learning-stat-courses").textContent = summary.enrolledCourses || 0;
@@ -25,9 +25,9 @@ document.addEventListener("DOMContentLoaded", async function () {
           <div class="card-body">
             <div>
               <h3>${learning.escapeHtml(attempt.challengeName)}</h3>
-              <p>${learning.escapeHtml(attempt.dojoName)} &middot; ${learning.escapeHtml(attempt.moduleName)} &middot; Session ${learning.escapeHtml(attempt.epoch)}</p>
+              <p>${learning.escapeHtml(attempt.dojoName)} &middot; ${learning.escapeHtml(attempt.moduleName)} &middot; 第 ${learning.escapeHtml(attempt.epoch)} 次练习</p>
             </div>
-            <a class="btn btn-primary" href="${learning.escapeHtml(href)}">Continue Exercise</a>
+            <a class="btn btn-primary" href="${learning.escapeHtml(href)}">继续练习</a>
           </div>
         </div>`;
       activeSection.hidden = false;
@@ -40,6 +40,6 @@ document.addEventListener("DOMContentLoaded", async function () {
     document.getElementById("learning-course-empty").hidden = courses.length !== 0;
     learning.showNotice(notice, "");
   } catch (error) {
-    learning.showNotice(notice, error.message || "Learning data could not be loaded.", "danger");
+    learning.showNotice(notice, error.message || "无法加载学习数据。", "danger");
   }
 });

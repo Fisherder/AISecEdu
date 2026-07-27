@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div id="learning-score-page" class="learning-score-page" data-attempt-id="{{ attempt_id }}">
+  <header class="learning-score-hero">
+    <div class="learning-score-hero-copy">
+      <nav class="learning-score-breadcrumb" aria-label="评分页面导航">
+        <a href="/{{ challenge.dojo.reference_id }}">课程</a>
+        <i class="fas fa-chevron-right" aria-hidden="true"></i>
+        <a href="/{{ challenge.dojo.reference_id }}/{{ challenge.module.id }}">{{ challenge.module.name }}</a>
+        <i class="fas fa-chevron-right" aria-hidden="true"></i>
+        <span>题目评分</span>
+      </nav>
+      <p class="learning-score-eyebrow">题目评分</p>
+      <h1 id="learning-score-title">{{ challenge.name }}</h1>
+      <p id="learning-score-meta">正在读取本次作答的评分与证据…</p>
+    </div>
+    <div class="learning-score-actions">
+      <a id="learning-score-challenge-link" class="btn btn-outline-secondary" href="/{{ challenge.dojo.reference_id }}/{{ challenge.module.id }}/{{ challenge.id }}">
+        <i class="fas fa-arrow-left" aria-hidden="true"></i> 返回题目
+      </a>
+      <a id="learning-score-course-link" class="btn btn-outline-primary" href="/dojo/{{ challenge.dojo.reference_id }}/learning">
+        <i class="fas fa-chart-line" aria-hidden="true"></i> 课程学习分析
+      </a>
+    </div>
+  </header>
+
+  <div id="learning-score-notice" class="learning-score-notice alert alert-info" role="status">正在加载评分详情…</div>
+
+  <div class="learning-score-content" hidden>
+    <section class="learning-score-overview" aria-label="总分概览">
+      <div class="learning-score-total-card">
+        <div class="learning-score-ring" id="learning-score-ring">
+          <div>
+            <strong id="learning-score-total">0</strong>
+            <span>/ 100</span>
+          </div>
+        </div>
+        <div>
+          <p class="learning-score-card-label">本次总分</p>
+          <h2 id="learning-score-level">评分已生成</h2>
+          <p id="learning-score-feedback"></p>
+        </div>
+      </div>
+      <div class="learning-score-metric">
+        <span class="learning-score-metric-icon is-objective"><i class="fas fa-flag-checkered"></i></span>
+        <div><small>客观结果</small><strong><span id="learning-score-objective">0</span> / 60</strong></div>
+      </div>
+      <div class="learning-score-metric">
+        <span class="learning-score-metric-icon is-process"><i class="fas fa-route"></i></span>
+        <div><small>可信过程</small><strong><span id="learning-score-process">0</span> / 40</strong></div>
+      </div>
+      <div class="learning-score-metric">
+        <span class="learning-score-metric-icon is-trust"><i class="fas fa-shield-alt"></i></span>
+        <div><small>证据可信度</small><strong id="learning-score-trust">0%</strong></div>
+      </div>
+    </section>
+
+    <section class="learning-score-grid">
+      <article class="learning-score-panel learning-score-breakdown">
+        <div class="learning-score-panel-header">
+          <div>
+            <p class="learning-score-eyebrow">评分明细</p>
+            <h2>每一分从哪里来</h2>
+          </div>
+          <span id="learning-score-revision" class="learning-score-badge">修订 1</span>
+        </div>
+        <div id="learning-score-criteria"></div>
+      </article>
+
+      <aside class="learning-score-side">
+        <article class="learning-score-panel">
+          <div class="learning-score-panel-header">
+            <div>
+              <p class="learning-score-eyebrow">能力变化</p>
+              <h2>六维能力表现</h2>
+            </div>
+          </div>
+          <div id="learning-score-abilities" class="learning-score-abilities"></div>
+        </article>
+
+        <article class="learning-score-panel">
+          <div class="learning-score-panel-header">
+            <div>
+              <p class="learning-score-eyebrow">本次复盘</p>
+              <h2>你的总结</h2>
+            </div>
+          </div>
+          <p id="learning-score-reflection" class="learning-score-reflection"></p>
+        </article>
+      </aside>
+    </section>
+
+    <section class="learning-score-panel learning-score-evidence-panel">
+      <div class="learning-score-panel-header">
+        <div>
+          <p class="learning-score-eyebrow">可信证据</p>
+          <h2>评分依据时间线</h2>
+        </div>
+        <span id="learning-score-chain" class="learning-score-badge"></span>
+      </div>
+      <div id="learning-score-evidence" class="learning-score-evidence"></div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-20260726-score-page') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-score.js', v='aisecedu-20260726-score-page') }}"></script>
+{% endblock %}

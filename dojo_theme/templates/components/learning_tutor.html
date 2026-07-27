@@ -1,24 +1,39 @@
 {% if user %}
 <aside class="learning-tutor-panel is-collapsed" data-learning-tutor>
-  <button type="button" class="learning-tutor-toggle" aria-expanded="false" title="Open Learning Tutor">
-    <i class="fas fa-user-ninja"></i>
-    <span class="sr-only">Toggle Learning Tutor</span>
+  <button type="button" class="learning-tutor-toggle" aria-expanded="false" aria-label="打开 Tutor" title="打开 Tutor">
+    <i class="fas fa-user-ninja" data-tutor-toggle-icon></i>
+    <span class="sr-only">展开或收起 Tutor</span>
   </button>
   <div class="learning-tutor-content">
     <div class="learning-tutor-header">
       <div>
-        <h4>Learning Tutor</h4>
-        <small data-tutor-context>Start an exercise to create an evidence-bound attempt.</small>
+        <h4>Tutor</h4>
+        <small data-tutor-context>先启动一个题目以创建与证据绑定的练习记录。</small>
+        <span class="learning-tutor-status is-checking" data-tutor-status role="status">
+          <i class="fas fa-circle-notch fa-spin"></i>
+          <span>正在检查 Tutor</span>
+        </span>
       </div>
-      <a href="/dojo/{{ dojo.reference_id }}/learning" title="Open learning analysis"><i class="fas fa-chart-line"></i></a>
     </div>
-    <div class="alert alert-info learning-tutor-notice" data-tutor-notice>Ask about your current approach. The Tutor will suggest what to think about, try, or inspect next.</div>
     <div class="learning-tutor-messages" data-tutor-messages></div>
+    <div class="learning-tutor-thinking" data-tutor-thinking hidden>
+      <span></span><span></span><span></span>
+      <small>正在读取实时工作区和你最近的操作…</small>
+    </div>
+    <div class="learning-tutor-prompts">
+      <button type="button" data-tutor-prompt="结合我刚才的操作，我现在最可能卡在哪里？">诊断卡点</button>
+      <button type="button" data-tutor-prompt="下一步做哪个最小验证最有信息量？">建议一次检查</button>
+      <button type="button" data-tutor-prompt="我目前的思路和标准解法相比，缺少了哪类证据？">复核我的证据</button>
+    </div>
     <label class="learning-tutor-field learning-tutor-question">
-      <span>Question</span>
-      <textarea class="form-control" rows="4" data-tutor-question placeholder="What are you trying to understand or test next?"></textarea>
+      <span>问题</span>
+      <textarea class="form-control" rows="4" data-tutor-question placeholder="你下一步想理解或验证什么？"></textarea>
     </label>
-    <button type="button" class="btn btn-primary btn-block" data-tutor-send>Send</button>
+    <button type="button" class="btn btn-primary btn-block" data-tutor-send><span>询问 Tutor</span></button>
+    <a class="learning-tutor-analysis-link" href="/dojo/{{ dojo.reference_id }}/learning">
+      <i class="fas fa-chart-line"></i>
+      <span>查看学习分析</span>
+    </a>
   </div>
 </aside>
 {% endif %}

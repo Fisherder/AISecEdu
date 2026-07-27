@@ -3,7 +3,7 @@
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1>Course Administration</h1>
+    <h1>课程管理</h1>
     <br>
     <h2>{{ dojo.name }}</h2>
   </div>
@@ -11,7 +11,7 @@
 <div class="container">
   <div id="dojo-delete-results" class="form-group">
   <div class="row text-center">
-    <p style="margin-left: 1rem;">Share this enrollment link with students.</p>
+    <p style="margin-left: 1rem;">将此加入链接分享给学生。</p>
     <div class="input-group mx-3 mb-2">
       <input type="text" id="user-token-result" class="form-control" value="{{ url_for('pwncollege_dojo.join_dojo', dojo=dojo.reference_id, password=dojo.password, _external=True) }}" readonly>
       <div class="input-group-append">
@@ -24,7 +24,7 @@
       <figure>
       <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.update_dojo', dojo=dojo.reference_id, update_code=dojo.update_code) }}" target="_blank">
         <i class="fas fa-upload fa-3x"></i>
-        <figcaption><b>Update</b></figcaption>
+        <figcaption><b>更新</b></figcaption>
       </a>
       </figure>
     </div>
@@ -33,7 +33,7 @@
       <figure>
         <a id="dojo-delete-button" class="text-decoration-none delete-link" href="#" data-dojo="{{ dojo.reference_id }}">
           <i class="fas fa-trash fa-3x"></i>
-          <figcaption><b>Delete</b></figcaption>
+          <figcaption><b>删除</b></figcaption>
         </a>
       </figure>
     </div>
@@ -42,7 +42,7 @@
       <figure>
       <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.dojo_solves', dojo=dojo.reference_id, solves_code=dojo.solves_code, format='csv') }}">
         <i class="fas fa-file-csv fa-3x"></i>
-        <figcaption><b>Completions</b></figcaption>
+        <figcaption><b>完成记录</b></figcaption>
       </a>
       </figure>
     </div>
@@ -51,15 +51,15 @@
       <figure>
       <a class="text-decoration-none" href="{{ url_for('course.view_all_grades', dojo=dojo.reference_id) }}">
         <i class="fas fa-signal fa-3x"></i>
-        <figcaption><b>Grades</b></figcaption>
+        <figcaption><b>成绩</b></figcaption>
       </a>
       </figure>
     </div>
     {% endif %}
   </div>
   {% if dojo.public_key %}
-  <label class="mb-1 ml-3 font-weight-bold" for="dojo-deploy-key-result">Deploy Key</label>
-  <small class="form-text text-muted mb-2 ml-3">For private GitHub repositories, add this key in your repository's Deploy Keys.</small>
+  <label class="mb-1 ml-3 font-weight-bold" for="dojo-deploy-key-result">部署密钥</label>
+  <small class="form-text text-muted mb-2 ml-3">对于私有 GitHub 仓库，请将此密钥添加到仓库的 Deploy Keys。</small>
   <div class="input-group mx-3 mb-3">
     <input type="text" id="dojo-deploy-key-result" class="form-control text-monospace" value="{{ dojo.public_key }}" readonly>
     <div class="input-group-append copy-button">
@@ -72,7 +72,7 @@
   <div>
     <form method="post" id="dojo-award-prune-form" autocomplete="off">
       <div class="form-group">
-        <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="Prune Legacy Emoji Awards">
+      <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="清理旧版表情徽章奖励">
       </div>
       <div id="dojo-award-prune-results" class="form-group">
       </div>
@@ -80,28 +80,28 @@
     {% if is_admin() %}
     <form method="post" id="dojo-promote-dojo-form" autocomplete="off">
       <div class="form-group">
-        <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="Feature This Course">
+      <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="设为推荐课程">
       </div>
       <div id="dojo-promote-dojo-results" class="form-group">
       </div>
     </form>
     {% endif %}
   </div>
-  <b>Course Slug: </b><code>{{ dojo.reference_id }}</code>
+  <b>课程标识：</b><code>{{ dojo.reference_id }}</code>
   <br>
-  <b>Internal Course ID: </b><code>{{ dojo.hex_dojo_id }}</code>
+  <b>内部课程 ID：</b><code>{{ dojo.hex_dojo_id }}</code>
   <br>
   <!-- <b>Update Code: </b><code>{{ dojo.update_code }}</code>
   <br> -->
-  <b>Git Hash: </b><code>{{ dojo.hash[:8] }}</code>
+  <b>Git 提交哈希：</b><code>{{ dojo.hash[:8] }}</code>
   <br>
-  <b>Teachers</b>
+  <b>教师</b>
   <ul>
     {% for admin in dojo.admins %}
     <li>{{ admin.user.name }}</li>
     {% endfor %}
   </ul>
-  <b>Students</b>
+  <b>学生</b>
   <form method="post" id="dojo-promote-admin-form" autocomplete="off">
     <div class="form-group">
       {% for member in dojo.members %}
@@ -109,7 +109,7 @@
       <label for="{{ member.user.id }}"><a href="{{ url_for('pwncollege_users.view_other', user_id=member.user.id) }}"><span id="name-for-{{member.user.id}}">{{ member.user.name }}</span></a></label>
       <br>
       {% endfor %}
-      <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="Promote to Teacher">
+      <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="提升为教师">
     </div>
     <div id="dojo-promote-admin-results" class="form-group">
     </div>
@@ -122,5 +122,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js', v='aisecedu-20260726-guided-workspace') }}"></script>
 {% endblock %}

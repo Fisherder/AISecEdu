@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=IDA Free
+Comment=Freeware interactive disassembler
+Exec=ida64
+Icon=/run/dojo/share/icons/hicolor/scalable/apps/aisecedu-ida-free.svg
+Terminal=false
+Categories=Development;Debugger;
+StartupWMClass=IDA

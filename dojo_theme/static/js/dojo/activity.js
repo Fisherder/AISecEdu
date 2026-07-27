@@ -4,16 +4,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const userID = tracker.getAttribute('user-id');
     const container = document.createElement('div');
     container.className = 'activity-graph';
-    container.innerHTML = `<h3>Learning Activity</h3>
+    container.innerHTML = `<h3>学习活动</h3>
         <div class="streak"></div>
         <div class="grid-wrapper">
         <div class="month-labels" style="font-size:0.7rem; height: 16px; position: relative;"></div>
         <div class="grid-container"></div>
         </div>
         <div class="legend">
-            <span>Less</span>
+            <span>较少</span>
             <div class="legend-cells"></div>
-            <span>More</span>
+            <span>较多</span>
         </div>`;
     tracker.appendChild(container);
 
@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (cell) {
                 const count = dailyActivityData[date];
                 const displayDate = cell.dataset.displayDate;
-                const solveText = count === 1 ? 'completion' : 'completions';
+                const solveText = '次完成';
                 cell.dataset.count = count;
                 cell.title = `${displayDate}: ${count} ${solveText}`;
                 let level = 0;
@@ -125,7 +125,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const max = Math.max(...Object.values(dailySolveCount), 1);
             updateGrid(dailySolveCount, max);
             const streakText = getStreak(dailySolveCount);
-            streak.textContent = streakText > 0 ? `${streakText} day streak` : '';
+            streak.textContent = streakText > 0 ? `连续 ${streakText} 天` : '';
         }
     })
     .catch(err => {

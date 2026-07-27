@@ -31,7 +31,7 @@
 {% block content %}
 <div class="jumbotron">
   <div class="container">
-    <h1>{{ dojo.name }} · Student Information</h1>
+    <h1>{{ dojo.name }} · 学生信息</h1>
   </div>
 </div>
 <div class="container">
@@ -39,15 +39,15 @@
     <div class="col-md-8 offset-md-1">
       <ul>
         <li>
-          AISecEdu Username: {{ user.name }}
+          AISecEdu 用户名：{{ user.name }}
         </li>
         <li>
           {{ identity_name }} : {{ identity_value }}
         </li>
         <li>
           {% if discord_member %}
-            Authorized and linked Discord Username: {{ discord_member.user.username }} <br>
-            Discord ID (unique): {{ discord_member.user.id }}
+            已授权并关联的 Discord 用户名：{{ discord_member.user.username }} <br>
+            Discord ID（唯一）：{{ discord_member.user.id }}
           {% endif %}
         </li>
       </ul>

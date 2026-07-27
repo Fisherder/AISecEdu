@@ -6,44 +6,49 @@
       <span class="brand-white">{{ Configs.ctf_name }}</span>
     </a>
     <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#base-navbars"
-            aria-controls="base-navbars" aria-expanded="false" aria-label="Toggle navigation">
+            aria-controls="base-navbars" aria-expanded="false" aria-label="切换导航栏">
       <span class="navbar-toggler-icon"></span>
     </button>
     <div class="collapse navbar-collapse" id="base-navbars">
       <div class="d-none d-md-block" style="border-left: 2px solid white; height: 20px; margin: 0 20px;"></div>
       <ul class="navbar-nav mr-auto">
-        {{ navitem("Courses", url_for("pwncollege_dojos.listing"), "fa-graduation-cap") }}
-        {{ navitem("My Learning", "/learning", "fa-brain") }}
-        {{ navitem("Workspace", url_for("pwncollege_workspace.view_workspace"), "fa-desktop") }}
-        {{ navitem("Guide", url_for("pwncollege_sensai.view_sensai"), "fa-question") }}
-        {{ navitem("Search", "#", "fa-search") }}
+        {{ navitem("课程", url_for("pwncollege_dojos.listing"), "fa-graduation-cap") }}
+        {{ navitem("我的学习", "/learning", "fa-brain") }}
+        {{ navitem("工作区", url_for("pwncollege_workspace.view_workspace"), "fa-desktop") }}
+        {{ navitem("Guide", url_for("pwncollege_sensai.view_guide"), "fa-comment-dots") }}
+        {{ navitem("搜索", "#", "fa-search") }}
       </ul>
       <hr class="d-sm-flex d-md-flex d-lg-none">
       <ul class="navbar-nav ml-md-auto d-block d-sm-flex d-md-flex">
         {% if authed() %}
         {% if is_admin() %}
-          {{ navitem("Admin Panel", url_for("admin.view"), "fa-wrench", shrink=True) }}
+          {{ navitem("管理面板", url_for("admin.view"), "fa-wrench", shrink=True) }}
         {% endif %}
-        {{ navitem("Profile", url_for("pwncollege_users.view_self"), "fa-user-circle", shrink=True) }}
-        {{ navitem("Settings", url_for("views.settings"), "fa-cogs", shrink=True) }}
-        {{ navitem("Logout", url_for("auth.logout"), "fa-sign-out-alt", shrink=True) }}
+        {{ navitem("个人资料", url_for("pwncollege_users.view_self"), "fa-user-circle", shrink=True) }}
+        {{ navitem("设置", url_for("views.settings"), "fa-cogs", shrink=True) }}
+        {{ navitem("退出登录", url_for("auth.logout"), "fa-sign-out-alt", shrink=True) }}
 
         {% else %}
         {% if registration_visible() %}
-        {{ navitem("Register", url_for("auth.register"), "fa-user-plus") }}
+        {{ navitem("注册", url_for("auth.register"), "fa-user-plus") }}
         {% endif %}
 
-        {{ navitem("Login", url_for("auth.login", next=request.full_path), "fa-sign-in-alt") }}
+        {{ navitem("登录", url_for("auth.login", next=request.full_path), "fa-sign-in-alt") }}
         {% endif %}
+        <li class="nav-item">
+          <button type="button" class="nav-link btn btn-link text-nowrap" data-theme-toggle title="切换浅色主题" aria-label="切换浅色主题">
+            <i class="fas fa-sun" aria-hidden="true"></i><span class="d-lg-none ml-2">浅色主题</span>
+          </button>
+        </li>
 
         <li class="nav-item">
           <a class="nav-link close-link" href="javascript:void(0)">
-            <span class="d-block" data-toggle="tooltip" data-placement="bottom" title="Hide Navbar">
+            <span class="d-block" data-toggle="tooltip" data-placement="bottom" title="收起导航栏">
               <i class="fas caret-up d-none d-md-block d-lg-none"></i>
             </span>
             <span class="d-sm-block d-md-none d-lg-block text-nowrap">
               <i class="fas fa-caret-up pr-1"></i>
-              <span class="d-lg-none">Hide Navbar</span>
+              <span class="d-lg-none">收起导航栏</span>
             </span>
           </a>
         </li>
@@ -53,7 +58,7 @@
 </nav>
 
 <div class="navbar-pulldown">
-  <i class="fas fa-fw fa-caret-down" title="Show navigation bar"></i>
+  <i class="fas fa-fw fa-caret-down" title="显示导航栏"></i>
 </div>
 
 <div id="searchModal" class="modal fade" tabindex="-1" role="dialog">
@@ -64,10 +69,10 @@
           <div class="input-group input-group-lg">
             <div class="input-group-prepend">
               <span class="input-group-text bg-secondary border-0 text-white">
-                <i class="fas fa-search"></i>
+              <i class="fas fa-search"></i>
               </span>
             </div>
-            <input type="text" id="searchInput" class="form-control bg-dark text-white border-0" placeholder="Search..." autocomplete="off">
+            <input type="text" id="searchInput" class="form-control bg-dark text-white border-0" placeholder="搜索…" autocomplete="off">
             <div class="input-group-append">
               <button type="button" class="btn btn-outline-light" data-dismiss="modal">
                 <i class="fas fa-times"></i>
