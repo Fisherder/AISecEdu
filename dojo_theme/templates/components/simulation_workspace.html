@@ -1,0 +1,69 @@
+<section id="simulation-workspace"
+    class="simulation-workspace"
+    data-simulation-workspace
+    data-run-id="{{ simulation_run_id or '' }}"
+    aria-label="安全情景模拟环境"
+    hidden>
+  <header class="simulation-header">
+    <div class="simulation-heading">
+      <span class="simulation-domain" data-simulation-domain>SIMULATION</span>
+      <div>
+        <h2 data-simulation-title>正在载入模拟场景</h2>
+        <p data-simulation-description></p>
+      </div>
+    </div>
+    <div class="simulation-header-status">
+      <span class="simulation-status" data-simulation-status>正在连接</span>
+      <span class="simulation-integrity" data-simulation-integrity>
+        <i class="fas fa-shield-alt" aria-hidden="true"></i>
+        等待完整性校验
+      </span>
+    </div>
+  </header>
+
+  <div class="simulation-progress" aria-label="模拟进度">
+    <div class="simulation-progress-copy">
+      <span data-simulation-turn>回合 0</span>
+      <span data-simulation-progress-label>目标进度 0%</span>
+    </div>
+    <div class="simulation-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-simulation-progress>
+      <span></span>
+    </div>
+  </div>
+
+  <div class="simulation-layout">
+    <section class="simulation-stage" aria-label="场景状态">
+      <nav class="simulation-view-tabs" role="tablist" aria-label="场景视图" data-simulation-view-tabs></nav>
+      <div class="simulation-view" data-simulation-view>
+        <div class="simulation-empty">
+          <i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i>
+          <span>正在读取结构化状态…</span>
+        </div>
+      </div>
+      <div class="simulation-observation" role="status" aria-live="polite" data-simulation-observation hidden></div>
+    </section>
+
+    <aside class="simulation-control-panel" aria-label="目标与操作">
+      <section class="simulation-objectives">
+        <div class="simulation-section-title">
+          <h3>任务目标</h3>
+          <span data-simulation-objective-count>0 / 0</span>
+        </div>
+        <div class="simulation-objective-list" data-simulation-objectives></div>
+      </section>
+      <section class="simulation-actions">
+        <div class="simulation-section-title">
+          <h3>可执行操作</h3>
+          <span data-simulation-action-state>选择一个操作推进场景</span>
+        </div>
+        <div data-simulation-actions></div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="simulation-loading" data-simulation-loading>
+    <div class="workspace-loading-spinner" aria-hidden="true"></div>
+    <strong>正在建立模拟运行</strong>
+    <span>加载题目版本、确定性规则和可视化绑定…</span>
+  </div>
+</section>

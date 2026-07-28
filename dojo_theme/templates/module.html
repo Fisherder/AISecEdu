@@ -200,24 +200,32 @@
                 {{ challenge.description | markdown }}
               {% endif %}
             </div>
+            {% set challenge_mode = challenge.exercise_mode or "CONTAINER" %}
             <div class="challenge-init row{% if active %} challenge-hidden{% endif %}">
               <div class="col-md-3 form-group text-center">
                 <button id="challenge-start" type="submit" class="btn btn-md btn-outline-secondary challenge-init">
                   <i class="fas fa-play fa-lg"></i>启动题目
                 </button>
               </div>
-              {% if challenge.allow_privileged %}
+              {% if challenge_mode != "SIMULATION" and challenge.allow_privileged %}
               <div class="col-md-3 form-group text-center">
                 <button id="challenge-priv" type="submit" class="btn btn-md btn-outline-secondary challenge-init">
                   <i class="fas fa-unlock fa-lg"></i>特权模式
                 </button>
               </div>
               {% endif %}
-              <div class="col-md-{% if challenge.allow_privileged %}6{% else %}9{% endif %}">
+              <div class="col-md-{% if challenge_mode != 'SIMULATION' and challenge.allow_privileged %}6{% else %}9{% endif %}">
                 <input id="module" type="hidden" value="{{ module.id }}">
                 <input id="challenge" type="hidden" value="{{ challenge.id }}">
                 <input id="challenge-id" type="hidden" value="{{ challenge.challenge_id }}">
+                {% if challenge_mode == "SIMULATION" %}
+                <div class="challenge-input form-control text-muted">
+                  <i class="fas fa-project-diagram"></i>
+                  通过场景目标完成本题
+                </div>
+                {% else %}
                 <input id="challenge-input" class="challenge-input form-control" type="text" name="answer" placeholder="输入 Flag">
+                {% endif %}
               </div>
             </div>
             <div class="challenge-workspace {{ "challenge-hidden" if not active }}">

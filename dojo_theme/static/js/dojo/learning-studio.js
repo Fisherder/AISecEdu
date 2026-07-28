@@ -42,6 +42,14 @@ document.addEventListener("DOMContentLoaded", function () {
     })[value] || value || "Agent 决策";
   }
 
+  function exerciseModeLabel(value) {
+    return ({
+      CONTAINER: "真实容器实践",
+      SIMULATION: "情境模拟",
+      HYBRID: "容器 + 模拟协同",
+    })[String(value || "CONTAINER").toUpperCase()] || value || "真实容器实践";
+  }
+
   function categoryLabel(value) {
     return ({
       GENERAL: "综合",
@@ -262,12 +270,15 @@ document.addEventListener("DOMContentLoaded", function () {
   function renderDrafts(items) {
     document.getElementById("studio-draft-list").innerHTML = items.map(draft => {
       const name = draft.spec && draft.spec.name ? draft.spec.name : draft.brief;
+      const exerciseMode = draft.spec && draft.spec.exerciseMode
+        ? draft.spec.exerciseMode
+        : "CONTAINER";
       const blocked = draft.validation && draft.validation.summary ? draft.validation.summary.blocked : "尚未校验";
       return `
         <li class="card card-small studio-draft-select" data-draft-id="${learning.escapeHtml(draft.id)}" role="button" tabindex="0">
           <div class="card-body">
             <h4 class="card-title">${learning.escapeHtml(name)}</h4>
-            <p class="card-text">${learning.escapeHtml(strategyLabel(draft.level))} · ${learning.escapeHtml(draftStatusLabel(draft.status))}<br>${learning.escapeHtml(draft.moduleId)} · 修订 ${learning.escapeHtml(draft.revision)}<br>${typeof blocked === "number" ? `${learning.escapeHtml(blocked)} 项阻断检查` : learning.escapeHtml(blocked)}</p>
+            <p class="card-text">${learning.escapeHtml(exerciseModeLabel(exerciseMode))} · ${learning.escapeHtml(strategyLabel(draft.level))} · ${learning.escapeHtml(draftStatusLabel(draft.status))}<br>${learning.escapeHtml(draft.moduleId)} · 修订 ${learning.escapeHtml(draft.revision)}<br>${typeof blocked === "number" ? `${learning.escapeHtml(blocked)} 项阻断检查` : learning.escapeHtml(blocked)}</p>
           </div>
         </li>`;
     }).join("");
@@ -318,12 +329,13 @@ document.addEventListener("DOMContentLoaded", function () {
       const status = run ? run.status : "NOT_STARTED";
       const percent = run ? Math.max(0, Math.min(100, Number(run.progress) || 0)) : 0;
       const active = run && ["QUEUED", "RUNNING"].includes(run.status);
+      const simulationOnly = String(item.exerciseMode || "CONTAINER").toUpperCase() === "SIMULATION";
       return `
         <li class="studio-published-card" data-solution-key="${learning.escapeHtml(solutionKey(item))}">
           <div class="studio-published-card-header">
             <div>
               <h3>${learning.escapeHtml(item.name)}</h3>
-              <p>${learning.escapeHtml(item.moduleId)} · ${learning.escapeHtml(categoryLabel(item.category))} · 难度 ${learning.escapeHtml(item.difficulty)}/5 · 版本 ${learning.escapeHtml(item.version)}</p>
+              <p>${learning.escapeHtml(item.moduleId)} · ${learning.escapeHtml(exerciseModeLabel(item.exerciseMode))} · ${learning.escapeHtml(categoryLabel(item.category))} · 难度 ${learning.escapeHtml(item.difficulty)}/5 · 版本 ${learning.escapeHtml(item.version)}</p>
             </div>
             <span class="badge badge-${solutionStatusClass(status)}">${learning.escapeHtml(status === "NOT_STARTED" ? "尚未验证解题步骤" : solutionStatusLabel(status))}</span>
           </div>
@@ -336,7 +348,7 @@ document.addEventListener("DOMContentLoaded", function () {
           <div class="studio-published-actions">
             <a class="btn btn-sm btn-outline-secondary" href="/${encodeURIComponent(dojoId)}/${encodeURIComponent(item.moduleId)}/${encodeURIComponent(item.id)}">打开题目</a>
             ${run ? `<button type="button" class="btn btn-sm btn-outline-primary studio-solution-view">查看${run.status === "VERIFIED" ? "已验证步骤" : "解题 Agent 进度"}</button>` : ""}
-            ${!active && status !== "VERIFIED" ? `<button type="button" class="btn btn-sm btn-primary studio-solution-start">${status === "FAILED" ? "重新真实解题" : "生成已验证步骤"}</button>` : ""}
+            ${!active && status !== "VERIFIED" ? `<button type="button" class="btn btn-sm btn-primary studio-solution-start">${status === "FAILED" ? (simulationOnly ? "重新验证场景" : "重新真实解题") : (simulationOnly ? "验证最短可达路径" : "生成已验证步骤")}</button>` : ""}
           </div>
         </li>`;
     }).join("");
@@ -361,39 +373,48 @@ document.addEventListener("DOMContentLoaded", function () {
     const status = document.getElementById("studio-solution-status");
     status.textContent = solutionStatusLabel(run.status);
     status.className = `badge badge-${solutionStatusClass(run.status)} ml-3`;
+    const simulationOnly = String(item.exerciseMode || "CONTAINER").toUpperCase() === "SIMULATION";
     document.getElementById("studio-solution-meta").textContent =
-      `${item.moduleId} · 题目版本 ${item.version} · ${run.model || "DeepSeek V4 Pro"}`;
+      `${item.moduleId} · ${exerciseModeLabel(item.exerciseMode)} · 题目版本 ${item.version} · ${run.model || (simulationOnly ? "确定性状态空间验证器" : "DeepSeek V4 Pro")}`;
     const active = ["QUEUED", "RUNNING"].includes(run.status);
     const running = document.getElementById("studio-solution-running");
     running.hidden = !active;
     document.getElementById("studio-solution-running-detail").textContent =
       active ? `${solutionPhaseLabel(run.phase)} · ${run.progress || 0}% · 关闭窗口不会中断任务。` : "";
     const verification = run.verification || {};
-    document.getElementById("studio-solution-verification").innerHTML = run.status === "VERIFIED" ? `
-      <span><i class="fas fa-check-circle"></i> 动态 Flag 已验证</span>
-      <span><i class="fas fa-user-shield"></i> ${learning.escapeHtml(verification.runAs || "hacker uid 1000")}</span>
-      <span><i class="fas fa-link"></i> 已绑定账号与题目</span>
-      <span><i class="fas fa-eye-slash"></i> Flag 已脱敏</span>
-      <span><i class="fas fa-terminal"></i> 已执行 ${learning.escapeHtml(verification.allowedCommands || 0)} 条合规命令</span>
-      <span><i class="fas fa-shield-alt"></i> ${verification.teacherStepsTraceBound ? "教师步骤逐条绑定真实执行轨迹" : "教师步骤尚未完成轨迹绑定"}</span>
-      <span><i class="fas fa-project-diagram"></i> ${verification.modelTraceMappingAccepted ? "Agent 轨迹映射已校验" : "已使用平台精确执行轨迹兜底"}</span>` : "";
+    document.getElementById("studio-solution-verification").innerHTML = run.status === "VERIFIED"
+      ? simulationOnly
+        ? `
+          <span><i class="fas fa-check-circle"></i> 必需目标全部可达</span>
+          <span><i class="fas fa-project-diagram"></i> 已搜索 ${learning.escapeHtml(verification.exploredStates || 0)} 个状态</span>
+          <span><i class="fas fa-shoe-prints"></i> 最短路径 ${learning.escapeHtml(verification.shortestTurns || 0)} 回合</span>
+          <span><i class="fas fa-fingerprint"></i> 声明式状态转移已确定性重放</span>`
+        : `
+          <span><i class="fas fa-check-circle"></i> 动态 Flag 已验证</span>
+          <span><i class="fas fa-user-shield"></i> ${learning.escapeHtml(verification.runAs || "hacker uid 1000")}</span>
+          <span><i class="fas fa-link"></i> 已绑定账号与题目</span>
+          <span><i class="fas fa-eye-slash"></i> Flag 已脱敏</span>
+          <span><i class="fas fa-terminal"></i> 已执行 ${learning.escapeHtml(verification.allowedCommands || 0)} 条合规命令</span>
+          <span><i class="fas fa-shield-alt"></i> ${verification.teacherStepsTraceBound ? "教师步骤逐条绑定真实执行轨迹" : "教师步骤尚未完成轨迹绑定"}</span>
+          <span><i class="fas fa-project-diagram"></i> ${verification.modelTraceMappingAccepted ? "Agent 轨迹映射已校验" : "已使用平台精确执行轨迹兜底"}</span>`
+      : "";
     const solution = run.solution || {};
     document.getElementById("studio-solution-overview").textContent = solution.overview || "";
     document.getElementById("studio-solution-steps").innerHTML = (solution.steps || []).map((step, index) => `
       <li>
-        <h4>${index + 1}. ${learning.escapeHtml(step.goal)}</h4>
-        <pre><code>${learning.escapeHtml(step.action)}</code></pre>
-        <p><strong>预期证据：</strong>${learning.escapeHtml(step.expectedEvidence)}</p>
+        <h4>${index + 1}. ${learning.escapeHtml(step.goal || step.action || step.actionId || "场景操作")}</h4>
+        <pre><code>${learning.escapeHtml(step.action || step.actionId || "")}${step.parameters && Object.keys(step.parameters).length ? ` ${learning.escapeHtml(JSON.stringify(step.parameters))}` : ""}</code></pre>
+        ${step.expectedEvidence ? `<p><strong>预期证据：</strong>${learning.escapeHtml(step.expectedEvidence)}</p>` : ""}
       </li>`).join("");
     const trace = run.steps || [];
     const traceWrap = document.getElementById("studio-solution-trace-wrap");
     traceWrap.hidden = trace.length === 0;
     document.getElementById("studio-solution-trace").innerHTML = trace.map(step => `
       <article class="studio-solution-trace-step is-${learning.escapeHtml(String(step.policy || "allowed").toLowerCase())}">
-        <div><strong>#${learning.escapeHtml(step.turn)} · ${learning.escapeHtml(tracePolicyLabel(step.policy || step.kind))}</strong><span>退出码 ${learning.escapeHtml(step.exitCode == null ? "—" : step.exitCode)}</span></div>
+        <div><strong>#${learning.escapeHtml(step.turn)} · ${learning.escapeHtml(simulationOnly ? "模拟操作" : tracePolicyLabel(step.policy || step.kind))}</strong><span>${simulationOnly ? learning.escapeHtml(step.actionId || "") : `退出码 ${learning.escapeHtml(step.exitCode == null ? "—" : step.exitCode)}`}</span></div>
         <p>${learning.escapeHtml(step.rationale || "")}</p>
-        <pre><code>${learning.escapeHtml(step.command || "")}</code></pre>
-        <pre class="studio-solution-output">${learning.escapeHtml(step.output || "")}</pre>
+        <pre><code>${learning.escapeHtml(simulationOnly ? JSON.stringify(step.parameters || {}) : (step.command || ""))}</code></pre>
+        ${simulationOnly ? "" : `<pre class="studio-solution-output">${learning.escapeHtml(step.output || "")}</pre>`}
       </article>`).join("");
     const error = document.getElementById("studio-solution-error");
     error.textContent = run.error || "";
@@ -465,9 +486,11 @@ document.addEventListener("DOMContentLoaded", function () {
     const validation = selected.validation || {};
     const pipeline = spec.authoringPipeline || {};
     const strategy = spec.authoringStrategy || pipeline.strategy || {};
+    const exerciseMode = String(spec.exerciseMode || "CONTAINER").toUpperCase();
+    const simulation = spec.simulation || {};
     document.getElementById("studio-draft-name").textContent = spec.name || selected.brief;
     document.getElementById("studio-draft-meta").textContent =
-      `${strategyLabel(selected.level)} · ${strategyProviderLabel(strategy.provider)} · ${selected.moduleId} · 修订 ${selected.revision}`;
+      `${exerciseModeLabel(exerciseMode)} · ${strategyLabel(selected.level)} · ${strategyProviderLabel(strategy.provider)} · ${selected.moduleId} · 修订 ${selected.revision}`;
     document.getElementById("studio-agent-pipeline").innerHTML = [
       ["策略", strategy],
       ["方案", pipeline.plan],
@@ -495,13 +518,54 @@ document.addEventListener("DOMContentLoaded", function () {
     }).join(" &nbsp; ");
     document.getElementById("studio-draft-status").textContent = selected.status;
     document.getElementById("studio-draft-description").textContent = spec.description || "";
+    const modeSummary = document.getElementById("studio-exercise-mode-summary");
+    modeSummary.innerHTML = `
+      <strong>${learning.escapeHtml(exerciseModeLabel(exerciseMode))}</strong>
+      <span> · ${
+        exerciseMode === "SIMULATION"
+          ? "题目使用受约束状态内核，不创建容器；目标由可回放的状态条件判定。"
+          : exerciseMode === "HYBRID"
+            ? "题目同时提供真实容器与模拟状态，两类证据进入同一 attempt 和评分。"
+            : "题目使用真实隔离容器与动态 Flag 验证。"
+      }</span>`;
+    const simulationDetails = document.getElementById("studio-simulation-details");
+    const simulationSummary = document.getElementById("studio-simulation-summary");
+    const objectives = Array.isArray(simulation.objectives) ? simulation.objectives : [];
+    const actions = Array.isArray(simulation.actions) ? simulation.actions : [];
+    const views = Array.isArray(simulation.views) ? simulation.views : [];
+    simulationDetails.hidden = !["SIMULATION", "HYBRID"].includes(exerciseMode);
+    if (!simulationDetails.hidden) {
+      simulationSummary.innerHTML = `
+        <p><strong>${learning.escapeHtml(simulation.title || spec.name || "模拟场景")}</strong> · ${learning.escapeHtml(simulation.domain || "GENERAL")} · 最多 ${learning.escapeHtml(simulation.maxTurns || "—")} 回合 · 完成策略 ${learning.escapeHtml(simulation.completionPolicy || "OBJECTIVES")}</p>
+        <div class="row">
+          <div class="col-md-4">
+            <h5>学习目标（${objectives.length}）</h5>
+            <ul>${objectives.map(item => `<li>${learning.escapeHtml(item.title || item.label || item.id || "")}${item.required === false ? "（可选）" : ""}</li>`).join("") || "<li>尚未生成</li>"}</ul>
+          </div>
+          <div class="col-md-4">
+            <h5>学习者操作（${actions.length}）</h5>
+            <ul>${actions.map(item => `<li>${learning.escapeHtml(item.label || item.id || "")}</li>`).join("") || "<li>尚未生成</li>"}</ul>
+          </div>
+          <div class="col-md-4">
+            <h5>状态视图（${views.length}）</h5>
+            <ul>${views.map(item => `<li>${learning.escapeHtml(item.title || item.label || item.id || "")} · ${learning.escapeHtml(item.type || "state")}</li>`).join("") || "<li>尚未生成</li>"}</ul>
+          </div>
+        </div>
+        <p class="text-muted mb-0">发布前会执行结构校验、私有状态泄漏检查、动作可达性搜索和确定性重放；大模型只能提出白名单公开状态补丁，不能注入 HTML、脚本或任意代码。</p>`;
+    } else {
+      simulationSummary.innerHTML = "";
+    }
     const implementation = spec.implementation || {};
     const solution = spec.privateSolution || {};
     const preflight = spec.preflightReview || {};
     document.getElementById("studio-implementation-summary").textContent =
-      implementation.summary || `${(implementation.artifacts || []).length} 个产物 · ${(implementation.selfChecks || []).length} 项自检`;
+      implementation.summary || (exerciseMode === "SIMULATION"
+        ? `${actions.length} 个受约束操作 · ${objectives.length} 个目标 · ${views.length} 个状态视图`
+        : `${(implementation.artifacts || []).length} 个产物 · ${(implementation.selfChecks || []).length} 项自检`);
     document.getElementById("studio-solution-summary").textContent =
-      solution.overview || `${(solution.steps || []).length} 个已验证步骤 · ${(solution.successIndicators || []).length} 个成功指标`;
+      solution.overview || (exerciseMode === "SIMULATION"
+        ? "由状态空间搜索生成最短可达路径，并以确定性重放验证。"
+        : `${(solution.steps || []).length} 个已验证步骤 · ${(solution.successIndicators || []).length} 个成功指标`);
     const preflightElement = document.getElementById("studio-preflight-summary");
     const findings = Array.isArray(preflight.findings) ? preflight.findings : [];
     const openFindings = findings.filter(finding => (finding.status || "OPEN") === "OPEN");

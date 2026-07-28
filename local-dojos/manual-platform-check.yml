@@ -2,8 +2,8 @@ id: manual-platform-check
 name: 手动功能验收场
 type: public
 description: |
-  这门实践课程用于人工验证学生题目平台。四道题分别覆盖终端、文件检索、
-  Home 持久化和浏览器 Web 接口，每道题都使用平台动态生成的个人答案凭证。
+  这门实践课程用于人工验证学生题目平台。五道题分别覆盖终端、文件检索、
+  Home 持久化、浏览器 Web 接口和声明式安全情境模拟。
 image: pwncollege/challenge-legacy:latest
 privileged: true
 interfaces:
@@ -61,6 +61,21 @@ modules:
           - name: Desktop
             port: 6080
           - name: SSH
+      - id: wireless-simulation
+        name: 无线接入异常诊断
+        exercise_mode: SIMULATION
+        description: |
+          一处企业无线接入点出现高时延和丢包。使用拓扑、频谱、指标与事件视图
+          建立基线，形成可证伪的干扰假设，选择修复动作并通过复测确认服务恢复。
+
+          本题与普通 CTF 题共享课程、题目、attempt、评分、Tutor 和完成记录，
+          但不启动容器，也不提交 Flag；达到全部必需场景目标后自动完成。
+        interfaces:
+          - name: Simulation
+        simulation:
+          preset: WIRELESS
+          title: 无线接入异常诊断
+          description: 分析无线拓扑和频谱状态，形成可验证的干扰假设并恢复客户端服务。
 files:
   - type: text
     path: manual/terminal-handshake/motd.txt

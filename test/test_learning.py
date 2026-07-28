@@ -7,6 +7,7 @@ from utils import DOJO_URL, solve_challenge, start_challenge, workspace_run
 
 
 API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/learning"
+SIMULATION_API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/simulations"
 COURSES_API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/dojos"
 
 
@@ -169,6 +170,164 @@ def test_teacher_can_add_course_unit(
     assert page.status_code == 200
     assert "Teacher Created Unit" in page.text
     assert "添加题目" in page.text
+
+
+def test_simulation_challenge_uses_unified_attempt_solve_tutor_and_replay(
+    admin_session,
+    random_user,
+    simple_award_dojo,
+):
+    _, user_session = random_user
+    challenge_id = f"wireless-sim-{secrets.token_hex(4)}"
+    created = admin_session.post(
+        f"{API}/dojos/{simple_award_dojo}/authoring",
+        json={
+            "brief": (
+                "Create a wireless incident-response simulation. Learners must inspect "
+                "the topology and spectrum, form a falsifiable interference hypothesis, "
+                "apply the safest channel change, and verify service recovery."
+            ),
+            "moduleId": "hello",
+            "constraints": {
+                "id": challenge_id,
+                "title": "Wireless Incident Simulation",
+                "description": (
+                    "Investigate a degraded enterprise wireless client by correlating "
+                    "topology, spectrum, service metrics, and a deterministic event trail."
+                ),
+                "category": "GENERAL",
+                "difficulty": 3,
+                "exerciseMode": "SIMULATION",
+                "objectives": [
+                    "建立无线拓扑与频谱基线",
+                    "形成可证伪的干扰假设",
+                    "实施最小变更并复测业务",
+                ],
+                "simulation": {
+                    "preset": "WIRELESS",
+                    "title": "Wireless Incident Simulation",
+                },
+            },
+        },
+    )
+    assert created.status_code == 201
+    draft = created.json()["draft"]
+    assert created.json()["validation"]["status"] == "PASS"
+    assert draft["spec"]["exerciseMode"] == "SIMULATION"
+    assert draft["spec"]["interfaces"] == [{"name": "Simulation"}]
+    assert draft["spec"]["starterFiles"] == []
+    assert draft["spec"]["oracleContract"] == {}
+    assert draft["spec"]["runtimeContract"] == {}
+    assert draft["spec"]["verificationAnswer"] is None
+
+    published = admin_session.post(
+        f"{API}/drafts/{draft['id']}/publish",
+        json={},
+    )
+    assert published.status_code == 200
+    challenge = published.json()["challenge"]
+    assert challenge["exerciseMode"] == "SIMULATION"
+    assert challenge["package"]["exerciseMode"] == "SIMULATION"
+    assert challenge["package"]["simulation"]["sourcePreset"] == "WIRELESS"
+
+    started = user_session.post(
+        f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/docker",
+        json={
+            "dojo": simple_award_dojo,
+            "module": "hello",
+            "challenge": challenge_id,
+            "practice": False,
+        },
+    )
+    assert started.status_code == 200
+    assert started.json()["success"]
+    assert started.json()["exerciseMode"] == "SIMULATION"
+    run_id = started.json()["simulationRunId"]
+    assert run_id
+
+    current_attempt = user_session.get(f"{API}/attempts/current").json()["attempt"]
+    assert current_attempt["exerciseMode"] == "SIMULATION"
+    assert current_attempt["simulationRunId"] == run_id
+    assert current_attempt["status"] == "ACTIVE"
+
+    current_run = user_session.get(f"{SIMULATION_API}/{run_id}")
+    assert current_run.status_code == 200
+    run = current_run.json()["run"]
+    assert run["exerciseMode"] == "SIMULATION"
+    assert run["turn"] == 0
+    assert run["status"] == "ACTIVE"
+    assert run["integrity"]["eventChain"]["valid"]
+    assert "privateState" not in json.dumps(run, sort_keys=True)
+    assert "rootCause" not in json.dumps(run, sort_keys=True)
+
+    def act(action_id, parameters=None):
+        response = user_session.post(
+            f"{SIMULATION_API}/{run_id}/actions",
+            json={
+                "actionId": action_id,
+                "parameters": parameters or {},
+                "expectedTurn": run["turn"],
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["success"]
+        assert response.json()["accepted"]
+        run.update(response.json()["run"])
+        return response
+
+    act("inspect-topology")
+    stale = user_session.post(
+        f"{SIMULATION_API}/{run_id}/actions",
+        json={
+            "actionId": "scan-spectrum",
+            "parameters": {},
+            "expectedTurn": 0,
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["code"] == "STALE_TURN"
+
+    act("scan-spectrum")
+    tutor = user_session.post(
+        f"{API}/tutor",
+        json={
+            "question": (
+                "Which observation should I correlate next before choosing a remediation?"
+            )
+        },
+    )
+    assert tutor.status_code == 200
+    assert tutor.json()["reply"]["context"]["live"]
+    assert tutor.json()["reply"]["context"]["environmentType"] == "SIMULATION"
+    assert tutor.json()["reply"]["context"]["simulationRunId"] == run_id
+
+    act("inspect-client")
+    act("form-hypothesis", {"cause": "co-channel-interference"})
+    act("change-channel", {"channel": 11})
+    completed = act("verify-service")
+    assert completed.json()["completed"]
+    assert run["status"] == "COMPLETED"
+    assert run["objectiveSummary"]["requiredComplete"]
+    assert run["integrity"]["eventChain"]["valid"]
+
+    replay = user_session.get(f"{SIMULATION_API}/{run_id}/replay")
+    assert replay.status_code == 200
+    assert replay.json()["replay"]["valid"]
+    assert replay.json()["replay"]["actionsReplayed"] == 6
+    assert replay.json()["replay"]["finalTurn"] == 6
+    assert replay.json()["replay"]["snapshots"] == 7
+
+    solved_attempt = user_session.get(
+        f"{API}/attempts/{current_attempt['id']}"
+    ).json()["attempt"]
+    assert solved_attempt["status"] == "SOLVED"
+    assert solved_attempt["objectiveScore"] == 60
+    assert solved_attempt["assessment"]["objectiveScore"] == 60
+    assert solved_attempt["evidenceChain"]["valid"]
+    evidence_types = [event["type"] for event in solved_attempt["evidence"]]
+    assert evidence_types.count("simulation.action.completed") == 6
+    assert "simulation.objective.evaluated" in evidence_types
+    assert "flag.correct" not in evidence_types
 
 
 def test_native_authoring_workspace_evidence_assessment_and_appeal(

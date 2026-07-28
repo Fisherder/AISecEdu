@@ -24,11 +24,13 @@ from ..models import (
     LearningDrafts,
     LearningEvidenceEvents,
     LearningRecommendations,
+    LearningSimulationRuns,
     LearningSkillStates,
     LearningTutorMessages,
 )
 from ..utils import get_current_container
 from .evidence import SENSITIVE_PATTERNS, scrub_payload, verify_evidence_chain
+from .simulation import simulation_run_view
 from .standards import ABILITY_LABELS, DEFAULT_HINT_POLICY, DEFAULT_RUBRIC
 
 
@@ -468,6 +470,42 @@ def container_snapshot(user, expected_challenge=None):
     return result
 
 
+def simulation_snapshot(attempt, expected_challenge=None):
+    run = LearningSimulationRuns.query.filter_by(attempt_id=attempt.id).first()
+    if run is None:
+        return {"available": False, "reason": "no-simulation-run"}
+    matches = bool(
+        expected_challenge is None
+        or (
+            run.dojo_id == expected_challenge.dojo_id
+            and run.module_index == expected_challenge.module_index
+            and run.challenge_index == expected_challenge.challenge_index
+        )
+    )
+    if not matches:
+        return {
+            "available": False,
+            "reason": "simulation-run-mismatch",
+            "matchesAttempt": False,
+            "runId": run.id,
+        }
+    try:
+        view = simulation_run_view(run)
+    except (LookupError, TypeError, ValueError) as exception:
+        return {
+            "available": False,
+            "reason": "simulation-view-error",
+            "matchesAttempt": True,
+            "runId": run.id,
+            "error": str(exception)[:300],
+        }
+    return {
+        "available": True,
+        "matchesAttempt": True,
+        "run": view,
+    }
+
+
 def _dojo_challenge(attempt):
     return DojoChallenges.query.filter_by(
         dojo_id=attempt.dojo_id,
@@ -649,6 +687,7 @@ def attempt_agent_context(
                 "description": challenge.description,
                 "image": challenge.image,
                 "interfaces": challenge.interfaces,
+                "exerciseMode": challenge.exercise_mode,
                 "required": challenge.required,
                 "category": profile.category if profile else "GENERAL",
                 "difficulty": profile.difficulty if profile else None,
@@ -692,6 +731,7 @@ def attempt_agent_context(
         }
     if include_container:
         result["liveContainer"] = container_snapshot(attempt.user, challenge)
+        result["liveSimulation"] = simulation_snapshot(attempt, challenge)
     return result
 
 
@@ -745,6 +785,7 @@ def learning_profile_context(user):
                 {
                     "id": challenge.id,
                     "name": challenge.name,
+                    "exerciseMode": challenge.exercise_mode,
                     "required": challenge.required,
                     "completed": challenge.challenge_id in solved_ids,
                     "url": f"/{dojo.reference_id}/{module.id}/{challenge.id}",
@@ -927,6 +968,7 @@ def guide_reference_catalog(profile):
                         "course": course.get("name") or course.get("id"),
                         "unit": module.get("name") or module.get("id"),
                         "exercise": exercise.get("name") or exercise.get("id"),
+                        "exerciseMode": exercise.get("exerciseMode") or "CONTAINER",
                         "completed": bool(exercise.get("completed")),
                         "recentAttempts": recent.get("count", 0),
                         "latestStatus": recent.get("latestStatus"),
@@ -1155,6 +1197,7 @@ def guide_reference_context(user, profile, references, *, max_references=6):
                     for interface in (challenge.interfaces or [])[:12]
                     if isinstance(interface, dict)
                 ],
+                "exerciseMode": challenge.exercise_mode,
                 "attemptCount": total_attempts.get(item["id"], 0),
                 "attempts": attempts,
             }

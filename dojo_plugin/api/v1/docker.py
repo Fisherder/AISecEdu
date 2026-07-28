@@ -38,6 +38,14 @@ from ...utils.feed import publish_container_start
 from ...utils.background_stats import publish_stat_event
 from ...utils.request_logging import get_trace_id, log_generator_output
 from ...learning.evidence import active_attempt, append_evidence, start_attempt
+from ...learning.simulation import (
+    active_simulation_run,
+    challenge_exercise_mode,
+    current_simulation_run,
+    interrupt_simulation_runs,
+    start_simulation_run,
+    stop_simulation_run,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -363,7 +371,7 @@ def start_challenge_session(user, dojo_challenge, practice, *, as_user=None):
             )
             actual_user = as_user or user
             node_id = user_node(actual_user)
-            start_attempt(
+            learning_attempt = start_attempt(
                 actual_user,
                 dojo_challenge,
                 "PRACTICE" if practice else "ASSESSMENT",
@@ -372,6 +380,7 @@ def start_challenge_session(user, dojo_challenge, practice, *, as_user=None):
                     "image": dojo_challenge.image,
                     "nodeId": node_id + 1 if node_id is not None else 0,
                     "interfaces": dojo_challenge.interfaces,
+                    "exerciseMode": challenge_exercise_mode(dojo_challenge),
                 },
             )
             db.session.commit()
@@ -390,7 +399,7 @@ def start_challenge_session(user, dojo_challenge, practice, *, as_user=None):
                 publish_container_start(actual_user, mode, challenge_data)
 
             publish_stat_event("container_stats_update", {})
-            return container
+            return container, learning_attempt
         except Exception as error:
             logger.warning(
                 f"Attempt {attempt_number} failed for user {user.id} with error: {error}"
@@ -554,17 +563,55 @@ class RunDocker(Resource):
                 as_user = student.user
 
         try:
-            start_challenge_session(
-                user,
-                dojo_challenge,
-                practice,
-                as_user=as_user,
-            )
+            exercise_mode = challenge_exercise_mode(dojo_challenge)
+            actual_user = as_user or user
+            if exercise_mode == "SIMULATION":
+                remove_container(user)
+                attempt = start_attempt(
+                    actual_user,
+                    dojo_challenge,
+                    "PRACTICE" if practice else "ASSESSMENT",
+                    {
+                        "exerciseMode": exercise_mode,
+                        "interfaces": [{"name": "Simulation"}],
+                    },
+                )
+                simulation_run = start_simulation_run(user, dojo_challenge, attempt)
+                db.session.commit()
+            else:
+                if exercise_mode == "CONTAINER":
+                    interrupt_simulation_runs(
+                        user.id,
+                        reason="container-started",
+                    )
+                _, attempt = start_challenge_session(
+                    user,
+                    dojo_challenge,
+                    practice,
+                    as_user=as_user,
+                )
+                simulation_run = (
+                    start_simulation_run(user, dojo_challenge, attempt)
+                    if exercise_mode == "HYBRID"
+                    else None
+                )
+                db.session.commit()
         except RuntimeError as error:
             logger.error(str(error))
             return {"success": False, "error": "工作区容器启动失败。"}
+        except Exception:
+            db.session.rollback()
+            logger.exception(
+                "Failed to start exercise mode for challenge %s",
+                dojo_challenge.reference_id,
+            )
+            return {"success": False, "error": "题目运行环境启动失败。"}
 
-        return {"success": True}
+        return {
+            "success": True,
+            "exerciseMode": exercise_mode,
+            "simulationRunId": simulation_run.id if simulation_run else None,
+        }
 
     @authed_only_cli
     @authed_only
@@ -575,10 +622,16 @@ class RunDocker(Resource):
 
         user = get_current_user()
         container = get_current_container(user)
-        if not container:
-            return {"success": False, "error": "未找到题目工作区容器。"}
+        simulation_run = current_simulation_run(user.id, dojo_challenge)
+        if not container and not simulation_run:
+            return {"success": False, "error": "未找到活动题目运行环境。"}
 
-        practice = container.labels.get("dojo.mode") == "privileged"
+        practice = (
+            container.labels.get("dojo.mode") == "privileged"
+            if container
+            else False
+        )
+        exercise_mode = challenge_exercise_mode(dojo_challenge)
 
         return {
             "success": True,
@@ -586,6 +639,8 @@ class RunDocker(Resource):
             "module": dojo_challenge.module.id,
             "challenge": dojo_challenge.id,
             "practice" : practice,
+            "exerciseMode": exercise_mode,
+            "simulationRunId": simulation_run.id if simulation_run else None,
         }
 
     @authed_only
@@ -593,13 +648,16 @@ class RunDocker(Resource):
     def delete(self):
         user = get_current_user()
         container = get_current_container(user)
+        simulation_run = active_simulation_run(user.id)
 
-        if not container:
-            return {"success": False, "error": "未找到活动题目的工作区容器。"}
+        if not container and not simulation_run:
+            return {"success": False, "error": "未找到活动题目运行环境。"}
 
         try:
             attempt = active_attempt(user.id)
-            if attempt:
+            if simulation_run:
+                stop_simulation_run(simulation_run)
+            elif attempt:
                 append_evidence(
                     attempt,
                     "lab.stopped",
@@ -610,12 +668,22 @@ class RunDocker(Resource):
                 attempt.status = "STOPPED"
                 attempt.completed = datetime.datetime.utcnow()
                 db.session.commit()
-            remove_container(user)
-            publish_stat_event("container_stats_update", {})
-            return {"success": True, "message": "题目工作区容器已停止。"}
+            if container:
+                remove_container(user)
+                publish_stat_event("container_stats_update", {})
+            db.session.commit()
+            return {
+                "success": True,
+                "message": (
+                    "题目模拟运行已停止。"
+                    if simulation_run and not container
+                    else "题目运行环境已停止。"
+                ),
+            }
         except Exception as e:
             logger.error(f"Failed to terminate container for user {user.id}: {e}")
-            return {"success": False, "error": "停止工作区容器失败。"}
+            db.session.rollback()
+            return {"success": False, "error": "停止题目运行环境失败。"}
 
 
 @docker_namespace.route("/reset")
@@ -626,31 +694,76 @@ class ResetDocker(Resource):
         user = get_current_user()
         container = get_current_container(user)
         dojo_challenge = get_current_dojo_challenge(user)
-        if not container or not dojo_challenge:
-            return {"success": False, "error": "未找到活动题目的工作区容器。"}
+        simulation_run = current_simulation_run(user.id, dojo_challenge)
+        if not dojo_challenge or (not container and not simulation_run):
+            return {"success": False, "error": "未找到活动题目运行环境。"}
 
-        practice = container.labels.get("dojo.mode") == "privileged"
-        as_user_id = int(container.labels.get("dojo.as_user_id", user.id))
+        exercise_mode = challenge_exercise_mode(dojo_challenge)
+        practice = (
+            container.labels.get("dojo.mode") == "privileged"
+            if container
+            else False
+        )
+        as_user_id = (
+            int(container.labels.get("dojo.as_user_id", user.id))
+            if container
+            else user.id
+        )
         as_user = Users.query.get(as_user_id) if as_user_id != user.id else None
         attempt = active_attempt((as_user or user).id, dojo_challenge)
         if attempt:
             append_evidence(
                 attempt,
                 "lab.reset.requested",
-                {"scope": "container-and-home", "homeErased": True},
+                {
+                    "scope": (
+                        "simulation-state"
+                        if exercise_mode == "SIMULATION"
+                        else "container-and-home"
+                    ),
+                    "homeErased": exercise_mode != "SIMULATION",
+                },
                 source="PLATFORM",
                 trust_level=3,
             )
             db.session.commit()
 
+        replacement_run = None
         try:
-            reset_home(user.id, backup=False)
-            start_challenge_session(
-                user,
-                dojo_challenge,
-                practice,
-                as_user=as_user,
-            )
+            if exercise_mode == "SIMULATION":
+                if simulation_run:
+                    stop_simulation_run(simulation_run, reason="reset")
+                replacement_attempt = start_attempt(
+                    as_user or user,
+                    dojo_challenge,
+                    "PRACTICE" if practice else "ASSESSMENT",
+                    {
+                        "exerciseMode": exercise_mode,
+                        "reset": True,
+                        "interfaces": [{"name": "Simulation"}],
+                    },
+                )
+                replacement_run = start_simulation_run(
+                    user,
+                    dojo_challenge,
+                    replacement_attempt,
+                )
+                db.session.commit()
+            else:
+                reset_home(user.id, backup=False)
+                _, replacement_attempt = start_challenge_session(
+                    user,
+                    dojo_challenge,
+                    practice,
+                    as_user=as_user,
+                )
+                if exercise_mode == "HYBRID":
+                    replacement_run = start_simulation_run(
+                        user,
+                        dojo_challenge,
+                        replacement_attempt,
+                    )
+                    db.session.commit()
         except Exception as error:
             db.session.rollback()
             logger.exception(
@@ -660,5 +773,11 @@ class ResetDocker(Resource):
 
         return {
             "success": True,
-            "message": "题目已恢复到初始状态。",
+            "message": (
+                "模拟场景已恢复到初始状态。"
+                if exercise_mode == "SIMULATION"
+                else "题目已恢复到初始状态。"
+            ),
+            "exerciseMode": exercise_mode,
+            "simulationRunId": replacement_run.id if replacement_run else None,
         }

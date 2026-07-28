@@ -59,6 +59,7 @@ from ...models import (
     LearningDrafts,
     LearningEvidenceEvents,
     LearningGuideThreads,
+    LearningSimulationRuns,
     LearningTutorMessages,
 )
 from ...utils import is_challenge_locked
@@ -367,6 +368,9 @@ def _queue_authoring_job(
 
 def _attempt_view(attempt, *, include_evidence=False):
     challenge = _dojo_challenge_for_attempt(attempt)
+    simulation_run = LearningSimulationRuns.query.filter_by(
+        attempt_id=attempt.id
+    ).first()
     latest = (
         LearningAssessments.query.filter_by(attempt_id=attempt.id)
         .order_by(LearningAssessments.revision.desc())
@@ -382,6 +386,8 @@ def _attempt_view(attempt, *, include_evidence=False):
         "challengeId": challenge.id,
         "challengeDatabaseId": challenge.challenge_id,
         "challengeName": challenge.name,
+        "exerciseMode": challenge.exercise_mode,
+        "simulationRunId": simulation_run.id if simulation_run else None,
         "challengeUrl": (
             f"/{challenge.dojo.reference_id}/{challenge.module.id}/{challenge.id}"
         ),
@@ -469,6 +475,7 @@ def _course_view(dojo, user, membership, solved_challenge_ids, submission_count)
                 "completed": challenge.challenge_id in solved_challenge_ids,
                 "locked": is_challenge_locked(challenge, user),
                 "allowPrivileged": challenge.allow_privileged,
+                "exerciseMode": challenge.exercise_mode,
                 "workspaceUrl": (
                     f"/{dojo.reference_id}/{module.id}/{challenge.id}"
                 ),
@@ -955,6 +962,11 @@ class LearningPackageImport(Resource):
             "tags": metadata.get("tags") or spec.get("tags"),
             "image": runtime.get("image") or spec.get("image"),
             "interfaces": runtime.get("interfaces") or spec.get("interfaces"),
+            "exerciseMode": (
+                spec.get("exerciseMode")
+                or runtime.get("mode")
+            ),
+            "simulation": spec.get("simulation"),
             "starterFiles": spec.get("starterFiles") or [],
             "verificationAnswer": spec.get("verificationAnswer"),
             "externalPackage": {
@@ -1026,7 +1038,17 @@ class LearningDraftPublish(Resource):
         except ValueError as error:
             db.session.rollback()
             return {"success": False, "error": str(error), "validation": draft.validation}, 400
-        if not challenge.image.startswith(("mac:", "pwncollege-", "pwncollege/", "challenges.pwn.college/")):
+        if (
+            challenge.exercise_mode != "SIMULATION"
+            and not challenge.image.startswith(
+                (
+                    "mac:",
+                    "pwncollege-",
+                    "pwncollege/",
+                    "challenges.pwn.college/",
+                )
+            )
+        ):
             publish_image_pull(challenge.image, dojo_reference_id=challenge.dojo.reference_id)
         solution_run = enqueue_solution_run(
             challenge,
@@ -1117,7 +1139,7 @@ class LearningTutor(Resource):
         challenge = get_current_dojo_challenge(user)
         attempt = active_attempt(user.id, challenge) if challenge else None
         if not attempt:
-            return {"success": False, "error": "当前没有活动靶场 attempt"}, 409
+            return {"success": False, "error": "当前没有活动题目会话"}, 409
         if not question:
             return {"success": False, "error": "问题不能为空"}, 400
         profile = LearningChallengeProfiles.query.get(attempt.challenge_id)

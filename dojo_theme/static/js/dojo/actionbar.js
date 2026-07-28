@@ -22,11 +22,21 @@ function isPopout(root) {
 }
 
 function serviceName(service) {
-    return service.split(": ")[0];
+    return String(service || "").split(":", 1)[0].trim();
 }
 
 function servicePort(service) {
-    return service.split(": ")[1];
+    const value = String(service || "");
+    const separator = value.indexOf(":");
+    return separator < 0 ? "" : value.slice(separator + 1).trim();
+}
+
+function isSimulationService(service) {
+    return serviceName(service) === "simulation";
+}
+
+function exerciseMode(root) {
+    return String(root.attr("data-exercise-mode") || "CONTAINER").toUpperCase();
 }
 
 function isSpecialService(service) {
@@ -85,6 +95,7 @@ function workspaceModeLabel(service) {
         code: "VS Code",
         desktop: "远程桌面",
         web: "Web",
+        simulation: "安全模拟",
     }[serviceName(service)] || serviceName(service) || `端口 ${servicePort(service)}`;
 }
 
@@ -355,7 +366,7 @@ function loadIframe(service, content) {
 
 function workspaceModeUrl(service) {
     const url = new URL("/workspace", window.location.origin);
-    if (isSpecialService(service)) {
+    if (isSpecialService(service) || isSimulationService(service)) {
         url.searchParams.set("service", serviceName(service));
     }
     else {
@@ -405,6 +416,31 @@ function selectService(service, log=true) {
         $(this).toggleClass("active", active);
         $(this).attr("aria-pressed", active ? "true" : "false");
     });
+    if (isSimulationService(service)) {
+        cancelWorkspaceLoad(content);
+        updateWorkspaceWebAddress(content, service, null);
+        content.removeAttribute("src");
+        content.hidden = true;
+        $(content).removeClass("SSH");
+        $(".workspace-ssh").hide();
+        if (!isPopout(root)) {
+            updateWorkspaceModeUrl(service);
+        }
+        if (window.AISecEduSimulation) {
+            window.AISecEduSimulation.activate().catch(function (error) {
+                animateBanner(
+                    {target: root[0]},
+                    error.message || "模拟环境加载失败。",
+                    "error"
+                );
+            });
+        }
+        return;
+    }
+    if (window.AISecEduSimulation) {
+        window.AISecEduSimulation.deactivate();
+    }
+    content.hidden = false;
     if (serviceName(service) == "ssh" && servicePort(service) == "") {
         cancelWorkspaceLoad(content);
         updateWorkspaceWebAddress(content, service, null);
@@ -425,7 +461,8 @@ function selectService(service, log=true) {
 
 function portlessButton(root) {
     return root.find(".workspace-service").filter(function () {
-        return servicePort($(this).attr("data-service")) === "";
+        const service = $(this).attr("data-service");
+        return serviceName(service) === "ssh" && servicePort(service) === "";
     });
 }
 
@@ -433,7 +470,11 @@ function portedService(root) {
     var service = null;
     root.find(".workspace-service").each(function () {
         const candidate = $(this).attr("data-service");
-        if (service === null && servicePort(candidate) !== "") {
+        if (
+            service === null &&
+            !isSimulationService(candidate) &&
+            servicePort(candidate) !== ""
+        ) {
             service = candidate;
         }
     });
@@ -459,6 +500,16 @@ function serviceClickCallback(event) {
             return;
         }
         selectService(service);
+        return;
+    }
+    if (isSimulationService(service)) {
+        const targetUrl = workspaceModeUrl(service);
+        const popout = window.open(targetUrl, "workspace-simulation");
+        if (!popout) {
+            animateBanner(event, "浏览器阻止了新窗口，请允许本站点打开弹窗。", "warn");
+            return;
+        }
+        popout.focus();
         return;
     }
     if (servicePort(service) === "") {
@@ -657,6 +708,25 @@ function setActionbarBusy(root, busy) {
     }
 }
 
+function updateSimulationRun(root, result) {
+    if (!result || !result.simulationRunId) return;
+    root.attr("data-simulation-run-id", result.simulationRunId);
+    const simulation = root
+        .closest(".challenge-workspace")
+        .find("[data-simulation-workspace]")
+        .first();
+    simulation.attr("data-run-id", result.simulationRunId);
+    if (window.AISecEduSimulation && simulation.length) {
+        window.AISecEduSimulation.reload().catch(function (error) {
+            animateBanner(
+                {target: root[0]},
+                error.message || "新的模拟运行加载失败。",
+                "error"
+            );
+        });
+    }
+}
+
 function challengeLaunchParameters(root, privileged) {
     const challenge = root.find("#current-challenge-id");
     const embedded = {
@@ -738,11 +808,20 @@ function actionStartChallenge(event, privileged) {
             privilegeControl.find("input").prop("checked", privileged);
 
             setActionbarRunning(root, true);
+            updateSimulationRun(root, result);
             refreshWorkspace(root);
             postStartChallenge(event, channel);
             window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
             setActionbarBusy(root, false);
-            animateBanner(event, "题目容器已重新创建，/home/hacker 文件已保留。", "success");
+            animateBanner(
+                event,
+                exerciseMode(root) === "SIMULATION"
+                    ? "已创建新的模拟运行，历史回放仍然保留。"
+                    : exerciseMode(root) === "HYBRID"
+                    ? "混合题运行环境与模拟状态已重新创建，Home 文件已保留。"
+                    : "题目容器已重新创建，/home/hacker 文件已保留。",
+                "success"
+            );
         });
     }).catch(function (error) {
         startFailed(error.message);
@@ -752,14 +831,26 @@ function actionStartChallenge(event, privileged) {
 async function actionStartCallback(event) {
     event.preventDefault();
     const root = context(event);
+    const mode = exerciseMode(root);
+    const running = actionbarIsRunning(root);
     const confirmed = await confirmWorkspaceAction(
-        actionbarIsRunning(root)
-            ? "当前题目容器会被替换，正在运行的进程和未写入 /home/hacker 的修改将丢失；Home 文件会保留。"
-            : "将重新创建当前题目容器，已有的 /home/hacker 文件会继续保留。",
+        mode === "SIMULATION"
+            ? running
+                ? "当前模拟运行会结束并保留为回放记录，新运行将从场景初始状态开始。"
+                : "将从场景初始状态创建一份新的模拟运行。"
+            : running
+            ? "当前题目运行环境会被替换，正在运行的进程和未写入 /home/hacker 的修改将丢失；Home 文件会保留。"
+            : "将重新创建当前题目运行环境，已有的 /home/hacker 文件会继续保留。",
         {
-            title: actionbarIsRunning(root) ? "重启题目容器" : "重新启动题目容器",
-            subtitle: "保留 Home，重新创建运行环境",
-            confirmLabel: actionbarIsRunning(root) ? "确认重启" : "启动容器",
+            title: mode === "SIMULATION"
+                ? running ? "重新开始模拟" : "启动模拟"
+                : running ? "重启题目环境" : "重新启动题目环境",
+            subtitle: mode === "SIMULATION"
+                ? "保留历史，创建全新的场景状态"
+                : "保留 Home，重新创建运行环境",
+            confirmLabel: mode === "SIMULATION"
+                ? running ? "重新开始" : "启动模拟"
+                : running ? "确认重启" : "启动环境",
         }
     );
     if (!confirmed) return;
@@ -788,14 +879,23 @@ async function privilegeChangeCallback(event) {
 
 function showWorkspaceStopped(root) {
     const content = workspaceIframe(root);
+    const mode = exerciseMode(root);
+    if (window.AISecEduSimulation) {
+        window.AISecEduSimulation.deactivate();
+    }
     if (content) {
         cancelWorkspaceLoad(content);
         content.removeAttribute("src");
+        content.hidden = false;
         const panel = workspaceLoadingPanel(content);
         panel.removeClass("is-error").addClass("is-active is-stopped");
-        panel.find("[data-workspace-loading-title]").text("题目容器已停止");
+        panel.find("[data-workspace-loading-title]").text(
+            mode === "SIMULATION" ? "模拟运行已停止" : "题目运行环境已停止"
+        );
         panel.find("[data-workspace-loading-detail]").text(
-            "/home/hacker 文件仍然保留。点击“重启”可重新创建题目容器。"
+            mode === "SIMULATION"
+                ? "本轮事件和状态快照已保留。点击“重新开始”可创建新的模拟运行。"
+                : "/home/hacker 文件仍然保留。点击“重启”可重新创建题目运行环境。"
         );
     }
     root.find(".workspace-service").removeClass("active").attr("aria-pressed", "false");
@@ -817,11 +917,16 @@ function collapseEmbeddedWorkspace(root) {
 async function actionStopCallback(event) {
     event.preventDefault();
     const root = context(event);
+    const mode = exerciseMode(root);
     const confirmed = await confirmWorkspaceAction(
-        "运行中的进程以及未写入 /home/hacker 的容器修改会丢失，Home 文件会保留。停止后可再次启动题目。",
+        mode === "SIMULATION"
+            ? "当前模拟运行会结束，但事件链、状态快照与评分证据会保留，之后可以重新开始。"
+            : "运行中的进程以及未写入 /home/hacker 的容器修改会丢失，Home 文件会保留。停止后可再次启动题目。",
         {
-            title: "停止题目容器",
-            subtitle: "保留 Home，结束当前运行环境",
+            title: mode === "SIMULATION" ? "停止模拟运行" : "停止题目运行环境",
+            subtitle: mode === "SIMULATION"
+                ? "保留回放，结束当前场景"
+                : "保留 Home，结束当前运行环境",
             confirmLabel: "确认停止",
             confirmStyle: "warning",
         }
@@ -855,7 +960,13 @@ async function actionStopCallback(event) {
         showWorkspaceStopped(root);
         window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
         window.dispatchEvent(new CustomEvent("dojo:workspace-stopped"));
-        animateBanner(event, "题目容器已停止，/home/hacker 文件已保留。", "success");
+        animateBanner(
+            event,
+            mode === "SIMULATION"
+                ? "模拟运行已停止，回放与评分证据已保留。"
+                : "题目运行环境已停止，/home/hacker 文件已保留。",
+            "success"
+        );
         window.setTimeout(() => collapseEmbeddedWorkspace(root), 180);
     }).catch(function (error) {
         animateBanner(event, error.message || "停止题目容器失败。", "error");
@@ -867,14 +978,19 @@ async function actionStopCallback(event) {
 async function actionResetCallback(event) {
     event.preventDefault();
     const root = context(event);
+    const mode = exerciseMode(root);
     const confirmed = await confirmWorkspaceAction(
-        "这会永久清除 /home/hacker 与当前容器中的全部修改，然后从题目初始状态重新创建运行环境。此操作无法撤销。",
+        mode === "SIMULATION"
+            ? "当前模拟运行会结束并保留为历史记录；新的运行将从题目定义的初始状态开始。"
+            : "这会永久清除 /home/hacker 与当前容器中的全部修改，然后从题目初始状态重新创建运行环境。此操作无法撤销。",
         {
-            title: "彻底重置题目",
-            subtitle: "Home 文件也会被清除",
-            confirmLabel: "清除并重置",
-            confirmStyle: "danger",
-            kind: "danger",
+            title: mode === "SIMULATION" ? "重置模拟状态" : "彻底重置题目",
+            subtitle: mode === "SIMULATION"
+                ? "历史可回放，状态从头开始"
+                : "Home 文件也会被清除",
+            confirmLabel: mode === "SIMULATION" ? "确认重置" : "清除并重置",
+            confirmStyle: mode === "SIMULATION" ? "warning" : "danger",
+            kind: mode === "SIMULATION" ? "warning" : "danger",
         }
     );
     if (!confirmed) return;
@@ -898,10 +1014,17 @@ async function actionResetCallback(event) {
             return;
         }
         setActionbarRunning(root, true);
+        updateSimulationRun(root, result);
         refreshWorkspace(root);
         postStartChallenge(event, channel);
         window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
-        animateBanner(event, "题目已恢复到初始状态。", "success");
+        animateBanner(
+            event,
+            mode === "SIMULATION"
+                ? "模拟场景已恢复到初始状态。"
+                : "题目已恢复到初始状态。",
+            "success"
+        );
     }).catch(function () {
         animateBanner(event, "重置题目失败。", "error");
     }).finally(function () {
@@ -943,6 +1066,10 @@ function refreshWorkspace(root) {
     }
     var active = root.find(".workspace-service.active").attr("data-service");
     if (active) {
+        if (isSimulationService(active) && window.AISecEduSimulation) {
+            window.AISecEduSimulation.reload();
+            return;
+        }
         selectService(active, false);
     }
     else {

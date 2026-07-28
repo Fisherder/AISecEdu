@@ -539,12 +539,26 @@ class DojoChallenges(db.Model):
     required = db.Column(db.Boolean, default=True, nullable=False)
 
     data = db.Column(JSONB)
-    data_fields = ["image", "privileged", "path_override", "importable", "allow_privileged", "progression_locked", "survey", "unified_index", "interfaces"]
+    data_fields = [
+        "image",
+        "privileged",
+        "path_override",
+        "importable",
+        "allow_privileged",
+        "progression_locked",
+        "survey",
+        "unified_index",
+        "interfaces",
+        "exercise_mode",
+        "simulation",
+    ]
     data_defaults = {
         "privileged": False,
         "importable": True,
         "allow_privileged": True,
         "progression_locked": False,
+        "exercise_mode": "CONTAINER",
+        "simulation": None,
         "interfaces": [
             dict(name="Terminal", port=7681),
             dict(name="Code",     port=8080),
@@ -583,6 +597,8 @@ class DojoChallenges(db.Model):
             # TODO: maybe we should track the entire import
             kwargs["data"]["image"] = default.data.get("image")
             kwargs["data"]["path_override"] = str(default.path)
+            kwargs["data"]["exercise_mode"] = default.exercise_mode
+            kwargs["data"]["simulation"] = default.simulation
             # only update the unified_index for module and dojo imports, not challenge specific ones
             if default.data.get("module_import", False):
                 kwargs["data"]["unified_index"] = default.data.get("unified_index")
@@ -957,6 +973,9 @@ from .learning import (
     LearningGuideMessages,
     LearningGuideThreads,
     LearningRecommendations,
+    LearningSimulationEvents,
+    LearningSimulationRuns,
+    LearningSimulationSnapshots,
     LearningSolutionRuns,
     LearningSkillStates,
     LearningTutorMessages,

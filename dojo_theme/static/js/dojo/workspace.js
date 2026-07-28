@@ -131,7 +131,7 @@ function initializeWorkspaceNavigation() {
             return;
         }
         const confirmed = window.AISecEduUI && await window.AISecEduUI.confirm(
-            `当前运行中的题目容器会被替换。切换到“${challenge.name || challenge.id}”后，/home/hacker 文件仍会保留。`,
+            `当前运行中的题目环境会被替换。切换到“${challenge.name || challenge.id}”后，可保留的工作区数据和历史回放仍会保留。`,
             {
                 title: "切换题目",
                 subtitle: `${course.name || course.id} · ${module.name || module.id}`,

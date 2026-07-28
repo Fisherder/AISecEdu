@@ -180,10 +180,10 @@ async function startChallenge(event) {
     const selectedChallenge = item.find(".challenge-name").first();
     if (activeChallenge.length && !activeChallenge.is(selectedChallenge)) {
         const confirmed = window.AISecEduUI && await window.AISecEduUI.confirm(
-            `当前运行中的题目容器会被替换。切换到“${selectedChallenge.data("challenge-name") || challenge}”后，/home/hacker 文件仍会保留。`,
+            `当前运行中的题目环境会被替换。切换到“${selectedChallenge.data("challenge-name") || challenge}”后，可保留的工作区数据和历史回放仍会保留。`,
             {
                 title: "切换题目",
-                subtitle: "保留 Home，替换当前运行环境",
+                subtitle: "保留学习记录，替换当前运行环境",
                 confirmLabel: "切换并启动",
             }
         );
@@ -255,7 +255,11 @@ async function startChallenge(event) {
         result_notification.removeClass();
 
         if (result.success) {
-            var message = "题目已成功启动！";
+            var message = result.exerciseMode === "SIMULATION"
+                ? "模拟题已成功启动！"
+                : result.exerciseMode === "HYBRID"
+                ? "混合实践题已成功启动！"
+                : "题目已成功启动！";
             result_message.html(message);
             result_notification.addClass('alert alert-info alert-dismissable text-center');
 
@@ -277,6 +281,11 @@ async function startChallenge(event) {
         $(".challenge-workspace").addClass("challenge-hidden");
         $(".iframe-wrapper").html("");
         if (result.success) {
+            if (result.exerciseMode === "SIMULATION") {
+                window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
+                window.location.assign("/workspace?service=simulation");
+                return;
+            }
             item.find(".iframe-wrapper").html("<iframe id=\"workspace-iframe\" class=\"challenge-iframe\" src=\"about:blank\" allow=\"clipboard-read *; clipboard-write *; fullscreen *\" allowfullscreen></iframe>");
             loadWorkspace();
             item.find(".challenge-init").addClass("challenge-hidden");

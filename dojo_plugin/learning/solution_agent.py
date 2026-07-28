@@ -16,6 +16,11 @@ from ..models import (
 from ..utils import unserialize_user_flag
 from ..api.v1.docker import remove_container, start_challenge
 from .intelligence import model_json
+from .simulation import (
+    challenge_exercise_mode,
+    challenge_scenario,
+    verify_scenario_reachability,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -417,6 +422,91 @@ def _run_solution_agent(app, run_id):
                 module_index=run.module_index,
                 challenge_index=run.challenge_index,
             ).one()
+            exercise_mode = challenge_exercise_mode(
+                challenge,
+                version=run.package_version,
+            )
+            simulation_verification = None
+            if exercise_mode in {"SIMULATION", "HYBRID"}:
+                scenario = challenge_scenario(
+                    challenge,
+                    version=run.package_version,
+                )
+                simulation_verification = verify_scenario_reachability(
+                    scenario
+                )
+                if not simulation_verification["reachable"]:
+                    raise RuntimeError(
+                        "结构化场景的必需目标在回合预算内不可达。"
+                    )
+            if exercise_mode == "SIMULATION":
+                trace = [
+                    {
+                        "turn": index,
+                        "kind": "SIMULATION_ACTION",
+                        "actionId": step["actionId"],
+                        "parameters": step["parameters"],
+                    }
+                    for index, step in enumerate(
+                        simulation_verification["path"],
+                        1,
+                    )
+                ]
+                action_labels = {
+                    action["id"]: action["label"]
+                    for action in scenario["actions"]
+                }
+                run.steps = trace
+                run.solution = {
+                    "overview": (
+                        "平台通过声明式状态内核重放了一条最短可达路径，并验证所有"
+                        "必需目标均由确定性状态条件完成。"
+                    ),
+                    "steps": [
+                        {
+                            "turn": step["turn"],
+                            "actionId": step["actionId"],
+                            "action": action_labels.get(
+                                step["actionId"],
+                                step["actionId"],
+                            ),
+                            "parameters": step["parameters"],
+                        }
+                        for step in trace
+                    ],
+                    "tools": ["AISecEdu Simulation Engine"],
+                    "verificationSummary": (
+                        f"状态空间搜索检查了 "
+                        f"{simulation_verification['exploredStates']} 个状态，"
+                        f"最短完成路径为 "
+                        f"{simulation_verification['shortestTurns']} 回合。"
+                    ),
+                    "provider": "DETERMINISTIC_REPLAY",
+                    "traceBound": True,
+                }
+                run.verification = {
+                    "objectivesVerified": True,
+                    "scenarioReachable": True,
+                    "shortestTurns": simulation_verification[
+                        "shortestTurns"
+                    ],
+                    "exploredStates": simulation_verification[
+                        "exploredStates"
+                    ],
+                    "deterministicReplay": True,
+                    "eventModel": "STRUCTURED_SIMULATION_DSL",
+                    "policyVersion": _POLICY_VERSION,
+                    "verifiedAt": (
+                        datetime.datetime.utcnow().isoformat() + "Z"
+                    ),
+                }
+                run.status = "VERIFIED"
+                run.phase = "complete"
+                run.progress = 100
+                run.completed = datetime.datetime.utcnow()
+                run.error = None
+                db.session.commit()
+                return
             solver_user = _temporary_solver_user(run.id)
             container = start_challenge(solver_user, challenge, False)
             run = _set_run_state(
@@ -504,6 +594,7 @@ def _run_solution_agent(app, run_id):
                     solution.get("modelTraceMappingAccepted")
                 ),
                 "policyVersion": _POLICY_VERSION,
+                "simulationReachability": simulation_verification,
                 "verifiedAt": datetime.datetime.utcnow().isoformat() + "Z",
             }
             run.status = "VERIFIED"

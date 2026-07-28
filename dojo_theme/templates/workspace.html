@@ -3,6 +3,7 @@
 
 {% block stylesheets %}
 {{ super() }}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/simulation.css') }}?v=aisecedu-20260728-simulation-engine">
 
 <style>
     html, body {
@@ -78,6 +79,9 @@
   <div class="challenge-workspace">
     <div class="challenge-workspace-body">
       <div class="challenge-workspace-surface">
+        {% if exercise_mode in ["SIMULATION", "HYBRID"] %}
+        {% include "components/simulation_workspace.html" %}
+        {% endif %}
         <iframe src="about:blank" id="workspace-iframe" name="workspace" allow="clipboard-read *; clipboard-write *; fullscreen *" allowfullscreen></iframe>
         {% include "components/workspace_loading.html" %}
         <div class="workspace-ssh" style="display: none;">
@@ -94,6 +98,7 @@
 
 
 {% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/simulation.js') }}?v=aisecedu-20260728-simulation-engine"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/actionbar.js') }}?v=aisecedu-20260726-score-short-web"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}?v=aisecedu-20260726-pwn-notices"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js') }}?v=aisecedu-20260726-guided-workspace"></script>

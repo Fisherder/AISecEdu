@@ -304,11 +304,28 @@
   }
 </style>
 
+{% set active_exercise_mode = exercise_mode if exercise_mode is defined else challenge.exercise_mode %}
+{% set active_simulation_run_id = simulation_run_id if simulation_run_id is defined else "" %}
+{% set active_completion_policy = simulation_completion_policy if simulation_completion_policy is defined else none %}
 {% set service_icons = {"terminal": "fa-terminal", "code": "fa-code", "desktop": "fa-desktop", "ssh": "fa-key", "lecture": "fa-video"} %}
-<div class="workspace-controls" data-popout="{{ 'true' if popout else 'false' }}">
+<div class="workspace-controls"
+    data-popout="{{ 'true' if popout else 'false' }}"
+    data-exercise-mode="{{ active_exercise_mode or 'CONTAINER' }}"
+    data-simulation-run-id="{{ active_simulation_run_id }}">
   <div id="workspace-notification-banner" role="status"></div>
+  {% if active_exercise_mode in ["SIMULATION", "HYBRID"] %}
+  <button class="workspace-control workspace-service btn btn-md btn-outline-secondary"
+      data-service="simulation:"
+      aria-pressed="false"
+      title="打开结构化安全模拟环境">
+    <i class="fas fa-project-diagram"></i>
+    <span class="workspace-service-name">Simulation</span>
+  </button>
+  {% endif %}
+  {% if active_exercise_mode != "SIMULATION" %}
   {% for service in challenge.interfaces %}
   {% set service_key = service.name | lower %}
+  {% if service_key != "simulation" %}
   <button class="workspace-control workspace-service btn btn-md btn-outline-secondary"
       data-service="{{ service_key }}: {{ service.port }}"
       aria-pressed="false"
@@ -318,40 +335,46 @@
     {% if popout and service.port %}<i class="fas fa-external-link-alt popout-icon"></i>{% endif %}
     {% if popout and not service.port %}<i class="fas fa-question-circle hint-icon"></i>{% endif %}
   </button>
+  {% endif %}
   {% endfor %}
+  {% endif %}
   <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="paste" title="将本机剪贴板文本粘贴到远程桌面" hidden>
     <i class="fas fa-paste"></i><span>粘贴</span>
   </button>
   <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="copy" title="将远程桌面的最新剪贴板文本复制到本机" hidden>
     <i class="fas fa-copy"></i><span>复制</span>
   </button>
+  {% if active_exercise_mode != "SIMULATION" and active_completion_policy in [None, "FLAG", "EITHER", "BOTH"] %}
   <div title="提交 Flag" class="workspace-control workspace-input">
     <i class="fas fa-flag workspace-highlight input-icon"></i>
     <input id="flag-input" type="text" placeholder="输入 Flag">
-    <input type="hidden" id="current-challenge-id" value="{{ challenge.challenge_id }}"
-        data-challenge-name="{{ challenge.name }}"
-        data-dojo-id="{{ dojo.reference_id }}"
-        data-module-id="{{ module.id }}"
-        data-challenge-reference-id="{{ challenge.id }}">
   </div>
+  {% endif %}
+  <input type="hidden" id="current-challenge-id" value="{{ challenge.challenge_id }}"
+      data-challenge-name="{{ challenge.name }}"
+      data-dojo-id="{{ dojo.reference_id }}"
+      data-module-id="{{ module.id }}"
+      data-challenge-reference-id="{{ challenge.id }}">
   <div class="workspace-control-spacer"></div>
   <button id="challenge-restart"
-      title="重新创建题目容器；保留 /home/hacker，运行中的进程和其他容器修改会丢失"
+      title="{% if active_exercise_mode == 'SIMULATION' %}结束当前回合记录并从场景初始状态开始新的作答{% else %}重新创建题目容器；保留 /home/hacker，运行中的进程和其他容器修改会丢失{% endif %}"
       class="workspace-control workspace-lifecycle btn btn-md btn-outline-secondary btn-challenge-start btn-challenge-busy">
     <i class="fas fa-redo"></i>
-    <span>重启</span>
+    <span>{{ "重新开始" if active_exercise_mode == "SIMULATION" else "重启" }}</span>
   </button>
   <button id="challenge-stop"
-      title="停止并删除当前题目容器；保留 /home/hacker，之后可点击“重启”再次创建"
+      title="{% if active_exercise_mode == 'SIMULATION' %}停止当前模拟运行并保留回放记录{% else %}停止并删除当前题目容器；保留 /home/hacker，之后可点击“重启”再次创建{% endif %}"
       class="workspace-control workspace-lifecycle workspace-stop btn btn-md btn-outline-warning btn-challenge-busy">
     <i class="fas fa-stop"></i>
     <span>停止</span>
   </button>
-  <button id="challenge-reset" title="清除 Home 文件并恢复题目初始状态" class="workspace-control workspace-reset btn btn-md btn-outline-danger btn-challenge-busy">
+  <button id="challenge-reset"
+      title="{% if active_exercise_mode == 'SIMULATION' %}结束当前运行并创建一份全新的初始场景{% else %}清除 Home 文件并恢复题目初始状态{% endif %}"
+      class="workspace-control workspace-reset btn btn-md btn-outline-danger btn-challenge-busy">
     <i class="fas fa-eraser"></i>
     <span class="workspace-service-name">重置</span>
   </button>
-  {% if challenge.allow_privileged %}
+  {% if active_exercise_mode != "SIMULATION" and challenge.allow_privileged %}
   <label id="workspace-change-privilege"
       title="以启用或禁用 sudo 的方式重启题目"
       class="workspace-control btn btn-md btn-outline-secondary"

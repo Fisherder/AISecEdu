@@ -7,7 +7,7 @@ from email.message import EmailMessage
 from email.utils import formatdate
 from urllib.parse import urlparse, urlunparse
 
-from flask import Response, request, redirect, current_app
+from flask import Response, request, redirect, current_app, g
 from itsdangerous.exc import BadSignature
 from marshmallow_sqlalchemy import field_for
 from CTFd.models import db, Challenges, Users, Solves
@@ -62,9 +62,46 @@ class DojoChallenge(BaseChallenge):
         if dojo_challenge:
             from .learning.assessment import assess_attempt
             from .learning.evidence import record_flag_check
+            from .learning.simulation import (
+                active_simulation_run,
+                complete_simulation_from_flag,
+                mark_simulation_solved,
+            )
+            from .models import LearningSimulationRuns
 
             try:
-                learning_attempt = record_flag_check(user, dojo_challenge, True)
+                simulation_run_id = getattr(
+                    g,
+                    "aisecedu_simulation_completion",
+                    None,
+                )
+                simulation_run = (
+                    LearningSimulationRuns.query.filter_by(
+                        id=simulation_run_id,
+                        challenge_id=challenge.id,
+                    ).first()
+                    if simulation_run_id
+                    else None
+                )
+                if (
+                    simulation_run is not None
+                    and simulation_run.attempt.user_id != user.id
+                ):
+                    simulation_run = None
+                if simulation_run is not None:
+                    learning_attempt = mark_simulation_solved(simulation_run)
+                else:
+                    learning_attempt = record_flag_check(
+                        user,
+                        dojo_challenge,
+                        True,
+                    )
+                    simulation_run = active_simulation_run(
+                        user.id,
+                        dojo_challenge,
+                    )
+                    if simulation_run is not None:
+                        complete_simulation_from_flag(simulation_run)
                 assess_attempt(learning_attempt, run_model=False)
                 db.session.commit()
             except Exception:
@@ -72,6 +109,8 @@ class DojoChallenge(BaseChallenge):
                 logging.getLogger(__name__).exception(
                     "Failed to record deterministic learning assessment"
                 )
+                if simulation_run_id:
+                    raise
             dojo = dojo_challenge.module.dojo
             if dojo.official or dojo.data.get("type") == "public":
                 module = dojo_challenge.module
@@ -119,6 +158,29 @@ class DojoFlag(BaseFlag):
 
         if challenge_id != current_challenge_id:
             raise FlagException("This flag is not for this challenge!")
+
+        dojo_challenge = DojoChallenges.query.filter_by(
+            challenge_id=current_challenge_id
+        ).first()
+        if dojo_challenge:
+            from .learning.simulation import (
+                active_simulation_run,
+                challenge_exercise_mode,
+                simulation_accepts_flag,
+            )
+
+            exercise_mode = challenge_exercise_mode(dojo_challenge)
+            if exercise_mode == "SIMULATION":
+                raise FlagException("本题由模拟目标完成，不接受 Flag。")
+            if exercise_mode == "HYBRID":
+                run = active_simulation_run(
+                    get_current_user().id,
+                    dojo_challenge,
+                )
+                if run is None or not simulation_accepts_flag(run):
+                    raise FlagException(
+                        "当前模拟目标尚未满足本题的 Flag 提交条件。"
+                    )
 
         return True
 

@@ -9,6 +9,28 @@ Challenges have two fundamental properties:
 - **Binary Outcome**: Each challenge has exactly two states—*solved* or *unsolved*. Crucially, there is no concept of "failing" a challenge. Challenges begin as unsolved, and once solved, remain permanently solved.
 - **Independent Completion**: Each student works independently on challenges. One student's success does not impact another student's ability to attempt or solve the same challenge.
 
+## Runtime Modes
+
+AISecEdu preserves one challenge system while supporting three runtime modes:
+
+- `CONTAINER` is the traditional isolated Linux/CTF environment described below.
+- `SIMULATION` runs a versioned, declarative security scenario. Learners manipulate typed actions and inspect structured views; deterministic objectives create the same normal `Solve` record as a flag.
+- `HYBRID` runs both and can require scenario objectives, a flag, either result, or both.
+
+Set `exercise_mode` and, for simulation-capable modes, a `simulation` object on the dojo, module, or challenge. A compact built-in example is:
+
+```yaml
+- id: wireless-response
+  name: Wireless incident response
+  exercise_mode: SIMULATION
+  interfaces:
+    - name: Simulation
+  simulation:
+    preset: WIRELESS
+```
+
+The simulation scenario is expanded and validated when the dojo is loaded. It uses bounded JSON state, typed parameters, allowlisted conditions/effects, public-only view bindings, deterministic objective evaluation, an event hash chain, snapshots, and replay. It never executes model-authored HTML, JavaScript, Python, shell commands, or arbitrary expressions. See [learning.md](learning.md#统一题目模式与模拟引擎) for the full contract.
+
 ## Verification Inspired by Capture The Flag Competitions
 
 Challenges utilize a verification method inspired by "Capture The Flag" (CTF) competitions:

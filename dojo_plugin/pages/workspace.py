@@ -8,6 +8,12 @@ from CTFd.utils.decorators import authed_only
 from urllib.parse import urlencode
 
 from ..models import Dojos
+from ..learning.simulation import (
+    SimulationError,
+    challenge_exercise_mode,
+    challenge_scenario,
+    current_simulation_run,
+)
 from ..utils import get_current_container, container_password
 from ..utils.dojo import get_current_dojo_challenge
 
@@ -30,7 +36,32 @@ def view_workspace():
         return render_template("error.html", error="No active challenge session; start a challenge!")
 
     user = get_current_user()
-    practice = get_current_container(user).labels.get("dojo.mode") == "privileged"
+    container = get_current_container(user)
+    practice = (
+        container.labels.get("dojo.mode") == "privileged"
+        if container
+        else False
+    )
+    exercise_mode = challenge_exercise_mode(current_challenge)
+    simulation_run = current_simulation_run(user.id, current_challenge)
+    simulation_completion_policy = None
+    if exercise_mode in {"SIMULATION", "HYBRID"}:
+        try:
+            simulation_completion_policy = challenge_scenario(
+                current_challenge,
+                version=(
+                    simulation_run.scenario_version
+                    if simulation_run
+                    else None
+                ),
+                digest=(
+                    simulation_run.scenario_digest
+                    if simulation_run
+                    else None
+                ),
+            )["completionPolicy"]
+        except SimulationError:
+            simulation_completion_policy = "OBJECTIVES"
 
     return render_template(
         "workspace.html",
@@ -39,6 +70,9 @@ def view_workspace():
         user=user,
         practice=practice,
         challenge=current_challenge,
+        exercise_mode=exercise_mode,
+        simulation_run_id=simulation_run.id if simulation_run else None,
+        simulation_completion_policy=simulation_completion_policy,
     )
 
 @workspace.route("/workspace/<int:port>", strict_slashes=False)

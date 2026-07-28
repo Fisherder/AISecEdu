@@ -264,6 +264,123 @@ class LearningEvidenceEvents(db.Model):
     attempt = db.relationship("LearningAttempts")
 
 
+class LearningSimulationRuns(db.Model):
+    __tablename__ = "learning_simulation_runs"
+    __table_args__ = (
+        db.Index(
+            "ix_learning_simulation_active",
+            "user_id",
+            "status",
+            "updated",
+        ),
+        db.Index(
+            "ix_learning_simulation_challenge",
+            "dojo_id",
+            "module_index",
+            "challenge_index",
+            "created",
+        ),
+    )
+
+    id = db.Column(db.String(48), primary_key=True, default=lambda: learning_id("sim"))
+    attempt_id = db.Column(
+        db.String(48),
+        db.ForeignKey("learning_attempts.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    dojo_id = db.Column(db.Integer, nullable=False, index=True)
+    module_index = db.Column(db.Integer, nullable=False)
+    challenge_index = db.Column(db.Integer, nullable=False)
+    challenge_id = db.Column(
+        db.Integer,
+        db.ForeignKey("challenges.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    scenario_version = db.Column(db.Integer, default=1, nullable=False)
+    scenario_digest = db.Column(db.String(64), nullable=False, index=True)
+    seed = db.Column(db.BigInteger, nullable=False)
+    status = db.Column(db.String(24), default="ACTIVE", nullable=False, index=True)
+    turn = db.Column(db.Integer, default=0, nullable=False)
+    public_state = db.Column(JSONB, default=dict, nullable=False)
+    private_state = db.Column(JSONB, default=dict, nullable=False)
+    objective_state = db.Column(JSONB, default=list, nullable=False)
+    metadata_json = db.Column("metadata", JSONB, default=dict, nullable=False)
+    created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated = db.Column(
+        db.DateTime,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow,
+        nullable=False,
+        index=True,
+    )
+    completed = db.Column(db.DateTime)
+
+    attempt = db.relationship("LearningAttempts")
+    user = db.relationship("Users")
+    challenge = db.relationship("Challenges")
+
+
+class LearningSimulationEvents(db.Model):
+    __tablename__ = "learning_simulation_events"
+    __table_args__ = (
+        db.UniqueConstraint("run_id", "sequence"),
+        db.Index("ix_learning_simulation_event_timeline", "run_id", "created"),
+    )
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    run_id = db.Column(
+        db.String(48),
+        db.ForeignKey("learning_simulation_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sequence = db.Column(db.Integer, nullable=False)
+    event_type = db.Column(db.String(64), nullable=False, index=True)
+    action_id = db.Column(db.String(64), index=True)
+    actor = db.Column(db.String(32), nullable=False)
+    request_json = db.Column("request", JSONB, default=dict, nullable=False)
+    transition = db.Column(JSONB, default=dict, nullable=False)
+    observation = db.Column(JSONB, default=dict, nullable=False)
+    previous_hash = db.Column(db.String(64), nullable=False)
+    event_hash = db.Column(db.String(64), nullable=False, index=True)
+    created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    run = db.relationship("LearningSimulationRuns")
+
+
+class LearningSimulationSnapshots(db.Model):
+    __tablename__ = "learning_simulation_snapshots"
+    __table_args__ = (
+        db.UniqueConstraint("run_id", "sequence"),
+        db.Index("ix_learning_simulation_snapshot", "run_id", "sequence"),
+    )
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    run_id = db.Column(
+        db.String(48),
+        db.ForeignKey("learning_simulation_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sequence = db.Column(db.Integer, nullable=False)
+    public_state = db.Column(JSONB, default=dict, nullable=False)
+    private_state = db.Column(JSONB, default=dict, nullable=False)
+    objective_state = db.Column(JSONB, default=list, nullable=False)
+    state_hash = db.Column(db.String(64), nullable=False, index=True)
+    created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    run = db.relationship("LearningSimulationRuns")
+
+
 class LearningTutorMessages(db.Model):
     __tablename__ = "learning_tutor_messages"
 

@@ -108,7 +108,12 @@
             </details>
             <details id="studio-description-details" class="studio-disclosure" open>
               <summary>题目概述</summary>
+              <div id="studio-exercise-mode-summary" class="alert alert-secondary"></div>
               <p id="studio-draft-description"></p>
+            </details>
+            <details id="studio-simulation-details" class="studio-disclosure" hidden>
+              <summary>模拟场景设计</summary>
+              <div id="studio-simulation-summary"></div>
             </details>
             <div class="row">
               <div class="col-md-6">
@@ -262,5 +267,5 @@
 
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}?v=aisecedu-20260726-pwn-notices"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-studio.js') }}?v=aisecedu-20260726-pwn-notices"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-studio.js') }}?v=aisecedu-20260728-simulation-engine"></script>
 {% endblock %}

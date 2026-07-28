@@ -35,7 +35,7 @@ CTFd + dojo_plugin (Flask)
 | 学生与教师身份 | CTFd 用户与同一 session | 平台管理员或课程 `DojoAdmin` 进入教师工作台，其他已加入成员使用学生视图 |
 | 题库与版本 | 稳定的 `DojoChallenges` 身份 + 不可变运行包版本 | 草稿修订与发布历史分别持久化 |
 | 智能出题 | `LearningAuthoringJobs`、`LearningDrafts`、策略/方案 Agent、Pro 构建/红队/修复/验证 Agent 与不可变运行包 | Agent 自动选策，并自主执行验证、修复和复验；问题未闭环时禁止发布 |
-| 实验环境 | 现有 Kata/Docker workspace | 每个作答环境隔离启动，不另建实验编排器 |
+| 实验环境 | 统一 Workspace + Kata/Docker + Simulation Engine | 每道题选择容器、模拟或混合模式；共享题目身份、attempt、证据、评分与完成记录 |
 | Terminal/IDE/Desktop/SSH | 现有 Workspace 页面和服务 | 围绕当前题目提供统一实验入口 |
 | Guide | `LearningGuideThreads` / `LearningGuideMessages` 与完整学习档案 | ChatGPT 式长期学习对话，结合真实课程、attempt、评分、能力和推荐提供个性化规划 |
 | Tutor 3.0 | `LearningTutorMessages`、完整题目/容器上下文、私有标准解法与当前 attempt/epoch | 比对标准路径和学生实时状态，给出统一提示式、防答案泄露的过程引导 |
@@ -43,6 +43,103 @@ CTFd + dojo_plugin (Flask)
 | 评分与复核 | `LearningAssessments` / `LearningAppeals`、Pro 评分 Agent | Oracle 锁定客观 60 分；Pro 结合全上下文评过程 40 分，支持修订、申诉与教师复评 |
 | 自适应学习 | `LearningSkillStates` / `LearningRecommendations` | 六维能力状态、置信度和下一题推荐 |
 | 教师分析 | 课程教师 API 与教师工作台 | 汇总参与者、attempt、得分、进度、能力与申诉 |
+
+## 统一题目模式与模拟引擎
+
+模拟题不是独立应用或第二套题库。`DojoChallenges` 仍是唯一题目发布实体，每道题只增加一个 `exercise_mode`：
+
+| 模式 | 运行环境 | 完成方式 | 适用场景 |
+| --- | --- | --- | --- |
+| `CONTAINER` | 现有 Kata/Docker Workspace | 动态 Flag / 原生 checker | CTF、代码分析、真实工具与服务操作 |
+| `SIMULATION` | 结构化状态模拟内核 | 必需目标的确定性条件 | 无线通信、侧信道、移动终端、工控、云控制面、应急推演等难以完整实装的场景 |
+| `HYBRID` | 容器与模拟内核同时运行 | `OBJECTIVES`、`FLAG`、`EITHER` 或 `BOTH` | 真实分析工具处理样本，同时在情境状态中作决策和验证 |
+
+三种模式共享课程导航、题目 URL、可见性与解锁、`LearningAttempts`、`Submissions/Solves`、Tutor、Guide、60/40 评分、申诉、能力画像和推荐。纯模拟题不创建空容器、不展示 Flag 输入框；完成必需目标后仍写入标准 CTFd `Solve`，因此排行榜、进度和前置题逻辑无需分叉。
+
+### 引擎边界
+
+```text
+题目 YAML / 教师 Agent
+        │ 结构校验、泄漏检查、可达性搜索
+        ▼
+版本化 Simulation Scenario
+        │
+        ├── public state ──► Topology / Spectrum / Metrics / Table / Timeline / State
+        ├── private state ─► 仅服务端条件、Tutor/Grader 安全参考
+        ├── actions ───────► 类型化参数 + 前置条件 + 使用次数/冷却
+        ├── effects/rules ─► 受限声明式状态转移
+        └── objectives ────► 确定性完成判定
+                  │
+                  ▼
+       事件哈希链 + 每步快照 + 可重放验证
+                  │
+                  ├── LearningEvidenceEvents
+                  ├── Tutor / Guide / Grader
+                  └── CTFd Solve
+```
+
+引擎不执行题目或模型提供的 Python、Shell、JavaScript、HTML/XML。场景只能使用有界 JSON 和白名单 DSL：
+
+- 条件：`eq`、`ne`、`gt/gte`、`lt/lte`、`in`、`contains`、`exists`、`truthy` 等；
+- 效果：`set`、`increment`、`append`、`merge`、`remove`、`toggle`；
+- 参数：`boolean`、`choice`、`entity`、`number`、`text`，均在服务端验证；
+- 状态路径使用 JSON Pointer；学生界面和模型语义补丁只能写 `/public`，视图也只能绑定公开路径；
+- 每个场景限制大小、动作数、规则数、目标数、条件数、效果数和最大回合数。
+
+模型可用于解释开放式学生输入或提出语义补丁，但不能直接决定分数、完成状态或执行代码。服务端只接受题目显式允许的公开路径，并在应用前校验类型、长度、私有字面量泄漏和不变量；模型不可用、超时或输出越界时，确定性规则仍可独立运行。所有必需目标最终都由声明式条件判定。
+
+### 场景规范
+
+最小的手写题目可以使用平台预设：
+
+```yaml
+challenges:
+  - id: wireless-simulation
+    name: 无线接入异常诊断
+    exercise_mode: SIMULATION
+    interfaces:
+      - name: Simulation
+    simulation:
+      preset: WIRELESS
+      title: 无线接入异常诊断
+      description: 分析无线拓扑和频谱状态，形成假设、实施调整并复测。
+```
+
+`WIRELESS` 与 `SECURITY`/`GENERAL` 预设会在课程导入时展开为完整、版本化场景。教师出题 Agent 发布的题目则保存完整规范，核心字段为：
+
+```json
+{
+  "schemaVersion": "dojo-simulation/1.0",
+  "version": 1,
+  "maxTurns": 12,
+  "completionPolicy": "OBJECTIVES",
+  "initialState": {"public": {}, "private": {}},
+  "actions": [],
+  "rules": [],
+  "objectives": [],
+  "views": [],
+  "invariants": []
+}
+```
+
+场景发布前必须同时通过 Schema 检查、公开视图路径检查、私有状态泄漏检查、必需目标有界可达性搜索和确定性重放。题目版本、场景摘要和 attempt 绑定；教师后来更新题目不会改变学生已经开始的运行。
+
+### 运行、持久化与回放
+
+启动纯模拟题会创建普通 attempt 和一条 `LearningSimulationRuns`，初始状态经过规则求值后写入第 0 快照。每次动作在事务与行锁内检查 `expectedTurn`，拒绝过期客户端写入；接受的动作依次执行参数校验、前置条件、效果、分支、规则、不变量和目标求值。运行记录保存：
+
+- 公开/私有/目标状态、随机种子、回合、场景版本与摘要；
+- 只追加的 `LearningSimulationEvents`，每项包含前一哈希和本事件哈希；
+- 每个接受动作后的 `LearningSimulationSnapshots`；
+- 同步写入 attempt 证据链的动作、拒绝、目标、停止和完成事件。
+
+`GET /pwncollege_api/v1/simulations/<run>/replay` 从初始状态按事件重新执行，不信任数据库中的最终状态；返回事件链、状态哈希和快照一致性。停止保留历史但终止当前运行；重启创建新 attempt/run；重置对纯模拟题不删除 `/home/hacker`，因为该题没有把 Home 作为运行状态。混合题仍沿用容器的 Home 语义。
+
+### Workspace 与学习智能
+
+Workspace 的 Simulation 服务使用固定结构化渲染器，不渲染模型原始标记。题目可组合拓扑、频谱、指标、表格、时间线和通用状态视图；窄屏自动重排。动作表单只显示当前可用操作、类型化参数、拒绝原因、目标进度、回合数和事件完整性，动作完成后局部刷新状态而不重载页面。
+
+Tutor 同时接收当前容器快照和/或模拟公开状态、可用动作、目标进度与最近事件，并在服务端用私有状态和标准路径做防泄漏比较。Guide 只有在学生明确引用该题且活动 attempt 匹配时才得到同一公开现场证据。Grader 将成功/拒绝的模拟动作和目标事件与终端命令同等纳入过程 40 分；客观 60 分仍只来源于平台完成判定。
 
 ## 角色流程
 

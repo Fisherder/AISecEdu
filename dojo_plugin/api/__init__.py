@@ -20,6 +20,7 @@ from .v1.search import search_namespace
 from .v1.test_error import test_error_namespace
 from .v1.user import user_namespace
 from .v1.learning import learning_namespace
+from .v1.simulation import simulation_namespace
 
 api = Blueprint("pwncollege_api", __name__)
 
@@ -73,3 +74,4 @@ api_v1.add_namespace(workspace_namespace, "/workspace")
 api_v1.add_namespace(search_namespace, "/search")
 api_v1.add_namespace(test_error_namespace, "/test_error")
 api_v1.add_namespace(learning_namespace, "/learning")
+api_v1.add_namespace(simulation_namespace, "/simulations")
