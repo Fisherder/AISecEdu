@@ -1,0 +1,298 @@
+/* Runtime theme tokens shared by legacy CTFd views and the 玄甲 course UI. */
+:root[data-aisecedu-palette="academy"] {
+  --theme-primary: #3157c8;
+  --theme-primary-strong: #2445a8;
+  --theme-primary-soft: rgba(49, 87, 200, 0.11);
+  --theme-secondary: #176f8e;
+  --theme-success: #2f7a50;
+  --theme-warning: #8a4d00;
+  --theme-danger: #b33d4b;
+  --theme-on-primary: #ffffff;
+  --theme-bg: #f3f6fb;
+  --theme-surface: #ffffff;
+  --theme-surface-raised: #f8faff;
+  --theme-surface-soft: #edf2fa;
+  --theme-surface-hover: #e8effb;
+  --theme-field: #ffffff;
+  --theme-border: #ccd7e6;
+  --theme-border-soft: #e0e6ef;
+  --theme-text: #182235;
+  --theme-text-muted: #5a687c;
+  --theme-text-dim: #647287;
+  --theme-shadow: rgba(28, 45, 72, 0.13);
+  --theme-overlay: rgba(18, 29, 47, 0.55);
+  --theme-stripe: rgba(49, 87, 200, 0.045);
+  --theme-nav: rgba(255, 255, 255, 0.94);
+  --theme-hero: radial-gradient(circle at 10% 0, rgba(49, 87, 200, 0.1), transparent 32rem);
+}
+
+:root[data-aisecedu-palette="forest"] {
+  --theme-primary: #3f7729;
+  --theme-primary-strong: #315d20;
+  --theme-primary-soft: rgba(63, 119, 41, 0.11);
+  --theme-secondary: #256f91;
+  --theme-success: #34794c;
+  --theme-warning: #805000;
+  --theme-danger: #aa3d49;
+  --theme-on-primary: #ffffff;
+  --theme-bg: #f3f6f1;
+  --theme-surface: #ffffff;
+  --theme-surface-raised: #f8faf7;
+  --theme-surface-soft: #edf3e9;
+  --theme-surface-hover: #e8f0e4;
+  --theme-field: #ffffff;
+  --theme-border: #d0dccb;
+  --theme-border-soft: #e0e8dc;
+  --theme-text: #18251a;
+  --theme-text-muted: #5d6c5d;
+  --theme-text-dim: #667565;
+  --theme-shadow: rgba(36, 57, 32, 0.13);
+  --theme-overlay: rgba(21, 34, 20, 0.54);
+  --theme-stripe: rgba(63, 119, 41, 0.045);
+  --theme-nav: rgba(255, 255, 255, 0.94);
+  --theme-hero: radial-gradient(circle at 10% 0, rgba(63, 119, 41, 0.1), transparent 32rem);
+}
+
+:root[data-aisecedu-palette="sunrise"] {
+  --theme-primary: #a64b14;
+  --theme-primary-strong: #80370d;
+  --theme-primary-soft: rgba(166, 75, 20, 0.11);
+  --theme-secondary: #246d8d;
+  --theme-success: #397449;
+  --theme-warning: #7f4e00;
+  --theme-danger: #a83d48;
+  --theme-on-primary: #ffffff;
+  --theme-bg: #faf5ed;
+  --theme-surface: #fffdfa;
+  --theme-surface-raised: #fdf9f4;
+  --theme-surface-soft: #f6ede2;
+  --theme-surface-hover: #f4e8da;
+  --theme-field: #fffdfa;
+  --theme-border: #e1d4c5;
+  --theme-border-soft: #eee4d8;
+  --theme-text: #2c2118;
+  --theme-text-muted: #705e50;
+  --theme-text-dim: #796657;
+  --theme-shadow: rgba(74, 48, 28, 0.13);
+  --theme-overlay: rgba(43, 29, 20, 0.54);
+  --theme-stripe: rgba(166, 75, 20, 0.045);
+  --theme-nav: rgba(255, 253, 250, 0.94);
+  --theme-hero: radial-gradient(circle at 10% 0, rgba(166, 75, 20, 0.11), transparent 32rem);
+}
+
+:root[data-aisecedu-palette="midnight"] {
+  --theme-primary: #7ba2ff;
+  --theme-primary-strong: #9ab7ff;
+  --theme-primary-soft: rgba(123, 162, 255, 0.14);
+  --theme-secondary: #63c2d6;
+  --theme-success: #65d19a;
+  --theme-warning: #f0b45d;
+  --theme-danger: #ff7b86;
+  --theme-on-primary: #0a1530;
+  --theme-bg: #0b1220;
+  --theme-surface: #111b2d;
+  --theme-surface-raised: #17243a;
+  --theme-surface-soft: #0e1828;
+  --theme-surface-hover: #1d2c44;
+  --theme-field: #0e192a;
+  --theme-border: #33455f;
+  --theme-border-soft: #26364d;
+  --theme-text: #eef4ff;
+  --theme-text-muted: #b1bdd0;
+  --theme-text-dim: #8292aa;
+  --theme-shadow: rgba(0, 0, 0, 0.36);
+  --theme-overlay: rgba(3, 8, 17, 0.74);
+  --theme-stripe: rgba(255, 255, 255, 0.045);
+  --theme-nav: rgba(17, 27, 45, 0.94);
+  --theme-hero: radial-gradient(circle at 10% 0, rgba(123, 162, 255, 0.1), transparent 32rem);
+}
+
+:root[data-aisecedu-palette] {
+  --brand-black: var(--theme-on-primary);
+  --brand-light-gray: var(--theme-text-dim);
+  --brand-dark-gray: var(--theme-border);
+  --brand-green: var(--theme-primary);
+  --brand-blue: var(--theme-secondary);
+  --brand-gold: var(--theme-warning);
+  --old-brand-green: var(--theme-primary);
+  --old-brand-blue: var(--theme-secondary);
+  --old-brand-gold: var(--theme-warning);
+
+  --ui-bg: var(--theme-bg);
+  --ui-surface: var(--theme-surface);
+  --ui-surface-raised: var(--theme-surface-raised);
+  --ui-surface-hover: var(--theme-surface-hover);
+  --ui-field: var(--theme-field);
+  --ui-border: var(--theme-border);
+  --ui-border-soft: var(--theme-border-soft);
+  --ui-text: var(--theme-text);
+  --ui-text-muted: var(--theme-text-muted);
+  --ui-shadow: var(--theme-shadow);
+  --ui-overlay: var(--theme-overlay);
+  --ui-stripe: var(--theme-stripe);
+
+  --product-bg: var(--theme-bg);
+  --product-surface: var(--theme-surface);
+  --product-surface-raised: var(--theme-surface-raised);
+  --product-surface-soft: var(--theme-surface-soft);
+  --product-surface-hover: var(--theme-surface-hover);
+  --product-border: var(--theme-border-soft);
+  --product-border-strong: var(--theme-border);
+  --product-text: var(--theme-text);
+  --product-muted: var(--theme-text-muted);
+  --product-dim: var(--theme-text-dim);
+  --product-accent: var(--theme-primary);
+  --product-accent-strong: var(--theme-primary-strong);
+  --product-accent-soft: var(--theme-primary-soft);
+  --product-blue: var(--theme-secondary);
+  --product-amber: var(--theme-warning);
+  --product-danger: var(--theme-danger);
+  --product-shadow: var(--theme-shadow);
+  --product-overlay: var(--theme-overlay);
+
+  --color-bg: var(--theme-bg);
+  --color-text: var(--theme-text);
+  accent-color: var(--theme-primary);
+}
+
+html,
+body {
+  color: var(--theme-text) !important;
+  background: var(--theme-bg);
+}
+
+body {
+  background-image: var(--theme-hero);
+  background-attachment: fixed;
+}
+
+.product-navbar {
+  border-bottom-color: var(--theme-border-soft);
+  background: var(--theme-nav);
+}
+
+:root[data-aisecedu-palette] .course-system-page {
+  --cs-bg: var(--theme-bg);
+  --cs-bg-soft: var(--theme-field);
+  --cs-surface: var(--theme-surface);
+  --cs-surface-raised: var(--theme-surface-raised);
+  --cs-surface-hover: var(--theme-surface-hover);
+  --cs-line: var(--theme-border-soft);
+  --cs-line-strong: var(--theme-border);
+  --cs-text: var(--theme-text);
+  --cs-muted: var(--theme-text-muted);
+  --cs-dim: var(--theme-text-dim);
+  --cs-accent: var(--theme-primary);
+  --cs-accent-strong: var(--theme-primary-strong);
+  --cs-blue: var(--theme-secondary);
+  --cs-amber: var(--theme-warning);
+  --cs-red: var(--theme-danger);
+  --cs-shadow: 0 10px 28px var(--theme-shadow);
+}
+
+:root[data-aisecedu-palette] .teacher-agent-page {
+  --agent-bg: var(--theme-bg);
+  --agent-surface: var(--theme-surface);
+  --agent-surface-raised: var(--theme-surface-raised);
+  --agent-surface-soft: var(--theme-surface-soft);
+  --agent-border: var(--theme-border-soft);
+  --agent-border-strong: var(--theme-border);
+  --agent-text: var(--theme-text);
+  --agent-muted: var(--theme-text-muted);
+  --agent-dim: var(--theme-text-dim);
+  --agent-accent: var(--theme-primary);
+  --agent-accent-strong: var(--theme-primary-strong);
+  --agent-blue: var(--theme-secondary);
+  background: var(--theme-bg);
+}
+
+.teaching-artifact-page,
+.self-learning-extend-page {
+  background: var(--theme-bg);
+}
+
+.btn-primary,
+.badge-primary,
+.page-item.active .page-link,
+.product-button.is-primary,
+.hub-button.is-primary,
+.cs-btn-primary,
+.product-ai-dot,
+.product-auth-actions .product-login,
+.cs-brand-mark,
+.cs-rail-nav button em,
+.cs-page-tabs button em,
+.teaching-wordmark-icon,
+.teacher-agent-page .teaching-composer-row #teaching-send,
+.teacher-agent-page .teaching-agent-mark,
+.teacher-agent-page .teaching-empty-mark,
+.teacher-agent-page .teaching-drawer-tabs button.is-active {
+  border-color: var(--theme-primary) !important;
+  color: var(--theme-on-primary) !important;
+  background: var(--theme-primary) !important;
+}
+
+:root[data-aisecedu-theme="light"] .navbar-dark.product-navbar .navbar-nav .product-auth-actions .nav-link.product-login {
+  color: #fff !important;
+  background: #3157c8 !important;
+}
+
+:root[data-aisecedu-theme="light"] .navbar-dark.product-navbar .navbar-nav .product-auth-actions .nav-link.product-login:hover,
+:root[data-aisecedu-theme="light"] .navbar-dark.product-navbar .navbar-nav .product-auth-actions .nav-link.product-login:focus {
+  color: #fff !important;
+  background: #2445a8 !important;
+}
+
+:root[data-aisecedu-theme="dark"] .navbar-dark.product-navbar .navbar-nav .product-auth-actions .nav-link.product-login {
+  color: #0a1530 !important;
+  background: #9ab7ff !important;
+}
+
+:root[data-aisecedu-theme="dark"] .navbar-dark.product-navbar .navbar-nav .product-auth-actions .nav-link.product-login:hover,
+:root[data-aisecedu-theme="dark"] .navbar-dark.product-navbar .navbar-nav .product-auth-actions .nav-link.product-login:focus {
+  color: #071027 !important;
+  background: #b5caff !important;
+}
+
+.btn-primary:hover,
+.btn-primary:focus,
+.product-button.is-primary:hover,
+.hub-button.is-primary:hover,
+.cs-btn-primary:hover,
+.teacher-agent-page .teaching-composer-row #teaching-send:hover {
+  border-color: var(--theme-primary-strong) !important;
+  color: var(--theme-on-primary) !important;
+  background: var(--theme-primary-strong) !important;
+}
+
+.btn-outline-primary {
+  border-color: var(--theme-primary) !important;
+  color: var(--theme-primary) !important;
+}
+
+.btn-outline-primary:hover,
+.btn-outline-primary:focus {
+  color: var(--theme-on-primary) !important;
+  background: var(--theme-primary) !important;
+}
+
+.form-control:focus,
+.custom-select:focus {
+  border-color: var(--theme-primary) !important;
+  box-shadow: 0 0 0 3px var(--theme-primary-soft) !important;
+}
+
+.course-hub-tabs button em,
+.simulation-domain,
+.simulation-topology-control.is-active,
+.simulation-view-tab.is-active {
+  color: var(--theme-on-primary) !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html,
+  body,
+  .product-navbar {
+    transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+  }
+}

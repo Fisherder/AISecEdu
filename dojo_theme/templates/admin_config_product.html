@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% set native_config_sections = ('theme', 'fields', 'backup', 'usermode', 'ctftime') %}
+
+{% block body_class %}admin-product-page{% endblock %}
+{% block footer %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/admin-product.css', v='aisecedu-admin-product-v6-readability-v1') }}">
+{% if selected_section in native_config_sections %}
+<link rel="stylesheet" href="{{ url_for('views.themes', theme='admin', path='css/admin.css') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes', theme='admin', path='css/codemirror.css') }}">
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="admin-product admin-config-product" aria-labelledby="admin-config-title">
+  <header class="admin-product-header">
+    <div>
+      <p class="admin-product-eyebrow">平台设置</p>
+      <h1 id="admin-config-title">配置与策略</h1>
+      <p>一次只编辑一个设置分区，避免同名字段互相覆盖；保存仍使用平台原生配置接口。</p>
+    </div>
+    <a class="admin-product-secondary" href="/admin">返回平台概览</a>
+  </header>
+
+  <div class="admin-config-layout">
+    <nav class="admin-config-nav" aria-label="配置分区">
+      {% for key, label, description in config_sections %}
+      <a href="/admin/config?section={{ key }}"{{ ' class=is-active aria-current=page' if selected_section == key else '' }}><strong>{{ label }}</strong><small>{{ description }}</small></a>
+      {% endfor %}
+      <a href="/admin/reset" class="is-danger"><strong>重置平台</strong><small>危险操作，进入独立确认页。</small></a>
+    </nav>
+    <section class="admin-config-panel product-surface" aria-labelledby="admin-config-section-title" data-admin-config-section="{{ selected_section }}">
+      {% for key, label, description in config_sections %}
+        {% if selected_section == key %}<header><p class="admin-product-eyebrow">当前分区</p><h2 id="admin-config-section-title">{{ label }}</h2><p>{{ description }}</p></header>{% endif %}
+      {% endfor %}
+      {% include selected_template %}
+
+      {#
+        CTFd ships one monolithic configuration entrypoint.  It initializes
+        the theme editors and custom-field mounts even when those sections are
+        not present.  Keep the native save/upload/import behavior, but provide
+        inert mounts for the sections that were deliberately not rendered.
+        The selected section never receives a duplicate control.
+      #}
+      {% if selected_section in native_config_sections %}
+      <div hidden aria-hidden="true" data-admin-config-compatibility>
+        {% if selected_section != 'theme' %}
+          <textarea id="theme-header"></textarea>
+          {% if selected_section != 'pages' %}<textarea id="theme-footer"></textarea>{% endif %}
+          <textarea id="theme-settings">{}</textarea>
+        {% endif %}
+        {% if selected_section != 'fields' %}
+          <div id="user-field-list"></div>
+          <div id="team-field-list"></div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+  </div>
+</section>
+
+{% if selected_section == 'ctftime' %}
+<script>
+  // The upstream time fragment repeats each tab-panel id on an inner row.
+  // Preserve the tab target and remove only the redundant descendants before
+  // the deferred native configuration bundle initializes.
+  ["start-date", "end-date", "freeze-date"].forEach(function (id) {
+    var matches = document.querySelectorAll("[id='" + id + "']");
+    for (var index = 1; index < matches.length; index += 1) {
+      matches[index].removeAttribute("id");
+    }
+  });
+  var startTimestamp = document.getElementById("start");
+  if (startTimestamp) startTimestamp.setAttribute("aria-label", "开始时间 UTC 时间戳");
+</script>
+{% endif %}
+{% endblock %}
+
+{% block legacy_runtime %}
+{% if selected_section in native_config_sections %}
+<script defer src="{{ url_for('views.themes', theme='admin', path='js/vendor.bundle.js') }}"></script>
+<script defer src="{{ url_for('views.themes', theme='admin', path='js/core.js') }}"></script>
+<script defer src="{{ url_for('views.themes', theme='admin', path='js/helpers.js') }}"></script>
+<script defer src="{{ url_for('views.themes', theme='admin', path='js/components.js') }}"></script>
+{% endif %}
+{% endblock %}
+
+{% block entrypoint %}
+{% if selected_section in native_config_sections %}
+<script defer src="{{ url_for('views.themes', theme='admin', path='js/pages/configs.js') }}"></script>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if selected_section not in native_config_sections %}
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/admin-config.js', v='aisecedu-admin-config-v1') }}"></script>
+{% endif %}
+{% endblock %}

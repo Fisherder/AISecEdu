@@ -1,0 +1,1369 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C/C++ 安全代码审计实战 — 交互式实验室</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1a1a2e;
+            --surface2: #1e293b;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --danger-bg: #3b1018;
+            --success: #22c55e;
+            --success-bg: #0a2e1a;
+            --warning: #f59e0b;
+            --warning-bg: #2e2000;
+            --amber: #f59e0b;
+            --code-bg: #0d1117;
+            --line-hover: #1e3a5f;
+            --line-select: #2a1a3a;
+            --line-danger: #3b1018;
+            --line-warning: #2e2000;
+            --line-success: #0a2e1a;
+            --radius: 8px;
+            --radius-sm: 4px;
+            --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+            --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 20px 24px 60px;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 28px 20px 20px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 24px;
+        }
+        .header h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .header .subtitle {
+            color: var(--text2);
+            font-size: 0.9rem;
+            margin-top: 4px;
+        }
+        .edu-note {
+            margin-top: 8px;
+            font-size: 0.75rem;
+            color: #64748b;
+            font-family: var(--font-mono);
+            background: var(--surface2);
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            letter-spacing: 0.02em;
+        }
+
+        /* Briefing card */
+        .briefing {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px 24px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+        }
+        .briefing .icon {
+            font-size: 2rem;
+            flex-shrink: 0;
+        }
+        .briefing .content h3 {
+            font-size: 1.05rem;
+            margin-bottom: 4px;
+        }
+        .briefing .content p {
+            color: var(--text2);
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        /* Progress */
+        .progress-wrap {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .progress-wrap .label {
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: var(--text2);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .progress-bar-outer {
+            flex: 1;
+            min-width: 150px;
+            height: 8px;
+            background: var(--surface2);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress-bar-inner {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #22c55e);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+            width: 0%;
+        }
+        .progress-count {
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--accent);
+            white-space: nowrap;
+        }
+        .progress-dots {
+            display: flex;
+            gap: 6px;
+        }
+        .progress-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--border);
+            transition: background var(--transition), transform var(--transition);
+        }
+        .progress-dot.done {
+            background: var(--success);
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+            transform: scale(1.2);
+        }
+        .progress-dot.current {
+            background: var(--accent);
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+            animation: pulse-dot 1.5s infinite;
+        }
+        @keyframes pulse-dot {
+            0%,
+            100% {
+                box-shadow: 0 0 4px rgba(59, 130, 246, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 14px rgba(59, 130, 246, 0.8);
+            }
+        }
+
+        /* Tab nav */
+        .tab-nav {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+            background: var(--surface2);
+            border-radius: var(--radius);
+            padding: 4px;
+        }
+        .tab-btn {
+            flex: 1;
+            min-width: 100px;
+            padding: 10px 14px;
+            border: none;
+            background: transparent;
+            color: var(--text2);
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            transition: all var(--transition);
+            white-space: nowrap;
+            position: relative;
+            font-family: var(--font-sans);
+        }
+        .tab-btn:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .tab-btn.active {
+            background: var(--accent);
+            color: #fff;
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }
+        .tab-btn .check-mark {
+            display: inline-block;
+            margin-left: 4px;
+            color: var(--success);
+            font-weight: 700;
+            opacity: 0;
+            transition: opacity var(--transition);
+        }
+        .tab-btn.done .check-mark {
+            opacity: 1;
+        }
+        .tab-btn.done {
+            color: var(--success);
+            border: 1px solid transparent;
+        }
+        .tab-btn.done.active {
+            color: #fff;
+            background: #15803d;
+            box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+        }
+
+        /* Main card */
+        .main-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            transition: border-color var(--transition);
+        }
+        .main-card.solved {
+            border-color: var(--success);
+            box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.15);
+        }
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .card-header .vuln-title {
+            font-weight: 700;
+            font-size: 1rem;
+        }
+        .badge-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            font-family: var(--font-mono);
+        }
+        .badge-cwe {
+            background: #3b1018;
+            color: #fca5a5;
+        }
+        .badge-cert {
+            background: #0a2e1a;
+            color: #86efac;
+        }
+        .badge-severity {
+            background: #2e2000;
+            color: #fde68a;
+        }
+
+        /* Code display area */
+        .code-section-label {
+            font-size: 0.78rem;
+            color: var(--text2);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 12px 20px 6px;
+            font-weight: 600;
+        }
+        .code-display {
+            margin: 0 16px 12px;
+            background: var(--code-bg);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            user-select: none;
+        }
+        .code-line {
+            display: flex;
+            align-items: flex-start;
+            padding: 3px 0;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            line-height: 1.55;
+            position: relative;
+        }
+        .code-line:hover {
+            background: var(--line-hover);
+        }
+        .code-line .ln {
+            width: 46px;
+            min-width: 46px;
+            text-align: right;
+            padding-right: 14px;
+            color: #545d6e;
+            user-select: none;
+            font-size: 0.76rem;
+            flex-shrink: 0;
+        }
+        .code-line .code-text {
+            white-space: pre;
+            color: #c9d1d9;
+            flex: 1;
+            padding-right: 12px;
+        }
+        .code-line.highlight-danger {
+            background: var(--line-danger);
+            border-left: 3px solid var(--danger);
+        }
+        .code-line.highlight-warning {
+            background: var(--line-warning);
+            border-left: 3px solid var(--warning);
+        }
+        .code-line.highlight-success {
+            background: var(--line-success);
+            border-left: 3px solid var(--success);
+        }
+        .code-line.clicked-wrong {
+            animation: shake 0.4s ease;
+        }
+        @keyframes shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            25% {
+                transform: translateX(-4px);
+            }
+            75% {
+                transform: translateX(4px);
+            }
+        }
+
+        /* Annotation tooltip */
+        .annotation {
+            margin: 8px 16px;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 0.82rem;
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+        .annotation.show {
+            display: block;
+        }
+        .annotation.danger {
+            background: var(--danger-bg);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+        }
+        .annotation.warning {
+            background: var(--warning-bg);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            color: #fde68a;
+        }
+        .annotation.success {
+            background: var(--success-bg);
+            border: 1px solid rgba(34, 197, 94, 0.4);
+            color: #86efac;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-4px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Fix editor */
+        .editor-section {
+            padding: 0 16px 16px;
+        }
+        .editor-section .section-label {
+            font-size: 0.78rem;
+            color: var(--text2);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+            margin-bottom: 6px;
+            display: block;
+        }
+        .fix-editor {
+            width: 100%;
+            min-height: 180px;
+            background: var(--code-bg);
+            color: #c9d1d9;
+            border: 2px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 14px;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            line-height: 1.55;
+            resize: vertical;
+            transition: border-color var(--transition);
+            tab-size: 4;
+            outline: none;
+        }
+        .fix-editor:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+        }
+        .fix-editor.correct {
+            border-color: var(--success) !important;
+            box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12) !important;
+        }
+        .fix-editor.incorrect {
+            border-color: var(--danger) !important;
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12) !important;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: none;
+            transition: all var(--transition);
+            font-family: var(--font-sans);
+            letter-spacing: 0.01em;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+        .btn-outline {
+            background: transparent;
+            color: var(--text2);
+            border: 1px solid var(--border);
+        }
+        .btn-outline:hover {
+            border-color: #64748b;
+            color: var(--text);
+        }
+        .btn-hint {
+            background: transparent;
+            color: var(--warning);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+        }
+        .btn-hint:hover {
+            background: var(--warning-bg);
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        /* Result panel */
+        .result-panel {
+            margin: 12px 16px 16px;
+            padding: 16px;
+            border-radius: var(--radius-sm);
+            display: none;
+            animation: fadeIn 0.35s ease;
+        }
+        .result-panel.show {
+            display: block;
+        }
+        .result-panel.pass {
+            background: var(--success-bg);
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        }
+        .result-panel.fail {
+            background: var(--danger-bg);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+        .result-panel h4 {
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+        .result-panel .detail {
+            font-size: 0.8rem;
+            color: var(--text2);
+            font-family: var(--font-mono);
+            white-space: pre-wrap;
+            line-height: 1.4;
+        }
+
+        /* Diff display */
+        .diff-display {
+            margin: 12px 16px 16px;
+            display: none;
+            gap: 12px;
+            animation: fadeIn 0.35s ease;
+        }
+        .diff-display.show {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .diff-col {
+            flex: 1;
+            min-width: 280px;
+            background: var(--code-bg);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .diff-col .diff-header {
+            padding: 8px 14px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+        .diff-col.orig .diff-header {
+            background: #3b1018;
+            color: #fca5a5;
+        }
+        .diff-col.fixed .diff-header {
+            background: #0a2e1a;
+            color: #86efac;
+        }
+        .diff-col pre {
+            padding: 10px 14px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            line-height: 1.5;
+            color: #c9d1d9;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin: 0;
+        }
+
+        /* Flag reveal */
+        .flag-reveal {
+            margin: 20px 16px 16px;
+            padding: 20px;
+            background: #1a1200;
+            border: 2px dashed var(--amber);
+            border-radius: var(--radius);
+            text-align: center;
+            display: none;
+            animation: pulseFlag 0.6s ease;
+        }
+        .flag-reveal.show {
+            display: block;
+        }
+        .flag-reveal .flag-text {
+            font-family: var(--font-mono);
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--amber);
+            letter-spacing: 0.04em;
+            word-break: break-all;
+        }
+        @keyframes pulseFlag {
+            0% {
+                transform: scale(0.9);
+                opacity: 0;
+            }
+            60% {
+                transform: scale(1.03);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        /* Analysis toggle */
+        .analysis-toggle {
+            margin: 8px 16px 16px;
+        }
+        .analysis-content {
+            background: var(--surface2);
+            border-radius: var(--radius-sm);
+            padding: 16px;
+            margin-top: 8px;
+            font-size: 0.84rem;
+            line-height: 1.6;
+            display: none;
+        }
+        .analysis-content.open {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+        .analysis-content table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+        .analysis-content th,
+        .analysis-content td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        .analysis-content th {
+            color: var(--text2);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            font-size: 0.7rem;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.85rem;
+            z-index: 999;
+            animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.2s forwards;
+            pointer-events: none;
+        }
+        .toast.success {
+            background: #15803d;
+            color: #fff;
+        }
+        .toast.info {
+            background: #1d4ed8;
+            color: #fff;
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 700px) {
+            .container {
+                padding: 12px 10px 40px;
+            }
+            .tab-btn {
+                font-size: 0.72rem;
+                padding: 8px 6px;
+            }
+            .code-line {
+                font-size: 0.7rem;
+            }
+            .code-line .ln {
+                width: 32px;
+                min-width: 32px;
+                padding-right: 8px;
+                font-size: 0.66rem;
+            }
+            .fix-editor {
+                min-height: 140px;
+                font-size: 0.72rem;
+            }
+            .diff-display.show {
+                flex-direction: column;
+            }
+            .header h1 {
+                font-size: 1.3rem;
+            }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🔍 C/C++ 安全代码审计实战</h1>
+            <p class="subtitle">定位漏洞 → 编写修复 → 掌握安全编码最佳实践</p>
+            <span class="edu-note">// EDUCATIONAL PURPOSE ONLY — authorized classroom use</span>
+        </div>
+
+        <!-- Briefing -->
+        <div class="briefing">
+            <span class="icon">📋</span>
+            <div class="content">
+                <h3>任务简报</h3>
+                <p>你是一名安全审计工程师。以下5段C/C++代码片段各包含一个典型的安全漏洞。你的任务是：<br>
+                <strong>① 点击</strong>你认为存在漏洞的代码行 → <strong>② 在编辑器中编写修复代码</strong> → <strong>③ 提交验证</strong>，通过模式匹配确认修复是否安全。<br>
+                全部修复完成后，将揭示隐藏的FLAG。参考标准：<strong>CWE</strong> 和 <strong>CERT C Secure Coding</strong>。</p>
+            </div>
+        </div>
+
+        <!-- Progress -->
+        <div class="progress-wrap">
+            <span class="label">审计进度</span>
+            <div class="progress-bar-outer">
+                <div class="progress-bar-inner" id="progressBar" style="width:0%"></div>
+            </div>
+            <span class="progress-count" id="progressCount">0 / 5</span>
+            <div class="progress-dots" id="progressDots">
+                <span class="progress-dot"></span><span class="progress-dot"></span><span class="progress-dot"></span><span class="progress-dot"></span><span class="progress-dot"></span>
+            </div>
+        </div>
+
+        <!-- Tab nav -->
+        <div class="tab-nav" id="tabNav">
+            <button class="tab-btn active" data-idx="0">漏洞1 · gets()<span class="check-mark"> ✓</span></button>
+            <button class="tab-btn" data-idx="1">漏洞2 · system()<span class="check-mark"> ✓</span></button>
+            <button class="tab-btn" data-idx="2">漏洞3 · rand()<span class="check-mark"> ✓</span></button>
+            <button class="tab-btn" data-idx="3">漏洞4 · 整数溢出<span class="check-mark"> ✓</span></button>
+            <button class="tab-btn" data-idx="4">漏洞5 · TOCTOU<span class="check-mark"> ✓</span></button>
+        </div>
+
+        <!-- Main card -->
+        <div class="main-card" id="mainCard">
+            <!-- Dynamically filled -->
+        </div>
+
+        <!-- Global flag reveal -->
+        <div class="flag-reveal" id="globalFlag">
+            <p style="color:#fde68a;font-weight:600;margin-bottom:8px;">🏆 全部漏洞修复完成！</p>
+            <span class="flag-text" id="globalFlagText"></span>
+        </div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toastContainer"></div>
+
+    <script>
+        (function() {
+            // ─────────────────────────────────────
+            // Vulnerability definitions
+            // ─────────────────────────────────────
+            const vulnData = [{
+                id: 0,
+                title: '漏洞1：gets() 缓冲区溢出',
+                cwe: 'CWE-119',
+                cert: 'CERT C STR31-C',
+                severity: '高危',
+                vulnLineIdx: [6], // 0-indexed lines that are the PRIMARY vulnerability
+                relatedLineIdx: [3], // secondary concern
+                codeLines: [
+                    '#include <stdio.h>',
+                    '#include <string.h>',
+                    '',
+                    'void process_input() {',
+                    '    char buffer[64];',
+                    '    printf("Enter your name: ");',
+                    '    gets(buffer);  // ← 危险：无边界检查',
+                    '    printf("Hello, %s!\\n", buffer);',
+                    '}',
+                    '',
+                    'int main() {',
+                    '    process_input();',
+                    '    return 0;',
+                    '}',
+                ],
+                safePatterns: [
+                    { pattern: /fgets\s*\(/, required: true, desc: '使用 fgets() 替代 gets()' },
+                    { pattern: /sizeof\s*\(\s*buffer\s*\)/, required: true,
+                    desc: '使用 sizeof(buffer) 限制读取长度' },
+                    { pattern: /gets\s*\(/, required: false, forbidden: true, desc: '不应再出现 gets() 调用' },
+                ],
+                hints: [
+                    '提示1：fgets(buffer, sizeof(buffer), stdin) 可以安全地限制输入长度。',
+                    '提示2：fgets 会保留换行符，可用 strcspn 去除。',
+                    '提示3：确保第二个参数使用了 sizeof 而非硬编码数字。',
+                ],
+                explanation: 'gets() 不执行任何边界检查，攻击者可输入超过64字节的数据覆盖栈上的返回地址，实现任意代码执行。这是CWE-119（缓冲区溢出）的典型案例。',
+                bestPractice: '始终使用 fgets() 并指定缓冲区大小。对于POSIX系统，也可考虑 getline()。C11标准已移除 gets()。',
+                starterFix: 'void process_input() {\n    char buffer[64];\n    printf("Enter your name: ");\n    // 在此编写修复代码\n    \n    printf("Hello, %s!\\n", buffer);\n}',
+            }, {
+                id: 1,
+                title: '漏洞2：system() 命令注入',
+                cwe: 'CWE-78',
+                cert: 'CERT C ENV03-C',
+                severity: '严重',
+                vulnLineIdx: [6],
+                relatedLineIdx: [5],
+                codeLines: [
+                    '#include <stdio.h>',
+                    '#include <stdlib.h>',
+                    '',
+                    'void view_file(const char *filename) {',
+                    '    char cmd[256];',
+                    '    snprintf(cmd, sizeof(cmd), "cat %s", filename);',
+                    '    system(cmd);  // ← 命令注入！',
+                    '}',
+                    '',
+                    'int main(int argc, char *argv[]) {',
+                    '    if (argc > 1) view_file(argv[1]);',
+                    '    return 0;',
+                    '}',
+                ],
+                safePatterns: [
+                    { pattern: /fopen\s*\(/, required: true,
+                    desc: '使用 fopen() 直接打开文件而非通过shell' },
+                    { pattern: /system\s*\(/, required: false, forbidden: true, desc: '不应再使用 system() 执行用户可控的命令' },
+                    { pattern: /(fread|fgets|fgetc)\s*\(/, required: false, desc: '建议使用文件读取函数处理内容',
+                        bonus: true },
+                ],
+                hints: [
+                    '提示1：使用 fopen() + fread()/fgets() 直接读取文件，完全避开shell。',
+                    '提示2：如果必须执行外部程序，使用 execvp() 传递参数数组（不经过shell解析）。',
+                    '提示3：snprintf 拼接命令字符串是危险的——filename 可包含 "; rm -rf /" 等注入。',
+                ],
+                explanation: 'system() 将字符串传递给shell执行。如果filename包含shell元字符（如 ; | & ` $），攻击者可以注入任意命令。例如 filename = "a; rm -rf /" 会执行 cat a 然后删除文件系统。这是CWE-78（OS命令注入）。',
+                bestPractice: '避免使用 system()/popen() 处理用户输入。使用 fopen/fread 直接操作文件，或使用 execvp() 传递参数数组（绕过shell）。',
+                starterFix: 'void view_file(const char *filename) {\n    // 在此编写修复代码 — 使用 fopen 替代 system\n    \n}',
+            }, {
+                id: 2,
+                title: '漏洞3：rand() 弱随机性',
+                cwe: 'CWE-338',
+                cert: 'CERT C MSC30-C',
+                severity: '中危',
+                vulnLineIdx: [5, 7],
+                relatedLineIdx: [],
+                codeLines: [
+                    '#include <stdio.h>',
+                    '#include <stdlib.h>',
+                    '#include <time.h>',
+                    '',
+                    'void generate_token(char *token, int len) {',
+                    '    srand(time(NULL));  // ← 可预测种子',
+                    '    for (int i = 0; i < len; i++) {',
+                    '        token[i] = \'a\' + rand() % 26;  // ← 弱随机',
+                    '    }',
+                    '    token[len] = \'\\0\';',
+                    '}',
+                    '',
+                    '// 用于生成"安全"密码重置令牌',
+                ],
+                safePatterns: [
+                    { pattern: /(\/dev\/urandom|getrandom|getentropy|arc4random|RAND_bytes)/, required: true,
+                        desc: '使用密码学安全的随机源' },
+                    { pattern: /rand\s*\(\s*\)/, required: false, forbidden: true, desc: '不应再依赖 rand() 生成安全令牌' },
+                    { pattern: /srand\s*\(/, required: false, forbidden: true, desc: 'srand() 种子可预测' },
+                ],
+                hints: [
+                    '提示1：从 /dev/urandom 读取随机字节是Linux下的安全做法。',
+                    '提示2：getrandom() 系统调用（Linux 3.17+）提供内核级随机数。',
+                    '提示3：rand() 的RAND_MAX通常只有32767，且种子time(NULL)精度仅到秒，可暴力破解。',
+                ],
+                explanation: 'rand() 使用线性同余生成器(LCG)，周期短且可预测。srand(time(NULL))的种子精度仅到秒，攻击者可在同一秒内猜测种子。对于安全令牌生成，应使用密码学安全的随机源。CWE-338（使用密码学不安全的PRNG）。',
+                bestPractice: '使用 /dev/urandom、getrandom()、getentropy() 或 OpenSSL 的 RAND_bytes()。在Windows上使用 CryptGenRandom。',
+                starterFix: 'void generate_token(char *token, int len) {\n    // 在此编写修复代码 — 使用安全随机源\n    \n    token[len] = \'\\0\';\n}',
+            }, {
+                id: 3,
+                title: '漏洞4：整数溢出导致小分配',
+                cwe: 'CWE-190',
+                cert: 'CERT C INT04-C',
+                severity: '高危',
+                vulnLineIdx: [6],
+                relatedLineIdx: [5],
+                codeLines: [
+                    '#include <stdio.h>',
+                    '#include <stdlib.h>',
+                    '',
+                    'struct record { char data[256]; };',
+                    '',
+                    'void allocate_records(int count) {',
+                    '    int alloc_size = count * sizeof(struct record);  // ← 可能溢出！',
+                    '    char *buffer = malloc(alloc_size);',
+                    '    if (!buffer) { perror("malloc"); return; }',
+                    '    // ... 使用buffer，假设分配了足够空间',
+                    '    free(buffer);',
+                    '}',
+                ],
+                safePatterns: [
+                    { pattern: /size_t/, required: true, desc: '使用 size_t 替代 int 作为大小类型' },
+                    { pattern: /SIZE_MAX|ULONG_MAX|((if|&&)\s*.*[><=]+\s*.*\/)/, required: true,
+                        desc: '需要溢出检查（如 count > SIZE_MAX / sizeof(...)）' },
+                    { pattern: /int\s+alloc_size|int\s+.*=\s*.*\*\s*sizeof/, required: false, forbidden: true,
+                        desc: '不应使用int存储乘法结果' },
+                ],
+                hints: [
+                    '提示1：将count改为size_t类型，alloc_size也使用size_t。',
+                    '提示2：在乘法前检查：if (count > SIZE_MAX / sizeof(struct record)) 返回错误。',
+                    '提示3：int类型在32位系统上最大约21亿，乘以256后仅需约840万条记录即可溢出。',
+                ],
+                explanation: '当count很大时（如1073741824），count * sizeof(struct record) 会超过INT_MAX并发生有符号整数溢出（C中未定义行为）。结果可能是一个很小的正数，导致malloc分配不足，后续写入造成堆溢出。CWE-190。',
+                bestPractice: '使用size_t进行大小计算，乘法前检查溢出条件。CERT C INT04-C要求在所有整数运算前检查溢出。',
+                starterFix: 'void allocate_records(size_t count) {\n    // 在此编写修复代码 — 检查溢出\n    \n    char *buffer = malloc(alloc_size);\n    if (!buffer) { perror("malloc"); return; }\n    free(buffer);\n}',
+            }, {
+                id: 4,
+                title: '漏洞5：TOCTOU 竞态条件',
+                cwe: 'CWE-367',
+                cert: 'CERT C FIO01-C',
+                severity: '中危',
+                vulnLineIdx: [5, 9],
+                relatedLineIdx: [],
+                codeLines: [
+                    '#include <stdio.h>',
+                    '#include <unistd.h>',
+                    '',
+                    'void write_config(const char *path, const char *data) {',
+                    '    if (access(path, W_OK) != 0) {  // ← 检查',
+                    '        printf("Not writable\\n");',
+                    '        return;',
+                    '    }',
+                    '    // TOCTOU窗口：此处可能被替换',
+                    '    FILE *fp = fopen(path, "w");  // ← 使用',
+                    '    if (fp) {',
+                    '        fputs(data, fp);',
+                    '        fclose(fp);',
+                    '    }',
+                    '}',
+                ],
+                safePatterns: [
+                    { pattern: /fstat|fchmod|lstat/, required: true, desc: '使用 fstat() 在打开后检查文件属性' },
+                    { pattern: /access\s*\(/, required: false, forbidden: true,
+                    desc: '应移除提前的 access() 检查（或改用其他方式）' },
+                    { pattern: /fopen\s*\(.*\)\s*.*if\s*\(/, required: false, desc: '先打开文件再检查，使用文件描述符',
+                        bonus: true },
+                ],
+                hints: [
+                    '提示1：先fopen打开文件，获取FILE*后再用fstat检查其属性。',
+                    '提示2：access()和fopen()之间的时间窗口可被符号链接攻击利用。',
+                    '提示3：使用 fileno(fp) 获取文件描述符，然后 fstat() 检查是否为普通文件。',
+                ],
+                explanation: 'access()检查后、fopen()使用前存在时间窗口。攻击者可在检查通过后快速将path替换为符号链接（指向/etc/shadow等敏感文件），导致程序写入不该写的位置。这是经典的TOCTOU（Time-of-Check Time-of-Use）竞态条件，CWE-367。',
+                bestPractice: '先打开文件，然后使用fstat()检查已打开文件的属性。或者使用open()的O_NOFOLLOW标志（Linux）防止符号链接跟随。CERT C FIO01-C。',
+                starterFix: 'void write_config(const char *path, const char *data) {\n    // 在此编写修复代码 — 先打开再检查\n    \n}',
+            }];
+
+            // ─────────────────────────────────────
+            // State
+            // ─────────────────────────────────────
+            let currentIdx = 0;
+            const solvedFlags = [false, false, false, false, false];
+            const vulnLocated = [false, false, false, false, false]; // track if user clicked the right line
+            const fixSubmitted = [false, false, false, false, false];
+
+            // ─────────────────────────────────────
+            // DOM refs
+            // ─────────────────────────────────────
+            const mainCard = document.getElementById('mainCard');
+            const progressBar = document.getElementById('progressBar');
+            const progressCount = document.getElementById('progressCount');
+            const progressDots = document.getElementById('progressDots');
+            const globalFlag = document.getElementById('globalFlag');
+            const globalFlagText = document.getElementById('globalFlagText');
+            const toastContainer = document.getElementById('toastContainer');
+            const tabNav = document.getElementById('tabNav');
+            const allTabBtns = tabNav.querySelectorAll('.tab-btn');
+
+            // ─────────────────────────────────────
+            // Helper: show toast
+            // ─────────────────────────────────────
+            function showToast(msg, type = 'info') {
+                const toast = document.createElement('div');
+                toast.className = 'toast ' + type;
+                toast.textContent = msg;
+                toastContainer.appendChild(toast);
+                setTimeout(() => { if (toast.parentNode) toast.remove(); }, 2600);
+            }
+
+            // ─────────────────────────────────────
+            // Helper: update progress UI
+            // ─────────────────────────────────────
+            function updateProgress() {
+                const solvedCount = solvedFlags.filter(Boolean).length;
+                const pct = (solvedCount / 5) * 100;
+                progressBar.style.width = pct + '%';
+                progressCount.textContent = solvedCount + ' / 5';
+                const dots = progressDots.querySelectorAll('.progress-dot');
+                dots.forEach((d, i) => {
+                    d.classList.remove('done', 'current');
+                    if (solvedFlags[i]) d.classList.add('done');
+                    else if (i === currentIdx && !solvedFlags[i]) d.classList.add('current');
+                });
+                // Update tab buttons
+                allTabBtns.forEach((btn, i) => {
+                    btn.classList.toggle('done', solvedFlags[i]);
+                    btn.classList.toggle('active', i === currentIdx);
+                });
+                // Update main card border
+                mainCard.classList.toggle('solved', solvedFlags[currentIdx]);
+                // Check global flag
+                if (solvedCount === 5) {
+                    globalFlag.classList.add('show');
+                    globalFlagText.textContent = 'FLAG{buff3r_0v3rfl0w_4nd_1nt3g3r_s4f3ty!}';
+                    showToast('🏆 恭喜！全部漏洞修复完成！FLAG已揭示！', 'success');
+                }
+            }
+
+            // ─────────────────────────────────────
+            // Render current vulnerability
+            // ─────────────────────────────────────
+            function renderVuln(idx) {
+                currentIdx = idx;
+                const v = vulnData[idx];
+                const isSolved = solvedFlags[idx];
+
+                let html = '';
+                // Card header
+                html += '<div class="card-header">';
+                html += '<span class="vuln-title">' + v.title + '</span>';
+                html += '<div class="badge-row">';
+                html += '<span class="badge badge-cwe">' + v.cwe + '</span>';
+                html += '<span class="badge badge-cert">' + v.cert + '</span>';
+                html += '<span class="badge badge-severity">' + v.severity + '</span>';
+                if (isSolved) html +=
+                    '<span class="badge" style="background:#0a2e1a;color:#86efac;">✅ 已修复</span>';
+                html += '</div></div>';
+
+                // Code display
+                html += '<div class="code-section-label">📄 源代码（点击可疑行进行漏洞定位）</div>';
+                html += '<div class="code-display" id="codeDisplay">';
+                v.codeLines.forEach((line, lineIdx) => {
+                    let extraClass = '';
+                    if (vulnLocated[idx] && v.vulnLineIdx.includes(lineIdx)) {
+                        extraClass = ' highlight-danger';
+                    } else if (vulnLocated[idx] && v.relatedLineIdx.includes(lineIdx)) {
+                        extraClass = ' highlight-warning';
+                    }
+                    html += '<div class="code-line' + extraClass +
+                        '" data-line="' + lineIdx + '">';
+                    html += '<span class="ln">' + (lineIdx + 1) + '</span>';
+                    html += '<span class="code-text">' + escapeHTML(line) + '</span>';
+                    html += '</div>';
+                });
+                html += '</div>';
+
+                // Annotation area
+                html += '<div class="annotation" id="annotation"></div>';
+
+                // Editor section
+                html += '<div class="editor-section">';
+                html += '<span class="section-label">✏️ 修复代码编辑器（编写你的安全修复）</span>';
+                html += '<textarea class="fix-editor" id="fixEditor" placeholder="在此输入修复后的代码片段...">';
+                html += escapeHTML(v.starterFix);
+                html += '</textarea>';
+                html += '<div class="btn-row">';
+                html += '<button class="btn btn-primary" id="btnSubmit">🔍 提交验证</button>';
+                html += '<button class="btn btn-hint" id="btnHint">💡 获取提示 (' + v.hints.length +
+                    '条可用)</button>';
+                html += '<button class="btn btn-outline" id="btnReset">↺ 重置编辑器</button>';
+                html += '</div></div>';
+
+                // Result panel
+                html += '<div class="result-panel" id="resultPanel"></div>';
+
+                // Diff display
+                html += '<div class="diff-display" id="diffDisplay">';
+                html += '<div class="diff-col orig"><div class="diff-header">❌ 原始漏洞代码</div><pre id="diffOrig"></pre></div>';
+                html += '<div class="diff-col fixed"><div class="diff-header">✅ 你的修复代码</div><pre id="diffFixed"></pre></div>';
+                html += '</div>';
+
+                // Analysis toggle
+                html += '<div class="analysis-toggle">';
+                html +=
+                    '<button class="btn btn-outline" id="btnAnalysis" style="width:100%;text-align:left;">📖 查看完整分析（CWE映射 + CERT C + 最佳实践）</button>';
+                html += '<div class="analysis-content" id="analysisContent">';
+                html += '<p><strong>漏洞解释：</strong>' + v.explanation + '</p>';
+                html += '<p style="margin-top:8px;"><strong>最佳实践：</strong>' + v.bestPractice + '</p>';
+                html += '<table style="margin-top:10px;"><tr><th>参考标准</th><th>编号</th><th>说明</th></tr>';
+                html += '<tr><td>CWE</td><td>' + v.cwe +
+                    '</td><td>见上方漏洞描述</td></tr>';
+                html += '<tr><td>CERT C</td><td>' + v.cert +
+                    '</td><td>见CERT C Secure Coding Standard对应规则</td></tr>';
+                html += '<tr><td>OWASP</td><td>A03 Injection</td><td>注入类漏洞（命令注入属于此类）</td></tr>';
+                html += '</table>';
+                html += '</div></div>';
+
+                // Flag for this vuln
+                if (isSolved) {
+                    html +=
+                        '<div style="margin:12px 16px;padding:10px 14px;background:#0a2e1a;border-radius:6px;font-family:var(--font-mono);font-size:0.8rem;color:#86efac;">🔓 子FLAG: <strong>solved_vuln_' +
+                        (idx + 1) + '</strong></div>';
+                }
+
+                mainCard.innerHTML = html;
+                updateProgress();
+                attachEventListeners(idx);
+            }
+
+            function escapeHTML(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            // ─────────────────────────────────────
+            // Attach event listeners for current view
+            // ─────────────────────────────────────
+            function attachEventListeners(idx) {
+                const v = vulnData[idx];
+
+                // Code line clicks
+                const codeLines = mainCard.querySelectorAll('.code-line');
+                codeLines.forEach(cl => {
+                    cl.addEventListener('click', function() {
+                        if (solvedFlags[idx]) return; // already solved
+                        const lineIdx = parseInt(this.getAttribute('data-line'));
+                        const annotation = document.getElementById('annotation');
+
+                        if (v.vulnLineIdx.includes(lineIdx)) {
+                            // Correct!
+                            vulnLocated[idx] = true;
+                            this.classList.add('highlight-danger');
+                            annotation.className = 'annotation danger show';
+                            annotation.innerHTML =
+                                '<strong>🎯 正确！这就是主要漏洞所在。</strong><br>' + v
+                                .explanation;
+                            // Also highlight related
+                            codeLines.forEach(cl2 => {
+                                const li2 = parseInt(cl2.getAttribute('data-line'));
+                                if (v.relatedLineIdx.includes(li2)) {
+                                    cl2.classList.add('highlight-warning');
+                                }
+                            });
+                            showToast('✅ 漏洞定位成功！请在编辑器中编写修复。', 'success');
+                        } else if (v.relatedLineIdx.includes(lineIdx)) {
+                            this.classList.add('highlight-warning');
+                            annotation.className = 'annotation warning show';
+                            annotation.innerHTML =
+                                '<strong>⚠️ 相关但有争议。</strong>这行代码与漏洞有关联，但不是最直接的漏洞点。请继续寻找。';
+                        } else {
+                            this.classList.add('clicked-wrong');
+                            setTimeout(() => this.classList.remove('clicked-wrong'), 400);
+                            annotation.className = 'annotation warning show';
+                            annotation.innerHTML =
+                                '<strong>🤔 这行代码本身是安全的。</strong>漏洞在其他位置，请仔细审查与外部输入交互的代码。';
+                        }
+                    });
+                });
+
+                // Submit button
+                const btnSubmit = document.getElementById('btnSubmit');
+                btnSubmit.addEventListener('click', () => {
+                    if (solvedFlags[idx]) {
+                        showToast('该漏洞已修复通过。', 'info');
+                        return;
+                    }
+                    validateFix(idx);
+                });
+
+                // Hint button
+                const btnHint = document.getElementById('btnHint');
+                let hintIndex = 0;
+                btnHint.addEventListener('click', () => {
+                    if (solvedFlags[idx]) return;
+                    const hint = v.hints[hintIndex % v.hints.length];
+                    showToast(hint, 'info');
+                    hintIndex++;
+                    btnHint.textContent = '💡 获取提示 (' + v.hints.length + '条可用) — 已显示 ' + Math
+                        .min(hintIndex, v.hints.length) + ' 条';
+                });
+
+                // Reset button
+                const btnReset = document.getElementById('btnReset');
+                btnReset.addEventListener('click', () => {
+                    if (solvedFlags[idx]) return;
+                    document.getElementById('fixEditor').value = v.starterFix;
+                    document.getElementById('fixEditor').classList.remove('correct', 'incorrect');
+                    document.getElementById('resultPanel').classList.remove('show', 'pass', 'fail');
+                    document.getElementById('diffDisplay').classList.remove('show');
+                    showToast('编辑器已重置。', 'info');
+                });
+
+                // Analysis toggle
+                const btnAnalysis = document.getElementById('btnAnalysis');
+                const analysisContent = document.getElementById('analysisContent');
+                btnAnalysis.addEventListener('click', () => {
+                    analysisContent.classList.toggle('open');
+                    btnAnalysis.textContent = analysisContent.classList.contains('open') ?
+                        '📖 收起完整分析 ▲' : '📖 查看完整分析（CWE映射 + CERT C + 最佳实践）';
+                });
+
+                // If already solved, pre-fill and show success
+                if (solvedFlags[idx]) {
+                    const editor = document.getElementById('fixEditor');
+                    editor.classList.add('correct');
+                    const resultPanel = document.getElementById('resultPanel');
+                    resultPanel.className = 'result-panel pass show';
+                    resultPanel.innerHTML =
+                        '<h4>✅ 修复验证通过</h4><div class="detail">该漏洞已成功修复。安全模式匹配通过。</div>';
+                    document.getElementById('annotation').className = 'annotation success show';
+                    document.getElementById('annotation').innerHTML =
+                        '<strong>✅ 漏洞已定位并修复。</strong>';
+                }
+            }
+
+            // ─────────────────────────────────────
+            // Validate fix
+            // ─────────────────────────────────────
+            function validateFix(idx) {
+                const v = vulnData[idx];
+                const editor = document.getElementById('fixEditor');
+                const userCode = editor.value;
+                const resultPanel = document.getElementById('resultPanel');
+                const diffDisplay = document.getElementById('diffDisplay');
+                const diffOrig = document.getElementById('diffOrig');
+                const diffFixed = document.getElementById('diffFixed');
+
+                // Run pattern checks
+                let allPassed = true;
+                let feedbackLines = [];
+
+                v.safePatterns.forEach(sp => {
+                    const found = sp.pattern.test(userCode);
+                    if (sp.forbidden && found) {
+                        allPassed = false;
+                        feedbackLines.push('❌ 检测到危险模式：' + sp.desc);
+                    } else if (sp.required && !found) {
+                        allPassed = false;
+                        feedbackLines.push('⚠️ 缺少安全模式：' + sp.desc);
+                    } else if (sp.required && found) {
+                        feedbackLines.push('✅ 通过：' + sp.desc);
+                    } else if (sp.bonus && found) {
+                        feedbackLines.push('🌟 加分项：' + sp.desc);
+                    }
+                });
+
+                // Additional heuristic checks
+                // For vuln 1: check if buffer size is hardcoded instead of sizeof
+                if (idx === 0 && /\bfgets\s*\(.*,\s*64\s*,/.test(userCode) && !/sizeof/.test(userCode)) {
+                    allPassed = false;
+                    feedbackLines.push('⚠️ fgets中硬编码了64，建议使用sizeof(buffer)以保持一致性。');
+                }
+                // For vuln 2: check if popen is used (still risky)
+                if (idx === 1 && /\bpopen\s*\(/.test(userCode)) {
+                    allPassed = false;
+                    feedbackLines.push('⚠️ popen() 仍然通过shell执行，存在类似风险。请使用fopen。');
+                }
+                // For vuln 3: check if they still use rand but with better seed
+                if (idx === 2 && /\brand\s*\(/.test(userCode) && !/\/dev\/urandom|getrandom|getentropy|arc4random|RAND_bytes/
+                    .test(userCode)) {
+                    allPassed = false;
+                    feedbackLines.push('⚠️ 仍在使用rand()，即使改变种子也不足以生成安全令牌。');
+                }
+                // For vuln 4: check for overflow guard
+                if (idx === 3 && /size_t/.test(userCode) && !/(SIZE_MAX|ULONG_MAX|if\s*\(.*>)/.test(userCode)) {
+                    allPassed = false;
+                    feedbackLines.push('⚠️ 使用了size_t但缺少溢出检查条件（如 count > SIZE_MAX / sizeof(...)）。');
+                }
+                // For vuln 5: check access still present
+                if (idx === 4 && /\baccess\s*\(/.test(userCode)) {
+                    allPassed = false;
+                    feedbackLines.push('⚠️ 仍保留了access()调用，TOCTOU窗口依然存在。');
+                }
+
+                // Show result
+                resultPanel.classList.add('show');
+                if (allPassed) {
+                    resultPanel.className = 'result-panel pass show';
+                    resultPanel.innerHTML = '<h4>✅ 修复验证通过！</h4><div class="detail">' + feedbackLines.join('\n') +
+                        '</div>';
+                    editor.classList.add('correct');
+                    editor.classList.remove('incorrect');
+                    solvedFlags[idx] = true;
+                    fixSubmitted[idx] = true;
+                    document.getElementById('annotation').className = 'annotation success show';
+                    document.getElementById('annotation').innerHTML =
+                    '<strong>✅ 修复成功！</strong>该漏洞已通过安全模式验证。';
+                    showToast('🎉 漏洞' + (idx + 1) + '修复成功！', 'success');
+                    // Re-render to update badge
+                    setTimeout(() => renderVuln(idx), 600);
+                } else {
+                    resultPanel.className = 'result-panel fail show';
+                    resultPanel.innerHTML = '<h4>❌ 修复未通过</h4><div class="detail">' + feedbackLines.join('\n') +
+                        '</div>';
+                    editor.classList.add('incorrect');
+                    editor.classList.remove('correct');
+                }
+
+                // Show diff
+                diffDisplay.classList.add('show');
+                diffOrig.textContent = v.codeLines.join('\n');
+                diffFixed.textContent = userCode;
+
+                updateProgress();
+            }
+
+            // ─────────────────────────────────────
+            // Tab navigation
+            // ─────────────────────────────────────
+            allTabBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const idx = parseInt(this.getAttribute('data-idx'));
+                    if (idx === currentIdx && mainCard.innerHTML) return;
+                    renderVuln(idx);
+                });
+            });
+
+            // ─────────────────────────────────────
+            // Keyboard shortcuts
+            // ─────────────────────────────────────
+            document.addEventListener('keydown', function(e) {
+                if (e.ctrlKey && e.key >= '1' && e.key <= '5') {
+                    e.preventDefault();
+                    const idx = parseInt(e.key) - 1;
+                    renderVuln(idx);
+                }
+                // Ctrl+Enter to submit
+                if (e.ctrlKey && e.key === 'Enter') {
+                    e.preventDefault();
+                    validateFix(currentIdx);
+                }
+            });
+
+            // ─────────────────────────────────────
+            // Initial render
+            // ─────────────────────────────────────
+            renderVuln(0);
+            updateProgress();
+
+            // Show initial toast
+            setTimeout(() => showToast('👆 点击代码中你认为存在漏洞的行，开始审计！', 'info'), 500);
+
+            console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+            console.log('// C/C++ 安全代码审计实战实验室已就绪');
+            console.log('// 5个漏洞：gets()溢出 | system()注入 | rand()弱随机 | 整数溢出 | TOCTOU');
+            console.log('// 快捷键：Ctrl+1~5 切换漏洞 | Ctrl+Enter 提交修复');
+        })();
+    </script>
+</body>
+</html>

@@ -21,6 +21,10 @@ from .v1.test_error import test_error_namespace
 from .v1.user import user_namespace
 from .v1.learning import learning_namespace
 from .v1.simulation import simulation_namespace
+from .v1.teaching import teaching_namespace
+from .v1.coursework import coursework_namespace
+from .v1.ui import ui_namespace
+from .v1.admin import admin_namespace
 
 api = Blueprint("pwncollege_api", __name__)
 
@@ -72,6 +76,18 @@ api_v1.add_namespace(ssh_key_namespace, "/ssh_key")
 api_v1.add_namespace(workspace_tokens_namespace, "/workspace_tokens")
 api_v1.add_namespace(workspace_namespace, "/workspace")
 api_v1.add_namespace(search_namespace, "/search")
-api_v1.add_namespace(test_error_namespace, "/test_error")
+enable_test_routes = (
+    bool(current_app.testing)
+    or bool(current_app.debug)
+    or str(os.getenv("DOJO_ENV") or "").strip().lower() in {"development", "test"}
+    or str(os.getenv("AISECEDU_ENABLE_TEST_ROUTES") or "").strip().lower()
+    in {"1", "true", "yes"}
+)
+if enable_test_routes:
+    api_v1.add_namespace(test_error_namespace, "/test_error")
 api_v1.add_namespace(learning_namespace, "/learning")
 api_v1.add_namespace(simulation_namespace, "/simulations")
+api_v1.add_namespace(teaching_namespace, "/teaching")
+api_v1.add_namespace(coursework_namespace, "/coursework")
+api_v1.add_namespace(ui_namespace, "/ui")
+api_v1.add_namespace(admin_namespace, "/admin")

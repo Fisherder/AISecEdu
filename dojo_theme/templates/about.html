@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block content %}
+<section class="container py-5" aria-labelledby="about-title">
+  <p class="cs-eyebrow">关于平台</p>
+  <h1 id="about-title">让网络安全学习可实践、可反馈、可复核</h1>
+  <p class="lead">玄甲将结构化课程、隔离实验环境、AI 辅导和学习证据组织在同一个教学闭环中。</p>
+  <div class="row g-4 mt-3">
+    <article class="col-md-4"><h2 class="h4">面向学习者</h2><p>从明确的下一步进入课程、作业与实验，并保留可解释的学习进展。</p></article>
+    <article class="col-md-4"><h2 class="h4">面向教师</h2><p>组织课件、题目与演示，审核 AI 产物，并基于真实证据理解学习情况。</p></article>
+    <article class="col-md-4"><h2 class="h4">安全边界</h2><p>实验在授权环境内运行；平台不会把真实公网目标或真实凭据作为教学对象。</p></article>
+  </div>
+  <div class="mt-4 d-flex flex-wrap gap-2">
+    <a class="btn btn-primary" href="/dojos?tab=discover">浏览课程</a>
+    <a class="btn btn-outline-secondary" href="/">返回首页</a>
+  </div>
+</section>
+{% endblock %}

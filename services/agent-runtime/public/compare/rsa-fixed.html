@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>RSA 加解密与攻击模拟</title>
+<style>
+  html,body{margin:0;padding:0;background:#0f172a;color:#e2e8f0;font-family:ui-sans-serif,system-ui,"PingFang SC",sans-serif;}
+  .wrap{padding:16px;max-width:760px;margin:0 auto;}
+  h2{font-size:17px;margin:0 0 2px;} p.desc{font-size:12px;color:#94a3b8;margin:0 0 14px;}
+  .progress{display:flex;gap:6px;margin-bottom:14px;}
+  .dot{height:6px;flex:1;background:#334155;border-radius:3px;} .dot.on{background:#3b82f6;}
+  .scene-title{font-size:15px;color:#93c5fd;margin:0 0 6px;}
+  .narr{font-size:13px;line-height:1.6;color:#cbd5e1;margin:0 0 12px;}
+  .visual{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px;margin-bottom:12px;min-height:40px;}
+  .vis-cap{font-size:11px;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;}
+  /* cells */
+  table.cells{border-collapse:collapse;width:100%;} table.cells td,table.cells th{border:1px solid #334155;padding:6px 8px;text-align:center;font-size:13px;font-family:ui-monospace,monospace;}
+  table.cells th{color:#94a3b8;font-weight:600;background:#0f172a;}
+  td.ok{color:#4ade80;} td.bad{color:#f87171;} td.info{color:#fbbf24;}
+  /* bars */
+  .bar-row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12px;}
+  .bar-label{width:120px;color:#cbd5e1;} .bar-track{flex:1;height:14px;background:#0f172a;border-radius:7px;overflow:hidden;}
+  .bar-fill{height:100%;background:#3b82f6;border-radius:7px;} .bar-val{width:40px;color:#93c5fd;font-family:ui-monospace,monospace;}
+  /* flow */
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:12px;}
+  .flow span{background:#334155;padding:4px 10px;border-radius:6px;} .flow .arr{background:transparent;color:#64748b;}
+  /* icons */
+  .icons{display:flex;flex-wrap:wrap;gap:10px;} .icon-item{background:#334155;border-radius:8px;padding:8px 12px;text-align:center;font-size:12px;}
+  .icon-item .e{font-size:22px;display:block;} .icon-item.ok{border:1px solid #4ade80;} .icon-item.bad{border:1px solid #f87171;} .icon-item.warn{border:1px solid #fbbf24;}
+  /* metric */
+  .metric{text-align:center;padding:8px;} .metric b{display:block;font-size:34px;color:#fbbf24;font-family:ui-monospace,monospace;} .metric small{color:#94a3b8;font-size:12px;}
+  .insight{font-size:12px;background:#1e293b;border-left:3px solid #3b82f6;padding:8px 10px;border-radius:0 6px 6px 0;color:#cbd5e1;margin-bottom:12px;}
+  .nav{display:flex;gap:8px;flex-wrap:wrap;}
+  button.navbtn{background:#3b82f6;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;}
+  button.ghost{background:#334155;color:#cbd5e1;}
+</style></head>
+<body><div class="wrap">
+  <h2>🎬 RSA 加解密与攻击模拟</h2>
+  <p class="desc">从 RSA 密钥生成、公钥加密、私钥解密到小模数攻击与安全参数选择，理解 RSA 协议逻辑及攻击边界。</p>
+  <div class="progress" id="progress"></div>
+  <div id="scene"></div>
+</div>
+<script>
+(function(){
+  var cfg = {"type":"simulation-scenario","title":"RSA 加解密与攻击模拟","description":"从 RSA 密钥生成、公钥加密、私钥解密到小模数攻击与安全参数选择，理解 RSA 协议逻辑及攻击边界。","startScene":"s1","scenes":[{"id":"s1","title":"密钥生成","narrative":"Bob 选择两个大素数 p 和 q，计算模数 n 和欧拉函数 φ(n)，再选取公钥指数 e 并计算私钥指数 d。","visual":{"kind":"flow","caption":"RSA 密钥生成步骤","steps":["选素数 p、q","n = p × q","φ(n) = (p−1)(q−1)","选 e，使 gcd(e, φ(n)) = 1","d ≡ e⁻¹ mod φ(n)","公钥 (n,e)，私钥 (n,d)"]},"insight":"RSA 的安全性依赖大整数分解的困难性；φ(n) 必须保密。"},{"id":"s2","title":"公钥加密","narrative":"Alice 用 Bob 的公钥 (3233, 17) 加密消息 M=65，得到密文 C = M^e mod n = 2790。","visual":{"kind":"flow","caption":"加密过程","steps":["明文 M = 65","公钥 (n,e) = (3233, 17)","C = 65^17 mod 3233","C = 2790","将 C 发送给 Bob"]},"insight":"任何人都能用公钥加密，但只有持有私钥者能解密。"},{"id":"s3","title":"私钥解密","narrative":"Bob 收到密文 C=2790，使用私钥指数 d=2753 计算 C^d mod n，恢复明文 M=65。","visual":{"kind":"flow","caption":"解密过程","steps":["密文 C = 2790","私钥 (n,d) = (3233, 2753)","M = 2790^2753 mod 3233","M = 65"]},"insight":"解密依赖 d 的秘密性；没有 d 就无法在计算上恢复 M。"},{"id":"s4","title":"攻击模型","narrative":"Eve 在公开信道上截获公钥和密文。她的目标是恢复明文 M。攻击是否可行取决于模数 n 的选取。","visual":{"kind":"flow","caption":"Eve 的视角","steps":["Eve 获得公钥 (n,e) 与密文 C","目标：恢复明文 M","若 n 可被因数分解 → 导出 d → 解密","若 n 为 2048 位强素数 → 计算不可行"]},"choices":[{"label":"用小模数尝试攻击","goto":"s5"},{"label":"采用安全参数防御","goto":"s6"}],"insight":"RSA 的安全边界是“不知道私钥就无法解密”；参数大小决定该边界是否成立。"},{"id":"s5","title":"小模数攻击","narrative":"n=3233 很小，Eve 用因数分解得到 p=61、q=53，立即重构私钥，还原明文。这说明模拟示例绝不可用于真实保密。","visual":{"kind":"flow","caption":"攻击过程","steps":["n = 3233","分解：3233 = 61 × 53","φ(n) = 3120","d = 2753","M = C^d mod n = 65"]},"choices":[{"label":"学习防御","goto":"s6"}],"insight":"小参数只是教学玩具；参数不足时，公钥加密等于没有加密。"},{"id":"s6","title":"安全参数与填充","narrative":"现代 RSA 要求至少 2048 位模数，并采用 OAEP 等填充方案，防止低指数攻击和结构攻击。","visual":{"kind":"bars","caption":"相对安全强度（示意）","items":[{"label":"RSA-512","value":0.25,"color":"#d9534f"},{"label":"RSA-1024","value":0.5,"color":"#f0ad4e"},{"label":"RSA-2048","value":0.85,"color":"#5cb85c"},{"label":"RSA-3072","value":1,"color":"#337ab7"}]},"choices":[{"label":"继续","goto":"s7"}],"insight":"密钥长度不是唯一因素，随机素数、安全填充、协议正确使用都不可缺少。"},{"id":"s7","title":"伦理与法律","narrative":"对 RSA 的攻击演示只能用于自己负责的系统或已获授权的教学环境。未经授权解密他人数据违反《网络安全法》和刑法。","visual":{"kind":"icons","caption":"安全测试的合法边界","items":[{"icon":"🔬","label":"授权测试","tone":"ok"},{"icon":"⚖️","label":"网络安全法","tone":"info"},{"icon":"🚫","label":"禁止未授权解密","tone":"bad"}]},"insight":"安全技能的合法边界：先授权，后测试；攻击模拟应以防御为目的。"}]};
+  var byId = {}; cfg.scenes.forEach(function(s){ byId[s.id] = s; });
+  var order = cfg.scenes.map(function(s){return s.id;});
+  var cur = cfg.startScene || order[0];
+  var hist = [];
+  function toneClass(t){ return t==='ok'?'ok':t==='bad'?'bad':t==='warn'?'bad':t==='info'?'info':''; }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function renderVisual(v){
+    if(!v || typeof v!=='object') return '';
+    var k = v.kind, cap = v.caption ? '<div class="vis-cap">'+esc(v.caption)+'</div>' : '';
+    if(k==='cells' && Array.isArray(v.rows)){
+      var rows = v.rows.map(function(r){
+        var cells = (r.cells||[]).map(function(c){ var m=String(c); var cls = m==='✓'?'ok':m==='✗'?'bad':(m.indexOf('⚠')>-1?'info':'') ; return '<td class="'+cls+'">'+esc(c)+'</td>'; }).join('');
+        return '<tr><th>'+esc(r.label)+'</th>'+cells+'</tr>';
+      }).join('');
+      return cap+'<table class="cells">'+rows+'</table>';
+    }
+    if(k==='bars' && Array.isArray(v.items)){
+      var bars = v.items.map(function(it){ var val = Math.max(0,Math.min(1,Number(it.value||0))); return '<div class="bar-row"><span class="bar-label">'+esc(it.label)+'</span><span class="bar-track"><span class="bar-fill" style="width:'+Math.round(val*100)+'%;background:'+(it.color||'#3b82f6')+'"></span></span><span class="bar-val">'+(Math.round(val*100))+'%</span></div>'; }).join('');
+      return cap+'<div>'+bars+'</div>';
+    }
+    if(k==='flow' && Array.isArray(v.steps)){
+      var f = v.steps.map(function(s,i){ return '<span>'+esc(s)+'</span>'+(i<v.steps.length-1?'<span class="arr">→</span>':''); }).join('');
+      return cap+'<div class="flow">'+f+'</div>';
+    }
+    if(k==='icons' && Array.isArray(v.items)){
+      var ic = v.items.map(function(it){ return '<div class="icon-item '+toneClass(it.tone)+'"><span class="e">'+esc(it.icon)+'</span>'+esc(it.label)+'</div>'; }).join('');
+      return cap+'<div class="icons">'+ic+'</div>';
+    }
+    if(k==='metric'){
+      return cap+'<div class="metric"><b>'+esc(v.value)+'</b>'+(v.unit?'<small>'+esc(v.unit)+'</small>':'')+'</div>';
+    }
+    return cap+'<div style="font-size:13px;color:#94a3b8;">'+esc(JSON.stringify(v))+'</div>';
+  }
+  function render(){
+    var s = byId[cur]; if(!s){ document.getElementById('scene').textContent='场景缺失'; return; }
+    var idx = order.indexOf(cur);
+    document.getElementById('progress').innerHTML = order.map(function(id,i){ return '<div class="dot'+(i<=idx?' on':'')+'"></div>'; }).join('');
+    var choices = (s.choices && s.choices.length) ? s.choices.map(function(c){ return '<button class="navbtn" data-goto="'+esc(c.goto)+'">'+esc(c.label)+'</button>'; }).join('') : '';
+    var nextLinear = (!choices && idx < order.length-1);
+    var html = '<p class="scene-title">'+esc(s.title)+'</p>'
+      + '<p class="narr">'+esc(s.narrative)+'</p>'
+      + (s.visual?'<div class="visual">'+renderVisual(s.visual)+'</div>':'')
+      + (s.insight?'<div class="insight">💡 '+esc(s.insight)+'</div>':'')
+      + '<div class="nav">'
+      + (hist.length?'<button class="navbtn ghost" id="back">← 上一步</button>':'')
+      + choices
+      + (nextLinear?'<button class="navbtn" id="next">下一步 →</button>':'')
+      + '</div>';
+    document.getElementById('scene').innerHTML = html;
+    if(document.getElementById('back')) document.getElementById('back').onclick=function(){ cur = hist.pop(); render(); };
+    if(document.getElementById('next')) document.getElementById('next').onclick=function(){ hist.push(cur); cur = order[idx+1]; render(); };
+    Array.prototype.forEach.call(document.querySelectorAll('[data-goto]'), function(b){ b.onclick=function(){ hist.push(cur); cur = b.getAttribute('data-goto'); render(); }; });
+  }
+  render();
+})();
+</script>
+<script type="application/json" id="widget-config">{"type":"simulation-scenario","title":"RSA 加解密与攻击模拟","description":"从 RSA 密钥生成、公钥加密、私钥解密到小模数攻击与安全参数选择，理解 RSA 协议逻辑及攻击边界。","startScene":"s1","scenes":[{"id":"s1","title":"密钥生成","narrative":"Bob 选择两个大素数 p 和 q，计算模数 n 和欧拉函数 φ(n)，再选取公钥指数 e 并计算私钥指数 d。","visual":{"kind":"flow","caption":"RSA 密钥生成步骤","steps":["选素数 p、q","n = p × q","φ(n) = (p−1)(q−1)","选 e，使 gcd(e, φ(n)) = 1","d ≡ e⁻¹ mod φ(n)","公钥 (n,e)，私钥 (n,d)"]},"insight":"RSA 的安全性依赖大整数分解的困难性；φ(n) 必须保密。"},{"id":"s2","title":"公钥加密","narrative":"Alice 用 Bob 的公钥 (3233, 17) 加密消息 M=65，得到密文 C = M^e mod n = 2790。","visual":{"kind":"flow","caption":"加密过程","steps":["明文 M = 65","公钥 (n,e) = (3233, 17)","C = 65^17 mod 3233","C = 2790","将 C 发送给 Bob"]},"insight":"任何人都能用公钥加密，但只有持有私钥者能解密。"},{"id":"s3","title":"私钥解密","narrative":"Bob 收到密文 C=2790，使用私钥指数 d=2753 计算 C^d mod n，恢复明文 M=65。","visual":{"kind":"flow","caption":"解密过程","steps":["密文 C = 2790","私钥 (n,d) = (3233, 2753)","M = 2790^2753 mod 3233","M = 65"]},"insight":"解密依赖 d 的秘密性；没有 d 就无法在计算上恢复 M。"},{"id":"s4","title":"攻击模型","narrative":"Eve 在公开信道上截获公钥和密文。她的目标是恢复明文 M。攻击是否可行取决于模数 n 的选取。","visual":{"kind":"flow","caption":"Eve 的视角","steps":["Eve 获得公钥 (n,e) 与密文 C","目标：恢复明文 M","若 n 可被因数分解 → 导出 d → 解密","若 n 为 2048 位强素数 → 计算不可行"]},"choices":[{"label":"用小模数尝试攻击","goto":"s5"},{"label":"采用安全参数防御","goto":"s6"}],"insight":"RSA 的安全边界是“不知道私钥就无法解密”；参数大小决定该边界是否成立。"},{"id":"s5","title":"小模数攻击","narrative":"n=3233 很小，Eve 用因数分解得到 p=61、q=53，立即重构私钥，还原明文。这说明模拟示例绝不可用于真实保密。","visual":{"kind":"flow","caption":"攻击过程","steps":["n = 3233","分解：3233 = 61 × 53","φ(n) = 3120","d = 2753","M = C^d mod n = 65"]},"choices":[{"label":"学习防御","goto":"s6"}],"insight":"小参数只是教学玩具；参数不足时，公钥加密等于没有加密。"},{"id":"s6","title":"安全参数与填充","narrative":"现代 RSA 要求至少 2048 位模数，并采用 OAEP 等填充方案，防止低指数攻击和结构攻击。","visual":{"kind":"bars","caption":"相对安全强度（示意）","items":[{"label":"RSA-512","value":0.25,"color":"#d9534f"},{"label":"RSA-1024","value":0.5,"color":"#f0ad4e"},{"label":"RSA-2048","value":0.85,"color":"#5cb85c"},{"label":"RSA-3072","value":1,"color":"#337ab7"}]},"choices":[{"label":"继续","goto":"s7"}],"insight":"密钥长度不是唯一因素，随机素数、安全填充、协议正确使用都不可缺少。"},{"id":"s7","title":"伦理与法律","narrative":"对 RSA 的攻击演示只能用于自己负责的系统或已获授权的教学环境。未经授权解密他人数据违反《网络安全法》和刑法。","visual":{"kind":"icons","caption":"安全测试的合法边界","items":[{"icon":"🔬","label":"授权测试","tone":"ok"},{"icon":"⚖️","label":"网络安全法","tone":"info"},{"icon":"🚫","label":"禁止未授权解密","tone":"bad"}]},"insight":"安全技能的合法边界：先授权，后测试；攻击模拟应以防御为目的。"}]}</script>
+</body></html>

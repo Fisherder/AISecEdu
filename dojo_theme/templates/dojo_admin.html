@@ -1,126 +1,143 @@
 {% extends "base.html" %}
 
+{% block body_class %}course-system-page content-management-page course-admin-page{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='aisecedu-course-hub-v12-readability-v1') }}">
+{% endblock %}
+
 {% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1>课程管理</h1>
-    <br>
-    <h2>{{ dojo.name }}</h2>
-  </div>
-</div>
-<div class="container">
-  <div id="dojo-delete-results" class="form-group">
-  <div class="row text-center">
-    <p style="margin-left: 1rem;">将此加入链接分享给学生。</p>
-    <div class="input-group mx-3 mb-2">
-      <input type="text" id="user-token-result" class="form-control" value="{{ url_for('pwncollege_dojo.join_dojo', dojo=dojo.reference_id, password=dojo.password, _external=True) }}" readonly>
-      <div class="input-group-append">
-        <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard(event)">
-          <i class="fas fa-clipboard"></i>
-        </button>
-      </div>
-      </div>
-    <div class="col-lg-auto m-3">
-      <figure>
-      <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.update_dojo', dojo=dojo.reference_id, update_code=dojo.update_code) }}" target="_blank">
-        <i class="fas fa-upload fa-3x"></i>
-        <figcaption><b>更新</b></figcaption>
-      </a>
-      </figure>
+<div class="content-management-shell course-admin-shell">
+  <nav class="content-breadcrumbs" aria-label="面包屑">
+    <a href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}">课程中心</a>
+    <i class="fas fa-chevron-right" aria-hidden="true"></i>
+    <span>成员与设置</span>
+  </nav>
+
+  <header class="content-management-header">
+    <div class="content-management-heading">
+      <span class="hub-kicker"><i class="fas fa-users-cog" aria-hidden="true"></i>课程管理</span>
+      <h1>成员与课程设置</h1>
+      <p>{{ dojo.name }} · 管理加入方式、教师权限与低频维护操作。</p>
     </div>
-    {% if is_admin() %}
-    <div class="col-lg-auto m-3">
-      <figure>
-        <a id="dojo-delete-button" class="text-decoration-none delete-link" href="#" data-dojo="{{ dojo.reference_id }}">
-          <i class="fas fa-trash fa-3x"></i>
-          <figcaption><b>删除</b></figcaption>
-        </a>
-      </figure>
+    <div class="content-management-actions">
+      <a class="hub-button" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}"><i class="fas fa-layer-group" aria-hidden="true"></i>课程中心</a>
+      <a class="hub-button is-primary" href="/{{ dojo.reference_id }}"><i class="fas fa-eye" aria-hidden="true"></i>打开课程</a>
     </div>
-    {% endif %}
-    <div class="col-lg-auto m-3">
-      <figure>
-      <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.dojo_solves', dojo=dojo.reference_id, solves_code=dojo.solves_code, format='csv') }}">
-        <i class="fas fa-file-csv fa-3x"></i>
-        <figcaption><b>完成记录</b></figcaption>
-      </a>
-      </figure>
-    </div>
+  </header>
+
+  <div id="dojo-delete-results" class="content-result" role="status" hidden></div>
+
+  <section class="content-surface course-invite-surface">
+    <header class="content-section-heading">
+      <div><span class="hub-kicker">邀请学生</span><h2>使用课程码加入</h2><p>课程码不会写入网址或浏览器历史；请在课程中心查看、复制或更换。</p></div>
+      <a class="hub-button is-primary" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}"><i class="fas fa-key" aria-hidden="true"></i>前往课程中心</a>
+    </header>
+  </section>
+
+  <section class="content-action-grid" aria-label="课程管理快捷操作">
+    <a class="content-action-card" href="{{ url_for('pwncollege_dojo.update_dojo', dojo=dojo.reference_id, update_code=dojo.update_code) }}" target="_blank" rel="noopener">
+      <span><i class="fas fa-sync-alt" aria-hidden="true"></i></span><div><strong>同步课程</strong><small>从 Git 仓库获取最新内容</small></div><i class="fas fa-external-link-alt" aria-hidden="true"></i>
+    </a>
+    <a class="content-action-card" href="{{ url_for('pwncollege_dojo.dojo_solves', dojo=dojo.reference_id, solves_code=dojo.solves_code, format='csv') }}">
+      <span><i class="fas fa-file-csv" aria-hidden="true"></i></span><div><strong>导出完成记录</strong><small>下载课程完成情况 CSV</small></div><i class="fas fa-download" aria-hidden="true"></i>
+    </a>
+    <a class="content-action-card" href="{{ url_for('pwncollege_dojo.view_dojo_activity', dojo=dojo.reference_id) }}">
+      <span><i class="fas fa-satellite-dish" aria-hidden="true"></i></span><div><strong>实时课程活动</strong><small>查看正在运行的学生环境</small></div><i class="fas fa-chevron-right" aria-hidden="true"></i>
+    </a>
     {% if dojo.course %}
-    <div class="col-lg-auto m-3">
-      <figure>
-      <a class="text-decoration-none" href="{{ url_for('course.view_all_grades', dojo=dojo.reference_id) }}">
-        <i class="fas fa-signal fa-3x"></i>
-        <figcaption><b>成绩</b></figcaption>
-      </a>
-      </figure>
-    </div>
+    <a class="content-action-card" href="{{ url_for('course.view_all_grades', dojo=dojo.reference_id) }}">
+      <span><i class="fas fa-chart-bar" aria-hidden="true"></i></span><div><strong>查看成绩</strong><small>进入课程成绩管理</small></div><i class="fas fa-chevron-right" aria-hidden="true"></i>
+    </a>
     {% endif %}
-  </div>
-  {% if dojo.public_key %}
-  <label class="mb-1 ml-3 font-weight-bold" for="dojo-deploy-key-result">部署密钥</label>
-  <small class="form-text text-muted mb-2 ml-3">对于私有 GitHub 仓库，请将此密钥添加到仓库的 Deploy Keys。</small>
-  <div class="input-group mx-3 mb-3">
-    <input type="text" id="dojo-deploy-key-result" class="form-control text-monospace" value="{{ dojo.public_key }}" readonly>
-    <div class="input-group-append copy-button">
-      <button class="btn btn-outline-secondary" type="button">
-        <i class="fas fa-clipboard"></i>
-      </button>
-    </div>
-  </div>
-  {% endif %}
-  <div>
-    <form method="post" id="dojo-award-prune-form" autocomplete="off">
-      <div class="form-group">
-      <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="清理旧版表情徽章奖励">
-      </div>
-      <div id="dojo-award-prune-results" class="form-group">
-      </div>
-    </form>
     {% if is_admin() %}
-    <form method="post" id="dojo-promote-dojo-form" autocomplete="off">
-      <div class="form-group">
-      <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="设为推荐课程">
-      </div>
-      <div id="dojo-promote-dojo-results" class="form-group">
-      </div>
-    </form>
+    <button id="dojo-delete-button" class="content-action-card is-danger" type="button" data-dojo="{{ dojo.reference_id }}">
+      <span><i class="fas fa-trash-alt" aria-hidden="true"></i></span><div><strong>删除课程</strong><small>永久移除课程及关联内容</small></div><i class="fas fa-chevron-right" aria-hidden="true"></i>
+    </button>
     {% endif %}
+  </section>
+
+  <div class="content-management-grid">
+    <section class="content-surface">
+      <header class="content-section-heading"><div><span class="hub-kicker">成员权限</span><h2>教师</h2><p>教师可以编辑内容、查看学情并管理课程。</p></div><span class="content-status is-secondary">{{ dojo.admins | length }} 人</span></header>
+      <ul class="content-member-list">
+        {% for admin in dojo.admins %}
+        <li><span><i class="fas fa-user-shield" aria-hidden="true"></i></span><div><strong>{{ admin.user.name }}</strong><small>课程教师</small></div></li>
+        {% else %}
+        <li class="content-member-empty">尚未添加课程教师。</li>
+        {% endfor %}
+      </ul>
+
+      <div class="content-section-divider"></div>
+
+      <header class="content-section-heading"><div><span class="hub-kicker">权限提升</span><h2>从学生中添加教师</h2><p>选择一名学生并授予课程管理权限。</p></div></header>
+      <form method="post" id="dojo-promote-admin-form" class="content-choice-form" autocomplete="off">
+        <fieldset class="content-member-choices">
+          <legend class="sr-only">选择学生</legend>
+          {% for member in dojo.members %}
+          <label for="{{ member.user.id }}">
+            <input type="radio" id="{{ member.user.id }}" name="user_id" value="{{ member.user.id }}" required>
+            <span><i class="fas fa-user" aria-hidden="true"></i></span>
+            <strong id="name-for-{{ member.user.id }}">{{ member.user.name }}</strong>
+            <a href="{{ url_for('pwncollege_users.view_other', user_id=member.user.id) }}" aria-label="查看 {{ member.user.name }}"><i class="fas fa-chevron-right" aria-hidden="true"></i></a>
+          </label>
+          {% else %}
+          <p class="content-muted-copy">课程还没有可提升的学生。</p>
+          {% endfor %}
+        </fieldset>
+        {% if dojo.members %}<button class="hub-button is-primary" name="_submit" type="submit" value="提升为教师"><i class="fas fa-user-plus" aria-hidden="true"></i>提升为教师</button>{% endif %}
+        <div id="dojo-promote-admin-results" class="content-result" role="status" hidden></div>
+      </form>
+    </section>
+
+    <aside class="content-management-sidebar">
+      {% if dojo.public_key %}
+      <section class="content-surface">
+        <header class="content-section-heading"><div><span class="hub-kicker">私有仓库</span><h2>部署密钥</h2><p>将此公钥添加到仓库的 Deploy Keys。</p></div></header>
+        <div class="content-copy-field is-stacked" data-copy-field>
+          <textarea id="dojo-deploy-key-result" class="content-code-field" rows="5" readonly>{{ dojo.public_key }}</textarea>
+          <button class="hub-button copy-button" type="button"><i class="fas fa-copy" aria-hidden="true"></i>复制密钥</button>
+        </div>
+      </section>
+      {% endif %}
+
+      <section class="content-surface">
+        <header class="content-section-heading"><div><span class="hub-kicker">版本信息</span><h2>内容来源</h2></div></header>
+        <dl class="content-detail-list">
+          {% if dojo.repository and dojo.private_key %}
+          <div><dt>当前版本</dt><dd><code>{{ dojo.hash[:8] }}</code></dd></div>
+          <div><dt>内容同步</dt><dd>Git 仓库</dd></div>
+          {% else %}
+          <div><dt>当前版本</dt><dd>平台内容</dd></div>
+          <div><dt>内容同步</dt><dd>由课程中心管理</dd></div>
+          {% endif %}
+        </dl>
+      </section>
+
+      <section class="content-surface">
+        <header class="content-section-heading"><div><span class="hub-kicker">维护操作</span><h2>课程维护</h2><p>仅在迁移或清理旧数据时使用。</p></div></header>
+        <form method="post" id="dojo-award-prune-form" class="content-maintenance-form" autocomplete="off">
+          <div><strong>清理旧版徽章奖励</strong><small>按当前完成要求重新整理历史徽章。</small></div>
+          <button class="hub-button" name="_submit" type="submit" value="清理旧版表情徽章奖励">清理</button>
+        </form>
+        <div id="dojo-award-prune-results" class="content-result" role="status" hidden></div>
+        {% if is_admin() %}
+        <form method="post" id="dojo-promote-dojo-form" class="content-maintenance-form" autocomplete="off">
+          <div><strong>设为推荐课程</strong><small>将课程加入公开推荐目录。</small></div>
+          <button class="hub-button" name="_submit" type="submit" value="设为推荐课程">设置</button>
+        </form>
+        <div id="dojo-promote-dojo-results" class="content-result" role="status" hidden></div>
+        {% endif %}
+      </section>
+    </aside>
   </div>
-  <b>课程标识：</b><code>{{ dojo.reference_id }}</code>
-  <br>
-  <b>内部课程 ID：</b><code>{{ dojo.hex_dojo_id }}</code>
-  <br>
-  <!-- <b>Update Code: </b><code>{{ dojo.update_code }}</code>
-  <br> -->
-  <b>Git 提交哈希：</b><code>{{ dojo.hash[:8] }}</code>
-  <br>
-  <b>教师</b>
-  <ul>
-    {% for admin in dojo.admins %}
-    <li>{{ admin.user.name }}</li>
-    {% endfor %}
-  </ul>
-  <b>学生</b>
-  <form method="post" id="dojo-promote-admin-form" autocomplete="off">
-    <div class="form-group">
-      {% for member in dojo.members %}
-      <input type="radio" id="{{ member.user.id }}" name="user_id" value="{{ member.user.id }}">
-      <label for="{{ member.user.id }}"><a href="{{ url_for('pwncollege_users.view_other', user_id=member.user.id) }}"><span id="name-for-{{member.user.id}}">{{ member.user.name }}</span></a></label>
-      <br>
-      {% endfor %}
-      <input class="btn btn-mini btn-primary" id="_submit" name="_submit" type="submit" value="提升为教师">
-    </div>
-    <div id="dojo-promote-admin-results" class="form-group">
-    </div>
-  </form>
 </div>
 {% endblock %}
 
 {% block entrypoint %}
-    <script defer src="{{ url_for('views.themes', path='js/pages/settings.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/pages/settings.js') }}"></script>
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js', v='aisecedu-20260726-guided-workspace') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js', v='aisecedu-content-management-v2') }}"></script>
 {% endblock %}

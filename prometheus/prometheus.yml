@@ -1,8 +1,15 @@
 global:
   scrape_interval: 15s
 
+rule_files:
+  - /etc/prometheus/rules/global-agent-runtime.rules.yml
+
 scrape_configs:
   - job_name: 'cadvisor'
+    # cAdvisor can retain per-cgroup sample timestamps after a nested Docker
+    # container exits. Use the scrape timestamp so Prometheus does not reject
+    # otherwise valid container metrics as stale.
+    honor_timestamps: false
     file_sd_configs:
       - files:
         - /etc/prometheus/targets/cadvisor.json
@@ -11,3 +18,15 @@ scrape_configs:
     file_sd_configs:
       - files:
           - /etc/prometheus/targets/node_exporter.json
+
+  - job_name: 'aisecedu_teaching'
+    metrics_path: /metrics/teaching
+    static_configs:
+      - targets:
+          - ctfd:8000
+
+  - job_name: 'aisecedu_agent_runtime'
+    metrics_path: /agent-runtime/api/integration/metrics
+    static_configs:
+      - targets:
+          - agent-runtime:3000

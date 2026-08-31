@@ -1,0 +1,1549 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工控安全实验室：PLC阶梯逻辑注入 — 传送带E-Stop旁路攻击</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --card2: #1a2332;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --amber: #f59e0b;
+            --rail: #64748b;
+            --ladder-bg: #1a1a2e;
+            --contact: #38bdf8;
+            --coil: #4ade80;
+            --highlight-attack: #ef4444;
+            --highlight-normal: #22c55e;
+            font-family: 'Segoe UI', 'Noto Sans SC', 'Consolas', 'Courier New', monospace;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px;
+            gap: 16px;
+        }
+        .edu-badge {
+            position: fixed;
+            top: 8px;
+            right: 8px;
+            background: #000000aa;
+            color: #fbbf24;
+            font-size: 10px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            z-index: 999;
+            letter-spacing: 0.5px;
+            border: 1px solid #fbbf2455;
+            pointer-events: none;
+        }
+        .container {
+            max-width: 1200px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px 24px;
+            box-shadow: 0 4px 24px #00000033;
+            transition: all 0.3s ease;
+        }
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+        }
+        .card-header h2 {
+            font-size: 1.15rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            color: #f1f5f9;
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+        }
+        .badge-step {
+            background: #3b82f620;
+            color: #60a5fa;
+            border: 1px solid #3b82f640;
+        }
+        .badge-danger {
+            background: #ef444420;
+            color: #f87171;
+            border: 1px solid #ef444440;
+        }
+        .badge-success {
+            background: #22c55e20;
+            color: #4ade80;
+            border: 1px solid #22c55e40;
+        }
+        .badge-warning {
+            background: #f59e0b20;
+            color: #fbbf24;
+            border: 1px solid #f59e0b40;
+        }
+        .progress-bar {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin: 4px 0 10px;
+        }
+        .progress-dot {
+            width: 28px;
+            height: 6px;
+            border-radius: 3px;
+            background: #334155;
+            transition: all 0.4s ease;
+        }
+        .progress-dot.active {
+            background: var(--accent);
+            box-shadow: 0 0 10px #3b82f688;
+        }
+        .progress-dot.done {
+            background: var(--success);
+            box-shadow: 0 0 8px #22c55e66;
+        }
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #1e293b;
+            color: #e2e8f0;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+            transition: all 0.2s;
+            user-select: none;
+        }
+        .btn:hover {
+            background: #2d3a4e;
+            border-color: #64748b;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px #00000044;
+        }
+        .btn:active {
+            transform: scale(0.97);
+            transition: transform 0.08s;
+        }
+        .btn-danger {
+            background: #7f1d1d;
+            border-color: #ef444460;
+            color: #fca5a5;
+        }
+        .btn-danger:hover {
+            background: #991b1b;
+            border-color: #ef4444;
+            box-shadow: 0 0 20px #ef444433;
+        }
+        .btn-success {
+            background: #14532d;
+            border-color: #22c55e50;
+            color: #86efac;
+        }
+        .btn-success:hover {
+            background: #166534;
+            border-color: #22c55e;
+            box-shadow: 0 0 18px #22c55e33;
+        }
+        .btn-accent {
+            background: #1e3a5f;
+            border-color: #3b82f650;
+            color: #93c5fd;
+        }
+        .btn-accent:hover {
+            background: #1e40af;
+            border-color: #3b82f6;
+            box-shadow: 0 0 18px #3b82f633;
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .estop-btn {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 40% 35%, #ef4444, #7f1d1d);
+            border: 4px solid #450a0a;
+            cursor: pointer;
+            font-weight: 900;
+            font-size: 0.7rem;
+            color: #fff;
+            letter-spacing: 1px;
+            text-shadow: 0 1px 2px #000;
+            transition: all 0.12s;
+            box-shadow: 0 6px 20px #ef444455, 0 2px 6px #00000088;
+            user-select: none;
+            position: relative;
+        }
+        .estop-btn:hover {
+            box-shadow: 0 8px 28px #ef444477, 0 3px 10px #000000aa;
+            transform: translateY(-2px);
+        }
+        .estop-btn:active,
+        .estop-btn.pressed {
+            transform: translateY(4px) scale(0.93);
+            box-shadow: 0 1px 6px #ef444433, 0 1px 2px #00000088;
+            background: radial-gradient(circle at 40% 35%, #dc2626, #450a0a);
+            border-color: #1a0000;
+        }
+        .conveyor-canvas {
+            width: 100%;
+            max-width: 700px;
+            height: 200px;
+            border-radius: 10px;
+            background: #0a0f18;
+            border: 2px solid #334155;
+            display: block;
+            margin: 0 auto;
+        }
+        .status-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            margin: 8px 0;
+        }
+        .status-light {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        .light-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            transition: all 0.3s;
+            box-shadow: 0 0 8px transparent;
+        }
+        .light-dot.on {
+            background: #22c55e;
+            box-shadow: 0 0 16px #22c55eaa;
+        }
+        .light-dot.off {
+            background: #374151;
+            box-shadow: 0 0 4px #1f2937;
+        }
+        .light-dot.warn {
+            background: #ef4444;
+            box-shadow: 0 0 20px #ef4444cc;
+            animation: pulse-warn 0.6s infinite alternate;
+        }
+        @keyframes pulse-warn {
+            from {
+                box-shadow: 0 0 12px #ef444488;
+            }
+            to {
+                box-shadow: 0 0 28px #ef4444dd;
+            }
+        }
+        .ladder-container {
+            background: var(--ladder-bg);
+            border-radius: 10px;
+            padding: 20px 12px;
+            border: 2px solid #334155;
+            overflow-x: auto;
+            position: relative;
+            min-height: 300px;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+        .ladder-rail-left,
+        .ladder-rail-right {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 8px;
+            background: #64748b;
+            border-radius: 4px;
+            z-index: 1;
+        }
+        .ladder-rail-left {
+            left: 24px;
+        }
+        .ladder-rail-right {
+            right: 24px;
+        }
+        .rung-row {
+            display: flex;
+            align-items: center;
+            height: 52px;
+            margin: 6px 0;
+            position: relative;
+            z-index: 2;
+            padding-left: 36px;
+            padding-right: 36px;
+            cursor: default;
+            transition: background 0.2s;
+            border-radius: 6px;
+            gap: 0;
+        }
+        .rung-row:hover {
+            background: #ffffff08;
+        }
+        .rung-row.highlight-attack {
+            background: #ef444415;
+            border: 1px dashed #ef444466;
+            border-radius: 6px;
+            animation: pulse-attack-bg 1s infinite alternate;
+        }
+        @keyframes pulse-attack-bg {
+            from {
+                background: #ef444410;
+            }
+            to {
+                background: #ef444428;
+            }
+        }
+        .rung-wire {
+            flex: 1;
+            height: 3px;
+            background: #94a3b8;
+            min-width: 16px;
+            border-radius: 2px;
+            transition: all 0.3s;
+        }
+        .rung-wire.energized {
+            background: #fbbf24;
+            box-shadow: 0 0 8px #fbbf2488;
+        }
+        .contact-no {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            flex-shrink: 0;
+            padding: 0 2px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .contact-no .gap {
+            width: 2px;
+            height: 18px;
+            background: transparent;
+            position: relative;
+        }
+        .contact-no .line-l,
+        .contact-no .line-r {
+            width: 10px;
+            height: 3px;
+            background: #38bdf8;
+            border-radius: 2px;
+        }
+        .contact-no.closed .gap {
+            background: #fbbf24;
+            box-shadow: 0 0 6px #fbbf2488;
+        }
+        .contact-no.closed .line-l,
+        .contact-no.closed .line-r {
+            background: #fbbf24;
+        }
+        .contact-nc {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            flex-shrink: 0;
+            padding: 0 2px;
+            cursor: pointer;
+            position: relative;
+        }
+        .contact-nc .diag {
+            width: 2px;
+            height: 22px;
+            background: #f87171;
+            transform: rotate(20deg);
+            border-radius: 1px;
+            margin: 0 6px;
+        }
+        .contact-nc .line-l,
+        .contact-nc .line-r {
+            width: 10px;
+            height: 3px;
+            background: #f87171;
+            border-radius: 2px;
+        }
+        .contact-nc.open-circ .diag {
+            background: #64748b;
+        }
+        .contact-nc.open-circ .line-l,
+        .contact-nc.open-circ .line-r {
+            background: #64748b;
+        }
+        .coil-symbol {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 3px solid #4ade80;
+            flex-shrink: 0;
+            transition: all 0.3s;
+            position: relative;
+        }
+        .coil-symbol.active {
+            background: #4ade80;
+            box-shadow: 0 0 14px #4ade80aa;
+            border-color: #86efac;
+        }
+        .timer-box {
+            border: 2px solid #a78bfa;
+            border-radius: 6px;
+            padding: 3px 8px;
+            font-size: 0.7rem;
+            color: #c4b5fd;
+            flex-shrink: 0;
+            background: #1e1b2e;
+            letter-spacing: 0.5px;
+        }
+        .inject-indicator {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 16px;
+            height: 16px;
+            background: #ef4444;
+            border-radius: 50%;
+            box-shadow: 0 0 12px #ef4444;
+            animation: pulse-warn 0.5s infinite alternate;
+            z-index: 5;
+            pointer-events: none;
+        }
+        .flag-box {
+            background: #0f0f1a;
+            border: 2px solid #f59e0b;
+            border-radius: 10px;
+            padding: 16px 20px;
+            text-align: center;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 1.1rem;
+            color: #fbbf24;
+            letter-spacing: 1px;
+            animation: glow-flag 2s infinite alternate;
+            user-select: all;
+        }
+        @keyframes glow-flag {
+            from {
+                box-shadow: 0 0 12px #f59e0b33;
+            }
+            to {
+                box-shadow: 0 0 32px #f59e0b77;
+            }
+        }
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 768px) {
+            .comparison-grid {
+                grid-template-columns: 1fr;
+            }
+            .ladder-rail-left {
+                left: 12px;
+            }
+            .ladder-rail-right {
+                right: 12px;
+            }
+            .rung-row {
+                padding-left: 24px;
+                padding-right: 24px;
+            }
+            .contact-no .line-l,
+            .contact-no .line-r {
+                width: 5px;
+            }
+            .contact-nc .line-l,
+            .contact-nc .line-r {
+                width: 5px;
+            }
+            .rung-wire {
+                min-width: 6px;
+            }
+        }
+        .code-block {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 14px 16px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.82rem;
+            overflow-x: auto;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            color: #c9d1d9;
+        }
+        .code-block .keyword {
+            color: #ff7b72;
+        }
+        .code-block .func {
+            color: #d2a8ff;
+        }
+        .code-block .comment {
+            color: #8b949e;
+        }
+        .code-block .string {
+            color: #a5d6ff;
+        }
+        input[type="text"],
+        textarea {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #e2e8f0;
+            padding: 10px 14px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.85rem;
+            width: 100%;
+            transition: border-color 0.2s;
+        }
+        input[type="text"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px #3b82f620;
+        }
+        .info-callout {
+            background: #3b82f610;
+            border-left: 4px solid #3b82f6;
+            border-radius: 0 8px 8px 0;
+            padding: 12px 16px;
+            margin: 10px 0;
+            font-size: 0.85rem;
+            color: #93c5fd;
+        }
+        .danger-callout {
+            background: #ef444410;
+            border-left: 4px solid #ef4444;
+            border-radius: 0 8px 8px 0;
+            padding: 12px 16px;
+            margin: 10px 0;
+            font-size: 0.85rem;
+            color: #fca5a5;
+        }
+        details {
+            margin: 8px 0;
+        }
+        details summary {
+            cursor: pointer;
+            color: #94a3b8;
+            font-size: 0.85rem;
+            padding: 4px 0;
+            user-select: none;
+        }
+        details summary:hover {
+            color: #e2e8f0;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .fade-in {
+            animation: fadeIn 0.4s ease forwards;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .shake {
+            animation: shake 0.5s ease;
+        }
+        @keyframes shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            20% {
+                transform: translateX(-6px);
+            }
+            40% {
+                transform: translateX(6px);
+            }
+            60% {
+                transform: translateX(-4px);
+            }
+            80% {
+                transform: translateX(4px);
+            }
+        }
+        .tag-hint {
+            font-size: 0.75rem;
+            color: #64748b;
+            font-style: italic;
+        }
+        .label-sm {
+            font-size: 0.7rem;
+            color: #94a3b8;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="edu-badge">// EDUCATIONAL PURPOSE ONLY — 授权教学环境使用</div>
+
+    <div class="container">
+
+        <!-- 任务简报 -->
+        <div class="card fade-in" id="briefing-card">
+            <div class="card-header">
+                <span style="font-size:1.5rem;">🏭</span>
+                <h2>任务简报：PLC阶梯逻辑注入攻击</h2>
+                <span class="badge badge-warning">工控安全·ICS/SCADA</span>
+            </div>
+            <p style="color:#cbd5e1;line-height:1.6;">
+                你是一名工控安全研究员。某制造工厂的<strong>西门子S7-1200 PLC</strong>控制着一条关键传送带系统。
+                你的任务是：<span style="color:#fbbf24;">理解正常的阶梯逻辑（Ladder Logic）</span>，然后<span style="color:#f87171;">注入一条恶意程序段（malicious rung）</span>，
+                使其能够<strong>绕过紧急停止按钮（E-Stop）</strong>——即使操作员拍下急停，传送带仍继续运转。
+                完成攻击后，学习PLC代码签名与变更检测等防御措施。
+            </p>
+            <div class="progress-bar" id="progress-bar">
+                <span class="label-sm" style="margin-right:8px;">进度：</span>
+                <span class="progress-dot active" data-step="1"></span>
+                <span class="progress-dot" data-step="2"></span>
+                <span class="progress-dot" data-step="3"></span>
+                <span class="progress-dot" data-step="4"></span>
+                <span class="progress-dot" data-step="5"></span>
+                <span class="progress-dot" data-step="6"></span>
+            </div>
+        </div>
+
+        <!-- 步骤1：观察正常运行 -->
+        <div class="card fade-in" id="step1-card">
+            <div class="card-header">
+                <span class="badge badge-step">步骤 1/6</span>
+                <h2>观察传送带系统正常运行</h2>
+            </div>
+            <p style="color:#94a3b8;margin-bottom:10px;">点击 <strong>启动</strong> 按钮运行传送带，然后按下 <strong>E-Stop急停</strong> 观察正常停止行为。</p>
+            <canvas class="conveyor-canvas" id="conveyorCanvas" width="700" height="200"></canvas>
+            <div class="status-row">
+                <span class="status-light"><span class="light-dot off" id="motorLight"></span> 电机状态</span>
+                <span class="status-light"><span class="light-dot off" id="estopLight"></span> E-Stop状态</span>
+                <span class="status-light"><span class="light-dot off" id="runLight"></span> 运行指示灯</span>
+            </div>
+            <div class="status-row" style="gap:12px;">
+                <button class="btn btn-success" id="btnStart" onclick="startConveyor()">▶ 启动传送带</button>
+                <button class="btn" id="btnStop" onclick="stopConveyor()" disabled>⏹ 正常停止</button>
+                <button class="estop-btn" id="btnEStop" onclick="pressEStop()" title="紧急停止按钮">E-STOP</button>
+                <button class="btn btn-accent" id="btnReset" onclick="resetSystem()">↺ 复位系统</button>
+            </div>
+            <p class="tag-hint" style="margin-top:8px;">💡 提示：先点启动观察传送带运转，再按E-Stop观察急停效果，然后复位。</p>
+        </div>
+
+        <!-- 步骤2：查看阶梯逻辑 -->
+        <div class="card fade-in" id="step2-card">
+            <div class="card-header">
+                <span class="badge badge-step">步骤 2/6</span>
+                <h2>检查正常阶梯逻辑（Ladder Logic）</h2>
+                <span class="badge badge-success">S7-1200 程序</span>
+            </div>
+            <p style="color:#94a3b8;margin-bottom:8px;">
+                以下是控制传送带的4条阶梯逻辑程序段（Rung）。请仔细理解每条程序段的逻辑。
+                将鼠标悬停在各个元件上可查看说明。
+            </p>
+            <div class="ladder-container" id="ladderNormal">
+                <div class="ladder-rail-left"></div>
+                <div class="ladder-rail-right"></div>
+                <!-- Rung 0: Start latch -->
+                <div class="rung-row" data-rung="0" title="Rung 0: 启动自锁回路">
+                    <span class="contact-no" data-type="NO" data-tag="Start_Button" title="常开触点 - 启动按钮 (I0.0)">
+                        <span class="line-l"></span><span class="gap"></span><span class="line-r"></span>
+                    </span>
+                    <span class="rung-wire"></span>
+                    <span class="coil-symbol" data-type="coil" data-tag="Run_Coil" title="输出线圈 - 运行继电器 (Q0.0)"></span>
+                </div>
+                <!-- Rung 1: Run latch (parallel contact for self-holding) -->
+                <div class="rung-row" data-rung="1" title="Rung 1: 自保持触点（与启动按钮并联）">
+                    <span class="contact-no" data-type="NO" data-tag="Run_Aux" title="常开触点 - 运行辅助触点 (Q0.0反馈)">
+                        <span class="line-l"></span><span class="gap"></span><span class="line-r"></span>
+                    </span>
+                    <span class="rung-wire"></span>
+                    <span class="rung-wire" style="flex:0.3;"></span>
+                </div>
+                <!-- Rung 2: E-Stop in series with Run coil power -->
+                <div class="rung-row" data-rung="2" title="Rung 2: E-Stop串联在运行回路中">
+                    <span class="contact-nc" data-type="NC" data-tag="E_Stop" title="常闭触点 - 紧急停止按钮 (I0.5)">
+                        <span class="line-l"></span><span class="diag"></span><span class="line-r"></span>
+                    </span>
+                    <span class="rung-wire"></span>
+                    <span class="coil-symbol" data-type="coil" data-tag="Motor_Output" title="输出线圈 - 传送带电机 (Q0.1)"></span>
+                </div>
+                <!-- Rung 3: Timer for delayed start monitoring -->
+                <div class="rung-row" data-rung="3" title="Rung 3: 启动延时监控定时器">
+                    <span class="contact-no" data-type="NO" data-tag="Motor_Running" title="常开触点 - 电机运行反馈 (Q0.1)">
+                        <span class="line-l"></span><span class="gap"></span><span class="line-r"></span>
+                    </span>
+                    <span class="rung-wire"></span>
+                    <span class="timer-box" title="接通延时定时器 TON - 预设2秒">TON<br>2s</span>
+                    <span class="rung-wire"></span>
+                    <span class="coil-symbol" data-type="coil" data-tag="Timer_Done" title="输出线圈 - 定时完成标志 (M0.0)"></span>
+                </div>
+            </div>
+            <div class="info-callout">
+                <strong>🔍 关键观察：</strong> Rung 0和Rung 1构成<strong>启动自锁回路</strong>（按下Start后Run线圈吸合，辅助触点保持供电）。
+                Rung 2中<strong>E-Stop常闭触点</strong>串联在电机输出回路中——当E-Stop被按下时，常闭触点断开，切断电机电源。
+                这个设计确保了紧急情况下传送带可以立即停止。
+            </div>
+            <button class="btn btn-accent" id="btnBeginAttack" onclick="beginAttackPhase()" style="margin-top:8px;">
+                ⚡ 开始攻击：注入恶意程序段
+            </button>
+        </div>
+
+        <!-- 步骤3：注入攻击 -->
+        <div class="card fade-in hidden" id="step3-card">
+            <div class="card-header">
+                <span class="badge badge-step">步骤 3/6</span>
+                <span class="badge badge-danger">攻击阶段</span>
+                <h2>注入恶意阶梯逻辑程序段</h2>
+            </div>
+            <p style="color:#fca5a5;margin-bottom:10px;">
+                攻击目标：在Rung 2的<strong>E-Stop常闭触点两端</strong>并联一条路径，使E-Stop被按下时电流仍能流过。
+                请在下方阶梯逻辑编辑器中<strong>点击E-Stop触点两端</strong>来注入并联旁路程序段。
+            </p>
+            <div class="ladder-container" id="ladderAttack" style="position:relative;">
+                <div class="ladder-rail-left"></div>
+                <div class="ladder-rail-right"></div>
+                <div class="rung-row" data-rung="0">
+                    <span class="contact-no closed" data-type="NO" data-tag="Start_Button">
+                        <span class="line-l"></span><span class="gap"></span><span class="line-r"></span>
+                    </span>
+                    <span class="rung-wire"></span>
+                    <span class="coil-symbol active" data-type="coil" data-tag="Run_Coil"></span>
+                </div>
+                <div class="rung-row" data-rung="1">
+                    <span class="contact-no closed" data-type="NO" data-tag="Run_Aux">
+                        <span class="line-l"></span><span class="gap"></span><span class="line-r"></span>
+                    </span>
+                    <span class="rung-wire"></span>
+                    <span class="rung-wire" style="flex:0.3;"></span>
+                </div>
+                <!-- Target rung for injection -->
+                <div class="rung-row highlight-attack" data-rung="2" id="targetRung" style="position:relative;cursor:crosshair;" title="点击此处注入旁路程序段">
+                    <span class="contact-nc" data-type="NC" data-tag="E_Stop" id="estopContact">
+                        <span class="line-l"></span><span class="diag"></span><span class="line-r"></span>
+                    </span>
+                    <span class="rung-wire energized" id="wireBeforeEstop" style="flex:0.4;cursor:crosshair;" title="点击此处注入并联路径起点"></span>
+                    <span class="rung-wire energized" id="wireAfterEstop" style="flex:0.4;cursor:crosshair;" title="点击此处完成并联路径"></span>
+                    <span class="coil-symbol active" data-type="coil" data-tag="Motor_Output"></span>
+                    <button class="btn btn-danger" id="btnInjectHere" style="position:absolute;right:-60px;top:50%;transform:translateY(-50%);font-size:0.7rem;padding:5px 10px;z-index:10;" onclick="injectMaliciousRung()">
+                        💉注入
+                    </button>
+                </div>
+                <div class="rung-row" data-rung="3">
+                    <span class="contact-no closed" data-type="NO" data-tag="Motor_Running">
+                        <span class="line-l"></span><span class="gap"></span><span class="line-r"></span>
+                    </span>
+                    <span class="rung-wire"></span>
+                    <span class="timer-box">TON<br>2s</span>
+                    <span class="rung-wire"></span>
+                    <span class="coil-symbol active" data-type="coil" data-tag="Timer_Done"></span>
+                </div>
+                <!-- Injected rung appears here -->
+                <div class="rung-row hidden" id="injectedRungPlaceholder" style="background:#ef444418;border:2px dashed #ef4444;border-radius:6px;position:relative;">
+                    <span class="inject-indicator"></span>
+                    <span class="contact-no closed" style="opacity:0.85;" title="恶意注入的常开触点 - 攻击者控制的远程信号 (M9.9)">
+                        <span class="line-l"></span><span class="gap"></span><span class="line-r"></span>
+                    </span>
+                    <span class="rung-wire energized" style="background:#ef4444;box-shadow:0 0 8px #ef444488;"></span>
+                    <span style="color:#f87171;font-size:0.7rem;margin:0 4px;white-space:nowrap;">⚠ 旁路路径</span>
+                    <span class="rung-wire energized" style="background:#ef4444;box-shadow:0 0 8px #ef444488;"></span>
+                    <span class="coil-symbol active" style="border-color:#ef4444;background:#ef444455;box-shadow:0 0 10px #ef444466;" title="恶意输出 - 强制保持电机运行"></span>
+                </div>
+            </div>
+            <div class="danger-callout" id="injectConfirmMsg" style="display:none;">
+                <strong>⚠ 恶意程序段已注入！</strong> 一个新的常开触点（由远程信号M9.9控制）已被并联到E-Stop两端。
+                当攻击者激活M9.9时，电流将<span style="color:#fbbf24;">绕过E-Stop</span>直接供给电机输出线圈。
+            </div>
+            <div id="injectPrompt" class="info-callout">
+                <strong>💡 操作提示：</strong> 点击Rung 2上的<strong style="color:#f87171;">「💉注入」按钮</strong>来注入恶意旁路程序段。
+                你将看到一条红色高亮的新程序段出现在E-Stop并联位置。
+            </div>
+            <button class="btn btn-accent" id="btnProceedToTest" onclick="proceedToTest()" disabled style="margin-top:8px;">
+                ▶ 前往测试E-Stop旁路效果
+            </button>
+        </div>
+
+        <!-- 步骤4：测试旁路攻击 -->
+        <div class="card fade-in hidden" id="step4-card">
+            <div class="card-header">
+                <span class="badge badge-step">步骤 4/6</span>
+                <span class="badge badge-danger">攻击验证</span>
+                <h2>测试E-Stop旁路攻击效果</h2>
+            </div>
+            <p style="color:#fca5a5;margin-bottom:10px;">
+                传送带正在运行。现在<strong>按下E-Stop紧急停止按钮</strong>——观察传送带是否真的停止。
+                由于恶意旁路程序段的存在，电机将<strong>无视急停信号继续运转</strong>。
+            </p>
+            <canvas class="conveyor-canvas" id="conveyorCanvasAttack" width="700" height="200"></canvas>
+            <div class="status-row">
+                <span class="status-light"><span class="light-dot on" id="motorLight2"></span> 电机状态</span>
+                <span class="status-light"><span class="light-dot warn" id="estopLight2"></span> E-Stop状态（已按下！）</span>
+                <span class="status-light"><span class="light-dot on" id="runLight2"></span> 运行指示灯（异常常亮）</span>
+            </div>
+            <div class="status-row" style="gap:12px;">
+                <button class="estop-btn pressed" id="btnEStop2" onclick="testEStopBypass()" style="animation:pulse-warn 0.4s infinite alternate;">
+                    已按下<br>E-STOP
+                </button>
+                <span style="color:#f87171;font-weight:700;font-size:1.1rem;animation:pulse-warn 0.6s infinite alternate;">
+                    ⚠ 传送带仍在运行！
+                </span>
+            </div>
+            <div class="danger-callout" style="margin-top:10px;">
+                <strong>🚨 攻击成功！</strong> E-Stop按钮已按下，但传送带电机继续运转。
+                恶意注入的旁路程序段（M9.9常开触点闭合）为电机提供了<strong>绕过E-Stop的替代供电路径</strong>。
+                这正是阶梯逻辑注入攻击的核心危害——<span style="color:#fbbf24;">破坏安全联锁机制</span>。
+            </div>
+            <button class="btn btn-success" onclick="revealFlag()" style="margin-top:8px;" id="btnRevealFlag">
+                🏴 捕获攻击标志（Flag）
+            </button>
+            <div class="flag-box hidden fade-in" id="flagDisplay" style="margin-top:12px;">
+                🏴 FLAG{plc_ladder_injection_e_stop_bypass_s7_1200}
+            </div>
+        </div>
+
+        <!-- 步骤5：逻辑对比 -->
+        <div class="card fade-in hidden" id="step5-card">
+            <div class="card-header">
+                <span class="badge badge-step">步骤 5/6</span>
+                <h2>正常逻辑 vs 恶意逻辑对比</h2>
+            </div>
+            <div class="comparison-grid">
+                <div style="background:#0f1a0f;border:2px solid #22c55e40;border-radius:10px;padding:14px;">
+                    <h3 style="color:#4ade80;font-size:0.95rem;margin-bottom:8px;">✅ 正常阶梯逻辑（安全）</h3>
+                    <div class="ladder-container" style="min-height:auto;padding:8px;">
+                        <div class="ladder-rail-left" style="left:12px;"></div>
+                        <div class="ladder-rail-right" style="right:12px;"></div>
+                        <div class="rung-row" style="padding-left:24px;padding-right:24px;height:40px;">
+                            <span class="contact-nc" data-type="NC" data-tag="E_Stop">
+                                <span class="line-l"></span><span class="diag"></span><span class="line-r"></span>
+                            </span>
+                            <span class="rung-wire"></span>
+                            <span class="coil-symbol" data-type="coil" data-tag="Motor_Output"></span>
+                        </div>
+                    </div>
+                    <p style="font-size:0.78rem;color:#86efac;margin-top:6px;">E-Stop常闭触点<strong>直接串联</strong>在电机回路中。按下E-Stop → 电路断开 → 电机停止。</p>
+                </div>
+                <div style="background:#1f0f0f;border:2px solid #ef444440;border-radius:10px;padding:14px;">
+                    <h3 style="color:#f87171;font-size:0.95rem;margin-bottom:8px;">🔴 恶意注入逻辑（危险）</h3>
+                    <div class="ladder-container" style="min-height:auto;padding:8px;">
+                        <div class="ladder-rail-left" style="left:12px;"></div>
+                        <div class="ladder-rail-right" style="right:12px;"></div>
+                        <div class="rung-row" style="padding-left:24px;padding-right:24px;height:40px;background:#ef444415;border-radius:4px;">
+                            <span class="contact-nc" data-type="NC" data-tag="E_Stop">
+                                <span class="line-l"></span><span class="diag"></span><span class="line-r"></span>
+                            </span>
+                            <span class="rung-wire"></span>
+                            <span class="coil-symbol" data-type="coil" data-tag="Motor_Output"></span>
+                        </div>
+                        <div class="rung-row" style="padding-left:24px;padding-right:24px;height:40px;background:#ef444428;border:2px dashed #ef444466;border-radius:4px;position:relative;">
+                            <span class="inject-indicator" style="top:4px;right:4px;"></span>
+                            <span class="contact-no closed" style="opacity:0.9;">
+                                <span class="line-l"></span><span class="gap"></span><span class="line-r"></span>
+                            </span>
+                            <span class="rung-wire energized" style="background:#ef4444;"></span>
+                            <span style="color:#f87171;font-size:0.65rem;">← 恶意旁路</span>
+                        </div>
+                    </div>
+                    <p style="font-size:0.78rem;color:#fca5a5;margin-top:6px;">注入的<strong>并联路径</strong>（M9.9远程触点）绕过E-Stop。即使E-Stop断开，电流仍可通过旁路供给电机。</p>
+                </div>
+            </div>
+            <div class="danger-callout" style="margin-top:12px;">
+                <strong>🔍 攻击原理分析：</strong> 攻击者利用对PLC的编程访问权限，在E-Stop常闭触点两端<strong>并联了一个由远程信号控制的常开触点</strong>（M9.9）。
+                这创建了一条"影子路径"——当攻击者远程闭合M9.9时，电流可以完全绕过物理E-Stop按钮。
+                从操作员视角，急停按钮被按下但设备仍在运转，造成严重的安全幻觉。
+            </div>
+        </div>
+
+        <!-- 步骤6：防御措施 -->
+        <div class="card fade-in hidden" id="step6-card">
+            <div class="card-header">
+                <span class="badge badge-step">步骤 6/6</span>
+                <span class="badge badge-success">防御学习</span>
+                <h2>PLC代码签名与变更检测防御</h2>
+            </div>
+            <p style="color:#94a3b8;margin-bottom:10px;">
+                如何防御此类阶梯逻辑注入攻击？以下是两种关键防御措施。请在下方<strong>编写变更检测的核心逻辑</strong>来完成防御学习。
+            </p>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+                <div style="background:#0f1a1f;border:1px solid #3b82f640;border-radius:8px;padding:14px;">
+                    <h3 style="color:#60a5fa;font-size:0.9rem;margin-bottom:6px;">🔐 PLC代码签名</h3>
+                    <p style="font-size:0.78rem;color:#93c5fd;line-height:1.5;">
+                        每次向PLC下载程序时，工程软件（如TIA Portal）使用<strong>数字签名</strong>对阶梯逻辑程序进行哈希计算并加密。
+                        PLC在上电或运行时<strong>验证签名</strong>——如果程序被非法修改，签名验证失败，PLC将<strong>拒绝执行并发出报警</strong>。
+                        这类似于操作系统的Secure Boot机制。
+                    </p>
+                </div>
+                <div style="background:#0f1a1f;border:1px solid #f59e0b40;border-radius:8px;padding:14px;">
+                    <h3 style="color:#fbbf24;font-size:0.9rem;margin-bottom:6px;">📋 变更检测与审计</h3>
+                    <p style="font-size:0.78rem;color:#fde68a;line-height:1.5;">
+                        通过<strong>定期比对</strong>PLC中运行的程序与"黄金镜像"（已知安全的基准版本），
+                        检测任何未经授权的程序段修改。结合<strong>版本控制和审计日志</strong>，
+                        记录谁在何时对PLC程序进行了何种变更。
+                    </p>
+                </div>
+            </div>
+
+            <p style="color:#e2e8f0;font-weight:600;margin-bottom:6px;">
+                ✍️ <strong>动手实践：</strong> 补全下方的变更检测伪代码，实现对阶梯逻辑程序段数量的监控。
+            </p>
+            <div class="code-block" style="margin-bottom:8px;">
+                <span class="comment">// PLC变更检测函数 — 检测程序段数量异常</span>
+                <span class="keyword">function</span> <span class="func">detectLadderChanges</span>(currentRungs, goldenImageRungs) {
+                <span class="comment">// 比较当前程序段数量与基准镜像</span>
+                <span class="keyword">if</span> (currentRungs.<span id="codeGap1" style="color:#fbbf24;border-bottom:2px dashed #f59e0b;cursor:pointer;" title="点击补全代码" onclick="fillCodeGap('codeGap1','length')">__???__</span> !== goldenImageRungs.length) {
+                <span class="keyword">return</span> { alert: <span class="string">"检测到程序段数量异常！"</span>, severity: <span class="string">"HIGH"</span> };
+                }
+                <span class="comment">// 逐段比对程序哈希</span>
+                <span class="keyword">for</span> (<span class="keyword">let</span> i = 0; i &lt; currentRungs.length; i++) {
+                <span class="keyword">if</span> (<span id="codeGap2" style="color:#fbbf24;border-bottom:2px dashed #f59e0b;cursor:pointer;" title="点击补全代码" onclick="fillCodeGap('codeGap2','hash')">__???__</span>(currentRungs[i]) !== goldenImageRungs[i].signature) {
+                <span class="keyword">return</span> { alert: <span class="string">`程序段 ${i+1} 被篡改！`</span>, rung: i+1, severity: <span class="string">"CRITICAL"</span> };
+                }
+                }
+                <span class="keyword">return</span> { status: <span class="string">"OK"</span>, message: <span class="string">"所有程序段验证通过 ✓"</span> };
+                }
+            </div>
+            <p class="tag-hint">💡 点击代码中的 <span style="color:#fbbf24;">__???__</span> 空白处补全缺失的关键词。（提示：数组长度属性、哈希计算函数）</p>
+
+            <textarea id="defenseSummary" placeholder="用一句话总结：如何防御PLC阶梯逻辑注入攻击？（例如：实施代码签名+定期变更检测...）" style="margin-top:10px;height:50px;"></textarea>
+            <button class="btn btn-success" onclick="checkDefenseAnswer()" style="margin-top:6px;">✓ 提交防御理解</button>
+            <div id="defenseFeedback" style="margin-top:8px;font-size:0.85rem;"></div>
+        </div>
+
+        <!-- 完整分析报告 -->
+        <details class="card" style="margin-top:0;" id="analysisReport">
+            <summary style="font-size:1rem;font-weight:600;color:#fbbf24;">📋 查看完整分析报告（攻击链+防御+CVE参考）</summary>
+            <div style="padding:12px 0;line-height:1.7;font-size:0.85rem;color:#cbd5e1;">
+                <h3 style="color:#f87171;">攻击链（Kill Chain）</h3>
+                <ol>
+                    <li><strong>初始访问：</strong> 攻击者通过网络或物理方式获得PLC编程访问权限（如TIA Portal工程站）。</li>
+                    <li><strong>执行：</strong> 攻击者修改阶梯逻辑程序，在E-Stop触点两端并联远程控制的常开触点。</li>
+                    <li><strong>持久化：</strong> 恶意程序段被写入PLC非易失性存储，断电重启后依然存在。</li>
+                    <li><strong>影响：</strong> 操作员按下E-Stop但传送带继续运转——安全联锁被破坏，可能导致人员伤亡。</li>
+                </ol>
+                <h3 style="color:#60a5fa;margin-top:12px;">防御措施总结</h3>
+                <ul>
+                    <li>🔐 <strong>PLC代码签名：</strong> 使用数字签名确保程序完整性，非法修改导致签名失效。</li>
+                    <li>📋 <strong>变更检测：</strong> 定期比对运行程序与黄金镜像，检测未授权修改。</li>
+                    <li>🔒 <strong>访问控制：</strong> 限制PLC编程端口物理访问，使用强密码和RBAC。</li>
+                    <li>📡 <strong>网络分段：</strong> 将OT网络与IT网络隔离，部署工业防火墙。</li>
+                    <li>📊 <strong>审计日志：</strong> 记录所有PLC程序变更操作，便于事后追溯。</li>
+                </ul>
+                <h3 style="color:#f59e0b;margin-top:12px;">真实世界参考</h3>
+                <p>此类攻击与<strong>震网（Stuxnet）</strong>病毒的攻击手法有相似之处——通过修改PLC程序来改变物理设备行为，同时向监控系统反馈伪造的正常状态值。在工控安全领域，CWE-74（通用注入）和CWE-94（代码注入）覆盖了此类漏洞类型。Siemens S7-1200系列PLC支持<strong>专有技术保护（Know-How Protection）</strong>和<strong>访问级别密码</strong>作为基本防护。</p>
+                <p style="color:#64748b;font-size:0.75rem;margin-top:8px;">// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境。所有技术细节仅用于概念演示。</p>
+            </div>
+        </details>
+
+    </div>
+
+    <script>
+        // ==================== STATE MANAGEMENT ====================
+        const state = {
+            currentStep: 1,
+            conveyorRunning: false,
+            estopPressed: false,
+            maliciousRungInjected: false,
+            attackActive: false,
+            flagRevealed: false,
+            defenseComplete: false,
+            animationId: null,
+            beltOffset: 0,
+            packages: [
+                { x: 120, y: 105, w: 40, h: 30, color: '#e879f9', label: 'A' },
+                { x: 340, y: 105, w: 35, h: 28, color: '#fbbf24', label: 'B' },
+                { x: 520, y: 105, w: 42, h: 32, color: '#38bdf8', label: 'C' },
+            ],
+            codeGapsFilled: { codeGap1: false, codeGap2: false },
+        };
+
+        function updateProgress(step) {
+            state.currentStep = step;
+            const dots = document.querySelectorAll('#progress-bar .progress-dot');
+            dots.forEach((d, i) => {
+                d.classList.remove('active', 'done');
+                if (i + 1 < step) d.classList.add('done');
+                if (i + 1 === step) d.classList.add('active');
+            });
+        }
+
+        function showCard(cardId) {
+            const card = document.getElementById(cardId);
+            if (card) {
+                card.classList.remove('hidden');
+                card.classList.add('fade-in');
+            }
+        }
+
+        function hideCard(cardId) {
+            const card = document.getElementById(cardId);
+            if (card) card.classList.add('hidden');
+        }
+
+        // ==================== CANVAS DRAWING ====================
+        function getCanvas(id) {
+            const c = document.getElementById(id);
+            if (!c) return null;
+            const ctx = c.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const rect = c.getBoundingClientRect();
+            if (c.width !== rect.width * dpr) {
+                c.width = rect.width * dpr;
+                c.height = rect.height * dpr;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                c.style.width = rect.width + 'px';
+                c.style.height = rect.height + 'px';
+            }
+            return { canvas: c, ctx, w: rect.width, h: rect.height };
+        }
+
+        function drawConveyor(canvasId, running, estopActive, attackMode) {
+            const result = getCanvas(canvasId);
+            if (!result) return;
+            const { canvas, ctx, w, h } = result;
+
+            ctx.clearRect(0, 0, w, h);
+
+            // Background
+            ctx.fillStyle = '#0a0f18';
+            ctx.fillRect(0, 0, w, h);
+
+            // Floor line
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, h - 30);
+            ctx.lineTo(w, h - 30);
+            ctx.stroke();
+
+            // Conveyor frame
+            const beltY = h - 80;
+            const beltH = 36;
+            const frameY = beltY - 8;
+            const frameH = beltH + 16;
+
+            // Frame / supports
+            ctx.fillStyle = '#334155';
+            ctx.fillRect(40, frameY, w - 80, frameH);
+            ctx.strokeStyle = '#475569';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(40, frameY, w - 80, frameH);
+
+            // Rollers
+            const rollerR = 16;
+            ctx.fillStyle = '#64748b';
+            ctx.beginPath();
+            ctx.arc(50, beltY + beltH / 2, rollerR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(w - 50, beltY + beltH / 2, rollerR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#94a3b8';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(50, beltY + beltH / 2, rollerR, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(w - 50, beltY + beltH / 2, rollerR, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Belt surface
+            const beltSurfaceY = beltY + 4;
+            const beltSurfaceH = beltH - 8;
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(50, beltSurfaceY, w - 100, beltSurfaceH);
+            ctx.strokeStyle = '#2d3748';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(50, beltSurfaceY, w - 100, beltSurfaceH);
+
+            // Belt treads (moving)
+            if (running && !estopActive) {
+                state.beltOffset = (state.beltOffset + 2.5) % 30;
+            } else if (running && estopActive && attackMode) {
+                state.beltOffset = (state.beltOffset + 2.5) % 30; // Still moving despite E-Stop!
+            }
+            const treadSpacing = 30;
+            const startX = 50 - (state.beltOffset % treadSpacing);
+            ctx.strokeStyle = '#374151';
+            ctx.lineWidth = 1.5;
+            for (let x = startX; x < w - 50; x += treadSpacing) {
+                ctx.beginPath();
+                ctx.moveTo(x, beltSurfaceY);
+                ctx.lineTo(x, beltSurfaceY + beltSurfaceH);
+                ctx.stroke();
+            }
+
+            // Packages
+            const pkgY = beltSurfaceY - 26;
+            state.packages.forEach(pkg => {
+                if (running && !estopActive) {
+                    pkg.x += 1.8;
+                    if (pkg.x > w - 60) pkg.x = 50;
+                } else if (running && estopActive && attackMode) {
+                    pkg.x += 1.8;
+                    if (pkg.x > w - 60) pkg.x = 50;
+                }
+                // Draw package
+                ctx.fillStyle = pkg.color;
+                ctx.fillRect(pkg.x, pkgY, pkg.w, pkg.h);
+                ctx.strokeStyle = '#ffffff44';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(pkg.x, pkgY, pkg.w, pkg.h);
+                // Label
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 14px "Segoe UI","Noto Sans SC",sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(pkg.label, pkg.x + pkg.w / 2, pkgY + pkg.h / 2 + 5);
+                ctx.textAlign = 'start';
+            });
+
+            // E-Stop button visual on canvas
+            const estopBtnX = w - 90;
+            const estopBtnY = 30;
+            ctx.fillStyle = estopActive ? '#7f1d1d' : '#ef4444';
+            ctx.beginPath();
+            ctx.arc(estopBtnX, estopBtnY, 22, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#450a0a';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(estopBtnX, estopBtnY, 22, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 8px "Segoe UI","Noto Sans SC",sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('E-STOP', estopBtnX, estopBtnY + 3);
+            ctx.textAlign = 'start';
+
+            // Status text
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '12px "Segoe UI","Noto Sans SC",sans-serif';
+            ctx.fillText('传送带系统 · Siemens S7-1200', 16, 20);
+
+            if (estopActive && attackMode) {
+                ctx.fillStyle = '#ef4444';
+                ctx.font = 'bold 13px "Segoe UI","Noto Sans SC",sans-serif';
+                ctx.fillText('⚠ E-STOP已按下但传送带未停止！', 16, 42);
+                // Glow effect
+                ctx.shadowColor = '#ef444488';
+                ctx.shadowBlur = 16;
+                ctx.fillText('⚠ E-STOP已按下但传送带未停止！', 16, 42);
+                ctx.shadowBlur = 0;
+            } else if (estopActive && !attackMode) {
+                ctx.fillStyle = '#22c55e';
+                ctx.font = 'bold 13px "Segoe UI","Noto Sans SC",sans-serif';
+                ctx.fillText('✓ E-Stop已触发 — 传送带已安全停止', 16, 42);
+            } else if (running) {
+                ctx.fillStyle = '#22c55e';
+                ctx.font = 'bold 13px "Segoe UI","Noto Sans SC",sans-serif';
+                ctx.fillText('▶ 传送带正常运行中', 16, 42);
+            } else {
+                ctx.fillStyle = '#64748b';
+                ctx.font = 'bold 13px "Segoe UI","Noto Sans SC",sans-serif';
+                ctx.fillText('⏸ 传送带已停止', 16, 42);
+            }
+        }
+
+        function startConveyorAnimation(canvasId, running, estopActive, attackMode) {
+            function animate() {
+                drawConveyor(canvasId, running, estopActive, attackMode);
+                state.animationId = requestAnimationFrame(() => animate());
+            }
+            if (state.animationId) cancelAnimationFrame(state.animationId);
+            animate();
+        }
+
+        // ==================== CONVEYOR CONTROLS ====================
+        function updateStatusLights(running, estop, attackMode) {
+            const motorLight = document.getElementById('motorLight');
+            const estopLight = document.getElementById('estopLight');
+            const runLight = document.getElementById('runLight');
+            const motorLight2 = document.getElementById('motorLight2');
+            const estopLight2 = document.getElementById('estopLight2');
+            const runLight2 = document.getElementById('runLight2');
+
+            const updateLight = (el, state) => {
+                if (!el) return;
+                el.classList.remove('on', 'off', 'warn');
+                el.classList.add(state);
+            };
+
+            if (motorLight) updateLight(motorLight, running ? 'on' : 'off');
+            if (estopLight) updateLight(estopLight, estop ? 'warn' : 'off');
+            if (runLight) updateLight(runLight, running ? 'on' : 'off');
+            if (motorLight2) updateLight(motorLight2, running ? 'on' : 'off');
+            if (estopLight2) updateLight(estopLight2, estop ? 'warn' : 'off');
+            if (runLight2) updateLight(runLight2, (running && estop && attackMode) ? 'on' : (running ? 'on' : 'off'));
+        }
+
+        function startConveyor() {
+            state.conveyorRunning = true;
+            state.estopPressed = false;
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnStop').disabled = false;
+            document.getElementById('btnEStop').classList.remove('pressed');
+            updateStatusLights(true, false, state.attackActive);
+            startConveyorAnimation('conveyorCanvas', true, false, false);
+            updateLadderEnergization(true, false);
+        }
+
+        function stopConveyor() {
+            state.conveyorRunning = false;
+            state.estopPressed = false;
+            document.getElementById('btnStart').disabled = false;
+            document.getElementById('btnStop').disabled = true;
+            document.getElementById('btnEStop').classList.remove('pressed');
+            updateStatusLights(false, false, false);
+            startConveyorAnimation('conveyorCanvas', false, false, false);
+            updateLadderEnergization(false, false);
+        }
+
+        function pressEStop() {
+            if (!state.conveyorRunning) return;
+            state.estopPressed = true;
+            document.getElementById('btnEStop').classList.add('pressed');
+            if (state.attackActive && state.maliciousRungInjected) {
+                // Attack mode: E-Stop does NOT stop the conveyor
+                updateStatusLights(true, true, true);
+                startConveyorAnimation('conveyorCanvas', true, true, true);
+                updateLadderEnergization(true, true);
+                // Flash the E-Stop button
+                const estopBtn = document.getElementById('btnEStop');
+                estopBtn.style.animation = 'pulse-warn 0.4s infinite alternate';
+                setTimeout(() => {
+                    if (state.estopPressed && state.attackActive) {
+                        showCard('step4-card');
+                        updateProgress(4);
+                        document.getElementById('step4-card').scrollIntoView({ behavior: 'smooth' });
+                        startConveyorAnimation('conveyorCanvasAttack', true, true, true);
+                        updateStatusLightsAttack(true, true);
+                    }
+                }, 600);
+            } else {
+                // Normal mode: E-Stop stops the conveyor
+                state.conveyorRunning = false;
+                updateStatusLights(false, true, false);
+                startConveyorAnimation('conveyorCanvas', false, true, false);
+                updateLadderEnergization(false, true);
+                document.getElementById('btnStart').disabled = false;
+                document.getElementById('btnStop').disabled = true;
+                document.getElementById('btnEStop').classList.add('pressed');
+            }
+        }
+
+        function resetSystem() {
+            state.conveyorRunning = false;
+            state.estopPressed = false;
+            state.attackActive = false;
+            state.maliciousRungInjected = false;
+            document.getElementById('btnStart').disabled = false;
+            document.getElementById('btnStop').disabled = true;
+            document.getElementById('btnEStop').classList.remove('pressed');
+            document.getElementById('btnEStop').style.animation = '';
+            updateStatusLights(false, false, false);
+            startConveyorAnimation('conveyorCanvas', false, false, false);
+            updateLadderEnergization(false, false);
+            // Reset attack UI
+            const injRung = document.getElementById('injectedRungPlaceholder');
+            if (injRung) injRung.classList.add('hidden');
+            const confirmMsg = document.getElementById('injectConfirmMsg');
+            if (confirmMsg) confirmMsg.style.display = 'none';
+            const injectBtn = document.getElementById('btnInjectHere');
+            if (injectBtn) injectBtn.disabled = false;
+            const proceedBtn = document.getElementById('btnProceedToTest');
+            if (proceedBtn) proceedBtn.disabled = true;
+            document.getElementById('btnEStop2')?.classList.remove('pressed');
+            hideCard('step4-card');
+            hideCard('step5-card');
+            hideCard('step6-card');
+            document.getElementById('flagDisplay')?.classList.add('hidden');
+            state.flagRevealed = false;
+            document.getElementById('btnRevealFlag')?.classList.remove('hidden');
+            updateProgress(2);
+            document.getElementById('step2-card').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function updateStatusLightsAttack(running, estop) {
+            const motorLight2 = document.getElementById('motorLight2');
+            const estopLight2 = document.getElementById('estopLight2');
+            const runLight2 = document.getElementById('runLight2');
+            if (motorLight2) {
+                motorLight2.classList.remove('on', 'off', 'warn');
+                motorLight2.classList.add(running ? 'on' : 'off');
+            }
+            if (estopLight2) {
+                estopLight2.classList.remove('on', 'off', 'warn');
+                estopLight2.classList.add(estop ? 'warn' : 'off');
+            }
+            if (runLight2) {
+                runLight2.classList.remove('on', 'off', 'warn');
+                runLight2.classList.add(running ? 'on' : 'off');
+            }
+        }
+
+        function testEStopBypass() {
+            const btn = document.getElementById('btnEStop2');
+            btn.classList.add('pressed');
+            btn.style.animation = 'pulse-warn 0.3s infinite alternate';
+            updateStatusLightsAttack(true, true);
+            startConveyorAnimation('conveyorCanvasAttack', true, true, true);
+            // Shake the step4 card
+            const card = document.getElementById('step4-card');
+            card.classList.add('shake');
+            setTimeout(() => card.classList.remove('shake'), 500);
+        }
+
+        // ==================== LADDER LOGIC VISUALIZATION ====================
+        function updateLadderEnergization(running, estopPressed) {
+            const normalLadder = document.getElementById('ladderNormal');
+            if (!normalLadder) return;
+            const wires = normalLadder.querySelectorAll('.rung-wire');
+            const coils = normalLadder.querySelectorAll('.coil-symbol');
+            const noContacts = normalLadder.querySelectorAll('.contact-no');
+            const ncContacts = normalLadder.querySelectorAll('.contact-nc');
+
+            if (running && !estopPressed) {
+                // All rungs energized
+                wires.forEach(w => w.classList.add('energized'));
+                coils.forEach(c => c.classList.add('active'));
+                noContacts.forEach(c => c.classList.add('closed'));
+                ncContacts.forEach(c => c.classList.remove('open-circ'));
+            } else if (estopPressed && !state.attackActive) {
+                // E-Stop breaks circuit - only rung 0/1 energized, rung 2 de-energized
+                const rungRows = normalLadder.querySelectorAll('.rung-row');
+                rungRows.forEach((row, i) => {
+                    const rowWires = row.querySelectorAll('.rung-wire');
+                    const rowCoils = row.querySelectorAll('.coil-symbol');
+                    const rowNo = row.querySelectorAll('.contact-no');
+                    const rowNc = row.querySelectorAll('.contact-nc');
+                    if (i < 2) {
+                        rowWires.forEach(w => w.classList.add('energized'));
+                        rowCoils.forEach(c => c.classList.add('active'));
+                        rowNo.forEach(c => c.classList.add('closed'));
+                    } else if (i === 2) {
+                        rowWires.forEach(w => w.classList.remove('energized'));
+                        rowCoils.forEach(c => c.classList.remove('active'));
+                        rowNc.forEach(c => c.classList.add('open-circ'));
+                    } else {
+                        rowWires.forEach(w => w.classList.remove('energized'));
+                        rowCoils.forEach(c => c.classList.remove('active'));
+                        rowNo.forEach(c => c.classList.remove('closed'));
+                    }
+                });
+                return;
+            } else if (!running) {
+                wires.forEach(w => w.classList.remove('energized'));
+                coils.forEach(c => c.classList.remove('active'));
+                noContacts.forEach(c => c.classList.remove('closed'));
+                ncContacts.forEach(c => c.classList.remove('open-circ'));
+            }
+        }
+
+        // ==================== ATTACK PHASE ====================
+        function beginAttackPhase() {
+            state.attackActive = true;
+            state.conveyorRunning = true;
+            state.estopPressed = false;
+            updateProgress(3);
+            showCard('step3-card');
+            hideCard('step4-card');
+            hideCard('step5-card');
+            hideCard('step6-card');
+            document.getElementById('step3-card').scrollIntoView({ behavior: 'smooth' });
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnStop').disabled = false;
+            document.getElementById('btnEStop').classList.remove('pressed');
+            updateStatusLights(true, false, false);
+            startConveyorAnimation('conveyorCanvas', true, false, false);
+            updateLadderEnergization(true, false);
+            // Setup attack ladder
+            const attackLadder = document.getElementById('ladderAttack');
+            if (attackLadder) {
+                const wires = attackLadder.querySelectorAll('.rung-wire');
+                wires.forEach(w => w.classList.add('energized'));
+                const coils = attackLadder.querySelectorAll('.coil-symbol');
+                coils.forEach(c => c.classList.add('active'));
+                const noContacts = attackLadder.querySelectorAll('.contact-no');
+                noContacts.forEach(c => c.classList.add('closed'));
+            }
+            document.getElementById('btnInjectHere').disabled = false;
+            document.getElementById('btnProceedToTest').disabled = true;
+            document.getElementById('injectConfirmMsg').style.display = 'none';
+            document.getElementById('injectedRungPlaceholder').classList.add('hidden');
+        }
+
+        function injectMaliciousRung() {
+            if (state.maliciousRungInjected) return;
+            state.maliciousRungInjected = true;
+            const injRung = document.getElementById('injectedRungPlaceholder');
+            injRung.classList.remove('hidden');
+            injRung.classList.add('fade-in');
+            document.getElementById('injectConfirmMsg').style.display = 'block';
+            document.getElementById('injectConfirmMsg').classList.add('fade-in');
+            document.getElementById('btnInjectHere').disabled = true;
+            document.getElementById('btnProceedToTest').disabled = false;
+            document.getElementById('injectPrompt').style.display = 'none';
+            // Flash the target rung
+            const targetRung = document.getElementById('targetRung');
+            targetRung.style.animation = 'pulse-attack-bg 0.5s 3';
+            setTimeout(() => { targetRung.style.animation = 'pulse-attack-bg 1s infinite alternate'; }, 1500);
+        }
+
+        function proceedToTest() {
+            if (!state.maliciousRungInjected) return;
+            updateProgress(4);
+            showCard('step4-card');
+            document.getElementById('step4-card').scrollIntoView({ behavior: 'smooth' });
+            state.conveyorRunning = true;
+            state.estopPressed = true;
+            state.attackActive = true;
+            updateStatusLightsAttack(true, true);
+            startConveyorAnimation('conveyorCanvasAttack', true, true, true);
+            document.getElementById('btnEStop2').classList.add('pressed');
+            document.getElementById('btnEStop2').style.animation = 'pulse-warn 0.4s infinite alternate';
+        }
+
+        function revealFlag() {
+            if (state.flagRevealed) return;
+            state.flagRevealed = true;
+            const flagDisplay = document.getElementById('flagDisplay');
+            flagDisplay.classList.remove('hidden');
+            flagDisplay.classList.add('fade-in');
+            document.getElementById('btnRevealFlag').classList.add('hidden');
+            updateProgress(5);
+            showCard('step5-card');
+            setTimeout(() => {
+                document.getElementById('step5-card').scrollIntoView({ behavior: 'smooth' });
+                updateProgress(6);
+                showCard('step6-card');
+                setTimeout(() => document.getElementById('step6-card').scrollIntoView({ behavior: 'smooth' }),
+                400);
+            }, 800);
+        }
+
+        // ==================== DEFENSE CODE GAPS ====================
+        function fillCodeGap(gapId, correctValue) {
+            if (state.codeGapsFilled[gapId]) return;
+            const el = document.getElementById(gapId);
+            if (!el) return;
+            const userInput = prompt(`请补全缺失的代码（提示：${correctValue === 'length' ? '数组长度属性' : '哈希计算函数'}）：`,
+                '');
+            if (userInput && userInput.trim().toLowerCase() === correctValue.toLowerCase()) {
+                el.textContent = correctValue;
+                el.style.color = '#22c55e';
+                el.style.borderBottom = '2px solid #22c55e';
+                el.style.cursor = 'default';
+                el.title = '✓ 正确！';
+                state.codeGapsFilled[gapId] = true;
+                el.onclick = null;
+                // Pulse effect
+                el.style.transition = 'all 0.3s';
+                el.style.boxShadow = '0 0 12px #22c55e66';
+                setTimeout(() => { el.style.boxShadow = 'none'; }, 800);
+            } else if (userInput !== null) {
+                alert('❌ 不正确，请再试一次。提示：' + (correctValue === 'length' ? '考虑数组的 .length 属性' :
+                    '考虑对程序段内容进行哈希计算'));
+            }
+        }
+
+        function checkDefenseAnswer() {
+            const answer = document.getElementById('defenseSummary').value.trim();
+            const feedback = document.getElementById('defenseFeedback');
+            const keywords = ['签名', '变更检测', '哈希', '验证', '完整性', '黄金镜像', '访问控制', '审计', 'code signing',
+                'change detection', 'hash', 'integrity'
+            ];
+            const matched = keywords.filter(kw => answer.toLowerCase().includes(kw.toLowerCase()));
+            if (matched.length >= 2 && state.codeGapsFilled['codeGap1'] && state.codeGapsFilled['codeGap2']) {
+                feedback.innerHTML =
+                    '<span style="color:#4ade80;">✅ 优秀！你的防御理解非常全面。所有防御措施已掌握。</span>';
+                feedback.classList.add('fade-in');
+                state.defenseComplete = true;
+                // All dots done
+                document.querySelectorAll('#progress-bar .progress-dot').forEach(d => d.classList.add('done'));
+                document.getElementById('analysisReport').scrollIntoView({ behavior: 'smooth' });
+                setTimeout(() => {
+                    document.getElementById('analysisReport').setAttribute('open', '');
+                }, 500);
+            } else if (matched.length >= 1) {
+                feedback.innerHTML =
+                    '<span style="color:#fbbf24;">⚠ 部分正确。请确保涵盖代码签名和变更检测两个方面。同时请补全上方代码空白。</span>';
+                feedback.classList.add('fade-in');
+            } else {
+                feedback.innerHTML =
+                    '<span style="color:#f87171;">❌ 请用一句话总结防御措施，包含关键词如"代码签名"、"变更检测"、"哈希验证"等。</span>';
+                feedback.classList.add('fade-in');
+            }
+        }
+
+        // ==================== INITIALIZATION ====================
+        function init() {
+            updateProgress(1);
+            updateStatusLights(false, false, false);
+            startConveyorAnimation('conveyorCanvas', false, false, false);
+            updateLadderEnergization(false, false);
+            // Ensure attack-related elements are hidden initially
+            hideCard('step3-card');
+            hideCard('step4-card');
+            hideCard('step5-card');
+            hideCard('step6-card');
+            document.getElementById('flagDisplay')?.classList.add('hidden');
+            document.getElementById('btnProceedToTest')?.setAttribute('disabled', '');
+            document.getElementById('btnProceedToTest')?.classList.add('disabled');
+            document.getElementById('btnProceedToTest').disabled = true;
+            document.getElementById('btnStop').disabled = true;
+        }
+
+        // Handle window resize for canvas
+        window.addEventListener('resize', () => {
+            const result1 = getCanvas('conveyorCanvas');
+            if (result1) drawConveyor('conveyorCanvas', state.conveyorRunning && !state.estopPressed, state
+                .estopPressed && !state.attackActive, state.attackActive && state.estopPressed);
+            const result2 = getCanvas('conveyorCanvasAttack');
+            if (result2) drawConveyor('conveyorCanvasAttack', state.conveyorRunning, state.estopPressed, state
+                .attackActive && state.maliciousRungInjected);
+        });
+
+        // Initialize
+        init();
+        console.log(
+            '🏭 工控安全实验室已就绪 — PLC阶梯逻辑注入攻击模拟\n// EDUCATIONAL PURPOSE ONLY — 授权教学环境使用\n场景：Siemens S7-1200 传送带控制系统 E-Stop旁路攻击'
+        );
+    </script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>MITRE ATT&amp;CK: APT Kill Chain</title>
+<style>
+  html,body{margin:0;padding:0;background:#f8fafc;font-family:ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;color:#0f172a;}
+  .wrap{padding:16px;}
+  h2{font-size:18px;margin:0 0 4px;}
+  p.desc{font-size:12px;color:#64748b;margin:0 0 12px;}
+  svg{width:100%;height:auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>MITRE ATT&amp;CK: APT Kill Chain</h2>
+  <p class="desc">APT attack chain from initial access to data exfiltration</p>
+  <svg viewBox="0 0 1170 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MITRE ATT&amp;CK: APT Kill Chain">
+    <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+    <line x1="105" y1="91" x2="345" y2="91" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="203" y="82" width="44" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="225" y="95" text-anchor="middle" font-size="10" fill="#475569">next</text><line x1="345" y1="91" x2="585" y2="91" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="443" y="82" width="44" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="465" y="95" text-anchor="middle" font-size="10" fill="#475569">next</text><line x1="585" y1="91" x2="825" y2="91" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="683" y="82" width="44" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="705" y="95" text-anchor="middle" font-size="10" fill="#475569">next</text><line x1="825" y1="91" x2="1065" y2="91" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="923" y="82" width="44" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="945" y="95" text-anchor="middle" font-size="10" fill="#475569">next</text>
+    <g>
+        <rect x="30" y="64" width="150" height="54" rx="8" fill="#7c3aed" opacity="0.12" stroke="#7c3aed" stroke-width="1.6"/>
+        <text x="105" y="86" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Initial Access</text>
+        <text x="105" y="104" text-anchor="middle" font-size="10" fill="#475569">T1566 Spearphishing</text>
+      </g><g>
+        <rect x="270" y="64" width="150" height="54" rx="8" fill="#7c3aed" opacity="0.12" stroke="#7c3aed" stroke-width="1.6"/>
+        <text x="345" y="86" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Execution</text>
+        <text x="345" y="104" text-anchor="middle" font-size="10" fill="#475569">T1059 PowerShell</text>
+      </g><g>
+        <rect x="510" y="64" width="150" height="54" rx="8" fill="#7c3aed" opacity="0.12" stroke="#7c3aed" stroke-width="1.6"/>
+        <text x="585" y="86" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Persistence</text>
+        <text x="585" y="104" text-anchor="middle" font-size="10" fill="#475569">T1546 Event Triggered</text>
+      </g><g>
+        <rect x="750" y="64" width="150" height="54" rx="8" fill="#7c3aed" opacity="0.12" stroke="#7c3aed" stroke-width="1.6"/>
+        <text x="825" y="86" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">C2</text>
+        <text x="825" y="104" text-anchor="middle" font-size="10" fill="#475569">T1071 Web Service</text>
+      </g><g>
+        <rect x="990" y="64" width="150" height="54" rx="8" fill="#7c3aed" opacity="0.12" stroke="#7c3aed" stroke-width="1.6"/>
+        <text x="1065" y="86" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">Exfiltration</text>
+        <text x="1065" y="104" text-anchor="middle" font-size="10" fill="#475569">T1567 Exfil to Cloud</text>
+      </g>
+  </svg>
+</div>
+<script type="application/json" id="widget-config">{"type":"diagram","diagramType":"flowchart","title":"MITRE ATT&CK: APT Kill Chain","description":"APT attack chain from initial access to data exfiltration","nodes":[{"id":"n1","label":"Initial Access","details":"T1566 Spearphishing","kind":"tactic"},{"id":"n2","label":"Execution","details":"T1059 PowerShell","kind":"tactic"},{"id":"n3","label":"Persistence","details":"T1546 Event Triggered","kind":"tactic"},{"id":"n4","label":"C2","details":"T1071 Web Service","kind":"tactic"},{"id":"n5","label":"Exfiltration","details":"T1567 Exfil to Cloud","kind":"tactic"}],"edges":[{"from":"n1","to":"n2","label":"next"},{"from":"n2","to":"n3","label":"next"},{"from":"n3","to":"n4","label":"next"},{"from":"n4","to":"n5","label":"next"}]}</script>
+</body>
+</html>

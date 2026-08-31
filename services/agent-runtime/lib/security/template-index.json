@@ -1,0 +1,205 @@
+[
+  {
+    "id": "tpl-ddos-3d",
+    "file": "ddos-3d-particles-lab.html",
+    "category": "3d-visualization",
+    "title": "DDoS 流量洪水 3D 粒子可视化",
+    "keywords": [
+      "ddos",
+      "拒绝服务",
+      "洪水",
+      "流量",
+      "flood",
+      "3d",
+      "粒子",
+      "particle",
+      "waf",
+      "清洗"
+    ],
+    "cnKeywords": ["ddos", "拒绝服务", "流量洪水", "流量清洗", "粒子特效", "3d可视化"],
+    "styleHints": "Three.js 粒子系统、绿色正常流量 vs 红色恶意洪水、WAF 阈值滑块、蓝色防御墙、服务器抖动反馈、实时流量计"
+  },
+  {
+    "id": "tpl-ransomware",
+    "file": "ransomware-simulation-lab.html",
+    "category": "malware-simulation",
+    "title": "勒索软件加密瞬间模拟",
+    "keywords": [
+      "ransomware",
+      "勒索",
+      "加密",
+      "malware",
+      "病毒",
+      "ransom",
+      "encrypt",
+      "桌面",
+      "desktop"
+    ],
+    "cnKeywords": ["勒索软件", "勒索病毒", "文件加密", "桌面模拟", "勒索信", "bitcoin"],
+    "styleHints": "仿 Windows 桌面 UI、文件图标网格、点击触发逐个加密动画（变灰+锁图标）、壁纸变黑、红色勒索信弹窗+倒计时；IOC 输入必须对应可观察证据，例如在文件属性或 EDR 告警中明确显示可复制的样本 SHA-256，禁止只把答案写在 JavaScript 判题逻辑中"
+  },
+  {
+    "id": "tpl-cve-analysis",
+    "file": "cve-log4shell-v2-lab.html",
+    "category": "cve-analysis",
+    "title": "CVE 深度分析（Log4Shell）",
+    "keywords": [
+      "cve",
+      "漏洞分析",
+      "root cause",
+      "patch",
+      "diff",
+      "exploit path",
+      "log4shell",
+      "jndi"
+    ],
+    "cnKeywords": ["cve分析", "漏洞根因", "补丁对比", "利用路径", "漏洞复现", "cvss"],
+    "styleHints": "漏洞代码高亮+点击定位、exploit 构造输入框、flag 捕获、补丁手写+diff、利用链排序、CVSS 分解"
+  },
+  {
+    "id": "tpl-protocol-analysis",
+    "file": "protocol-tls-lab.html",
+    "category": "protocol-analysis",
+    "title": "协议分析（TLS MITM）",
+    "keywords": [
+      "protocol",
+      "tls",
+      "ssl",
+      "mitm",
+      "packet",
+      "wireshark",
+      "handshake",
+      "traffic",
+      "流量分析"
+    ],
+    "cnKeywords": ["协议分析", "数据包", "抓包", "中间人", "流量分析", "握手", "降级攻击"],
+    "styleHints": "Wireshark 式数据包列表、字段解析+hex dump、异常包点击标记、攻击时间线可视化"
+  },
+  {
+    "id": "tpl-zkp-game",
+    "file": "zkp-cave-lab.html",
+    "category": "crypto-game",
+    "title": "ZKP 零知识证明博弈",
+    "keywords": [
+      "zkp",
+      "zero-knowledge",
+      "proof",
+      "cave",
+      "alibaba",
+      "peggy",
+      "victor",
+      "密码学博弈"
+    ],
+    "cnKeywords": ["零知识证明", "山洞", "交互验证", "置信度", "密码学实验"],
+    "styleHints": "多方角色交互、山洞 SVG 可视化、学生选择挑战方向、置信度进度条（1-(1/2)^n）、多轮博弈"
+  },
+  {
+    "id": "tpl-phishing",
+    "file": "phishing-lab.html",
+    "category": "social-engineering",
+    "title": "钓鱼模拟与识别",
+    "keywords": ["phishing", "social engineering", "钓鱼", "社工", "fake login", "email", "url"],
+    "cnKeywords": ["钓鱼", "社会工程", "仿冒登录", "钓鱼邮件", "URL检测"],
+    "styleHints": "逼真钓鱼邮件+仿冒登录页、点击识别可疑元素、每个正确识别显示为什么危险、心理学复盘（紧迫感/权威/熟悉感）"
+  },
+  {
+    "id": "tpl-sqli",
+    "file": "sqli-lab.html",
+    "category": "web-attack",
+    "title": "SQL 注入攻击靶标",
+    "keywords": ["sql injection", "sqli", "login bypass", "注入", "or 1=1", "union select"],
+    "cnKeywords": ["sql注入", "注入攻击", "登录绕过", "数据库注入"],
+    "styleHints": "漏洞登录表单、mock SQL 查询可视化、payload 输入+即时反馈、防御代码对照（参数化查询）"
+  },
+  {
+    "id": "tpl-stuxnet-ics",
+    "file": "stuxnet-centrifuge-3d-lab.html",
+    "category": "ics-scada",
+    "title": "震网病毒离心机 3D 摧毁（工控安全）",
+    "keywords": [
+      "stuxnet",
+      "ics",
+      "scada",
+      "plc",
+      "ladder logic",
+      "centrifuge",
+      "industrial",
+      "modbus",
+      "ot security",
+      "siemens"
+    ],
+    "cnKeywords": [
+      "震网",
+      "工控安全",
+      "离心机",
+      "plc",
+      "scada",
+      "工业控制",
+      "阶梯逻辑",
+      "操作技术",
+      "物理破坏"
+    ],
+    "styleHints": "Three.js 3D 工业设备模型+PLC 控制台（RPM 寄存器/阶梯逻辑）+恶意指令注入+物理反馈动画（加速/红光/抖动/解体碎片）+伪造监控值 vs 实际值数据对比"
+  },
+  {
+    "id": "tpl-canbus-automotive",
+    "file": "canbus-injection-lab.html",
+    "category": "automotive-v2x",
+    "title": "CAN 总线仪表盘劫持（网联汽车安全）",
+    "keywords": [
+      "can bus",
+      "can",
+      "automotive",
+      "v2x",
+      "vehicle",
+      "car",
+      "dashboard",
+      "obd-ii",
+      "arbitration id",
+      "frame",
+      "hex injection"
+    ],
+    "cnKeywords": [
+      "can总线",
+      "网联汽车",
+      "车载安全",
+      "仪表盘",
+      "报文注入",
+      "车辆安全",
+      "智能汽车",
+      "can帧"
+    ],
+    "styleHints": "SVG/Canvas 汽车仪表盘（时速表/转速表/车门/转向灯指针动画）+CAN hex 报文注入终端+CAN ID 参考表+实时仪表响应（注入正确ID→对应仪表反应）+广播无认证原理说明"
+  },
+  {
+    "id": "tpl-adsb-aviation",
+    "file": "adsb-ghost-flights-lab.html",
+    "category": "aerospace-rf",
+    "title": "ADS-B 幽灵航班雷达欺骗（航空安全）",
+    "keywords": [
+      "ads-b",
+      "adsb",
+      "aviation",
+      "radar",
+      "sdr",
+      "flight",
+      "tcas",
+      "1090mhz",
+      "spoofing",
+      "transponder",
+      "radio frequency"
+    ],
+    "cnKeywords": [
+      "ads-b",
+      "航空安全",
+      "雷达欺骗",
+      "幽灵航班",
+      "sdr",
+      "射频安全",
+      "航班追踪",
+      "tcas告警",
+      "应答机"
+    ],
+    "styleHints": "仿 Flightradar24 雷达屏幕（地图+航班轨迹）+Python 代码编辑器（模拟 ADS-B 发帧）+幽灵客机涌现动画+TCAS 碰撞警报红色闪烁+明文广播缺陷分析+合法 vs 欺骗信号对比"
+  }
+]

@@ -1,20 +1,37 @@
 {% extends "base.html" %}
 
-{% block stylesheets %}
-{{ super() }}
-<style>
-    .error {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 60vh;
-        text-align: center;
-    }
-</style>
-{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% set display_code = error_code | default('PAGE_UNAVAILABLE') %}
+{% set display_title = error_title | default('暂时无法打开此内容') %}
+{% set display_description = error_description | default(error | default('请返回学习中心后重试。')) %}
+{% set display_request_id = error_request_id | default(request_id | default('NONE')) %}
+{% set display_kicker = error_kicker | default('当前操作尚未完成') %}
 
 {% block content %}
-<div class="error">
-    <h1>{{ error | safe}}</h1>
+<div class="product-error-page">
+  <section class="product-error-card" role="alert" aria-labelledby="product-error-title" data-product-error data-error-code="{{ display_code }}" data-request-id="{{ display_request_id }}">
+    <span class="product-error-status" aria-hidden="true"><i class="fas fa-compass"></i></span>
+    <p class="product-error-kicker">{{ display_kicker }}</p>
+    <h1 id="product-error-title">{{ display_title }}</h1>
+    <p class="product-error-description">{{ display_description }}</p>
+    <div class="product-error-actions">
+      <a class="product-error-primary" data-error-recovery="primary" href="{{ recovery_href | default('/student') }}">{{ recovery_label | default('返回今天') }}<i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+      <a data-error-recovery="courses" href="/dojos">浏览课程</a>
+    </div>
+    <details class="product-error-support">
+      <summary>需要帮助？</summary>
+      <p>联系支持时请提供请求编号：<code>{{ display_request_id }}</code></p>
+    </details>
+  </section>
 </div>
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/product-error.js', v='student-ux-v1') }}"></script>
 {% endblock %}

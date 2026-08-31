@@ -1,0 +1,1697 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stuxnet 离心机级联破坏 - ICS/SCADA 安全实验</title>
+    <style>
+        :root {
+            --bg: #0a0e17;
+            --panel-bg: #111827;
+            --border: #1e293b;
+            --text: #e2e8f0;
+            --text-dim: #94a3b8;
+            --green: #22c55e;
+            --red: #ef4444;
+            --amber: #f59e0b;
+            --blue: #3b82f6;
+            --cyan: #06b6d4;
+            --plc-green: #00ff41;
+            --metal-dark: #2d3238;
+            --metal-mid: #4a5058;
+            --font-mono: 'Courier New', 'Consolas', 'Monaco', monospace;
+            --font-sans: 'Segoe UI', 'Inter', system-ui, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #app-container {
+            display: grid;
+            grid-template-rows: 52px 1fr 36px;
+            grid-template-columns: 340px 1fr 340px;
+            grid-template-areas:
+                "header header header"
+                "left center right"
+                "footer footer footer";
+            height: 100vh;
+            width: 100vw;
+            gap: 2px;
+            background: #060a10;
+        }
+
+        #header {
+            grid-area: header;
+            background: var(--panel-bg);
+            border-bottom: 2px solid #1a2332;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 16px;
+            z-index: 10;
+        }
+        #header .logo {
+            font-weight: 900;
+            font-size: 1.1rem;
+            letter-spacing: 1px;
+            color: var(--cyan);
+            text-transform: uppercase;
+            font-family: var(--font-mono);
+        }
+        #header .logo .skull {
+            color: var(--red);
+            margin-right: 4px;
+        }
+        #header .badge {
+            background: #1a2332;
+            border: 1px solid #2a3a4a;
+            padding: 4px 10px;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            font-family: var(--font-mono);
+            color: var(--amber);
+            letter-spacing: 0.5px;
+        }
+        #header .scenario-title {
+            flex: 1;
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            text-align: center;
+            letter-spacing: 0.5px;
+        }
+        #header .step-indicator {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        #header .step-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #2a3a4a;
+            transition: all 0.4s;
+            border: 1px solid #3a4a5a;
+        }
+        #header .step-dot.done {
+            background: var(--green);
+            border-color: var(--green);
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+        }
+        #header .step-dot.active {
+            background: var(--amber);
+            border-color: var(--amber);
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+            animation: pulse-dot 0.8s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%,
+            100% {
+                box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 16px rgba(245, 158, 11, 0.9);
+            }
+        }
+
+        #left-panel {
+            grid-area: left;
+            background: var(--panel-bg);
+            border-right: 2px solid #1a2332;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 12px;
+            gap: 10px;
+        }
+        .panel-title {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--plc-green);
+            border-bottom: 1px solid #1e3a2a;
+            padding-bottom: 6px;
+            margin-bottom: 2px;
+        }
+        .ladder-rung {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            padding: 6px 8px;
+            background: #0d1117;
+            border: 1px solid #1a2a1a;
+            border-radius: 3px;
+            min-height: 36px;
+            flex-wrap: wrap;
+        }
+        .ladder-rung .rail {
+            width: 4px;
+            height: 28px;
+            background: #1a3a2a;
+            border-radius: 1px;
+            flex-shrink: 0;
+        }
+        .ladder-rung .contact {
+            width: 22px;
+            height: 14px;
+            border: 2px solid #3a5a3a;
+            border-radius: 2px;
+            background: #0a1a0a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.55rem;
+            color: #4a8a4a;
+            flex-shrink: 0;
+            position: relative;
+        }
+        .ladder-rung .contact.closed {
+            border-color: var(--plc-green);
+            background: #0a2a0a;
+            color: var(--plc-green);
+        }
+        .ladder-rung .contact.bypassed {
+            border-color: var(--red);
+            background: #1a0a0a;
+            color: var(--red);
+        }
+        .ladder-rung .wire {
+            height: 2px;
+            background: #3a5a3a;
+            flex: 1;
+            min-width: 12px;
+            flex-shrink: 1;
+        }
+        .ladder-rung .coil {
+            width: 28px;
+            height: 18px;
+            border: 2px solid #5a7a5a;
+            border-radius: 9px;
+            background: #0a1a0a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.5rem;
+            color: #6a9a6a;
+            flex-shrink: 0;
+        }
+        .ladder-rung .coil.active {
+            border-color: var(--plc-green);
+            background: #0a2a0a;
+            color: var(--plc-green);
+            box-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+        }
+        .ladder-rung .label {
+            font-size: 0.6rem;
+            color: #6a8a6a;
+            flex-shrink: 0;
+            min-width: 30px;
+            text-align: center;
+        }
+        .register-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+        }
+        .register-table th {
+            background: #0d1a0d;
+            color: #5a9a5a;
+            padding: 5px 8px;
+            text-align: left;
+            font-size: 0.6rem;
+            letter-spacing: 1px;
+            border-bottom: 1px solid #1a3a1a;
+        }
+        .register-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid #0f1f0f;
+            color: var(--text-dim);
+        }
+        .register-table .reg-addr {
+            color: #4a8a4a;
+            font-weight: bold;
+        }
+        .register-table .reg-value {
+            color: var(--plc-green);
+            font-weight: bold;
+            font-size: 0.85rem;
+        }
+        .register-table .reg-value.editable {
+            background: #0a1a0a;
+            border: 1px dashed #2a5a2a;
+            padding: 3px 6px;
+            border-radius: 2px;
+            cursor: text;
+            min-width: 50px;
+            display: inline-block;
+        }
+        .register-table .reg-value.editable:focus {
+            outline: none;
+            border-color: var(--plc-green);
+            box-shadow: 0 0 6px rgba(0, 255, 65, 0.3);
+        }
+        .btn {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            padding: 8px 16px;
+            border: 1px solid #3a5a3a;
+            background: #0d1a0d;
+            color: var(--plc-green);
+            cursor: pointer;
+            border-radius: 3px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+        .btn:hover {
+            background: #0f2a0f;
+            border-color: var(--plc-green);
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+        }
+        .btn.danger {
+            border-color: #5a2a2a;
+            color: var(--red);
+            background: #1a0a0a;
+        }
+        .btn.danger:hover {
+            border-color: var(--red);
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+        }
+        .btn.reset-btn {
+            border-color: #3a4a5a;
+            color: var(--blue);
+            background: #0a0f1a;
+        }
+        .btn.reset-btn:hover {
+            border-color: var(--blue);
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+        }
+        .inject-input {
+            background: #0a0e0a;
+            border: 2px solid #2a4a2a;
+            color: var(--plc-green);
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            padding: 8px 12px;
+            width: 100%;
+            border-radius: 3px;
+            text-align: center;
+            letter-spacing: 1px;
+            transition: all 0.3s;
+        }
+        .inject-input:focus {
+            outline: none;
+            border-color: var(--amber);
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+            background: #0a1008;
+        }
+        .inject-input.danger-input {
+            border-color: var(--red);
+            animation: pulse-border 0.5s ease-in-out infinite;
+        }
+        @keyframes pulse-border {
+            0%,
+            100% {
+                border-color: #5a1a1a;
+            }
+            50% {
+                border-color: var(--red);
+                box-shadow: 0 0 16px rgba(239, 68, 68, 0.6);
+            }
+        }
+
+        #center-panel {
+            grid-area: center;
+            position: relative;
+            background: #000;
+            overflow: hidden;
+            cursor: grab;
+        }
+        #center-panel:active {
+            cursor: grabbing;
+        }
+        #three-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        .overlay-gauge {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid #2a3a4a;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            pointer-events: none;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        .overlay-gauge .rpm-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: var(--plc-green);
+            transition: color 0.5s;
+        }
+        .overlay-gauge .rpm-value.warning {
+            color: var(--amber);
+            animation: flicker 0.3s ease-in-out infinite;
+        }
+        .overlay-gauge .rpm-value.danger {
+            color: var(--red);
+            animation: flicker 0.1s ease-in-out infinite;
+        }
+        @keyframes flicker {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+        .alert-flash {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            background: transparent;
+            transition: background 0.15s;
+            z-index: 5;
+        }
+        .alert-flash.critical {
+            background: rgba(255, 30, 30, 0.15);
+            animation: flash-red 0.4s ease-out;
+        }
+        @keyframes flash-red {
+            0% {
+                background: rgba(255, 30, 30, 0.4);
+            }
+            100% {
+                background: transparent;
+            }
+        }
+
+        #right-panel {
+            grid-area: right;
+            background: var(--panel-bg);
+            border-left: 2px solid #1a2332;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 12px;
+            gap: 10px;
+        }
+        .data-compare {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .data-card {
+            background: #0d1117;
+            border: 1px solid #1a2a2a;
+            border-radius: 4px;
+            padding: 8px;
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+        }
+        .data-card.hmi-card {
+            border-color: #1a3a2a;
+        }
+        .data-card.actual-card {
+            border-color: #3a1a1a;
+        }
+        .data-card .card-label {
+            font-size: 0.55rem;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+            padding-bottom: 3px;
+            border-bottom: 1px solid #1a2a2a;
+        }
+        .data-card.hmi-card .card-label {
+            color: #4a8a4a;
+        }
+        .data-card.actual-card .card-label {
+            color: #8a4a4a;
+        }
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+        }
+        .data-row .param {
+            color: #6a7a6a;
+        }
+        .data-row .val {
+            font-weight: bold;
+        }
+        .data-card.hmi-card .val {
+            color: var(--plc-green);
+        }
+        .data-card.actual-card .val {
+            color: var(--red);
+            transition: color 0.3s;
+        }
+        .data-card.actual-card .val.normal-val {
+            color: var(--plc-green);
+        }
+        .divergence-indicator {
+            text-align: center;
+            font-size: 0.6rem;
+            color: var(--amber);
+            padding: 4px;
+            border: 1px dashed #3a2a0a;
+            border-radius: 3px;
+            margin-top: 4px;
+            display: none;
+        }
+        .divergence-indicator.visible {
+            display: block;
+            animation: pulse-amber 1s ease-in-out infinite;
+        }
+        @keyframes pulse-amber {
+            0%,
+            100% {
+                opacity: 0.6;
+            }
+            50% {
+                opacity: 1;
+            }
+        }
+
+        #footer {
+            grid-area: footer;
+            background: var(--panel-bg);
+            border-top: 2px solid #1a2332;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 12px;
+            font-size: 0.65rem;
+            font-family: var(--font-mono);
+        }
+        #footer .flag-area {
+            flex: 1;
+            color: var(--amber);
+            font-weight: bold;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+            opacity: 0;
+            transition: opacity 0.8s;
+        }
+        #footer .flag-area.revealed {
+            opacity: 1;
+            animation: glow-flag 0.6s ease-out;
+        }
+        @keyframes glow-flag {
+            0% {
+                text-shadow: 0 0 20px rgba(245, 158, 11, 1);
+                transform: scale(1.05);
+            }
+            100% {
+                text-shadow: 0 0 4px rgba(245, 158, 11, 0.5);
+                transform: scale(1);
+            }
+        }
+        #footer .status-text {
+            color: var(--text-dim);
+        }
+        #footer .edu-note {
+            color: #5a5a5a;
+            font-size: 0.55rem;
+        }
+
+        .analysis-toggle {
+            font-family: var(--font-mono);
+            font-size: 0.6rem;
+            color: var(--blue);
+            cursor: pointer;
+            background: none;
+            border: none;
+            text-decoration: underline;
+            padding: 2px 6px;
+        }
+        .analysis-panel {
+            display: none;
+            background: #0d1117;
+            border: 1px solid #2a3a4a;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: var(--font-mono);
+            font-size: 0.6rem;
+            color: var(--text-dim);
+            line-height: 1.6;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .analysis-panel.open {
+            display: block;
+        }
+        .analysis-panel .highlight {
+            color: var(--amber);
+            font-weight: bold;
+        }
+        .analysis-panel .code-block {
+            background: #060a10;
+            border: 1px solid #1a2a2a;
+            padding: 6px 8px;
+            border-radius: 3px;
+            margin: 4px 0;
+            color: #8a9a8a;
+            white-space: pre-wrap;
+            font-size: 0.6rem;
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0a0e14;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #2a3a4a;
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3a5a5a;
+        }
+
+        @media (max-width: 1100px) {
+            #app-container {
+                grid-template-columns: 280px 1fr 280px;
+            }
+            #left-panel,
+            #right-panel {
+                padding: 8px;
+                gap: 6px;
+            }
+            .ladder-rung {
+                font-size: 0.6rem;
+                padding: 4px 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <!-- HEADER -->
+        <div id="header">
+            <span class="logo"><span class="skull">☠</span>ICS-SIM</span>
+            <span class="badge">SCADA 安全实验</span>
+            <span class="scenario-title">场景：西门子 PLC 控制核离心机 — Stuxnet 式攻击模拟</span>
+            <div class="step-indicator" id="stepDots">
+                <span class="step-dot active" title="观察正常运转"></span>
+                <span class="step-dot" title="注入恶意指令"></span>
+                <span class="step-dot" title="数据欺骗对比"></span>
+                <span class="step-dot" title="物理破坏"></span>
+                <span class="step-dot" title="捕获旗帜"></span>
+            </div>
+        </div>
+
+        <!-- LEFT PANEL: PLC Ladder Logic -->
+        <div id="left-panel">
+            <div class="panel-title">▶ PLC 梯形图逻辑 — 西门子 S7-300 模拟</div>
+
+            <div style="font-size:0.6rem;color:#5a7a5a;font-family:var(--font-mono);margin-bottom:-4px;">Rung 1: 主电机控制</div>
+            <div class="ladder-rung">
+                <span class="rail"></span>
+                <span class="contact closed" title="常开触点 - 启动按钮">| |</span>
+                <span class="wire"></span>
+                <span class="contact closed" title="常闭触点 - 停止按钮">|/|</span>
+                <span class="wire"></span>
+                <span class="coil active" title="输出线圈 - 电机运行">( )</span>
+                <span class="rail"></span>
+                <span class="label">MTR_RUN</span>
+            </div>
+
+            <div style="font-size:0.6rem;color:#5a7a5a;font-family:var(--font-mono);margin-bottom:-4px;">Rung 2: 转速设定值</div>
+            <div class="ladder-rung">
+                <span class="rail"></span>
+                <span class="contact closed">| |</span>
+                <span class="wire"></span>
+                <span class="coil active">( )</span>
+                <span class="rail"></span>
+                <span class="label">SPEED_REF</span>
+            </div>
+
+            <div style="font-size:0.6rem;color:#8a4a4a;font-family:var(--font-mono);margin-bottom:-4px;">Rung 3: 安全联锁 ⚠ 已旁路</div>
+            <div class="ladder-rung" style="border-color:#3a1a1a;">
+                <span class="rail"></span>
+                <span class="contact bypassed" title="安全联锁已被强制闭合（旁路）">| |</span>
+                <span class="wire" style="background:#3a1a1a;"></span>
+                <span class="coil" style="border-color:#5a2a2a;color:#8a3a3a;">( )</span>
+                <span class="rail"></span>
+                <span class="label" style="color:#8a3a3a;">SAFETY_BYP</span>
+            </div>
+
+            <div class="panel-title" style="margin-top:6px;">📋 寄存器表</div>
+            <table class="register-table">
+                <thead>
+                    <tr><th>地址</th><th>名称</th><th>值</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="reg-addr">MW100</td>
+                        <td>RPM_SETPOINT</td>
+                        <td><span class="reg-value editable" id="regSetpoint" contenteditable="true" spellcheck="false">1000</span></td>
+                        <td style="color:#8a8a8a;">转速设定</td>
+                    </tr>
+                    <tr>
+                        <td class="reg-addr">MW102</td>
+                        <td>RPM_ACTUAL</td>
+                        <td><span class="reg-value" id="regActual">1000</span></td>
+                        <td style="color:#8a8a8a;">实际转速</td>
+                    </tr>
+                    <tr>
+                        <td class="reg-addr">MW104</td>
+                        <td>MAX_RPM_LIMIT</td>
+                        <td><span class="reg-value" style="color:#8a3a3a;">5000</span></td>
+                        <td style="color:#8a3a3a;">⚠ 上限已篡改</td>
+                    </tr>
+                    <tr>
+                        <td class="reg-addr">MW106</td>
+                        <td>SAFETY_STATUS</td>
+                        <td><span class="reg-value" style="color:#ef4444;">BYPASSED</span></td>
+                        <td style="color:#ef4444;">🔴 安全联锁失效</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <input type="number" class="inject-input" id="injectRpmInput" placeholder="输入 RPM 值..." value="5000" min="100" max="9999" step="100">
+                <button class="btn" id="btnInject" style="flex:1;">⬇ 写入寄存器</button>
+            </div>
+            <button class="btn danger" id="btnEmergencyStop" style="width:100%;">🛑 紧急停机 (模拟)</button>
+            <button class="btn reset-btn" id="btnReset" style="width:100%;">↻ 重置模拟</button>
+            <div style="font-size:0.55rem;color:#4a5a4a;text-align:center;font-family:var(--font-mono);">
+                // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+            </div>
+        </div>
+
+        <!-- CENTER PANEL: 3D Centrifuge -->
+        <div id="center-panel">
+            <canvas id="three-canvas"></canvas>
+            <div class="overlay-gauge" id="overlayGauge">
+                <div style="font-size:0.55rem;color:#5a7a5a;letter-spacing:1px;">实际物理转速</div>
+                <div class="rpm-value" id="rpmDisplay">1000</div>
+                <div style="font-size:0.5rem;">RPM</div>
+            </div>
+            <div class="alert-flash" id="alertFlash"></div>
+        </div>
+
+        <!-- RIGHT PANEL: Data Comparison -->
+        <div id="right-panel">
+            <div class="panel-title">📊 数据对比 — HMI 欺骗 vs 实际物理值</div>
+            <div class="data-compare">
+                <div class="data-card hmi-card">
+                    <div class="card-label">🖥 HMI/SCADA 显示 (欺骗值)</div>
+                    <div class="data-row"><span class="param">转速</span><span class="val" id="hmiRpm">1000 RPM</span></div>
+                    <div class="data-row"><span class="param">温度</span><span class="val" id="hmiTemp">45°C</span></div>
+                    <div class="data-row"><span class="param">振动</span><span class="val" id="hmiVib">0.2 mm/s</span></div>
+                    <div class="data-row"><span class="param">状态</span><span class="val" style="color:#22c55e;" id="hmiStatus">NORMAL</span></div>
+                </div>
+                <div class="data-card actual-card">
+                    <div class="card-label">🔬 实际物理参数</div>
+                    <div class="data-row"><span class="param">转速</span><span class="val normal-val" id="actRpm">1000 RPM</span></div>
+                    <div class="data-row"><span class="param">温度</span><span class="val normal-val" id="actTemp">45°C</span></div>
+                    <div class="data-row"><span class="param">振动</span><span class="val normal-val" id="actVib">0.2 mm/s</span></div>
+                    <div class="data-row"><span class="param">状态</span><span class="val normal-val" id="actStatus">NORMAL</span></div>
+                </div>
+            </div>
+            <div class="divergence-indicator" id="divergenceIndicator">
+                ⚠ 数据偏差检测：HMI 显示值与实际物理值出现显著差异！
+            </div>
+            <div class="panel-title" style="margin-top:6px;">🔍 攻击分析</div>
+            <button class="analysis-toggle" id="btnToggleAnalysis">▶ 展开完整分析报告</button>
+            <div class="analysis-panel" id="analysisPanel">
+                <p><span class="highlight">攻击手法：</span>Stuxnet 式 PLC 寄存器注入 + HMI 数据欺骗</p>
+                <p><span class="highlight">漏洞利用链：</span></p>
+                <div class="code-block">
+    1. 初始入侵 → USB/网络传播
+    2. 识别西门子 S7 PLC
+    3. 篡改 MW104 (最大转速限制) 从 1500→5000
+    4. 旁路 MW106 (安全联锁) → BYPASSED
+    5. 注入 MW100 (转速设定) → 5000 RPM
+    6. 劫持 HMI 显示 → 持续显示正常值
+    7. 物理破坏 → 离心机超速解体
+                </div>
+                <p><span class="highlight">防御措施：</span>固件完整性校验、HMI-PLC 双向验证、物理安全联锁不可软件旁路、转速硬件上限、多传感器交叉验证</p>
+                <p style="color:#5a5a5a;">// 仅用于授权教学环境 — 理解 ICS 攻击原理</p>
+            </div>
+        </div>
+
+        <!-- FOOTER -->
+        <div id="footer">
+            <span class="status-text" id="footerStatus">● 系统状态：正常运行中 | RPM: 1000 | 离心机: 稳定</span>
+            <span class="flag-area" id="flagDisplay">🏴 FLAG{ics_plc_centrifuge_overspeed_critical_natanz}</span>
+            <span class="edu-note">// EDUCATIONAL PURPOSE ONLY — 授权教学环境使用</span>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js">
+    </script>
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // Stuxnet Centrifuge 3D Sabotage Simulation
+        // This PoC demonstrates ICS/SCADA attack concepts against a mock target
+
+        (function() {
+            // ────────────────────────────────────────
+            // DOM ELEMENTS
+            // ────────────────────────────────────────
+            const canvas = document.getElementById('three-canvas');
+            const centerPanel = document.getElementById('center-panel');
+            const rpmDisplay = document.getElementById('rpmDisplay');
+            const overlayGauge = document.getElementById('overlayGauge');
+            const alertFlash = document.getElementById('alertFlash');
+            const flagDisplay = document.getElementById('flagDisplay');
+            const footerStatus = document.getElementById('footerStatus');
+            const divergenceIndicator = document.getElementById('divergenceIndicator');
+            const analysisPanel = document.getElementById('analysisPanel');
+            const btnToggleAnalysis = document.getElementById('btnToggleAnalysis');
+            const btnInject = document.getElementById('btnInject');
+            const btnEmergencyStop = document.getElementById('btnEmergencyStop');
+            const btnReset = document.getElementById('btnReset');
+            const injectRpmInput = document.getElementById('injectRpmInput');
+            const regSetpoint = document.getElementById('regSetpoint');
+            const regActual = document.getElementById('regActual');
+            const stepDots = document.querySelectorAll('#stepDots .step-dot');
+
+            // HMI display elements
+            const hmiRpm = document.getElementById('hmiRpm');
+            const hmiTemp = document.getElementById('hmiTemp');
+            const hmiVib = document.getElementById('hmiVib');
+            const hmiStatus = document.getElementById('hmiStatus');
+            const actRpm = document.getElementById('actRpm');
+            const actTemp = document.getElementById('actTemp');
+            const actVib = document.getElementById('actVib');
+            const actStatus = document.getElementById('actStatus');
+
+            // ────────────────────────────────────────
+            // STATE
+            // ────────────────────────────────────────
+            let currentRPM = 1000;
+            let targetRPM = 1000;
+            let spoofedRPM = 1000;
+            let isDestroyed = false;
+            let isOverheating = false;
+            let isCritical = false;
+            let destructionTime = null;
+            let debrisPieces = [];
+            let stepProgress = [false, false, false, false, false]; // 5 steps
+            let flagRevealed = false;
+            let emergencyStop = false;
+            let injectConfirmed = false;
+
+            // ────────────────────────────────────────
+            // THREE.JS SETUP
+            // ────────────────────────────────────────
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x080c14);
+            scene.fog = new THREE.Fog(0x080c14, 15, 40);
+
+            const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.2;
+
+            const camera = new THREE.PerspectiveCamera(50, 2, 0.5, 50);
+            camera.position.set(7, 4.5, 9);
+            camera.lookAt(0, 3.8, 0);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x1a2a3a, 1.2);
+            scene.add(ambientLight);
+
+            const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
+            keyLight.position.set(10, 12, 6);
+            keyLight.castShadow = true;
+            keyLight.shadow.mapSize.width = 1024;
+            keyLight.shadow.mapSize.height = 1024;
+            keyLight.shadow.camera.near = 0.5;
+            keyLight.shadow.camera.far = 40;
+            keyLight.shadow.camera.left = -12;
+            keyLight.shadow.camera.right = 12;
+            keyLight.shadow.camera.top = 12;
+            keyLight.shadow.camera.bottom = -2;
+            keyLight.shadow.bias = -0.0001;
+            scene.add(keyLight);
+
+            const fillLight = new THREE.DirectionalLight(0x4466aa, 0.8);
+            fillLight.position.set(-4, 3, -2);
+            scene.add(fillLight);
+
+            const rimLight = new THREE.DirectionalLight(0x8899cc, 1.0);
+            rimLight.position.set(0, 2, -6);
+            scene.add(rimLight);
+
+            // Ground
+            const groundGeo = new THREE.PlaneGeometry(20, 20);
+            const groundMat = new THREE.MeshStandardMaterial({
+                color: 0x1a1a1e,
+                roughness: 0.85,
+                metalness: 0.3,
+            });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = -0.05;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Grid on ground
+            const gridHelper = new THREE.PolarGridHelper(8, 32, 16, 64, 0x2a3a4a, 0x1a2a3a);
+            gridHelper.position.y = 0.01;
+            scene.add(gridHelper);
+
+            // ────────────────────────────────────────
+            // CENTRIFUGE MODEL
+            // ────────────────────────────────────────
+            const centrifugeGroup = new THREE.Group();
+            scene.add(centrifugeGroup);
+
+            // Stationary base
+            const baseGroup = new THREE.Group();
+            centrifugeGroup.add(baseGroup);
+
+            // Base plate
+            const basePlateGeo = new THREE.CylinderGeometry(1.6, 1.8, 0.25, 48);
+            const basePlateMat = new THREE.MeshStandardMaterial({ color: 0x3a3a42, roughness: 0.4, metalness: 0.85 });
+            const basePlate = new THREE.Mesh(basePlateGeo, basePlateMat);
+            basePlate.position.y = 0.125;
+            basePlate.castShadow = true;
+            basePlate.receiveShadow = true;
+            baseGroup.add(basePlate);
+
+            // Motor housing
+            const motorHousingGeo = new THREE.CylinderGeometry(0.75, 0.85, 1.0, 40);
+            const motorHousingMat = new THREE.MeshStandardMaterial({ color: 0x4a4a55, roughness: 0.35, metalness: 0.9 });
+            const motorHousing = new THREE.Mesh(motorHousingGeo, motorHousingMat);
+            motorHousing.position.y = 0.75;
+            motorHousing.castShadow = true;
+            motorHousing.receiveShadow = true;
+            baseGroup.add(motorHousing);
+
+            // Motor detail rings
+            for (let i = 0; i < 3; i++) {
+                const ringGeo = new THREE.TorusGeometry(0.78, 0.04, 16, 40);
+                const ringMat = new THREE.MeshStandardMaterial({ color: 0x5a5a60, roughness: 0.3, metalness: 0.9 });
+                const ring = new THREE.Mesh(ringGeo, ringMat);
+                ring.position.y = 0.45 + i * 0.28;
+                ring.rotation.x = Math.PI / 2;
+                ring.castShadow = true;
+                baseGroup.add(ring);
+            }
+
+            // Lower bearing housing
+            const lowerBearingGeo = new THREE.CylinderGeometry(0.4, 0.5, 0.35, 32);
+            const bearingMat = new THREE.MeshStandardMaterial({ color: 0x5a5a5a, roughness: 0.25, metalness: 0.95 });
+            const lowerBearing = new THREE.Mesh(lowerBearingGeo, bearingMat);
+            lowerBearing.position.y = 1.4;
+            lowerBearing.castShadow = true;
+            baseGroup.add(lowerBearing);
+
+            // Outer casing (stationary, semi-transparent suggestion)
+            const casingGeo = new THREE.CylinderGeometry(0.9, 0.85, 5.5, 40, 1, true);
+            const casingMat = new THREE.MeshStandardMaterial({
+                color: 0x3a3a44,
+                roughness: 0.5,
+                metalness: 0.7,
+                transparent: true,
+                opacity: 0.25,
+                side: THREE.DoubleSide,
+            });
+            const casing = new THREE.Mesh(casingGeo, casingMat);
+            casing.position.y = 4.15;
+            casing.castShadow = false;
+            baseGroup.add(casing);
+
+            // Upper bearing housing
+            const upperBearingGeo = new THREE.CylinderGeometry(0.4, 0.5, 0.35, 32);
+            const upperBearing = new THREE.Mesh(upperBearingGeo, bearingMat);
+            upperBearing.position.y = 6.95;
+            upperBearing.castShadow = true;
+            baseGroup.add(upperBearing);
+
+            // Top plate
+            const topPlateGeo = new THREE.CylinderGeometry(0.7, 0.8, 0.2, 40);
+            const topPlateMat = new THREE.MeshStandardMaterial({ color: 0x3a3a42, roughness: 0.4, metalness: 0.85 });
+            const topPlate = new THREE.Mesh(topPlateGeo, topPlateMat);
+            topPlate.position.y = 7.2;
+            topPlate.castShadow = true;
+            baseGroup.add(topPlate);
+
+            // Pipe connections
+            for (let i = 0; i < 3; i++) {
+                const angle = (i / 3) * Math.PI * 2 + 0.4;
+                const pipeGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.2, 12);
+                const pipeMat = new THREE.MeshStandardMaterial({ color: 0x5a5a55, roughness: 0.3, metalness: 0.9 });
+                const pipe = new THREE.Mesh(pipeGeo, pipeMat);
+                pipe.position.set(Math.cos(angle) * 1.0, 1.6, Math.sin(angle) * 1.0);
+                pipe.rotation.z = (Math.PI / 2) * 0.6;
+                pipe.rotation.y = -angle;
+                pipe.castShadow = true;
+                baseGroup.add(pipe);
+            }
+
+            // Rotating rotor group
+            const rotorGroup = new THREE.Group();
+            centrifugeGroup.add(rotorGroup);
+
+            // Main rotor cylinder
+            const rotorGeo = new THREE.CylinderGeometry(0.55, 0.58, 5.2, 48, 8);
+            const rotorMat = new THREE.MeshStandardMaterial({
+                color: 0x6a6a72,
+                roughness: 0.2,
+                metalness: 0.95,
+                emissive: 0x000000,
+                emissiveIntensity: 0,
+            });
+            const rotor = new THREE.Mesh(rotorGeo, rotorMat);
+            rotor.position.y = 4.1;
+            rotor.castShadow = true;
+            rotor.name = 'mainRotor';
+            rotorGroup.add(rotor);
+
+            // Rotor visual bands (to show rotation)
+            for (let i = 0; i < 4; i++) {
+                const bandGeo = new THREE.TorusGeometry(0.57, 0.06, 12, 48);
+                const bandMat = new THREE.MeshStandardMaterial({
+                    color: 0x888890,
+                    roughness: 0.15,
+                    metalness: 0.95,
+                    emissive: 0x000000,
+                    emissiveIntensity: 0,
+                });
+                const band = new THREE.Mesh(bandGeo, bandMat);
+                band.position.y = 2.3 + i * 1.2;
+                band.rotation.x = Math.PI / 2;
+                band.name = 'rotorBand';
+                rotorGroup.add(band);
+            }
+
+            // Rotor shaft top
+            const shaftTopGeo = new THREE.CylinderGeometry(0.15, 0.2, 0.5, 20);
+            const shaftMat = new THREE.MeshStandardMaterial({ color: 0x7a7a78, roughness: 0.2, metalness: 0.95 });
+            const shaftTop = new THREE.Mesh(shaftTopGeo, shaftMat);
+            shaftTop.position.y = 6.9;
+            shaftTop.castShadow = true;
+            rotorGroup.add(shaftTop);
+
+            // Rotor shaft bottom
+            const shaftBottomGeo = new THREE.CylinderGeometry(0.15, 0.2, 0.5, 20);
+            const shaftBottom = new THREE.Mesh(shaftBottomGeo, shaftMat);
+            shaftBottom.position.y = 1.5;
+            shaftBottom.castShadow = true;
+            rotorGroup.add(shaftBottom);
+
+            // Warning point light (initially off)
+            const warningLight = new THREE.PointLight(0xff3300, 0, 8, 2);
+            warningLight.position.set(0, 4.1, 0);
+            warningLight.name = 'warningLight';
+            centrifugeGroup.add(warningLight);
+
+            // ────────────────────────────────────────
+            // DEBRIS PARTICLE SYSTEM
+            // ────────────────────────────────────────
+            function createDebris() {
+                const pieces = [];
+                const rotorWorldPos = new THREE.Vector3(0, 4.1, 0);
+                centrifugeGroup.localToWorld(rotorWorldPos);
+
+                for (let i = 0; i < 45; i++) {
+                    const size = 0.08 + Math.random() * 0.35;
+                    const geo = new THREE.BoxGeometry(size, size * (0.5 + Math.random()), size * (0.5 + Math.random()));
+                    const mat = new THREE.MeshStandardMaterial({
+                        color: new THREE.Color().setHSL(0.08 + Math.random() * 0.1, 0.1, 0.3 + Math.random() * 0.5),
+                        roughness: 0.4 + Math.random() * 0.3,
+                        metalness: 0.8 + Math.random() * 0.2,
+                        emissive: new THREE.Color().setHSL(0.05, 0.9, 0.1 + Math.random() * 0.3),
+                        emissiveIntensity: 0.3 + Math.random() * 1.2,
+                    });
+                    const piece = new THREE.Mesh(geo, mat);
+                    piece.position.copy(rotorWorldPos);
+                    piece.position.x += (Math.random() - 0.5) * 0.8;
+                    piece.position.y += (Math.random() - 0.5) * 5;
+                    piece.position.z += (Math.random() - 0.5) * 0.8;
+                    piece.castShadow = true;
+                    piece.receiveShadow = true;
+                    scene.add(piece);
+
+                    const outward = new THREE.Vector3(
+                        (Math.random() - 0.5) * 2,
+                        Math.random() * 1.5 + 0.3,
+                        (Math.random() - 0.5) * 2
+                    ).normalize();
+
+                    pieces.push({
+                        mesh: piece,
+                        velocity: outward.multiplyScalar(3 + Math.random() * 12),
+                        angularVel: new THREE.Vector3(
+                            (Math.random() - 0.5) * 25,
+                            (Math.random() - 0.5) * 25,
+                            (Math.random() - 0.5) * 25
+                        ),
+                        life: 2.5 + Math.random() * 3,
+                        age: 0,
+                    });
+                }
+
+                // Spark particles
+                for (let i = 0; i < 30; i++) {
+                    const sparkGeo = new THREE.SphereGeometry(0.03 + Math.random() * 0.06, 6, 6);
+                    const sparkMat = new THREE.MeshBasicMaterial({
+                        color: new THREE.Color().setHSL(0.08 + Math.random() * 0.12, 1, 0.5 + Math.random() * 0.5),
+                    });
+                    const spark = new THREE.Mesh(sparkGeo, sparkMat);
+                    spark.position.copy(rotorWorldPos);
+                    spark.position.x += (Math.random() - 0.5) * 0.5;
+                    spark.position.y += (Math.random() - 0.5) * 5;
+                    spark.position.z += (Math.random() - 0.5) * 0.5;
+                    scene.add(spark);
+                    pieces.push({
+                        mesh: spark,
+                        velocity: new THREE.Vector3(
+                            (Math.random() - 0.5) * 14,
+                            Math.random() * 8 + 1,
+                            (Math.random() - 0.5) * 14
+                        ),
+                        angularVel: new THREE.Vector3(0, 0, 0),
+                        life: 0.8 + Math.random() * 1.5,
+                        age: 0,
+                        isSpark: true,
+                    });
+                }
+
+                return pieces;
+            }
+
+            function updateDebris(deltaTime) {
+                for (let i = debrisPieces.length - 1; i >= 0; i--) {
+                    const d = debrisPieces[i];
+                    d.age += deltaTime;
+                    if (d.age > d.life || d.mesh.position.y < -3) {
+                        scene.remove(d.mesh);
+                        if (d.mesh.geometry) d.mesh.geometry.dispose();
+                        if (d.mesh.material) d.mesh.material.dispose();
+                        debrisPieces.splice(i, 1);
+                        continue;
+                    }
+                    d.velocity.y -= 9.8 * deltaTime;
+                    d.mesh.position.x += d.velocity.x * deltaTime;
+                    d.mesh.position.y += d.velocity.y * deltaTime;
+                    d.mesh.position.z += d.velocity.z * deltaTime;
+                    if (!d.isSpark) {
+                        d.mesh.rotation.x += d.angularVel.x * deltaTime;
+                        d.mesh.rotation.y += d.angularVel.y * deltaTime;
+                        d.mesh.rotation.z += d.angularVel.z * deltaTime;
+                    }
+                    if (d.isSpark && d.age > d.life * 0.6) {
+                        d.mesh.material.opacity = 1 - (d.age - d.life * 0.6) / (d.life * 0.4);
+                        d.mesh.material.transparent = true;
+                    }
+                    if (d.mesh.position.y < 0.02 && d.velocity.y < 0) {
+                        d.mesh.position.y = 0.02;
+                        d.velocity.y *= -0.3;
+                        d.velocity.x *= 0.6;
+                        d.velocity.z *= 0.6;
+                        if (Math.abs(d.velocity.y) < 0.3) d.velocity.y = 0;
+                    }
+                }
+            }
+
+            // ────────────────────────────────────────
+            // CAMERA ORBIT (simple mouse drag)
+            // ────────────────────────────────────────
+            let isDragging = false;
+            let prevMouseX = 0;
+            let prevMouseY = 0;
+            let cameraTheta = Math.PI / 5;
+            let cameraPhi = Math.PI / 3.5;
+            let cameraRadius = 10;
+
+            function updateCameraPosition() {
+                camera.position.x = cameraRadius * Math.sin(cameraPhi) * Math.cos(cameraTheta);
+                camera.position.y = cameraRadius * Math.cos(cameraPhi);
+                camera.position.z = cameraRadius * Math.sin(cameraPhi) * Math.sin(cameraTheta);
+                camera.lookAt(0, 3.8, 0);
+            }
+            updateCameraPosition();
+
+            centerPanel.addEventListener('mousedown', (e) => {
+                if (e.target === canvas || e.target === centerPanel) {
+                    isDragging = true;
+                    prevMouseX = e.clientX;
+                    prevMouseY = e.clientY;
+                    centerPanel.style.cursor = 'grabbing';
+                }
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const dx = e.clientX - prevMouseX;
+                const dy = e.clientY - prevMouseY;
+                cameraTheta -= dx * 0.005;
+                cameraPhi -= dy * 0.005;
+                cameraPhi = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, cameraPhi));
+                cameraRadius = Math.max(5, Math.min(16, cameraRadius));
+                prevMouseX = e.clientX;
+                prevMouseY = e.clientY;
+                updateCameraPosition();
+            });
+
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+                centerPanel.style.cursor = 'grab';
+            });
+
+            centerPanel.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                cameraRadius += e.deltaY * 0.01;
+                cameraRadius = Math.max(5, Math.min(16, cameraRadius));
+                updateCameraPosition();
+            }, { passive: false });
+
+            // ────────────────────────────────────────
+            // RESIZE HANDLER
+            // ────────────────────────────────────────
+            function resize() {
+                const rect = centerPanel.getBoundingClientRect();
+                const w = rect.width;
+                const h = rect.height;
+                if (w <= 0 || h <= 0) return;
+                renderer.setSize(w, h, false);
+                camera.aspect = w / Math.max(h, 1);
+                camera.updateProjectionMatrix();
+            }
+            window.addEventListener('resize', resize);
+            resize();
+
+            // ────────────────────────────────────────
+            // UPDATE FUNCTIONS
+            // ────────────────────────────────────────
+            function updateHMI() {
+                hmiRpm.textContent = spoofedRPM + ' RPM';
+                hmiTemp.textContent = '45°C';
+                hmiVib.textContent = '0.2 mm/s';
+                hmiStatus.textContent = 'NORMAL';
+                hmiStatus.style.color = '#22c55e';
+                document.getElementById('regActual').textContent = spoofedRPM;
+            }
+
+            function updateActualDisplay() {
+                const rpm = Math.round(currentRPM);
+                const temp = 45 + Math.max(0, (currentRPM - 1000) * 0.025);
+                const vib = 0.2 + Math.max(0, (currentRPM - 1200) * 0.003);
+                actRpm.textContent = rpm + ' RPM';
+                actTemp.textContent = Math.round(temp) + '°C';
+                actVib.textContent = vib.toFixed(2) + ' mm/s';
+
+                if (currentRPM < 1500) {
+                    actStatus.textContent = 'NORMAL';
+                    actStatus.style.color = '#22c55e';
+                    actRpm.style.color = '#22c55e';
+                    actTemp.style.color = '#22c55e';
+                    actVib.style.color = '#22c55e';
+                } else if (currentRPM < 3000) {
+                    actStatus.textContent = 'WARNING';
+                    actStatus.style.color = '#f59e0b';
+                    actRpm.style.color = '#f59e0b';
+                    actTemp.style.color = '#f59e0b';
+                    actVib.style.color = '#f59e0b';
+                } else if (currentRPM < 4800) {
+                    actStatus.textContent = 'CRITICAL';
+                    actStatus.style.color = '#ef4444';
+                    actRpm.style.color = '#ef4444';
+                    actTemp.style.color = '#ef4444';
+                    actVib.style.color = '#ef4444';
+                } else {
+                    actStatus.textContent = 'FAILURE IMMINENT';
+                    actStatus.style.color = '#ff0000';
+                    actRpm.style.color = '#ff0000';
+                    actTemp.style.color = '#ff0000';
+                    actVib.style.color = '#ff0000';
+                }
+
+                if (currentRPM > 1200 && Math.abs(currentRPM - spoofedRPM) > 100) {
+                    divergenceIndicator.classList.add('visible');
+                } else {
+                    divergenceIndicator.classList.remove('visible');
+                }
+            }
+
+            function updateStepProgress() {
+                if (!stepProgress[0] && currentRPM >= 900 && currentRPM <= 1100 && !injectConfirmed) {
+                    stepProgress[0] = true;
+                }
+                if (!stepProgress[1] && injectConfirmed && targetRPM > 1500) {
+                    stepProgress[1] = true;
+                }
+                if (!stepProgress[2] && currentRPM > 1500 && Math.abs(currentRPM - spoofedRPM) > 300) {
+                    stepProgress[2] = true;
+                }
+                if (!stepProgress[3] && isDestroyed) {
+                    stepProgress[3] = true;
+                }
+                if (!stepProgress[4] && flagRevealed) {
+                    stepProgress[4] = true;
+                }
+
+                stepDots.forEach((dot, i) => {
+                    dot.classList.remove('done', 'active');
+                    if (stepProgress[i]) dot.classList.add('done');
+                });
+                const activeIndex = stepProgress.findIndex(s => !s);
+                if (activeIndex >= 0 && activeIndex < stepDots.length) {
+                    stepDots[activeIndex].classList.add('active');
+                }
+                if (stepProgress.every(s => s)) {
+                    stepDots.forEach(d => d.classList.add('done'));
+                    stepDots[stepDots.length - 1].classList.add('active');
+                }
+            }
+
+            function updateFooterStatus() {
+                if (isDestroyed) {
+                    footerStatus.textContent = '💀 系统状态：离心机已解体 | 物理损坏确认 | 安全联锁失效';
+                    footerStatus.style.color = '#ef4444';
+                } else if (isCritical) {
+                    footerStatus.textContent = '🔴 系统状态：严重超速！| RPM: ' + Math.round(currentRPM) +
+                        ' | 离心机: 濒临解体';
+                    footerStatus.style.color = '#ff4444';
+                } else if (isOverheating) {
+                    footerStatus.textContent = '🟡 系统状态：转速异常 | RPM: ' + Math.round(currentRPM) +
+                        ' | 离心机: 不稳定';
+                    footerStatus.style.color = '#f59e0b';
+                } else {
+                    footerStatus.textContent = '● 系统状态：正常运行中 | RPM: ' + Math.round(currentRPM) + ' | 离心机: 稳定';
+                    footerStatus.style.color = '#94a3b8';
+                }
+            }
+
+            function revealFlag() {
+                if (!flagRevealed) {
+                    flagRevealed = true;
+                    flagDisplay.classList.add('revealed');
+                    updateStepProgress();
+                }
+            }
+
+            // ────────────────────────────────────────
+            // DESTRUCTION SEQUENCE
+            // ────────────────────────────────────────
+            function triggerDestruction() {
+                if (isDestroyed) return;
+                isDestroyed = true;
+                destructionTime = performance.now() / 1000;
+
+                // Hide rotor
+                rotorGroup.visible = false;
+
+                // Create debris
+                debrisPieces = createDebris();
+
+                // Flash
+                alertFlash.classList.add('critical');
+                setTimeout(() => alertFlash.classList.remove('critical'), 600);
+
+                // Warning light burst
+                warningLight.intensity = 15;
+                warningLight.color.set('#ff4400');
+
+                // Camera shake
+                const shakeDuration = 1.5;
+                const shakeStart = performance.now() / 1000;
+                const origRadius = cameraRadius;
+                const origPhi = cameraPhi;
+                const origTheta = cameraTheta;
+
+                function shakeCamera() {
+                    const elapsed = performance.now() / 1000 - shakeStart;
+                    if (elapsed < shakeDuration && isDestroyed) {
+                        const decay = 1 - elapsed / shakeDuration;
+                        cameraRadius = origRadius + (Math.random() - 0.5) * 1.5 * decay;
+                        cameraPhi = origPhi + (Math.random() - 0.5) * 0.3 * decay;
+                        cameraTheta = origTheta + (Math.random() - 0.5) * 0.3 * decay;
+                        updateCameraPosition();
+                        requestAnimationFrame(() => {
+                            if (isDestroyed && elapsed < shakeDuration) shakeCamera();
+                            else {
+                                cameraRadius = origRadius;
+                                cameraPhi = origPhi;
+                                cameraTheta = origTheta;
+                                updateCameraPosition();
+                            }
+                        });
+                    }
+                }
+                shakeCamera();
+
+                // Reveal flag after short delay
+                setTimeout(() => {
+                    revealFlag();
+                }, 1200);
+
+                updateStepProgress();
+            }
+
+            // ────────────────────────────────────────
+            // ANIMATION LOOP
+            // ────────────────────────────────────────
+            let lastTime = performance.now() / 1000;
+            let accumulatedRotation = 0;
+
+            function animate(timestamp) {
+                requestAnimationFrame(animate);
+
+                const currentTime = timestamp / 1000;
+                let deltaTime = currentTime - lastTime;
+                lastTime = currentTime;
+
+                if (deltaTime <= 0) deltaTime = 0.016;
+                if (deltaTime > 0.2) deltaTime = 0.2; // cap
+
+                // Update RPM
+                if (!isDestroyed && !emergencyStop) {
+                    if (Math.abs(currentRPM - targetRPM) > 1) {
+                        const rampSpeed = 400; // RPM per second
+                        const step = rampSpeed * deltaTime;
+                        if (currentRPM < targetRPM) {
+                            currentRPM = Math.min(targetRPM, currentRPM + step);
+                        } else {
+                            currentRPM = Math.max(targetRPM, currentRPM - step);
+                        }
+                    } else {
+                        currentRPM = targetRPM;
+                    }
+                } else if (emergencyStop && !isDestroyed) {
+                    targetRPM = 0;
+                    const rampSpeed = 600;
+                    const step = rampSpeed * deltaTime;
+                    if (currentRPM > 0) {
+                        currentRPM = Math.max(0, currentRPM - step);
+                    }
+                    if (currentRPM < 5 && injectConfirmed) {
+                        emergencyStop = false;
+                        targetRPM = 1000;
+                        spoofedRPM = 1000;
+                        injectConfirmed = false;
+                    }
+                }
+
+                // Check thresholds
+                isOverheating = currentRPM > 2500;
+                isCritical = currentRPM > 3800;
+
+                // Trigger destruction at ~5000 RPM
+                if (!isDestroyed && currentRPM >= 4950 && !emergencyStop) {
+                    triggerDestruction();
+                }
+
+                // Rotate rotor
+                if (!isDestroyed && rotorGroup.visible) {
+                    const rotSpeed = (currentRPM / 1000) * Math.PI * 2 * 0.35;
+                    accumulatedRotation += rotSpeed * deltaTime;
+                    rotorGroup.rotation.y = accumulatedRotation;
+
+                    // Vibration when overheating
+                    if (isCritical) {
+                        const vibAmp = (currentRPM - 3800) / 1200 * 0.25;
+                        const vibFreq = 40 + (currentRPM - 3800) / 1200 * 80;
+                        rotorGroup.position.x = Math.sin(currentTime * vibFreq) * vibAmp * 0.7;
+                        rotorGroup.position.z = Math.cos(currentTime * vibFreq * 1.3) * vibAmp * 0.7;
+                        rotorGroup.position.y = Math.sin(currentTime * vibFreq * 0.8) * vibAmp * 0.25;
+                    } else if (isOverheating) {
+                        const vibAmp = (currentRPM - 2500) / 1300 * 0.08;
+                        const vibFreq = 25;
+                        rotorGroup.position.x = Math.sin(currentTime * vibFreq) * vibAmp;
+                        rotorGroup.position.z = Math.cos(currentTime * vibFreq * 1.2) * vibAmp;
+                        rotorGroup.position.y = 0;
+                    } else {
+                        rotorGroup.position.x = 0;
+                        rotorGroup.position.y = 0;
+                        rotorGroup.position.z = 0;
+                    }
+                }
+
+                // Update rotor material emissive
+                if (!isDestroyed) {
+                    let emissiveIntensity = 0;
+                    if (currentRPM > 3500) {
+                        emissiveIntensity = (currentRPM - 3500) / 1500 * 2.5;
+                    } else if (currentRPM > 2500) {
+                        emissiveIntensity = (currentRPM - 2500) / 1000 * 0.8;
+                    }
+                    emissiveIntensity = Math.min(3, emissiveIntensity);
+                    rotorMat.emissive.set('#ff2200');
+                    rotorMat.emissiveIntensity = emissiveIntensity;
+
+                    // Update bands
+                    rotorGroup.children.forEach(child => {
+                        if (child.name === 'rotorBand' && child.material && child.material
+                            .emissive) {
+                            child.material.emissive.set('#ff2200');
+                            child.material.emissiveIntensity = emissiveIntensity * 0.8;
+                        }
+                    });
+
+                    // Warning light
+                    warningLight.intensity = emissiveIntensity * 3;
+                    if (emissiveIntensity > 0.5) {
+                        warningLight.color.set('#ff4400');
+                    }
+                } else {
+                    // Fade warning light after destruction
+                    const timeSinceDestruction = currentTime - (destructionTime || currentTime);
+                    warningLight.intensity = Math.max(0, 15 * Math.exp(-timeSinceDestruction * 2.5));
+                }
+
+                // Update debris
+                if (isDestroyed && debrisPieces.length > 0) {
+                    updateDebris(deltaTime);
+                }
+
+                // Update UI
+                rpmDisplay.textContent = Math.round(currentRPM);
+                const rpmEl = document.getElementById('rpmDisplay');
+                if (isCritical) {
+                    rpmEl.className = 'rpm-value danger';
+                } else if (isOverheating) {
+                    rpmEl.className = 'rpm-value warning';
+                } else {
+                    rpmEl.className = 'rpm-value';
+                }
+
+                updateActualDisplay();
+                updateFooterStatus();
+                updateStepProgress();
+
+                if (!isDestroyed) {
+                    updateHMI();
+                }
+
+                // Render
+                resize();
+                renderer.render(scene, camera);
+            }
+
+            // ────────────────────────────────────────
+            // INTERACTION HANDLERS
+            // ────────────────────────────────────────
+            btnInject.addEventListener('click', () => {
+                if (isDestroyed) {
+                    alert('离心机已解体！请先重置模拟。');
+                    return;
+                }
+                const inputVal = parseInt(injectRpmInput.value);
+                if (isNaN(inputVal) || inputVal < 100 || inputVal > 9999) {
+                    alert('请输入有效的 RPM 值 (100-9999)');
+                    return;
+                }
+                targetRPM = inputVal;
+                spoofedRPM = 1000; // HMI stays spoofed
+                injectConfirmed = true;
+                emergencyStop = false;
+                regSetpoint.textContent = inputVal;
+                document.getElementById('regActual').textContent = '1000'; // spoofed
+                updateStepProgress();
+
+                // Flash the input
+                injectRpmInput.classList.add('danger-input');
+                setTimeout(() => injectRpmInput.classList.remove('danger-input'), 2000);
+
+                // Update register display
+                if (inputVal > 1500) {
+                    document.querySelector(
+                        'tr:nth-child(3) .reg-value').textContent = Math.max(inputVal,
+                        5000);
+                }
+            });
+
+            btnEmergencyStop.addEventListener('click', () => {
+                if (isDestroyed) {
+                    alert('离心机已解体！请先重置模拟。');
+                    return;
+                }
+                emergencyStop = true;
+                targetRPM = 0;
+                spoofedRPM = 0;
+                injectConfirmed = false;
+                regSetpoint.textContent = '0';
+                document.getElementById('regActual').textContent = '0';
+                injectRpmInput.value = '0';
+                injectRpmInput.classList.remove('danger-input');
+            });
+
+            btnReset.addEventListener('click', () => {
+                // Clean up debris
+                debrisPieces.forEach(d => {
+                    scene.remove(d.mesh);
+                    if (d.mesh.geometry) d.mesh.geometry.dispose();
+                    if (d.mesh.material) d.mesh.material.dispose();
+                });
+                debrisPieces = [];
+
+                // Reset state
+                currentRPM = 1000;
+                targetRPM = 1000;
+                spoofedRPM = 1000;
+                isDestroyed = false;
+                isOverheating = false;
+                isCritical = false;
+                destructionTime = null;
+                emergencyStop = false;
+                injectConfirmed = false;
+                flagRevealed = false;
+                accumulatedRotation = 0;
+
+                // Reset rotor
+                rotorGroup.visible = true;
+                rotorGroup.position.set(0, 0, 0);
+                rotorGroup.rotation.y = 0;
+                rotorMat.emissive.set('#000000');
+                rotorMat.emissiveIntensity = 0;
+                rotorGroup.children.forEach(child => {
+                    if (child.name === 'rotorBand' && child.material && child.material.emissive) {
+                        child.material.emissive.set('#000000');
+                        child.material.emissiveIntensity = 0;
+                    }
+                });
+                warningLight.intensity = 0;
+                warningLight.color.set('#ff3300');
+
+                // Reset UI
+                rpmDisplay.textContent = '1000';
+                rpmDisplay.className = 'rpm-value';
+                regSetpoint.textContent = '1000';
+                document.getElementById('regActual').textContent = '1000';
+                injectRpmInput.value = '5000';
+                injectRpmInput.classList.remove('danger-input');
+                document.querySelector('tr:nth-child(3) .reg-value').textContent = '5000';
+                document.querySelector('tr:nth-child(4) .reg-value').textContent = 'BYPASSED';
+                flagDisplay.classList.remove('revealed');
+                divergenceIndicator.classList.remove('visible');
+                alertFlash.classList.remove('critical');
+                updateHMI();
+                updateActualDisplay();
+                updateFooterStatus();
+                stepProgress = [false, false, false, false, false];
+                updateStepProgress();
+                actRpm.style.color = '#22c55e';
+                actTemp.style.color = '#22c55e';
+                actVib.style.color = '#22c55e';
+                actStatus.style.color = '#22c55e';
+                actStatus.textContent = 'NORMAL';
+            });
+
+            // Allow Enter key in RPM input to trigger injection
+            injectRpmInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    btnInject.click();
+                }
+            });
+
+            // Sync editable register with input
+            regSetpoint.addEventListener('blur', () => {
+                const val = parseInt(regSetpoint.textContent);
+                if (!isNaN(val) && val >= 100 && val <= 9999) {
+                    injectRpmInput.value = val;
+                } else {
+                    regSetpoint.textContent = targetRPM;
+                }
+            });
+            regSetpoint.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    regSetpoint.blur();
+                    btnInject.click();
+                }
+            });
+
+            // Analysis toggle
+            btnToggleAnalysis.addEventListener('click', () => {
+                const isOpen = analysisPanel.classList.contains('open');
+                if (isOpen) {
+                    analysisPanel.classList.remove('open');
+                    btnToggleAnalysis.textContent = '▶ 展开完整分析报告';
+                } else {
+                    analysisPanel.classList.add('open');
+                    btnToggleAnalysis.textContent = '▼ 收起分析报告';
+                }
+            });
+
+            // ────────────────────────────────────────
+            // INITIAL SETUP
+            // ────────────────────────────────────────
+            updateHMI();
+            updateActualDisplay();
+            updateFooterStatus();
+            updateStepProgress();
+            resize();
+
+            // Start animation
+            lastTime = performance.now() / 1000;
+            requestAnimationFrame(animate);
+
+            // Log educational notice
+            console.log(
+                '%c// EDUCATIONAL PURPOSE ONLY — authorized classroom use %c\n%cStuxnet Centrifuge 3D Sabotage Simulation %c\n%cThis PoC demonstrates ICS/SCADA attack concepts against a mock target. %c\n%c防御措施：固件完整性校验、HMI-PLC双向验证、物理安全联锁、转速硬件上限 %c',
+                'color:#ef4444;font-weight:bold;',
+                '',
+                'color:#f59e0b;font-size:1.2em;',
+                '',
+                'color:#94a3b8;',
+                '',
+                'color:#22c55e;',
+                ''
+            );
+        })();
+    </script>
+</body>
+</html>

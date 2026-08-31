@@ -210,7 +210,7 @@ def test_welcome_desktop(random_user_browser, random_user_name, welcome_dojo):
         time.sleep(2)
         assert workspace_run("cat /tmp/desktop-escape-check", user=random_user_name).stdout.strip() == "DESKTOP_ESCAPE_OK"
 
-        clipboard_in = "AISecEdu clipboard into desktop"
+        clipboard_in = "玄甲 clipboard into desktop"
         random_user_browser.switch_to.parent_frame()
         assert random_user_browser.execute_script(
             "return sendDesktopClipboard($('.workspace-controls'), arguments[0]);",
@@ -227,7 +227,7 @@ def test_welcome_desktop(random_user_browser, random_user_name, welcome_dojo):
             time.sleep(0.25)
         assert copied == clipboard_in
 
-        clipboard_out = "AISecEdu clipboard out of desktop"
+        clipboard_out = "玄甲 clipboard out of desktop"
         workspace_run(
             f"printf %s {clipboard_out!r} | DISPLAY=:0 xclip -selection clipboard",
             user=random_user_name,
@@ -726,16 +726,13 @@ def test_registration_commitment(browser_fixture):
     submit_button = browser_fixture.find_element(By.ID, "register-submit")
     submit_button.click()
 
-    reminder = wait.until(EC.alert_is_present())
-    assert "完全按照上方显示内容" in reminder.text
-    reminder.accept()
-
     commitment_input = browser_fixture.find_element(By.ID, "commitment-input")
-    commitment_input.send_keys(
-        "我会负责任地使用 AISecEdu，并且不会发布受限题目的解法。"
+    assert browser_fixture.execute_script(
+        "return arguments[0].validity.valueMissing", commitment_input
     )
+    assert "/register" in browser_fixture.current_url
 
-    time.sleep(0.5)
+    commitment_input.click()
 
     submit_button.click()
 

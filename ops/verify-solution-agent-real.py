@@ -124,7 +124,7 @@ def main():
     try:
         spec = {
             "id": dojo_id,
-            "name": "AISecEdu 教师解题 Agent 真实验证",
+            "name": "玄甲教师解题 Agent 真实验证",
             "type": "public",
             "modules": [
                 {
@@ -147,7 +147,7 @@ def main():
                 {
                     "type": "text",
                     "path": f"lab/{challenge_id}/handoff.txt",
-                    "content": "AISecEdu solution-agent verification\nhandoff=normal-learner-path\n",
+                    "content": "玄甲 solution-agent verification\nhandoff=normal-learner-path\n",
                 },
                 {
                     "type": "text",

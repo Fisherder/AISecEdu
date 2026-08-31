@@ -1,0 +1,1158 @@
+<!doctype html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZKP 山洞模拟 — Alibaba Cave Zero-Knowledge Proof</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --bg-card: #1a1f35;
+            --bg-panel: #151a2e;
+            --text: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --accent: #3b82f6;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --flag: #f59e0b;
+            --cave-rock: #3d352a;
+            --cave-tunnel: #5c4a35;
+            --cave-light: #8b6f4e;
+            --door-glow: #a855f7;
+            --peggy-color: #22d3a5;
+            --border: #2a3050;
+            --radius: 12px;
+            --transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .lab-container {
+            width: 100%;
+            max-width: 780px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px 24px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+        .header .icon {
+            font-size: 2.2rem;
+        }
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: #f1f5f9;
+            flex: 1;
+            min-width: 200px;
+        }
+        .header .badge {
+            background: #1e293b;
+            color: var(--accent);
+            border: 1px solid var(--border);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+        }
+        .edu-notice {
+            background: #1a1a1a;
+            color: #666;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.7rem;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border-left: 3px solid #444;
+            width: 100%;
+            margin-top: 4px;
+        }
+
+        /* Briefing card */
+        .briefing {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 18px 22px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+        .briefing .mission-icon {
+            font-size: 2rem;
+            flex-shrink: 0;
+        }
+        .briefing .content h3 {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: #f1f5f9;
+        }
+        .briefing .content p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin: 0;
+        }
+        .briefing .highlight {
+            color: var(--door-glow);
+            font-weight: 600;
+        }
+
+        /* Progress */
+        .progress-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 12px 18px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .progress-step {
+            color: var(--accent);
+            font-weight: 700;
+        }
+        .progress-fill-outer {
+            flex: 1;
+            height: 6px;
+            background: #1e293b;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .progress-fill-inner {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            transition: width 0.5s ease;
+            width: 0%;
+        }
+
+        /* Cave area */
+        .cave-stage {
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+            min-height: 420px;
+        }
+        .cave-svg {
+            width: 100%;
+            max-width: 600px;
+            height: auto;
+            display: block;
+        }
+
+        /* Peggy glow */
+        .peggy-glow {
+            filter: drop-shadow(0 0 12px rgba(34, 211, 165, 0.7)) drop-shadow(0 0 24px rgba(34, 211, 165, 0.4));
+            transition: all var(--transition);
+        }
+        .peggy-hidden {
+            opacity: 0;
+            transition: opacity 0.35s ease;
+        }
+        .peggy-visible {
+            opacity: 1;
+            transition: opacity 0.25s ease;
+        }
+
+        /* Door glow animation */
+        @keyframes doorPulse {
+            0%,
+            100% {
+                filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.5));
+            }
+            50% {
+                filter: drop-shadow(0 0 20px rgba(168, 85, 247, 0.95));
+            }
+        }
+        .door-used {
+            animation: doorPulse 0.8s ease-in-out 3;
+        }
+        @keyframes doorIdle {
+            0%,
+            100% {
+                filter: drop-shadow(0 0 3px rgba(168, 85, 247, 0.3));
+            }
+            50% {
+                filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.5));
+            }
+        }
+        .door-idle {
+            animation: doorIdle 2.5s ease-in-out infinite;
+        }
+
+        /* Challenge buttons */
+        .challenge-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 18px 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            justify-content: center;
+        }
+        .challenge-panel .prompt {
+            width: 100%;
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: #f1f5f9;
+            margin-bottom: 2px;
+        }
+        .btn {
+            padding: 12px 28px;
+            border-radius: 25px;
+            border: 2px solid transparent;
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            letter-spacing: 0.02em;
+            font-family: inherit;
+            position: relative;
+            overflow: hidden;
+        }
+        .btn:active {
+            transform: scale(0.95);
+        }
+        .btn-left {
+            background: #1e3a5f;
+            border-color: #3b82f6;
+            color: #bfdbfe;
+        }
+        .btn-left:hover {
+            background: #2563eb;
+            color: #fff;
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.45);
+        }
+        .btn-right {
+            background: #3a1e5f;
+            border-color: #a855f7;
+            color: #e9d5ff;
+        }
+        .btn-right:hover {
+            background: #7c3aed;
+            color: #fff;
+            box-shadow: 0 0 30px rgba(168, 85, 247, 0.45);
+        }
+        .btn-random {
+            background: #1e3a3a;
+            border-color: #22c55e;
+            color: #bbf7d0;
+        }
+        .btn-random:hover {
+            background: #16a34a;
+            color: #fff;
+            box-shadow: 0 0 24px rgba(34, 197, 94, 0.4);
+        }
+        .btn-new-round {
+            background: #1e293b;
+            border-color: #64748b;
+            color: #cbd5e1;
+        }
+        .btn-new-round:hover {
+            background: #334155;
+            color: #fff;
+        }
+        .btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .btn:disabled:hover {
+            box-shadow: none;
+        }
+
+        /* Stats panel */
+        .stats-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .stat-card {
+            flex: 1;
+            min-width: 120px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 16px;
+            text-align: center;
+        }
+        .stat-card .stat-value {
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: #f1f5f9;
+            letter-spacing: -0.02em;
+        }
+        .stat-card .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .stat-card.confidence-card .stat-value {
+            color: var(--success);
+        }
+        .stat-card.flag-card {
+            border-color: var(--flag);
+            animation: flagGlow 1.5s ease-in-out infinite;
+        }
+        @keyframes flagGlow {
+            0%,
+            100% {
+                box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 28px rgba(245, 158, 11, 0.7);
+            }
+        }
+        .flag-code {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--flag);
+            word-break: break-all;
+        }
+
+        /* History */
+        .history-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 18px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .history-panel h4 {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .history-dots {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .history-dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        .history-dot.success {
+            background: #14532d;
+            border: 2px solid #22c55e;
+            color: #bbf7d0;
+        }
+        .history-dot.door-used-dot {
+            background: #3b1f6e;
+            border: 2px solid #a855f7;
+            color: #e9d5ff;
+        }
+        .history-dot:hover {
+            transform: scale(1.2);
+            z-index: 2;
+        }
+        .history-dot .tooltip {
+            display: none;
+            position: absolute;
+            bottom: 110%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e293b;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 0.7rem;
+            white-space: nowrap;
+            pointer-events: none;
+            color: #cbd5e1;
+            z-index: 5;
+        }
+        .history-dot:hover .tooltip {
+            display: block;
+        }
+
+        /* Behind-the-scenes */
+        .bts-panel {
+            background: var(--bg-panel);
+            border: 1px dashed #475569;
+            border-radius: var(--radius);
+            padding: 16px 18px;
+            margin-top: 4px;
+        }
+        .bts-panel summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: #cbd5e1;
+            font-size: 0.9rem;
+            user-select: none;
+        }
+        .bts-panel summary:hover {
+            color: #f1f5f9;
+        }
+        .bts-content {
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+        .bts-content .route-diagram {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            background: #0f172a;
+            padding: 10px 14px;
+            border-radius: 6px;
+            margin: 8px 0;
+            font-size: 0.8rem;
+            white-space: pre;
+            color: #94a3b8;
+        }
+        .bts-content .route-diagram .highlight-path {
+            color: var(--peggy-color);
+            font-weight: 700;
+        }
+        .bts-content .route-diagram .highlight-door {
+            color: var(--door-glow);
+            font-weight: 700;
+        }
+
+        /* Analysis section */
+        .analysis-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 18px;
+        }
+        .analysis-section summary {
+            cursor: pointer;
+            font-weight: 700;
+            color: #f1f5f9;
+            font-size: 0.95rem;
+            user-select: none;
+        }
+        .analysis-inner {
+            margin-top: 12px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.8;
+        }
+        .analysis-inner h4 {
+            color: #f1f5f9;
+            margin: 12px 0 4px;
+        }
+        .analysis-inner code {
+            background: #1e293b;
+            padding: 2px 7px;
+            border-radius: 3px;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.82rem;
+            color: #e2e8f0;
+        }
+        .analysis-inner .formula {
+            display: block;
+            text-align: center;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin: 8px 0;
+            padding: 8px;
+            background: #0f172a;
+            border-radius: 6px;
+        }
+
+        /* Confetti placeholder */
+        @keyframes confettiDrop {
+            0% {
+                transform: translateY(-100px) rotate(0deg);
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(500px) rotate(720deg);
+                opacity: 0;
+            }
+        }
+        .confetti-piece {
+            position: fixed;
+            top: -20px;
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            animation: confettiDrop 2.5s ease-out forwards;
+            pointer-events: none;
+            z-index: 999;
+        }
+
+        /* Warning toast */
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #451a1a;
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            z-index: 100;
+            animation: fadeInOut 3s ease forwards;
+            pointer-events: none;
+        }
+        @keyframes fadeInOut {
+            0% {
+                opacity: 0;
+                top: 30px;
+            }
+            10% {
+                opacity: 1;
+                top: 20px;
+            }
+            80% {
+                opacity: 1;
+                top: 20px;
+            }
+            100% {
+                opacity: 0;
+                top: 10px;
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .btn {
+                padding: 10px 18px;
+                font-size: 0.85rem;
+            }
+            .cave-stage {
+                min-height: 300px;
+                padding: 4px;
+            }
+            .stat-card .stat-value {
+                font-size: 1.4rem;
+            }
+            .header h1 {
+                font-size: 1.2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="lab-container">
+        <!-- Header -->
+        <div class="header">
+            <span class="icon">🏔️</span>
+            <h1>ZKP 山洞模拟 — Alibaba Cave</h1>
+            <span class="badge">零知识证明</span>
+            <div class="edu-notice">// EDUCATIONAL PURPOSE ONLY — authorized classroom use | 仅用于授权教学环境</div>
+        </div>
+
+        <!-- Briefing -->
+        <div class="briefing">
+            <span class="mission-icon">📋</span>
+            <div class="content">
+                <h3>🔍 任务简报</h3>
+                <p>山洞有<span class="highlight">左、右两条路径</span>，深处有一扇<span class="highlight">魔法门</span>连接两侧。
+                    Peggy声称知道打开魔法门的<span class="highlight">秘密咒语</span>。你是<strong>Victor（验证者）</strong>——在每轮中，
+                    Peggy进入洞穴后，你随机指定她从哪条路出来。如果她真的知道秘密，她<strong>总能</strong>从你指定的路径返回。
+                    如果她在说谎，每轮只有<strong>50%</strong>的概率蒙对。重复多轮，用概率建立确信——<strong>但你始终不知道秘密本身</strong>。</p>
+            </div>
+        </div>
+
+        <!-- Progress -->
+        <div class="progress-bar-wrap">
+            <span>📊 进度：<span class="progress-step" id="progressLabel">等待开始</span></span>
+            <div class="progress-fill-outer">
+                <div class="progress-fill-inner" id="progressFill"></div>
+            </div>
+            <span id="progressPercent" style="font-size:0.8rem;color:#94a3b8;">0%</span>
+        </div>
+
+        <!-- Cave Stage -->
+        <div class="cave-stage" id="caveStage">
+            <svg class="cave-svg" viewBox="0 0 600 460" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <radialGradient id="tunnelGlow" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="#5c4a35" stop-opacity="0.6"/>
+                        <stop offset="100%" stop-color="#3d352a" stop-opacity="0"/>
+                    </radialGradient>
+                    <filter id="peggyGlowFilter">
+                        <feGaussianBlur stdDeviation="4" result="blur"/>
+                        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                    <filter id="doorGlowFilter">
+                        <feGaussianBlur stdDeviation="5" result="blur"/>
+                        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                </defs>
+                <!-- Background -->
+                <rect x="0" y="0" width="600" height="460" fill="#1a1f35" rx="8"/>
+                <!-- Mountain / rock mass -->
+                <polygon points="20,420 60,160 140,70 280,30 320,30 460,70 540,160 580,420 580,460 20,460"
+                fill="#2a2520" stroke="#3d352a" stroke-width="3"/>
+                <polygon points="40,420 70,170 145,85 280,45 320,45 455,85 530,170 560,420 560,450 40,450"
+                fill="#332e28" stroke="none"/>
+                <!-- Cave tunnels (outer thick stroke = tunnel walls, inner = passage) -->
+                <!-- Main tunnel: entrance to fork -->
+                <path d="M300,440 L300,260" stroke="#4a3d2f" stroke-width="52" fill="none" stroke-linecap="round"/>
+                <path d="M300,440 L300,260" stroke="#5c4a35" stroke-width="36" fill="none" stroke-linecap="round"/>
+                <path d="M300,440 L300,260" stroke="#6b5840" stroke-width="18" fill="none" stroke-linecap="round" opacity="0.5"/>
+                <!-- Left branch -->
+                <path d="M300,260 Q220,180 100,90" stroke="#4a3d2f" stroke-width="46" fill="none" stroke-linecap="round"/>
+                <path d="M300,260 Q220,180 100,90" stroke="#5c4a35" stroke-width="30" fill="none" stroke-linecap="round"/>
+                <path d="M300,260 Q220,180 100,90" stroke="#6b5840" stroke-width="14" fill="none" stroke-linecap="round" opacity="0.45"/>
+                <!-- Right branch -->
+                <path d="M300,260 Q380,180 500,90" stroke="#4a3d2f" stroke-width="46" fill="none" stroke-linecap="round"/>
+                <path d="M300,260 Q380,180 500,90" stroke="#5c4a35" stroke-width="30" fill="none" stroke-linecap="round"/>
+                <path d="M300,260 Q380,180 500,90" stroke="#6b5840" stroke-width="14" fill="none" stroke-linecap="round" opacity="0.45"/>
+                <!-- Magic door connection (top horizontal) -->
+                <path d="M100,90 Q300,90 500,90" stroke="#4a3d2f" stroke-width="40" fill="none" stroke-linecap="round"/>
+                <path d="M100,90 Q300,90 500,90" stroke="#3d2a4f" stroke-width="24" fill="none" stroke-linecap="round"/>
+                <!-- Door marker -->
+                <rect x="275" y="62" width="50" height="56" rx="8" fill="#2a1a3f" stroke="#a855f7" stroke-width="3"
+                id="doorRect" class="door-idle" filter="url(#doorGlowFilter)"/>
+                <line x1="285" y1="70" x2="315" y2="110" stroke="#a855f7" stroke-width="2.5" opacity="0.8"/>
+                <line x1="315" y1="70" x2="285" y2="110" stroke="#a855f7" stroke-width="2.5" opacity="0.8"/>
+                <text x="300" y="135" text-anchor="middle" fill="#c4b5fd" font-size="10" font-weight="700">魔法门</text>
+                <!-- Labels -->
+                <text x="65" y="55" text-anchor="middle" fill="#94a3b8" font-size="12" font-weight="600">← 左出口</text>
+                <text x="535" y="55" text-anchor="middle" fill="#94a3b8" font-size="12" font-weight="600">右出口 →</text>
+                <text x="300" y="470" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="600">▼ 洞口（Victor在此等待）</text>
+                <!-- Peggy (circle) -->
+                <circle id="peggy" cx="300" cy="425" r="11" fill="#22d3a5" stroke="#0f172a" stroke-width="2.5"
+                class="peggy-glow peggy-visible" filter="url(#peggyGlowFilter)"/>
+                <!-- Peggy label -->
+                <text id="peggyLabel" x="300" y="408" text-anchor="middle" fill="#22d3a5" font-size="9" font-weight="700"
+                class="peggy-visible">Peggy</text>
+                <!-- Hint arrow inside cave (shows during Peggy's hidden phase) -->
+                <text id="hiddenHint" x="300" y="200" text-anchor="middle" fill="#64748b" font-size="10" opacity="0"
+                font-style="italic">Peggy在洞穴深处…</text>
+            </svg>
+        </div>
+
+        <!-- Challenge Panel -->
+        <div class="challenge-panel" id="challengePanel">
+            <div class="prompt" id="challengePrompt">🎯 Peggy已进入洞穴！选择她从哪条路出来：</div>
+            <button class="btn btn-left" id="btnLeft" title="要求Peggy从左出口出来">⬅ 左边出来！</button>
+            <button class="btn btn-random" id="btnRandom" title="随机选择（推荐）">🎲 随机挑战</button>
+            <button class="btn btn-right" id="btnRight" title="要求Peggy从右出口出来">➡ 右边出来！</button>
+            <button class="btn btn-new-round" id="btnNewRound" style="display:none;">🔄 开始新一轮</button>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-value" id="roundCount">0</div>
+                <div class="stat-label">已完成轮次</div>
+            </div>
+            <div class="stat-card confidence-card">
+                <div class="stat-value" id="confidenceValue">0%</div>
+                <div class="stat-label">确信度 1−(½)ⁿ</div>
+            </div>
+            <div class="stat-card" id="flagCard" style="display:none;">
+                <div class="stat-label" style="color:#f59e0b;">🏆 捕获的Flag</div>
+                <div class="flag-code" id="flagDisplay">---</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="doorUseCount">0</div>
+                <div class="stat-label">魔法门使用次数</div>
+            </div>
+        </div>
+
+        <!-- Round History -->
+        <div class="history-panel">
+            <h4>📜 轮次历史（悬停查看详情）</h4>
+            <div class="history-dots" id="historyDots">
+                <span style="color:#64748b;font-size:0.8rem;">尚未开始…</span>
+            </div>
+        </div>
+
+        <!-- Behind-the-scenes -->
+        <details class="bts-panel" id="btsPanel">
+            <summary>🔎 查看幕后细节（最近一轮）</summary>
+            <div class="bts-content" id="btsContent">
+                <em>完成一轮挑战后可查看。</em>
+            </div>
+        </details>
+
+        <!-- Full Analysis -->
+        <details class="analysis-section">
+            <summary>📖 查看完整分析（ZKP原理 + 攻击与防御）</summary>
+            <div class="analysis-inner">
+                <h4>🧠 零知识证明（ZKP）核心属性</h4>
+                <p><strong>完备性：</strong>如果Peggy真的知道秘密，她总能通过验证（100%成功）。</p>
+                <p><strong>可靠性：</strong>如果Peggy在说谎，每轮她只有<strong>50%</strong>概率蒙对。n轮后蒙混过关的概率为：</p>
+                <div class="formula">P(作弊成功) = (1/2)ⁿ</div>
+                <p>10轮后 ≈ 0.098%，20轮后 ≈ 0.000095%。</p>
+                <p><strong>零知识性：</strong>Victor（你）始终不知道秘密是什么——你只看到Peggy从你指定的路径出来，但不知道她是否使用了魔法门。</p>
+                <hr style="border-color:#2a3050;margin:12px 0;">
+                <h4>⚔️ 攻击视角：尝试作弊的Prover</h4>
+                <p>如果Peggy不知道秘密，她只能走一条路并希望Victor恰好挑战那条路。每轮50%概率。Victor需要<strong>随机且不可预测地</strong>选择挑战路径。如果Victor总是选"左边"，作弊者就可以每次都走左边——这就是为什么<strong>验证者的随机性至关重要</strong>。</p>
+                <p><code>// 攻击者策略：固定走一条路 → 50%成功率/轮 → n轮后 (½)ⁿ 总成功率</code></p>
+                <h4>🛡️ 防御视角：协议设计保障</h4>
+                <p>防御措施即协议本身：验证者必须使用<strong>真随机挑战</strong>。在现实世界的ZKP中（如Schnorr协议、zk-SNARKs），挑战由<strong>随机预言机（Random Oracle）</strong>或<strong>Fiat-Shamir变换</strong>生成，确保证明者无法预测。</p>
+                <p><code>// 防御：验证者随机挑战 + 多轮迭代 → 将作弊概率压至可忽略</code></p>
+                <hr style="border-color:#2a3050;margin:12px 0;">
+                <h4>🌐 现实世界应用</h4>
+                <p>ZKP用于：区块链隐私（Zcash的zk-SNARKs）、身份验证（不泄露密码）、安全多方计算、电子投票、可验证计算等。</p>
+                <p style="color:#64748b;font-size:0.75rem;">// 本模拟仅用于教学目的，展示ZKP的Alibaba Cave经典场景。</p>
+            </div>
+        </details>
+    </div>
+
+    <script>
+        (function() {
+            // ============ STATE ============
+            let round = 0;
+            let peggyActualPath = null; // 'left' | 'right' — Peggy真正走的路
+            let victorChallenge = null; // 'left' | 'right' — Victor的挑战
+            let doorUsedThisRound = false;
+            let totalDoorUses = 0;
+            let history = []; // {round, peggyPath, challenge, doorUsed, success}
+            let phase = 'idle'; // 'idle' | 'peggy-entering' | 'waiting-challenge' | 'peggy-exiting' | 'round-complete'
+            let challengeBias = { left: 0, right: 0 };
+            let flagRevealed = false;
+
+            // ============ DOM REFS ============
+            const peggy = document.getElementById('peggy');
+            const peggyLabel = document.getElementById('peggyLabel');
+            const hiddenHint = document.getElementById('hiddenHint');
+            const doorRect = document.getElementById('doorRect');
+            const btnLeft = document.getElementById('btnLeft');
+            const btnRight = document.getElementById('btnRight');
+            const btnRandom = document.getElementById('btnRandom');
+            const btnNewRound = document.getElementById('btnNewRound');
+            const challengePrompt = document.getElementById('challengePrompt');
+            const roundCountEl = document.getElementById('roundCount');
+            const confidenceValueEl = document.getElementById('confidenceValue');
+            const doorUseCountEl = document.getElementById('doorUseCount');
+            const historyDots = document.getElementById('historyDots');
+            const btsContent = document.getElementById('btsContent');
+            const flagCard = document.getElementById('flagCard');
+            const flagDisplay = document.getElementById('flagDisplay');
+            const progressFill = document.getElementById('progressFill');
+            const progressLabel = document.getElementById('progressLabel');
+            const progressPercent = document.getElementById('progressPercent');
+            const caveStage = document.getElementById('caveStage');
+
+            // ============ SVG COORDINATES ============
+            const POS = {
+                entrance: { x: 300, y: 425 },
+                fork: { x: 300, y: 260 },
+                leftExit: { x: 95, y: 88 },
+                rightExit: { x: 505, y: 88 },
+                leftBehind: { x: 200, y: 175 },
+                rightBehind: { x: 400, y: 175 },
+                doorLeft: { x: 270, y: 88 },
+                doorRight: { x: 330, y: 88 },
+                hiddenCenter: { x: 300, y: 160 },
+            };
+
+            // ============ AUDIO-VISUAL HELPERS ============
+            function setPeggyPos(x, y, visible = true) {
+                peggy.setAttribute('cx', x);
+                peggy.setAttribute('cy', y);
+                peggyLabel.setAttribute('x', x);
+                peggyLabel.setAttribute('y', y - 17);
+                if (visible) {
+                    peggy.classList.remove('peggy-hidden');
+                    peggy.classList.add('peggy-visible');
+                    peggyLabel.classList.remove('peggy-hidden');
+                    peggyLabel.classList.add('peggy-visible');
+                    hiddenHint.setAttribute('opacity', '0');
+                } else {
+                    peggy.classList.add('peggy-hidden');
+                    peggy.classList.remove('peggy-visible');
+                    peggyLabel.classList.add('peggy-hidden');
+                    peggyLabel.classList.remove('peggy-visible');
+                    hiddenHint.setAttribute('opacity', '0.7');
+                }
+            }
+
+            function animatePeggy(waypoints, durationPerSegment, callback, hideAtEnd = false) {
+                if (waypoints.length < 2) {
+                    if (callback) callback();
+                    return;
+                }
+                let segIndex = 0;
+                const totalSegments = waypoints.length - 1;
+
+                function moveToNext() {
+                    if (segIndex >= totalSegments) {
+                        if (hideAtEnd) setPeggyPos(waypoints[waypoints.length - 1].x, waypoints[waypoints.length -
+                            1].y, false);
+                        if (callback) callback();
+                        return;
+                    }
+                    const from = waypoints[segIndex];
+                    const to = waypoints[segIndex + 1];
+                    const dist = Math.hypot(to.x - from.x, to.y - from.y);
+                    const dur = Math.max(durationPerSegment, dist * 1.5);
+                    const startTime = performance.now();
+
+                    function step(now) {
+                        const elapsed = now - startTime;
+                        const t = Math.min(elapsed / dur, 1.0);
+                        // Ease in-out
+                        const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+                        const cx = from.x + (to.x - from.x) * eased;
+                        const cy = from.y + (to.y - from.y) * eased;
+                        setPeggyPos(cx, cy, true);
+                        if (t < 1.0) {
+                            requestAnimationFrame(step);
+                        } else {
+                            setPeggyPos(to.x, to.y, true);
+                            segIndex++;
+                            moveToNext();
+                        }
+                    }
+                    requestAnimationFrame(step);
+                }
+                setPeggyPos(waypoints[0].x, waypoints[0].y, true);
+                moveToNext();
+            }
+
+            function pulseDoor() {
+                doorRect.classList.remove('door-idle', 'door-used');
+                void doorRect.offsetWidth; // reflow
+                doorRect.classList.add('door-used');
+                setTimeout(() => {
+                    doorRect.classList.remove('door-used');
+                    doorRect.classList.add('door-idle');
+                }, 2400);
+            }
+
+            function spawnConfetti() {
+                const colors = ['#22c55e', '#f59e0b', '#3b82f6', '#a855f7', '#ef4444', '#22d3a5', '#fbbf24'];
+                for (let i = 0; i < 50; i++) {
+                    const piece = document.createElement('div');
+                    piece.classList.add('confetti-piece');
+                    piece.style.left = Math.random() * 100 + '%';
+                    piece.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                    piece.style.animationDuration = (1.8 + Math.random() * 3) + 's';
+                    piece.style.animationDelay = Math.random() * 0.6 + 's';
+                    piece.style.width = (6 + Math.random() * 10) + 'px';
+                    piece.style.height = (6 + Math.random() * 10) + 'px';
+                    document.body.appendChild(piece);
+                    setTimeout(() => piece.remove(), 3500);
+                }
+            }
+
+            function showToast(msg) {
+                const existing = document.querySelector('.toast');
+                if (existing) existing.remove();
+                const toast = document.createElement('div');
+                toast.classList.add('toast');
+                toast.textContent = msg;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 3200);
+            }
+
+            // ============ CORE LOGIC ============
+            function updateStats() {
+                roundCountEl.textContent = round;
+                const confidence = round > 0 ? (1 - Math.pow(0.5, round)) * 100 : 0;
+                confidenceValueEl.textContent = confidence.toFixed(round >= 10 ? 4 : 1) + '%';
+                doorUseCountEl.textContent = totalDoorUses;
+
+                // Progress
+                const progressGoal = 10; // 10 rounds for flag
+                const prog = Math.min(round / progressGoal * 100, 100);
+                progressFill.style.width = prog + '%';
+                progressPercent.textContent = Math.round(prog) + '%';
+                if (round === 0) {
+                    progressLabel.textContent = '等待开始';
+                } else if (round < progressGoal) {
+                    progressLabel.textContent = '步骤 ' + round + ' — 积累确信';
+                } else {
+                    progressLabel.textContent = '✅ 确信度达标！';
+                }
+
+                // Flag
+                if (round >= 10 && !flagRevealed) {
+                    flagRevealed = true;
+                    flagCard.style.display = '';
+                    flagDisplay.textContent = 'FLAG{ZKP_CAVE_VERIFIED_' + round + '_ROUNDS}';
+                    spawnConfetti();
+                    caveStage.style.borderColor = '#f59e0b';
+                    caveStage.style.boxShadow = '0 0 40px rgba(245,158,11,0.35)';
+                    setTimeout(() => {
+                        caveStage.style.borderColor = 'var(--border)';
+                        caveStage.style.boxShadow = 'none';
+                    }, 4000);
+                }
+                if (flagRevealed) {
+                    flagDisplay.textContent = 'FLAG{ZKP_CAVE_VERIFIED_' + round + '_ROUNDS}';
+                }
+
+                // Bias check
+                const totalChallenges = challengeBias.left + challengeBias.right;
+                if (totalChallenges >= 6) {
+                    const leftRatio = challengeBias.left / totalChallenges;
+                    if (leftRatio > 0.8 || leftRatio < 0.2) {
+                        showToast('⚠️ 挑战分布不均！验证者应随机选择路径，否则ZKP安全性降低。');
+                    }
+                }
+            }
+
+            function updateHistoryDots() {
+                if (history.length === 0) {
+                    historyDots.innerHTML = '<span style="color:#64748b;font-size:0.8rem;">尚未开始…</span>';
+                    return;
+                }
+                historyDots.innerHTML = '';
+                history.forEach((h, i) => {
+                    const dot = document.createElement('span');
+                    dot.classList.add('history-dot');
+                    if (h.doorUsed) {
+                        dot.classList.add('door-used-dot');
+                        dot.textContent = '🚪';
+                    } else {
+                        dot.classList.add('success');
+                        dot.textContent = '✓';
+                    }
+                    const tooltip = document.createElement('span');
+                    tooltip.classList.add('tooltip');
+                    tooltip.textContent = 'R' + h.round + ': 挑战' + (h.challenge === 'left' ? '左' : '右') +
+                        ' | Peggy走' + (h.peggyPath === 'left' ? '左' : '右') +
+                        (h.doorUsed ? ' | 🔑用了魔法门' : ' | 直接返回');
+                    dot.appendChild(tooltip);
+                    dot.addEventListener('click', () => {
+                        showBTSForRound(h);
+                    });
+                    historyDots.appendChild(dot);
+                });
+            }
+
+            function showBTSForRound(h) {
+                const routeLines = [];
+                routeLines.push('   洞口 ──→ 分叉点');
+                if (h.peggyPath === 'left') {
+                    routeLines.push('  分叉点 ──→ <span class="highlight-path">左支路</span> → 左深处');
+                } else {
+                    routeLines.push('  分叉点 ──→ <span class="highlight-path">右支路</span> → 右深处');
+                }
+                if (h.doorUsed) {
+                    routeLines.push('  🔑 <span class="highlight-door">魔法门开启!</span> ' +
+                        (h.peggyPath === 'left' ? '左深处 → 右深处' : '右深处 → 左深处'));
+                }
+                routeLines.push('  ' + (h.challenge === 'left' ? '左出口 ←' : '右出口 ←') + ' Peggy返回 ✓');
+                btsContent.innerHTML = `
+                    <strong>第 ${h.round} 轮幕后：</strong><br>
+                    Peggy真正走的路径：<strong style="color:#22d3a5;">${h.peggyPath === 'left' ? '左侧' : '右侧'}</strong><br>
+                    Victor挑战：<strong style="color:#f59e0b;">${h.challenge === 'left' ? '左边出来' : '右边出来'}</strong><br>
+                    是否使用魔法门：<strong style="color:#a855f7;">${h.doorUsed ? '是 🔑' : '否（路径恰好匹配）'}</strong><br>
+                    <div class="route-diagram">${routeLines.join('\n')}</div>
+                    <em>Peggy${h.doorUsed ? '使用了魔法门穿越到另一侧' : '直接原路返回'}，满足Victor的挑战。</em>
+                `;
+                document.getElementById('btsPanel').open = true;
+            }
+
+            function updateBTS() {
+                if (history.length === 0) {
+                    btsContent.innerHTML = '<em>完成一轮挑战后可查看。</em>';
+                    return;
+                }
+                const h = history[history.length - 1];
+                showBTSForRound(h);
+            }
+
+            function startNewRound() {
+                if (phase === 'peggy-entering' || phase === 'waiting-challenge' || phase === 'peggy-exiting') return;
+                phase = 'peggy-entering';
+                doorUsedThisRound = false;
+                victorChallenge = null;
+                peggyActualPath = Math.random() < 0.5 ? 'left' : 'right';
+                challengePrompt.textContent = '👀 Peggy正在进入洞穴…';
+                btnLeft.disabled = true;
+                btnRight.disabled = true;
+                btnRandom.disabled = true;
+                btnNewRound.style.display = 'none';
+                hiddenHint.setAttribute('opacity', '0');
+                document.getElementById('btsPanel').open = false;
+
+                // Animate: entrance → fork → behind chosen path → hidden
+                const behindPos = peggyActualPath === 'left' ? POS.leftBehind : POS.rightBehind;
+                const deepPos = peggyActualPath === 'left' ?
+                    { x: 140, y: 120 } : { x: 460, y: 120 };
+                animatePeggy([POS.entrance, POS.fork, behindPos, deepPos], 350, () => {
+                    // Peggy is now hidden inside the cave
+                    setPeggyPos(POS.hiddenCenter.x, POS.hiddenCenter.y, false);
+                    phase = 'waiting-challenge';
+                    challengePrompt.textContent = '🎯 Peggy已进入洞穴！选择她从哪条路出来：';
+                    btnLeft.disabled = false;
+                    btnRight.disabled = false;
+                    btnRandom.disabled = false;
+                }, true);
+            }
+
+            function handleChallenge(chosenPath) {
+                if (phase !== 'waiting-challenge') return;
+                phase = 'peggy-exiting';
+                victorChallenge = chosenPath;
+                challengeBias[chosenPath]++;
+
+                // Determine if door is needed
+                doorUsedThisRound = (peggyActualPath !== victorChallenge);
+                if (doorUsedThisRound) totalDoorUses++;
+
+                // Peggy always succeeds (she knows the secret)
+                const exitPos = victorChallenge === 'left' ? POS.leftExit : POS.rightExit;
+                const appearPos = victorChallenge === 'left' ?
+                    { x: 130, y: 110 } : { x: 470, y: 110 };
+
+                // Disable buttons during exit
+                btnLeft.disabled = true;
+                btnRight.disabled = true;
+                btnRandom.disabled = true;
+                challengePrompt.textContent = '⏳ Peggy正在返回…';
+
+                if (doorUsedThisRound) {
+                    pulseDoor();
+                }
+
+                // Show Peggy appearing at the challenged exit
+                setPeggyPos(appearPos.x, appearPos.y, true);
+                hiddenHint.setAttribute('opacity', '0');
+
+                // Animate: appear → exit → fork → entrance
+                animatePeggy([appearPos, exitPos, POS.fork, POS.entrance], 320, () => {
+                    setPeggyPos(POS.entrance.x, POS.entrance.y, true);
+                    // Round complete
+                    round++;
+                    history.push({
+                        round: round,
+                        peggyPath: peggyActualPath,
+                        challenge: victorChallenge,
+                        doorUsed: doorUsedThisRound,
+                        success: true,
+                    });
+                    phase = 'round-complete';
+                    challengePrompt.textContent = '✅ 第 ' + round + ' 轮完成！Peggy从' + (victorChallenge === 'left' ?
+                        '左' : '右') + '侧出来了。';
+                    btnNewRound.style.display = '';
+                    btnNewRound.disabled = false;
+                    btnLeft.disabled = true;
+                    btnRight.disabled = true;
+                    btnRandom.disabled = true;
+                    updateStats();
+                    updateHistoryDots();
+                    updateBTS();
+                    if (flagRevealed && round === 10) {
+                        spawnConfetti();
+                    }
+                }, false);
+            }
+
+            function randomChallenge() {
+                if (phase !== 'waiting-challenge') return;
+                const chosen = Math.random() < 0.5 ? 'left' : 'right';
+                // Briefly highlight the random button
+                btnRandom.style.boxShadow = '0 0 30px rgba(34,197,94,0.7)';
+                setTimeout(() => { btnRandom.style.boxShadow = ''; }, 400);
+                handleChallenge(chosen);
+            }
+
+            // ============ EVENT LISTENERS ============
+            btnLeft.addEventListener('click', () => handleChallenge('left'));
+            btnRight.addEventListener('click', () => handleChallenge('right'));
+            btnRandom.addEventListener('click', randomChallenge);
+            btnNewRound.addEventListener('click', startNewRound);
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowLeft' && phase === 'waiting-challenge') {
+                    handleChallenge('left');
+                } else if (e.key === 'ArrowRight' && phase === 'waiting-challenge') {
+                    handleChallenge('right');
+                } else if (e.key === ' ' && phase === 'waiting-challenge') {
+                    e.preventDefault();
+                    randomChallenge();
+                } else if (e.key === 'n' && phase === 'round-complete') {
+                    startNewRound();
+                }
+            });
+
+            // ============ INITIALIZATION ============
+            function init() {
+                setPeggyPos(POS.entrance.x, POS.entrance.y, true);
+                doorRect.classList.add('door-idle');
+                updateStats();
+                updateHistoryDots();
+                btsContent.innerHTML = '<em>完成一轮挑战后可查看。</em>';
+                btnLeft.disabled = true;
+                btnRight.disabled = true;
+                btnRandom.disabled = true;
+                btnNewRound.style.display = '';
+                btnNewRound.disabled = false;
+                challengePrompt.textContent = '🟢 准备就绪！点击"开始新一轮"来启动ZKP验证。';
+                phase = 'idle';
+                // Auto-start hint
+                setTimeout(() => {
+                    if (phase === 'idle' && round === 0) {
+                        challengePrompt.textContent =
+                            '🟢 准备就绪！点击下方按钮开始。💡 提示：也可用键盘 ← → 挑战，空格键随机，N键新一轮。';
+                    }
+                }, 2000);
+            }
+
+            init();
+
+            console.log('🏔️ ZKP Alibaba Cave Lab 已就绪');
+            console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+            console.log('💡 键盘快捷键: ← 左挑战 | → 右挑战 | 空格 随机挑战 | N 新一轮');
+            console.log('🎯 完成10轮验证以捕获Flag');
+        })();
+    </script>
+</body>
+</html>

@@ -1,196 +1,127 @@
 {% extends "base.html" %}
 
-{% set commitment_text = "我会负责任地使用 AISecEdu，并且不会发布受限题目的解法。" %}
+{% block body_class %}account-auth-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/account-auth.css', v='aisecedu-auth-system-v1-readability-v1') }}">
+{% endblock %}
 
 {% block content %}
-<div class="jumbotron">
-	<div class="container">
-		<h1>注册</h1>
-	</div>
-</div>
-<div class="container">
-	<div class="row">
-		<div class="col-md-6 offset-md-3">
-			{% include "components/errors.html" %}
+<div class="account-auth-shell" data-auth-page="register" data-invited-course="{{ request.args.get('course', '') }}" data-invite-code="{{ request.args.get('code', '') }}">
+  <aside class="account-auth-story" aria-label="玄甲课程学习平台">
+    <a class="account-auth-story-brand" href="/">
+      <img src="{{ url_for('views.themes', path='img/aisecedu-mark.svg') }}" alt="">
+      <span><strong>玄甲</strong><small>完整课程系统账号</small></span>
+    </a>
+    <div class="account-auth-story-copy">
+      <span><i class="fas fa-sparkles fa-magic" aria-hidden="true"></i> 一次注册，进入完整课程系统</span>
+      <h1>选择起点，马上开始。</h1>
+      <p>学生可以在注册时直接加入课程；教师从创建第一门课程开始。账号、课程权限、智能体与实践工作区会在同一条路径中建立。</p>
+      <div class="account-auth-proof">
+        <div><i class="fas fa-user-graduate"></i><strong>学生起点</strong><small>加入课程并进入学习中心</small></div>
+        <div><i class="fas fa-chalkboard-teacher"></i><strong>教师起点</strong><small>创建课程后获得管理权限</small></div>
+        <div><i class="fas fa-shield-alt"></i><strong>权限分离</strong><small>身份意图不会自动授予高权限</small></div>
+      </div>
+    </div>
+    <div class="account-auth-story-footer"><i class="fas fa-lock"></i><span>注册、入课与身份建立在一个安全事务中完成</span></div>
+  </aside>
 
-			<h2>使用准则</h2>
-			<p>使用本平台时，请牢记以下准则。</p>
-			<h3>课程资料</h3>
-			<p>题目可能用于真实教学和评估。请遵守教师设置的共享政策，不要发布受限解法、答案令牌、讲解视频或实时解题直播。</p>
-      <h3>负责任地使用</h3>
-      <p>仅在获授权的范围内使用提供的环境和目标。如果发现 AISecEdu 自身的安全问题，请私下报告给当前部署的管理员，不要对其他用户或生产数据进行测试。</p>
+  <section class="account-auth-panel">
+    <div class="account-auth-card">
+      <header class="account-auth-heading">
+        <span>创建账号</span>
+        <h2>加入玄甲</h2>
+        <p>先告诉我们你的使用方式，再完成账号信息。</p>
+      </header>
 
-			<div class="form-group" id="commitment-section">
-				<div class="alert alert-warning">
-					要注册，请完全按照下方显示内容输入承诺：
-					<br><br>
-					<strong id="commitment-text">{{ commitment_text }}</strong>
-				</div>
-				<input type="text" id="commitment-input" class="form-control" placeholder="输入上方的承诺内容" autocomplete="off">
-				<small class="form-text text-muted" id="commitment-feedback">
-					请完全按照上方显示内容输入承诺，以启用注册。
-				</small>
-			</div>
+      {% include "components/errors.html" %}
+      <div id="account-auth-errors" class="account-auth-errors" role="alert" aria-live="assertive" hidden>
+        <i class="fas fa-exclamation-circle" aria-hidden="true"></i><span></span>
+      </div>
 
-      <h2>创建账号</h2>
-			{% with form = Forms.auth.RegistrationForm() %}
-			{% from "macros/forms.html" import render_extra_fields %}
-			<form method="post" accept-charset="utf-8" autocomplete="off" role="form" id="registration-form">
-				<div class="form-group">
-					<b>用户名</b>
-					{{ form.name(class="form-control", value=name) }}
-					<small class="form-text text-muted">
-						该用户名会显示在平台中。
-					</small>
-				</div>
-				<div class="form-group">
-					<b>电子邮箱</b>
-					{{ form.email(class="form-control", value=email) }}
-					<small class="form-text text-muted">
-						不会向公众展示。
-					</small>
-				</div>
-				<div class="form-group">
-					<b>密码</b>
-					{{ form.password(class="form-control", value=password) }}
-					<small class="form-text text-muted">
-						用于登录账号的密码。
-					</small>
-				</div>
+      {% with form = Forms.auth.RegistrationForm() %}
+      <form id="account-register-form" method="post" accept-charset="utf-8" autocomplete="on" novalidate>
+        <fieldset class="account-auth-section">
+          <legend>我准备以什么方式开始？<small>之后仍可加入或创建其他课程</small></legend>
+          <div class="account-role-options">
+            <label class="account-role-option">
+              <input type="radio" name="role" value="student" checked>
+              <strong>我是学生</strong><small>加入课程、完成任务并使用学习智能体</small>
+            </label>
+            <label class="account-role-option">
+              <input type="radio" name="role" value="teacher">
+              <strong>我是教师</strong><small>注册后创建第一门课程并获得教师权限</small>
+            </label>
+          </div>
+        </fieldset>
 
-				{{ form.nonce() }}
-				
-				<input type="hidden" id="commitment-verified" name="commitment_verified" value="">
+        <section id="account-course-entry" class="account-course-entry" aria-label="加入课程">
+          <div class="account-course-entry-header">
+            <span><strong>现在加入课程 <small>可选</small></strong><small>没有邀请也可以注册后再选课</small></span>
+            <button id="account-course-invite-toggle" type="button" aria-expanded="false">使用课程邀请</button>
+          </div>
+          <label class="account-auth-field" for="account-public-course">
+            <span>公开课程</span>
+            <select id="account-public-course"><option value="">稍后选择课程</option></select>
+          </label>
+          <div id="account-course-invite" class="account-course-invite" hidden>
+            <label class="account-auth-field" for="account-course-id">
+              <span>课程标识</span>
+              <input id="account-course-id" type="text" maxlength="96" placeholder="邀请链接中的课程标识" autocomplete="off">
+              <small>教师提供的课程标识，例如 software-security 或 course~a1b2c3d4。</small>
+            </label>
+            <label class="account-auth-field" for="account-course-password">
+              <span>课程邀请码 <small>如课程要求</small></span>
+              <input id="account-course-password" type="password" maxlength="128" placeholder="输入教师提供的邀请码" autocomplete="off">
+            </label>
+          </div>
+        </section>
 
-				{{ render_extra_fields(form.extra) }}
+        <label class="account-auth-field" for="name">
+          <span>用户名</span>
+          {{ form.name(class="form-control", value=name, placeholder="用于登录和课程内展示", autocomplete="username", minlength="2", maxlength="128", required=true) }}
+          <small>建议使用姓名拼音或常用学习代号；不能使用电子邮箱格式。</small>
+        </label>
+        <label class="account-auth-field" for="email">
+          <span>电子邮箱</span>
+          {{ form.email(class="form-control", value=email, placeholder="name@example.edu", autocomplete="email", required=true) }}
+          <small>用于验证账号和找回密码，不会公开展示。</small>
+        </label>
+        <label class="account-auth-field" for="password">
+          <span>密码</span>
+          <span class="account-auth-input-wrap">
+            {{ form.password(class="form-control", value=password, placeholder="至少 8 个字符", autocomplete="new-password", minlength="8", maxlength="128", required=true) }}
+            <button class="account-auth-password-toggle" type="button" data-password-toggle="password" aria-label="显示密码"><i class="far fa-eye"></i></button>
+          </span>
+          <small id="account-password-strength">请使用不与其他网站重复的密码。</small>
+        </label>
 
-				<div class="row pt-3">
-					<div class="col-md-12">
-						{{ form.submit(class="btn btn-md btn-primary btn-outlined float-right btn-disabled", id="register-submit", value="注册", style="opacity: 0.5; cursor: not-allowed;") }}
-					</div>
-				</div>
+        <div id="account-registration-code-slot" hidden></div>
+        <div id="account-custom-fields"></div>
+        {{ form.nonce() }}
 
-				{% if Configs.tos_or_privacy %}
-				<div class="row pt-3">
-					<div class="col-md-12 text-center">
-						<small class="text-muted text-center">
-							注册即表示你同意
-							<a href="{{ Configs.privacy_link }}" rel="noopener" target="_blank">隐私政策</a>
-							和<a href="{{ Configs.tos_link }}" rel="noopener" target="_blank">服务条款</a>
-						</small>
-					</div>
-				</div>
-				{% endif %}
-			</form>
-			{% endwith %}
-		</div>
-	</div>
+        <label class="account-auth-check account-auth-commitment">
+          <input id="commitment-input" type="checkbox" name="commitment_accepted" required>
+          <span id="commitment-text">我已阅读并同意遵守平台公约，不公开玄甲课程题目的解题过程或答案。</span>
+        </label>
+
+        <button id="register-submit" class="account-auth-submit" type="submit">
+          <span>创建账号并继续</span><i class="fas fa-arrow-right" aria-hidden="true"></i>
+        </button>
+        <p id="account-auth-legal" class="account-auth-legal">创建账号即表示你同意平台公约与课程教师设置的内容共享规则。</p>
+      </form>
+      {% endwith %}
+
+      <p class="account-auth-switch">已经有账号？<a href="{{ url_for('auth.login', next=request.args.get('next', '')) }}">直接登录</a></p>
+    </div>
+  </section>
 </div>
 {% endblock %}
 
+{% block footer %}{% endblock %}
+
 {% block scripts %}
-<style>
-@keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
-    20%, 40%, 60%, 80% { transform: translateX(5px); }
-}
-</style>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const commitmentText = {{ commitment_text | tojson }};
-    const commitmentInput = document.getElementById('commitment-input');
-    const commitmentFeedback = document.getElementById('commitment-feedback');
-    const registerButton = document.getElementById('register-submit');
-    const registerForm = document.getElementById('registration-form');
-    const commitmentVerifiedField = document.getElementById('commitment-verified');
-    let commitmentValid = false;
-    
-    function normalizeText(text) {
-        return text.normalize('NFKC').replace(/\s+/g, '').trim();
-    }
-    
-    function validateCommitment() {
-        const userInput = commitmentInput.value.trim();
-        
-        if (userInput === '') {
-            commitmentValid = false;
-            commitmentVerifiedField.value = '';
-            commitmentInput.classList.remove('is-valid', 'is-invalid');
-            commitmentFeedback.textContent = '请完全按照上方显示内容输入承诺，以启用注册。';
-            commitmentFeedback.classList.remove('text-success', 'text-danger');
-            commitmentFeedback.classList.add('text-muted');
-            
-            registerButton.style.opacity = '0.5';
-            registerButton.style.cursor = 'not-allowed';
-            registerButton.classList.add('btn-disabled');
-        } else {
-            const normalizedUser = normalizeText(userInput);
-            const normalizedCommitment = normalizeText(commitmentText);
-            
-            if (normalizedUser === normalizedCommitment) {
-                commitmentValid = true;
-                commitmentVerifiedField.value = 'verified';
-                commitmentInput.classList.remove('is-invalid');
-                commitmentInput.classList.add('is-valid');
-                commitmentFeedback.textContent = '感谢你负责任地使用 AISecEdu！';
-                commitmentFeedback.classList.remove('text-muted', 'text-danger');
-                commitmentFeedback.classList.add('text-success');
-                
-                registerButton.style.opacity = '1';
-                registerButton.style.cursor = 'pointer';
-                registerButton.classList.remove('btn-disabled');
-            } else {
-                commitmentValid = false;
-                commitmentVerifiedField.value = '';
-                commitmentInput.classList.remove('is-valid');
-                commitmentInput.classList.add('is-invalid');
-                commitmentFeedback.textContent = '请按照上方显示内容输入承诺。';
-                commitmentFeedback.classList.remove('text-muted', 'text-success');
-                commitmentFeedback.classList.add('text-danger');
-                
-                registerButton.style.opacity = '0.5';
-                registerButton.style.cursor = 'not-allowed';
-                registerButton.classList.add('btn-disabled');
-            }
-        }
-    }
-    
-    function showCommitmentReminder() {
-        alert('请完全按照上方显示内容输入承诺，以启用注册。');
-        document.getElementById('commitment-section').scrollIntoView({ behavior: 'smooth', block: 'center' });
-        commitmentInput.focus();
-        commitmentInput.style.animation = 'shake 0.5s';
-        setTimeout(() => {
-            commitmentInput.style.animation = '';
-        }, 500);
-    }
-    
-    commitmentInput.addEventListener('input', validateCommitment);
-    commitmentInput.addEventListener('paste', function() {
-        setTimeout(validateCommitment, 10);
-    });
-    
-    registerForm.addEventListener('submit', function(e) {
-        if (!commitmentValid) {
-            e.preventDefault();
-            e.stopPropagation();
-            showCommitmentReminder();
-            return false;
-        }
-        return true;
-    });
-    
-    registerButton.addEventListener('click', function(e) {
-        if (!commitmentValid) {
-            e.preventDefault();
-            e.stopPropagation();
-            showCommitmentReminder();
-            return false;
-        }
-    });
-    
-    validateCommitment();
-});
-</script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/account-auth.js', v='aisecedu-auth-system-v1') }}"></script>
 {% endblock %}

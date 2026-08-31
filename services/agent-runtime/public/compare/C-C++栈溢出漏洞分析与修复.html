@@ -1,0 +1,1315 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>C/C++ 栈溢出漏洞分析与修复 — 交互式安全实验</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text-dim: #94a3b8;
+            --danger: #ef4444;
+            --danger-glow: #f87171;
+            --success: #22c55e;
+            --success-glow: #4ade80;
+            --info: #3b82f6;
+            --info-glow: #60a5fa;
+            --amber: #f59e0b;
+            --amber-glow: #fbbf24;
+            --purple: #a855f7;
+            --code-bg: #0d1117;
+            --line-num: #6e7681;
+            --keyword: #ff7b72;
+            --string: #a5d6ff;
+            --comment: #8b949e;
+            --func: #d2a8ff;
+            --type: #ffa657;
+            --highlight-danger: rgba(239, 68, 68, 0.25);
+            --highlight-success: rgba(34, 197, 94, 0.2);
+            --highlight-amber: rgba(245, 158, 11, 0.2);
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 16px 20px;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 16px 20px;
+            background: var(--panel);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+        .title-section h1 {
+            font-size: 1.35rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: #fff;
+        }
+        .title-section .subtitle {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
+        .badge-danger {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger-glow);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+        .badge-info {
+            background: rgba(59, 130, 246, 0.2);
+            color: var(--info-glow);
+            border: 1px solid rgba(59, 130, 246, 0.4);
+        }
+        .badge-success {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--success-glow);
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        }
+        .badge-amber {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--amber-glow);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+        }
+        .progress-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .progress-steps {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+        .step-dot {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.8rem;
+            border: 2px solid var(--border);
+            background: var(--bg);
+            color: var(--text-dim);
+            transition: all 0.35s ease;
+            cursor: default;
+        }
+        .step-dot.active {
+            border-color: var(--info);
+            color: var(--info-glow);
+            background: rgba(59, 130, 246, 0.15);
+            box-shadow: 0 0 14px rgba(59, 130, 246, 0.3);
+            animation: pulse-step 2s infinite;
+        }
+        .step-dot.done {
+            border-color: var(--success);
+            color: var(--success-glow);
+            background: rgba(34, 197, 94, 0.15);
+        }
+        .step-connector {
+            width: 20px;
+            height: 2px;
+            background: var(--border);
+            border-radius: 1px;
+        }
+        .step-connector.done {
+            background: var(--success);
+        }
+        @keyframes pulse-step {
+            0%,
+            100% {
+                box-shadow: 0 0 14px rgba(59, 130, 246, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 24px rgba(59, 130, 246, 0.55);
+            }
+        }
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        @media (max-width: 900px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .panel {
+            background: var(--panel);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            padding: 18px;
+            position: relative;
+            overflow: hidden;
+        }
+        .panel h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #fff;
+        }
+        .panel h3 .icon {
+            font-size: 1.1rem;
+        }
+        .code-display {
+            background: var(--code-bg);
+            border-radius: 8px;
+            overflow: hidden;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+            font-size: 0.85rem;
+            line-height: 1.7;
+            border: 1px solid var(--border);
+            user-select: none;
+        }
+        .code-line {
+            display: flex;
+            cursor: default;
+            transition: background 0.2s;
+            position: relative;
+        }
+        .code-line.clickable {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .code-line.clickable:hover {
+            background: rgba(239, 68, 68, 0.12);
+        }
+        .code-line.clickable:active {
+            background: rgba(239, 68, 68, 0.25);
+        }
+        .code-line.highlighted-danger {
+            background: var(--highlight-danger) !important;
+            box-shadow: inset 3px 0 0 var(--danger);
+            animation: flash-danger 0.6s ease-out;
+        }
+        .code-line.highlighted-success {
+            background: var(--highlight-success) !important;
+            box-shadow: inset 3px 0 0 var(--success);
+        }
+        @keyframes flash-danger {
+            0% {
+                background: rgba(239, 68, 68, 0.5);
+            }
+            100% {
+                background: var(--highlight-danger);
+            }
+        }
+        .line-num {
+            width: 44px;
+            min-width: 44px;
+            text-align: right;
+            padding-right: 12px;
+            color: var(--line-num);
+            user-select: none;
+            flex-shrink: 0;
+        }
+        .line-content {
+            padding: 1px 8px;
+            white-space: pre;
+            flex: 1;
+        }
+        .kw {
+            color: var(--keyword);
+        }
+        .str {
+            color: var(--string);
+        }
+        .cm {
+            color: var(--comment);
+            font-style: italic;
+        }
+        .fn {
+            color: var(--func);
+        }
+        .tp {
+            color: var(--type);
+        }
+        .stack-viz {
+            background: var(--code-bg);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 8px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.78rem;
+            position: relative;
+            min-height: 380px;
+        }
+        .stack-block {
+            position: relative;
+            border-radius: 6px;
+            margin: 3px 0;
+            padding: 8px 10px;
+            transition: all 0.4s ease;
+            border: 1px solid transparent;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            overflow: hidden;
+        }
+        .stack-block .block-label {
+            font-weight: 600;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+            flex-shrink: 0;
+            min-width: 110px;
+        }
+        .stack-block .block-addr {
+            font-size: 0.68rem;
+            opacity: 0.7;
+            flex-shrink: 0;
+            min-width: 100px;
+        }
+        .stack-block .block-data {
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 0.7rem;
+            word-break: break-all;
+            flex: 1;
+            opacity: 0.9;
+        }
+        .stack-block.buffer-zone {
+            background: rgba(59, 130, 246, 0.12);
+            border-color: rgba(59, 130, 246, 0.35);
+        }
+        .stack-block.canary-zone {
+            background: rgba(245, 158, 11, 0.15);
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+        .stack-block.rbp-zone {
+            background: rgba(34, 197, 94, 0.1);
+            border-color: rgba(34, 197, 94, 0.3);
+        }
+        .stack-block.ret-zone {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.35);
+        }
+        .stack-block.overflowed {
+            animation: overflow-pulse 0.5s ease-out;
+            border-color: var(--danger-glow) !important;
+            box-shadow: 0 0 16px rgba(239, 68, 68, 0.4);
+            background: rgba(239, 68, 68, 0.2) !important;
+        }
+        @keyframes overflow-pulse {
+            0% {
+                transform: scale(1.03);
+                box-shadow: 0 0 30px rgba(239, 68, 68, 0.7);
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 16px rgba(239, 68, 68, 0.4);
+            }
+        }
+        .stack-arrow {
+            text-align: center;
+            font-size: 0.65rem;
+            color: var(--text-dim);
+            padding: 1px 0;
+            letter-spacing: 0.05em;
+        }
+        .input-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        input[type="text"],
+        textarea {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            padding: 10px 14px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            flex: 1;
+            min-width: 200px;
+        }
+        input[type="text"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--info);
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.25);
+        }
+        textarea {
+            min-height: 50px;
+            resize: vertical;
+            width: 100%;
+        }
+        .btn {
+            padding: 10px 18px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.25s;
+            white-space: nowrap;
+            letter-spacing: 0.01em;
+        }
+        .btn-primary {
+            background: var(--info);
+            color: #fff;
+            border-color: var(--info);
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            box-shadow: 0 0 16px rgba(59, 130, 246, 0.4);
+        }
+        .btn-danger {
+            background: var(--danger);
+            color: #fff;
+            border-color: var(--danger);
+        }
+        .btn-danger:hover {
+            background: #dc2626;
+            box-shadow: 0 0 16px rgba(239, 68, 68, 0.4);
+        }
+        .btn-success {
+            background: var(--success);
+            color: #fff;
+            border-color: var(--success);
+        }
+        .btn-success:hover {
+            background: #16a34a;
+            box-shadow: 0 0 16px rgba(34, 197, 94, 0.4);
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+        .btn-outline:hover {
+            border-color: var(--text-dim);
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.75rem;
+        }
+        .toggle-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin: 10px 0;
+        }
+        .toggle-switch {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+            font-size: 0.82rem;
+            font-weight: 500;
+        }
+        .toggle-switch input {
+            display: none;
+        }
+        .toggle-track {
+            width: 44px;
+            height: 24px;
+            border-radius: 12px;
+            background: var(--border);
+            position: relative;
+            transition: background 0.3s;
+            flex-shrink: 0;
+        }
+        .toggle-track::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #fff;
+            transition: transform 0.3s;
+        }
+        .toggle-switch input:checked+.toggle-track {
+            background: var(--success);
+        }
+        .toggle-switch input:checked+.toggle-track::after {
+            transform: translateX(20px);
+        }
+        .flag-reveal {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.05));
+            border: 2px solid var(--amber);
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-top: 12px;
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--amber-glow);
+            text-align: center;
+            animation: flag-pop 0.5s ease-out;
+            letter-spacing: 0.03em;
+        }
+        @keyframes flag-pop {
+            0% {
+                transform: scale(0.85);
+                opacity: 0;
+            }
+            60% {
+                transform: scale(1.04);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+        .alert {
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            margin: 8px 0;
+            border: 1px solid transparent;
+        }
+        .alert-info {
+            background: rgba(59, 130, 246, 0.1);
+            border-color: rgba(59, 130, 246, 0.3);
+            color: var(--info-glow);
+        }
+        .alert-danger {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: var(--danger-glow);
+        }
+        .alert-success {
+            background: rgba(34, 197, 94, 0.1);
+            border-color: rgba(34, 197, 94, 0.3);
+            color: var(--success-glow);
+        }
+        .segfault-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(239, 68, 68, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--danger-glow);
+            pointer-events: none;
+            border-radius: 8px;
+            animation: segfault-flash 0.4s ease-out;
+        }
+        @keyframes segfault-flash {
+            0% {
+                background: rgba(239, 68, 68, 0.3);
+            }
+            100% {
+                background: rgba(239, 68, 68, 0.05);
+            }
+        }
+        .diff-view {
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 0.82rem;
+            line-height: 1.6;
+            padding: 8px;
+            border-radius: 6px;
+            background: var(--code-bg);
+        }
+        .diff-add {
+            color: var(--success-glow);
+            background: rgba(34, 197, 94, 0.1);
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        .diff-rem {
+            color: var(--danger-glow);
+            background: rgba(239, 68, 68, 0.1);
+            padding: 2px 4px;
+            border-radius: 3px;
+            text-decoration: line-through;
+        }
+        .terminal-output {
+            background: #000;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 0.78rem;
+            color: #0f0;
+            margin-top: 8px;
+            border: 1px solid #333;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        .tooltip {
+            position: relative;
+            cursor: help;
+            border-bottom: 1px dotted var(--text-dim);
+        }
+        details {
+            margin-top: 8px;
+        }
+        details summary {
+            cursor: pointer;
+            color: var(--info-glow);
+            font-weight: 500;
+            font-size: 0.85rem;
+            padding: 4px 0;
+        }
+        details summary:hover {
+            color: #93c5fd;
+        }
+        .section-divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 16px 0;
+        }
+        .footer-note {
+            text-align: center;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            margin-top: 20px;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="title-section">
+                <h1>🔬 C/C++ 栈溢出漏洞分析与修复</h1>
+                <div class="subtitle">CWE-119 · Buffer Overflow · strcpy → strncpy · 栈帧分析</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <span class="badge badge-danger">CWE-119</span>
+                <span class="badge badge-info">栈溢出</span>
+                <span class="badge badge-amber">x86-64</span>
+            </div>
+            <div class="progress-bar-wrap">
+                <span style="font-size:0.78rem;color:var(--text-dim);">进度</span>
+                <div class="progress-steps" id="progressSteps">
+                    <span class="step-dot active" data-step="1">1</span>
+                    <span class="step-connector"></span>
+                    <span class="step-dot" data-step="2">2</span>
+                    <span class="step-connector"></span>
+                    <span class="step-dot" data-step="3">3</span>
+                    <span class="step-connector"></span>
+                    <span class="step-dot" data-step="4">4</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Task Briefing -->
+        <div class="panel" style="margin-bottom:16px; border-left: 3px solid var(--info);">
+            <h3><span class="icon">📋</span> 任务简报</h3>
+            <p style="font-size:0.9rem;color:var(--text-dim);">
+                你收到一份来自安全审计团队的代码片段。该函数使用 <code style="color:var(--danger-glow);">strcpy()</code> 将用户输入复制到栈上的64字节缓冲区中。
+                你的任务：<strong>①定位漏洞行</strong> → <strong>②构造溢出利用</strong> → <strong>③编写安全修复</strong> → <strong>④评估编译器防御</strong>。
+                完成全部步骤以捕获所有 Flag。
+            </p>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="main-grid">
+            <!-- Left: Code Panel -->
+            <div class="panel" id="codePanel">
+                <h3><span class="icon">📝</span> 漏洞代码 <span style="font-size:0.7rem;color:var(--text-dim);">（点击你认为存在漏洞的行）</span></h3>
+                <div class="code-display" id="codeDisplay">
+                    <!-- dynamically filled -->
+                </div>
+                <div id="codeFeedback" style="margin-top:8px;min-height:24px;"></div>
+                <div id="fixEditorArea" style="display:none;margin-top:12px;">
+                    <h4 style="font-size:0.85rem;margin-bottom:6px;color:var(--success-glow);">✏️ 编写修复代码（替换漏洞行）</h4>
+                    <textarea id="fixInput" placeholder="在此输入修复代码，例如：strncpy(buffer, user_input, sizeof(buffer));" rows="2"></textarea>
+                    <div class="input-row" style="margin-top:8px;">
+                        <button class="btn btn-success btn-sm" onclick="submitFix()">✅ 提交修复</button>
+                        <button class="btn btn-outline btn-sm" onclick="revealPatch()">💡 显示标准修复</button>
+                    </div>
+                    <div id="fixFeedback" style="margin-top:6px;min-height:20px;"></div>
+                    <div id="bypassTestResults" style="margin-top:4px;"></div>
+                </div>
+            </div>
+
+            <!-- Right: Stack Visualization -->
+            <div class="panel" id="stackPanel" style="position:relative;">
+                <h3><span class="icon">🧠</span> 栈内存布局 <span style="font-size:0.7rem;color:var(--text-dim);">（x86-64 小端序）</span></h3>
+                <div class="stack-viz" id="stackViz">
+                    <!-- dynamically filled -->
+                </div>
+                <div id="stackOverlay"></div>
+                <div style="margin-top:8px;font-size:0.7rem;color:var(--text-dim);text-align:center;">
+                    栈向低地址增长 ↑ · 数据写入向高地址方向 ↓
+                </div>
+                <div id="flagRevealArea"></div>
+            </div>
+        </div>
+
+        <!-- Exploit Input Row -->
+        <div class="panel" style="margin-bottom:16px;" id="exploitPanel">
+            <h3><span class="icon">💣</span> 步骤②：构造溢出利用（Exploit Construction）</h3>
+            <p style="font-size:0.82rem;color:var(--text-dim);margin-bottom:8px;">
+                输入超长字符串，观察栈帧被覆盖的过程。需要多少字节才能覆盖<strong>返回地址</strong>？
+            </p>
+            <div class="input-row">
+                <input type="text" id="exploitInput" placeholder="输入payload，例如：AAAAAAAAAAAAAAAAAAAAAAAA..." oninput="liveExploitPreview()">
+                <button class="btn btn-danger" onclick="executeExploit()">🚀 执行溢出</button>
+                <button class="btn btn-outline btn-sm" onclick="resetStack()">🔄 重置栈</button>
+            </div>
+            <div style="margin-top:4px;font-size:0.75rem;color:var(--text-dim);">
+                当前输入长度：<strong id="inputLen">0</strong> 字节 · Buffer容量：<strong>64</strong> 字节
+            </div>
+            <div id="exploitFeedback" style="margin-top:6px;min-height:22px;"></div>
+        </div>
+
+        <!-- GCC Defense Toggles -->
+        <div class="panel" style="margin-bottom:16px;" id="defensePanel">
+            <h3><span class="icon">🛡️</span> GCC 编译防御标志（可切换）</h3>
+            <div class="toggle-row">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggleCanary" onchange="updateDefenses()">
+                    <span class="toggle-track"></span>
+                    <span>Stack Canary <code style="font-size:0.7rem;">-fstack-protector</code></span>
+                </label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggleASLR" onchange="updateDefenses()">
+                    <span class="toggle-track"></span>
+                    <span>ASLR <code style="font-size:0.7rem;">内核随机化</code></span>
+                </label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggleDEP" onchange="updateDefenses()">
+                    <span class="toggle-track"></span>
+                    <span>DEP/NX <code style="font-size:0.7rem;">-z noexecstack</code></span>
+                </label>
+            </div>
+            <div id="defenseInfo" style="font-size:0.78rem;color:var(--text-dim);margin-top:4px;"></div>
+        </div>
+
+        <!-- Analysis Report -->
+        <div class="panel" style="margin-bottom:16px;">
+            <details>
+                <summary>📊 查看完整分析报告（点击展开）</summary>
+                <div style="margin-top:10px;font-size:0.85rem;line-height:1.7;">
+                    <h4 style="color:var(--danger-glow);">漏洞根因</h4>
+                    <p><code>strcpy()</code> 不执行边界检查。它将源字符串的<strong>所有字节</strong>（直到null终止符）复制到目标缓冲区，完全忽略目标缓冲区的大小。当源字符串长度 ≥ 64 字节时，写入会超出 <code>buffer[64]</code> 的边界，覆盖相邻栈帧数据。</p>
+                    <h4 style="color:var(--amber-glow);margin-top:10px;">利用链</h4>
+                    <p>用户输入 → <code>strcpy(buffer, user_input)</code> → 覆盖 saved RBP（8字节）→ 覆盖返回地址（8字节）→ 函数返回时跳转到攻击者控制的地址 → 任意代码执行</p>
+                    <h4 style="color:var(--success-glow);margin-top:10px;">修复方案</h4>
+                    <p>使用 <code>strncpy(buffer, user_input, sizeof(buffer));</code> 并确保null终止，或使用 <code>snprintf(buffer, sizeof(buffer), "%s", user_input);</code></p>
+                    <h4 style="color:var(--info-glow);margin-top:10px;">防御层次</h4>
+                    <p>Stack Canary（编译时）→ ASLR（运行时）→ DEP/NX（硬件/OS）— 纵深防御</p>
+                    <p style="margin-top:10px;font-size:0.7rem;color:var(--text-dim);">
+                        // EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境
+                    </p>
+                </div>
+            </details>
+        </div>
+        <div class="footer-note">
+            // EDUCATIONAL PURPOSE ONLY — authorized classroom use · CWE-119 Buffer Overflow · 栈溢出分析实验
+        </div>
+    </div>
+
+    <script>
+        // ============ STATE ============
+        const BUFFER_SIZE = 64;
+        const RBP_SIZE = 8;
+        const RET_SIZE = 8;
+        const CANARY_SIZE = 8;
+
+        let state = {
+            step: 1,
+            vulnLineClicked: false,
+            exploitDone: false,
+            fixSubmitted: false,
+            fixValidated: false,
+            defensesReviewed: false,
+            flags: [],
+            stackBytes: new Array(BUFFER_SIZE + CANARY_SIZE + RBP_SIZE + RET_SIZE).fill(0x00),
+            canaryEnabled: false,
+            aslrEnabled: false,
+            depEnabled: false,
+            canaryValue: null,
+            baseAddr: 0x7fffffffe000,
+            overflowDetected: false,
+            segfaultTriggered: false,
+        };
+
+        // Generate random canary
+        function genCanary() {
+            return Math.floor(Math.random() * 0xffffffffffffffff) & 0xffffffffffffff00 | 0x00;
+        }
+        state.canaryValue = genCanary();
+
+        // ============ DOM REFS ============
+        const codeDisplay = document.getElementById('codeDisplay');
+        const codeFeedback = document.getElementById('codeFeedback');
+        const fixEditorArea = document.getElementById('fixEditorArea');
+        const fixInput = document.getElementById('fixInput');
+        const fixFeedback = document.getElementById('fixFeedback');
+        const bypassTestResults = document.getElementById('bypassTestResults');
+        const stackViz = document.getElementById('stackViz');
+        const stackOverlay = document.getElementById('stackOverlay');
+        const exploitInput = document.getElementById('exploitInput');
+        const exploitFeedback = document.getElementById('exploitFeedback');
+        const inputLenEl = document.getElementById('inputLen');
+        const flagRevealArea = document.getElementById('flagRevealArea');
+        const defenseInfo = document.getElementById('defenseInfo');
+        const toggleCanary = document.getElementById('toggleCanary');
+        const toggleASLR = document.getElementById('toggleASLR');
+        const toggleDEP = document.getElementById('toggleDEP');
+
+        // ============ VULNERABLE CODE LINES ============
+        const codeLinesData = [
+            { num: 1, text: '/* 简易用户问候函数 — 存在栈溢出漏洞 */', cls: 'cm' },
+            { num: 2, text: '#include <string.h>', cls: 'kw' },
+            { num: 3, text: '#include <stdio.h>', cls: 'kw' },
+            { num: 4, text: '', cls: '' },
+            { num: 5, text: 'void vulnerable_function(char *user_input) {', cls: 'tp' },
+            { num: 6, text: '    char buffer[64];            // 64字节栈缓冲区', cls: 'cm' },
+            { num: 7, text: '    ', cls: '' },
+            { num: 8, text: '    strcpy(buffer, user_input); // ⚠️ 无边界检查！', cls: 'fn', isVuln: true },
+            { num: 9, text: '    ', cls: '' },
+            { num: 10, text: '    printf("Hello, %s\\n", buffer);', cls: 'fn' },
+            { num: 11, text: '}', cls: 'tp' },
+            { num: 12, text: '', cls: '' },
+            { num: 13, text: 'int main(int argc, char **argv) {', cls: 'tp' },
+            { num: 14, text: '    if (argc < 2) return 1;', cls: '' },
+            { num: 15, text: '    vulnerable_function(argv[1]);', cls: 'fn' },
+            { num: 16, text: '    return 0;', cls: '' },
+            { num: 17, text: '}', cls: 'tp' },
+        ];
+
+        function renderCodeLines() {
+            let html = '';
+            codeLinesData.forEach((line, idx) => {
+                const clickable = line.isVuln && !state.vulnLineClicked;
+                const highlightedDanger = line.isVuln && state.vulnLineClicked && !state.fixSubmitted;
+                const highlightedSuccess = line.isVuln && state.fixValidated;
+                let rowClass = 'code-line';
+                if (clickable) rowClass += ' clickable';
+                if (highlightedDanger) rowClass += ' highlighted-danger';
+                if (highlightedSuccess) rowClass += ' highlighted-success';
+                html += `<div class="${rowClass}" data-line="${line.num}" data-vuln="${line.isVuln || false}">
+                    <span class="line-num">${line.num}</span>
+                    <span class="line-content ${line.cls}">${escapeHTML(line.text)}</span>
+                </div>`;
+            });
+            codeDisplay.innerHTML = html;
+
+            // Attach click handlers
+            codeDisplay.querySelectorAll('.code-line.clickable').forEach(el => {
+                el.addEventListener('click', function() {
+                    if (state.vulnLineClicked) return;
+                    const isVuln = this.dataset.vuln === 'true';
+                    if (isVuln) {
+                        handleVulnLineClick(this);
+                    }
+                });
+            });
+        }
+
+        function escapeHTML(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function handleVulnLineClick(el) {
+            state.vulnLineClicked = true;
+            state.step = Math.max(state.step, 2);
+            el.classList.add('highlighted-danger');
+            el.classList.remove('clickable');
+            codeFeedback.innerHTML =
+                '<div class="alert alert-danger">🎯 <strong>正确！</strong>第8行 <code>strcpy(buffer, user_input)</code> 是漏洞点——<code>strcpy()</code> 不执行边界检查，可能导致栈缓冲区溢出（CWE-119）。</div>';
+            fixEditorArea.style.display = 'block';
+            updateProgress();
+            updateStackVisualization();
+            // Scroll exploit panel into view
+            document.getElementById('exploitPanel').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        // ============ STACK VISUALIZATION ============
+        function getStackZones() {
+            const zones = [];
+            // Return address (highest address in this frame view)
+            const retStart = BUFFER_SIZE + CANARY_SIZE + RBP_SIZE;
+            zones.push({
+                name: '返回地址 (Return Address)',
+                type: 'ret-zone',
+                startByte: retStart,
+                size: RET_SIZE,
+                addrOffset: retStart,
+                critical: true,
+            });
+            // Saved RBP
+            const rbpStart = BUFFER_SIZE + CANARY_SIZE;
+            zones.push({
+                name: 'Saved RBP',
+                type: 'rbp-zone',
+                startByte: rbpStart,
+                size: RBP_SIZE,
+                addrOffset: rbpStart,
+                critical: false,
+            });
+            // Canary (if enabled)
+            if (state.canaryEnabled) {
+                zones.push({
+                    name: 'Stack Canary 🐤',
+                    type: 'canary-zone',
+                    startByte: BUFFER_SIZE,
+                    size: CANARY_SIZE,
+                    addrOffset: BUFFER_SIZE,
+                    critical: true,
+                });
+            }
+            // Buffer
+            zones.push({
+                name: 'buffer[64]',
+                type: 'buffer-zone',
+                startByte: 0,
+                size: BUFFER_SIZE,
+                addrOffset: 0,
+                critical: false,
+            });
+            // Sort by startByte descending (high address first in visual)
+            zones.sort((a, b) => b.startByte - a.startByte);
+            return zones;
+        }
+
+        function updateStackVisualization() {
+            const zones = getStackZones();
+            let html = '';
+            const totalSize = BUFFER_SIZE + (state.canaryEnabled ? CANARY_SIZE : 0) + RBP_SIZE + RET_SIZE;
+            const effectiveBase = state.aslrEnabled ?
+                state.baseAddr + Math.floor(Math.random() * 0x100000) :
+                state.baseAddr;
+
+            zones.forEach((zone, zi) => {
+                const endAddr = effectiveBase - zone.startByte;
+                const startAddr = effectiveBase - (zone.startByte + zone.size);
+                const addrRange = `0x${startAddr.toString(16)} – 0x${endAddr.toString(16)}`;
+                const overflowed = checkZoneOverflowed(zone);
+                let blockClass = `stack-block ${zone.type}`;
+                if (overflowed) blockClass += ' overflowed';
+                const dataPreview = getZoneDataPreview(zone);
+                html +=
+                    `<div class="${blockClass}" style="min-height:${Math.max(36, zone.size * 3.5)}px;">
+                    <span class="block-label">${zone.name}</span>
+                    <span class="block-addr">${addrRange}</span>
+                    <span class="block-data">${dataPreview}</span>
+                </div>`;
+                if (zi < zones.length - 1) {
+                    html += '<div class="stack-arrow">▲ 高地址 · 栈增长方向 ▼</div>';
+                }
+            });
+
+            stackViz.innerHTML = html;
+            stackOverlay.innerHTML = '';
+
+            if (state.segfaultTriggered) {
+                stackOverlay.innerHTML = '<div class="segfault-overlay">💥 SEGMENTATION FAULT — 返回地址已损坏</div>';
+            }
+
+            updateDefenseInfoText();
+        }
+
+        function checkZoneOverflowed(zone) {
+            if (!state.overflowDetected) return false;
+            const overflowLen = state.stackBytes.filter(b => b !== 0x00).length;
+            // If the overflow reached into this zone
+            return overflowLen > zone.startByte;
+        }
+
+        function getZoneDataPreview(zone) {
+            const bytes = state.stackBytes.slice(zone.startByte, zone.startByte + zone.size);
+            const hasData = bytes.some(b => b !== 0x00);
+            if (!hasData) return '(未初始化 / 零填充)';
+            if (zone.type === 'canary-zone' && state.canaryEnabled) {
+                const cv = state.canaryValue;
+                return `Canary: 0x${cv.toString(16).padStart(16, '0')} ${state.overflowDetected && checkZoneOverflowed(zone) ? '⚠️ 已损坏' : '✅ 完整'}`;
+            }
+            if (zone.type === 'ret-zone' && state.overflowDetected && checkZoneOverflowed(zone)) {
+                return '⚠️ 已被覆盖: ' + bytes.slice(0, 8).map(b => String.fromCharCode(b) === '\0' ? '\\x00' : (b >=
+                    0x20 && b <= 0x7e ? String.fromCharCode(b) : '\\x' + b.toString(16).padStart(2,
+                    '0'))).join('');
+            }
+            const preview = bytes.slice(0, Math.min(zone.size, 16)).map(b =>
+                b === 0x00 ? '00' : b.toString(16).padStart(2, '0')
+            ).join(' ');
+            return `[${preview}${zone.size > 16 ? '...' : ''}]`;
+        }
+
+        function updateDefenseInfoText() {
+            let info = '';
+            if (state.canaryEnabled) info += '🛡️ Stack Canary 已启用 — 溢出将触发 __stack_chk_fail；';
+            else info += '⚠️ Stack Canary 禁用 — 无栈保护；';
+            if (state.aslrEnabled) info += ' 🎲 ASLR 已启用 — 地址随机化；';
+            else info += ' 📍 ASLR 禁用 — 地址可预测；';
+            if (state.depEnabled) info += ' 🚫 DEP/NX 已启用 — 栈不可执行。';
+            else info += ' ✍️ DEP/NX 禁用 — 栈可执行。';
+            defenseInfo.textContent = info;
+        }
+
+        function updateDefenses() {
+            state.canaryEnabled = toggleCanary.checked;
+            state.aslrEnabled = toggleASLR.checked;
+            state.depEnabled = toggleDEP.checked;
+            if (state.canaryEnabled && !state.canaryValue) state.canaryValue = genCanary();
+            updateStackVisualization();
+            if (state.canaryEnabled || state.aslrEnabled || state.depEnabled) {
+                state.defensesReviewed = true;
+                if (state.step < 4) state.step = 4;
+                updateProgress();
+            }
+        }
+
+        // ============ EXPLOIT SIMULATION ============
+        function liveExploitPreview() {
+            const input = exploitInput.value;
+            inputLenEl.textContent = input.length;
+            // Reset overflow state for preview
+            state.overflowDetected = false;
+            state.segfaultTriggered = false;
+            state.stackBytes = new Array(BUFFER_SIZE + CANARY_SIZE + RBP_SIZE + RET_SIZE).fill(0x00);
+            // Simulate strcpy
+            for (let i = 0; i < Math.min(input.length, state.stackBytes.length); i++) {
+                state.stackBytes[i] = input.charCodeAt(i) & 0xff;
+            }
+            if (input.length > BUFFER_SIZE) {
+                state.overflowDetected = true;
+                if (input.length >= BUFFER_SIZE + (state.canaryEnabled ? CANARY_SIZE : 0) + RBP_SIZE + 1) {
+                    state.segfaultTriggered = true;
+                }
+            }
+            updateStackVisualization();
+            exploitFeedback.innerHTML = '';
+            flagRevealArea.innerHTML = '';
+            if (input.length > BUFFER_SIZE && input.length < BUFFER_SIZE + (state.canaryEnabled ? CANARY_SIZE : 0) +
+                RBP_SIZE + 1) {
+                exploitFeedback.innerHTML =
+                    '<div class="alert alert-info">📊 溢出已发生！但尚未覆盖返回地址。还需要 <strong>' +
+                    (BUFFER_SIZE + (state.canaryEnabled ? CANARY_SIZE : 0) + RBP_SIZE + 1 - input.length) +
+                    '</strong> 字节才能触及返回地址。</div>';
+            }
+            if (state.segfaultTriggered && !state.exploitDone) {
+                exploitFeedback.innerHTML =
+                    '<div class="alert alert-danger">💥 <strong>返回地址已被覆盖！</strong>函数返回时将跳转到无效地址，触发 Segmentation Fault。</div>';
+            }
+        }
+
+        function executeExploit() {
+            const input = exploitInput.value;
+            if (input.length === 0) {
+                exploitFeedback.innerHTML = '<div class="alert alert-info">请输入payload字符串。</div>';
+                return;
+            }
+            // Full simulation
+            state.stackBytes = new Array(BUFFER_SIZE + CANARY_SIZE + RBP_SIZE + RET_SIZE).fill(0x00);
+            for (let i = 0; i < Math.min(input.length, state.stackBytes.length); i++) {
+                state.stackBytes[i] = input.charCodeAt(i) & 0xff;
+            }
+            state.overflowDetected = input.length > BUFFER_SIZE;
+            state.segfaultTriggered = input.length >= BUFFER_SIZE + (state.canaryEnabled ? CANARY_SIZE : 0) + RBP_SIZE +
+                1;
+            updateStackVisualization();
+
+            if (state.segfaultTriggered && !state.exploitDone) {
+                state.exploitDone = true;
+                state.step = Math.max(state.step, 3);
+                updateProgress();
+                exploitFeedback.innerHTML =
+                    '<div class="alert alert-danger">💥 <strong>利用成功！</strong>返回地址已被覆盖。程序将崩溃或跳转到攻击者指定的地址。</div>';
+                flagRevealArea.innerHTML =
+                    '<div class="flag-reveal">🏴 FLAG{return_address_overwritten_strcpy_overflow}</div>';
+                // Also show canary bypass if enabled
+                if (state.canaryEnabled) {
+                    flagRevealArea.innerHTML +=
+                        '<div class="alert alert-amber" style="margin-top:6px;">⚠️ 注意：Stack Canary 也被覆盖了！如果Canary值不匹配，程序将在返回前调用 <code>__stack_chk_fail()</code> 并终止。</div>';
+                }
+            } else if (state.overflowDetected && !state.segfaultTriggered) {
+                exploitFeedback.innerHTML =
+                    '<div class="alert alert-info">📊 溢出发生但返回地址尚未被覆盖。需要更多字节触及返回地址区域。</div>';
+            } else if (!state.overflowDetected) {
+                exploitFeedback.innerHTML =
+                    '<div class="alert alert-info">📊 输入未超出buffer边界（≤64字节），没有溢出发生。</div>';
+            }
+        }
+
+        function resetStack() {
+            state.stackBytes = new Array(BUFFER_SIZE + CANARY_SIZE + RBP_SIZE + RET_SIZE).fill(0x00);
+            state.overflowDetected = false;
+            state.segfaultTriggered = false;
+            exploitInput.value = '';
+            inputLenEl.textContent = '0';
+            exploitFeedback.innerHTML = '';
+            flagRevealArea.innerHTML = '';
+            stackOverlay.innerHTML = '';
+            updateStackVisualization();
+        }
+
+        // ============ FIX SUBMISSION ============
+        function submitFix() {
+            const userFix = fixInput.value.trim();
+            if (!userFix) {
+                fixFeedback.innerHTML = '<div class="alert alert-info">请先输入修复代码。</div>';
+                return;
+            }
+            const validation = validateFix(userFix);
+            fixFeedback.innerHTML = validation.feedback;
+            bypassTestResults.innerHTML = '';
+
+            if (validation.valid) {
+                // Run bypass tests
+                const bypassResults = runBypassTests(userFix);
+                bypassTestResults.innerHTML = bypassResults.html;
+                if (bypassResults.allPassed) {
+                    state.fixSubmitted = true;
+                    state.fixValidated = true;
+                    state.step = Math.max(state.step, 4);
+                    updateProgress();
+                    fixFeedback.innerHTML +=
+                        '<div class="alert alert-success" style="margin-top:6px;">🎉 <strong>修复验证通过！</strong>所有绕过测试均被成功防御。</div>';
+                    if (!state.flags.includes('fix')) {
+                        state.flags.push('fix');
+                        flagRevealArea.innerHTML +=
+                            '<div class="flag-reveal" style="margin-top:8px;">🏴 FLAG{buffer_overflow_strcpy_patched_secure}</div>';
+                    }
+                    // Update code display
+                    renderCodeLines();
+                } else {
+                    fixFeedback.innerHTML +=
+                        '<div class="alert alert-danger" style="margin-top:6px;">❌ 修复存在缺陷——部分绕过测试未能防御。请检查边界设置。</div>';
+                }
+            }
+        }
+
+        function validateFix(userFix) {
+            const normalized = userFix.replace(/\s+/g, ' ').trim().toLowerCase();
+            const hasStrncpy = normalized.includes('strncpy');
+            const hasSnprintf = normalized.includes('snprintf');
+            const hasStrlcpy = normalized.includes('strlcpy');
+            const hasSizeof = normalized.includes('sizeof(buffer)') || normalized.includes('sizeof buffer');
+            const hasExplicitSize = /\b64\b/.test(normalized) || /\b63\b/.test(normalized);
+            const hasNullTerm = normalized.includes("'\\0'") || normalized.includes('"\\0"') || normalized.includes(
+                'null') || normalized.includes('= 0');
+
+            if (hasStrncpy && (hasSizeof || hasExplicitSize)) {
+                const hasNullGuard = hasNullTerm || normalized.includes('sizeof(buffer)-1') || normalized.includes(
+                    'sizeof(buffer) - 1');
+                const warningNote = hasNullGuard ? '' :
+                    ' <span style="color:#f59e0b;">（建议添加null终止符确保安全）</span>';
+                return {
+                    valid: true,
+                    feedback: `<div class="alert alert-success">✅ 正确！使用了 <code>strncpy()</code> 并设置了边界。${warningNote}</div>`,
+                };
+            }
+            if (hasSnprintf && (hasSizeof || hasExplicitSize)) {
+                return {
+                    valid: true,
+                    feedback: '<div class="alert alert-success">✅ 正确！<code>snprintf()</code> 自动处理边界和null终止，是更安全的选择。</div>',
+                };
+            }
+            if (hasStrlcpy && (hasSizeof || hasExplicitSize)) {
+                return {
+                    valid: true,
+                    feedback: '<div class="alert alert-success">✅ 正确！<code>strlcpy()</code> 保证null终止（BSD/非标准但广泛使用）。</div>',
+                };
+            }
+            if (hasStrncpy || hasSnprintf || hasStrlcpy) {
+                return {
+                    valid: false,
+                    feedback: '<div class="alert alert-danger">❌ 使用了安全函数但<strong>缺少正确的边界参数</strong>。请使用 <code>sizeof(buffer)</code> 或明确的大小值。</div>',
+                };
+            }
+            if (normalized.includes('strcpy')) {
+                return {
+                    valid: false,
+                    feedback: '<div class="alert alert-danger">❌ 仍然使用了 <code>strcpy()</code>——这不安全！请使用带边界检查的函数。</div>',
+                };
+            }
+            return {
+                valid: false,
+                feedback: '<div class="alert alert-danger">❌ 未识别到有效的安全函数。请使用 <code>strncpy()</code>、<code>snprintf()</code> 或 <code>strlcpy()</code> 并正确设置边界。</div>',
+            };
+        }
+
+        function runBypassTests(userFix) {
+            const tests = [
+                { name: '空字符串', input: '', expectSafe: true },
+                { name: '短字符串(10字节)', input: 'AAAAAAAAAA', expectSafe: true },
+                { name: '边界字符串(63字节)', input: 'A'.repeat(63), expectSafe: true },
+                { name: '精确边界(64字节)', input: 'A'.repeat(64), expectSafe: true },
+                { name: '溢出尝试(100字节)', input: 'A'.repeat(100), expectSafe: true },
+                { name: '超大溢出(500字节)', input: 'A'.repeat(500), expectSafe: true },
+            ];
+
+            const results = [];
+            let allPassed = true;
+
+            tests.forEach(test => {
+                const simulated = simulateFix(userFix, test.input);
+                const passed = simulated.safe === test.expectSafe;
+                if (!passed) allPassed = false;
+                results.push({ ...test, passed, detail: simulated.detail });
+            });
+
+            let html = '<div style="font-size:0.78rem;margin-top:6px;"><strong>绕过测试结果：</strong></div>';
+            results.forEach(r => {
+                const icon = r.passed ? '✅' : '❌';
+                const color = r.passed ? 'var(--success-glow)' : 'var(--danger-glow)';
+                html +=
+                    `<div style="color:${color};font-size:0.75rem;margin:2px 0;">${icon} ${r.name}: ${r.detail}</div>`;
+            });
+
+            return { allPassed, html };
+        }
+
+        function simulateFix(userFix, testInput) {
+            const normalized = userFix.replace(/\s+/g, ' ').trim();
+            // Simulate a 64-byte buffer
+            const simBuffer = new Array(64).fill(0);
+            const simBeyond = new Array(100).fill(0); // memory beyond buffer
+            let safe = true;
+            let detail = '';
+
+            // Very simple heuristic simulation
+            if (normalized.toLowerCase().includes('strncpy') || normalized.toLowerCase().includes('snprintf') ||
+                normalized.toLowerCase().includes('strlcpy')) {
+                // These functions respect bounds
+                const maxCopy = 63; // conservative: leave room for null terminator
+                if (testInput.length > maxCopy) {
+                    detail = `截断至${maxCopy}字节（安全）`;
+                } else {
+                    detail = `正常复制${testInput.length}字节（安全）`;
+                }
+                safe = true;
+            } else if (normalized.toLowerCase().includes('strcpy')) {
+                if (testInput.length >= 64) {
+                    detail = `溢出${testInput.length - 63}字节到相邻内存（危险！）`;
+                    safe = false;
+                } else {
+                    detail = `正常复制${testInput.length}字节`;
+                    safe = true;
+                }
+            } else {
+                // Unknown fix - assume unsafe for overflow tests
+                if (testInput.length >= 64) {
+                    detail = '可能溢出（无法验证修复逻辑）';
+                    safe = false;
+                } else {
+                    detail = '短输入通过';
+                    safe = true;
+                }
+            }
+
+            return { safe, detail };
+        }
+
+        function revealPatch() {
+            fixInput.value = 'strncpy(buffer, user_input, sizeof(buffer));';
+            fixFeedback.innerHTML =
+                '<div class="alert alert-info">💡 标准修复已显示。注意：为完全安全，建议额外添加 <code>buffer[sizeof(buffer)-1] = \'\\0\';</code> 确保null终止。</div>';
+        }
+
+        // ============ PROGRESS ============
+        function updateProgress() {
+            const dots = document.querySelectorAll('#progressSteps .step-dot');
+            const connectors = document.querySelectorAll('#progressSteps .step-connector');
+            dots.forEach((dot, i) => {
+                const stepNum = i + 1;
+                dot.classList.remove('active', 'done');
+                if (stepNum < state.step) dot.classList.add('done');
+                if (stepNum === state.step) dot.classList.add('active');
+            });
+            connectors.forEach((conn, i) => {
+                if (i + 1 < state.step) conn.classList.add('done');
+                else conn.classList.remove('done');
+            });
+        }
+
+        // ============ INITIALIZATION ============
+        function init() {
+            renderCodeLines();
+            updateStackVisualization();
+            updateProgress();
+            updateDefenseInfoText();
+            // Set initial defense states
+            toggleCanary.checked = false;
+            toggleASLR.checked = false;
+            toggleDEP.checked = false;
+            state.canaryEnabled = false;
+            state.aslrEnabled = false;
+            state.depEnabled = false;
+        }
+
+        // ============ GLOBAL CLICK for code lines (delegation) ============
+        codeDisplay.addEventListener('click', function(e) {
+            const lineEl = e.target.closest('.code-line.clickable');
+            if (!lineEl) return;
+            if (state.vulnLineClicked) return;
+            const isVuln = lineEl.dataset.vuln === 'true';
+            if (isVuln) {
+                handleVulnLineClick(lineEl);
+            } else {
+                // Wrong line clicked — give hint
+                const tempFeedback = document.createElement('div');
+                tempFeedback.className = 'alert alert-info';
+                tempFeedback.textContent = '🤔 这一行看起来没有直接的缓冲区溢出风险。仔细看看哪一行使用了不安全的字符串复制函数？';
+                tempFeedback.style.animation = 'flash-danger 0.4s ease-out';
+                codeFeedback.innerHTML = '';
+                codeFeedback.appendChild(tempFeedback);
+                // Briefly highlight the clicked line
+                lineEl.style.background = 'rgba(245,158,11,0.2)';
+                setTimeout(() => { lineEl.style.background = ''; }, 600);
+            }
+        });
+
+        // Initialize
+        init();
+
+        console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+        console.log('🔬 C/C++ 栈溢出漏洞分析与修复 — 交互式实验已就绪');
+        console.log('  步骤①: 点击漏洞代码行 (第8行 strcpy)');
+        console.log('  步骤②: 输入超长payload触发溢出');
+        console.log('  步骤③: 编写安全修复代码');
+        console.log('  步骤④: 切换GCC防御标志观察效果');
+    </script>
+</body>
+</html>

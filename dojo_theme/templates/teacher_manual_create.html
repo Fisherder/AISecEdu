@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block body_class %}course-system-page teacher-manual-create-page{% endblock %}
+
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='aisecedu-course-hub-v31-readability-v1') }}">
+{% endblock %}
+
+{% set is_course = create_kind == 'course' %}
+{% set is_chapter = create_kind == 'chapter' %}
+{% set is_practice = create_kind == 'practice' %}
+{% set course_reference = dojo.reference_id if dojo else '' %}
+{% set course_name = dojo.name if dojo else '' %}
+
+{% block content %}
+<div id="teacher-manual-create" class="manual-create-shell"
+      data-create-kind="{{ create_kind }}"
+      data-dojo-id="{{ course_reference }}"
+      data-dojo-name="{{ course_name }}">
+  <div id="manual-notice" class="hub-notice" role="status" hidden></div>
+
+  <header class="manual-create-header">
+    <div>
+      <a class="hub-back-link" href="{{ '/teacher/courses' if is_course else '/teacher/courses?dojo=' ~ (course_reference | urlencode) }}">
+        <i class="fas fa-arrow-left" aria-hidden="true"></i>{{ '返回课程列表' if is_course else '返回课程工作台' }}
+      </a>
+      <span class="hub-kicker"><i class="fas {{ 'fa-book' if is_course else ('fa-layer-group' if is_chapter else 'fa-flag') }}" aria-hidden="true"></i>手动创建</span>
+      <h1>{{ '新建课程' if is_course else ('新建章节' if is_chapter else '新建实践题') }}</h1>
+      <p>
+        {% if is_course %}填写基本信息即可建立课程，也可以同时准备第一章。
+        {% elif is_chapter %}在“{{ course_name }}”中添加一个可继续承载课件与实践题的章节。
+        {% else %}明确题面、私有验证条件与运行方式，学生最终只提交动态 Flag。
+        {% endif %}
+      </p>
+    </div>
+    {% if not is_course %}
+    <div class="manual-context-pill"><small>当前课程</small><strong>{{ course_name }}</strong>{% if is_practice %}<span id="manual-autosave-state" role="status" aria-live="polite"><i class="fas fa-cloud" aria-hidden="true"></i>尚未修改</span>{% endif %}</div>
+    {% endif %}
+  </header>
+
+  {% if is_practice %}
+  <nav class="manual-section-nav" aria-label="题目表单分区">
+    <a href="#manual-section-content">题目与目标</a>
+    <a href="#manual-section-validation">验证与解法</a>
+    <a href="#manual-section-runtime">运行环境</a>
+    <span><i class="fas fa-shield-alt" aria-hidden="true"></i>保存、检查、发布互不混淆</span>
+  </nav>
+  {% endif %}
+
+  <div class="manual-create-layout">
+    <form id="manual-create-form" class="manual-form-card" novalidate>
+      {% if is_course %}
+      <section id="manual-section-content" class="manual-form-section">
+        <div class="manual-section-heading"><span>01</span><div><h2>课程基本信息</h2><p>这些内容会展示在教师课程列表和学员端。</p></div></div>
+        <div class="manual-field-grid">
+          <label class="manual-field is-wide"><span>课程名称 <em>必填</em></span><input id="manual-name" name="name" type="text" maxlength="128" autocomplete="off" placeholder="例如：软件安全" required></label>
+          <label class="manual-field is-wide"><span>课程简介</span><textarea id="manual-description" name="description" rows="4" maxlength="24000" placeholder="用一两句话说明课程面向谁、学习什么。"></textarea></label>
+          <fieldset class="manual-field manual-choice-group is-wide"><legend>谁可以看到课程</legend><label><input type="radio" name="access" value="private" checked><span><strong>仅课程成员</strong><small>适合备课和内部教学</small></span></label><label><input type="radio" name="access" value="public"><span><strong>所有登录用户</strong><small>可在公开课程中访问</small></span></label></fieldset>
+        </div>
+      </section>
+
+      <section class="manual-form-section is-optional">
+        <label class="manual-section-toggle"><input id="manual-initial-enabled" type="checkbox"><span><strong>同时创建第一章</strong><small>推荐：课程创建后可以直接添加实践题。</small></span></label>
+        <div id="manual-initial-fields" class="manual-field-grid" hidden>
+          <label class="manual-field is-wide"><span>章节名称 <em>必填</em></span><input id="manual-initial-name" type="text" maxlength="128" placeholder="例如：缓冲区溢出基础"></label>
+          <label class="manual-field is-wide"><span>章节简介</span><textarea id="manual-initial-description" rows="3" maxlength="24000" placeholder="说明本章的学习目标和内容范围。"></textarea></label>
+        </div>
+      </section>
+      {% elif is_chapter %}
+      <section class="manual-form-section">
+        <div class="manual-section-heading"><span>01</span><div><h2>章节基本信息</h2><p>建立清晰的章节边界，后续课件、实践题与学情都会归到这里。</p></div></div>
+        <div class="manual-field-grid">
+          <label class="manual-field is-wide"><span>章节名称 <em>必填</em></span><input id="manual-name" name="name" type="text" maxlength="128" autocomplete="off" placeholder="例如：栈溢出原理与利用" required></label>
+          <label class="manual-field is-wide"><span>章节简介</span><textarea id="manual-description" name="description" rows="5" maxlength="24000" placeholder="说明学习目标、先修知识和内容范围。"></textarea></label>
+        </div>
+      </section>
+      {% else %}
+      {% if not dojo.modules %}
+      <div class="manual-blocking-state" role="alert"><span><i class="fas fa-layer-group" aria-hidden="true"></i></span><div><strong>请先创建章节</strong><p>实践题必须归属一个章节，创建章节后再回来填写题目。</p></div><a class="hub-button is-primary" href="/teacher/courses/{{ course_reference | urlencode }}/chapters/new">新建章节</a></div>
+      {% endif %}
+      <section class="manual-form-section">
+        <div class="manual-section-heading"><span>01</span><div><h2>题目与学习目标</h2><p>学生会直接看到题目名称、说明和目标。</p></div></div>
+        <div class="manual-field-grid">
+          <label class="manual-field"><span>所属章节 <em>必填</em></span><select id="manual-module" name="moduleId" required {% if not dojo.modules %}disabled{% endif %}><option value="">请选择章节</option>{% for module in dojo.modules %}<option value="{{ module.id }}" data-module-index="{{ module.module_index }}" {% if module.id == selected_module_id %}selected{% endif %}>{{ module.name or '未命名章节' }}</option>{% endfor %}</select></label>
+          <label class="manual-field"><span>题目名称 <em>必填</em><a class="manual-field-ai" href="/teacher" target="_blank" rel="noopener" data-ai-field="title"><i class="fas fa-magic" aria-hidden="true"></i>协助拟题</a></span><input id="manual-name" name="title" type="text" maxlength="128" autocomplete="off" placeholder="例如：经典栈溢出入门" required {% if not dojo.modules %}disabled{% endif %}></label>
+          <label class="manual-field"><span>类型</span><select id="manual-category" name="category" {% if not dojo.modules %}disabled{% endif %}><option value="GENERAL">综合</option><option value="WEB">Web 安全</option><option value="PWN">二进制安全</option><option value="REV">逆向工程</option><option value="CRYPTO">密码学</option><option value="FORENSICS">数字取证</option></select></label>
+          <label class="manual-field"><span>难度</span><select id="manual-difficulty" name="difficulty" {% if not dojo.modules %}disabled{% endif %}><option value="1">入门</option><option value="2" selected>基础</option><option value="3">进阶</option><option value="4">困难</option><option value="5">挑战</option></select></label>
+          <label class="manual-check-field is-wide"><input id="manual-required" type="checkbox" checked {% if not dojo.modules %}disabled{% endif %}><span><strong>设为必修题</strong><small>计入本章节完成进度</small></span></label>
+          <label class="manual-field is-wide"><span>题目说明 <em>必填</em><a class="manual-field-ai" href="/teacher" target="_blank" rel="noopener" data-ai-field="description"><i class="fas fa-magic" aria-hidden="true"></i>协助完善</a></span><textarea id="manual-description" name="description" rows="8" minlength="40" maxlength="24000" placeholder="说明背景、任务目标、可用环境以及取得 Flag 的条件。至少 40 个字符。" required {% if not dojo.modules %}disabled{% endif %}></textarea><small><b id="manual-description-count">0</b> / 40 个最少字符</small></label>
+          <label class="manual-field is-wide"><span>学习目标 <em>必填</em><a class="manual-field-ai" href="/teacher" target="_blank" rel="noopener" data-ai-field="objectives"><i class="fas fa-magic" aria-hidden="true"></i>基于题面生成</a></span><textarea id="manual-objectives" rows="4" placeholder="每行一项目标，例如：&#10;理解栈帧的基本结构&#10;能够定位覆盖返回地址所需的偏移" required {% if not dojo.modules %}disabled{% endif %}></textarea><small>每行一项，填写 1–12 项。</small></label>
+          <label class="manual-field is-wide"><span>标签</span><input id="manual-tags" type="text" maxlength="500" placeholder="例如：栈溢出, x86-64, 入门" {% if not dojo.modules %}disabled{% endif %}><small>用逗号分隔，便于后续筛选。</small></label>
+        </div>
+      </section>
+
+      <section id="manual-section-validation" class="manual-form-section">
+        <div class="manual-section-heading"><span>02</span><div><h2>Flag 验证与教师解法</h2><p>验证答案只用于私有门禁，不会显示在学生题面中。</p></div></div>
+        <div class="manual-field-grid">
+          <label class="manual-field is-wide"><span>验证答案 <em>必填</em></span><span class="manual-secret-input"><input id="manual-expected-answer" type="password" maxlength="512" autocomplete="new-password" placeholder="填写用于私有检查的唯一答案" required {% if not dojo.modules %}disabled{% endif %}><button id="manual-answer-toggle" type="button" aria-label="显示答案" {% if not dojo.modules %}disabled{% endif %}><i class="fas fa-eye" aria-hidden="true"></i></button></span><small>学生用它通过私有检查获取动态 Flag，平台最终只接收 Flag；请勿在题面或起始文件中泄露。</small></label>
+          <label class="manual-field is-wide"><span>教师解法</span><textarea id="manual-teacher-solution" rows="6" maxlength="24000" placeholder="记录关键思路、操作步骤和取得 Flag 的依据，仅教师可见。" {% if not dojo.modules %}disabled{% endif %}></textarea></label>
+        </div>
+      </section>
+
+      <details id="manual-section-runtime" class="manual-advanced" {% if not dojo.modules %}hidden{% endif %}>
+        <summary><span><strong>运行环境</strong><small>默认终端环境可以满足大多数 CTF 实践题</small></span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+        <div class="manual-form-section">
+          <div class="manual-field-grid">
+            <fieldset class="manual-field manual-choice-group is-wide"><legend>学生如何操作</legend><label><input type="radio" name="runtimeMode" value="terminal" checked><span><strong>终端环境</strong><small>学生在隔离终端中完成目标并获取 Flag</small></span></label><label><input type="radio" name="runtimeMode" value="web"><span><strong>Web 服务</strong><small>启动一个带网页入口的隔离服务</small></span></label></fieldset>
+            <label class="manual-field is-wide"><span>运行镜像</span><input id="manual-image" type="text" maxlength="255" value="pwncollege/challenge-legacy:latest"><small>不确定时保留默认值。</small></label>
+            <label class="manual-field"><span>起始文件路径</span><input id="manual-starter-path" type="text" maxlength="240" placeholder="例如：challenge/app.py"></label>
+            <label id="manual-port-field" class="manual-field" hidden><span>Web 服务端口</span><input id="manual-port" type="number" min="1024" max="65535" value="8000"></label>
+            <label class="manual-field is-wide"><span>起始文件内容</span><textarea id="manual-starter-content" class="is-code" rows="10" maxlength="100000" placeholder="可选。为学生准备源代码、数据或 Web 服务入口。"></textarea><small id="manual-runtime-hint">终端题可以不填写；如填写，路径和内容必须同时提供。</small></label>
+          </div>
+        </div>
+      </details>
+      {% endif %}
+
+      <div id="manual-progress" class="manual-progress" hidden aria-live="polite">
+        <header><span class="manual-progress-spinner"></span><div><strong id="manual-progress-title">正在保存内容</strong><p id="manual-progress-copy">请稍候，不需要停留在底层处理页面。</p></div><b id="manual-progress-percent" hidden>10%</b></header>
+        <div class="manual-progress-track" hidden><span id="manual-progress-bar"></span></div>
+        <ol><li id="manual-progress-save" class="is-active"><i class="fas fa-check"></i><span>保存题目</span></li><li id="manual-progress-check"><i class="fas fa-shield-alt"></i><span>安全检查</span></li><li id="manual-progress-ready"><i class="fas fa-flag-checkered"></i><span>准备发布</span></li></ol>
+      </div>
+
+      <section id="manual-result" class="manual-result" hidden aria-live="polite">
+        <span id="manual-result-icon"><i class="fas fa-check" aria-hidden="true"></i></span>
+        <div><small id="manual-result-kicker">创建成功</small><h2 id="manual-result-title">内容已保存</h2><p id="manual-result-copy"></p><div id="manual-result-actions" class="manual-result-actions"></div></div>
+      </section>
+
+      <footer id="manual-form-actions" class="manual-form-actions">
+        {% if is_practice %}<p class="manual-action-note"><i class="fas fa-cloud" aria-hidden="true"></i><span>非敏感字段会自动保存在本浏览器；答案与教师解法不会缓存。</span></p>{% endif %}
+        <a class="hub-button is-secondary" href="{{ '/teacher/courses' if is_course else '/teacher/courses?dojo=' ~ (course_reference | urlencode) }}">取消</a>
+        {% if is_practice %}<button class="hub-button is-secondary" type="submit" name="submitMode" value="draft" {% if not dojo.modules %}disabled{% endif %}>仅保存草稿</button>{% endif %}
+        <button id="manual-primary-submit" class="hub-button is-primary" type="submit" name="submitMode" value="{{ 'validate' if is_practice else 'create' }}" {% if is_practice and not dojo.modules %}disabled{% endif %}><i class="fas {{ 'fa-shield-alt' if is_practice else 'fa-plus' }}" aria-hidden="true"></i>{{ '保存并检查' if is_practice else ('创建课程' if is_course else '创建章节') }}</button>
+      </footer>
+    </form>
+
+    <aside class="manual-summary-card" aria-label="创建内容摘要">
+      <span class="hub-kicker">即将创建</span>
+      <span class="manual-summary-icon"><i class="fas {{ 'fa-book' if is_course else ('fa-layer-group' if is_chapter else 'fa-flag') }}" aria-hidden="true"></i></span>
+      <h2 id="manual-summary-title">{{ '未命名课程' if is_course else ('未命名章节' if is_chapter else '未命名实践题') }}</h2>
+      <p id="manual-summary-description">填写左侧内容，这里会同步显示摘要。</p>
+      <dl>
+        {% if not is_course %}<div><dt>课程</dt><dd>{{ course_name }}</dd></div>{% endif %}
+        <div><dt>归属</dt><dd id="manual-summary-scope">{{ '教师课程中心' if is_course else ('课程结构' if is_chapter else '请选择章节') }}</dd></div>
+        <div><dt>状态</dt><dd>{{ '创建后即可管理' if not is_practice else '草稿，可检查后发布' }}</dd></div>
+      </dl>
+      <div class="manual-summary-help"><i class="fas fa-info-circle" aria-hidden="true"></i><p>{{ '信息可以在课程卡片中继续修改。' if is_course else ('章节创建后可以继续添加课件和实践题。' if is_chapter else '保存草稿不会立即对学生可见；检查通过后由您决定是否发布。') }}</p></div>
+    </aside>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-upload-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/teacher-manual-create.js', v='aisecedu-manual-create-v4') }}"></script>
+{% endblock %}

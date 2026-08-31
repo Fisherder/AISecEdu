@@ -163,132 +163,30 @@ def solution_counts():
     return tuple(int(value) for value in result.stdout.strip().split(","))
 
 
-def satisfying_report(contract):
-    if (
-        not isinstance(contract, dict)
-        or contract.get("type") != "REPORT_JSON_V1"
-        or contract.get("submissionPath") != "/home/hacker/solution.json"
-    ):
-        raise AssertionError("published challenge has no fixed report Oracle")
-    fields = {
-        str(field)
-        for field in [
-            *(contract.get("requiredFields") or []),
-            *[
-                assertion.get("field")
-                for assertion in contract.get("assertions") or []
-                if isinstance(assertion, dict)
-            ],
-        ]
-        if field
+def validate_flag_gate_contract(contract):
+    if not isinstance(contract, dict) or contract.get("type") != "FLAG_GATE_V1":
+        raise AssertionError("published challenge has no private Flag gate")
+    if "submissionPath" in contract or "maxBytes" in contract:
+        raise AssertionError("Flag gate still exposes the legacy report protocol")
+    live_fields = {
+        binding.get("field")
+        for binding in contract.get("liveBindings") or []
+        if isinstance(binding, dict)
     }
-    prefixes = {
-        ".".join(parts[:index])
-        for field in fields
-        for parts in [field.split(".")]
-        for index in range(1, len(parts))
-    }
-    document = {}
-
-    def assign(field, value, *, preserve=False):
-        parts = field.split(".")
-        current = document
-        for part in parts[:-1]:
-            existing = current.setdefault(part, {})
-            if not isinstance(existing, dict):
-                raise AssertionError(
-                    f"Oracle contract contains incompatible field paths: {field}"
-                )
-            current = existing
-        leaf = parts[-1]
-        if preserve and leaf in current:
-            return
-        if isinstance(current.get(leaf), dict) and not isinstance(value, dict):
-            raise AssertionError(
-                f"Oracle contract asserts a scalar parent with child fields: {field}"
-            )
-        current[leaf] = value
-
-    for field in sorted(fields, key=lambda item: (item.count("."), item)):
-        assign(field, {} if field in prefixes else "observed", preserve=True)
-    for assertion in contract.get("assertions") or []:
-        field = assertion["field"]
-        operator = assertion["operator"]
-        expected = assertion.get("value")
-        if operator == "exists":
-            continue
-        if operator == "equals":
-            actual = expected
-        elif operator == "not_equals":
-            actual = (
-                "__aisecedu_alternative__"
-                if expected != "__aisecedu_alternative__"
-                else "__aisecedu_other__"
-            )
-        elif operator == "contains":
-            actual = f"observed:{expected}"
-        elif operator == "one_of":
-            choices = expected if isinstance(expected, list) else []
-            if not choices:
-                raise AssertionError("Oracle one_of assertion has no choices")
-            actual = choices[0]
-        else:
-            raise AssertionError(f"unsupported Oracle operator: {operator}")
-        assign(field, actual)
-    return document
-
-
-def satisfy_live_report_values(document, contract, runtime_contract, workspace):
-    services = {
-        service["name"]: service
-        for service in (runtime_contract or {}).get("services") or []
-        if isinstance(service, dict) and service.get("name")
-    }
-    probe_script = (
-        "import hashlib,http.client,json,sys;"
-        "binding=json.loads(sys.argv[1]);"
-        "port=int(sys.argv[2]);"
-        "connection=http.client.HTTPConnection('127.0.0.1',port,timeout=3);"
-        "connection.request('GET',binding['path'],headers=binding.get('headers') or {});"
-        "response=connection.getresponse();"
-        "status=response.status;"
-        "body=response.read(65537);"
-        "connection.close();"
-        "capture=binding['capture'];"
-        "value=status if capture=='status' else "
-        "hashlib.sha256(body).hexdigest() if capture=='body_sha256' else "
-        "json.loads(body.decode('utf-8'));"
-        "selector=binding.get('selector','').split('.');"
-        "\nif capture=='json_field':\n"
-        "    for part in selector: value=value[part]\n"
-        "print(json.dumps(value,ensure_ascii=False))"
-    )
-
-    def assign(field, value):
-        current = document
-        parts = field.split(".")
-        for part in parts[:-1]:
-            current = current.setdefault(part, {})
-        current[parts[-1]] = value
-
-    for binding in contract.get("liveBindings") or []:
-        service = services.get(binding["service"])
-        if not service or not service.get("port"):
-            raise AssertionError(
-                f"live binding references an unavailable service: {binding['field']}"
-            )
-        observed = inner(
-            "exec",
-            "--user=1000",
-            workspace,
-            "/usr/local/bin/python3",
-            "-c",
-            probe_script,
-            json.dumps(binding, ensure_ascii=False, sort_keys=True),
-            str(service["port"]),
+    required_fields = set(contract.get("requiredFields") or [])
+    if not required_fields or not required_fields.issubset(live_fields):
+        raise AssertionError("Flag gate still depends on learner-supplied fields")
+    assertions = contract.get("assertions") or []
+    if any(
+        not any(
+            assertion.get("field") == field
+            and assertion.get("operator") != "exists"
+            for assertion in assertions
+            if isinstance(assertion, dict)
         )
-        assign(binding["field"], json.loads(observed.stdout))
-    return document
+        for field in required_fields
+    ):
+        raise AssertionError("Flag gate contains a field without a target value")
 
 
 def dojo_database_id(dojo_id):
@@ -426,7 +324,7 @@ def verify_flag_latency():
 
         spec = {
             "id": dojo_id,
-            "name": "AISecEdu Flag Latency Verification",
+            "name": "玄甲 Flag Latency Verification",
             "type": "public",
             "modules": [
                 {
@@ -603,7 +501,7 @@ def main():
 
         spec = {
             "id": dojo_id,
-            "name": "AISecEdu Learning Verification",
+            "name": "玄甲 Learning Verification",
             "type": "public",
             "modules": [
                 {
@@ -665,7 +563,7 @@ def main():
                 json={
                     "id": unit_id,
                     "name": "Teacher-Created Unit",
-                    "description": "A unit created through the AISecEdu course interface.",
+                    "description": "A unit created through the 玄甲 course interface.",
                 },
                 timeout=30,
             ),
@@ -682,14 +580,17 @@ def main():
         if "添加题目" not in unit_page:
             raise AssertionError("teacher unit page did not render exercise creation controls")
         studio_page = require(
-            admin.get(f"{BASE_URL}/dojo/{dojo}/studio", timeout=30)
+            admin.get(
+                f"{BASE_URL}/teacher/courses?dojo={urllib.parse.quote(dojo, safe='')}&tab=questions",
+                timeout=30,
+            )
         ).text
         if (
-            "Flash 会把教学意图转为方案" not in studio_page
-            or "独立的 Pro 红队 Agent" not in studio_page
+            "创建一组独立题目" not in studio_page
+            or "Agent 出题流水线" not in studio_page
         ):
             raise AssertionError(
-                "teacher studio did not explain the configured DeepSeek agent pipeline"
+                "standalone question management did not render the authoring pipeline"
             )
         passed("teacher-only course unit creation and exercise authoring entry point")
 
@@ -1004,7 +905,7 @@ def main():
                 "deployed Bash profile does not contain automatic evidence capture"
             )
         passed(
-            "same AISecEdu workspace, attempt epoch, Nix CLI, and automatic command capture profile"
+            "same 玄甲 workspace, attempt epoch, Nix CLI, and automatic command capture profile"
         )
 
         command = "printf pwn.college{private}; scanner --token hidden-token"
@@ -1124,26 +1025,18 @@ def main():
         passed("ChatGPT-style Flash Guide with concrete learner-history grounding")
 
         contract = (republished["package"] or {}).get("oracleContract") or {}
-        report = satisfying_report(contract)
-        report = satisfy_live_report_values(
-            report,
-            contract,
-            (republished["package"] or {}).get("runtimeContract") or {},
-            workspace,
-        )
-        inner(
+        validate_flag_gate_contract(contract)
+        no_report = inner(
             "exec",
             "--user=1000",
             workspace,
-            "/usr/local/bin/python3",
+            "sh",
             "-c",
-            (
-                "import pathlib,sys;"
-                "pathlib.Path('/home/hacker/solution.json').write_text("
-                "sys.argv[1],encoding='utf-8')"
-            ),
-            json.dumps(report, ensure_ascii=False, sort_keys=True),
+            "test ! -e /home/hacker/solution.json",
+            check=False,
         )
+        if no_report.returncode != 0:
+            raise AssertionError("learner workspace unexpectedly requires a report file")
         leaked_checker = inner(
             "exec",
             "--user=1000",
@@ -1154,7 +1047,7 @@ def main():
             check=False,
         )
         if leaked_checker.returncode == 0:
-            raise AssertionError("learner can read the private Oracle contract")
+            raise AssertionError("learner can read the private Flag gate")
         checker_mode = inner(
             "exec",
             workspace,
@@ -1164,7 +1057,7 @@ def main():
             "/challenge/check-server.py",
         ).stdout.strip()
         if checker_mode != "700":
-            raise AssertionError("private Oracle checker mode is not 0700")
+            raise AssertionError("private Flag-gate checker mode is not 0700")
         process_record_mode = inner(
             "exec",
             workspace,
@@ -1184,7 +1077,7 @@ def main():
             check=False,
         )
         if legacy_argument.returncode == 0:
-            raise AssertionError("report Oracle accepted a legacy answer argument")
+            raise AssertionError("Flag gate accepted a learner-supplied result")
         checked = inner(
             "exec",
             "--user=1000",
@@ -1205,7 +1098,7 @@ def main():
                 check=False,
             )
             raise AssertionError(
-                "native challenge oracle failed to execute\n"
+                "native challenge Flag gate failed to execute\n"
                 + checked.stderr[-1000:]
                 + diagnostics.stdout[-3000:]
                 + diagnostics.stderr[-1000:]
@@ -1213,7 +1106,7 @@ def main():
         flag = checked.stdout.strip()
         if not re.fullmatch(r"pwn\.college\{[^}]+\}", flag):
             raise AssertionError(
-                "native challenge oracle did not return a dynamic flag"
+                "native challenge Flag gate did not return a dynamic flag"
             )
         flag_submit_started = time.monotonic()
         solved = require(
@@ -1379,7 +1272,7 @@ def main():
     passed(
         "temporary course, package, user, home, workspace, solve, and submission cleanup"
     )
-    print("All AISecEdu learning-flow checks passed", flush=True)
+    print("All 玄甲 learning-flow checks passed", flush=True)
 
 
 if __name__ == "__main__":

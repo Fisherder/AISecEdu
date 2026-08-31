@@ -1,29 +1,33 @@
 #!/bin/sh
 
-mount --make-shared /
+config_only="${DOJO_INIT_CONFIG_ONLY:-false}"
 
-data_mount_options="$(findmnt -nro OPTIONS -- /data 2>/dev/null)"
-if [ "$?" -ne 0 ]; then
-    if [ -f /data.img ]; then
-        echo "[+] Using existing data image"
-    else
-        echo "[+] Creating data storage"
-        truncate -s 256G /data.img
-        mkfs.ext4 /data.img
+if [ "$config_only" != "true" ]; then
+    mount --make-shared /
+
+    data_mount_options="$(findmnt -nro OPTIONS -- /data 2>/dev/null)"
+    if [ "$?" -ne 0 ]; then
+        if [ -f /data.img ]; then
+            echo "[+] Using existing data image"
+        else
+            echo "[+] Creating data storage"
+            truncate -s 256G /data.img
+            mkfs.ext4 /data.img
+        fi
+        loop_device=$(losetup -f)
+        if [ ! -e "$loop_device" ]; then
+            mknod $loop_device b 7 $(echo $loop_device | tr -cd '0-9')
+            chmod --reference=/dev/loop0 $loop_device
+            chown --reference=/dev/loop0 $loop_device
+        fi
+        losetup "$loop_device" /data.img
+        mount --options X-mount.mkdir "$loop_device" /data
+    elif printf '%s' "$data_mount_options" | grep -Fqw 'nosuid'; then
+        echo "[+] Remounting /data with suid enabled"
+        mount --options remount,suid /data
     fi
-    loop_device=$(losetup -f)
-    if [ ! -e "$loop_device" ]; then
-        mknod $loop_device b 7 $(echo $loop_device | tr -cd '0-9')
-        chmod --reference=/dev/loop0 $loop_device
-        chown --reference=/dev/loop0 $loop_device
-    fi
-    losetup "$loop_device" /data.img
-    mount --options X-mount.mkdir "$loop_device" /data
-elif printf '%s' "$data_mount_options" | grep -Fqw 'nosuid'; then
-    echo "[+] Remounting /data with suid enabled"
-    mount --options remount,suid /data
+    mount --make-shared /data
 fi
-mount --make-shared /data
 
 >> /data/config.env
 
@@ -88,16 +92,33 @@ define DOJO_AI_SOLUTION_MODEL deepseek-v4-pro
 define DOJO_AI_AUTHORING_PLAN_MODEL deepseek-v4-flash
 define DOJO_AI_AUTHORING_BUILD_MODEL deepseek-v4-pro
 define DOJO_AI_AUTHORING_VALIDATE_MODEL deepseek-v4-pro
+define DOJO_AI_AUTHORING_VALIDATION_MAX_ROUNDS 5
 define DOJO_AI_TIMEOUT_SECONDS 120
 define DOJO_AI_MAX_CONTEXT_CHARS 180000
 define DOJO_AI_MAX_FILE_CHARS 32000
+legacy_agent_ticket_secret="$(grep -oP '^OPENMAIC_TICKET_SECRET=\K.*' /data/config.env)"
+legacy_agent_service_secret="$(grep -oP '^OPENMAIC_SERVICE_SECRET=\K.*' /data/config.env)"
+define GLOBAL_AGENT_RUNTIME_TICKET_SECRET "${legacy_agent_ticket_secret:-$(openssl rand -hex 32)}"
+define GLOBAL_AGENT_RUNTIME_SERVICE_SECRET "${legacy_agent_service_secret:-$(openssl rand -hex 32)}"
+define GLOBAL_AGENT_RUNTIME_DATA_VOLUME pwncollege_agent-runtime-data
 
 mv /data/.config.env /data/config.env
+chmod 0600 /data/config.env
 . /data/config.env
 
 if [ -z "$dojo_workspace_from_environment" ] && [ "$DOJO_WORKSPACE" = "core" ]; then
     DOJO_WORKSPACE=full
     sed -i 's/^DOJO_WORKSPACE=core$/DOJO_WORKSPACE=full/' /data/config.env
+fi
+
+if [ "$config_only" = "true" ]; then
+    if [ -d /data/openmaic ] && [ ! -e /data/agent-runtime ]; then
+        mv /data/openmaic /data/agent-runtime
+    fi
+    mkdir -p /data/agent-runtime /data/platform-removal /data/ctf-corpus
+    chmod 0700 /data/agent-runtime /data/platform-removal
+    chmod 0755 /data/ctf-corpus
+    exit 0
 fi
 
 # Configure Docker daemon for Splunk logging if enabled
@@ -125,6 +146,14 @@ mkdir -p /data/workspace/nix
 mkdir -p /data/workspacefs/bin
 mkdir -p /data/ctfd-ipython
 mkdir -p /data/coverage
+if [ -d /data/openmaic ] && [ ! -e /data/agent-runtime ]; then
+    mv /data/openmaic /data/agent-runtime
+fi
+mkdir -p /data/agent-runtime
+mkdir -p /data/platform-removal
+mkdir -p /data/ctf-corpus
+chmod 0700 /data/agent-runtime /data/platform-removal
+chmod 0755 /data/ctf-corpus
 
 # Enable systemd journal forwarding to Splunk if configured
 if [ "${ENABLE_SPLUNK}" = "true" ]; then

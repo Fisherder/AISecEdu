@@ -1,0 +1,1210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>无线安全 — RFID门禁卡克隆实验</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1a1a2e;
+            --border: #2d3a5c;
+            --text: #c8d6e5;
+            --accent: #3b82f6;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --terminal-bg: #0a0e14;
+            --terminal-text: #00e676;
+            --terminal-prompt: #ff9800;
+            --highlight: #1e3a5f;
+            --dim: #64748b;
+            --card-bg: #1e293b;
+            --glow-green: 0 0 20px rgba(34,197,94,0.5);
+            --glow-red: 0 0 20px rgba(239,68,68,0.5);
+            --glow-blue: 0 0 20px rgba(59,130,246,0.5);
+            --glow-amber: 0 0 20px rgba(245,158,11,0.5);
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            background: var(--panel);
+            border-bottom: 2px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        header h1 {
+            font-size: 1.4rem;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        header h1 .icon {
+            font-size: 1.8rem;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .badge-danger {
+            background: #3b1111;
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+        .badge-info {
+            background: #0c2d4a;
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+        .progress-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .progress-step {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.85rem;
+            transition: all 0.4s;
+            position: relative;
+            cursor: default;
+            color: #888;
+        }
+        .progress-step.done {
+            background: var(--success);
+            color: #000;
+            box-shadow: var(--glow-green);
+        }
+        .progress-step.active {
+            background: var(--accent);
+            color: #fff;
+            box-shadow: var(--glow-blue);
+            animation: pulse-step 1.5s infinite;
+        }
+        @keyframes pulse-step {
+            0%,
+            100% {
+                box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+            }
+            50% {
+                box-shadow: 0 0 24px rgba(59, 130, 246, 0.9);
+            }
+        }
+        .progress-connector {
+            width: 24px;
+            height: 3px;
+            background: var(--border);
+            border-radius: 2px;
+            transition: background 0.4s;
+        }
+        .progress-connector.done {
+            background: var(--success);
+        }
+        .briefing-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin-bottom: 20px;
+            border-left: 4px solid var(--warning);
+        }
+        .briefing-card h2 {
+            color: var(--warning);
+            margin-bottom: 8px;
+            font-size: 1.1rem;
+        }
+        .briefing-card p {
+            color: #b0bec5;
+            font-size: 0.95rem;
+        }
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        @media (max-width: 900px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .panel-header {
+            background: #151d30;
+            padding: 10px 16px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid var(--border);
+            color: #e0e0e0;
+        }
+        .panel-header .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot-red {
+            background: #ef4444;
+            box-shadow: 0 0 6px #ef4444;
+        }
+        .dot-green {
+            background: #22c55e;
+            box-shadow: 0 0 6px #22c55e;
+        }
+        .dot-amber {
+            background: #f59e0b;
+            box-shadow: 0 0 6px #f59e0b;
+        }
+        .panel-body {
+            padding: 16px;
+        }
+        .terminal {
+            background: var(--terminal-bg);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace;
+            font-size: 0.85rem;
+            max-height: 420px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--terminal-text);
+            line-height: 1.5;
+            scroll-behavior: smooth;
+        }
+        .terminal .output-line {
+            margin: 0;
+            padding: 2px 0;
+        }
+        .terminal .output-line.prompt {
+            color: var(--terminal-prompt);
+        }
+        .terminal .output-line.info {
+            color: #64b5f6;
+        }
+        .terminal .output-line.success {
+            color: #4caf50;
+        }
+        .terminal .output-line.warning-line {
+            color: #ffb74d;
+        }
+        .terminal .output-line.error {
+            color: #ef5350;
+        }
+        .terminal .output-line.highlight {
+            color: #ffeb3b;
+            font-weight: bold;
+        }
+        .terminal-input-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .terminal-input-row .prompt-symbol {
+            color: var(--terminal-prompt);
+            font-family: monospace;
+            font-weight: 700;
+            font-size: 0.9rem;
+            flex-shrink: 0;
+        }
+        .terminal-input-row input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.85rem;
+            outline: none;
+            caret-color: #00e676;
+        }
+        .terminal-input-row input::placeholder {
+            color: #4a5568;
+        }
+        canvas {
+            width: 100%;
+            border-radius: 8px;
+            background: #050a12;
+            display: block;
+            border: 1px solid #1e2d44;
+        }
+        .door-section {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 10px 0;
+        }
+        .door-reader {
+            background: #1a1f2e;
+            border-radius: 16px;
+            padding: 20px;
+            text-align: center;
+            border: 2px solid #3a4a6a;
+            min-width: 140px;
+            cursor: pointer;
+            transition: all 0.3s;
+            user-select: none;
+            position: relative;
+        }
+        .door-reader:hover {
+            border-color: var(--accent);
+            box-shadow: var(--glow-blue);
+        }
+        .door-reader.activated {
+            border-color: var(--success);
+            box-shadow: var(--glow-green);
+        }
+        .door-reader.denied {
+            border-color: var(--danger);
+            box-shadow: var(--glow-red);
+            animation: shake 0.5s;
+        }
+        @keyframes shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            20% {
+                transform: translateX(-6px);
+            }
+            40% {
+                transform: translateX(6px);
+            }
+            60% {
+                transform: translateX(-4px);
+            }
+            80% {
+                transform: translateX(4px);
+            }
+        }
+        .reader-led {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #ef4444;
+            margin: 8px auto;
+            box-shadow: var(--glow-red);
+            transition: all 0.3s;
+        }
+        .reader-led.green {
+            background: #22c55e;
+            box-shadow: var(--glow-green);
+        }
+        .door-icon {
+            font-size: 4rem;
+            transition: transform 0.6s, color 0.3s;
+            display: inline-block;
+            color: #8b9dc3;
+        }
+        .door-icon.open {
+            transform: perspective(200px) rotateY(-25deg);
+            color: #22c55e;
+        }
+        .card-visual {
+            width: 100px;
+            height: 62px;
+            background: linear-gradient(135deg, #e8e8e8, #c0c0c0);
+            border-radius: 8px;
+            margin: 10px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: #333;
+            font-family: monospace;
+            letter-spacing: 1px;
+            border: 1px solid #999;
+            transition: all 0.4s;
+            position: relative;
+        }
+        .card-visual.cloned {
+            background: linear-gradient(135deg, #fff9c4, #ffcc80);
+            border-color: #f59e0b;
+            box-shadow: var(--glow-amber);
+        }
+        .card-visual .card-chip {
+            width: 18px;
+            height: 14px;
+            background: #d4af37;
+            border-radius: 3px;
+            position: absolute;
+            left: 12px;
+            top: 10px;
+        }
+        .flag-display {
+            background: #0a0f0a;
+            border: 2px dashed #22c55e;
+            border-radius: 10px;
+            padding: 16px;
+            text-align: center;
+            font-family: monospace;
+            font-size: 1.1rem;
+            color: #22c55e;
+            animation: fadeInUp 0.6s;
+            display: none;
+            margin-top: 12px;
+        }
+        .flag-display.visible {
+            display: block;
+        }
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .defense-section {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .defense-section h3 {
+            color: var(--accent);
+            margin-bottom: 12px;
+        }
+        .auth-flow {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: center;
+            justify-content: center;
+            margin: 16px 0;
+        }
+        .auth-node {
+            background: #151d30;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            min-width: 100px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            user-select: none;
+            font-size: 0.85rem;
+        }
+        .auth-node:hover {
+            border-color: var(--accent);
+            box-shadow: var(--glow-blue);
+        }
+        .auth-node.active-step {
+            border-color: var(--warning);
+            box-shadow: var(--glow-amber);
+            animation: pulse-step 1.5s infinite;
+        }
+        .auth-node.done-step {
+            border-color: var(--success);
+            box-shadow: var(--glow-green);
+            background: #0a2a0f;
+        }
+        .auth-arrow {
+            font-size: 1.5rem;
+            color: #5a7a9a;
+            flex-shrink: 0;
+        }
+        .btn {
+            display: inline-block;
+            padding: 8px 18px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--highlight);
+            color: #fff;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        .btn:hover {
+            background: #254a6e;
+            border-color: var(--accent);
+        }
+        .btn-success {
+            background: #14532d;
+            border-color: #22c55e;
+        }
+        .btn-success:hover {
+            background: #1a6b3a;
+        }
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: 0.85rem;
+        }
+        .comparison-table th,
+        .comparison-table td {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            text-align: left;
+        }
+        .comparison-table th {
+            background: #151d30;
+            color: #fff;
+        }
+        .comparison-table .vuln {
+            color: #ef4444;
+        }
+        .comparison-table .secure {
+            color: #22c55e;
+        }
+        details {
+            margin-top: 12px;
+        }
+        details summary {
+            cursor: pointer;
+            color: var(--accent);
+            font-weight: 600;
+            padding: 8px 0;
+            user-select: none;
+        }
+        details summary:hover {
+            color: #60a5fa;
+        }
+        .analysis-content {
+            background: #0f1a2e;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 8px;
+            line-height: 1.7;
+            font-size: 0.9rem;
+            color: #b0bec5;
+        }
+        .analysis-content h4 {
+            color: #fff;
+            margin: 10px 0 6px;
+        }
+        .analysis-content code {
+            background: #1e2d44;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #f59e0b;
+        }
+        .achievement-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #1a3a1a;
+            border: 2px solid #22c55e;
+            border-radius: 12px;
+            padding: 16px 20px;
+            z-index: 100;
+            animation: slideInRight 0.5s, fadeOut 0.5s 3.5s forwards;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+        @keyframes slideInRight {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+        }
+        .achievement-toast .trophy {
+            font-size: 2rem;
+        }
+        .achievement-toast .msg {
+            font-size: 0.9rem;
+            color: #22c55e;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1><span class="icon">📡</span>无线安全实验 — RFID门禁卡克隆</h1>
+            <span class="badge badge-danger">⚠ 仅限授权教学环境</span>
+        </header>
+
+        <!-- Progress -->
+        <div class="progress-bar-wrap" style="margin-bottom:16px;justify-content:center">
+            <span class="progress-step done" id="step1">1</span>
+            <span class="progress-connector done" id="conn1"></span>
+            <span class="progress-step" id="step2">2</span>
+            <span class="progress-connector" id="conn2"></span>
+            <span class="progress-step" id="step3">3</span>
+            <span class="progress-connector" id="conn3"></span>
+            <span class="progress-step" id="step4">4</span>
+            <span class="progress-connector" id="conn4"></span>
+            <span class="progress-step" id="step5">5</span>
+        </div>
+
+        <!-- Briefing -->
+        <div class="briefing-card">
+            <h2>📋 任务简报</h2>
+            <p>你是一名安全研究员，受委托对某办公楼的门禁系统进行安全评估。门禁使用<strong>EM410x协议（125kHz低频RFID）</strong>。你的任务是：使用模拟的<strong>Proxmark3</strong>嗅探合法门禁卡的UID，制作克隆卡，并验证其可打开门禁。完成后，你将理解为何现代系统应采用<strong>MIFARE DESFire（13.56MHz+双向认证）</strong>来防御此类攻击。</p>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="main-grid">
+            <!-- Left: Proxmark3 Terminal -->
+            <div class="panel">
+                <div class="panel-header"><span class="dot dot-amber"></span>Proxmark3 终端模拟器 <span style="font-weight:400;color:#888;margin-left:auto;">v4.2.0</span></div>
+                <div class="panel-body">
+                    <div class="terminal" id="terminal">
+                        <p class="output-line info">[=] Proxmark3 仿真器已启动</p>
+                        <p class="output-line info">[=] 固件版本: PM3-EDU-v4.2.0</p>
+                        <p class="output-line info">[=] 类型 <span style="color:#ffeb3b;">help</span> 查看可用命令</p>
+                        <p class="output-line" style="color:#4a5568;">──────────────────────────────</p>
+                    </div>
+                    <div class="terminal-input-row">
+                        <span class="prompt-symbol">pm3 &gt;</span>
+                        <input type="text" id="terminalInput" placeholder="输入命令..." autocomplete="off" autofocus>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                        <button class="btn" onclick="quickCmd('help')">🆘 help</button>
+                        <button class="btn" onclick="quickCmd('lf em410x reader')">📖 读卡</button>
+                        <button class="btn" onclick="quickCmd('lf em410x sniff')">👃 嗅探</button>
+                        <button class="btn" onclick="quickCmd('lf em410x clone A4F7B3C91D')">🧬 克隆</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Waveform + Door -->
+            <div class="panel">
+                <div class="panel-header"><span class="dot dot-green"></span>信号波形 & 门禁面板</div>
+                <div class="panel-body">
+                    <canvas id="waveformCanvas" width="700" height="180"></canvas>
+                    <p style="font-size:0.75rem;color:var(--dim);text-align:center;margin-top:4px;">EM410x Manchester编码波形 (嗅探后显示完整信号)</p>
+                    <hr style="border-color:var(--border);margin:10px 0;">
+                    <div class="door-section">
+                        <div class="door-reader" id="doorReader" onclick="presentCard()" title="点击刷卡">
+                            <div class="reader-led" id="readerLed"></div>
+                            <span style="font-size:0.8rem;color:#aaa;">门禁读卡器</span>
+                            <div class="card-visual" id="cardVisual">
+                                <div class="card-chip"></div>
+                                <span id="cardLabel">空白卡</span>
+                            </div>
+                        </div>
+                        <div style="text-align:center;">
+                            <span class="door-icon" id="doorIcon">🚪</span>
+                            <p style="font-size:0.8rem;color:#888;">🔒 <span id="lockStatus">已锁定</span></p>
+                        </div>
+                    </div>
+                    <div class="flag-display" id="flagDisplay">
+                        🏁 <strong>FLAG{em410x_clone_m4st3r_2024}</strong><br>
+                        <span style="font-size:0.75rem;">恭喜！你成功克隆了RFID门禁卡并打开了门禁。</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DESFire Defense Section -->
+        <div class="defense-section" id="defenseSection">
+            <h3>🛡️ 防御方案：MIFARE DESFire 双向认证</h3>
+            <p style="color:#b0bec5;font-size:0.9rem;margin-bottom:12px;">
+                EM410x仅是简单的UID广播协议——卡片被动响应，无任何加密或认证。而<strong>MIFARE DESFire EV3</strong>使用<strong>AES-128加密+3步双向认证</strong>，使得克隆攻击几乎不可能。点击下方步骤理解认证流程：
+            </p>
+            <div class="auth-flow" id="authFlow">
+                <div class="auth-node" id="authNode1" onclick="advanceAuth(1)">
+                    📡<br>读卡器→卡<br><small>发送随机数 R<sub>r</sub></small>
+                </div>
+                <span class="auth-arrow">→</span>
+                <div class="auth-node" id="authNode2" onclick="advanceAuth(2)">
+                    💳<br>卡→读卡器<br><small>R<sub>c</sub> + E(K, R<sub>r</sub>||R<sub>c</sub>)</small>
+                </div>
+                <span class="auth-arrow">→</span>
+                <div class="auth-node" id="authNode3" onclick="advanceAuth(3)">
+                    ✅<br>读卡器→卡<br><small>E(K, R<sub>c</sub>||R<sub>r</sub>)</small>
+                </div>
+                <span class="auth-arrow">→</span>
+                <div class="auth-node" id="authNode4">
+                    🔐<br>双向认证完成<br><small>会话密钥建立</small>
+                </div>
+            </div>
+            <p id="authExplanation" style="color:#888;font-size:0.8rem;text-align:center;min-height:20px;"></p>
+            <table class="comparison-table">
+                <thead>
+                    <tr><th>特性</th><th>EM410x</th><th>MIFARE DESFire EV3</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>频率</td><td>125 kHz</td><td>13.56 MHz</td></tr>
+                    <tr><td>认证方式</td><td class="vuln">❌ 无认证（仅UID广播）</td><td class="secure">✅ AES-128双向认证</td></tr>
+                    <tr><td>加密</td><td class="vuln">❌ 明文传输</td><td class="secure">✅ 端到端加密</td></tr>
+                    <tr><td>防克隆</td><td class="vuln">❌ 极易克隆（<1秒）</td><td class="secure">✅ 密钥不可提取</td></tr>
+                    <tr><td>典型应用</td><td>老旧门禁、低成本标签</td><td>金融、政府、高安全门禁</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Analysis Report -->
+        <details style="margin-top:16px;">
+            <summary>📄 查看完整分析报告</summary>
+            <div class="analysis-content">
+                <h4>🔍 漏洞根因</h4>
+                <p>EM410x协议设计于1990年代，采用<strong>明文UID广播</strong>机制。卡片进入读卡器磁场后，持续循环发送64位数据帧（包含40位UID），<strong>无任何身份验证或加密</strong>。任何具备125kHz接收能力的设备（如Proxmark3）均可被动嗅探并复制UID。</p>
+                <h4>⚔️ 攻击链</h4>
+                <ol>
+                    <li><strong>侦察</strong>：使用<code>lf em410x reader</code>在近距离读取目标卡UID</li>
+                    <li><strong>嗅探</strong>：使用<code>lf em410x sniff</code>捕获完整Manchester编码波形</li>
+                    <li><strong>解码</strong>：从波形中提取64位数据帧，解析出40位UID</li>
+                    <li><strong>克隆</strong>：使用<code>lf em410x clone &lt;UID&gt;</code>将UID写入可编程T55x7标签</li>
+                    <li><strong>利用</strong>：将克隆卡靠近读卡器，门禁系统无法区分原卡与克隆卡</li>
+                </ol>
+                <h4>🛡️ 修复方案</h4>
+                <p>升级至<strong>MIFARE DESFire EV3</strong>（或同等级安全芯片），利用其<strong>3步双向认证</strong>机制：读卡器与卡片各自生成随机数，使用预共享密钥(AES-128)加密交换，双方验证对方确实持有正确密钥后才建立会话。即使攻击者嗅探到通信，也无法导出密钥或伪造响应。</p>
+                <h4>📚 真实案例参考</h4>
+                <p>2023年DEF CON演示中，安全研究员使用Proxmark3在<strong>0.3秒内</strong>克隆了一张办公楼EM410x门禁卡。同类攻击在物理渗透测试中成功率接近<strong>100%</strong>（针对未升级的125kHz系统）。MIFARE DESFire EV3目前尚无已知的实用克隆攻击。</p>
+                <p style="color:var(--danger);font-size:0.8rem;margin-top:8px;">⚠ 本文档仅用于授权教学环境。未经授权克隆他人门禁卡属于违法行为。</p>
+            </div>
+        </details>
+    </div>
+
+    <!-- Achievement Toast -->
+    <div class="achievement-toast" id="achievementToast" style="display:none;">
+        <div class="trophy">🏆</div>
+        <div class="msg" id="toastMsg"></div>
+    </div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // This simulation demonstrates RFID EM410x protocol weakness
+        // and MIFARE DESFire mutual authentication defense.
+
+        (function() {
+            // ──────────── STATE ────────────
+            const TARGET_UID = 'A4F7B3C91D';
+            const TARGET_UID_SPACED = 'A4 F7 B3 C9 1D';
+            let currentCardUID = null; // UID on the cloned card (null = blank)
+            let hasReadCard = false;
+            let hasSniffed = false;
+            let hasCloned = false;
+            let doorOpened = false;
+            let authStep = 0;
+            let sniffWaveformData = null;
+
+            // ──────────── DOM REFS ────────────
+            const terminal = document.getElementById('terminal');
+            const terminalInput = document.getElementById('terminalInput');
+            const waveformCanvas = document.getElementById('waveformCanvas');
+            const ctx = waveformCanvas.getContext('2d');
+            const doorReader = document.getElementById('doorReader');
+            const readerLed = document.getElementById('readerLed');
+            const doorIcon = document.getElementById('doorIcon');
+            const lockStatus = document.getElementById('lockStatus');
+            const flagDisplay = document.getElementById('flagDisplay');
+            const cardVisual = document.getElementById('cardVisual');
+            const cardLabel = document.getElementById('cardLabel');
+            const achievementToast = document.getElementById('achievementToast');
+            const toastMsg = document.getElementById('toastMsg');
+            const authExplanation = document.getElementById('authExplanation');
+
+            // ──────────── PROGRESS ────────────
+            function updateProgress() {
+                const steps = ['step1', 'step2', 'step3', 'step4', 'step5'];
+                const conns = ['conn1', 'conn2', 'conn3', 'conn4'];
+                // step1: always done (briefing read)
+                setProgressState('step1', 'done');
+                // step2: card read
+                setProgressState('step2', hasReadCard ? 'done' : (hasReadCard ? 'done' : 'active'));
+                setProgressState('conn1', hasReadCard ? 'done' : '');
+                // step3: sniffed
+                setProgressState('step3', hasSniffed ? 'done' : (hasReadCard ? 'active' : ''));
+                setProgressState('conn2', hasSniffed ? 'done' : '');
+                // step4: cloned
+                setProgressState('step4', hasCloned ? 'done' : (hasSniffed ? 'active' : ''));
+                setProgressState('conn3', hasCloned ? 'done' : '');
+                // step5: door opened
+                setProgressState('step5', doorOpened ? 'done' : (hasCloned ? 'active' : ''));
+                setProgressState('conn4', doorOpened ? 'done' : '');
+
+                if (!hasReadCard && !hasSniffed && !hasCloned && !doorOpened) {
+                    setProgressState('step2', 'active');
+                }
+            }
+
+            function setProgressState(id, state) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.remove('done', 'active');
+                if (state === 'done') el.classList.add('done');
+                if (state === 'active') el.classList.add('active');
+            }
+
+            // ──────────── TERMINAL ────────────
+            function appendTerminal(text, cls = '') {
+                const lines = text.split('\n');
+                lines.forEach(line => {
+                    const p = document.createElement('p');
+                    p.className = 'output-line ' + cls;
+                    p.textContent = line;
+                    terminal.appendChild(p);
+                });
+                terminal.scrollTop = terminal.scrollHeight;
+            }
+
+            function appendPrompt(cmd) {
+                const p = document.createElement('p');
+                p.className = 'output-line prompt';
+                p.textContent = 'pm3 > ' + cmd;
+                terminal.appendChild(p);
+                terminal.scrollTop = terminal.scrollHeight;
+            }
+
+            function processCommand(cmd) {
+                const trimmed = cmd.trim();
+                if (!trimmed) return;
+
+                appendPrompt(trimmed);
+
+                const lower = trimmed.toLowerCase();
+
+                if (lower === 'help') {
+                    appendTerminal('══════════ Proxmark3 命令列表 ══════════', 'info');
+                    appendTerminal('lf em410x reader    读取EM410x标签UID', 'highlight');
+                    appendTerminal('lf em410x sniff     嗅探EM410x通信信号', 'highlight');
+                    appendTerminal('lf em410x clone <id> 克隆标签到T55x7卡', 'highlight');
+                    appendTerminal('lf em410x demod     从波形解调UID', 'highlight');
+                    appendTerminal('hf mf desfire info  查看MIFARE DESFire信息', 'highlight');
+                    appendTerminal('clear               清屏', 'info');
+                    appendTerminal('═══════════════════════════════════════', 'info');
+                } else if (lower === 'clear') {
+                    terminal.innerHTML = '';
+                    appendTerminal('[=] 终端已清除', 'info');
+                } else if (lower.startsWith('lf em410x reader')) {
+                    appendTerminal('[=] 正在搜索EM410x标签 (125kHz)...', 'info');
+                    appendTerminal('[=] 天线已激活，等待标签进入磁场...', 'info');
+                    setTimeout(() => {
+                        appendTerminal('[+] 检测到标签！', 'success');
+                        appendTerminal('[=] EM410x Tag ID: ' + TARGET_UID_SPACED, 'highlight');
+                        appendTerminal('[=] 格式: EM410x (125kHz, ASK调制, Manchester编码)', 'info');
+                        appendTerminal('[=] 数据速率: 64 bits/帧, RF/64', 'info');
+                        appendTerminal('[+] 读取成功！UID已记录。', 'success');
+                        if (!hasReadCard) {
+                            hasReadCard = true;
+                            updateProgress();
+                            showToast('📖', '成功读取目标卡UID: ' + TARGET_UID_SPACED);
+                        }
+                    }, 600);
+                } else if (lower.startsWith('lf em410x sniff')) {
+                    appendTerminal('[=] 启动EM410x嗅探模式...', 'info');
+                    appendTerminal('[=] 采样率: 125kHz × 64 = 8MHz', 'info');
+                    appendTerminal('[=] 等待标签通信...', 'info');
+                    setTimeout(() => {
+                        appendTerminal('[+] 捕获到EM410x数据帧！', 'success');
+                        appendTerminal('[=] 样本数: 2048', 'info');
+                        appendTerminal('[=] 检测到64位完整帧', 'info');
+                        appendTerminal('[=] 帧头检测: 9位全1 ✓', 'info');
+                        appendTerminal('[=] 波形数据已就绪，请查看右侧面板', 'info');
+                        appendTerminal('[+] 嗅探完成。使用 lf em410x demod 可解调UID', 'success');
+                        if (!hasSniffed) {
+                            hasSniffed = true;
+                            sniffWaveformData = generateWaveformData(TARGET_UID);
+                            drawFullWaveform(sniffWaveformData);
+                            updateProgress();
+                            showToast('👃', '成功嗅探EM410x信号波形');
+                        }
+                    }, 800);
+                } else if (lower.startsWith('lf em410x clone')) {
+                    const parts = trimmed.split(/\s+/);
+                    const uidArg = parts[parts.length - 1];
+                    const cleanUID = uidArg.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+                    if (cleanUID.length !== 10) {
+                        appendTerminal('[!] 错误: UID格式无效。需要10位十六进制字符 (如 A4F7B3C91D)', 'error');
+                        appendTerminal('[!] 提示: 先用 lf em410x reader 读取目标UID', 'warning-line');
+                    } else if (!hasReadCard && cleanUID === TARGET_UID) {
+                        appendTerminal('[!] 警告: 尚未读取任何卡片。请先使用 lf em410x reader', 'warning-line');
+                        appendTerminal('[=] 继续强制写入...', 'info');
+                        doClone(cleanUID);
+                    } else {
+                        doClone(cleanUID);
+                    }
+                } else if (lower.startsWith('lf em410x demod')) {
+                    if (!hasSniffed) {
+                        appendTerminal('[!] 错误: 没有可解调的波形数据。请先使用 lf em410x sniff', 'error');
+                    } else {
+                        appendTerminal('[=] 正在解调Manchester编码波形...', 'info');
+                        appendTerminal('[=] 检测帧头: 111111111 (9位) ✓', 'info');
+                        appendTerminal('[=] 提取数据位 (10组×5位)...', 'info');
+                        setTimeout(() => {
+                            appendTerminal('[=] 解调UID: ' + TARGET_UID_SPACED, 'highlight');
+                            appendTerminal('[+] 解调成功！', 'success');
+                        }, 400);
+                    }
+                } else if (lower.startsWith('hf mf desfire info')) {
+                    appendTerminal('[=] 查询MIFARE DESFire标签 (13.56MHz)...', 'info');
+                    appendTerminal('[=] ISO 14443-A 选卡...', 'info');
+                    setTimeout(() => {
+                        appendTerminal('[+] 检测到 MIFARE DESFire EV3 标签', 'success');
+                        appendTerminal('[=] ATQA: 0x0344  SAK: 0x20', 'info');
+                        appendTerminal('[=] 支持 AES-128 / 3DES / ISO 7816-4', 'info');
+                        appendTerminal('[=] 安全特性: 双向认证 ✓ | 加密通信 ✓ | 防克隆 ✓', 'success');
+                        appendTerminal('[=] ⚠ 此卡无法被EM410x工具克隆——需要密钥才能认证', 'warning-line');
+                    }, 500);
+                } else {
+                    appendTerminal('[!] 未知命令: ' + trimmed + ' — 输入 help 查看可用命令', 'error');
+                }
+
+                terminal.scrollTop = terminal.scrollHeight;
+            }
+
+            function doClone(uid) {
+                appendTerminal('[=] 初始化T55x7可编程标签...', 'info');
+                appendTerminal('[=] 写入UID: ' + uid.replace(/(.{2})/g, '$1 ').trim(), 'highlight');
+                appendTerminal('[=] 配置EM410x调制参数 (ASK, RF/64, Manchester)...', 'info');
+                setTimeout(() => {
+                    appendTerminal('[+] 写入成功！标签已配置为EM410x模拟模式', 'success');
+                    appendTerminal('[=] 克隆卡UID: ' + uid.replace(/(.{2})/g, '$1 ').trim(), 'highlight');
+                    currentCardUID = uid;
+                    hasCloned = true;
+                    updateCardVisual(uid);
+                    updateProgress();
+                    if (uid === TARGET_UID) {
+                        showToast('🧬', '克隆成功！卡片UID: ' + uid);
+                    } else {
+                        appendTerminal('[!] 注意: 克隆的UID与目标不匹配，门禁可能无法打开', 'warning-line');
+                        showToast('🧬', '卡片已写入UID: ' + uid + ' (与目标不同)');
+                    }
+                }, 500);
+            }
+
+            function quickCmd(cmd) {
+                terminalInput.value = cmd;
+                terminalInput.focus();
+                // Auto-submit for convenience
+                processCommand(cmd);
+                terminalInput.value = '';
+            }
+
+            terminalInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    const cmd = terminalInput.value;
+                    processCommand(cmd);
+                    terminalInput.value = '';
+                }
+            });
+
+            // ──────────── WAVEFORM CANVAS ────────────
+            function generateWaveformData(uid) {
+                // Convert UID hex to binary (40 bits)
+                let binaryUID = '';
+                for (let i = 0; i < uid.length; i++) {
+                    const nibble = parseInt(uid[i], 16);
+                    binaryUID += nibble.toString(2).padStart(4, '0');
+                }
+                // EM410x frame: 9 header bits (all 1) + 10 groups of [4 data + 1 parity] + 4 col parity + 1 stop
+                const header = '111111111';
+                let dataGroups = '';
+                for (let g = 0; g < 10; g++) {
+                    const nibbleBits = binaryUID.substring(g * 4, g * 4 + 4);
+                    const ones = nibbleBits.split('1').length - 1;
+                    const parity = (ones % 2 === 0) ? '0' : '1'; // even parity
+                    dataGroups += nibbleBits + parity;
+                }
+                const colParity = '0000'; // simplified
+                const stopBit = '0';
+                const fullFrame = header + dataGroups + colParity + stopBit;
+                return fullFrame; // 64 bits
+            }
+
+            function drawFullWaveform(bits) {
+                const w = waveformCanvas.width;
+                const h = waveformCanvas.height;
+                ctx.clearRect(0, 0, w, h);
+
+                // Background grid
+                ctx.strokeStyle = '#1a2840';
+                ctx.lineWidth = 0.5;
+                for (let gy = 0; gy < h; gy += 30) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, gy);
+                    ctx.lineTo(w, gy);
+                    ctx.stroke();
+                }
+
+                const totalBits = bits.length;
+                const marginX = 40;
+                const availableW = w - marginX * 2;
+                const bitWidth = availableW / totalBits;
+                const highY = 40;
+                const lowY = 120;
+                const midY = (highY + lowY) / 2;
+                const signalTop = 25;
+                const signalBottom = 140;
+
+                // Draw bit period separators
+                ctx.strokeStyle = '#1e3550';
+                ctx.lineWidth = 0.5;
+                for (let i = 0; i <= totalBits; i++) {
+                    const x = marginX + i * bitWidth;
+                    ctx.beginPath();
+                    ctx.moveTo(x, signalTop);
+                    ctx.lineTo(x, signalBottom);
+                    ctx.stroke();
+                }
+
+                // Draw Manchester encoded waveform
+                ctx.strokeStyle = '#00e676';
+                ctx.lineWidth = 2.5;
+                ctx.shadowColor = '#00e676';
+                ctx.shadowBlur = 4;
+                ctx.beginPath();
+
+                let prevLevel = null;
+                for (let i = 0; i < totalBits; i++) {
+                    const bit = bits[i];
+                    const xStart = marginX + i * bitWidth;
+                    const xMid = xStart + bitWidth / 2;
+                    const xEnd = xStart + bitWidth;
+
+                    // Manchester: 1 = high→low, 0 = low→high
+                    if (bit === '1') {
+                        // Start high, transition to low at midpoint
+                        if (i === 0 || prevLevel === null) ctx.moveTo(xStart, highY);
+                        else ctx.lineTo(xStart, highY);
+                        ctx.lineTo(xMid, highY);
+                        ctx.lineTo(xMid, lowY);
+                        ctx.lineTo(xEnd, lowY);
+                        prevLevel = 'low';
+                    } else {
+                        // Start low, transition to high at midpoint
+                        if (i === 0 || prevLevel === null) ctx.moveTo(xStart, lowY);
+                        else ctx.lineTo(xStart, lowY);
+                        ctx.lineTo(xMid, lowY);
+                        ctx.lineTo(xMid, highY);
+                        ctx.lineTo(xEnd, highY);
+                        prevLevel = 'high';
+                    }
+                }
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+
+                // Highlight header section
+                const headerEndX = marginX + 9 * bitWidth;
+                ctx.fillStyle = 'rgba(255,235,59,0.12)';
+                ctx.fillRect(marginX, signalTop, 9 * bitWidth, signalBottom - signalTop);
+                ctx.fillStyle = '#ffeb3b';
+                ctx.font = '10px monospace';
+                ctx.fillText('帧头(9位1)', marginX + 2, signalTop - 6);
+
+                // Highlight data section
+                const dataStartX = marginX + 9 * bitWidth;
+                const dataEndX = marginX + 59 * bitWidth;
+                ctx.fillStyle = 'rgba(59,130,246,0.10)';
+                ctx.fillRect(dataStartX, signalTop, 50 * bitWidth, signalBottom - signalTop);
+                ctx.fillStyle = '#64b5f6';
+                ctx.fillText('数据区(10组×5位)', dataStartX + 4, signalTop - 6);
+
+                // Annotate UID
+                ctx.fillStyle = '#f59e0b';
+                ctx.font = 'bold 11px monospace';
+                ctx.fillText('UID: ' + TARGET_UID_SPACED, marginX + 9 * bitWidth + 4, signalBottom + 18);
+
+                // Legend
+                ctx.fillStyle = '#888';
+                ctx.font = '9px sans-serif';
+                ctx.fillText('Manchester: 1=高→低  0=低→高', marginX, h - 8);
+                ctx.fillText('EM410x 64-bit完整帧', w - marginX - 120, h - 8);
+            }
+
+            function drawPlaceholderWaveform() {
+                const w = waveformCanvas.width;
+                const h = waveformCanvas.height;
+                ctx.clearRect(0, 0, w, h);
+                ctx.strokeStyle = '#1a2840';
+                ctx.lineWidth = 0.5;
+                for (let gy = 0; gy < h; gy += 30) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, gy);
+                    ctx.lineTo(w, gy);
+                    ctx.stroke();
+                }
+                ctx.fillStyle = '#4a5568';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('📡 使用 lf em410x sniff 捕获波形', w / 2, h / 2 - 8);
+                ctx.fillText('波形将显示在此处', w / 2, h / 2 + 18);
+                ctx.textAlign = 'start';
+                // Draw faint flat line
+                ctx.strokeStyle = '#2a3a55';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(40, h / 2 + 30);
+                ctx.lineTo(w - 40, h / 2 + 30);
+                ctx.stroke();
+            }
+
+            // ──────────── DOOR & CARD ────────────
+            function presentCard() {
+                if (doorOpened) {
+                    appendTerminal('[=] 门已打开，无需再次刷卡', 'info');
+                    return;
+                }
+                if (!currentCardUID) {
+                    // No card cloned yet
+                    doorReader.classList.add('denied');
+                    readerLed.classList.remove('green');
+                    readerLed.style.background = '#ef4444';
+                    readerLed.style.boxShadow = '0 0 20px rgba(239,68,68,0.7)';
+                    appendTerminal('[!] 未检测到有效卡片。请先克隆一张卡。', 'warning-line');
+                    setTimeout(() => doorReader.classList.remove('denied'), 500);
+                    return;
+                }
+                if (currentCardUID === TARGET_UID) {
+                    // Correct UID - door opens!
+                    doorOpened = true;
+                    doorReader.classList.add('activated');
+                    readerLed.classList.add('green');
+                    readerLed.style.background = '#22c55e';
+                    readerLed.style.boxShadow = '0 0 24px rgba(34,197,94,0.8)';
+                    doorIcon.classList.add('open');
+                    lockStatus.textContent = '已解锁 🔓';
+                    lockStatus.style.color = '#22c55e';
+                    flagDisplay.classList.add('visible');
+                    appendTerminal('[+] 卡片验证通过！UID匹配: ' + TARGET_UID_SPACED, 'success');
+                    appendTerminal('[🔓] 门禁已打开！', 'success');
+                    appendTerminal('[🏁] FLAG{em410x_clone_m4st3r_2024}', 'highlight');
+                    updateProgress();
+                    showToast('🔓', '门禁已打开！FLAG已获取！');
+                    // Scroll flag into view
+                    flagDisplay.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } else {
+                    // Wrong UID
+                    doorReader.classList.add('denied');
+                    readerLed.classList.remove('green');
+                    readerLed.style.background = '#ef4444';
+                    readerLed.style.boxShadow = '0 0 20px rgba(239,68,68,0.7)';
+                    appendTerminal('[!] 访问拒绝！UID不匹配。期望: ' + TARGET_UID_SPACED +
+                        '  当前卡: ' + currentCardUID.replace(/(.{2})/g, '$1 ').trim(), 'error');
+                    setTimeout(() => doorReader.classList.remove('denied'), 500);
+                }
+            }
+
+            function updateCardVisual(uid) {
+                cardVisual.classList.add('cloned');
+                cardLabel.textContent = uid.substring(0, 8) + '...';
+                cardLabel.style.fontSize = '0.65rem';
+            }
+
+            function resetCardVisual() {
+                cardVisual.classList.remove('cloned');
+                cardLabel.textContent = '空白卡';
+                cardLabel.style.fontSize = '0.7rem';
+            }
+
+            // ──────────── DESFire AUTH FLOW ────────────
+            window.advanceAuth = function(step) {
+                const nodes = ['authNode1', 'authNode2', 'authNode3', 'authNode4'];
+                nodes.forEach((id, idx) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    el.classList.remove('active-step', 'done-step');
+                    if (idx < step) el.classList.add('done-step');
+                    if (idx === step - 1) el.classList.add('active-step');
+                });
+
+                const explanations = [
+                    '',
+                    '第1步：读卡器生成随机数 Rᵣ，发送给卡片。这防止了重放攻击——每次认证的挑战值都不同。',
+                    '第2步：卡片生成自己的随机数 Rᶜ，并使用共享密钥K加密 (Rᵣ||Rᶜ) 后返回。读卡器解密验证Rᵣ是否正确——确认卡片持有密钥。',
+                    '第3步：读卡器使用密钥K加密 (Rᶜ||Rᵣ) 发送给卡片。卡片解密验证Rᶜ是否正确——确认读卡器也持有密钥。双向认证完成！',
+                ];
+                authExplanation.textContent = explanations[step] || '';
+                if (step >= 3) {
+                    document.getElementById('authNode4').classList.add('done-step');
+                    authExplanation.textContent = '✅ 双向认证完成！双方均已验证对方身份。会话密钥从Rᵣ和Rᶜ派生，后续通信加密。攻击者即使嗅探全程也无法克隆——因为他们没有密钥K。';
+                }
+            };
+
+            // ──────────── TOAST ────────────
+            function showToast(icon, msg) {
+                toastMsg.textContent = icon + ' ' + msg;
+                achievementToast.style.display = 'block';
+                achievementToast.style.animation = 'none';
+                achievementToast.offsetHeight; // reflow
+                achievementToast.style.animation = 'slideInRight 0.5s, fadeOut 0.5s 3.5s forwards';
+                setTimeout(() => {
+                    achievementToast.style.display = 'none';
+                }, 4200);
+            }
+
+            // ──────────── INIT ────────────
+            function init() {
+                drawPlaceholderWaveform();
+                updateProgress();
+                setProgressState('step2', 'active');
+                // Focus terminal input on page click (but not when clicking buttons)
+                document.addEventListener('click', function(e) {
+                    if (!e.target.closest('button') && !e.target.closest('input') && !e.target.closest(
+                            'details') && !e.target.closest('.auth-node') && !e.target.closest(
+                            '.door-reader')) {
+                        terminalInput.focus();
+                    }
+                });
+                terminalInput.focus();
+                // Draw initial card
+                resetCardVisual();
+            }
+
+            init();
+
+            // ──────────── EXPORT FOR INLINE ONCLICK ────────────
+            window.presentCard = presentCard;
+            window.quickCmd = quickCmd;
+            window.processCommand = processCommand;
+            window.advanceAuth = advanceAuth;
+        })();
+    </script>
+</body>
+</html>

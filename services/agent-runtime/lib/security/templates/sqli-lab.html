@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL 注入登录绕过 — 教学实验</title>
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <!-- 漏洞类型：SQL Injection (SQL 注入) -->
+    <!-- 场景：模拟登录框的 SQL 注入绕过，学生尝试用 OR 1=1 等 payload 绕过认证 -->
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --code-bg: #0c1222;
+            --highlight-bg: #1a2332;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 720px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* 顶部提示条 */
+        .edu-banner {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid #f59e0b33;
+            border-radius: 12px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            font-size: 0.9rem;
+            color: #fcd34d;
+        }
+        .edu-banner .icon {
+            font-size: 1.4rem;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        .edu-banner .content .title {
+            font-weight: 700;
+            font-size: 0.95rem;
+            margin-bottom: 2px;
+            color: #fbbf24;
+        }
+        .edu-banner .content .desc {
+            color: #fcd34dcc;
+            font-size: 0.82rem;
+        }
+        .edu-banner .content .legal {
+            color: #94a3b8;
+            font-size: 0.72rem;
+            margin-top: 4px;
+            font-style: italic;
+        }
+
+        /* 主卡片 */
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        .card h2 {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: #f1f5f9;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card h2 .badge {
+            display: inline-block;
+            font-size: 0.7rem;
+            background: #ef444422;
+            color: #f87171;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+        }
+        .card .subtitle {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+        }
+
+        /* 模拟浏览器地址栏 */
+        .mock-browser {
+            background: #0c1222;
+            border-radius: 10px 10px 6px 6px;
+            overflow: hidden;
+            margin-bottom: 0;
+            border: 1px solid #2d3a50;
+        }
+        .mock-browser .bar {
+            background: #1a2332;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid #2d3a50;
+        }
+        .mock-browser .bar .dots {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .mock-browser .bar .dots span {
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            display: block;
+        }
+        .mock-browser .bar .dots span:nth-child(1) {
+            background: #ef4444;
+        }
+        .mock-browser .bar .dots span:nth-child(2) {
+            background: #f59e0b;
+        }
+        .mock-browser .bar .dots span:nth-child(3) {
+            background: #22c55e;
+        }
+        .mock-browser .bar .url {
+            flex: 1;
+            background: #0c1222;
+            border-radius: 6px;
+            padding: 7px 12px;
+            font-size: 0.78rem;
+            color: #94a3b8;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+        .mock-browser .page {
+            padding: 24px 20px;
+            background: #f8fafc;
+            border-radius: 0 0 6px 6px;
+            color: #1e293b;
+            min-height: 200px;
+        }
+        .mock-browser .page .login-box {
+            max-width: 340px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 28px 22px;
+            box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e2e8f0;
+        }
+        .mock-browser .page .login-box h3 {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 1.15rem;
+            color: #1e293b;
+            font-weight: 700;
+        }
+        .mock-browser .page .login-box label {
+            display: block;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 4px;
+        }
+        .mock-browser .page .login-box input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            margin-bottom: 14px;
+            transition: border-color 0.2s;
+            font-family: inherit;
+            outline: none;
+            background: #f8fafc;
+        }
+        .mock-browser .page .login-box input:focus {
+            border-color: #3b82f6;
+            background: #fff;
+        }
+        .mock-browser .page .login-box .btn-login {
+            width: 100%;
+            padding: 11px;
+            background: #1e293b;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-family: inherit;
+            letter-spacing: 0.3px;
+        }
+        .mock-browser .page .login-box .btn-login:hover {
+            background: #334155;
+        }
+        .mock-browser .page .login-box .btn-reset {
+            width: 100%;
+            padding: 9px;
+            background: transparent;
+            color: #64748b;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            margin-top: 8px;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        .mock-browser .page .login-box .btn-reset:hover {
+            background: #f1f5f9;
+            color: #475569;
+        }
+
+        /* 反馈区 */
+        .feedback-area {
+            margin-top: 16px;
+            border-radius: 10px;
+            padding: 16px 18px;
+            font-size: 0.88rem;
+            display: none;
+            animation: fadeSlide 0.35s ease;
+        }
+        @keyframes fadeSlide {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .feedback-area.success {
+            display: block;
+            background: #22c55e12;
+            border: 1px solid #22c55e55;
+            color: #16a34a;
+        }
+        .feedback-area.failure {
+            display: block;
+            background: #f59e0b12;
+            border: 1px solid #f59e0b55;
+            color: #d97706;
+        }
+        .feedback-area .fb-title {
+            font-weight: 700;
+            font-size: 1rem;
+            margin-bottom: 6px;
+        }
+        .feedback-area code {
+            background: #0c1222;
+            padding: 3px 7px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+            color: #e2e8f0;
+            word-break: break-all;
+            display: inline-block;
+            margin: 2px 0;
+        }
+        .feedback-area pre {
+            background: #0c1222;
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.78rem;
+            margin: 8px 0;
+            color: #cbd5e1;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+            line-height: 1.5;
+        }
+
+        /* 防御方案区 */
+        .defense-section {
+            margin-top: 12px;
+        }
+        .btn-defense {
+            width: 100%;
+            padding: 12px;
+            background: transparent;
+            border: 2px dashed #475569;
+            color: #94a3b8;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+            font-family: inherit;
+            letter-spacing: 0.3px;
+        }
+        .btn-defense:hover {
+            border-color: #3b82f6;
+            color: #3b82f6;
+            background: #3b82f608;
+        }
+        .btn-defense.active {
+            border-color: #22c55e;
+            color: #22c55e;
+            background: #22c55e0a;
+        }
+        .defense-content {
+            display: none;
+            margin-top: 14px;
+            background: var(--highlight-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            animation: fadeSlide 0.35s ease;
+        }
+        .defense-content.visible {
+            display: block;
+        }
+        .defense-content h4 {
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #f1f5f9;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .defense-content .code-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+            display: inline-block;
+            margin-bottom: 6px;
+        }
+        .defense-content .code-label.vuln {
+            background: #ef444422;
+            color: #f87171;
+        }
+        .defense-content .code-label.fixed {
+            background: #22c55e22;
+            color: #4ade80;
+        }
+        .defense-content pre {
+            background: #0c1222;
+            padding: 14px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.78rem;
+            margin-bottom: 14px;
+            color: #cbd5e1;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+            line-height: 1.5;
+            border: 1px solid #2d3a50;
+        }
+        .defense-content .explanation {
+            font-size: 0.84rem;
+            color: #94a3b8;
+            line-height: 1.6;
+        }
+        .defense-content .explanation strong {
+            color: #f1f5f9;
+        }
+
+        /* 数据库面板 */
+        .db-panel {
+            background: #0c1222;
+            border: 1px solid #2d3a50;
+            border-radius: 10px;
+            padding: 16px;
+            margin-top: 14px;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+            font-size: 0.78rem;
+        }
+        .db-panel .db-title {
+            color: #94a3b8;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+        .db-panel table {
+            width: 100%;
+            border-collapse: collapse;
+            color: #cbd5e1;
+        }
+        .db-panel th,
+        .db-panel td {
+            padding: 8px 10px;
+            text-align: left;
+            border-bottom: 1px solid #1e293b;
+        }
+        .db-panel th {
+            color: #f59e0b;
+            font-weight: 600;
+            font-size: 0.72rem;
+            letter-spacing: 0.3px;
+        }
+        .db-panel td {
+            font-size: 0.78rem;
+        }
+        .db-panel .highlight-row {
+            background: #22c55e15;
+            border-radius: 4px;
+        }
+
+        /* 响应式 */
+        @media (max-width: 600px) {
+            .card {
+                padding: 18px 14px;
+            }
+            .mock-browser .page {
+                padding: 16px 10px;
+            }
+            .mock-browser .page .login-box {
+                padding: 20px 14px;
+            }
+            .feedback-area pre,
+            .defense-content pre {
+                font-size: 0.7rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 教育提示横幅 -->
+        <div class="edu-banner">
+            <span class="icon">🎓</span>
+            <div class="content">
+                <div class="title">SQL 注入（SQL Injection）— 登录绕过实验</div>
+                <div class="desc">本实验模拟一个存在 SQL 注入漏洞的登录表单。请尝试构造恶意输入，绕过身份验证进入系统。</div>
+                <div class="legal">// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境。禁止将所学技术用于未授权系统。</div>
+            </div>
+        </div>
+
+        <!-- 主卡片：模拟浏览器 + 登录框 -->
+        <div class="card">
+            <h2>
+                🔐 模拟登录页面
+                <span class="badge">存在漏洞</span>
+            </h2>
+            <p class="subtitle">下方模拟了一个真实的登录界面。数据库中有两个用户：admin / student。试试看能否不输入正确密码就登录成功？</p>
+
+            <!-- 模拟浏览器 -->
+            <div class="mock-browser">
+                <div class="bar">
+                    <span class="dots"><span></span><span></span><span></span></span>
+                    <span class="url">https://vulnerable-app.local/login</span>
+                </div>
+                <div class="page">
+                    <div class="login-box">
+                        <h3>🔑 用户登录</h3>
+                        <label for="username">用户名</label>
+                        <input type="text" id="username" placeholder="请输入用户名" autocomplete="off">
+                        <label for="password">密码</label>
+                        <input type="password" id="password" placeholder="请输入密码">
+                        <button class="btn-login" id="btnLogin">登 录</button>
+                        <button class="btn-reset" id="btnReset">🔄 重置</button>
+                        <div class="feedback-area" id="feedback"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 数据库面板 -->
+            <div class="db-panel">
+                <div class="db-title">📊 模拟数据库 — users 表</div>
+                <table>
+                    <thead>
+                        <tr><th>id</th><th>username</th><th>password</th><th>role</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>1</td><td>admin</td><td>Str0ngP@ss!</td><td>管理员</td></tr>
+                        <tr><td>2</td><td>student</td><td>learn123</td><td>学生</td></tr>
+                    </tbody>
+                </table>
+                <p style="color:#94a3b8;font-size:0.7rem;margin-top:8px;">💡 提示：正常登录需要正确的用户名和密码。但漏洞在于查询语句是拼接而成的……</p>
+            </div>
+        </div>
+
+        <!-- 防御方案卡片 -->
+        <div class="card defense-section">
+            <button class="btn-defense" id="btnDefense">🛡️ 查看防御方案（参数化查询）</button>
+            <div class="defense-content" id="defenseContent">
+                <h4>🔴 漏洞代码（存在 SQL 注入）</h4>
+                <span class="code-label vuln">VULNERABLE — 字符串拼接</span>
+                <pre>// 危险！直接将用户输入拼接到 SQL 查询中
+                    function vulnerableLogin(username, password) {
+                    const sql = `SELECT * FROM users
+                    WHERE username='${username}'
+                    AND password='${password}'`;
+                    // 执行查询...
+                    }</pre>
+
+                    <h4>🟢 修复代码（参数化查询 / Prepared Statement）</h4>
+                    <span class="code-label fixed">FIXED — 参数化查询</span>
+                    <pre>// 安全：使用参数化查询，用户输入不会被解释为 SQL 代码
+                        function safeLogin(username, password) {
+                        const sql = `SELECT * FROM users
+                        WHERE username = ? AND password = ?`;
+                        const params = [username, password];
+                        // db.query(sql, params) — 参数与查询分离
+                        }</pre>
+
+                        <div class="explanation">
+                            <strong>🔍 原理说明：</strong> 在漏洞版本中，用户输入被直接拼接到 SQL 字符串中。当输入 <code>' OR 1=1 --</code> 时，单引号闭合了原查询的字符串边界，<code>OR 1=1</code> 添加了一个恒真条件，<code>--</code> 注释掉了后续的密码检查部分，导致查询返回所有用户，从而绕过登录。修复方案使用 <strong>参数化查询（Prepared Statement）</strong>，将 SQL 结构与用户数据分离，数据库引擎不会将参数解释为 SQL 代码，从根本上杜绝了注入。
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+                // 模拟后端：纯浏览器端 JavaScript，无网络请求
+                // 漏洞类型：SQL Injection — 字符串拼接导致登录绕过
+
+                (function() {
+                    // ---------- 模拟数据库 ----------
+                    const usersTable = [
+                        { id: 1, username: 'admin', password: 'Str0ngP@ss!', role: '管理员' },
+                        { id: 2, username: 'student', password: 'learn123', role: '学生' },
+                    ];
+
+                    // ---------- 漏洞查询函数（字符串拼接） ----------
+                    function vulnerableQuery(username, password) {
+                        // 模拟：直接将用户输入拼接到 SQL 字符串中
+                        const sql = `SELECT * FROM users WHERE username='${username}' AND password='${password}'`;
+                        return {
+                            sql: sql,
+                            // 模拟执行：检查是否有匹配的行
+                            result: usersTable.filter(
+                                u => u.username === username && u.password === password
+                            ),
+                        };
+                    }
+
+                    // ---------- DOM 元素 ----------
+                    const usernameInput = document.getElementById('username');
+                    const passwordInput = document.getElementById('password');
+                    const btnLogin = document.getElementById('btnLogin');
+                    const btnReset = document.getElementById('btnReset');
+                    const feedbackDiv = document.getElementById('feedback');
+                    const btnDefense = document.getElementById('btnDefense');
+                    const defenseContent = document.getElementById('defenseContent');
+
+                    // ---------- 检测是否为 SQL 注入攻击 payload ----------
+                    function detectSQLInjection(username, password) {
+                        const combined = (username + ' ' + password).toLowerCase();
+                        // 检测常见的 SQL 注入 payload 模式
+                        const patterns = [
+                            /'.*\s*or\s+.*=.*--/i, // ' OR 1=1 --
+                            /'.*\s*or\s+.*=.*#/i, // ' OR 1=1 #
+                            /'.*\s*or\s+'1'\s*=\s*'1/i, // ' OR '1'='1
+                            /'.*\s*or\s+1\s*=\s*1/i, // ' OR 1=1
+                            /'.*\s*or\s+true\s*--/i, // ' OR true --
+                            /admin'.*\s*--/i, // admin' --
+                            /'.*\s*--\s*$/i, // ' --
+                            /'\s*or\s+1\s*=\s*1\s*--/i, // 'or 1=1 --
+                            /'\s*or\s+'1'\s*=\s*'1'\s*--/i, // 'or '1'='1' --
+                        ];
+                        return patterns.some(p => p.test(combined));
+                    }
+
+                    // ---------- 检查是否恰好构造了有效的注入 payload ----------
+                    function isEffectiveSQLInjection(username, password) {
+                        const combined = (username + ' ' + password).trim();
+                        // 核心检测：包含单引号闭合 + OR + 恒真条件 + 注释符
+                        const hasQuote = /['"]/.test(combined);
+                        const hasOR = /\bor\b/i.test(combined);
+                        const hasAlwaysTrue = /1\s*=\s*1|'1'\s*=\s*'1'|true|1\)\s*=\s*1|'a'\s*=\s*'a'/i.test(
+                            combined);
+                        const hasComment = /--|#|\/\*/.test(combined);
+                        // 也检测 admin' -- 这种模式（直接注释掉密码）
+                        const isAdminBypass = /admin['"]\s*--/i.test(combined) && !password.trim();
+
+                        return (hasQuote && hasOR && hasAlwaysTrue && hasComment) || isAdminBypass ||
+                            (hasQuote && hasOR && hasAlwaysTrue);
+                    }
+
+                    // ---------- 登录处理 ----------
+                    function handleLogin() {
+                        const username = usernameInput.value;
+                        const password = passwordInput.value;
+
+                        // 清空之前的反馈样式
+                        feedbackDiv.className = 'feedback-area';
+                        feedbackDiv.style.display = 'none';
+                        feedbackDiv.innerHTML = '';
+
+                        // 检查是否为空
+                        if (!username.trim() && !password.trim()) {
+                            feedbackDiv.className = 'feedback-area failure';
+                            feedbackDiv.innerHTML =
+                                '<span class="fb-title">⚠️ 请输入用户名和密码</span><p>提示：试试在用户名或密码中注入 SQL 语句。</p>';
+                            feedbackDiv.style.display = 'block';
+                            return;
+                        }
+
+                        // 执行漏洞查询
+                        const queryResult = vulnerableQuery(username, password);
+                        const sqlExecuted = queryResult.sql;
+                        const matchedUsers = queryResult.result;
+
+                        // 判断是否是 SQL 注入攻击
+                        const isInjection = detectSQLInjection(username, password);
+                        const isEffective = isEffectiveSQLInjection(username, password);
+
+                        if (isEffective && matchedUsers.length > 0) {
+                            // 🎯 攻击成功！SQL 注入绕过了认证
+                            const bypassedUser = matchedUsers[0];
+                            feedbackDiv.className = 'feedback-area success';
+                            feedbackDiv.innerHTML = `
+                            <span class="fb-title">🎯 攻击成功！SQL 注入绕过登录</span>
+                            <p>你以 <strong>${bypassedUser.username}</strong>（角色：${bypassedUser.role}）的身份成功登录！</p>
+                            <p style="margin-top:6px;">实际执行的 SQL 查询：</p>
+                            <pre>${escapeHTML(sqlExecuted)}</pre>
+                            <p style="margin-top:4px;font-size:0.82rem;">
+                              📌 <strong>原理：</strong>你的输入中的单引号 <code>'</code> 闭合了原查询的字符串边界，
+                              <code>OR 1=1</code> 添加了一个恒真条件，<code>--</code> 将后续的密码检查部分变成了注释。
+                              查询变成了无条件返回所有用户，导致认证被绕过。
+                            </p>
+                          `;
+                            feedbackDiv.style.display = 'block';
+
+                            // 高亮数据库中被返回的行
+                            highlightDBRow(bypassedUser.id);
+                        } else if (isInjection && matchedUsers.length === 0) {
+                            // 检测到注入尝试但未成功匹配
+                            feedbackDiv.className = 'feedback-area failure';
+                            feedbackDiv.innerHTML = `
+                            <span class="fb-title">🔍 检测到 SQL 注入尝试，但未成功绕过</span>
+                            <p>执行的 SQL 查询：</p>
+                            <pre>${escapeHTML(sqlExecuted)}</pre>
+                            <p style="margin-top:4px;">💡 数据库中没有匹配的行。试试让 <code>OR</code> 条件恒真（如 <code>OR 1=1</code>），同时确保语法正确。</p>
+                          `;
+                            feedbackDiv.style.display = 'block';
+                            clearDBHighlight();
+                        } else if (!isInjection && matchedUsers.length > 0) {
+                            // 正常登录成功
+                            feedbackDiv.className = 'feedback-area success';
+                            feedbackDiv.innerHTML = `
+                            <span class="fb-title">✅ 正常登录成功</span>
+                            <p>欢迎回来，<strong>${matchedUsers[0].username}</strong>！你使用了正确的用户名和密码。</p>
+                            <p style="font-size:0.8rem;color:#64748b;">执行的 SQL 查询：</p>
+                            <pre style="font-size:0.72rem;">${escapeHTML(sqlExecuted)}</pre>
+                            <p style="margin-top:4px;font-size:0.78rem;color:#94a3b8;">💡 这是正常登录。试试构造 SQL 注入 payload 来<em>绕过</em>密码验证？</p>
+                          `;
+                            feedbackDiv.style.display = 'block';
+                            highlightDBRow(matchedUsers[0].id);
+                        } else {
+                            // 登录失败
+                            feedbackDiv.className = 'feedback-area failure';
+                            feedbackDiv.innerHTML = `
+                            <span class="fb-title">❌ 登录失败</span>
+                            <p>用户名或密码错误。</p>
+                            <p style="margin-top:4px;font-size:0.82rem;">💡 <strong>提示：</strong>如何让 WHERE 条件恒真？试试在用户名中输入 <code>' OR 1=1 --</code>（注意单引号闭合 + OR + 注释符）。</p>
+                            <p style="font-size:0.72rem;color:#94a3b8;">执行的 SQL：<code>${escapeHTML(sqlExecuted)}</code></p>
+                          `;
+                            feedbackDiv.style.display = 'block';
+                            clearDBHighlight();
+                        }
+                    }
+
+                    // ---------- 重置 ----------
+                    function handleReset() {
+                        usernameInput.value = '';
+                        passwordInput.value = '';
+                        feedbackDiv.className = 'feedback-area';
+                        feedbackDiv.style.display = 'none';
+                        feedbackDiv.innerHTML = '';
+                        clearDBHighlight();
+                        usernameInput.focus();
+                    }
+
+                    // ---------- 防御方案切换 ----------
+                    function toggleDefense() {
+                        const isVisible = defenseContent.classList.contains('visible');
+                        if (isVisible) {
+                            defenseContent.classList.remove('visible');
+                            btnDefense.classList.remove('active');
+                            btnDefense.innerHTML = '🛡️ 查看防御方案（参数化查询）';
+                        } else {
+                            defenseContent.classList.add('visible');
+                            btnDefense.classList.add('active');
+                            btnDefense.innerHTML = '🛡️ 隐藏防御方案';
+                            defenseContent.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    }
+
+                    // ---------- 辅助函数 ----------
+                    function escapeHTML(str) {
+                        const div = document.createElement('div');
+                        div.appendChild(document.createTextNode(str));
+                        return div.innerHTML;
+                    }
+
+                    function highlightDBRow(userId) {
+                        const rows = document.querySelectorAll('.db-panel tbody tr');
+                        rows.forEach(row => {
+                            row.classList.remove('highlight-row');
+                            const firstCell = row.querySelector('td');
+                            if (firstCell && parseInt(firstCell.textContent) === userId) {
+                                row.classList.add('highlight-row');
+                            }
+                        });
+                    }
+
+                    function clearDBHighlight() {
+                        const rows = document.querySelectorAll('.db-panel tbody tr');
+                        rows.forEach(row => row.classList.remove('highlight-row'));
+                    }
+
+                    // ---------- 事件绑定 ----------
+                    btnLogin.addEventListener('click', handleLogin);
+                    btnReset.addEventListener('click', handleReset);
+                    btnDefense.addEventListener('click', toggleDefense);
+
+                    // 回车键触发登录
+                    usernameInput.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            passwordInput.focus();
+                        }
+                    });
+                    passwordInput.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleLogin();
+                        }
+                    });
+
+                    // 初始聚焦
+                    usernameInput.focus();
+
+                    console.log(
+                        '%c// EDUCATIONAL PURPOSE ONLY — authorized classroom use',
+                        'color: #f59e0b; font-weight: bold;'
+                    );
+                    console.log(
+                        '%cSQL注入实验已就绪。试试在用户名中输入: \' OR 1=1 --',
+                        'color: #94a3b8;'
+                    );
+                    console.log('%c模拟数据库用户: admin / student', 'color: #94a3b8;');
+                })();
+            </script>
+        </body>
+        </html>

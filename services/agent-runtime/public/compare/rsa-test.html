@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>RSA算法模拟实验</title>
+<style>
+  html,body{margin:0;padding:0;background:#0f172a;color:#e2e8f0;font-family:ui-sans-serif,system-ui,"PingFang SC",sans-serif;}
+  .wrap{padding:16px;max-width:760px;margin:0 auto;}
+  h2{font-size:17px;margin:0 0 2px;} p.desc{font-size:12px;color:#94a3b8;margin:0 0 14px;}
+  .progress{display:flex;gap:6px;margin-bottom:14px;}
+  .dot{height:6px;flex:1;background:#334155;border-radius:3px;} .dot.on{background:#3b82f6;}
+  .scene-title{font-size:15px;color:#93c5fd;margin:0 0 6px;}
+  .narr{font-size:13px;line-height:1.6;color:#cbd5e1;margin:0 0 12px;}
+  .visual{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px;margin-bottom:12px;min-height:40px;}
+  .vis-cap{font-size:11px;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;}
+  /* cells */
+  table.cells{border-collapse:collapse;width:100%;} table.cells td,table.cells th{border:1px solid #334155;padding:6px 8px;text-align:center;font-size:13px;font-family:ui-monospace,monospace;}
+  table.cells th{color:#94a3b8;font-weight:600;background:#0f172a;}
+  td.ok{color:#4ade80;} td.bad{color:#f87171;} td.info{color:#fbbf24;}
+  /* bars */
+  .bar-row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12px;}
+  .bar-label{width:120px;color:#cbd5e1;} .bar-track{flex:1;height:14px;background:#0f172a;border-radius:7px;overflow:hidden;}
+  .bar-fill{height:100%;background:#3b82f6;border-radius:7px;} .bar-val{width:40px;color:#93c5fd;font-family:ui-monospace,monospace;}
+  /* flow */
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:12px;}
+  .flow span{background:#334155;padding:4px 10px;border-radius:6px;} .flow .arr{background:transparent;color:#64748b;}
+  /* icons */
+  .icons{display:flex;flex-wrap:wrap;gap:10px;} .icon-item{background:#334155;border-radius:8px;padding:8px 12px;text-align:center;font-size:12px;}
+  .icon-item .e{font-size:22px;display:block;} .icon-item.ok{border:1px solid #4ade80;} .icon-item.bad{border:1px solid #f87171;} .icon-item.warn{border:1px solid #fbbf24;}
+  /* metric */
+  .metric{text-align:center;padding:8px;} .metric b{display:block;font-size:34px;color:#fbbf24;font-family:ui-monospace,monospace;} .metric small{color:#94a3b8;font-size:12px;}
+  .insight{font-size:12px;background:#1e293b;border-left:3px solid #3b82f6;padding:8px 10px;border-radius:0 6px 6px 0;color:#cbd5e1;margin-bottom:12px;}
+  .nav{display:flex;gap:8px;flex-wrap:wrap;}
+  button.navbtn{background:#3b82f6;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;}
+  button.ghost{background:#334155;color:#cbd5e1;}
+</style></head>
+<body><div class="wrap">
+  <h2>🎬 RSA算法模拟实验</h2>
+  <p class="desc">通过一个可验证的小型 RSA 实验，逐步体验密钥生成、加密、解密，并理解攻击模型与密码参数选择。</p>
+  <div class="progress" id="progress"></div>
+  <div id="scene"></div>
+</div>
+<script>
+(function(){
+  var cfg = {"type":"simulation-scenario","title":"RSA算法模拟实验","description":"通过一个可验证的小型 RSA 实验，逐步体验密钥生成、加密、解密，并理解攻击模型与密码参数选择。","startScene":"s1","scenes":[{"id":"s1","title":"RSA密码体制","narrative":"RSA 是一种经典的非对称加密算法：先用随机素数生成公私钥，再用公钥加密、私钥解密。我们先完整梳理实验流程。","visual":{"kind":"flow","caption":"RSA 算法整体流程","steps":["选择大素数 p 和 q","计算 n = p × q，φ(n) = (p−1)(q−1)","选择公钥指数 e","计算私钥 d = e⁻¹ mod φ(n)","公钥加密，私钥解密"]},"choices":[{"label":"开始实验","goto":"s2"}],"insight":"RSA 的安全性建立在“大整数因数分解困难”这一数学假设上。"},{"id":"s2","title":"密钥生成","narrative":"为了便于实验验证，我们使用小型参数：p=61，q=53。真实系统中 p、q 应使用至少 1024 位的大素数。","visual":{"kind":"cells","caption":"本次实验的参数","rows":[{"label":"p","cells":["61"]},{"label":"q","cells":["53"]},{"label":"n = pq","cells":["3233"]},{"label":"φ(n)","cells":["3120"]},{"label":"公钥 e","cells":["17"]},{"label":"私钥 d","cells":["2753"]}]},"choices":[{"label":"下一步：加密","goto":"s3"}],"insight":"公钥 (n, e) 可以公开；私钥 d 必须严格保密。"},{"id":"s3","title":"公钥加密","narrative":"Bob 取明文 m=65，使用 Alice 的公钥 (n=3233, e=17) 计算密文：C = m^e mod n = 65^17 mod 3233。","visual":{"kind":"cells","caption":"加密过程","rows":[{"label":"明文 m","cells":["65"]},{"label":"模数 n","cells":["3233"]},{"label":"公钥指数 e","cells":["17"]},{"label":"密文 C","cells":["2790"]}]},"choices":[{"label":"下一步：解密","goto":"s4"}],"insight":"加密只需要公钥，任何知道公钥的人都能给 Alice 发送秘密消息。"},{"id":"s4","title":"私钥解密","narrative":"Alice 收到密文 C=2790 后，使用自己的私钥 d=2753 解密：m = C^d mod n = 2790^2753 mod 3233 = 65。","visual":{"kind":"cells","caption":"解密过程","rows":[{"label":"密文 C","cells":["2790"]},{"label":"私钥 d","cells":["2753"]},{"label":"模数 n","cells":["3233"]},{"label":"明文 m","cells":["65"]}]},"choices":[{"label":"模拟攻击者","goto":"s5"},{"label":"直接看防护","goto":"s6"}],"insight":"解密必须使用私钥；只有持有 d 的人才能恢复出明文。"},{"id":"s5","title":"攻击模型","narrative":"攻击者 Eve 截获了公钥和密文。如果 n 太小，她可以对 n 做因数分解，进而计算出私钥 d 并还原明文。","visual":{"kind":"flow","caption":"针对小 n 的因数分解攻击","steps":["截获 (n, e) 与密文 C","因数分解 n = 61 × 53","计算 φ(n) = (p−1)(q−1)","计算 d = e⁻¹ mod φ(n)","还原明文 M = C^d mod n"]},"choices":[{"label":"了解防御","goto":"s6"}],"insight":"攻击能成功是因为 n=3233 太小；实际必须选择足够大的 n，使因数分解不可行。"},{"id":"s6","title":"参数与防御","narrative":"对抗因数分解攻击的核心是选择足够长的密钥。现代 RSA 的最低推荐长度是 2048 位，长期或高安全场景可使用 3072/4096 位。","visual":{"kind":"bars","caption":"不同密钥长度的相对安全强度（示意）","items":[{"label":"1024 位","value":0.1,"color":"red"},{"label":"2048 位","value":0.6,"color":"orange"},{"label":"3072 位","value":0.85,"color":"green"},{"label":"4096 位","value":0.95,"color":"green"}]},"choices":[{"label":"下一步：合规提示","goto":"s7"}],"insight":"密钥长度是 RSA 的第一道防线；配合 OAEP 填充等方案可抵御更多攻击类型。"},{"id":"s7","title":"实验与合规","narrative":"RSA 实验必须在授权环境中进行。《网络安全法》《密码法》明确规定，不得在未授权系统中截取、解密或破解他人数据。","visual":{"kind":"icons","caption":"负责任的安全实验","items":[{"icon":"🔬","label":"授权实验","tone":"ok"},{"icon":"🔐","label":"合法使用","tone":"info"},{"icon":"🕵️","label":"未授权监听","tone":"bad"},{"icon":"⚖️","label":"遵守法律","tone":"info"}]},"insight":"学习密码算法是为了构建防御，而不是用于攻击他人系统。"}]};
+  var byId = {}; cfg.scenes.forEach(function(s){ byId[s.id] = s; });
+  var order = cfg.scenes.map(function(s){return s.id;});
+  var cur = cfg.startScene || order[0];
+  var hist = [];
+  function toneClass(t){ return t==='ok'?'ok':t==='bad'?'bad':t==='warn'?'bad':t==='info'?'info':''; }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function renderVisual(v){
+    if(!v || typeof v!=='object') return '';
+    var k = v.kind, cap = v.caption ? '<div class="vis-cap">'+esc(v.caption)+'</div>' : '';
+    if(k==='cells' && Array.isArray(v.rows)){
+      var rows = v.rows.map(function(r){
+        var cells = (r.cells||[]).map(function(c){ var m=String(c); var cls = m==='✓'?'ok':m==='✗'?'bad':(m.indexOf?('⚠')>-1?'info':'') ; return '<td class="'+cls+'">'+esc(c)+'</td>'; }).join('');
+        return '<tr><th>'+esc(r.label)+'</th>'+cells+'</tr>';
+      }).join('');
+      return cap+'<table class="cells">'+rows+'</table>';
+    }
+    if(k==='bars' && Array.isArray(v.items)){
+      var bars = v.items.map(function(it){ var val = Math.max(0,Math.min(1,Number(it.value||0))); return '<div class="bar-row"><span class="bar-label">'+esc(it.label)+'</span><span class="bar-track"><span class="bar-fill" style="width:'+Math.round(val*100)+'%;background:'+(it.color||'#3b82f6')+'"></span></span><span class="bar-val">'+(Math.round(val*100))+'%</span></div>'; }).join('');
+      return cap+'<div>'+bars+'</div>';
+    }
+    if(k==='flow' && Array.isArray(v.steps)){
+      var f = v.steps.map(function(s,i){ return '<span>'+esc(s)+'</span>'+(i<v.steps.length-1?'<span class="arr">→</span>':''); }).join('');
+      return cap+'<div class="flow">'+f+'</div>';
+    }
+    if(k==='icons' && Array.isArray(v.items)){
+      var ic = v.items.map(function(it){ return '<div class="icon-item '+toneClass(it.tone)+'"><span class="e">'+esc(it.icon)+'</span>'+esc(it.label)+'</div>'; }).join('');
+      return cap+'<div class="icons">'+ic+'</div>';
+    }
+    if(k==='metric'){
+      return cap+'<div class="metric"><b>'+esc(v.value)+'</b>'+(v.unit?'<small>'+esc(v.unit)+'</small>':'')+'</div>';
+    }
+    return cap+'<div style="font-size:13px;color:#94a3b8;">'+esc(JSON.stringify(v))+'</div>';
+  }
+  function render(){
+    var s = byId[cur]; if(!s){ document.getElementById('scene').textContent='场景缺失'; return; }
+    var idx = order.indexOf(cur);
+    document.getElementById('progress').innerHTML = order.map(function(id,i){ return '<div class="dot'+(i<=idx?' on':'')+'"></div>'; }).join('');
+    var choices = (s.choices && s.choices.length) ? s.choices.map(function(c){ return '<button class="navbtn" data-goto="'+esc(c.goto)+'">'+esc(c.label)+'</button>'; }).join('') : '';
+    var nextLinear = (!choices && idx < order.length-1);
+    var html = '<p class="scene-title">'+esc(s.title)+'</p>'
+      + '<p class="narr">'+esc(s.narrative)+'</p>'
+      + (s.visual?'<div class="visual">'+renderVisual(s.visual)+'</div>':'')
+      + (s.insight?'<div class="insight">💡 '+esc(s.insight)+'</div>':'')
+      + '<div class="nav">'
+      + (hist.length?'<button class="navbtn ghost" id="back">← 上一步</button>':'')
+      + choices
+      + (nextLinear?'<button class="navbtn" id="next">下一步 →</button>':'')
+      + '</div>';
+    document.getElementById('scene').innerHTML = html;
+    if(document.getElementById('back')) document.getElementById('back').onclick=function(){ cur = hist.pop(); render(); };
+    if(document.getElementById('next')) document.getElementById('next').onclick=function(){ hist.push(cur); cur = order[idx+1]; render(); };
+    Array.prototype.forEach.call(document.querySelectorAll('[data-goto]'), function(b){ b.onclick=function(){ hist.push(cur); cur = b.getAttribute('data-goto'); render(); }; });
+  }
+  render();
+})();
+</script>
+<script type="application/json" id="widget-config">{"type":"simulation-scenario","title":"RSA算法模拟实验","description":"通过一个可验证的小型 RSA 实验，逐步体验密钥生成、加密、解密，并理解攻击模型与密码参数选择。","startScene":"s1","scenes":[{"id":"s1","title":"RSA密码体制","narrative":"RSA 是一种经典的非对称加密算法：先用随机素数生成公私钥，再用公钥加密、私钥解密。我们先完整梳理实验流程。","visual":{"kind":"flow","caption":"RSA 算法整体流程","steps":["选择大素数 p 和 q","计算 n = p × q，φ(n) = (p−1)(q−1)","选择公钥指数 e","计算私钥 d = e⁻¹ mod φ(n)","公钥加密，私钥解密"]},"choices":[{"label":"开始实验","goto":"s2"}],"insight":"RSA 的安全性建立在“大整数因数分解困难”这一数学假设上。"},{"id":"s2","title":"密钥生成","narrative":"为了便于实验验证，我们使用小型参数：p=61，q=53。真实系统中 p、q 应使用至少 1024 位的大素数。","visual":{"kind":"cells","caption":"本次实验的参数","rows":[{"label":"p","cells":["61"]},{"label":"q","cells":["53"]},{"label":"n = pq","cells":["3233"]},{"label":"φ(n)","cells":["3120"]},{"label":"公钥 e","cells":["17"]},{"label":"私钥 d","cells":["2753"]}]},"choices":[{"label":"下一步：加密","goto":"s3"}],"insight":"公钥 (n, e) 可以公开；私钥 d 必须严格保密。"},{"id":"s3","title":"公钥加密","narrative":"Bob 取明文 m=65，使用 Alice 的公钥 (n=3233, e=17) 计算密文：C = m^e mod n = 65^17 mod 3233。","visual":{"kind":"cells","caption":"加密过程","rows":[{"label":"明文 m","cells":["65"]},{"label":"模数 n","cells":["3233"]},{"label":"公钥指数 e","cells":["17"]},{"label":"密文 C","cells":["2790"]}]},"choices":[{"label":"下一步：解密","goto":"s4"}],"insight":"加密只需要公钥，任何知道公钥的人都能给 Alice 发送秘密消息。"},{"id":"s4","title":"私钥解密","narrative":"Alice 收到密文 C=2790 后，使用自己的私钥 d=2753 解密：m = C^d mod n = 2790^2753 mod 3233 = 65。","visual":{"kind":"cells","caption":"解密过程","rows":[{"label":"密文 C","cells":["2790"]},{"label":"私钥 d","cells":["2753"]},{"label":"模数 n","cells":["3233"]},{"label":"明文 m","cells":["65"]}]},"choices":[{"label":"模拟攻击者","goto":"s5"},{"label":"直接看防护","goto":"s6"}],"insight":"解密必须使用私钥；只有持有 d 的人才能恢复出明文。"},{"id":"s5","title":"攻击模型","narrative":"攻击者 Eve 截获了公钥和密文。如果 n 太小，她可以对 n 做因数分解，进而计算出私钥 d 并还原明文。","visual":{"kind":"flow","caption":"针对小 n 的因数分解攻击","steps":["截获 (n, e) 与密文 C","因数分解 n = 61 × 53","计算 φ(n) = (p−1)(q−1)","计算 d = e⁻¹ mod φ(n)","还原明文 M = C^d mod n"]},"choices":[{"label":"了解防御","goto":"s6"}],"insight":"攻击能成功是因为 n=3233 太小；实际必须选择足够大的 n，使因数分解不可行。"},{"id":"s6","title":"参数与防御","narrative":"对抗因数分解攻击的核心是选择足够长的密钥。现代 RSA 的最低推荐长度是 2048 位，长期或高安全场景可使用 3072/4096 位。","visual":{"kind":"bars","caption":"不同密钥长度的相对安全强度（示意）","items":[{"label":"1024 位","value":0.1,"color":"red"},{"label":"2048 位","value":0.6,"color":"orange"},{"label":"3072 位","value":0.85,"color":"green"},{"label":"4096 位","value":0.95,"color":"green"}]},"choices":[{"label":"下一步：合规提示","goto":"s7"}],"insight":"密钥长度是 RSA 的第一道防线；配合 OAEP 填充等方案可抵御更多攻击类型。"},{"id":"s7","title":"实验与合规","narrative":"RSA 实验必须在授权环境中进行。《网络安全法》《密码法》明确规定，不得在未授权系统中截取、解密或破解他人数据。","visual":{"kind":"icons","caption":"负责任的安全实验","items":[{"icon":"🔬","label":"授权实验","tone":"ok"},{"icon":"🔐","label":"合法使用","tone":"info"},{"icon":"🕵️","label":"未授权监听","tone":"bad"},{"icon":"⚖️","label":"遵守法律","tone":"info"}]},"insight":"学习密码算法是为了构建防御，而不是用于攻击他人系统。"}]}</script>
+</body></html>

@@ -1,29 +1,66 @@
-{% extends "admin/base.html" %}
+{% extends "base.html" %}
+
+{% block body_class %}admin-product-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/admin-product.css', v='aisecedu-admin-product-v6-readability-v1') }}">
+{% endblock %}
+{% block footer %}{% endblock %}
 
 {% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1>全部课程</h1>
+<section class="admin-product" aria-labelledby="admin-dojos-title">
+  <header class="admin-product-header">
+    <div>
+      <p class="admin-product-eyebrow">课程治理</p>
+      <h1 id="admin-dojos-title">课程健康与负责人</h1>
+      <p>统一查看平台创建和 Git 仓库课程；异常课程会明确列出需要补充的事实。</p>
+    </div>
+    <a class="admin-product-secondary" href="/teacher/courses">返回教学平台</a>
+  </header>
+
+  <form class="admin-product-filters" method="get" action="/admin/dojos" role="search">
+    <label><span>搜索课程</span><input name="q" value="{{ catalog.query }}" placeholder="课程名称或标识"></label>
+    <label><span>来源</span><select name="source">
+      <option value="all"{% if catalog.source == 'all' %} selected{% endif %}>全部来源</option>
+      <option value="database"{% if catalog.source == 'database' %} selected{% endif %}>平台创建</option>
+      <option value="repository"{% if catalog.source == 'repository' %} selected{% endif %}>Git 仓库</option>
+    </select></label>
+    <button type="submit">筛选</button>
+  </form>
+
+  <section class="admin-product-summary" aria-label="课程统计">
+    <strong>{{ catalog.total }}</strong><span>门符合条件的课程</span>
+    <span>第 {{ catalog.page }} / {{ catalog.totalPages }} 页</span>
+  </section>
+
+  {% if course_rows %}
+  <div class="admin-product-table-wrap">
+    <table class="admin-product-table">
+      <thead><tr><th scope="col">课程</th><th scope="col">状态与来源</th><th scope="col">负责人</th><th scope="col">规模</th><th scope="col">健康</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
+      <tbody>
+      {% for course in course_rows %}
+        <tr>
+          <td data-label="课程"><a class="admin-product-title" href="{{ course.href }}">{{ course.name }}</a><small>{{ course.id }}</small></td>
+          <td data-label="状态与来源"><span class="admin-product-badge" data-kind="{{ 'success' if course.workflow == 'published' else 'warning' if course.workflow in ['needs_review', 'unknown'] else 'neutral' }}">{{ course.workflowLabel }}</span><small>{{ course.sourceLabel }}</small></td>
+          <td data-label="负责人">{{ course.teacherNames | join('、') if course.teacherNames else '尚未指定' }}</td>
+          <td data-label="规模">{{ course.studentCount }} 名学生<br><small>{{ course.moduleCount }} 章节 · {{ course.itemCount }} 题目</small></td>
+          <td data-label="健康">{% if course.issues %}<span class="admin-product-health is-warning">{{ course.issues | join('；') }}</span>{% else %}<span class="admin-product-health is-good">未发现结构异常</span>{% endif %}</td>
+          <td data-label="操作"><a class="admin-product-row-action" href="{{ course.manageHref }}">查看治理详情</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
   </div>
-</div>
-<div class="container">
-    {% for dojo in dojos %}
-    <h2><a href="{{ url_for('pwncollege_dojo.view_dojo', dojo=dojo.reference_id) }}">{{ dojo.name }}</a></h2>
-    <b>课程标识：</b><code>{{ dojo.reference_id }}</code>
-    <br>
-    <b>内部课程 ID：</b><code>{{ dojo.hex_dojo_id }}</code>
-    <br>
-    <b>Git 提交哈希：</b><code>{{ dojo.hash[:8] }}</code>
-    <br>
-    <b>最近提交：</b><code>{{ dojo.last_commit_time }}</code>
-    <br>
-    <b>教师</b>
-    <ul>
-        {% for admin in dojo.admins %}
-        <li>{{ admin.user.name }}</li>
-        {% endfor %}
-    </ul>
-    <hr>
-    {% endfor %}
-</div>
+  {% else %}
+  <section class="admin-product-empty"><h2>没有符合条件的课程</h2><p>调整搜索或来源筛选后重试。</p><a href="/admin/dojos">清除筛选</a></section>
+  {% endif %}
+
+  <nav class="admin-product-pagination" aria-label="课程分页">
+    {% if catalog.previousUrl %}<a href="{{ catalog.previousUrl }}" rel="prev">上一页</a>{% else %}<span aria-disabled="true">上一页</span>{% endif %}
+    <span>第 {{ catalog.page }} / {{ catalog.totalPages }} 页</span>
+    {% if catalog.nextUrl %}<a href="{{ catalog.nextUrl }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
+  </nav>
+</section>
 {% endblock %}

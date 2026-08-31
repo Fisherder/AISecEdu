@@ -1,8 +1,9 @@
 # 本机部署与运维
 
-本目录记录 `/mnt/HDD1/LLM/AISecEdu-dojo/dojo` 的单节点 AISecEdu 学生题目平台部署。它在 pwn.college 原生服务拓扑内完成单系统改造；外层镜像和容器继续使用 `pwncollege/dojo:*` 与 `pwncollege-dojo` 兼容名，不代表并存第二套平台。
+本目录记录玄甲单节点学生题目平台的部署与验收。它在 pwn.college 原生服务拓扑内完成单系统改造；外层镜像和容器继续使用 `pwncollege/dojo:*` 与 `pwncollege-dojo` 兼容名，不代表并存第二套平台。跨机器克隆、仓库边界和源码归档规则见 [`../docs/repository-release.md`](../docs/repository-release.md)。
 
 完整的实机测试范围、结果和边界见 [`verification-report.md`](./verification-report.md)。
+全局智能体是教师完成任务的唯一产品入口；内部 `agent-runtime` 仅提供生成、渲染和课堂能力。架构、数据迁移、监控与回滚要求分别见 [`../docs/global-agent-architecture.md`](../docs/global-agent-architecture.md) 和 [`../docs/global-agent-operations.md`](../docs/global-agent-operations.md)。
 
 服务绑定到本机 LAN 地址 `192.168.3.111`，目标客户端为 `192.168.200.17`：
 
@@ -15,7 +16,7 @@
 - 构建缓存：`./cache/`
 - 本地 CA / 服务器证书：`./data/local-tls/ca.crt`、`./data/local-tls/fullchain.pem`
 
-`data/` 与 `cache/` 已由上游 `.gitignore` 排除。不要提交 `data/config.env`、数据库、SSH 密钥或管理员凭据。
+`data/`、`cache/`、`output/` 与 `ops/deployment.env` 已被 Git 和构建上下文隔离。不要提交 `data/config.env`、数据库、SSH 密钥、模型密钥、管理员凭据或验收录像。
 
 ## 日常操作
 
@@ -26,11 +27,23 @@ docker restart pwncollege-dojo
 docker exec pwncollege-dojo dojo logs -n 200
 docker exec pwncollege-dojo dojo compose ps
 ./ops/verify-local.sh
+./ops/verify-system-performance.py --output output/system-performance.json
+./ops/verify-browser-performance.py --output output/browser-performance.json
 ./ops/smoke-user-flow.py
 ./ops/verify-learning-flow.py
+./ops/verify-student-ux.py --output-dir output/student-ux
 ./ops/verify-solution-agent-real.py
+./ops/verify-teacher-agent-flow.py
+./ops/verify-complete-teaching-learning-lifecycle.py
+./ops/verify-teacher-agent-intelligence.py
 ./ops/set-offline-mode.sh enable
 ```
+
+`verify-system-performance.py` 负责页面/API 的 P95、响应体、数据库查询数与静态资源缓存预算；`verify-browser-performance.py` 使用 Chromium DevTools Protocol 分别测量匿名首页和登录后的学生、教师、课程、管理入口，记录 FCP、LCP、CLS、长任务、首屏传输量与 API 瀑布。浏览器验收不依赖 Selenium/ChromeDriver，可用 `--route` 重复指定需单独复测的登录后路径。
+
+`verify-student-ux.py` 会创建并清理隔离学生账号、作业、个人创作和学习记录，使用真实 API 与浏览器自动完成学生体验方案的 A01–A32 验收，并把 JSON 报告、桌面/移动截图及教师端回归截图写入指定输出目录。
+
+学生体验默认全量启用。设置 `STUDENT_UX_V2_MODE=cohort` 并用 `STUDENT_UX_V2_PERCENT=0..100` 控制稳定用户分桶；紧急回滚使用 `STUDENT_UX_V2_MODE=disabled`。服务端只接受白名单学习旅程指标，并以 `student.telemetry.*` 审计事件记录，不采集回答、命令、提示词或搜索内容。
 
 轮换本地管理员密码：
 
@@ -94,7 +107,7 @@ curl http://192.168.3.111/lan-health
 curl http://192.168.3.111/local-tls.crt -o pwncollege-local-ca.crt
 ```
 
-第一个命令应输出 `AISecEdu LAN endpoint ready`。macOS/Edge 客户端可将 CA
+第一个命令应输出 `玄甲 LAN endpoint ready`。macOS/Edge 客户端可将 CA
 导入“钥匙串访问”的“系统”钥匙串，打开证书的“信任”区域并设为“始终信任”；
 也可由管理员执行：
 
@@ -105,7 +118,7 @@ sudo security add-trusted-cert -d -r trustRoot \
 
 随后必须完全退出并重新打开 Edge。访问 `https://192.168.3.111`，再访问
 `https://192.168.3.111:4443/trust-check`；后者应显示
-`AISecEdu Workspace TLS is trusted and reachable`。入口只使用 IP，不依赖公网 DNS、
+`玄甲 Workspace TLS is trusted and reachable`。入口只使用 IP，不依赖公网 DNS、
 hosts 文件或 wildcard DNS，也不会因代理未绕过 `nip.io` 而把 LAN 请求发往代理。
 域名入口的旧会话不会迁移到 IP 入口，切换后需重新登录一次。
 
@@ -131,7 +144,7 @@ docker exec pwncollege-dojo systemctl show pwn.college.service -p ActiveState -p
 ./ops/set-offline-mode.sh enable
 ```
 
-`ops/deployment.env` 固化了当前机器的非秘密 LAN IP、Web/Workspace 端口、目标客户端和已验证镜像标签；显式进程环境变量优先于该文件，也可用 `DOJO_DEPLOYMENT_ENV` 指向另一份配置。`run-local.sh` 会读取该配置、验证源码可读性并准备本地 TLS 证书。源码以可写、非递归 bind mount 挂载；非递归设置可防止内层 Docker 的 overlay 挂载反向泄漏到源码树。首次初始化会构建所有内层服务和 Nix 工作区，可能需要较长时间。如果预载前 `pwn.college.service` 因拉取超时失败，预载脚本会导入固定的基础镜像、清除失败状态并重新启动服务。只有首次构建成功后才启用离线模式；它让后续开机复用已验证镜像，不受 Registry 波动影响。查看进度：
+从 `ops/deployment.env.example` 复制出的 `ops/deployment.env` 固化当前机器的 LAN IP、Web/Workspace 端口、共享内存和本地镜像选择；该文件不会进入 Git。显式进程环境变量优先于它，也可用 `DOJO_DEPLOYMENT_ENV` 指向另一份配置。`run-local.sh` 会读取配置、验证源码可读性并准备本地 TLS 证书。源码以可写、非递归 bind mount 挂载；非递归设置可防止内层 Docker 的 overlay 挂载反向泄漏到源码树。首次初始化会构建所有内层服务和 Nix 工作区，可能需要较长时间。如果预载前 `pwn.college.service` 因拉取超时失败，预载脚本会导入固定的基础镜像、清除失败状态并重新启动服务。只有首次构建成功后才启用离线模式；它让后续开机复用已验证镜像，不受 Registry 波动影响。查看进度：
 
 ```bash
 docker exec pwncollege-dojo systemctl show pwn.college.service -p ActiveState -p SubState -p Result
@@ -153,7 +166,118 @@ DOJO_PROXY_URL=http://proxy-host:port ./ops/configure-inner-proxy.sh
 
 ## 二次开发
 
-本仓库以读写方式挂载到容器的 `/opt/pwn.college`，本地定制代码保存在 `local/deployment` 分支。修改前先备份数据库：
+### 全自然语言教学生命周期验收
+
+`verify-natural-language-teaching-lifecycle.py` 是可重复执行的真实模型、真实队列、真实浏览器验收。它从一个网页可见的全局智能体会话开始，只用教师自然语言依次创建课程项目、生成并按四点要求修改 14 页课件、一次生成 5 道独立 CTF 并按四点要求统一修订、生成并按四点要求修改实训演示，最后生成基于真实平台证据的学情分析。脚本会检查每个修改都形成新 revision；五道题按教师给出的顺序分别绑定输入验证、会话权限、日志取证、配置错误和安全编码，并在标题与实质内容中真正落实，而不是只写入隐藏元数据；每题还必须独立构建、运行标准解、取得动态 Flag 并复验为 PASS。学情分析必须直接回答且不能被误判为内容生成。最后用 Chrome 验证会话、任务列表、进度条、课程、章节、课件与演示确实出现在网页。
+
+```bash
+python3 ops/verify-natural-language-teaching-lifecycle.py
+```
+
+长时间 CTF 构建可调整上限，调试无浏览器环境时可显式跳过最后的可见性检查：
+
+```bash
+python3 ops/verify-natural-language-teaching-lifecycle.py \
+  --job-timeout 1200 --authoring-timeout 10800
+python3 ops/verify-natural-language-teaching-lifecycle.py --skip-browser
+```
+
+若真实运行在某个阶段发现产品缺陷，修复并部署后可继续使用该次运行保留的会话、课程、
+课件与五道题草稿完成后半程；恢复运行不会另建隐藏项目，也不会覆盖此前自然语言与断言证据：
+
+```bash
+python3 ops/verify-natural-language-teaching-lifecycle.py \
+  --resume-report data/natural-language-e2e/<run-id>/report.json \
+  --job-timeout 1200 --authoring-timeout 10800
+```
+
+若五题生成批次本身需要重新生成，在同一网页会话和课程中执行：
+
+```bash
+python3 ops/verify-natural-language-teaching-lifecycle.py \
+  --resume-report data/natural-language-e2e/<run-id>/report.json \
+  --replace-ctf-batch \
+  --job-timeout 1200 --authoring-timeout 10800
+```
+
+若五题中只有部分任务失败，而五个任务都已经留下独立草稿，可按原顺序接管这五个任务并直接继续自然语言四点修改；这会复用网页中的现有草稿，不重复生成已经完成的内容：
+
+```bash
+python3 ops/verify-natural-language-teaching-lifecycle.py \
+  --resume-report data/natural-language-e2e/<run-id>/report.json \
+  --adopt-ctf-job <输入验证任务ID> \
+  --adopt-ctf-job <会话权限任务ID> \
+  --adopt-ctf-job <日志取证任务ID> \
+  --adopt-ctf-job <配置错误任务ID> \
+  --adopt-ctf-job <安全编码任务ID> \
+  --job-timeout 1200 --authoring-timeout 10800
+```
+
+底层出题任务若因模型暂态错误进入失败态，驱动器会核对上层批次项；只有同一全局任务确实已原位自动重排时才继续等待，并记录任务与草稿未复制的证据。上层批次已终止或非暂态失败仍会立即使验收失败。任何永久失败前，驱动器也会保留整批已观察到的草稿 ID，确保续跑不会退回旧批次。只有最终报告为 `PASSED`、`failure` 为 `null`、五题 `allValidated` 为 `true`，且浏览器截图齐全，才算整个生命周期通过。
+
+每次运行都使用唯一名称，并默认保留课程、章节、会话、任务卡、课件/演示版本和 CTF 草稿，便于直接在 `/teacher` 与课程中心复核。机器可读报告、完整自然语言脚本和浏览器截图保存在 `data/natural-language-e2e/<run-id>/`；该目录由 Git 忽略且不保存管理员密码或模型密钥。重复运行会创建一套新的独立验收项目，不覆盖历史证据。
+
+### 教师到学生的完整闭环验收
+
+`verify-complete-teaching-learning-lifecycle.py` 在**同一门一次性课程**中验证需求级闭环：教师上传资料并将完整分析结果应用为至少三个名称不同、具教学目标的章节；教师通过自然语言生成一份恰好 12 页、带讲稿和形成性检查的课件，以及双阶段攻防演示、双场景模拟、原生实践题和三道作业题；再分别修改并发布课件、实践题、攻防演示和模拟演示。学生会立即读取发布后的当前版本，提交教师端私有答案键对应的正确作业答案，按预先确定的安全模拟决策完成演示题；开放作答和模拟反思必须由真实智能体批改并产生正向过程分，不能以确定性降级评分通过。学生随后通过真实 Guide 模型发起文字提问，创建仅自己可见的自主学习演示与三道带答案和即时反馈的自检题。验收会用真实学生浏览器翻页读取课件，并在个人自检中填入三道已知正确答案，确认提交后显示满分与即时反馈；两类个人内容还必须取得受保护的学生预览启动票据。最后教师让全局智能体基于这些真实作业、模拟、评分和六维能力证据输出课程全景与个体干预两类学情分析。
+
+```bash
+python3 ops/verify-complete-teaching-learning-lifecycle.py \
+  --job-timeout 1200 --authoring-timeout 10800
+```
+
+该验收会调用真实模型和队列，默认清理自己创建的账号、课程、工作区和资源。调试可视化或失败恢复时可保留隔离资源：
+
+```bash
+python3 ops/verify-complete-teaching-learning-lifecycle.py --keep-data
+```
+
+若环境没有 Chromium/ChromeDriver，可显式跳过浏览器段；这会降低学生端可视化验收覆盖：
+
+```bash
+python3 ops/verify-complete-teaching-learning-lifecycle.py --skip-browser
+```
+
+### 300 学生高并发验收
+
+`verify-high-concurrency.py` 使用 300 个彼此独立的临时学生会话验证课程、六道题目、学习页、
+个人页、设置、Workspace API 和 Guide 会话的创建/重命名/置顶/归档/恢复；随后让 300 名学生
+同时启动 Kata 题目环境，逐个验证 VS Code Workbench、Desktop 键盘/剪贴板桥接和真实 RFB
+WebSocket 握手，并让其中 100 名学生同时调用真实 Guide 模型。脚本不把单个登录 Cookie 复制
+成 300 个虚拟用户，也不以 mock 响应代替模型或桌面协议。
+
+```bash
+python3 ops/verify-high-concurrency.py \
+  --base-url https://192.168.3.111 \
+  --dojo-host 192.168.3.111 \
+  --workspace-host 192.168.3.111 \
+  --workspace-port 4443 \
+  --students 300 \
+  --workspace-students 300 \
+  --agent-students 100 \
+  --workspace-timeout 900 \
+  --service-timeout 900 \
+  --agent-timeout 900 \
+  --run-id full300-$(date +%m%d%H%M) \
+  --output output/high-concurrency-full-300.json
+```
+
+这是容量验收而非无成本的 HTTP 微基准：会创建 300 个真实 Kata VM、启动 300 份 Code 与
+Desktop，并产生 100 次真实模型调用。参考 256 GiB / 64 核节点必须为外层容器提供至少
+230 GiB `/dev/shm`，保持 Code/Desktop 的 64 路冷启动准入控制，并预留约 20 GiB 内存余量；
+不要在未复测时提高这些上限。脚本默认精确删除自己创建的 workspace、Home、账号和课程，
+并把成功率、P50/P95/P99、模型来源、宿主负载、内存、共享内存和最大工作区数写入 JSON。
+只有 `passed: true`、`failures: []`、`cleanupErrors: []` 且 `agentProviders.MODEL` 等于 100
+才算通过。实现单测为：
+
+```bash
+pytest -q test/test_high_concurrency_verifier.py
+```
+
+本机 2026-08-30 的完整诊断、修复过程、容量边界与最终数据见
+[`../docs/high-concurrency-verification-2026-08-30.md`](../docs/high-concurrency-verification-2026-08-30.md)。
+
+本仓库以读写方式挂载到容器的 `/opt/pwn.college`。修改、更新或切换分支前先备份数据库：
 
 ```bash
 docker exec pwncollege-dojo dojo backup
@@ -169,6 +293,32 @@ docker exec pwncollege-dojo dojo backup
 - dojo 定义：通过管理界面或独立 dojo 仓库添加课程和模块。
 
 建议每项定制使用独立 Git 提交，并在提交前运行 `./ops/verify-local.sh`；它会执行离线 DeepSeek HTTP 参数、Guide/Tutor/Grader/出题模型路由、全上下文和动态秘密隔离测试，不会使用真实 key 或访问模型 API。涉及基础 Workspace 或认证的改动还应运行 `./ops/smoke-user-flow.py`；只修改容器上下文采集时先运行 `./ops/verify-container-context-real.py`，修改 L1/L2 源题复用/改编时运行 `./ops/verify-source-authoring-real.py`，涉及完整智能出题、证据、Guide、Tutor、评分或推荐的改动应运行 `./ops/verify-learning-flow.py`。改动教师工作台的“已验证解题步骤”、执行策略或动态 Flag 绑定时，额外运行会真实调用模型的 `./ops/verify-solution-agent-real.py`。智能学习域的架构、模型配置和升级说明见 [`../docs/learning.md`](../docs/learning.md)。
+
+## CTF 出题素材库
+
+出题 Agent 使用 `/data/ctf-corpus/catalog.jsonl` 中的分类素材。当前构建器整合 Google CTF、CryptoHack CTF Archive、picoCTF 与 `sajjadium/ctf-archives`，保存来源、许可证、活动、年份、分类、难度、标签、容器信息和经脱敏的本地源码证据。外部素材只作为不可信设计证据进入模型上下文，不会被当作平台本地题直接复用或发布。
+
+首次下载缺失来源并原子重建索引：
+
+```bash
+python3 ops/build-ctf-corpus.py --fetch-missing
+```
+
+仅重新索引已有快照：
+
+```bash
+python3 ops/build-ctf-corpus.py
+```
+
+在实际 CTFd 应用上下文验证题库检索、外部素材隔离、三层修复与原位重试：
+
+```bash
+docker exec pwncollege-dojo docker cp \
+  /opt/pwn.college/ops/verify-ctf-authoring-resilience.py \
+  ctfd:/tmp/verify-ctf-authoring-resilience.py
+docker exec pwncollege-dojo docker exec ctfd flask shell -c \
+  "exec(open('/tmp/verify-ctf-authoring-resilience.py', encoding='utf-8').read()); main()"
+```
 
 生产实例默认启用 `DOJO_OFFLINE=true`。改动 `dojo_plugin/` 或 `dojo_theme/` 后，同步源码并重启相关服务：
 
@@ -199,7 +349,7 @@ docker exec pwncollege-dojo dojo compose config
 docker exec pwncollege-dojo dojo compose restart ctfd
 ```
 
-改动顶层 `Dockerfile`、`etc/systemd/`、Kata 或外层 Docker 配置时，需要执行 `./ops/build-outer-local.sh`，随后用相同数据目录重建外层容器。合并官方更新时先获取 `origin/master`，再合并到 `local/deployment`；不要在 `data/` 中保存源码或把其中的运行数据提交到 Git。
+改动顶层 `Dockerfile`、`etc/systemd/`、Kata 或外层 Docker 配置时，需要执行 `./ops/build-outer-local.sh`，随后用相同数据目录重建外层容器。合并官方更新时从 `upstream/master` 获取上游提交，再在当前功能分支完成迁移和验收；不要在 `data/` 中保存源码或把其中的运行数据提交到 Git。
 
 ## 访问范围
 
@@ -207,9 +357,9 @@ docker exec pwncollege-dojo dojo compose restart ctfd
 
 外层端口为 Web `80/443`、浏览器 Workspace `4443` 和 Workspace SSH `2223`。Web、Terminal、Code 与 Desktop 都直接使用 `192.168.3.111`；Workspace 通过独立 HTTPS 端口和 HMAC 签名路由保持隔离，不再使用域名或 SNI 分流。
 
-`verify-local.sh` 执行基础设施、IP 端口映射、HTTP/SSH、AISecEdu 首页/课程列表/认证页面、Workspace Cookie 隔离、可选前端停用状态，以及使用 mock HTTP 的 DeepSeek Guide/Tutor/Grader/出题路由、上下文、审查状态和秘密边界检查；`smoke-user-flow.py` 临时注册用户、创建 smoke 课程、启动 Kata 工作区，检查 `/challenge` 默认目录、完整工具集、IP:4443 上的 Terminal、Code、Desktop、SSH 和 Home 持久化。在宿主存在 Chromium/ChromeDriver 和 Selenium 时，它还会验证真实加载动画、Code 根目录、noVNC 完整键盘输入、双向剪贴板、终端静默证据记录和统一 Tutor；缺少任一浏览器依赖时自动跳过该段，非标准安装位置可通过 `DOJO_BROWSER_BINARY` 和 `DOJO_CHROMEDRIVER_BINARY` 指定，也可用 `DOJO_SKIP_BROWSER_SMOKE=true` 显式跳过。脚本最后删除测试用户与课程，且不会读取或提交 flag。
+`verify-local.sh` 执行基础设施、IP 端口映射、HTTP/SSH、玄甲首页/课程列表/认证页面、Workspace Cookie 隔离、可选前端停用状态，以及使用 mock HTTP 的 DeepSeek Guide/Tutor/Grader/出题路由、上下文、审查状态和秘密边界检查；`smoke-user-flow.py` 临时注册用户、创建 smoke 课程、启动 Kata 工作区，检查 `/challenge` 默认目录、完整工具集、IP:4443 上的 Terminal、Code、Desktop、SSH 和 Home 持久化。在宿主存在 Chromium/ChromeDriver 和 Selenium 时，它还会验证真实加载动画、Code 根目录、noVNC 完整键盘输入、双向剪贴板、终端静默证据记录和统一 Tutor；缺少任一浏览器依赖时自动跳过该段，非标准安装位置可通过 `DOJO_BROWSER_BINARY` 和 `DOJO_CHROMEDRIVER_BINARY` 指定，也可用 `DOJO_SKIP_BROWSER_SMOKE=true` 显式跳过。脚本最后删除测试用户与课程，且不会读取或提交 flag。
 
-`verify-learning-flow.py` 使用一次性课程、用户和由验证器随机生成的 L3 教学挑战，在真实 Kata workspace 中验证红队修复、私有声明式报告 Oracle、Guide、Tutor、证据链和 Pro 过程评分。验证器按私有 `liveBindings` 主动请求该题当前运行的本地服务，生成与真实响应一致的一次性报告，并由 root 私有检查器复核响应、starter file 完整性和平台服务进程记录；随后只提交该挑战返回的动态 flag。结束时会删除对应 workspace、home、用户、课程、生成包、solve 与 submission，并断言运行前后的全局 solve/submission 数量一致，不读取或完成任何现有课程题目。
+`verify-learning-flow.py` 使用一次性课程、用户和由验证器随机生成的 L3 教学挑战，在真实 Kata workspace 中验证红队修复、私有声明式 Flag Gate、Guide、Tutor、证据链和 Pro 过程评分。验证器确认题包不存在学生报告提交路径，每个判定字段都由私有 `liveBindings` 直接读取当前本地服务状态；root 私有检查器同时复核响应、starter file 完整性和平台服务进程记录，满足目标后只返回该挑战的动态 Flag。结束时会删除对应 workspace、home、用户、课程、生成包、solve 与 submission，并断言运行前后的全局 solve/submission 数量一致，不读取或完成任何现有课程题目。
 
 `verify-solution-agent-real.py` 创建一次性课程和普通学习者可见的握手题，真实调用 `deepseek-v4-pro` 以临时隐藏学习者身份启动 Kata workspace。它要求 Agent 仅沿题面公开入口解题、在 uid 1000 下获得与该临时账号和题目绑定的动态 Flag，并断言 Flag 只以脱敏证据出现。教师步骤必须与真实允许命令轨迹逐 turn、逐顺序一一对应；最后验证器删除临时课程、题目、工作区、用户和解题记录。
 

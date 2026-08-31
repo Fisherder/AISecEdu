@@ -1,0 +1,1449 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无线安全：RFID/NFC 门禁卡克隆实验</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1a1f30;
+            --border: #2a3045;
+            --text: #e2e8f0;
+            --text-dim: #94a3b8;
+            --accent: #3b82f6;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --flag: #f59e0b;
+            --terminal-bg: #0a0e14;
+            --terminal-text: #10b981;
+            --terminal-prompt: #3b82f6;
+            --door-frame: #4a5568;
+            --door-panel: #5a6c7d;
+            --reader-bg: #1e293b;
+            --card-white: #f1f5f9;
+            --card-cloned: #fef3c7;
+            --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', 'Monaco', monospace;
+            --font-sans: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            line-height: 1.5;
+        }
+
+        /* ── Header ─────────────────────── */
+        .header {
+            width: 100%;
+            max-width: 1300px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 16px 20px;
+            background: var(--panel);
+            border-radius: 14px;
+            border: 1px solid var(--border);
+        }
+        .header .title-group h1 {
+            font-size: 1.3rem;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+            color: #fff;
+        }
+        .header .title-group .subtitle {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+        .badge-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .badge {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }
+        .badge-edu {
+            background: #1e3a5f;
+            color: #60a5fa;
+            border: 1px solid #2a5080;
+        }
+        .badge-step {
+            background: #1e2a3f;
+            color: #94a3b8;
+            border: 1px solid var(--border);
+        }
+        .badge-step.active {
+            background: #1a3a2a;
+            color: #4ade80;
+            border: 1px solid #2a6040;
+            animation: pulse-badge 1.8s infinite;
+        }
+        @keyframes pulse-badge {
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.25);
+            }
+            50% {
+                box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+            }
+        }
+
+        /* ── Main Layout ────────────────── */
+        .main-grid {
+            width: 100%;
+            max-width: 1300px;
+            display: grid;
+            grid-template-columns: 320px 1fr 380px;
+            grid-template-rows: auto auto;
+            gap: 14px;
+        }
+        @media (max-width: 1100px) {
+            .main-grid {
+                grid-template-columns: 1fr 1fr;
+                grid-template-rows: auto auto auto;
+            }
+        }
+        @media (max-width: 700px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: var(--panel);
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .panel h3 {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--text-dim);
+            margin-bottom: 2px;
+            font-weight: 600;
+        }
+
+        /* ── Door Scene Panel ──────────── */
+        .door-scene {
+            grid-row: 1 / 3;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            min-height: 520px;
+            position: relative;
+            overflow: hidden;
+        }
+        .wall {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, #1e2838 0%, #1a2232 100%);
+            border-radius: 10px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 440px;
+        }
+        .doorway {
+            position: relative;
+            width: 180px;
+            height: 260px;
+            border: 6px solid var(--door-frame);
+            border-radius: 8px 8px 0 0;
+            background: #0d1117;
+            overflow: hidden;
+            box-shadow: inset 0 2px 20px rgba(0, 0, 0, 0.5);
+        }
+        .door-panel-el {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, #5a6c7d 0%, #4a5a6a 100%);
+            border-radius: 2px 2px 0 0;
+            transform: translateX(0);
+            transition: transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2;
+        }
+        .door-panel-el.open {
+            transform: translateX(105%);
+        }
+        .door-handle {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #c0c8d0;
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+        }
+        .reader-box {
+            position: absolute;
+            right: -55px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 44px;
+            height: 70px;
+            background: var(--reader-bg);
+            border-radius: 6px;
+            border: 2px solid #3a4555;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        .reader-led {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ef4444;
+            transition: background 0.3s;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+        }
+        .reader-led.green {
+            background: #22c55e;
+            box-shadow: 0 0 14px rgba(34, 197, 94, 0.8);
+        }
+        .reader-led.yellow {
+            background: #f59e0b;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.7);
+        }
+        .reader-label {
+            font-size: 0.55rem;
+            color: #8899aa;
+            text-align: center;
+            letter-spacing: 0.3px;
+        }
+        .card-hover-area {
+            position: absolute;
+            left: -70px;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .card-hover-area:hover {
+            transform: translateY(-50%) scale(1.04);
+        }
+        .card-visual {
+            width: 50px;
+            height: 78px;
+            border-radius: 5px;
+            background: var(--card-white);
+            border: 2px solid #cbd5e1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.55rem;
+            color: #334155;
+            text-align: center;
+            font-weight: 600;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s;
+            position: relative;
+        }
+        .card-visual.cloned {
+            background: #fef3c7;
+            border-color: #f59e0b;
+            box-shadow: 0 3px 16px rgba(245, 158, 11, 0.35);
+        }
+        .card-visual.mifare {
+            background: #e0e7ff;
+            border-color: #6366f1;
+            box-shadow: 0 3px 14px rgba(99, 102, 241, 0.3);
+        }
+        .card-visual .card-chip {
+            position: absolute;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 16px;
+            height: 10px;
+            border-radius: 2px;
+            background: #d4d4d8;
+            border: 1px solid #a1a1aa;
+        }
+        .card-type-label {
+            font-size: 0.6rem;
+            color: var(--text-dim);
+            text-align: center;
+            margin-top: 4px;
+        }
+        .door-status {
+            position: absolute;
+            bottom: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            transition: all 0.3s;
+        }
+        .door-status.locked {
+            background: #3b1a1a;
+            color: #f87171;
+        }
+        .door-status.unlocked {
+            background: #1a3b2a;
+            color: #4ade80;
+            animation: pulse-badge 1.5s infinite;
+        }
+
+        /* ── Terminal Panel ────────────── */
+        .terminal-panel {
+            grid-column: 2;
+            grid-row: 1;
+            min-height: 340px;
+        }
+        .terminal-output {
+            flex: 1;
+            background: var(--terminal-bg);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--terminal-text);
+            overflow-y: auto;
+            max-height: 260px;
+            min-height: 200px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            border: 1px solid #1a2530;
+            line-height: 1.55;
+        }
+        .terminal-output .dim {
+            color: #6b7d8a;
+        }
+        .terminal-output .warn {
+            color: #f59e0b;
+        }
+        .terminal-output .err {
+            color: #ef4444;
+        }
+        .terminal-output .info {
+            color: #60a5fa;
+        }
+        .terminal-output .success-line {
+            color: #22c55e;
+        }
+        .terminal-input-row {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        .terminal-prompt {
+            color: var(--terminal-prompt);
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 0.8rem;
+            white-space: nowrap;
+        }
+        .terminal-input {
+            flex: 1;
+            background: var(--terminal-bg);
+            border: 1px solid #2a3a4a;
+            color: var(--terminal-text);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            padding: 8px 10px;
+            border-radius: 6px;
+            outline: none;
+            caret-color: #22c55e;
+        }
+        .terminal-input:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        .btn-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.78rem;
+            cursor: pointer;
+            border: none;
+            letter-spacing: 0.3px;
+            transition: all 0.2s;
+            font-family: var(--font-sans);
+        }
+        .btn-action {
+            background: #3b82f6;
+            color: #fff;
+        }
+        .btn-action:hover {
+            background: #2563eb;
+            box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+            transform: translateY(-1px);
+        }
+        .btn-action:active {
+            transform: scale(0.97);
+        }
+        .btn-clone {
+            background: #f59e0b;
+            color: #1a1a1a;
+        }
+        .btn-clone:hover {
+            background: #d97706;
+            box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4);
+        }
+        .btn-danger {
+            background: #b91c1c;
+            color: #fff;
+        }
+        .btn-danger:hover {
+            background: #991b1b;
+            box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1.5px solid var(--border);
+            color: var(--text-dim);
+        }
+        .btn-outline:hover {
+            border-color: #60a5fa;
+            color: #93c5fd;
+        }
+        .btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        /* ── Waveform Panel ────────────── */
+        .waveform-panel {
+            grid-column: 2;
+            grid-row: 2;
+            min-height: 200px;
+        }
+        .waveform-canvas {
+            width: 100%;
+            height: 170px;
+            border-radius: 8px;
+            background: #0a0e14;
+            border: 1px solid #1a2530;
+            display: block;
+        }
+        .waveform-legend {
+            display: flex;
+            gap: 14px;
+            font-size: 0.7rem;
+            flex-wrap: wrap;
+            color: var(--text-dim);
+        }
+        .legend-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+        .legend-dot.bit1 {
+            background: #60a5fa;
+        }
+        .legend-dot.bit0 {
+            background: #f87171;
+        }
+        .legend-dot.sync {
+            background: #fbbf24;
+        }
+
+        /* ── Info Panel (right side) ──── */
+        .info-panel {
+            grid-column: 3;
+            grid-row: 1 / 3;
+            gap: 12px;
+            min-height: 520px;
+        }
+        .info-card {
+            background: #141b26;
+            border-radius: 10px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            font-size: 0.75rem;
+        }
+        .info-card h4 {
+            font-size: 0.72rem;
+            letter-spacing: 0.5px;
+            color: #93c5fd;
+            margin-bottom: 6px;
+        }
+        .info-card .uid-display {
+            font-family: var(--font-mono);
+            font-size: 1.6rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: #f59e0b;
+            text-align: center;
+            padding: 8px;
+            background: #1a1f2e;
+            border-radius: 6px;
+            border: 1px dashed #4a5568;
+            transition: all 0.3s;
+        }
+        .info-card .uid-display.revealed {
+            color: #22c55e;
+            border-color: #22c55e;
+            animation: glow-reveal 0.6s ease-out;
+        }
+        @keyframes glow-reveal {
+            0% {
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+            }
+            100% {
+                box-shadow: 0 0 0 18px rgba(34, 197, 94, 0);
+            }
+        }
+        .flag-box {
+            background: #1a1a0a;
+            border: 2px dashed #f59e0b;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: #f59e0b;
+            opacity: 0;
+            transition: opacity 0.5s;
+            letter-spacing: 1px;
+        }
+        .flag-box.visible {
+            opacity: 1;
+            animation: flag-pop 0.5s ease-out;
+        }
+        @keyframes flag-pop {
+            0% {
+                transform: scale(0.8);
+                opacity: 0;
+            }
+            60% {
+                transform: scale(1.06);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.7rem;
+            margin-top: 6px;
+        }
+        .comparison-table th,
+        .comparison-table td {
+            padding: 7px 8px;
+            border: 1px solid var(--border);
+            text-align: left;
+        }
+        .comparison-table th {
+            background: #1a2535;
+            color: #93c5fd;
+            font-weight: 600;
+        }
+        .comparison-table .vuln {
+            color: #f87171;
+            font-weight: 600;
+        }
+        .comparison-table .secure {
+            color: #4ade80;
+            font-weight: 600;
+        }
+
+        /* ── Analysis Report ───────────── */
+        .report-section {
+            width: 100%;
+            max-width: 1300px;
+            margin-top: 14px;
+        }
+        .report-content {
+            background: var(--panel);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            padding: 18px;
+            font-size: 0.8rem;
+            line-height: 1.7;
+            color: var(--text-dim);
+        }
+        .report-content h4 {
+            color: #93c5fd;
+            margin-top: 12px;
+            margin-bottom: 4px;
+        }
+        .report-content code {
+            background: #1a2535;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: #f59e0b;
+        }
+
+        /* ── Toast ─────────────────────── */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 999;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            animation: slideIn 0.3s ease-out;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .toast.show {
+            opacity: 1;
+        }
+        .toast.success {
+            background: #1a3b2a;
+            color: #4ade80;
+            border: 1px solid #2a6040;
+        }
+        .toast.error {
+            background: #3b1a1a;
+            color: #f87171;
+            border: 1px solid #602a2a;
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(120px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* ── Misc ──────────────────────── */
+        .hidden {
+            display: none !important;
+        }
+        .glow-green {
+            box-shadow: 0 0 20px rgba(34, 197, 94, 0.5);
+            border-color: #22c55e !important;
+        }
+        .glow-red {
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+            border-color: #ef4444 !important;
+        }
+        details summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: #93c5fd;
+            font-size: 0.85rem;
+            padding: 8px 0;
+        }
+        details summary:hover {
+            color: #60a5fa;
+        }
+        .progress-dots {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        .progress-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #3a4555;
+            transition: all 0.3s;
+        }
+        .progress-dot.done {
+            background: #22c55e;
+            box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+        }
+        .progress-dot.current {
+            background: #f59e0b;
+            box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+            animation: pulse-dot 1.2s infinite;
+        }
+        @keyframes pulse-dot {
+            0%,
+            100% {
+                box-shadow: 0 0 4px rgba(245, 158, 11, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 14px rgba(245, 158, 11, 0.9);
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <!-- 本实验仅用于授权教学环境，演示RFID安全概念 -->
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Header -->
+    <div class="header">
+        <div class="title-group">
+            <h1>🔐 无线安全：RFID/NFC 门禁卡克隆实验</h1>
+            <div class="subtitle">使用模拟 Proxmark3 设备嗅探、克隆并测试门禁卡安全性</div>
+        </div>
+        <div class="badge-row">
+            <span class="badge badge-edu">📚 仅用于授权教学环境</span>
+            <span class="badge badge-step active" id="stepBadge">步骤 1/5 — 嗅探卡片</span>
+            <span class="progress-dots" id="progressDots">
+                <span class="progress-dot current" data-step="1"></span>
+                <span class="progress-dot" data-step="2"></span>
+                <span class="progress-dot" data-step="3"></span>
+                <span class="progress-dot" data-step="4"></span>
+                <span class="progress-dot" data-step="5"></span>
+            </span>
+        </div>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="main-grid">
+        <!-- Door Scene (Left) -->
+        <div class="panel door-scene" id="doorScenePanel">
+            <h3>🚪 门禁场景</h3>
+            <div class="wall" id="wallArea">
+                <div class="doorway" id="doorwayEl">
+                    <div class="door-panel-el" id="doorPanelEl">
+                        <div class="door-handle"></div>
+                    </div>
+                </div>
+                <div class="reader-box" id="readerBox">
+                    <div class="reader-led" id="readerLed"></div>
+                    <span class="reader-label">读卡器</span>
+                </div>
+                <div class="card-hover-area" id="cardHoverArea" title="将卡片靠近读卡器">
+                    <div class="card-visual" id="cardVisual">
+                        <div class="card-chip"></div>
+                        <span id="cardLabel">EM410x<br>门禁卡</span>
+                    </div>
+                    <div class="card-type-label" id="cardTypeLabel">125kHz 低频卡</div>
+                </div>
+                <div class="door-status locked" id="doorStatus">🔒 已锁定</div>
+            </div>
+        </div>
+
+        <!-- Terminal (Center-Top) -->
+        <div class="panel terminal-panel" id="terminalPanel">
+            <h3>💻 Proxmark3 终端 <span style="font-weight:400;font-size:0.7rem;color:var(--text-dim);">— 模拟器 v3.5</span></h3>
+            <div class="terminal-output" id="terminalOutput">
+                <span class="dim">[=] Proxmark3 模拟器已启动</span>
+                <span class="dim">[=] 固件版本: PM3-EDU-v3.5 (教学版)</span>
+                <span class="dim">[=] 天线已调谐 — 就绪</span>
+                <span class="info">[i] 输入 <code>help</code> 查看可用命令，或将卡片靠近读卡器后点击下方按钮</span>
+            </div>
+            <div class="terminal-input-row">
+                <span class="terminal-prompt">pm3 &gt;</span>
+                <input type="text" class="terminal-input" id="terminalInput" placeholder="输入命令... (如 lf read)" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="btn-row" id="actionBtnRow">
+                <button class="btn btn-action" id="btnSniff" onclick="startSniff()">📡 开始嗅探 (lf read)</button>
+                <button class="btn btn-clone" id="btnClone" onclick="startClone()" disabled>📝 克隆到空白卡</button>
+                <button class="btn btn-outline" id="btnSwipeClone" onclick="swipeClone()" disabled>🔑 使用克隆卡开门</button>
+                <button class="btn btn-danger" id="btnTryMifare" onclick="switchToMifare()" disabled>🔒 尝试 MIFARE DESFire</button>
+            </div>
+        </div>
+
+        <!-- Waveform (Center-Bottom) -->
+        <div class="panel waveform-panel" id="waveformPanel">
+            <h3>📊 电磁信号波形 (解调后基带信号)</h3>
+            <canvas class="waveform-canvas" id="waveformCanvas" width="650" height="170"></canvas>
+            <div class="waveform-legend">
+                <span><span class="legend-dot bit1"></span> 逻辑 1 (上升沿)</span>
+                <span><span class="legend-dot bit0"></span> 逻辑 0 (下降沿)</span>
+                <span><span class="legend-dot sync"></span> 前导/同步序列</span>
+                <span style="color:#94a3b8;">| 曼彻斯特编码 (IEEE 802.3)</span>
+            </div>
+        </div>
+
+        <!-- Info Panel (Right) -->
+        <div class="panel info-panel" id="infoPanel">
+            <h3>📋 卡片信息</h3>
+            <div class="info-card">
+                <h4>卡片类型</h4>
+                <span id="infoCardType" style="color:#f59e0b;font-weight:600;">EM410x (125kHz 低频)</span>
+            </div>
+            <div class="info-card">
+                <h4>提取的 UID</h4>
+                <div class="uid-display" id="uidDisplay">-- -- -- --</div>
+                <span style="font-size:0.65rem;color:var(--text-dim);" id="uidRaw"></span>
+            </div>
+            <div class="info-card">
+                <h4>安全特性</h4>
+                <span id="infoSecurity" style="color:#f87171;">⚠ 无加密 · 无认证 · UID 明文传输</span>
+            </div>
+            <div class="info-card" id="cloneStatusCard">
+                <h4>克隆状态</h4>
+                <span id="cloneStatus" style="color:var(--text-dim);">⏳ 尚未克隆</span>
+            </div>
+            <div class="flag-box" id="flagBox">
+                🏁 FLAG{em410x_clone_success_rfid_insecure}
+            </div>
+            <div class="info-card" id="comparisonCard" style="display:none;">
+                <h4>🛡️ EM410x vs MIFARE DESFire</h4>
+                <table class="comparison-table">
+                    <tr><th>特性</th><th>EM410x</th><th>MIFARE DESFire</th></tr>
+                    <tr><td>频率</td><td>125 kHz</td><td>13.56 MHz</td></tr>
+                    <tr><td>加密</td><td class="vuln">❌ 无</td><td class="secure">✅ AES-128</td></tr>
+                    <tr><td>认证</td><td class="vuln">❌ 无</td><td class="secure">✅ 双向认证</td></tr>
+                    <tr><td>克隆难度</td><td class="vuln">⚠ 极易</td><td class="secure">🛡️ 极难</td></tr>
+                    <tr><td>滚动码</td><td class="vuln">❌ 无</td><td class="secure">✅ 支持</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Analysis Report -->
+    <div class="report-section">
+        <details id="analysisDetails">
+            <summary>📖 查看完整分析报告 (攻击链、根因、防御方案)</summary>
+            <div class="report-content">
+                <h4>🔍 攻击链分析</h4>
+                <p><strong>1. 被动嗅探：</strong>攻击者使用 Proxmark3 等设备在受害者刷卡时被动捕获电磁信号。对于 EM410x 卡（125kHz），卡片持续广播其 UID，无需任何认证即可读取。信号采用曼彻斯特编码，解调后直接获得明文 UID。</p>
+                <p><strong>2. 信号解码：</strong>捕获的基带信号经曼彻斯特解码后，提取出卡片的唯一标识符（UID）。EM410x 协议没有任何加密层，UID 以明文形式传输。</p>
+                <p><strong>3. 克隆写入：</strong>将提取的 UID 写入空白 T5577 或兼容芯片卡。T5577 是可编程的 125kHz 标签，可模拟任意 EM410x UID。写入过程仅需数秒。</p>
+                <p><strong>4. 门禁突破：</strong>使用克隆卡靠近读卡器，读卡器将其识别为合法卡片并开锁。由于 EM410x 无挑战-响应机制，读卡器无法区分原始卡与克隆卡。</p>
+
+                <h4>🧬 根本原因</h4>
+                <p>EM410x 协议设计于安全性尚未成为首要考虑的时代。它仅提供<strong>静态 UID 广播</strong>，缺乏以下关键安全机制：</p>
+                <ul>
+                    <li><strong>无加密：</strong>UID 以明文传输，任何具备射频嗅探能力的人都能截获。</li>
+                    <li><strong>无认证：</strong>读卡器不验证卡片真实性，卡片也不验证读卡器。</li>
+                    <li><strong>无防重放：</strong>相同的 UID 每次都产生相同的信号，克隆卡与原始卡在射频层面完全不可区分。</li>
+                </ul>
+
+                <h4>🛡️ 防御方案</h4>
+                <p><strong>1. 双向认证 (Mutual Authentication)：</strong>MIFARE DESFire EV2 等现代卡片使用 AES-128 加密的挑战-响应协议。读卡器发送随机数（nonce），卡片使用内部密钥加密后返回。没有密钥的攻击者无法计算出正确响应。</p>
+                <p><strong>2. 滚动码 (Rolling Codes)：</strong>每次认证成功后更新内部计数器或密钥，使得即使某次通信被截获，重放攻击也无法成功。常用于汽车无钥匙进入系统。</p>
+                <p><strong>3. 多样化密钥：</strong>每张卡使用唯一的密钥（由主密钥和 UID 派生），即使一张卡被破解也不影响其他卡片。</p>
+                <p><strong>4. 物理防护：</strong>使用屏蔽卡套防止被动嗅探，在不使用时将卡片置于 RFID 屏蔽环境中。</p>
+                <p><strong>5. 多因素认证：</strong>将 RFID 卡与 PIN 码、生物识别或其他因素结合使用。</p>
+
+                <h4>📚 参考</h4>
+                <p><code>// EDUCATIONAL PURPOSE ONLY — authorized classroom use</code></p>
+                <p>CWE-287: Improper Authentication | CWE-306: Missing Authentication for Critical Function | OWASP A07: Identification & Authentication Failures</p>
+            </div>
+        </details>
+    </div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // 本模拟器仅用于教学演示，展示RFID安全概念
+
+        (function() {
+            // ── State ──────────────────────────
+            const state = {
+                step: 1, // 1=sniff EM410x, 2=clone, 3=swipe clone, 4=try MIFARE, 5=defense
+                cardType: 'em410x', // 'em410x' | 'mifare'
+                em410xUID: '5A 3C 9F 1E',
+                em410xUIDRaw: '01011010 00111100 10011111 00011110',
+                mifareUID: 'D4 E5 F6 A7',
+                sniffed: false,
+                cloned: false,
+                doorOpened: false,
+                flagRevealed: false,
+                terminalHistory: [],
+                sniffProgress: 0,
+                sniffAnimId: null,
+            };
+
+            // ── DOM refs ───────────────────────
+            const $ = (sel) => document.querySelector(sel);
+            const $$ = (sel) => document.querySelectorAll(sel);
+
+            const terminalOutput = $('#terminalOutput');
+            const terminalInput = $('#terminalInput');
+            const waveformCanvas = $('#waveformCanvas');
+            const ctx = waveformCanvas.getContext('2d');
+            const doorPanelEl = $('#doorPanelEl');
+            const readerLed = $('#readerLed');
+            const doorStatus = $('#doorStatus');
+            const uidDisplay = $('#uidDisplay');
+            const uidRaw = $('#uidRaw');
+            const flagBox = $('#flagBox');
+            const cardVisual = $('#cardVisual');
+            const cardLabel = $('#cardLabel');
+            const cardTypeLabel = $('#cardTypeLabel');
+            const cloneStatus = $('#cloneStatus');
+            const infoSecurity = $('#infoSecurity');
+            const infoCardType = $('#infoCardType');
+            const comparisonCard = $('#comparisonCard');
+            const toast = $('#toast');
+            const stepBadge = $('#stepBadge');
+            const progressDots = $$('#progressDots .progress-dot');
+            const btnSniff = $('#btnSniff');
+            const btnClone = $('#btnClone');
+            const btnSwipeClone = $('#btnSwipeClone');
+            const btnTryMifare = $('#btnTryMifare');
+            const cloneStatusCard = $('#cloneStatusCard');
+            const cardHoverArea = $('#cardHoverArea');
+
+            // ── Toast ──────────────────────────
+            let toastTimer;
+
+            function showToast(msg, type = 'success') {
+                toast.textContent = msg;
+                toast.className = 'toast ' + type + ' show';
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(() => { toast.className = 'toast'; }, 2500);
+            }
+
+            // ── Terminal ───────────────────────
+            function termAppend(text, cssClass = '') {
+                const span = document.createElement('span');
+                if (cssClass) span.className = cssClass;
+                span.textContent = text;
+                terminalOutput.appendChild(span);
+                terminalOutput.appendChild(document.createTextNode('\n'));
+                terminalOutput.scrollTop = terminalOutput.scrollHeight;
+            }
+
+            function termAppendHTML(html) {
+                const div = document.createElement('span');
+                div.innerHTML = html;
+                terminalOutput.appendChild(div);
+                terminalOutput.appendChild(document.createTextNode('\n'));
+                terminalOutput.scrollTop = terminalOutput.scrollHeight;
+            }
+
+            function termClear() {
+                terminalOutput.innerHTML = '';
+                termAppend('[=] 终端已清除', 'dim');
+            }
+
+            function executeCommand(cmd) {
+                const trimmed = cmd.trim().toLowerCase();
+                termAppend('pm3 > ' + cmd, 'info');
+
+                if (trimmed === 'help') {
+                    termAppend('可用命令:', 'dim');
+                    termAppend('  lf read         — 读取125kHz低频卡', 'dim');
+                    termAppend('  lf em 410x clone --id <uid>  — 克隆EM410x卡', 'dim');
+                    termAppend('  hf mf info      — 获取13.56MHz高频卡信息', 'dim');
+                    termAppend('  hf mf desfire auth — 尝试DESFire认证', 'dim');
+                    termAppend('  clear           — 清除终端', 'dim');
+                    termAppend('  help            — 显示此帮助', 'dim');
+                } else if (trimmed === 'clear') {
+                    termClear();
+                } else if (trimmed === 'lf read') {
+                    handleLFRead();
+                } else if (trimmed.startsWith('lf em 410x clone')) {
+                    handleCloneCommand(trimmed);
+                } else if (trimmed === 'hf mf info') {
+                    handleHFInfo();
+                } else if (trimmed === 'hf mf desfire auth') {
+                    handleDESFireAuth();
+                } else if (trimmed.length > 0) {
+                    termAppend('[!] 未知命令: ' + trimmed + ' — 输入 help 查看可用命令', 'warn');
+                }
+                state.terminalHistory.push(cmd);
+                terminalInput.value = '';
+                terminalInput.focus();
+            }
+
+            // ── LF Read (Sniff EM410x) ────────
+            function handleLFRead() {
+                if (state.cardType === 'mifare') {
+                    termAppend('[=] 正在扫描 125kHz 频段...', 'dim');
+                    termAppend('[!] 未检测到 125kHz 卡片', 'warn');
+                    termAppend('[i] 当前卡片为 13.56MHz MIFARE DESFire，请使用 hf mf info', 'info');
+                    return;
+                }
+                if (state.sniffed) {
+                    termAppend('[=] EM410x 标签已读取', 'dim');
+                    termAppend('[+] 标签 ID: ' + state.em410xUID, 'success-line');
+                    termAppend('[+] 原始数据: ' + state.em410xUIDRaw, 'dim');
+                    return;
+                }
+                termAppend('[=] 正在扫描 125kHz 频段...', 'dim');
+                termAppend('[=] 检测到载波信号 @ 125kHz', 'dim');
+                termAppend('[=] 解调中 (AM解调)...', 'dim');
+
+                // Animate sniff
+                state.sniffProgress = 0;
+                animateSniff();
+            }
+
+            function animateSniff() {
+                if (state.sniffProgress >= 100) {
+                    finishSniff();
+                    return;
+                }
+                state.sniffProgress += 2;
+                drawWaveform(state.sniffProgress);
+                readerLed.className = 'reader-led yellow';
+                state.sniffAnimId = requestAnimationFrame(animateSniff);
+            }
+
+            function finishSniff() {
+                cancelAnimationFrame(state.sniffAnimId);
+                state.sniffed = true;
+                state.sniffProgress = 100;
+                drawWaveform(100);
+                readerLed.className = 'reader-led yellow';
+
+                termAppend('[+] ✅ EM410x 标签已识别!', 'success-line');
+                termAppend('[+] 标签 ID (UID): ' + state.em410xUID, 'success-line');
+                termAppend('[+] 原始二进制: ' + state.em410xUIDRaw, 'dim');
+                termAppend('[+] 调制方式: 曼彻斯特编码 (IEEE 802.3)', 'dim');
+                termAppend('[!] ⚠ 此卡片无加密保护，UID 已明文捕获', 'warn');
+
+                uidDisplay.textContent = state.em410xUID;
+                uidDisplay.classList.add('revealed');
+                uidRaw.textContent = '原始: ' + state.em410xUIDRaw;
+                infoSecurity.innerHTML = '<span style="color:#f87171;">⚠ 无加密 · 无认证 · UID 明文传输 · 可克隆</span>';
+
+                updateStep(2);
+                btnClone.disabled = false;
+                btnClone.classList.add('glow-green');
+                showToast('✅ 嗅探成功！UID 已提取: ' + state.em410xUID, 'success');
+            }
+
+            // ── Clone ──────────────────────────
+            function handleCloneCommand(cmd) {
+                if (!state.sniffed) {
+                    termAppend('[!] 请先使用 lf read 读取卡片', 'warn');
+                    return;
+                }
+                if (state.cardType === 'mifare') {
+                    termAppend('[!] MIFARE DESFire 卡片需要密钥才能克隆', 'err');
+                    termAppend('[!] 克隆失败 — 需要双向认证', 'err');
+                    return;
+                }
+                if (state.cloned) {
+                    termAppend('[=] 卡片已克隆，UID: ' + state.em410xUID, 'dim');
+                    return;
+                }
+                termAppend('[=] 正在写入 T5577 空白卡...', 'dim');
+                termAppend('[=] 配置调制参数: ASK, 曼彻斯特, RF/64', 'dim');
+                termAppend('[=] 写入 UID: ' + state.em410xUID + ' ...', 'dim');
+
+                // Simulate write progress
+                setTimeout(() => {
+                    termAppend('[+] ✅ 写入成功! 空白卡已克隆', 'success-line');
+                    termAppend('[+] 克隆卡 UID: ' + state.em410xUID, 'success-line');
+                    state.cloned = true;
+                    cloneStatus.textContent = '✅ 已克隆 — UID: ' + state.em410xUID;
+                    cloneStatus.style.color = '#22c55e';
+                    cardVisual.classList.add('cloned');
+                    cardLabel.innerHTML = '已克隆卡<br><small>' + state.em410xUID + '</small>';
+                    cardTypeLabel.textContent = 'T5577 可编程卡';
+                    updateStep(3);
+                    btnSwipeClone.disabled = false;
+                    btnSwipeClone.classList.add('glow-green');
+                    btnClone.disabled = true;
+                    btnClone.classList.remove('glow-green');
+                    showToast('📝 克隆成功！空白卡已写入 UID', 'success');
+                }, 1200);
+            }
+
+            function startClone() {
+                terminalInput.value = 'lf em 410x clone --id ' + state.em410xUID.replace(/\s/g, '');
+                executeCommand(terminalInput.value);
+            }
+
+            function startSniff() {
+                terminalInput.value = 'lf read';
+                executeCommand('lf read');
+            }
+
+            // ── Swipe Clone ────────────────────
+            function swipeClone() {
+                if (!state.cloned) {
+                    showToast('请先克隆卡片', 'error');
+                    return;
+                }
+                if (state.doorOpened) {
+                    termAppend('[=] 门已打开', 'dim');
+                    return;
+                }
+                termAppend('[=] 将克隆卡靠近读卡器...', 'dim');
+                termAppend('[=] 读卡器检测到卡片...', 'dim');
+                termAppend('[=] 读取 UID: ' + state.em410xUID, 'dim');
+                termAppend('[=] 比对数据库中授权 UID...', 'dim');
+
+                setTimeout(() => {
+                    termAppend('[+] ✅ UID 匹配! 门禁授权通过', 'success-line');
+                    termAppend('[!] ⚠ 读卡器无法区分原始卡与克隆卡!', 'warn');
+                    openDoor();
+                }, 800);
+            }
+
+            function openDoor() {
+                state.doorOpened = true;
+                doorPanelEl.classList.add('open');
+                readerLed.className = 'reader-led green';
+                doorStatus.textContent = '🔓 已解锁 (克隆卡)';
+                doorStatus.className = 'door-status unlocked';
+                revealFlag();
+                updateStep(4);
+                btnTryMifare.disabled = false;
+                btnTryMifare.classList.add('glow-green');
+                btnSwipeClone.disabled = true;
+                btnSwipeClone.classList.remove('glow-green');
+                showToast('🚪 门已打开！EM410x 安全性不足', 'success');
+            }
+
+            function revealFlag() {
+                if (state.flagRevealed) return;
+                state.flagRevealed = true;
+                flagBox.classList.add('visible');
+                termAppend('[🏁] FLAG 已解锁: FLAG{em410x_clone_success_rfid_insecure}', 'warn');
+            }
+
+            // ── MIFARE DESFire ────────────────
+            function handleHFInfo() {
+                if (state.cardType === 'em410x' && !state.doorOpened) {
+                    termAppend('[!] 当前为 EM410x 125kHz 卡，请先完成 EM410x 实验', 'warn');
+                    termAppend('[i] 完成克隆开门后可切换到 MIFARE DESFire 场景', 'info');
+                    return;
+                }
+                if (state.cardType === 'em410x' && state.doorOpened) {
+                    // prompt switch
+                    termAppend('[i] 检测到您想测试高频卡。请点击下方 "尝试 MIFARE DESFire" 按钮切换场景', 'info');
+                    return;
+                }
+                termAppend('[=] 正在扫描 13.56MHz 频段...', 'dim');
+                termAppend('[+] ✅ MIFARE DESFire EV2 检测到', 'success-line');
+                termAppend('[+] UID: ' + state.mifareUID, 'success-line');
+                termAppend('[+] 协议: ISO/IEC 14443-A', 'dim');
+                termAppend('[!] ⚠ 此卡片需要认证 — 无法直接读取存储器', 'warn');
+                termAppend('[i] 尝试 hf mf desfire auth 进行认证', 'info');
+                uidDisplay.textContent = state.mifareUID;
+                uidDisplay.classList.add('revealed');
+                uidRaw.textContent = 'UID 可见但数据区受保护';
+                infoSecurity.innerHTML =
+                    '<span style="color:#4ade80;">🛡️ AES-128 加密 · 双向认证 · 防克隆</span>';
+                infoCardType.innerHTML = '<span style="color:#6366f1;font-weight:600;">MIFARE DESFire EV2 (13.56MHz 高频)</span>';
+            }
+
+            function handleDESFireAuth() {
+                if (state.cardType === 'em410x') {
+                    termAppend('[!] 当前为 EM410x 卡，不支持此命令', 'warn');
+                    return;
+                }
+                termAppend('[=] 尝试与 MIFARE DESFire 进行双向认证...', 'dim');
+                termAppend('[=] 读卡器发送随机挑战 (Nonce): A7B3F2...', 'dim');
+                termAppend('[=] 卡片使用 AES-128 密钥加密响应...', 'dim');
+
+                setTimeout(() => {
+                    termAppend('[!] ❌ 认证失败!', 'err');
+                    termAppend('[!] 原因: 未提供有效密钥', 'err');
+                    termAppend('[!] 无法读取卡片存储器内容', 'err');
+                    termAppend('[i] 💡 MIFARE DESFire 使用双向认证 + AES加密', 'info');
+                    termAppend('[i] 💡 没有密钥的攻击者无法克隆此类卡片', 'info');
+                    readerLed.className = 'reader-led';
+                    readerLed.style.background = '#ef4444';
+                    readerLed.style.boxShadow = '0 0 14px rgba(239,68,68,0.8)';
+                    doorStatus.textContent = '🔒 已锁定 (认证失败)';
+                    doorStatus.className = 'door-status locked';
+                    doorPanelEl.classList.remove('open');
+                    flashDoorwayRed();
+                    showToast('❌ MIFARE DESFire 认证失败 — 需要密钥', 'error');
+                    comparisonCard.style.display = 'block';
+                    updateStep(5);
+                    btnTryMifare.disabled = true;
+                    btnTryMifare.classList.remove('glow-green');
+                    termAppend('[🏁] 防御验证完成 — EM410x 可克隆, MIFARE DESFire 安全', 'success-line');
+                }, 1000);
+            }
+
+            function flashDoorwayRed() {
+                const doorway = $('#doorwayEl');
+                doorway.classList.add('glow-red');
+                setTimeout(() => doorway.classList.remove('glow-red'), 1200);
+            }
+
+            function switchToMifare() {
+                if (!state.doorOpened) return;
+                state.cardType = 'mifare';
+                state.sniffed = false;
+                state.cloned = false;
+                state.doorOpened = false;
+                state.sniffProgress = 0;
+
+                // Reset visuals
+                doorPanelEl.classList.remove('open');
+                readerLed.className = 'reader-led';
+                readerLed.style.background = '#ef4444';
+                readerLed.style.boxShadow = '0 0 8px rgba(239,68,68,0.6)';
+                doorStatus.textContent = '🔒 已锁定';
+                doorStatus.className = 'door-status locked';
+                cardVisual.classList.remove('cloned');
+                cardVisual.classList.add('mifare');
+                cardLabel.innerHTML = 'DESFire<br>加密卡';
+                cardTypeLabel.textContent = '13.56MHz 高频卡';
+                uidDisplay.textContent = '-- -- -- --';
+                uidDisplay.classList.remove('revealed');
+                uidRaw.textContent = '';
+                cloneStatus.textContent = '⏳ 需要密钥认证';
+                cloneStatus.style.color = '#f59e0b';
+                infoSecurity.innerHTML =
+                '<span style="color:#4ade80;">🛡️ AES-128 加密 · 双向认证 · 防克隆</span>';
+                infoCardType.innerHTML =
+                '<span style="color:#6366f1;font-weight:600;">MIFARE DESFire EV2 (13.56MHz 高频)</span>';
+                flagBox.classList.remove('visible');
+                state.flagRevealed = false;
+                comparisonCard.style.display = 'none';
+                drawWaveform(0);
+                btnSniff.disabled = false;
+                btnClone.disabled = true;
+                btnSwipeClone.disabled = true;
+                btnTryMifare.disabled = true;
+                btnClone.classList.remove('glow-green');
+                btnSwipeClone.classList.remove('glow-green');
+                btnTryMifare.classList.remove('glow-green');
+
+                termClear();
+                termAppend('[=] 🔄 场景已切换: MIFARE DESFire EV2', 'info');
+                termAppend('[=] 这是一张 13.56MHz 高频加密卡', 'info');
+                termAppend('[i] 使用 hf mf info 获取卡片信息', 'info');
+                termAppend('[i] 使用 hf mf desfire auth 尝试认证', 'info');
+                updateStep(4);
+                showToast('🔄 已切换到 MIFARE DESFire 场景', 'success');
+            }
+
+            // ── Waveform Drawing ───────────────
+            function drawWaveform(progressPercent) {
+                const W = waveformCanvas.width;
+                const H = waveformCanvas.height;
+                ctx.clearRect(0, 0, W, H);
+
+                // Background grid
+                ctx.strokeStyle = '#1a2530';
+                ctx.lineWidth = 0.5;
+                for (let y = 20; y < H - 20; y += 30) {
+                    ctx.beginPath();
+                    ctx.moveTo(20, y);
+                    ctx.lineTo(W - 20, y);
+                    ctx.stroke();
+                }
+                for (let x = 40; x < W - 20; x += 80) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 15);
+                    ctx.lineTo(x, H - 15);
+                    ctx.stroke();
+                }
+
+                const midY = H / 2;
+                const highY = midY - 50;
+                const lowY = midY + 45;
+                const marginLeft = 35;
+                const drawWidth = W - marginLeft - 25;
+
+                if (progressPercent <= 0) {
+                    // Draw flat line
+                    ctx.strokeStyle = '#3a5060';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(marginLeft, midY);
+                    ctx.lineTo(marginLeft + drawWidth, midY);
+                    ctx.stroke();
+                    ctx.fillStyle = '#6b7d8a';
+                    ctx.font = '11px "SF Mono", "Consolas", monospace';
+                    ctx.fillText('等待信号...', marginLeft + 10, midY - 10);
+                    return;
+                }
+
+                // Draw preamble (sync sequence)
+                const totalBits = 40; // preamble(8) + data(32)
+                const bitWidth = drawWidth / totalBits;
+                const visibleBits = Math.floor((progressPercent / 100) * totalBits);
+
+                // Preamble pattern: 8 bits of 10101010 (Manchester)
+                const preambleBits = [1, 0, 1, 0, 1, 0, 1, 0];
+
+                // Data bits from UID (32 bits from 5A 3C 9F 1E)
+                const uidHex = state.cardType === 'em410x' ? state.em410xUID.replace(/\s/g, '') : 'D4E5F6A7';
+                const dataBits = [];
+                for (let i = 0; i < uidHex.length; i++) {
+                    const nibble = parseInt(uidHex[i], 16);
+                    for (let j = 3; j >= 0; j--) {
+                        dataBits.push((nibble >> j) & 1);
+                    }
+                }
+
+                const allBits = [...preambleBits, ...dataBits];
+
+                // Draw bits
+                for (let i = 0; i < Math.min(visibleBits, allBits.length); i++) {
+                    const bit = allBits[i];
+                    const xStart = marginLeft + i * bitWidth;
+                    const xMid = xStart + bitWidth / 2;
+                    const xEnd = xStart + bitWidth;
+
+                    // Determine if preamble or data
+                    const isPreamble = i < 8;
+
+                    // Manchester: rising edge (low→high) = 1, falling edge (high→low) = 0
+                    const prevLevel = (i === 0) ? (allBits[0] === 1 ? 'low' : 'high') :
+                        (allBits[i - 1] === 1 ? 'high' : 'low');
+
+                    const startY = (i === 0) ? (bit === 1 ? lowY : highY) :
+                        (allBits[i - 1] === 1 ? highY : lowY);
+                    const midY_val = bit === 1 ? highY : lowY;
+                    const endY_val = midY_val;
+
+                    // Draw waveform segment
+                    ctx.strokeStyle = isPreamble ? '#fbbf24' : (bit === 1 ? '#60a5fa' : '#f87171');
+                    ctx.lineWidth = 2.5;
+                    ctx.beginPath();
+                    ctx.moveTo(xStart, startY);
+                    ctx.lineTo(xStart, startY);
+                    ctx.lineTo(xMid - 1, startY);
+                    ctx.lineTo(xMid, midY_val);
+                    ctx.lineTo(xMid + 1, midY_val);
+                    ctx.lineTo(xEnd, endY_val);
+                    ctx.stroke();
+
+                    // Draw bit label
+                    if (bitWidth > 14 && i >= 8) {
+                        ctx.fillStyle = bit === 1 ? '#60a5fa' : '#f87171';
+                        ctx.font = '9px "SF Mono", "Consolas", monospace';
+                        ctx.fillText(bit, xStart + bitWidth / 2 - 2, bit === 1 ? highY - 7 : lowY + 16);
+                    }
+                }
+
+                // Draw progress indicator
+                if (progressPercent < 100) {
+                    const progX = marginLeft + (progressPercent / 100) * drawWidth;
+                    ctx.strokeStyle = '#22c55e';
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(progX, 15);
+                    ctx.lineTo(progX, H - 15);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.fillStyle = '#22c55e';
+                    ctx.font = '10px "SF Mono", "Consolas", monospace';
+                    ctx.fillText('嗅探中...', progX + 5, 25);
+                }
+
+                // Labels
+                if (progressPercent >= 15) {
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.font = '10px "SF Mono", "Consolas", monospace';
+                    const preambleEndX = marginLeft + 8 * bitWidth;
+                    ctx.fillText('前导序列', marginLeft + 2, highY - 14);
+                }
+                if (progressPercent >= 30 && state.cardType === 'em410x') {
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.font = '10px "SF Mono", "Consolas", monospace';
+                    const dataStartX = marginLeft + 8 * bitWidth;
+                    ctx.fillText('UID 数据 (' + state.em410xUID + ')', dataStartX + 5, highY - 14);
+                }
+                if (progressPercent >= 30 && state.cardType === 'mifare') {
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.font = '10px "SF Mono", "Consolas", monospace';
+                    const dataStartX = marginLeft + 8 * bitWidth;
+                    ctx.fillText('加密数据 (无法解码)', dataStartX + 5, highY - 14);
+                }
+
+                // Axis labels
+                ctx.fillStyle = '#4a5568';
+                ctx.font = '9px "SF Mono", "Consolas", monospace';
+                ctx.fillText('HIGH', 4, highY + 4);
+                ctx.fillText('LOW', 4, lowY + 4);
+            }
+
+            // ── Step Management ────────────────
+            function updateStep(newStep) {
+                state.step = newStep;
+                stepBadge.textContent = '步骤 ' + newStep + '/5 — ' +
+                    ['嗅探卡片', '克隆到空白卡', '使用克隆卡开门', '尝试 MIFARE DESFire', '防御分析'][newStep - 1];
+                stepBadge.classList.add('active');
+                progressDots.forEach((dot, i) => {
+                    dot.classList.remove('done', 'current');
+                    if (i + 1 < newStep) dot.classList.add('done');
+                    if (i + 1 === newStep) dot.classList.add('current');
+                });
+            }
+
+            // ── Event Listeners ────────────────
+            terminalInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    const cmd = terminalInput.value.trim();
+                    if (cmd.length > 0) {
+                        executeCommand(cmd);
+                    }
+                }
+            });
+
+            // Card hover area click — quick sniff shortcut
+            cardHoverArea.addEventListener('click', function() {
+                if (state.cardType === 'em410x' && !state.sniffed) {
+                    startSniff();
+                } else if (state.cardType === 'mifare' && !state.sniffed) {
+                    terminalInput.value = 'hf mf info';
+                    executeCommand('hf mf info');
+                }
+            });
+
+            // Focus terminal on page load
+            setTimeout(() => terminalInput.focus(), 300);
+
+            // Click anywhere in terminal panel to focus input
+            $('#terminalPanel').addEventListener('click', function(e) {
+                if (e.target !== terminalInput && e.target.tagName !== 'BUTTON') {
+                    terminalInput.focus();
+                }
+            });
+
+            // ── Initialize ────────────────────
+            function init() {
+                drawWaveform(0);
+                updateStep(1);
+                termAppend('[i] 💡 提示: 点击卡片图标或输入 lf read 开始嗅探', 'info');
+                termAppend('[i] 也可直接点击下方 "开始嗅探" 按钮', 'info');
+            }
+
+            init();
+
+            // ── Expose for button onclick ─────
+            window.startSniff = startSniff;
+            window.startClone = startClone;
+            window.swipeClone = swipeClone;
+            window.switchToMifare = switchToMifare;
+        })();
+    </script>
+</body>
+</html>

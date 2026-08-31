@@ -1,202 +1,290 @@
 {% extends "base.html" %}
+{% from "macros/forms.html" import render_extra_fields %}
 
-{% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1>用户设置</h1>
-  </div>
-</div>
-<div class="container">
-  <div class="row">
-    <div class="col-md-2 offset-md-1">
-      <div class="nav flex-column nav-pills" role="tablist">
-        <a class="nav-link active" id="settings-profile-tab" data-toggle="pill" href="#profile" role="tab">个人资料</a>
-        <a class="nav-link" id="settings-ssh-key-tab" data-toggle="pill" href="#ssh-key" role="tab">SSH 密钥</a>
-        {% if discord_enabled %}
-        <a class="nav-link" id="settings-discord-tab" data-toggle="pill" href="#discord" role="tab">Discord</a>
-        {% endif %}
-	      <a class="nav-link" id="settings-tokens-tab" data-toggle="pill" href="#tokens" role="tab">访问令牌</a>
-        <a class="nav-link" id="settings-reset-home-tab" data-toggle="pill" href="#reset-home" role="tab">重置 Home 目录</a>
-      </div>
-    </div>
-    <div class="col-md-8">
-      <div class="tab-content" id="v-pills-tabContent">
+{% block body_class %}account-settings-page{% endblock %}
 
-        <div class="tab-pane fade show active" id="profile" role="tabpanel">
-          {% include "components/errors.html" %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
 
-          {% with form = Forms.self.SettingsForm(country=user.country) %}
-          {% from "macros/forms.html" import render_extra_fields %}
-          <form id="user-profile-form" method="post" accept-charset="utf-8" autocomplete="off" role="form"
-                class="form-horizontal">
-            <div class="form-group">
-              <b>用户名</b>
-              {{ form.name(class="form-control", value=user.name) }}
-            </div>
-            <div class="form-group">
-              <b>电子邮箱</b>
-              {{ form.email(class="form-control", value=user.email) }}
-            </div>
-
-            <hr>
-
-            <div class="form-group">
-              <b>确认当前密码</b>
-              {{ form.confirm(class="form-control") }}
-            </div>
-            <div class="form-group">
-              <b>新密码</b>
-              {{ form.password(class="form-control") }}
-            </div>
-
-	    {{ render_extra_fields(form.extra) }}
-
-            <div id="results" class="form-group">
-            </div>
-
-            <div class="form-group">
-              {{ form.submit(class="btn btn-md btn-primary float-right") }}
-            </div>
-          </form>
-          {% endwith %}
-        </div>
-
-        <div class="tab-pane fade" id="ssh-key" role="tabpanel">
-
-          {% if ssh_keys %}
-            <b><label for="enter-name">当前 SSH 密钥</label></b>
-            <br>
-
-            {% for key in ssh_keys %}
-            <form method="post" id="delete-ssh-key-{{ loop.index }}-form" autocomplete="off">
-                <div class="form-group">
-                    <div class="input-group">
-                        <input class="form-control" id="ssh-key" name="ssh_key" type="text" value="{{ key }}" readonly>
-                        <div class="input-group-append ml-1" style="margin: -0.1rem">
-                            <button type="submit" class="btn btn-danger" id="delete-ssh-key-button-{{ loop.index }}">
-                                <i class="fas fa-times"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="delete-ssh-key-{{ loop.index }}-results" class="form-group">
-                </div>
-            </form>
-
-            <script>
-              document.addEventListener('DOMContentLoaded', function() {
-                form_fetch_and_show("delete-ssh-key-{{ loop.index }}", "/pwncollege_api/v1/ssh_key", "DELETE", "SSH 公钥已删除。");
-              });
-            </script>
-            {% endfor %}
-            <br>
-          {% endif %}
-
-          <form method="post" id="ssh-key-form" autocomplete="off">
-            <div class="form-group">
-              <b><label for="enter-name">添加 SSH 密钥</label></b>
-              <small class="form-text text-muted">通过 SSH 访问题目时必需。</small>
-              <br>
-              <input class="form-control" id="ssh-key" name="ssh_key" type="text" value="">
-            </div>
-
-            <div id="ssh-key-results" class="form-group">
-            </div>
-
-            <div class="form-group text-right">
-              <input class="btn btn-md btn-primary btn-outlined" id="_submit" name="_submit" type="submit" value="添加">
-            </div>
-          </form><b><label for="ssh-key-create">如何创建 SSH 密钥</label></b>
-          <p id="ssh-key-create">在你的本机终端中运行 <code>ssh-keygen -f key -N ''</code>，即可快速生成 SSH 密钥。
-          此命令会生成 <code>key</code> 和 <code>key.pub</code> 文件，它们分别是私钥与公钥。
-          将<em>公钥</em>关联到账号后，可使用 <code>ssh -i key hacker@{{ request.host.split(':')[0] }}</code> 连接当前题目。</p>
-        </div>
-
-        {% if discord_enabled %}
-        <div class="tab-pane fade" id="discord" role="tabpanel">
-          <div class="text-center">
-            <img src="{{ discord_avatar_asset(discord_member) }}" class="discord-avatar">
-            {% if discord_member %}
-              <h2>{{ discord_member["user"]["username"] }}</h2>
-              <br>
-              <form method="post" id="discord-form" autocomplete="off">
-                <div class="form-group">
-                  <input type="submit" class="btn btn-danger" value="断开 Discord 账号">
-                </div>
-                <div id="discord-results" class="form-group">
-                </div>
-              </form>
-            {% else %}
-              <br>
-              <a href="/discord/connect" class="btn btn-primary">连接 Discord 账号</a>
-            {% endif %}
-          </div>
-        </div>
-        {% endif %}
-
-        <div class="tab-pane fade" id="tokens" role="tabpanel">
-          {% with form = Forms.self.TokensForm() %}
-          <form method="POST" id="user-token-form">
-            <div class="form-group">
-              <b>{{ form.expiration.label }}</b>
-              {{ form.expiration(class="form-control") }}
-            </div>
-
-            <div class="form-group text-right">
-              {{ form.submit(class="btn btn-md btn-primary btn-outlined") }}
-            </div>
-          </form>
-          {% endwith %}
-
-          {% if tokens %}
-          <hr>
-          <h4 class="text-center">有效令牌</h4>
-          <table class="table table-striped">
-            <thead>
-              <tr>
-                <td class="text-center"><b>创建时间</b></td>
-                <td class="text-center"><b>到期时间</b></td>
-                <td class="text-center"><b>删除</b></td>
-              </tr>
-            </thead>
-            <tbody>
-              {% for token in tokens %}
-              <tr>
-                <td><span data-time="{{ token.created | isoformat }}"></span></td>
-                <td><span data-time="{{ token.expiration | isoformat }}"></span></td>
-                <td class="text-center">
-                  <span class="delete-token" role="button" data-token-id="{{ token.id }}">
-                    <i class="btn-fa fas fa-times"></i>
-                  </span>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          {% endif %}
-        </div>
-
-        <div class="tab-pane fade" id="reset-home" role="tabpanel">
-          <div class="text-center">
-            <h2>重置 Home 目录</h2>
-            <p>点击下方按钮重置 Home 目录。系统会打包当前目录，并清除其余内容。</p>
-            <button id="reset-home-button" class="btn btn-danger">重置 Home 目录</button>
-          </div>
-          <br>
-          <div id="reset-home-results" class="form-group"></div>
-        </div>
-
-      </div>
-    </div>
-  </div>
-</div>
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/account-settings.css', v='aisecedu-account-settings-v2-readability-v1') }}">
 {% endblock %}
 
-{% block entrypoint %}
-<script defer src="{{ url_for('views.themes', path='js/pages/settings.js') }}"></script>
+{% block content %}
+<div
+  id="account-settings-app"
+  class="account-settings-app"
+  data-settings-endpoint="/pwncollege_api/v1/users/settings"
+  data-threads-endpoint="/pwncollege_api/v1/teaching/threads"
+  data-is-teacher="{{ 'true' if is_course_teacher else 'false' }}"
+>
+  <header class="account-settings-hero">
+    <div>
+      <span class="account-settings-kicker">账户中心</span>
+      <h1>设置</h1>
+      <p>管理你的公开资料、登录安全、界面体验和对话数据。</p>
+    </div>
+    <a class="account-settings-profile-link" href="{{ url_for('pwncollege_users.view_self') }}">
+      <span class="account-settings-avatar" aria-hidden="true">{{ user.name[:1] | upper }}</span>
+      <span><strong>{{ user.name }}</strong><small>查看个人资料</small></span>
+      <i class="fas fa-arrow-right" aria-hidden="true"></i>
+    </a>
+  </header>
+
+  {% include "components/errors.html" %}
+
+  <div class="account-settings-layout">
+    <nav class="account-settings-nav" aria-label="设置分类">
+      <button type="button" class="is-active" data-settings-section="profile" aria-controls="settings-panel-profile" aria-selected="true">
+        <i class="fas fa-id-card" aria-hidden="true"></i><span>个人资料</span>
+      </button>
+      <button type="button" data-settings-section="account" aria-controls="settings-panel-account" aria-selected="false">
+        <i class="fas fa-user-circle" aria-hidden="true"></i><span>账户</span>
+      </button>
+      <button type="button" data-settings-section="security" aria-controls="settings-panel-security" aria-selected="false">
+        <i class="fas fa-shield-alt" aria-hidden="true"></i><span>安全</span>
+      </button>
+      <button type="button" data-settings-section="appearance" aria-controls="settings-panel-appearance" aria-selected="false">
+        <i class="fas fa-palette" aria-hidden="true"></i><span>外观与体验</span>
+      </button>
+      <button type="button" data-settings-section="data" aria-controls="settings-panel-data" aria-selected="false">
+        <i class="fas fa-database" aria-hidden="true"></i><span>数据与对话</span>
+      </button>
+    </nav>
+
+    <div class="account-settings-content">
+      <section id="settings-panel-profile" class="account-settings-panel" data-settings-panel="profile" aria-labelledby="settings-profile-title">
+        <div class="account-settings-heading">
+          <div><span>个人资料</span><h2 id="settings-profile-title">你希望如何被看到</h2></div>
+          <p>这些信息会显示在你的个人资料页。留空的项目不会公开展示。</p>
+        </div>
+
+        {% with form = Forms.self.SettingsForm(country=user.country) %}
+        <form id="settings-profile-form" class="account-settings-form" autocomplete="off">
+          <div class="account-settings-fields is-two-column">
+            <label class="account-settings-field">
+              <span>所属单位</span>
+              {{ form.affiliation(class="form-control", value=user.affiliation or "", placeholder="学校、学院或组织") }}
+            </label>
+            <label class="account-settings-field">
+              <span>个人网站</span>
+              {{ form.website(class="form-control", value=user.website or "", placeholder="https://example.com") }}
+            </label>
+            <label class="account-settings-field is-wide">
+              <span>国家或地区</span>
+              {{ form.country(class="form-control custom-select") }}
+            </label>
+          </div>
+
+          {% if form.extra %}
+          <div class="account-settings-extra-fields">
+            {{ render_extra_fields(form.extra) }}
+          </div>
+          {% endif %}
+
+          <label class="account-settings-switch">
+            <input id="settings-profile-hidden" type="checkbox" {% if user.hidden %}checked{% endif %}>
+            <span aria-hidden="true"></span>
+            <span><strong>隐藏公开资料</strong><small>开启后，其他用户无法查看你的个人资料和公开成绩。</small></span>
+          </label>
+
+          <div class="account-settings-form-actions">
+            <p id="settings-profile-status" class="account-settings-status" role="status" aria-live="polite"></p>
+            <button class="account-settings-primary" type="submit">保存个人资料</button>
+          </div>
+        </form>
+        {% endwith %}
+      </section>
+
+      <section id="settings-panel-account" class="account-settings-panel" data-settings-panel="account" aria-labelledby="settings-account-title" hidden>
+        <div class="account-settings-heading">
+          <div><span>账户</span><h2 id="settings-account-title">身份与登录邮箱</h2></div>
+          <p>修改邮箱时可能需要确认当前密码；邮箱验证要求由平台策略决定。</p>
+        </div>
+
+        {% with form = Forms.self.SettingsForm() %}
+        <form id="settings-account-form" class="account-settings-form" autocomplete="off">
+          <div class="account-settings-fields">
+            <label class="account-settings-field">
+              <span>用户名</span>
+              {{ form.name(class="form-control", value=user.name, readonly=prevent_name_change) }}
+              {% if prevent_name_change %}<small>平台当前不允许修改用户名。</small>{% endif %}
+            </label>
+            <label class="account-settings-field">
+              <span>电子邮箱</span>
+              {{ form.email(class="form-control", value=user.email, autocomplete="email") }}
+              <small id="settings-email-verification">{{ '已验证' if user.verified else '尚未验证' }}</small>
+            </label>
+            <label class="account-settings-field" id="settings-current-password-field">
+              <span>当前密码</span>
+              <input id="settings-current-password" class="form-control" type="password" autocomplete="current-password" placeholder="仅在修改受保护信息时需要">
+            </label>
+          </div>
+          <div id="settings-oauth-notice" class="account-settings-notice" hidden>
+            <i class="fas fa-link" aria-hidden="true"></i>
+            <span><strong>此账户由外部身份服务管理</strong><small>部分身份信息需在登录服务中修改。</small></span>
+          </div>
+          <div class="account-settings-form-actions">
+            <p id="settings-account-status" class="account-settings-status" role="status" aria-live="polite"></p>
+            <button class="account-settings-primary" type="submit">保存账户信息</button>
+          </div>
+        </form>
+        {% endwith %}
+      </section>
+
+      <section id="settings-panel-security" class="account-settings-panel" data-settings-panel="security" aria-labelledby="settings-security-title" hidden>
+        <div class="account-settings-heading">
+          <div><span>安全</span><h2 id="settings-security-title">密码与访问凭据</h2></div>
+          <p>分别管理网页登录密码、SSH 公钥和 API 访问令牌。</p>
+        </div>
+
+        <section class="account-settings-subsection" id="settings-password-section">
+          <div class="account-settings-subheading"><div><h3>修改密码</h3><p>密码更新后，其他旧登录会话将失效。</p></div></div>
+          <form id="settings-password-form" class="account-settings-form" autocomplete="off">
+            <div class="account-settings-fields is-three-column">
+              <label class="account-settings-field"><span>当前密码</span><input id="settings-password-current" class="form-control" type="password" autocomplete="current-password" required></label>
+              <label class="account-settings-field"><span>新密码</span><input id="settings-password-new" class="form-control" type="password" autocomplete="new-password" minlength="8" required></label>
+              <label class="account-settings-field"><span>确认新密码</span><input id="settings-password-confirm" class="form-control" type="password" autocomplete="new-password" minlength="8" required></label>
+            </div>
+            <div class="account-settings-form-actions">
+              <p id="settings-password-status" class="account-settings-status" role="status" aria-live="polite"></p>
+              <button class="account-settings-primary" type="submit">更新密码</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="account-settings-subsection">
+          <div class="account-settings-subheading"><div><h3>SSH 公钥</h3><p>用于从本机终端安全连接题目工作区。</p></div></div>
+          {% if ssh_keys %}
+          <div class="account-settings-credential-list" aria-label="当前 SSH 公钥">
+            {% for key in ssh_keys %}
+            <form method="post" id="delete-ssh-key-{{ loop.index }}-form" class="account-settings-credential" autocomplete="off">
+              <input name="ssh_key" type="text" value="{{ key }}" readonly aria-label="SSH 公钥 {{ loop.index }}">
+              <button type="submit" aria-label="删除 SSH 公钥 {{ loop.index }}"><i class="fas fa-trash-alt" aria-hidden="true"></i></button>
+              <div id="delete-ssh-key-{{ loop.index }}-results" class="account-settings-inline-result" role="status" aria-live="polite"></div>
+            </form>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <form method="post" id="ssh-key-form" class="account-settings-inline-form" autocomplete="off">
+            <label class="account-settings-field"><span>添加公钥</span><textarea class="form-control" id="settings-ssh-key" name="ssh_key" rows="3" placeholder="ssh-ed25519 AAAA…" required></textarea></label>
+            <button class="account-settings-secondary" type="submit">添加公钥</button>
+          </form>
+          <div id="ssh-key-results" class="account-settings-inline-result" role="status" aria-live="polite"></div>
+          <details class="account-settings-details"><summary>查看连接方法</summary><p>在本机运行 <code>ssh-keygen -f key -N ''</code>，将 <code>key.pub</code> 的内容添加到这里，然后使用 <code>ssh -i key hacker@{{ request.host.split(':')[0] }}</code> 连接。</p></details>
+        </section>
+
+        <section class="account-settings-subsection">
+          <div class="account-settings-subheading"><div><h3>API 访问令牌</h3><p>令牌只在创建时显示一次，请妥善保存。</p></div></div>
+          {% with form = Forms.self.TokensForm() %}
+          <form method="post" id="settings-token-form" class="account-settings-inline-form">
+            <label class="account-settings-field"><span>到期日期</span>{{ form.expiration(class="form-control") }}</label>
+            <label class="account-settings-field is-grow"><span>用途说明</span>{{ form.description(class="form-control", rows="2", placeholder="例如：本机自动化脚本") }}</label>
+            <button class="account-settings-secondary" type="submit">生成令牌</button>
+          </form>
+          {% endwith %}
+          <div id="settings-token-result" class="account-settings-token-result" role="status" aria-live="polite" hidden></div>
+          {% if tokens %}
+          <div class="account-settings-token-list" aria-label="有效访问令牌">
+            {% for token in tokens %}
+            <div class="account-settings-token" data-token-row="{{ token.id }}">
+              <i class="fas fa-key" aria-hidden="true"></i>
+              <span><strong>{{ token.description or '未命名令牌' }}</strong><small>创建于 <span data-time="{{ token.created | isoformat }}"></span>{% if token.expiration %} · 到期 <span data-time="{{ token.expiration | isoformat }}"></span>{% endif %}</small></span>
+              <button type="button" class="settings-delete-token" data-token-id="{{ token.id }}" aria-label="删除令牌 {{ token.description or token.id }}"><i class="fas fa-trash-alt" aria-hidden="true"></i></button>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="account-settings-empty is-compact" data-token-empty>当前没有有效令牌。</p>
+          {% endif %}
+        </section>
+
+        {% if discord_enabled %}
+        <section class="account-settings-subsection">
+          <div class="account-settings-subheading"><div><h3>Discord 连接</h3><p>管理平台通知与社区身份连接。</p></div></div>
+          {% if discord_member %}
+          <div class="account-settings-connection">
+            <img src="{{ discord_avatar_asset(discord_member) }}" alt="">
+            <span><strong>{{ discord_member["user"]["username"] }}</strong><small>Discord 已连接</small></span>
+            <form method="post" id="discord-form" autocomplete="off"><button class="account-settings-danger-link" type="submit">断开连接</button></form>
+          </div>
+          <div id="discord-results" class="account-settings-inline-result" role="status" aria-live="polite"></div>
+          {% else %}
+          <a href="/discord/connect" class="account-settings-secondary">连接 Discord</a>
+          {% endif %}
+        </section>
+        {% endif %}
+      </section>
+
+      <section id="settings-panel-appearance" class="account-settings-panel" data-settings-panel="appearance" aria-labelledby="settings-appearance-title" hidden>
+        <div class="account-settings-heading">
+          <div><span>外观与体验</span><h2 id="settings-appearance-title">选择界面主题</h2></div>
+          <p>主题偏好会保存到账户，并立即应用到当前浏览器的后续页面。</p>
+        </div>
+        <div class="account-settings-theme-grid" role="radiogroup" aria-label="界面主题">
+          <button type="button" data-settings-appearance="system" role="radio" aria-checked="false"><span class="is-system" aria-hidden="true"></span><strong>跟随系统</strong><small>自动匹配设备明暗外观</small><i class="fas fa-check" aria-hidden="true"></i></button>
+          <button type="button" data-settings-palette="academy" role="radio" aria-checked="false"><span class="is-academy" aria-hidden="true"></span><strong>学院蓝</strong><small>清晰、专注、通用</small><i class="fas fa-check" aria-hidden="true"></i></button>
+          <button type="button" data-settings-palette="forest" role="radio" aria-checked="false"><span class="is-forest" aria-hidden="true"></span><strong>书院绿</strong><small>柔和、沉稳、自然</small><i class="fas fa-check" aria-hidden="true"></i></button>
+          <button type="button" data-settings-palette="sunrise" role="radio" aria-checked="false"><span class="is-sunrise" aria-hidden="true"></span><strong>暖沙橙</strong><small>温暖、纸感、低刺激</small><i class="fas fa-check" aria-hidden="true"></i></button>
+          <button type="button" data-settings-palette="midnight" role="radio" aria-checked="false"><span class="is-midnight" aria-hidden="true"></span><strong>深海夜</strong><small>暗色、低眩光、专注</small><i class="fas fa-check" aria-hidden="true"></i></button>
+        </div>
+        <label class="account-settings-switch account-settings-motion-preference">
+          <input id="settings-reduced-motion" type="checkbox">
+          <span aria-hidden="true"></span>
+          <span><strong>减少动态效果</strong><small>关闭大部分动画和过渡，降低视觉干扰。该偏好会应用到整个平台。</small></span>
+        </label>
+        <p id="settings-appearance-status" class="account-settings-status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="settings-panel-data" class="account-settings-panel" data-settings-panel="data" aria-labelledby="settings-data-title" hidden>
+        <div class="account-settings-heading">
+          <div><span>数据与对话</span><h2 id="settings-data-title">管理保留的数据</h2></div>
+          <p>恢复已归档的 AI 对话，或重置个人题目实验环境的 Home 目录。</p>
+        </div>
+
+        {% if is_course_teacher %}
+        <section class="account-settings-subsection">
+          <button type="button" class="account-settings-deep-link" data-settings-open-subpage="archives">
+            <span><i class="fas fa-archive" aria-hidden="true"></i></span>
+            <span><strong>归档对话</strong><small>搜索并恢复已从 AI 共创侧栏归档的对话</small></span>
+            <span id="settings-archive-summary-count">正在读取…</span>
+            <i class="fas fa-chevron-right" aria-hidden="true"></i>
+          </button>
+        </section>
+        {% endif %}
+
+        <section class="account-settings-subsection is-danger-zone">
+          <div class="account-settings-subheading">
+            <div><h3>重置 Home 目录</h3><p>系统会先把完整目录备份到 <code>/home/hacker/home-backup.tar.gz</code>，再清除其余内容。此操作影响所有题目实验环境；备份之后产生的修改无法恢复。</p></div>
+            <button id="reset-home-button" class="account-settings-danger" type="button">重置 Home 目录</button>
+          </div>
+          <div id="reset-home-results" class="account-settings-inline-result" role="status" aria-live="polite"></div>
+        </section>
+      </section>
+
+      {% if is_course_teacher %}
+      <section id="settings-panel-archives" class="account-settings-panel" data-settings-subpage="archives" aria-labelledby="settings-archives-title" hidden>
+        <button type="button" class="account-settings-back" data-settings-close-subpage="archives"><i class="fas fa-arrow-left" aria-hidden="true"></i>数据与对话</button>
+        <div class="account-settings-heading">
+          <div><span>对话管理</span><h2 id="settings-archives-title">归档对话</h2></div>
+          <p>搜索标题或消息内容；可以恢复对话，或永久删除不再需要的记录。</p>
+        </div>
+        <div class="account-settings-subsection" id="settings-archive-section">
+          <div class="account-settings-subheading is-searchable">
+            <div><h3>已归档</h3><p>恢复只改变归档状态；永久删除不可撤销，并会先要求再次确认。</p></div>
+            <button id="settings-archive-refresh" class="account-settings-icon-button" type="button" aria-label="刷新归档对话"><i class="fas fa-sync-alt" aria-hidden="true"></i></button>
+          </div>
+          <label class="account-settings-search"><i class="fas fa-search" aria-hidden="true"></i><input id="settings-archive-search" type="search" placeholder="搜索标题或对话内容" autocomplete="off"><kbd>⌘ K</kbd></label>
+          <div id="settings-archive-status" class="account-settings-list-status" role="status" aria-live="polite"></div>
+          <div id="settings-archive-list" class="account-settings-archive-list" aria-live="polite"></div>
+        </div>
+      </section>
+      {% endif %}
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js', v='aisecedu-20260726-guided-workspace') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js', v='aisecedu-account-settings-v3') }}"></script>
 {% endblock %}

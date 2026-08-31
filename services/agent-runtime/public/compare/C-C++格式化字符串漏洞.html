@@ -1,0 +1,1741 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>格式化字符串漏洞实验 — C/C++ Format String Attack Lab</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --bg-card: #1a1f2e;
+            --bg-code: #0d1117;
+            --bg-terminal: #0c0c0c;
+            --text: #e2e8f0;
+            --text-dim: #94a3b8;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --flag: #f59e0b;
+            --highlight-read: #3b82f6;
+            --highlight-write: #ef4444;
+            --border: #334155;
+            --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+            --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        .main-container {
+            width: 100%;
+            max-width: 1100px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 1.5rem 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: linear-gradient(180deg, var(--danger), var(--warning), var(--accent));
+        }
+        .header .edu-badge {
+            display: inline-block;
+            background: #1e293b;
+            color: var(--warning);
+            font-size: 0.7rem;
+            padding: 0.25rem 0.7rem;
+            border-radius: 20px;
+            font-family: var(--font-mono);
+            letter-spacing: 0.5px;
+            width: fit-content;
+        }
+        .header h1 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+            color: #f1f5f9;
+        }
+        .header .scenario {
+            color: var(--text-dim);
+            font-size: 0.9rem;
+            max-width: 700px;
+        }
+
+        /* Progress */
+        .progress-bar {
+            display: flex;
+            gap: 0;
+            align-items: center;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.75rem 1.25rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .progress-step {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            padding: 0.35rem 0.6rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.25s;
+            white-space: nowrap;
+            user-select: none;
+        }
+        .progress-step.active {
+            color: #fff;
+            background: #1e3a5f;
+            font-weight: 600;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.3);
+        }
+        .progress-step.done {
+            color: var(--success);
+        }
+        .progress-step .step-num {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.75rem;
+            border: 2px solid var(--border);
+            flex-shrink: 0;
+            transition: all 0.3s;
+        }
+        .progress-step.active .step-num {
+            border-color: var(--accent);
+            background: #1e3a5f;
+        }
+        .progress-step.done .step-num {
+            border-color: var(--success);
+            background: #14532d;
+            color: var(--success);
+        }
+        .progress-arrow {
+            color: var(--text-dim);
+            margin: 0 0.2rem;
+            font-size: 0.7rem;
+            flex-shrink: 0;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: all 0.3s;
+        }
+        .card h2 {
+            font-size: 1.15rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .card h2 .icon {
+            font-size: 1.3rem;
+        }
+
+        /* Code display */
+        .code-block {
+            background: var(--bg-code);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            line-height: 1.7;
+            overflow-x: auto;
+            border: 1px solid #252d3a;
+            position: relative;
+            white-space: pre;
+            color: #c9d1d9;
+        }
+        .code-block .line {
+            display: block;
+            padding: 0.08rem 0.5rem;
+            margin: 0 -0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+        }
+        .code-block .line:hover {
+            background: #1a2332;
+        }
+        .code-block .line.vulnerable-highlight {
+            background: rgba(239, 68, 68, 0.2);
+            border-left-color: var(--danger);
+            animation: pulse-danger 1.5s infinite;
+        }
+        .code-block .line.correct-click {
+            background: rgba(34, 197, 94, 0.25);
+            border-left-color: var(--success);
+            animation: pulse-success 0.6s ease-out;
+        }
+        .code-block .line.wrong-click {
+            background: rgba(239, 68, 68, 0.15);
+            animation: shake 0.4s ease;
+        }
+        .code-block .line-number {
+            display: inline-block;
+            width: 28px;
+            color: #555;
+            user-select: none;
+            text-align: right;
+            margin-right: 1rem;
+        }
+        .code-keyword {
+            color: #ff7b72;
+        }
+        .code-func {
+            color: #d2a8ff;
+        }
+        .code-string {
+            color: #a5d6ff;
+        }
+        .code-comment {
+            color: #6e7681;
+            font-style: italic;
+        }
+        .code-macro {
+            color: #ffa657;
+        }
+
+        @keyframes pulse-danger {
+            0%,
+            100% {
+                background: rgba(239, 68, 68, 0.2);
+            }
+            50% {
+                background: rgba(239, 68, 68, 0.4);
+            }
+        }
+        @keyframes pulse-success {
+            0% {
+                background: rgba(34, 197, 94, 0.5);
+            }
+            100% {
+                background: rgba(34, 197, 94, 0.1);
+            }
+        }
+        @keyframes shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            25% {
+                transform: translateX(-6px);
+            }
+            75% {
+                transform: translateX(6px);
+            }
+        }
+
+        /* Terminal */
+        .terminal {
+            background: var(--bg-terminal);
+            border-radius: 10px;
+            border: 1px solid #2a2a2a;
+            overflow: hidden;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+        .terminal-header {
+            background: #1a1a1a;
+            padding: 0.5rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            border-bottom: 1px solid #2a2a2a;
+        }
+        .terminal-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .terminal-dot.red {
+            background: #ff5f56;
+        }
+        .terminal-dot.yellow {
+            background: #ffbd2e;
+        }
+        .terminal-dot.green {
+            background: #27c93f;
+        }
+        .terminal-title {
+            color: #888;
+            font-size: 0.7rem;
+            margin-left: 0.5rem;
+        }
+        .terminal-body {
+            padding: 1rem;
+            min-height: 120px;
+            max-height: 350px;
+            overflow-y: auto;
+            color: #b0f0b0;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .terminal-body .prompt {
+            color: #88cc88;
+        }
+        .terminal-body .input-echo {
+            color: #f0f0b0;
+        }
+        .terminal-body .output {
+            color: #b0f0b0;
+        }
+        .terminal-body .leak-highlight {
+            color: #ffcc00;
+            font-weight: bold;
+        }
+        .terminal-body .write-highlight {
+            color: #ff6666;
+            font-weight: bold;
+            animation: glow-red 0.8s ease-out;
+        }
+        .terminal-body .flag-output {
+            color: #f59e0b;
+            font-weight: bold;
+            font-size: 1rem;
+            animation: glow-gold 0.6s ease-out;
+        }
+        .terminal-body .error-output {
+            color: #ff5f56;
+        }
+
+        @keyframes glow-red {
+            0% {
+                text-shadow: 0 0 12px #ff0000;
+            }
+            100% {
+                text-shadow: none;
+            }
+        }
+        @keyframes glow-gold {
+            0% {
+                text-shadow: 0 0 16px #f59e0b;
+            }
+            100% {
+                text-shadow: none;
+            }
+        }
+
+        /* Input */
+        .input-group {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 0.75rem;
+        }
+        .input-group input {
+            flex: 1;
+            min-width: 200px;
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.6rem 0.9rem;
+            color: #f0f0b0;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .input-group input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        .btn {
+            padding: 0.55rem 1.2rem;
+            border-radius: 6px;
+            border: none;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: var(--font-sans);
+            white-space: nowrap;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            box-shadow: 0 4px 16px rgba(59, 130, 246, 0.35);
+        }
+        .btn-danger {
+            background: var(--danger);
+            color: #fff;
+        }
+        .btn-danger:hover {
+            background: #dc2626;
+            box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35);
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+        .btn-outline:hover {
+            border-color: var(--accent);
+            color: #fff;
+        }
+        .btn-success {
+            background: var(--success);
+            color: #000;
+        }
+        .btn-success:hover {
+            box-shadow: 0 4px 16px rgba(34, 197, 94, 0.4);
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        /* Stack visualization */
+        .stack-viz {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            background: #0a0d14;
+            border-radius: 8px;
+            padding: 0.6rem;
+            border: 1px solid #1e2530;
+            max-width: 500px;
+        }
+        .stack-slot {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.4rem 0.6rem;
+            border-radius: 5px;
+            transition: all 0.35s;
+            border-left: 3px solid transparent;
+            background: #0d1117;
+            cursor: default;
+            position: relative;
+        }
+        .stack-slot.reading {
+            background: rgba(59, 130, 246, 0.2);
+            border-left-color: var(--highlight-read);
+            animation: slot-read 0.5s ease-out;
+        }
+        .stack-slot.writing {
+            background: rgba(239, 68, 68, 0.3);
+            border-left-color: var(--highlight-write);
+            animation: slot-write 0.7s ease-out;
+        }
+        .stack-slot .addr {
+            color: #667;
+            min-width: 80px;
+            font-size: 0.7rem;
+        }
+        .stack-slot .val {
+            color: #b0f0b0;
+            font-weight: 600;
+            min-width: 80px;
+        }
+        .stack-slot .label {
+            color: #888;
+            font-size: 0.7rem;
+            flex: 1;
+            text-align: right;
+        }
+        .stack-slot .arrow-indicator {
+            position: absolute;
+            right: -30px;
+            font-size: 1rem;
+            animation: fade-in 0.3s;
+        }
+        @keyframes slot-read {
+            0% {
+                box-shadow: 0 0 16px rgba(59, 130, 246, 0.6);
+            }
+            100% {
+                box-shadow: none;
+            }
+        }
+        @keyframes slot-write {
+            0% {
+                box-shadow: 0 0 20px rgba(239, 68, 68, 0.8);
+                transform: scale(1.03);
+            }
+            100% {
+                box-shadow: none;
+                transform: scale(1);
+            }
+        }
+        @keyframes fade-in {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* Flags panel */
+        .flags-panel {
+            display: flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+            padding: 0.5rem 0;
+        }
+        .flag-badge {
+            background: #1e1a0f;
+            border: 1px solid #4a3a10;
+            color: #b0a060;
+            padding: 0.35rem 0.8rem;
+            border-radius: 20px;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            transition: all 0.4s;
+            opacity: 0.5;
+            user-select: none;
+        }
+        .flag-badge.captured {
+            background: #1a2f1a;
+            border-color: #3a6a3a;
+            color: var(--success);
+            opacity: 1;
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.25);
+            animation: flag-pop 0.5s ease-out;
+        }
+        @keyframes flag-pop {
+            0% {
+                transform: scale(1.3);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        /* Diff */
+        .diff-line {
+            padding: 0.25rem 0.6rem;
+            border-radius: 3px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            margin: 1px 0;
+        }
+        .diff-add {
+            background: rgba(34, 197, 94, 0.2);
+            color: #7ee787;
+        }
+        .diff-remove {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ff7b72;
+        }
+        .diff-same {
+            color: #888;
+        }
+
+        /* Analysis report */
+        .analysis-report {
+            background: #111827;
+            border: 1px solid #252d3a;
+            border-radius: 10px;
+            padding: 1.25rem;
+            margin-top: 0.5rem;
+        }
+        .analysis-report h3 {
+            color: var(--warning);
+            margin-bottom: 0.8rem;
+            font-size: 1rem;
+        }
+        .analysis-report p {
+            color: #b0b8c0;
+            font-size: 0.85rem;
+            margin-bottom: 0.5rem;
+            line-height: 1.6;
+        }
+        .analysis-report .ref {
+            color: var(--accent);
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.3rem;
+            }
+            .code-block {
+                font-size: 0.7rem;
+                padding: 0.6rem 0.8rem;
+            }
+            .stack-slot .addr {
+                min-width: 55px;
+                font-size: 0.6rem;
+            }
+            .stack-slot .val {
+                min-width: 55px;
+                font-size: 0.7rem;
+            }
+            .progress-step {
+                font-size: 0.7rem;
+                padding: 0.25rem 0.4rem;
+            }
+            .progress-step .step-num {
+                width: 22px;
+                height: 22px;
+                font-size: 0.65rem;
+            }
+            .progress-arrow {
+                margin: 0 0.05rem;
+                font-size: 0.6rem;
+            }
+            .input-group {
+                flex-direction: column;
+            }
+            .input-group input {
+                width: 100%;
+            }
+        }
+
+        /* Collapsible */
+        details {
+            margin-top: 0.75rem;
+        }
+        details summary {
+            cursor: pointer;
+            color: var(--accent);
+            font-weight: 600;
+            font-size: 0.85rem;
+            padding: 0.4rem 0;
+            user-select: none;
+        }
+        details summary:hover {
+            color: #60a5fa;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+        .fade-in {
+            animation: fade-in 0.4s ease-out;
+        }
+        .text-success {
+            color: var(--success);
+        }
+        .text-danger {
+            color: var(--danger);
+        }
+        .text-warning {
+            color: var(--warning);
+        }
+        .text-accent {
+            color: var(--accent);
+        }
+        .mt-1 {
+            margin-top: 0.75rem;
+        }
+        .mt-2 {
+            margin-top: 1.25rem;
+        }
+        .mb-1 {
+            margin-bottom: 0.75rem;
+        }
+        .gap-1 {
+            gap: 0.75rem;
+        }
+        .flex-row {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- Header -->
+        <div class="header">
+            <span class="edu-badge">// EDUCATIONAL PURPOSE ONLY — authorized classroom use</span>
+            <h1>🔬 C/C++ 格式化字符串漏洞实验</h1>
+            <p class="scenario"><strong>任务简报：</strong>你是一名安全研究员，正在审计一个 C 程序的源代码。该程序使用 <code>printf()</code> 处理用户输入，但存在严重的格式化字符串漏洞。你的任务是：<strong>①识别漏洞</strong> → <strong>②泄露栈数据</strong> → <strong>③利用 %n 写入内存</strong> → <strong>④分析栈帧</strong> → <strong>⑤修复代码</strong>。全程在浏览器中模拟 x86 环境。</p>
+        </div>
+
+        <!-- Flags Panel -->
+        <div class="flags-panel" id="flagsPanel">
+            <span class="flag-badge" id="flag1">🏴 FLAG_1: 待捕获</span>
+            <span class="flag-badge" id="flag2">🏴 FLAG_2: 待捕获</span>
+            <span class="flag-badge" id="flag3">🏴 FLAG_3: 待捕获</span>
+            <span class="flag-badge" id="flag4">🏴 FLAG_4: 待捕获</span>
+            <span class="flag-badge" id="flag5">🏆 FLAG_FINAL: 待捕获</span>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-bar" id="progressBar">
+            <span class="progress-step active" data-step="1"><span class="step-num">1</span>漏洞识别</span>
+            <span class="progress-arrow">→</span>
+            <span class="progress-step" data-step="2"><span class="step-num">2</span>栈泄露</span>
+            <span class="progress-arrow">→</span>
+            <span class="progress-step" data-step="3"><span class="step-num">3</span>内存写入</span>
+            <span class="progress-arrow">→</span>
+            <span class="progress-step" data-step="4"><span class="step-num">4</span>栈帧分析</span>
+            <span class="progress-arrow">→</span>
+            <span class="progress-step" data-step="5"><span class="step-num">5</span>代码修复</span>
+        </div>
+
+        <!-- STEP 1: Vulnerability Hunt -->
+        <div class="card step-content" id="step1">
+            <h2><span class="icon">🔍</span>步骤 1/5 — 漏洞识别（Vulnerability Hunt）</h2>
+            <p style="color:var(--text-dim);margin-bottom:0.75rem;">下面是一个简化但<strong>真实</strong>的 C 程序。请<strong>点击你认为存在漏洞的代码行</strong>。</p>
+            <div class="code-block" id="codeBlock1">
+<span class="line" data-line="1"><span class="line-number">1</span><span class="code-macro">#include</span> <span class="code-string">&lt;stdio.h&gt;</span></span>
+<span class="line" data-line="2"><span class="code-macro">#include</span> <span class="code-string">&lt;string.h&gt;</span></span>
+<span class="line" data-line="3"></span>
+<span class="line" data-line="4"><span class="code-macro">#define</span> SECRET_KEY   <span class="code-string">0x1337</span></span>
+<span class="line" data-line="5"><span class="code-macro">#define</span> ACCESS_LEVEL <span class="code-string">0x00</span></span>
+<span class="line" data-line="6"></span>
+<span class="line" data-line="7"><span class="code-keyword">int</span> <span class="code-func">main</span>(<span class="code-keyword">int</span> argc, <span class="code-keyword">char</span> *argv[]) {</span>
+<span class="line" data-line="8">    <span class="code-keyword">char</span>  input_buf[<span class="code-string">256</span>];</span>
+<span class="line" data-line="9">    <span class="code-keyword">int</span>   secret_key  = SECRET_KEY;   <span class="code-comment">// 0x1337</span></span>
+<span class="line" data-line="10">    <span class="code-keyword">int</span>   access_level = ACCESS_LEVEL; <span class="code-comment">// 0x00</span></span>
+<span class="line" data-line="11">    <span class="code-keyword">int</span>   marker_a = <span class="code-string">0x41414141</span>;</span>
+<span class="line" data-line="12">    <span class="code-keyword">int</span>   marker_b = <span class="code-string">0x42424242</span>;</span>
+<span class="line" data-line="13">    <span class="code-keyword">int</span>   marker_c = <span class="code-string">0x43434343</span>;</span>
+<span class="line" data-line="14">    <span class="code-keyword">int</span>   marker_d = <span class="code-string">0x44444444</span>;</span>
+<span class="line" data-line="15"></span>
+<span class="line" data-line="16">    <span class="code-func">printf</span>(<span class="code-string">"Enter message: "</span>);</span>
+<span class="line" data-line="17">    <span class="code-func">fgets</span>(input_buf, <span class="code-keyword">sizeof</span>(input_buf), stdin);</span>
+<span class="line" data-line="18">    input_buf[<span class="code-func">strcspn</span>(input_buf, <span class="code-string">"\n"</span>)] = <span class="code-string">0</span>;</span>
+<span class="line" data-line="19"></span>
+<span class="line" data-line="20">    <span class="code-func">printf</span>(<span class="code-string">"Output: "</span>);</span>
+<span class="line" data-line="21" id="vulnLine">    <span class="code-func">printf</span>(input_buf);  <span class="code-comment">// ← 此处将用户输入作为格式字符串</span></span>
+<span class="line" data-line="22">    <span class="code-func">printf</span>(<span class="code-string">"\n"</span>);</span>
+<span class="line" data-line="23"></span>
+<span class="line" data-line="24">    <span class="code-func">printf</span>(<span class="code-string">"[DEBUG] Access level: 0x%08x\n"</span>, access_level);</span>
+<span class="line" data-line="25">    <span class="code-keyword">if</span> (access_level == <span class="code-string">0x1337</span>) {</span>
+<span class="line" data-line="26">        <span class="code-func">printf</span>(<span class="code-string">"🎯 FLAG{fmt_str_priv_esc}\n"</span>);</span>
+<span class="line" data-line="27">    } <span class="code-keyword">else</span> {</span>
+<span class="line" data-line="28">        <span class="code-func">printf</span>(<span class="code-string">"   Access denied.\n"</span>);</span>
+<span class="line" data-line="29">    }</span>
+<span class="line" data-line="30">    <span class="code-keyword">return</span> <span class="code-string">0</span>;</span>
+<span class="line" data-line="31">}</span>
+            </div>
+            <div id="step1Feedback" class="mt-1" style="min-height:2rem;"></div>
+            <div id="step1Hint" style="color:var(--text-dim);font-size:0.8rem;margin-top:0.4rem;"></div>
+            <div class="input-group">
+                <button class="btn btn-primary" id="btnNext1" disabled>确认并进入下一步 →</button>
+            </div>
+        </div>
+
+        <!-- STEP 2: Stack Leak -->
+        <div class="card step-content hidden" id="step2">
+            <h2><span class="icon">🫣</span>步骤 2/5 — 栈信息泄露（Stack Information Leak）</h2>
+            <p style="color:var(--text-dim);margin-bottom:0.75rem;">现在你已经发现了漏洞：<code>printf(input_buf)</code> 将用户输入直接作为<strong>格式字符串</strong>处理。请在下方终端中输入格式字符串 payload，泄露栈上的敏感数据。尝试使用 <code>%x</code> 来读取栈上的十六进制值。</p>
+            <p style="color:var(--warning);font-size:0.8rem;">💡 提示：连续使用多个 <code>%x</code>（如 <code>%x %x %x %x %x %x</code>）可以遍历栈上的多个 4 字节槽位，从而读取局部变量。</p>
+            <div class="terminal">
+                <div class="terminal-header">
+                    <span class="terminal-dot red"></span><span class="terminal-dot yellow"></span><span class="terminal-dot green"></span>
+                    <span class="terminal-title">模拟终端 — ./vuln_prog (x86 cdecl)</span>
+                </div>
+                <div class="terminal-body" id="terminal2">
+                    <span class="prompt">$ </span><span>./vuln_prog</span>
+                    <span>Enter message: </span><span class="input-echo" id="echo2"></span>
+                    <span>Output: </span><span class="output" id="output2"></span>
+                    <span id="debug2"></span>
+                    <span id="flag2out"></span>
+                </div>
+            </div>
+            <div class="input-group mt-1">
+                <input type="text" id="payload2" placeholder="输入格式字符串 payload，如: %x %x %x %x %x %x" autocomplete="off">
+                <button class="btn btn-primary" id="btnExec2">▶ 执行</button>
+                <button class="btn btn-outline" id="btnReset2">↺ 重置</button>
+            </div>
+            <div id="step2Feedback" class="mt-1" style="min-height:1.5rem;"></div>
+            <div class="flex-row mt-1 gap-1">
+                <div class="stack-viz" id="stackViz2" style="flex:1;min-width:280px;">
+                    <div style="color:#667;font-size:0.7rem;text-align:center;padding:0.3rem;">📋 栈槽位快照（printf 参数视角）</div>
+                </div>
+                <div style="flex:1;min-width:200px;font-size:0.78rem;color:var(--text-dim);" id="leakInfo2">
+                    <strong>已泄露数据：</strong><br>
+                    <span id="leakedVals2">尚未执行 payload</span>
+                </div>
+            </div>
+            <div class="input-group mt-1">
+                <button class="btn btn-primary" id="btnNext2" disabled>确认并进入下一步 →</button>
+            </div>
+        </div>
+
+        <!-- STEP 3: Memory Write -->
+        <div class="card step-content hidden" id="step3">
+            <h2><span class="icon">✍️</span>步骤 3/5 — 内存写入攻击（%n Write Primitive）</h2>
+            <p style="color:var(--text-dim);margin-bottom:0.75rem;">你已经泄露了栈数据，发现 <code>access_level</code> 当前值为 <strong>0x00000000</strong>，而获得 flag 需要它等于 <strong>0x00001337</strong>。现在请使用 <code>%n</code> 格式说明符<strong>向内存写入数据</strong>，覆盖 access_level。使用<strong>直接位置参数</strong> <code>%N$n</code> 精准写入第 N 个栈槽位。</p>
+            <p style="color:var(--warning);font-size:0.8rem;">💡 从泄露结果可知 <code>access_level</code> 位于第 <strong>5</strong> 个栈槽位（从 %x 计数）。尝试 <code>%5$n</code> 或组合多个 %x 后再用 %n。%n 写入的是<strong>已打印字符总数</strong>。</p>
+            <div class="terminal">
+                <div class="terminal-header">
+                    <span class="terminal-dot red"></span><span class="terminal-dot yellow"></span><span class="terminal-dot green"></span>
+                    <span class="terminal-title">模拟终端 — ./vuln_prog (特权提升攻击)</span>
+                </div>
+                <div class="terminal-body" id="terminal3">
+                    <span class="prompt">$ </span><span>./vuln_prog</span>
+                    <span>Enter message: </span><span class="input-echo" id="echo3"></span>
+                    <span>Output: </span><span class="output" id="output3"></span>
+                    <span id="debug3"></span>
+                    <span id="flag3out"></span>
+                </div>
+            </div>
+            <div class="input-group mt-1">
+                <input type="text" id="payload3" placeholder="输入含 %n 的 payload，如: %5$n 或 AAAA%5$n" autocomplete="off">
+                <button class="btn btn-danger" id="btnExec3">⚡ 执行写入</button>
+                <button class="btn btn-outline" id="btnReset3">↺ 重置</button>
+            </div>
+            <div id="step3Feedback" class="mt-1" style="min-height:1.5rem;"></div>
+            <div class="input-group mt-1">
+                <button class="btn btn-primary" id="btnNext3" disabled>确认并进入下一步 →</button>
+            </div>
+        </div>
+
+        <!-- STEP 4: Stack Frame Visualization -->
+        <div class="card step-content hidden" id="step4">
+            <h2><span class="icon">📐</span>步骤 4/5 — x86 栈帧可视化分析（Stack Frame Analysis）</h2>
+            <p style="color:var(--text-dim);margin-bottom:0.75rem;">下方是 x86（32-bit cdecl）栈帧的详细布局。点击<strong>「逐步处理」</strong>按钮观察格式化字符串如何<strong>逐槽位读取栈数据</strong>（%x 蓝色高亮）以及 <strong>%n 如何写回内存</strong>（红色高亮）。</p>
+            <div class="flex-row gap-1">
+                <div class="stack-viz" id="stackViz4" style="flex:1.5;min-width:340px;">
+                    <div style="color:#667;font-size:0.7rem;text-align:center;padding:0.3rem;border-bottom:1px solid #1e2530;margin-bottom:0.3rem;">
+                        📋 x86 栈帧 — printf() 调用时 (地址从高到低)
+                    </div>
+                </div>
+                <div style="flex:1;min-width:200px;font-size:0.78rem;" id="step4Info">
+                    <strong>格式字符串处理状态：</strong><br>
+                    <span id="fmtState4">等待执行...</span>
+                    <div class="mt-1" id="fmtProgress4"></div>
+                </div>
+            </div>
+            <div class="input-group mt-1">
+                <button class="btn btn-primary" id="btnStep4">▶ 逐步处理下一个说明符</button>
+                <button class="btn btn-outline" id="btnAuto4">⏩ 自动播放全部</button>
+                <button class="btn btn-outline" id="btnReset4">↺ 重置</button>
+            </div>
+            <div id="step4Feedback" class="mt-1" style="min-height:1.5rem;"></div>
+            <div class="input-group mt-1">
+                <button class="btn btn-primary" id="btnNext4">确认并进入下一步 →</button>
+            </div>
+        </div>
+
+        <!-- STEP 5: Code Fix -->
+        <div class="card step-content hidden" id="step5">
+            <h2><span class="icon">🛡️</span>步骤 5/5 — 代码修复（Patch the Vulnerability）</h2>
+            <p style="color:var(--text-dim);margin-bottom:0.75rem;">最后，请<strong>修复</strong>这个漏洞。在下方输入框中键入修复后的代码行（替换第 21 行的 <code>printf(input_buf);</code>）。正确的修复应确保用户输入不会被解释为格式字符串。</p>
+            <div class="code-block mb-1">
+                <span style="color:#ff7b72;">// 原始漏洞代码（第 21 行）：</span>
+                <span style="color:#ff7b72;text-decoration:line-through;">    printf(input_buf);</span>
+                <span style="color:#6e7681;">// 请写出修复后的代码：</span>
+            </div>
+            <div class="input-group">
+                <input type="text" id="fixInput5" placeholder="输入修复代码，如: printf(&quot;%s&quot;, input_buf);" autocomplete="off" style="flex:2;">
+                <button class="btn btn-success" id="btnCheck5">✅ 检查修复</button>
+            </div>
+            <div id="diffOutput5" class="mt-1" style="min-height:2rem;"></div>
+            <div id="step5Feedback" class="mt-1" style="min-height:1.5rem;"></div>
+            <div class="input-group mt-1">
+                <button class="btn btn-primary" id="btnFinish5" disabled>🏁 完成实验</button>
+            </div>
+        </div>
+
+        <!-- Analysis Report -->
+        <details id="analysisReport">
+            <summary>📄 查看完整分析报告（实验完成后可展开）</summary>
+            <div class="analysis-report">
+                <h3>🔬 格式化字符串漏洞完整分析</h3>
+                <p><strong>根因：</strong><code>printf(input_buf)</code> 将用户可控的数据作为格式字符串的第一个参数。当用户输入包含格式说明符（如 <code>%x</code>、<code>%n</code>）时，<code>printf()</code> 会从栈上读取额外参数或向内存写入数据，导致<strong>信息泄露</strong>（CWE-200）和<strong>任意内存写入</strong>。</p>
+                <p><strong>攻击链：</strong></p>
+                <ol style="color:#b0b8c0;font-size:0.85rem;margin-left:1.5rem;line-height:1.8;">
+                    <li><strong>信息泄露：</strong>使用 <code>%x %x %x...</code> 遍历栈槽位，读取局部变量（secret_key=0x1337, access_level=0x00）和栈金丝雀等敏感数据。</li>
+                    <li><strong>内存写入：</strong>使用 <code>%n</code> 将已打印字符数写入栈上任意地址。结合直接位置参数 <code>%N$n</code> 可精准覆盖目标变量（如将 access_level 改为 0x1337 实现特权提升）。</li>
+                    <li><strong>任意地址写入：</strong>在输入中嵌入目标地址字节，利用 <code>%N$n</code> 写入任意值到任意内存位置，可劫持 GOT 表、返回地址等。</li>
+                </ol>
+                <p><strong>修复方案：</strong></p>
+                <ul style="color:#b0b8c0;font-size:0.85rem;margin-left:1.5rem;line-height:1.8;">
+                    <li><strong>方案 A（推荐）：</strong><code>printf("%s", input_buf);</code> — 显式指定格式字符串，用户输入仅作为字符串参数。</li>
+                    <li><strong>方案 B：</strong><code>puts(input_buf);</code> — puts 不接受格式说明符，天然安全（但会追加换行）。</li>
+                    <li><strong>方案 C：</strong><code>fputs(input_buf, stdout);</code> — 同样安全，无自动换行。</li>
+                </ul>
+                <p class="ref">📚 参考：CWE-134 (Use of Externally-Controlled Format String) | SEED Labs Format String Vulnerability Lab | OWASP Format String Attack</p>
+                <p style="color:var(--warning);font-size:0.75rem;margin-top:0.75rem;">// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境。所有 exploit 均在模拟沙箱中运行，不涉及真实系统。</p>
+            </div>
+        </details>
+    </div>
+
+    <script>
+        // ============ STATE ============
+        const state = {
+            currentStep: 1,
+            totalSteps: 5,
+            flags: {
+                flag1: false, // 识别漏洞
+                flag2: false, // 泄露栈
+                flag3: false, // 写入内存
+                flag4: false, // 栈帧分析完成
+                flag5: false, // 代码修复
+            },
+            step1Done: false,
+            step2Done: false,
+            step3Done: false,
+            step4Done: false,
+            step5Done: false,
+            // Simulated stack slots for printf (x86 cdecl, from printf's perspective)
+            // Slot 0 = format string ptr itself, Slot 1-9 = values %x reads
+            stackSlots: [
+                { addr: '0xbffff4f0', value: 0x6d6f746e, label: 'fmt_str_ptr (arg)' },
+                { addr: '0xbffff4f4', value: 0xbffff510, label: 'saved EBP area' },
+                { addr: '0xbffff4f8', value: 0x080484a0, label: 'return address' },
+                { addr: '0xbffff4fc', value: 0x00000000, label: '(padding/reg)' },
+                { addr: '0xbffff500', value: 0x00001337, label: 'secret_key = 0x1337' },
+                { addr: '0xbffff504', value: 0x00000000, label: 'access_level = 0x00' },
+                { addr: '0xbffff508', value: 0x41414141, label: 'marker_a = 0x41414141' },
+                { addr: '0xbffff50c', value: 0x42424242, label: 'marker_b = 0x42424242' },
+                { addr: '0xbffff510', value: 0x43434343, label: 'marker_c = 0x43434343' },
+                { addr: '0xbffff514', value: 0x44444444, label: 'marker_d = 0x44444444' },
+            ],
+            // Copy for step 4 manipulation
+            stackSlots4: [],
+            step4SpecIndex: 0,
+            step4Specs: [],
+            charsPrintedStep3: 0,
+        };
+
+        function resetStackSlots4() {
+            state.stackSlots4 = state.stackSlots.map(s => ({ ...s, value: s.value }));
+            state.step4SpecIndex = 0;
+            state.step4Specs = ['%x', '%x', '%x', '%x', '%x', '%x', '%x', '%x', '%x', '%x'];
+            state.charsPrintedStep3 = 0;
+        }
+
+        // ============ DOM REFS ============
+        function $(id) { return document.getElementById(id); }
+
+        // ============ PROGRESS BAR ============
+        function updateProgressBar() {
+            const steps = document.querySelectorAll('.progress-step');
+            steps.forEach(s => {
+                const stepNum = parseInt(s.dataset.step);
+                s.classList.remove('active', 'done');
+                if (stepNum === state.currentStep) s.classList.add('active');
+                else if (
+                    (stepNum === 1 && state.step1Done) ||
+                    (stepNum === 2 && state.step2Done) ||
+                    (stepNum === 3 && state.step3Done) ||
+                    (stepNum === 4 && state.step4Done) ||
+                    (stepNum === 5 && state.step5Done)
+                ) s.classList.add('done');
+            });
+        }
+
+        function showStep(n) {
+            for (let i = 1; i <= state.totalSteps; i++) {
+                const el = $('step' + i);
+                if (el) el.classList.add('hidden');
+            }
+            const target = $('step' + n);
+            if (target) target.classList.remove('hidden');
+            state.currentStep = n;
+            updateProgressBar();
+            if (n === 4) initStep4();
+            // Scroll to step
+            const header = document.querySelector('.header');
+            if (header) header.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        // ============ FLAGS ============
+        function captureFlag(flagKey) {
+            if (!state.flags[flagKey]) {
+                state.flags[flagKey] = true;
+                const flagId = flagKey; // 'flag1', 'flag2', etc.
+                const badge = $(flagId);
+                if (badge) {
+                    badge.classList.add('captured');
+                    const flagNames = {
+                        flag1: 'FLAG{fmt_vuln_identified}',
+                        flag2: 'FLAG{stack_leak_0x1337}',
+                        flag3: 'FLAG{fmt_write_primitive}',
+                        flag4: 'FLAG{stack_frame_mastered}',
+                        flag5: 'FLAG{secure_code_patched}',
+                    };
+                    badge.textContent = '🏴 ' + (flagNames[flagKey] || flagKey) + ' ✓';
+                }
+            }
+            updateProgressBar();
+        }
+
+        // ============ STEP 1: Vulnerability Hunt ============
+        function initStep1() {
+            const lines = document.querySelectorAll('#codeBlock1 .line');
+            let clickedCorrect = false;
+            lines.forEach(line => {
+                line.addEventListener('click', function() {
+                    if (state.step1Done) return;
+                    const lineNum = parseInt(this.dataset.line);
+                    // Line 21 is the vulnerable line
+                    if (lineNum === 21) {
+                        this.classList.add('correct-click');
+                        this.classList.add('vulnerable-highlight');
+                        $('step1Feedback').innerHTML =
+                            '<span class="text-success">✅ <strong>正确！</strong>第 21 行 <code>printf(input_buf);</code> 是格式化字符串漏洞的根源。</span> ' +
+                            '用户输入被直接作为 <code>printf()</code> 的第一个参数（格式字符串），攻击者可以插入 <code>%x</code>、<code>%n</code> 等说明符来读取或写入内存。';
+                        $('step1Hint').textContent = '';
+                        $('btnNext1').disabled = false;
+                        state.step1Done = true;
+                        captureFlag('flag1');
+                        updateProgressBar();
+                        clickedCorrect = true;
+                    } else if (!clickedCorrect && lineNum >= 1) {
+                        this.classList.add('wrong-click');
+                        setTimeout(() => this.classList.remove('wrong-click'), 450);
+                        $('step1Hint').textContent =
+                            '🤔 第 ' + lineNum +
+                            ' 行虽然也涉及用户输入处理，但漏洞核心在于格式字符串参数未被固定。再仔细看看 printf 的调用方式...';
+                    }
+                });
+            });
+            // Reset on re-entry
+            if (state.step1Done) {
+                $('btnNext1').disabled = false;
+                const vulnLine = document.querySelector('#codeBlock1 .line[data-line="21"]');
+                if (vulnLine) {
+                    vulnLine.classList.add('correct-click', 'vulnerable-highlight');
+                }
+                $('step1Feedback').innerHTML =
+                    '<span class="text-success">✅ 漏洞已识别：第 21 行 <code>printf(input_buf);</code></span>';
+            }
+        }
+
+        $('btnNext1').addEventListener('click', () => {
+            if (state.step1Done) showStep(2);
+        });
+
+        // ============ STEP 2: Stack Leak ============
+        function buildStackViz2() {
+            const viz = $('stackViz2');
+            let html = '<div style="color:#667;font-size:0.7rem;text-align:center;padding:0.3rem;border-bottom:1px solid #1e2530;margin-bottom:0.3rem;">📋 栈槽位快照（printf 参数视角）</div>';
+            // Show slots 1-8 (what %x would read)
+            for (let i = 1; i <= 8; i++) {
+                const slot = state.stackSlots[i];
+                const valHex = '0x' + slot.value.toString(16).padStart(8, '0');
+                html += `<div class="stack-slot" id="slot2-${i}">
+                    <span class="addr">${slot.addr}</span>
+                    <span class="val">${valHex}</span>
+                    <span class="label">${slot.label}</span>
+                </div>`;
+            }
+            viz.innerHTML = html;
+        }
+
+        function parseFormatString(input) {
+            // Parse format specifiers from input, return array of {type, position, raw}
+            const specs = [];
+            const regex = /%(\d+\$)?(\d*\.?\d*)?([hlLqjzt]*)([diouxXeEfFgGaAcspn%])/g;
+            let match;
+            while ((match = regex.exec(input)) !== null) {
+                let position = null;
+                if (match[1]) position = parseInt(match[1].replace('$', ''));
+                const width = match[2] || '';
+                const lengthMod = match[3] || '';
+                const specChar = match[4];
+                specs.push({
+                    raw: match[0],
+                    position,
+                    width,
+                    lengthMod,
+                    type: specChar,
+                    index: match.index,
+                });
+            }
+            // Also handle bare %x without width
+            const bareRegex = /%(\d+\$)?([diouxXeEfFgGaAcspn%])/g;
+            // Already covered by above regex mostly
+            return specs;
+        }
+
+        function simulatePrintf(input, stackSlots) {
+            // Simulate printf behavior, return {output, reads, writes, charsPrinted}
+            let output = '';
+            let charsPrinted = 0;
+            const reads = [];
+            const writes = [];
+            let specCount = 0;
+            let charIndex = 0;
+
+            // Process the format string
+            let i = 0;
+            while (i < input.length) {
+                if (input[i] === '%' && i + 1 < input.length) {
+                    // Parse specifier
+                    const specStart = i;
+                    i++;
+                    let position = null;
+                    let widthStr = '';
+                    let lengthMod = '';
+                    let specChar = '';
+
+                    // Check for positional parameter
+                    let posStr = '';
+                    while (i < input.length && input[i] >= '0' && input[i] <= '9') {
+                        posStr += input[i];
+                        i++;
+                    }
+                    if (i < input.length && input[i] === '$') {
+                        position = parseInt(posStr);
+                        posStr = '';
+                        i++;
+                        // Re-read width after $
+                        while (i < input.length && input[i] >= '0' && input[i] <= '9') {
+                            widthStr += input[i];
+                            i++;
+                        }
+                    } else {
+                        widthStr = posStr; // it was actually width, not position
+                        posStr = '';
+                    }
+
+                    // Length modifiers
+                    while (i < input.length && 'hlLqjzt'.includes(input[i])) {
+                        lengthMod += input[i];
+                        i++;
+                    }
+
+                    if (i < input.length) {
+                        specChar = input[i];
+                        i++;
+                    }
+
+                    specCount++;
+                    const slotIndex = position !== null ? position : specCount;
+
+                    if ('diouxX'.includes(specChar)) {
+                        // Read from stack
+                        const slot = slotIndex < stackSlots.length ? stackSlots[slotIndex] : { value: 0xdeadbeef,
+                            addr: '???', label: '???' };
+                        reads.push({ slotIndex, value: slot.value, addr: slot.addr, label: slot.label });
+                        let valStr;
+                        if (specChar === 'x' || specChar === 'X') {
+                            valStr = slot.value.toString(16);
+                            if (widthStr && parseInt(widthStr) > valStr.length) {
+                                valStr = valStr.padStart(parseInt(widthStr), '0');
+                            }
+                        } else if (specChar === 'd' || specChar === 'i') {
+                            valStr = (slot.value | 0).toString(10);
+                        } else if (specChar === 'u') {
+                            valStr = (slot.value >>> 0).toString(10);
+                        } else {
+                            valStr = slot.value.toString(16);
+                        }
+                        output += valStr;
+                        charsPrinted += valStr.length;
+                    } else if (specChar === 's') {
+                        // Read string pointer - simplified: show "(string)"
+                        const slot = slotIndex < stackSlots.length ? stackSlots[slotIndex] : { value: 0, addr: '???',
+                            label: '???' };
+                        reads.push({ slotIndex, value: slot.value, addr: slot.addr, label: slot.label, isString: true });
+                        output += '(string_ptr)';
+                        charsPrinted += 12;
+                    } else if (specChar === 'n') {
+                        // Write to stack
+                        const slot = slotIndex < stackSlots.length ? stackSlots[slotIndex] : { value: 0, addr: '???',
+                            label: '???' };
+                        writes.push({ slotIndex, oldValue: slot.value, newValue: charsPrinted, addr: slot.addr,
+                            label: slot.label });
+                        // Actually modify the slot
+                        if (slotIndex < stackSlots.length) {
+                            stackSlots[slotIndex].value = charsPrinted;
+                        }
+                        // %n produces no output
+                    } else if (specChar === '%') {
+                        output += '%';
+                        charsPrinted += 1;
+                    } else if (specChar === 'c') {
+                        const slot = slotIndex < stackSlots.length ? stackSlots[slotIndex] : { value: 0x41, addr: '???',
+                            label: '???' };
+                        reads.push({ slotIndex, value: slot.value, addr: slot.addr, label: slot.label });
+                        const charVal = slot.value & 0xff;
+                        output += String.fromCharCode(charVal > 31 ? charVal : 46);
+                        charsPrinted += 1;
+                    } else {
+                        output += '[?]';
+                        charsPrinted += 3;
+                    }
+                } else {
+                    output += input[i];
+                    charsPrinted += 1;
+                    i++;
+                }
+            }
+            return { output, reads, writes, charsPrinted, specCount };
+        }
+
+        function highlightStackSlots2(reads, writes) {
+            // Reset all
+            for (let i = 1; i <= 8; i++) {
+                const el = $('slot2-' + i);
+                if (el) el.classList.remove('reading', 'writing');
+            }
+            // Highlight reads
+            reads.forEach(r => {
+                const el = $('slot2-' + r.slotIndex);
+                if (el) { el.classList.add('reading');
+                    setTimeout(() => el.classList.remove('reading'), 1200); }
+            });
+            // Highlight writes
+            writes.forEach(w => {
+                const el = $('slot2-' + w.slotIndex);
+                if (el) { el.classList.add('writing');
+                    setTimeout(() => el.classList.remove('writing'), 1500); }
+                // Update displayed value
+                if (el) {
+                    const valSpan = el.querySelector('.val');
+                    if (valSpan) valSpan.textContent = '0x' + w.newValue.toString(16).padStart(8, '0');
+                }
+            });
+        }
+
+        $('btnExec2').addEventListener('click', () => {
+            if (!state.step1Done) return;
+            const payload = $('payload2').value.trim();
+            if (!payload) {
+                $('step2Feedback').innerHTML = '<span class="text-danger">请输入格式字符串 payload。</span>';
+                return;
+            }
+            // Reset stack slots for fresh simulation
+            const simSlots = state.stackSlots.map(s => ({ ...s, value: s.value }));
+            const result = simulatePrintf(payload, simSlots);
+
+            $('echo2').textContent = payload;
+            $('output2').textContent = result.output;
+            $('debug2').textContent = '\n[DEBUG] Access level: 0x' + simSlots[5].value.toString(16).padStart(8,
+            '0') + '\n   Access denied.';
+            $('flag2out').textContent = '';
+
+            // Update stack viz
+            for (let i = 1; i <= 8; i++) {
+                const el = $('slot2-' + i);
+                if (el) {
+                    const valSpan = el.querySelector('.val');
+                    if (valSpan) valSpan.textContent = '0x' + simSlots[i].value.toString(16).padStart(8, '0');
+                }
+            }
+            highlightStackSlots2(result.reads, result.writes);
+
+            // Show leaked info
+            let leakHtml = '';
+            result.reads.forEach(r => {
+                leakHtml +=
+                    `<span style="color:#ffcc00;">Slot ${r.slotIndex}:</span> 0x${r.value.toString(16).padStart(8,'0')} <span style="color:#888;">— ${r.label}</span><br>`;
+            });
+            $('leakedVals2').innerHTML = leakHtml || '无泄露数据';
+
+            // Check if they leaked secret_key and access_level
+            const leakedSlots = result.reads.map(r => r.slotIndex);
+            const leakedSecret = leakedSlots.includes(4);
+            const leakedAccess = leakedSlots.includes(5);
+
+            if (leakedSecret && leakedAccess) {
+                $('step2Feedback').innerHTML =
+                    '<span class="text-success">✅ <strong>成功！</strong>你泄露了栈上的 secret_key (0x1337) 和 access_level (0x00)。这正是格式化字符串漏洞的信息泄露能力。</span>';
+                if (!state.step2Done) {
+                    state.step2Done = true;
+                    captureFlag('flag2');
+                    $('btnNext2').disabled = false;
+                }
+                $('flag2out').innerHTML = '<span class="flag-output">🏴 FLAG{stack_leak_0x1337} — 栈泄露成功！</span>';
+            } else if (result.reads.length >= 4) {
+                $('step2Feedback').innerHTML =
+                    '<span class="text-warning">⚠️ 已读取部分栈数据，但尚未同时泄露 secret_key（槽位4）和 access_level（槽位5）。尝试更多 <code>%x</code> 说明符。</span>';
+                $('btnNext2').disabled = true;
+            } else {
+                $('step2Feedback').innerHTML =
+                    '<span class="text-accent">ℹ️ 使用更多 <code>%x</code>（如 <code>%x %x %x %x %x</code>）来遍历栈槽位。</span>';
+                $('btnNext2').disabled = true;
+            }
+
+            state.charsPrintedStep3 = result.charsPrinted;
+            // Update simSlots back for step 3 reference
+            for (let i = 0; i < state.stackSlots.length; i++) {
+                state.stackSlots[i].value = simSlots[i].value;
+            }
+        });
+
+        $('btnReset2').addEventListener('click', () => {
+            $('payload2').value = '';
+            $('echo2').textContent = '';
+            $('output2').textContent = '';
+            $('debug2').textContent = '';
+            $('flag2out').textContent = '';
+            $('step2Feedback').textContent = '';
+            $('leakedVals2').textContent = '尚未执行 payload';
+            for (let i = 0; i < state.stackSlots.length; i++) {
+                state.stackSlots[i].value = [0x6d6f746e, 0xbffff510, 0x080484a0, 0x00000000, 0x00001337, 0x00000000,
+                    0x41414141, 0x42424242, 0x43434343, 0x44444444
+                ][i];
+            }
+            buildStackViz2();
+            state.step2Done = false;
+            $('btnNext2').disabled = true;
+        });
+
+        $('btnNext2').addEventListener('click', () => {
+            if (state.step2Done) showStep(3);
+        });
+
+        // ============ STEP 3: Memory Write ============
+        $('btnExec3').addEventListener('click', () => {
+            const payload = $('payload3').value.trim();
+            if (!payload) {
+                $('step3Feedback').innerHTML = '<span class="text-danger">请输入包含 %n 的 payload。</span>';
+                return;
+            }
+            if (!payload.includes('%n') && !payload.includes('%')) {
+                $('step3Feedback').innerHTML =
+                '<span class="text-warning">⚠️ payload 中未检测到 <code>%n</code>。%n 是写入内存的关键说明符。</span>';
+                return;
+            }
+
+            const simSlots = state.stackSlots.map(s => ({ ...s, value: s.value }));
+            const result = simulatePrintf(payload, simSlots);
+
+            $('echo3').textContent = payload;
+            $('output3').textContent = result.output;
+            const newAccessLevel = simSlots[5].value;
+            $('debug3').textContent = '\n[DEBUG] Access level: 0x' + newAccessLevel.toString(16).padStart(8, '0');
+
+            if (newAccessLevel === 0x1337) {
+                $('debug3').textContent += '\n🎯 FLAG{fmt_str_priv_esc}\n   Privilege escalation successful!';
+                $('flag3out').innerHTML =
+                    '<span class="flag-output">🏴 FLAG{fmt_write_primitive} — 特权提升成功！access_level 已被覆盖为 0x1337</span>';
+                $('step3Feedback').innerHTML =
+                    '<span class="text-success">✅ <strong>攻击成功！</strong>你使用 <code>%n</code> 将 access_level 从 0x00 覆盖为 0x1337，实现了特权提升！</span>';
+                if (!state.step3Done) {
+                    state.step3Done = true;
+                    captureFlag('flag3');
+                    $('btnNext3').disabled = false;
+                }
+            } else if (result.writes.length > 0) {
+                $('debug3').textContent += '\n   Access denied (need 0x1337, have 0x' + newAccessLevel.toString(16)
+                    .padStart(8, '0') + ')';
+                $('step3Feedback').innerHTML =
+                    '<span class="text-warning">⚠️ %n 已写入，但 access_level 当前值为 0x' + newAccessLevel.toString(16)
+                    .padStart(8, '0') +
+                    '，需要恰好 0x1337（十进制 4919）。调整前面输出的字符数试试。</span>';
+                $('btnNext3').disabled = true;
+            } else {
+                $('debug3').textContent += '\n   Access denied.';
+                $('step3Feedback').innerHTML =
+                    '<span class="text-accent">ℹ️ 请确保 payload 中包含 <code>%n</code>（如 <code>%5$n</code>）并正确定位到 access_level（槽位5）。</span>';
+                $('btnNext3').disabled = true;
+            }
+
+            // Update for step 4
+            for (let i = 0; i < state.stackSlots.length; i++) {
+                state.stackSlots[i].value = simSlots[i].value;
+            }
+            state.charsPrintedStep3 = result.charsPrinted;
+        });
+
+        $('btnReset3').addEventListener('click', () => {
+            $('payload3').value = '';
+            $('echo3').textContent = '';
+            $('output3').textContent = '';
+            $('debug3').textContent = '';
+            $('flag3out').textContent = '';
+            $('step3Feedback').textContent = '';
+            for (let i = 0; i < state.stackSlots.length; i++) {
+                state.stackSlots[i].value = [0x6d6f746e, 0xbffff510, 0x080484a0, 0x00000000, 0x00001337, 0x00000000,
+                    0x41414141, 0x42424242, 0x43434343, 0x44444444
+                ][i];
+            }
+            state.step3Done = false;
+            $('btnNext3').disabled = true;
+        });
+
+        $('btnNext3').addEventListener('click', () => {
+            if (state.step3Done) showStep(4);
+        });
+
+        // ============ STEP 4: Stack Frame Visualization ============
+        function initStep4() {
+            resetStackSlots4();
+            buildStackViz4();
+            $('fmtState4').textContent = '就绪 — 点击"逐步处理"开始';
+            $('fmtProgress4').textContent = '';
+            $('step4Feedback').textContent = '';
+            state.step4SpecIndex = 0;
+            // Build spec list based on a typical exploit: %x %x %x %x %x %x %x %x %x %x
+            state.step4Specs = [
+                { type: 'x', position: 1, label: '第1个%x → 读取槽位1' },
+                { type: 'x', position: 2, label: '第2个%x → 读取槽位2' },
+                { type: 'x', position: 3, label: '第3个%x → 读取槽位3' },
+                { type: 'x', position: 4, label: '第4个%x → 读取槽位4 (secret_key!)' },
+                { type: 'x', position: 5, label: '第5个%x → 读取槽位5 (access_level!)' },
+                { type: 'x', position: 6, label: '第6个%x → 读取槽位6 (marker_a)' },
+                { type: 'x', position: 7, label: '第7个%x → 读取槽位7 (marker_b)' },
+                { type: 'x', position: 8, label: '第8个%x → 读取槽位8 (marker_c)' },
+                { type: 'x', position: 9, label: '第9个%x → 读取槽位9 (marker_d)' },
+                { type: 'n', position: 5, label: '第10个说明符 %5$n → 写入槽位5！' },
+            ];
+        }
+
+        function buildStackViz4() {
+            const viz = $('stackViz4');
+            let html = '<div style="color:#667;font-size:0.7rem;text-align:center;padding:0.3rem;border-bottom:1px solid #1e2530;margin-bottom:0.3rem;">📋 x86 栈帧 — printf() 调用时 (地址从高到低)</div>';
+            for (let i = 0; i < state.stackSlots4.length; i++) {
+                const slot = state.stackSlots4[i];
+                const valHex = '0x' + slot.value.toString(16).padStart(8, '0');
+                html += `<div class="stack-slot" id="slot4-${i}">
+                    <span class="addr">${slot.addr}</span>
+                    <span class="val">${valHex}</span>
+                    <span class="label">${slot.label}</span>
+                    <span class="arrow-indicator" style="display:none;" id="arrow4-${i}"></span>
+                </div>`;
+            }
+            viz.innerHTML = html;
+        }
+
+        function clearAllSlotHighlights4() {
+            for (let i = 0; i < state.stackSlots4.length; i++) {
+                const el = $('slot4-' + i);
+                if (el) el.classList.remove('reading', 'writing');
+                const arrow = $('arrow4-' + i);
+                if (arrow) arrow.style.display = 'none';
+            }
+        }
+
+        function processNextSpec4() {
+            if (state.step4SpecIndex >= state.step4Specs.length) {
+                $('fmtState4').textContent = '✅ 全部说明符处理完毕！栈帧分析完成。';
+                $('step4Feedback').innerHTML =
+                    '<span class="text-success">✅ <strong>栈帧分析完成！</strong>你已完整观察了格式化字符串如何遍历栈并写入内存。</span>';
+                if (!state.step4Done) {
+                    state.step4Done = true;
+                    captureFlag('flag4');
+                }
+                return;
+            }
+            const spec = state.step4Specs[state.step4SpecIndex];
+            clearAllSlotHighlights4();
+            $('fmtState4').textContent = `正在处理: ${spec.label}`;
+            $('fmtProgress4').textContent =
+                `进度: ${state.step4SpecIndex + 1}/${state.step4Specs.length} — ${spec.type === 'n' ? '🔴 %n 写入' : '🔵 %x 读取'}`;
+
+            const slotIdx = spec.position;
+            const el = $('slot4-' + slotIdx);
+            const arrow = $('arrow4-' + slotIdx);
+
+            if (spec.type === 'n') {
+                // Write operation
+                if (el) el.classList.add('writing');
+                if (arrow) { arrow.style.display = 'inline';
+                    arrow.textContent = '⬅️ WRITE';
+                    arrow.style.color = '#ef4444'; }
+                // Simulate writing charsPrinted to slot
+                const charsToWrite = state.charsPrintedStep3 > 0 ? state.charsPrintedStep3 : 4919; // 0x1337 = 4919
+                state.stackSlots4[slotIdx].value = charsToWrite;
+                if (el) {
+                    const valSpan = el.querySelector('.val');
+                    if (valSpan) valSpan.textContent = '0x' + charsToWrite.toString(16).padStart(8, '0');
+                }
+                setTimeout(() => {
+                    if (el) el.classList.remove('writing');
+                    if (arrow) arrow.style.display = 'none';
+                }, 1500);
+            } else {
+                // Read operation
+                if (el) el.classList.add('reading');
+                if (arrow) { arrow.style.display = 'inline';
+                    arrow.textContent = '👁️ READ';
+                    arrow.style.color = '#3b82f6'; }
+                setTimeout(() => {
+                    if (el) el.classList.remove('reading');
+                    if (arrow) arrow.style.display = 'none';
+                }, 1000);
+            }
+
+            state.step4SpecIndex++;
+            if (state.step4SpecIndex >= state.step4Specs.length) {
+                setTimeout(() => {
+                    $('fmtState4').textContent = '✅ 全部说明符处理完毕！栈帧分析完成。';
+                    $('step4Feedback').innerHTML =
+                        '<span class="text-success">✅ <strong>栈帧分析完成！</strong>你已完整观察了格式化字符串如何遍历栈并写入内存。</span>';
+                    if (!state.step4Done) {
+                        state.step4Done = true;
+                        captureFlag('flag4');
+                    }
+                }, 1600);
+            }
+        }
+
+        $('btnStep4').addEventListener('click', processNextSpec4);
+
+        $('btnAuto4').addEventListener('click', () => {
+            if (state.step4SpecIndex >= state.step4Specs.length) {
+                initStep4();
+                buildStackViz4();
+                $('fmtState4').textContent = '就绪 — 自动播放中...';
+                $('fmtProgress4').textContent = '';
+                state.step4SpecIndex = 0;
+            }
+            $('btnAuto4').disabled = true;
+            $('btnStep4').disabled = true;
+            $('btnReset4').disabled = true;
+            let delay = 0;
+            const totalSpecs = state.step4Specs.length;
+            const startIndex = state.step4SpecIndex;
+            for (let j = startIndex; j < totalSpecs; j++) {
+                delay += 900;
+                ((idx) => {
+                    setTimeout(() => {
+                        state.step4SpecIndex = idx;
+                        processNextSpec4Silent(idx);
+                        if (idx === totalSpecs - 1) {
+                            setTimeout(() => {
+                                $('btnAuto4').disabled = false;
+                                $('btnStep4').disabled = false;
+                                $('btnReset4').disabled = false;
+                            }, 1000);
+                        }
+                    }, delay);
+                })(j);
+            }
+            if (startIndex >= totalSpecs) {
+                $('btnAuto4').disabled = false;
+                $('btnStep4').disabled = false;
+                $('btnReset4').disabled = false;
+            }
+        });
+
+        function processNextSpec4Silent(idx) {
+            if (idx >= state.step4Specs.length) return;
+            const spec = state.step4Specs[idx];
+            clearAllSlotHighlights4();
+            $('fmtState4').textContent = `正在处理: ${spec.label}`;
+            $('fmtProgress4').textContent =
+                `进度: ${idx + 1}/${state.step4Specs.length} — ${spec.type === 'n' ? '🔴 %n 写入' : '🔵 %x 读取'}`;
+            const slotIdx = spec.position;
+            const el = $('slot4-' + slotIdx);
+            const arrow = $('arrow4-' + slotIdx);
+            if (spec.type === 'n') {
+                if (el) el.classList.add('writing');
+                if (arrow) { arrow.style.display = 'inline';
+                    arrow.textContent = '⬅️ WRITE';
+                    arrow.style.color = '#ef4444'; }
+                const charsToWrite = state.charsPrintedStep3 > 0 ? state.charsPrintedStep3 : 4919;
+                state.stackSlots4[slotIdx].value = charsToWrite;
+                if (el) {
+                    const valSpan = el.querySelector('.val');
+                    if (valSpan) valSpan.textContent = '0x' + charsToWrite.toString(16).padStart(8, '0');
+                }
+                setTimeout(() => { if (el) el.classList.remove('writing'); if (arrow) arrow.style.display = 'none'; },
+                    1500);
+            } else {
+                if (el) el.classList.add('reading');
+                if (arrow) { arrow.style.display = 'inline';
+                    arrow.textContent = '👁️ READ';
+                    arrow.style.color = '#3b82f6'; }
+                setTimeout(() => { if (el) el.classList.remove('reading'); if (arrow) arrow.style.display = 'none'; },
+                    1000);
+            }
+            state.step4SpecIndex = idx + 1;
+            if (state.step4SpecIndex >= state.step4Specs.length) {
+                setTimeout(() => {
+                    $('fmtState4').textContent = '✅ 全部说明符处理完毕！';
+                    if (!state.step4Done) {
+                        state.step4Done = true;
+                        captureFlag('flag4');
+                        $('step4Feedback').innerHTML =
+                            '<span class="text-success">✅ <strong>栈帧分析完成！</strong></span>';
+                    }
+                }, 1600);
+            }
+        }
+
+        $('btnReset4').addEventListener('click', () => {
+            initStep4();
+            buildStackViz4();
+            $('fmtState4').textContent = '就绪 — 点击"逐步处理"开始';
+            $('fmtProgress4').textContent = '';
+            $('step4Feedback').textContent = '';
+            state.step4SpecIndex = 0;
+            $('btnAuto4').disabled = false;
+            $('btnStep4').disabled = false;
+            $('btnReset4').disabled = false;
+        });
+
+        $('btnNext4').addEventListener('click', () => {
+            showStep(5);
+        });
+
+        // ============ STEP 5: Code Fix ============
+        $('btnCheck5').addEventListener('click', () => {
+            const fixInput = $('fixInput5').value.trim();
+            if (!fixInput) {
+                $('step5Feedback').innerHTML = '<span class="text-danger">请输入修复代码。</span>';
+                return;
+            }
+            // Normalize: remove extra spaces, handle common correct answers
+            const normalized = fixInput.replace(/\s+/g, ' ').replace(/\(\s+/g, '(').replace(/\s+\)/g, ')').replace(
+                /\s*,\s*/g, ', ').trim();
+            const correctAnswers = [
+                'printf("%s", input_buf);',
+                'printf("%s",input_buf);',
+                'printf("%s", input_buf) ;',
+                'puts(input_buf);',
+                'fputs(input_buf, stdout);',
+                'printf("%s", user_input);',
+                'puts(user_input);',
+                'fputs(user_input, stdout);',
+            ];
+            const correctNormalized = correctAnswers.map(a => a.replace(/\s+/g, ' ').replace(/\(\s+/g, '(').replace(
+                /\s+\)/g, ')').replace(/\s*,\s*/g, ', ').trim());
+
+            // Also check if it contains "%s" and "input_buf" or "user_input" and no bare "input_buf" as format
+            const hasPercentS = normalized.includes('%s');
+            const hasInputBuf = normalized.includes('input_buf') || normalized.includes('user_input');
+            const isPuts = normalized.startsWith('puts(') && hasInputBuf;
+            const isFputs = normalized.startsWith('fputs(') && hasInputBuf;
+
+            let isCorrect = correctNormalized.includes(normalized) || ((hasPercentS || isPuts || isFputs) && hasInputBuf &&
+                !normalized.match(/printf\s*\(\s*(input_buf|user_input)\s*\)/));
+
+            // Also ensure they're not still using the vulnerable pattern
+            const vulnerablePattern = /printf\s*\(\s*(input_buf|user_input)\s*\)/;
+            if (vulnerablePattern.test(normalized.replace(/\s+/g, ' '))) {
+                isCorrect = false;
+            }
+
+            if (isCorrect) {
+                $('step5Feedback').innerHTML =
+                    '<span class="text-success">✅ <strong>修复正确！</strong>你已将格式字符串固定为 <code>"%s"</code>，用户输入仅作为字符串参数处理，不再被解释为格式说明符。</span>';
+                $('diffOutput5').innerHTML = `
+                    <div class="diff-line diff-remove">−   printf(input_buf);  <span style="color:#888;">// 漏洞：用户输入作为格式字符串</span></div>
+                    <div class="diff-line diff-add">+   ${fixInput.replace(/</g,'&lt;').replace(/>/g,'&gt;')}  <span style="color:#7ee787;">// 修复：显式指定格式字符串</span></div>
+                `;
+                if (!state.step5Done) {
+                    state.step5Done = true;
+                    captureFlag('flag5');
+                    $('btnFinish5').disabled = false;
+                }
+            } else {
+                $('step5Feedback').innerHTML =
+                    '<span class="text-warning">⚠️ 修复不完全正确。请确保使用 <code>printf("%s", input_buf);</code> 或 <code>puts(input_buf);</code> 来避免用户输入被解释为格式字符串。</span>';
+                $('diffOutput5').innerHTML = `
+                    <div class="diff-line diff-remove">−   printf(input_buf);  <span style="color:#888;">// 当前漏洞代码</span></div>
+                    <div class="diff-line" style="color:#ffaa00;">?   ${fixInput.replace(/</g,'&lt;').replace(/>/g,'&gt;')}  <span style="color:#ffaa00;">// 请检查...</span></div>
+                    <div class="diff-line diff-add" style="opacity:0.6;">+   printf("%s", input_buf);  <span style="color:#7ee787;">// 预期修复</span></div>
+                `;
+                $('btnFinish5').disabled = true;
+            }
+        });
+
+        $('btnFinish5').addEventListener('click', () => {
+            if (state.step5Done) {
+                $('step5Feedback').innerHTML =
+                    '<span class="text-success" style="font-size:1.1rem;">🎉 <strong>实验完成！</strong>你已成功完成格式化字符串漏洞的完整分析流程：识别 → 利用 → 分析 → 修复。所有 5 个 FLAG 已捕获！</span>';
+                $('btnFinish5').textContent = '🏁 实验已完成';
+                $('btnFinish5').disabled = true;
+                // Expand analysis report
+                const report = $('analysisReport');
+                if (report) report.open = true;
+                // Ensure all flags are marked
+                ['flag1', 'flag2', 'flag3', 'flag4', 'flag5'].forEach(f => captureFlag(f));
+                updateProgressBar();
+            }
+        });
+
+        // ============ PROGRESS STEP CLICKS ============
+        document.querySelectorAll('.progress-step').forEach(stepEl => {
+            stepEl.addEventListener('click', () => {
+                const targetStep = parseInt(stepEl.dataset.step);
+                // Allow navigation to completed steps or current+1
+                const completedUpTo =
+                    state.step5Done ? 5 :
+                    state.step4Done ? 4 :
+                    state.step3Done ? 3 :
+                    state.step2Done ? 2 :
+                    state.step1Done ? 1 : 0;
+                if (targetStep <= completedUpTo + 1 && targetStep >= 1 && targetStep <= state.totalSteps) {
+                    showStep(targetStep);
+                }
+            });
+        });
+
+        // ============ INITIALIZATION ============
+        function init() {
+            showStep(1);
+            initStep1();
+            buildStackViz2();
+            $('btnNext1').disabled = !state.step1Done;
+            $('btnNext2').disabled = !state.step2Done;
+            $('btnNext3').disabled = !state.step3Done;
+            $('btnFinish5').disabled = !state.step5Done;
+            resetStackSlots4();
+            updateProgressBar();
+        }
+
+        init();
+
+        // ============ KEYBOARD SHORTCUTS ============
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+                const inputId = e.target.id;
+                if (inputId === 'payload2') $('btnExec2').click();
+                if (inputId === 'payload3') $('btnExec3').click();
+                if (inputId === 'fixInput5') $('btnCheck5').click();
+            }
+        });
+
+        console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+        console.log('🔬 C/C++ Format String Vulnerability Lab initialized.');
+        console.log('📋 Steps: 1) Identify 2) Leak 3) Write 4) Analyze 5) Fix');
+        console.log('🏴 Capture all 5 flags to complete the lab.');
+    </script>
+</body>
+</html>

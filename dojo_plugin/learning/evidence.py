@@ -26,13 +26,26 @@ SENSITIVE_PATTERNS = (
     (re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE), "Bearer [REDACTED]"),
     (
         re.compile(
-            r"(?i)\b(password|passwd|token|secret|api[_-]?key|authorization)\s*=\s*([^\s;&|]+)"
+            r"(?i)\b(password|passwd|token|secret|api[_-]?key|authorization)\s*[:=]\s*"
+            r"(\"[^\"]*\"|'[^']*'|[^\s,;&|]+)"
         ),
         r"\1=[REDACTED]",
     ),
     (
+        re.compile(
+            r"(?i)([\"'](?:password|passwd|token|secret|api[_-]?key|authorization)[\"']\s*:\s*)"
+            r"(\"[^\"]*\"|'[^']*'|[^,}\s]+)"
+        ),
+        r"\1\"[REDACTED]\"",
+    ),
+    (
         re.compile(r"(?i)(--(?:password|token|secret|api-key)\s+)([^\s;&|]+)"),
         r"\1[REDACTED]",
+    ),
+    (re.compile(r"(?i)(\bcookie\s*[:=]\s*)[^\r\n]+"), r"\1[REDACTED]"),
+    (
+        re.compile(r"(?i)([a-z][a-z0-9+.-]*://[^:/\s@]+:)[^@\s/]+(@)"),
+        r"\1[REDACTED]\2",
     ),
 )
 
@@ -50,26 +63,37 @@ def utcnow():
     return datetime.datetime.utcnow()
 
 
-def redact_text(value):
+def redact_text(value, limit=8000):
     result = str(value)
     for pattern, replacement in SENSITIVE_PATTERNS:
         result = pattern.sub(replacement, result)
-    return result[:8000]
+    return result[:limit]
 
 
-def scrub_payload(value, key=None):
+def scrub_payload(value, key=None, depth=0):
+    # Booleans describe security contracts and validation outcomes; they can
+    # never contain a credential even when their descriptive key mentions a
+    # sensitive concept such as ``oneDynamicFlagPerItem``.
+    if isinstance(value, bool):
+        return value
     if key and any(part in key.lower() for part in SENSITIVE_KEYS):
         return "[REDACTED]"
+    if depth >= 8:
+        return "[TRUNCATED]"
     if isinstance(value, dict):
         return {
-            str(item_key)[:128]: scrub_payload(item_value, str(item_key))
+            str(item_key)[:128]: scrub_payload(
+                item_value,
+                str(item_key),
+                depth + 1,
+            )
             for item_key, item_value in list(value.items())[:100]
         }
     if isinstance(value, list):
-        return [scrub_payload(item) for item in value[:100]]
+        return [scrub_payload(item, depth=depth + 1) for item in value[:100]]
     if isinstance(value, str):
         return redact_text(value)
-    if isinstance(value, (bool, int, float)) or value is None:
+    if isinstance(value, (int, float)) or value is None:
         return value
     return redact_text(value)
 

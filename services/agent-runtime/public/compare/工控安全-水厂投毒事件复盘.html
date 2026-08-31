@@ -1,0 +1,1771 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工控安全实验 — Oldsmar水厂投毒事件复盘</title>
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <style>
+        :root {
+            --bg-deep: #0a0f18;
+            --bg-panel: #111827;
+            --bg-card: #1a1f2e;
+            --border: #1e293b;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #22c55e;
+            --accent-yellow: #f59e0b;
+            --accent-amber: #fbbf24;
+            --accent-red: #ef4444;
+            --accent-orange: #f97316;
+            --accent-purple: #8b5cf6;
+            --flag-color: #f59e0b;
+            --font-mono: 'Courier New', 'Source Code Pro', 'JetBrains Mono', monospace;
+            --font-sans: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+            --glow-green: 0 0 12px rgba(34, 197, 94, 0.5);
+            --glow-red: 0 0 16px rgba(239, 68, 68, 0.7);
+            --glow-amber: 0 0 10px rgba(245, 158, 11, 0.6);
+            --glow-cyan: 0 0 10px rgba(6, 182, 212, 0.5);
+            --transition-fast: 0.15s ease;
+            --transition-normal: 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            overflow-x: hidden;
+            line-height: 1.5;
+        }
+
+        /* ============ TOP BAR ============ */
+        .top-bar {
+            background: var(--bg-panel);
+            border-bottom: 2px solid var(--border);
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
+        }
+        .top-bar .lab-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: var(--accent-cyan);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .top-bar .lab-title .icon-shield {
+            font-size: 1.4rem;
+        }
+        .countdown-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #0d1117;
+            border: 2px solid #1e293b;
+            border-radius: 8px;
+            padding: 6px 14px;
+        }
+        .countdown-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+        .countdown-timer {
+            font-family: var(--font-mono);
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--accent-green);
+            transition: color var(--transition-fast);
+            min-width: 50px;
+            text-align: center;
+        }
+        .countdown-timer.warning {
+            color: var(--accent-yellow);
+            animation: pulse-warning 0.8s infinite;
+        }
+        .countdown-timer.danger {
+            color: var(--accent-red);
+            animation: pulse-danger 0.5s infinite;
+        }
+        @keyframes pulse-warning {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+        @keyframes pulse-danger {
+            0%,
+            100% {
+                opacity: 1;
+                text-shadow: var(--glow-red);
+            }
+            50% {
+                opacity: 0.4;
+                text-shadow: none;
+            }
+        }
+
+        /* ============ MAIN LAYOUT ============ */
+        .main-container {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 16px;
+            padding: 16px;
+            max-width: 1400px;
+            margin: 0 auto;
+            min-height: calc(100vh - 160px);
+        }
+        @media (max-width: 1100px) {
+            .main-container {
+                grid-template-columns: 1fr;
+                max-width: 100%;
+            }
+        }
+
+        /* ============ HMI PANEL ============ */
+        .hmi-panel {
+            background: var(--bg-panel);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            min-height: 550px;
+        }
+        .hmi-panel .hmi-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
+        }
+        .hmi-panel .hmi-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+        .hmi-panel .hmi-status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            box-shadow: var(--glow-green);
+            transition: all var(--transition-normal);
+        }
+        .hmi-panel .hmi-status-dot.alert {
+            background: var(--accent-red);
+            box-shadow: var(--glow-red);
+            animation: blink-dot 0.6s infinite;
+        }
+        @keyframes blink-dot {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.2;
+            }
+        }
+
+        /* HMI Canvas area */
+        .hmi-canvas-wrap {
+            position: relative;
+            flex: 1;
+            background: #080d14;
+            border-radius: 8px;
+            border: 1px solid #1a2332;
+            min-height: 280px;
+            overflow: hidden;
+        }
+        .hmi-canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* Remote cursor overlay */
+        .remote-cursor {
+            position: absolute;
+            pointer-events: none;
+            z-index: 20;
+            width: 24px;
+            height: 24px;
+            transition: left 0.6s cubic-bezier(0.25, 0.1, 0.25, 1), top 0.6s cubic-bezier(0.25, 0.1, 0.25, 1);
+            opacity: 0;
+        }
+        .remote-cursor.active {
+            opacity: 0.9;
+        }
+        .remote-cursor svg {
+            width: 100%;
+            height: 100%;
+            filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.9));
+        }
+        .remote-cursor-label {
+            position: absolute;
+            top: -18px;
+            left: 20px;
+            font-size: 0.6rem;
+            color: #ef4444;
+            font-weight: 700;
+            white-space: nowrap;
+            background: #1a0000;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid #ef4444;
+            letter-spacing: 0.5px;
+        }
+
+        /* HMI parameter cards row */
+        .hmi-params-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+        @media (max-width: 700px) {
+            .hmi-params-row {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        .param-card {
+            background: #0d1117;
+            border: 1px solid #1e293b;
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+            transition: all var(--transition-normal);
+            position: relative;
+        }
+        .param-card.alert-highlight {
+            border-color: var(--accent-red);
+            box-shadow: var(--glow-red);
+            animation: card-alert-pulse 0.8s infinite;
+        }
+        @keyframes card-alert-pulse {
+            0%,
+            100% {
+                box-shadow: var(--glow-red);
+            }
+            50% {
+                box-shadow: 0 0 25px rgba(239, 68, 68, 1);
+            }
+        }
+        .param-card .param-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+        .param-card .param-value {
+            font-family: var(--font-mono);
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--accent-cyan);
+            transition: color var(--transition-fast);
+        }
+        .param-card .param-value.danger-val {
+            color: var(--accent-red);
+            animation: pulse-danger 0.6s infinite;
+        }
+        .param-card .param-unit {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-left: 2px;
+        }
+        .param-card .param-sub {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* ============ SIDE PANEL ============ */
+        .side-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .side-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+        }
+        .side-card h3 {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+        /* TeamViewer session indicator */
+        .tv-session {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: #0d1117;
+            border-radius: 6px;
+            border: 1px solid #1e293b;
+            transition: all var(--transition-normal);
+        }
+        .tv-session.intruder-active {
+            border-color: var(--accent-red);
+            background: #1a0008;
+            box-shadow: var(--glow-red);
+            animation: card-alert-pulse 0.8s infinite;
+        }
+        .tv-session .tv-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            flex-shrink: 0;
+            transition: all var(--transition-normal);
+        }
+        .tv-session.intruder-active .tv-dot {
+            background: var(--accent-red);
+            box-shadow: var(--glow-red);
+        }
+        .tv-session .tv-info {
+            flex: 1;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        .tv-session .tv-info strong {
+            color: var(--text-primary);
+        }
+        .btn-disconnect {
+            background: var(--accent-red);
+            color: #fff;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8rem;
+            letter-spacing: 0.5px;
+            transition: all var(--transition-fast);
+            white-space: nowrap;
+        }
+        .btn-disconnect:hover {
+            background: #dc2626;
+            box-shadow: var(--glow-red);
+            transform: scale(1.03);
+        }
+        .btn-disconnect:disabled {
+            background: #4a1a1a;
+            color: #888;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+        .btn-disconnect:active:not(:disabled) {
+            transform: scale(0.96);
+        }
+
+        /* NaOH restore control */
+        .naoh-restore-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .naoh-restore-group .slider-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .naoh-restore-group input[type="range"] {
+            flex: 1;
+            accent-color: var(--accent-cyan);
+            height: 8px;
+            cursor: pointer;
+        }
+        .naoh-restore-group .slider-val {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 1.3rem;
+            color: var(--accent-cyan);
+            min-width: 65px;
+            text-align: right;
+        }
+        .btn-restore {
+            background: var(--accent-cyan);
+            color: #000;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.85rem;
+            letter-spacing: 0.5px;
+            transition: all var(--transition-fast);
+        }
+        .btn-restore:hover {
+            background: #22d3ee;
+            box-shadow: var(--glow-cyan);
+        }
+        .btn-restore:disabled {
+            background: #1a3a3f;
+            color: #555;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        .btn-restore:active:not(:disabled) {
+            transform: scale(0.96);
+        }
+
+        /* Alert log */
+        .alert-log {
+            max-height: 180px;
+            overflow-y: auto;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            line-height: 1.6;
+            background: #080d14;
+            border-radius: 6px;
+            padding: 10px;
+            border: 1px solid #1a2332;
+            color: var(--text-secondary);
+        }
+        .alert-log .log-entry {
+            padding: 2px 0;
+            border-bottom: 1px solid #111827;
+        }
+        .alert-log .log-entry.critical {
+            color: var(--accent-red);
+            font-weight: 700;
+        }
+        .alert-log .log-entry.success {
+            color: var(--accent-green);
+        }
+        .alert-log .log-entry.info {
+            color: var(--accent-cyan);
+        }
+        .alert-log .log-entry .timestamp {
+            color: var(--text-muted);
+            margin-right: 6px;
+        }
+
+        /* ============ BOTTOM BAR ============ */
+        .bottom-section {
+            max-width: 1400px;
+            margin: 0 auto 20px;
+            padding: 0 16px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+        @media (max-width: 900px) {
+            .bottom-section {
+                grid-template-columns: 1fr;
+            }
+        }
+        .report-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+        }
+        .report-card h3 {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+        .report-card textarea {
+            width: 100%;
+            background: #080d14;
+            border: 1px solid #1e293b;
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            padding: 10px;
+            resize: vertical;
+            min-height: 100px;
+            transition: border-color var(--transition-fast);
+        }
+        .report-card textarea:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 8px rgba(6, 182, 212, 0.2);
+        }
+        .keyword-hits {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+            font-size: 0.7rem;
+        }
+        .keyword-tag {
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: #1a2332;
+            color: var(--text-muted);
+            border: 1px solid #1e293b;
+            transition: all var(--transition-fast);
+        }
+        .keyword-tag.matched {
+            background: #0a3d1a;
+            color: var(--accent-green);
+            border-color: var(--accent-green);
+            box-shadow: 0 0 6px rgba(34, 197, 94, 0.3);
+        }
+
+        /* ============ FLAG DISPLAY ============ */
+        .flag-reveal {
+            background: #0d0a00;
+            border: 2px solid var(--flag-color);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            margin-top: 10px;
+            display: none;
+            animation: flag-appear 0.6s ease-out;
+        }
+        .flag-reveal.visible {
+            display: block;
+        }
+        @keyframes flag-appear {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+                box-shadow: 0 0 0 rgba(245, 158, 11, 0);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+                box-shadow: 0 0 40px rgba(245, 158, 11, 0.6);
+            }
+        }
+        .flag-reveal .flag-icon {
+            font-size: 2.5rem;
+            margin-bottom: 6px;
+        }
+        .flag-reveal .flag-text {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--flag-color);
+            letter-spacing: 1px;
+            word-break: break-all;
+        }
+
+        /* ============ PROGRESS STEPS ============ */
+        .progress-steps {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .progress-step {
+            font-size: 0.7rem;
+            padding: 5px 10px;
+            border-radius: 14px;
+            background: #1a2332;
+            color: var(--text-muted);
+            border: 1px solid #1e293b;
+            transition: all var(--transition-normal);
+            white-space: nowrap;
+        }
+        .progress-step.done {
+            background: #0a3d1a;
+            color: var(--accent-green);
+            border-color: var(--accent-green);
+        }
+        .progress-step.active {
+            background: #1a2a3d;
+            color: var(--accent-cyan);
+            border-color: var(--accent-cyan);
+            animation: pulse-step 1.5s infinite;
+        }
+        @keyframes pulse-step {
+            0%,
+            100% {
+                box-shadow: 0 0 6px rgba(6, 182, 212, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 14px rgba(6, 182, 212, 0.7);
+            }
+        }
+
+        /* ============ BRIEFING MODAL ============ */
+        .briefing-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+        .briefing-card {
+            background: var(--bg-panel);
+            border: 2px solid var(--accent-cyan);
+            border-radius: 16px;
+            padding: 30px;
+            max-width: 600px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 0 60px rgba(6, 182, 212, 0.3);
+        }
+        .briefing-card h2 {
+            color: var(--accent-cyan);
+            margin-bottom: 12px;
+            font-size: 1.4rem;
+        }
+        .briefing-card p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.7;
+            margin-bottom: 8px;
+        }
+        .briefing-card .btn-start {
+            margin-top: 16px;
+            background: var(--accent-cyan);
+            color: #000;
+            border: none;
+            padding: 12px 28px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 1rem;
+            letter-spacing: 0.5px;
+            transition: all var(--transition-fast);
+        }
+        .briefing-card .btn-start:hover {
+            background: #22d3ee;
+            box-shadow: var(--glow-cyan);
+            transform: scale(1.04);
+        }
+
+        /* ============ FAILURE OVERLAY ============ */
+        .failure-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(30, 0, 0, 0.9);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            display: none;
+        }
+        .failure-overlay.visible {
+            display: flex;
+            animation: fadeIn 0.4s ease;
+        }
+        .failure-card {
+            background: #1a0008;
+            border: 2px solid var(--accent-red);
+            border-radius: 16px;
+            padding: 30px;
+            max-width: 550px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 0 80px rgba(239, 68, 68, 0.6);
+        }
+        .failure-card h2 {
+            color: var(--accent-red);
+            margin-bottom: 10px;
+        }
+        .btn-retry {
+            margin-top: 16px;
+            background: var(--accent-red);
+            color: #fff;
+            border: none;
+            padding: 12px 28px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 1rem;
+            transition: all var(--transition-fast);
+        }
+        .btn-retry:hover {
+            background: #dc2626;
+            box-shadow: var(--glow-red);
+        }
+
+        /* ============ ANALYSIS TOGGLE ============ */
+        .analysis-toggle-btn {
+            background: transparent;
+            border: 1px solid var(--accent-purple);
+            color: var(--accent-purple);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all var(--transition-fast);
+            letter-spacing: 0.5px;
+        }
+        .analysis-toggle-btn:hover {
+            background: #1a1030;
+            box-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
+        }
+        .analysis-content {
+            margin-top: 12px;
+            padding: 16px;
+            background: #0d1117;
+            border-radius: 8px;
+            border: 1px solid #1e293b;
+            font-size: 0.8rem;
+            line-height: 1.7;
+            color: var(--text-secondary);
+            display: none;
+        }
+        .analysis-content.visible {
+            display: block;
+            animation: fadeIn 0.4s ease;
+        }
+        .analysis-content strong {
+            color: var(--text-primary);
+        }
+        .analysis-content .cwe-tag {
+            display: inline-block;
+            background: #1a1a2e;
+            border: 1px solid var(--accent-purple);
+            color: var(--accent-purple);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            margin: 2px;
+        }
+
+        /* scrollbar */
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0d1117;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #2a3340;
+            border-radius: 3px;
+        }
+
+        /* Edu notice banner */
+        .edu-notice {
+            font-size: 0.6rem;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 4px;
+            letter-spacing: 0.5px;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- EDU NOTICE -->
+    <div class="edu-notice">// EDUCATIONAL PURPOSE ONLY — authorized classroom use &nbsp;|&nbsp; 仅用于授权教学环境 &nbsp;|&nbsp; 所有攻击模拟均在沙箱中进行</div>
+
+    <!-- TOP BAR -->
+    <div class="top-bar">
+        <div class="lab-title">
+            <span class="icon-shield">🛡️</span> 工控安全实验 — Oldsmar水厂投毒事件复盘
+        </div>
+        <div class="progress-steps" id="progressSteps">
+            <span class="progress-step active" data-step="1">步骤1: 监控HMI</span>
+            <span class="progress-step" data-step="2">步骤2: 检测入侵</span>
+            <span class="progress-step" data-step="3">步骤3: 断开连接</span>
+            <span class="progress-step" data-step="4">步骤4: 恢复NaOH</span>
+            <span class="progress-step" data-step="5">步骤5: 撰写报告</span>
+        </div>
+        <div class="countdown-container">
+            <span class="countdown-label">⏱ 应急响应倒计时</span>
+            <span class="countdown-timer" id="countdownTimer">--</span>
+            <span class="countdown-label">秒</span>
+        </div>
+    </div>
+
+    <!-- MAIN CONTAINER -->
+    <div class="main-container">
+        <!-- HMI PANEL -->
+        <div class="hmi-panel" id="hmiPanel">
+            <div class="hmi-header">
+                <span class="hmi-title">🏭 Oldsmar Water Treatment — HMI Station 3 (NaOH Injection Control)</span>
+                <span class="hmi-status-dot" id="hmiStatusDot" title="系统状态"></span>
+            </div>
+            <div class="hmi-canvas-wrap" id="hmiCanvasWrap">
+                <canvas id="hmiCanvas"></canvas>
+                <!-- Remote attacker cursor -->
+                <div class="remote-cursor" id="remoteCursor">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M3 3L10 20L13 13L20 10L3 3Z" fill="#ef4444" stroke="#fff" stroke-width="1.2"/>
+                        <circle cx="9" cy="9" r="4" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="3 2" opacity="0.8"/>
+                    </svg>
+                    <span class="remote-cursor-label">⚠ 远程控制</span>
+                </div>
+            </div>
+            <div class="hmi-params-row">
+                <div class="param-card" id="paramNaOH">
+                    <div class="param-label">🧪 NaOH 浓度</div>
+                    <div class="param-value" id="valNaOH">100</div>
+                    <div class="param-unit">ppm</div>
+                    <div class="param-sub">安全范围: 50-500 ppm</div>
+                </div>
+                <div class="param-card" id="paramPH">
+                    <div class="param-label">📊 pH 值</div>
+                    <div class="param-value" id="valPH">7.2</div>
+                    <div class="param-unit"></div>
+                    <div class="param-sub">安全范围: 6.5-8.5</div>
+                </div>
+                <div class="param-card" id="paramFlow">
+                    <div class="param-label">💧 流量</div>
+                    <div class="param-value" id="valFlow">420</div>
+                    <div class="param-unit">GPM</div>
+                    <div class="param-sub">正常: 380-450 GPM</div>
+                </div>
+                <div class="param-card" id="paramPump">
+                    <div class="param-label">⚙️ 注入泵状态</div>
+                    <div class="param-value" id="valPump" style="font-size:1.2rem;">正常</div>
+                    <div class="param-unit"></div>
+                    <div class="param-sub">NaOH Injection Pump #2</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SIDE PANEL -->
+        <div class="side-panel">
+            <!-- TeamViewer session card -->
+            <div class="side-card">
+                <h3>🔗 远程访问会话 (TeamViewer)</h3>
+                <div class="tv-session" id="tvSession">
+                    <span class="tv-dot" id="tvDot"></span>
+                    <div class="tv-info">
+                        <span id="tvStatusText">未检测到活跃远程会话</span><br>
+                        <small style="color:#64748b;" id="tvDetail">监听中...</small>
+                    </div>
+                </div>
+                <button class="btn-disconnect" id="btnDisconnect" disabled title="检测到未授权会话后可断开">
+                    ⚡ 断开远程连接
+                </button>
+                <p style="font-size:0.65rem;color:var(--text-muted);margin-top:6px;">
+                    提示：观察HMI上的异常光标移动和参数变化
+                </p>
+            </div>
+
+            <!-- NaOH restore card -->
+            <div class="side-card" id="restoreCard">
+                <h3>🔧 NaOH 设定值恢复</h3>
+                <div class="naoh-restore-group">
+                    <div class="slider-wrap">
+                        <input type="range" id="naohSlider" min="50" max="12000" value="100" step="10" disabled>
+                        <span class="slider-val" id="sliderVal">100 ppm</span>
+                    </div>
+                    <button class="btn-restore" id="btnRestore" disabled>✅ 确认恢复安全值 (100 ppm)</button>
+                </div>
+                <p style="font-size:0.65rem;color:var(--text-muted);margin-top:6px;">
+                    目标：将NaOH恢复至100 ppm（原始安全设定值）
+                </p>
+            </div>
+
+            <!-- Alert log -->
+            <div class="side-card">
+                <h3>📋 系统告警日志</h3>
+                <div class="alert-log" id="alertLog">
+                    <div class="log-entry info"><span class="timestamp">[00:00]</span> 系统启动 — HMI Station 3 在线</div>
+                    <div class="log-entry info"><span class="timestamp">[00:00]</span> NaOH设定值: 100 ppm — 正常</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- BOTTOM SECTION -->
+    <div class="bottom-section">
+        <div class="report-card">
+            <h3>📝 事件分析报告（请输入你的分析）</h3>
+            <textarea id="reportTextarea" placeholder="请描述你观察到的事件：攻击者是如何进入系统的？你采取了什么措施？系统有哪些安全缺陷？如何防御？" disabled></textarea>
+            <div class="keyword-hits" id="keywordHits">
+                <span class="keyword-tag" data-kw="teamviewer">TeamViewer</span>
+                <span class="keyword-tag" data-kw="远程访问">远程访问</span>
+                <span class="keyword-tag" data-kw="naoh">NaOH</span>
+                <span class="keyword-tag" data-kw="认证">认证/MFA</span>
+                <span class="keyword-tag" data-kw="未授权">未授权</span>
+                <span class="keyword-tag" data-kw="断开">断开连接</span>
+                <span class="keyword-tag" data-kw="恢复">恢复设定值</span>
+                <span class="keyword-tag" data-kw="防御">防御/分段</span>
+            </div>
+            <button class="analysis-toggle-btn" id="btnToggleAnalysis" style="margin-top:8px;">📖 查看完整分析报告</button>
+            <div class="analysis-content" id="analysisContent">
+                <strong>🔍 事件复盘：2021 Oldsmar水处理厂攻击</strong><br><br>
+                <strong>攻击向量：</strong>攻击者利用泄露的TeamViewer凭据远程接入HMI工作站。由于缺乏多因素认证（MFA），仅凭密码即可建立远程会话。<br><br>
+                <strong>攻击过程：</strong>操作员观察到鼠标光标自行移动，攻击者打开NaOH注入控制界面，将设定值从<strong>100 ppm</strong>篡改为<strong>11,100 ppm</strong>（提高110倍）。操作员立即手动恢复设定值，阻止了污染。<br><br>
+                <strong>安全缺陷：</strong><br>
+                • <span class="cwe-tag">CWE-287</span> 不当认证 — TeamViewer仅依赖静态密码<br>
+                • <span class="cwe-tag">CWE-306</span> 关键功能缺少认证 — HMI未对远程会话做额外验证<br>
+                • OWASP <strong>A07</strong> — 身份认证失效，无MFA、无会话异常检测<br><br>
+                <strong>防御措施：</strong><br>
+                1. 启用<strong>多因素认证（MFA）</strong>保护所有远程访问<br>
+                2. 实施<strong>网络分段</strong>，将工控网络与IT网络隔离<br>
+                3. 部署<strong>远程会话监控与告警</strong>（异常时间/来源告警）<br>
+                4. 设置<strong>参数变更阈值告警</strong>（NaOH突变自动锁定）<br>
+                5. 定期<strong>审计远程访问日志</strong>并轮换凭据<br>
+                6. 确保<strong>多层冗余安全</strong>（下游pH监测可独立检测异常）<br><br>
+                <strong>真实事件参考：</strong>2021年2月，佛罗里达州Oldsmar市水处理厂。攻击者通过TeamViewer远程控制HMI，将NaOH从100 ppm调至11,100 ppm。操作员及时发现并恢复，未造成实际伤害。事件凸显了工控系统远程访问安全的严重风险。<br><br>
+                <em>// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境</em>
+            </div>
+        </div>
+        <div class="report-card">
+            <h3>🏆 实验成就</h3>
+            <div class="flag-reveal" id="flagReveal">
+                <div class="flag-icon">🚩</div>
+                <div class="flag-text" id="flagText">FLAG{oldsmar_hmi_2021_teamviewer_intrusion}</div>
+                <p style="font-size:0.7rem;color:var(--text-muted);margin-top:6px;">成功检测并阻止了水厂投毒攻击！</p>
+            </div>
+            <p id="achievementHint" style="font-size:0.75rem;color:var(--text-muted);margin-top:8px;">
+                完成所有响应步骤并撰写分析报告以解锁成就旗标。
+            </p>
+        </div>
+    </div>
+
+    <!-- BRIEFING OVERLAY -->
+    <div class="briefing-overlay" id="briefingOverlay">
+        <div class="briefing-card">
+            <h2>🛡️ 任务简报</h2>
+            <p><strong>场景：</strong>2021年2月，佛罗里达州Oldsmar水处理厂。</p>
+            <p>你是一名值班操作员，正在监控<strong>HMI Station 3</strong>（NaOH注入控制系统）。</p>
+            <p>你的任务是：<strong>监控HMI界面，检测任何异常活动，发现并断开未授权的远程访问，恢复安全的水处理参数。</strong></p>
+            <p style="color:var(--accent-yellow);">⚠ 攻击者可能随时通过泄露的TeamViewer凭据远程接入系统。</p>
+            <p style="font-size:0.75rem;color:var(--text-muted);">// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境</p>
+            <button class="btn-start" id="btnStart">▶ 开始实验</button>
+        </div>
+    </div>
+
+    <!-- FAILURE OVERLAY -->
+    <div class="failure-overlay" id="failureOverlay">
+        <div class="failure-card">
+            <h2>⚠ 响应超时 — 攻击成功</h2>
+            <p>NaOH浓度已达到<strong>11,100 ppm</strong>，污染物已进入供水系统...</p>
+            <p style="color:var(--accent-red);">在真实事件中，操作员在几秒内就发现了异常并恢复了设置。</p>
+            <p style="font-size:0.8rem;">请重试，提高你的事件响应速度。</p>
+            <button class="btn-retry" id="btnRetry">🔄 重新开始实验</button>
+        </div>
+    </div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // This is a sandboxed simulation of the 2021 Oldsmar water treatment plant incident.
+        // All "attacks" are simulated locally. No real systems are affected.
+
+        (function() {
+            // ============ DOM ELEMENTS ============
+            const hmiCanvas = document.getElementById('hmiCanvas');
+            const hmiCanvasWrap = document.getElementById('hmiCanvasWrap');
+            const remoteCursor = document.getElementById('remoteCursor');
+            const hmiStatusDot = document.getElementById('hmiStatusDot');
+            const countdownTimer = document.getElementById('countdownTimer');
+            const tvSession = document.getElementById('tvSession');
+            const tvDot = document.getElementById('tvDot');
+            const tvStatusText = document.getElementById('tvStatusText');
+            const tvDetail = document.getElementById('tvDetail');
+            const btnDisconnect = document.getElementById('btnDisconnect');
+            const naohSlider = document.getElementById('naohSlider');
+            const sliderVal = document.getElementById('sliderVal');
+            const btnRestore = document.getElementById('btnRestore');
+            const valNaOH = document.getElementById('valNaOH');
+            const valPH = document.getElementById('valPH');
+            const valFlow = document.getElementById('valFlow');
+            const valPump = document.getElementById('valPump');
+            const paramNaOH = document.getElementById('paramNaOH');
+            const alertLog = document.getElementById('alertLog');
+            const reportTextarea = document.getElementById('reportTextarea');
+            const keywordHits = document.getElementById('keywordHits');
+            const flagReveal = document.getElementById('flagReveal');
+            const achievementHint = document.getElementById('achievementHint');
+            const briefingOverlay = document.getElementById('briefingOverlay');
+            const failureOverlay = document.getElementById('failureOverlay');
+            const btnStart = document.getElementById('btnStart');
+            const btnRetry = document.getElementById('btnRetry');
+            const btnToggleAnalysis = document.getElementById('btnToggleAnalysis');
+            const analysisContent = document.getElementById('analysisContent');
+            const progressSteps = document.getElementById('progressSteps');
+            const btnRestoreCard = document.getElementById('restoreCard');
+
+            // ============ STATE ============
+            const state = {
+                phase: 'idle', // idle | monitoring | intruder_active | disconnected | restored | reporting | complete | failed
+                naohSetpoint: 100,
+                naohActual: 100,
+                phValue: 7.2,
+                flowRate: 420,
+                pumpStatus: 'normal',
+                tvConnected: false,
+                tvIntruder: false,
+                countdownActive: false,
+                countdownRemaining: 45,
+                countdownInterval: null,
+                stepCompleted: [false, false, false, false, false], // 5 steps
+                logEntries: [],
+                remoteCursorPath: [],
+                remoteCursorIndex: 0,
+                remoteCursorInterval: null,
+                intruderNaohTarget: 11100,
+                intruderChangeSpeed: 0,
+                simulationTickInterval: null,
+                reportSubmitted: false,
+                flagRevealed: false,
+            };
+
+            // ============ CANVAS DRAWING ============
+            function resizeCanvas() {
+                const rect = hmiCanvasWrap.getBoundingClientRect();
+                hmiCanvas.width = rect.width;
+                hmiCanvas.height = rect.height;
+            }
+
+            function drawHMICanvas() {
+                const ctx = hmiCanvas.getContext('2d');
+                const w = hmiCanvas.width;
+                const h = hmiCanvas.height;
+                ctx.clearRect(0, 0, w, h);
+
+                // Background grid
+                ctx.strokeStyle = '#1a2332';
+                ctx.lineWidth = 0.5;
+                const gridSize = 30;
+                for (let x = gridSize; x < w; x += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, h);
+                    ctx.stroke();
+                }
+                for (let y = gridSize; y < h; y += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(w, y);
+                    ctx.stroke();
+                }
+
+                // Title
+                ctx.fillStyle = '#64748b';
+                ctx.font = '11px "Segoe UI", sans-serif';
+                ctx.fillText('流程示意 — 原水 → 沉淀 → 过滤 → NaOH注入 → pH调节 → 出水', 20, 22);
+
+                // Draw simplified process flow
+                const tankY = h * 0.35;
+                const tankW = 90;
+                const tankH = 130;
+                const startX = 30;
+
+                // Tank 1 - 沉淀池
+                drawTank(ctx, startX, tankY, tankW, tankH, '沉淀池', '#1e3a5f');
+                // Tank 2 - 过滤
+                drawTank(ctx, startX + tankW + 50, tankY, tankW, tankH, '过滤', '#1e3a5f');
+                // NaOH injection point (highlighted)
+                const injX = startX + (tankW + 50) * 2 + 20;
+                const injY = tankY + tankH * 0.35;
+                const naohColor = state.naohActual > 500 ? '#ef4444' : state.naohActual > 200 ? '#f59e0b' :
+                '#22c55e';
+                const naohGlow = state.naohActual > 500 ? 'rgba(239,68,68,0.7)' : state.naohActual > 200 ?
+                    'rgba(245,158,11,0.5)' : 'rgba(34,197,94,0.4)';
+
+                // Draw NaOH injector symbol
+                ctx.fillStyle = naohColor;
+                ctx.shadowColor = naohGlow;
+                ctx.shadowBlur = state.naohActual > 500 ? 20 : 8;
+                ctx.beginPath();
+                ctx.arc(injX, injY, 18, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 9px "Courier New", monospace';
+                ctx.fillText('NaOH', injX - 16, injY + 4);
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = '9px "Segoe UI", sans-serif';
+                ctx.fillText('注入点', injX - 14, injY - 26);
+
+                // Tank 3 - pH调节
+                drawTank(ctx, injX + 50, tankY, tankW, tankH, 'pH调节', '#1e3a5f');
+                // Tank 4 - 出水
+                drawTank(ctx, injX + 50 + tankW + 50, tankY, tankW, tankH, '清水出口', '#1e4a3a');
+
+                // Connecting pipes
+                ctx.strokeStyle = '#4a90d9';
+                ctx.lineWidth = 5;
+                const pipeY = tankY + tankH * 0.5;
+                ctx.beginPath();
+                ctx.moveTo(startX + tankW, pipeY);
+                ctx.lineTo(startX + tankW + 50, pipeY);
+                ctx.moveTo(startX + (tankW + 50) * 2 - 30, pipeY);
+                ctx.lineTo(injX - 18, pipeY);
+                ctx.moveTo(injX + 18, pipeY);
+                ctx.lineTo(injX + 50, pipeY);
+                ctx.moveTo(injX + 50 + tankW, pipeY);
+                ctx.lineTo(injX + 50 + tankW + 50, pipeY);
+                ctx.stroke();
+
+                // Arrow indicators on pipes
+                ctx.fillStyle = '#4a90d9';
+                const arrowY = pipeY;
+                [
+                    [startX + tankW + 20, arrowY],
+                    [injX - 25, arrowY],
+                    [injX + 30, arrowY],
+                    [injX + 50 + tankW + 20, arrowY]
+                ].forEach(([ax, ay]) => {
+                    ctx.beginPath();
+                    ctx.moveTo(ax, ay - 5);
+                    ctx.lineTo(ax + 10, ay);
+                    ctx.lineTo(ax, ay + 5);
+                    ctx.fill();
+                });
+
+                // NaOH value label near injection point
+                ctx.fillStyle = state.naohActual > 500 ? '#ef4444' : '#e2e8f0';
+                ctx.font = 'bold 13px "Courier New", monospace';
+                const naohLabel = state.naohActual + ' ppm';
+                ctx.fillText(naohLabel, injX - 25, injY + 45);
+
+                // Alert indicator on NaOH area
+                if (state.naohActual > 500) {
+                    ctx.fillStyle = '#ef4444';
+                    ctx.font = 'bold 10px "Segoe UI", sans-serif';
+                    const pulse = Math.sin(Date.now() / 300) * 0.5 + 0.5;
+                    ctx.globalAlpha = 0.6 + pulse * 0.4;
+                    ctx.fillText('⚠ 危险!', injX - 22, injY - 40);
+                    ctx.globalAlpha = 1;
+                }
+            }
+
+            function drawTank(ctx, x, y, w, h, label, color) {
+                ctx.fillStyle = color;
+                ctx.strokeStyle = '#3b5998';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(x, y, w, h, 8);
+                ctx.fill();
+                ctx.stroke();
+                // Liquid level
+                const liquidH = h * 0.65;
+                ctx.fillStyle = 'rgba(74,144,217,0.5)';
+                ctx.beginPath();
+                ctx.roundRect(x + 4, y + h - liquidH - 4, w - 8, liquidH, 4);
+                ctx.fill();
+                // Label
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = '10px "Segoe UI", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(label, x + w / 2, y + h + 16);
+                ctx.textAlign = 'start';
+            }
+
+            // ============ LOGGING ============
+            function addLog(message, type = 'info') {
+                const timestamp = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit',
+                    minute: '2-digit', second: '2-digit' });
+                state.logEntries.push({ timestamp, message, type });
+                updateLogDisplay();
+            }
+
+            function updateLogDisplay() {
+                const entries = state.logEntries.slice(-12);
+                alertLog.innerHTML = entries.map(e => {
+                    let cls = 'info';
+                    if (e.type === 'critical') cls = 'critical';
+                    if (e.type === 'success') cls = 'success';
+                    return `<div class="log-entry ${cls}"><span class="timestamp">[${e.timestamp}]</span> ${e.message}</div>`;
+                }).join('');
+                alertLog.scrollTop = alertLog.scrollHeight;
+            }
+
+            // ============ COUNTDOWN ============
+            function startCountdown() {
+                if (state.countdownActive) return;
+                state.countdownActive = true;
+                state.countdownRemaining = 45;
+                updateCountdownDisplay();
+                addLog('倒计时启动 — 需在45秒内完成应急响应', 'critical');
+                state.countdownInterval = setInterval(() => {
+                    state.countdownRemaining--;
+                    updateCountdownDisplay();
+                    if (state.countdownRemaining <= 0) {
+                        clearInterval(state.countdownInterval);
+                        state.countdownInterval = null;
+                        state.countdownActive = false;
+                        if (state.phase !== 'complete' && state.phase !== 'restored' && state.phase !==
+                            'disconnected') {
+                            triggerFailure();
+                        }
+                    }
+                }, 1000);
+            }
+
+            function updateCountdownDisplay() {
+                countdownTimer.textContent = state.countdownRemaining;
+                countdownTimer.classList.remove('warning', 'danger');
+                if (state.countdownRemaining <= 15 && state.countdownRemaining > 0) {
+                    countdownTimer.classList.add('danger');
+                } else if (state.countdownRemaining <= 30 && state.countdownRemaining > 15) {
+                    countdownTimer.classList.add('warning');
+                }
+                if (!state.countdownActive && state.countdownRemaining <= 0) {
+                    countdownTimer.textContent = '0';
+                    countdownTimer.classList.add('danger');
+                }
+                if (!state.countdownActive && state.phase === 'idle') {
+                    countdownTimer.textContent = '--';
+                    countdownTimer.classList.remove('warning', 'danger');
+                }
+            }
+
+            function stopCountdown() {
+                if (state.countdownInterval) {
+                    clearInterval(state.countdownInterval);
+                    state.countdownInterval = null;
+                }
+                state.countdownActive = false;
+                countdownTimer.classList.remove('warning', 'danger');
+            }
+
+            // ============ REMOTE CURSOR ANIMATION ============
+            function startRemoteCursor() {
+                const wrapRect = hmiCanvasWrap.getBoundingClientRect();
+                // Generate a path that moves toward the NaOH injection area on the canvas
+                const path = [
+                    { x: wrapRect.width * 0.15, y: wrapRect.height * 0.3 },
+                    { x: wrapRect.width * 0.3, y: wrapRect.height * 0.25 },
+                    { x: wrapRect.width * 0.5, y: wrapRect.height * 0.35 },
+                    { x: wrapRect.width * 0.55, y: wrapRect.height * 0.38 },
+                    { x: wrapRect.width * 0.53, y: wrapRect.height * 0.4 },
+                    { x: wrapRect.width * 0.54, y: wrapRect.height * 0.39 },
+                    { x: wrapRect.width * 0.52, y: wrapRect.height * 0.42 },
+                ];
+                state.remoteCursorPath = path;
+                state.remoteCursorIndex = 0;
+                remoteCursor.classList.add('active');
+                moveRemoteCursor();
+                state.remoteCursorInterval = setInterval(() => {
+                    state.remoteCursorIndex = (state.remoteCursorIndex + 1) % state.remoteCursorPath
+                        .length;
+                    moveRemoteCursor();
+                }, 900);
+            }
+
+            function moveRemoteCursor() {
+                const pt = state.remoteCursorPath[state.remoteCursorIndex];
+                if (pt) {
+                    remoteCursor.style.left = pt.x + 'px';
+                    remoteCursor.style.top = pt.y + 'px';
+                }
+            }
+
+            function stopRemoteCursor() {
+                if (state.remoteCursorInterval) {
+                    clearInterval(state.remoteCursorInterval);
+                    state.remoteCursorInterval = null;
+                }
+                remoteCursor.classList.remove('active');
+            }
+
+            // ============ SIMULATION TICK ============
+            function startSimulationTick() {
+                state.simulationTickInterval = setInterval(() => {
+                    // Simulate NaOH being changed by intruder
+                    if (state.tvIntruder && state.naohSetpoint < state.intruderNaohTarget && state.phase ===
+                        'intruder_active') {
+                        const diff = state.intruderNaohTarget - state.naohSetpoint;
+                        const increment = Math.max(50, Math.floor(diff * 0.25));
+                        state.naohSetpoint = Math.min(state.intruderNaohTarget, state.naohSetpoint +
+                            increment);
+                        state.naohActual = state.naohSetpoint + Math.floor((Math.random() - 0.5) * 30);
+                        if (state.naohSetpoint >= state.intruderNaohTarget - 100) {
+                            state.naohSetpoint = state.intruderNaohTarget;
+                            state.naohActual = state.intruderNaohTarget;
+                        }
+                        updateParamDisplays();
+                        if (state.naohSetpoint > 500 && !state._naohAlertLogged) {
+                            state._naohAlertLogged = true;
+                            addLog('⚠ NaOH浓度超出安全范围！当前: ' + state.naohSetpoint + ' ppm',
+                                'critical');
+                        }
+                    }
+                    // Slight pH drift based on NaOH
+                    if (state.naohActual > 500) {
+                        state.phValue = Math.min(12, 7.2 + (state.naohActual - 100) / 2000 + (Math.random() -
+                            0.5) * 0.3);
+                    } else if (state.naohActual <= 200) {
+                        state.phValue = 7.2 + (Math.random() - 0.5) * 0.2;
+                    }
+                    state.phValue = Math.round(state.phValue * 10) / 10;
+                    state.flowRate = 420 + Math.floor((Math.random() - 0.5) * 25);
+                    updateParamDisplays();
+                    drawHMICanvas();
+                }, 800);
+            }
+
+            function updateParamDisplays() {
+                valNaOH.textContent = state.naohActual;
+                valPH.textContent = state.phValue.toFixed(1);
+                valFlow.textContent = state.flowRate;
+                // Update NaOH card styling
+                if (state.naohActual > 500) {
+                    valNaOH.classList.add('danger-val');
+                    paramNaOH.classList.add('alert-highlight');
+                    valPump.textContent = '⚠ 异常';
+                    valPump.style.color = '#ef4444';
+                } else if (state.naohActual > 200) {
+                    valNaOH.classList.remove('danger-val');
+                    paramNaOH.classList.remove('alert-highlight');
+                    valNaOH.style.color = '#f59e0b';
+                    valPump.textContent = '注意';
+                    valPump.style.color = '#f59e0b';
+                } else {
+                    valNaOH.classList.remove('danger-val');
+                    paramNaOH.classList.remove('alert-highlight');
+                    valNaOH.style.color = '#06b6d4';
+                    valPump.textContent = '正常';
+                    valPump.style.color = '#22c55e';
+                }
+                // HMI status dot
+                if (state.naohActual > 500 || state.tvIntruder) {
+                    hmiStatusDot.classList.add('alert');
+                } else {
+                    hmiStatusDot.classList.remove('alert');
+                }
+                // Slider
+                if (!document.activeElement || document.activeElement !== naohSlider) {
+                    naohSlider.value = state.naohSetpoint;
+                    sliderVal.textContent = state.naohSetpoint + ' ppm';
+                }
+            }
+
+            // ============ PHASE MANAGEMENT ============
+            function updateProgressSteps() {
+                const steps = progressSteps.querySelectorAll('.progress-step');
+                steps.forEach((step, i) => {
+                    step.classList.remove('active', 'done');
+                    if (state.stepCompleted[i]) {
+                        step.classList.add('done');
+                    } else if (i === getCurrentStepIndex()) {
+                        step.classList.add('active');
+                    }
+                });
+            }
+
+            function getCurrentStepIndex() {
+                if (!state.stepCompleted[0]) return 0;
+                if (!state.stepCompleted[1]) return 1;
+                if (!state.stepCompleted[2]) return 2;
+                if (!state.stepCompleted[3]) return 3;
+                if (!state.stepCompleted[4]) return 4;
+                return -1;
+            }
+
+            function completeStep(index) {
+                if (!state.stepCompleted[index]) {
+                    state.stepCompleted[index] = true;
+                    updateProgressSteps();
+                }
+            }
+
+            function triggerIntruder() {
+                if (state.phase !== 'monitoring') return;
+                state.phase = 'intruder_active';
+                state.tvIntruder = true;
+                state.tvConnected = true;
+                state._naohAlertLogged = false;
+                // Update TV session display
+                tvSession.classList.add('intruder-active');
+                tvStatusText.innerHTML = '<strong style="color:#ef4444;">⚠ 检测到活跃远程会话</strong>';
+                tvDetail.textContent = '来源: TeamViewer ID 987-654-321 | 未授权接入';
+                tvDot.style.background = '#ef4444';
+                tvDot.style.boxShadow = '0 0 10px rgba(239,68,68,0.8)';
+                btnDisconnect.disabled = false;
+                addLog('🚨 检测到未授权TeamViewer远程会话建立！', 'critical');
+                addLog('检测到异常 — HMI出现远程光标移动', 'critical');
+                // Start remote cursor
+                startRemoteCursor();
+                // Start countdown
+                startCountdown();
+                // Enable slider for later use
+                naohSlider.disabled = false;
+                // Intruder starts changing NaOH
+                state.intruderNaohTarget = 11100;
+                completeStep(1); // Step 2: 检测入侵
+                updateProgressSteps();
+                // Highlight restore card
+                btnRestoreCard.style.borderColor = '#f59e0b';
+                btnRestoreCard.style.boxShadow = '0 0 15px rgba(245,158,11,0.3)';
+            }
+
+            function disconnectTV() {
+                if (!state.tvIntruder) return;
+                state.tvIntruder = false;
+                state.tvConnected = false;
+                state.phase = 'disconnected';
+                stopRemoteCursor();
+                // Stop intruder from changing NaOH
+                state.intruderNaohTarget = state.naohSetpoint;
+                // Update TV display
+                tvSession.classList.remove('intruder-active');
+                tvStatusText.innerHTML = '<span style="color:#22c55e;">✅ 远程会话已断开</span>';
+                tvDetail.textContent = 'TeamViewer连接已终止 | 本地控制已恢复';
+                tvDot.style.background = '#22c55e';
+                tvDot.style.boxShadow = '0 0 8px rgba(34,197,94,0.5)';
+                btnDisconnect.disabled = true;
+                btnDisconnect.textContent = '✅ 已断开';
+                btnDisconnect.style.background = '#1a4a2a';
+                addLog('✅ 操作员手动断开TeamViewer远程连接', 'success');
+                addLog('本地HMI控制权已恢复 — 请立即检查并恢复NaOH设定值', 'info');
+                completeStep(2); // Step 3: 断开连接
+                updateProgressSteps();
+                // Enable restore button
+                btnRestore.disabled = false;
+                naohSlider.disabled = false;
+                naohSlider.focus();
+            }
+
+            function restoreNaOH() {
+                if (state.phase !== 'disconnected' && state.phase !== 'intruder_active') return;
+                const targetVal = parseInt(naohSlider.value);
+                if (targetVal <= 200 && targetVal >= 50) {
+                    state.naohSetpoint = targetVal;
+                    state.naohActual = targetVal;
+                    state.phValue = 7.2;
+                    state.intruderNaohTarget = targetVal;
+                    state.phase = 'restored';
+                    updateParamDisplays();
+                    drawHMICanvas();
+                    stopCountdown();
+                    countdownTimer.textContent = '✓';
+                    countdownTimer.classList.remove('warning', 'danger');
+                    countdownTimer.style.color = '#22c55e';
+                    addLog('✅ NaOH设定值已恢复至安全水平: ' + targetVal + ' ppm', 'success');
+                    addLog('✅ pH值恢复正常 — 系统安全确认完成', 'success');
+                    btnRestore.disabled = true;
+                    btnRestore.textContent = '✅ 已恢复';
+                    btnRestore.style.background = '#1a4a2a';
+                    naohSlider.disabled = true;
+                    completeStep(3); // Step 4: 恢复NaOH
+                    updateProgressSteps();
+                    // Enable report writing
+                    reportTextarea.disabled = false;
+                    reportTextarea.placeholder = '请描述你观察到的事件：攻击者是如何进入系统的？你采取了什么措施？系统有哪些安全缺陷？如何防御？';
+                    btnRestoreCard.style.borderColor = '#22c55e';
+                    btnRestoreCard.style.boxShadow = '0 0 12px rgba(34,197,94,0.4)';
+                } else {
+                    addLog('⚠ NaOH设定值必须在安全范围（50-200 ppm），当前值: ' + targetVal + ' ppm', 'critical');
+                    // Flash the slider
+                    naohSlider.style.outline = '2px solid #ef4444';
+                    setTimeout(() => { naohSlider.style.outline = 'none'; }, 600);
+                }
+            }
+
+            function triggerFailure() {
+                stopCountdown();
+                stopRemoteCursor();
+                state.phase = 'failed';
+                state.naohSetpoint = 11100;
+                state.naohActual = 11100;
+                state.phValue = 11.8;
+                updateParamDisplays();
+                drawHMICanvas();
+                hmiStatusDot.classList.add('alert');
+                addLog('💀 应急响应超时 — NaOH浓度已达到危险水平11,100 ppm', 'critical');
+                addLog('💀 污染物已进入供水系统 — 模拟攻击成功', 'critical');
+                failureOverlay.classList.add('visible');
+            }
+
+            function resetExperiment() {
+                stopCountdown();
+                stopRemoteCursor();
+                if (state.simulationTickInterval) clearInterval(state.simulationTickInterval);
+                state.phase = 'monitoring';
+                state.naohSetpoint = 100;
+                state.naohActual = 100;
+                state.phValue = 7.2;
+                state.flowRate = 420;
+                state.pumpStatus = 'normal';
+                state.tvConnected = false;
+                state.tvIntruder = false;
+                state.countdownActive = false;
+                state.countdownRemaining = 45;
+                state.stepCompleted = [true, false, false, false, false];
+                state.logEntries = [];
+                state.remoteCursorPath = [];
+                state.remoteCursorIndex = 0;
+                state.intruderNaohTarget = 11100;
+                state._naohAlertLogged = false;
+                state.reportSubmitted = false;
+                state.flagRevealed = false;
+                // Reset UI
+                countdownTimer.textContent = '--';
+                countdownTimer.classList.remove('warning', 'danger');
+                countdownTimer.style.color = '#22c55e';
+                tvSession.classList.remove('intruder-active');
+                tvStatusText.textContent = '未检测到活跃远程会话';
+                tvDetail.textContent = '监听中...';
+                tvDot.style.background = '#22c55e';
+                tvDot.style.boxShadow = '0 0 8px rgba(34,197,94,0.5)';
+                btnDisconnect.disabled = true;
+                btnDisconnect.textContent = '⚡ 断开远程连接';
+                btnDisconnect.style.background = '#ef4444';
+                naohSlider.value = 100;
+                naohSlider.disabled = true;
+                sliderVal.textContent = '100 ppm';
+                btnRestore.disabled = true;
+                btnRestore.textContent = '✅ 确认恢复安全值 (100 ppm)';
+                btnRestore.style.background = '#06b6d4';
+                reportTextarea.value = '';
+                reportTextarea.disabled = true;
+                reportTextarea.placeholder = '完成应急响应后可撰写分析报告...';
+                flagReveal.classList.remove('visible');
+                achievementHint.style.display = 'block';
+                hmiStatusDot.classList.remove('alert');
+                paramNaOH.classList.remove('alert-highlight');
+                valNaOH.classList.remove('danger-val');
+                valNaOH.style.color = '#06b6d4';
+                valPump.textContent = '正常';
+                valPump.style.color = '#22c55e';
+                btnRestoreCard.style.borderColor = '#1e293b';
+                btnRestoreCard.style.boxShadow = 'none';
+                failureOverlay.classList.remove('visible');
+                remoteCursor.classList.remove('active');
+                updateParamDisplays();
+                drawHMICanvas();
+                updateProgressSteps();
+                addLog('系统启动 — HMI Station 3 在线', 'info');
+                addLog('NaOH设定值: 100 ppm — 正常', 'info');
+                // Reset keyword tags
+                document.querySelectorAll('.keyword-tag').forEach(t => t.classList.remove('matched'));
+                // Schedule intruder
+                setTimeout(() => {
+                    if (state.phase === 'monitoring') {
+                        triggerIntruder();
+                    }
+                }, 6000);
+            }
+
+            // ============ REPORT VALIDATION ============
+            function checkReportKeywords() {
+                const text = reportTextarea.value.toLowerCase();
+                const keywords = [
+                    { kw: 'teamviewer', tag: 'teamviewer' },
+                    { kw: '远程访问', tag: '远程访问' },
+                    { kw: 'naoh', tag: 'naoh' },
+                    { kw: '认证', tag: '认证' },
+                    { kw: 'mfa', tag: '认证' },
+                    { kw: '未授权', tag: '未授权' },
+                    { kw: '断开', tag: '断开' },
+                    { kw: '恢复', tag: '恢复' },
+                    { kw: '防御', tag: '防御' },
+                    { kw: '分段', tag: '防御' },
+                ];
+                let matchCount = 0;
+                const matchedTags = new Set();
+                keywords.forEach(({ kw, tag }) => {
+                    if (text.includes(kw)) {
+                        matchCount++;
+                        matchedTags.add(tag);
+                    }
+                });
+                // Update keyword tags
+                document.querySelectorAll('.keyword-tag').forEach(tagEl => {
+                    const tagKey = tagEl.dataset.kw;
+                    if (matchedTags.has(tagKey)) {
+                        tagEl.classList.add('matched');
+                    } else {
+                        tagEl.classList.remove('matched');
+                    }
+                });
+                return matchCount >= 4;
+            }
+
+            function submitReport() {
+                if (state.reportSubmitted) return;
+                if (checkReportKeywords()) {
+                    state.reportSubmitted = true;
+                    state.phase = 'complete';
+                    completeStep(4);
+                    updateProgressSteps();
+                    addLog('📝 事件分析报告已提交 — 分析质量: 合格', 'success');
+                    revealFlag();
+                } else {
+                    addLog('⚠ 报告分析不够全面，请包含更多关键信息（TeamViewer、认证、NaOH、防御措施等）', 'info');
+                    reportTextarea.style.borderColor = '#f59e0b';
+                    setTimeout(() => { reportTextarea.style.borderColor = '#1e293b'; }, 1500);
+                }
+            }
+
+            function revealFlag() {
+                if (state.flagRevealed) return;
+                state.flagRevealed = true;
+                flagReveal.classList.add('visible');
+                achievementHint.style.display = 'none';
+                addLog('🏆 成就解锁 — FLAG已捕获！', 'success');
+                stopCountdown();
+                countdownTimer.textContent = '✓✓';
+                countdownTimer.style.color = '#f59e0b';
+                countdownTimer.classList.remove('warning', 'danger');
+            }
+
+            // ============ EVENT HANDLERS ============
+            btnStart.addEventListener('click', () => {
+                briefingOverlay.style.display = 'none';
+                resetExperiment();
+                state.phase = 'monitoring';
+                state.stepCompleted[0] = true;
+                updateProgressSteps();
+                startSimulationTick();
+                addLog('操作员已登录HMI Station 3 — 开始监控', 'info');
+                // Schedule intruder after 6 seconds
+                setTimeout(() => {
+                    if (state.phase === 'monitoring') {
+                        triggerIntruder();
+                    }
+                }, 6000);
+            });
+
+            btnRetry.addEventListener('click', () => {
+                failureOverlay.classList.remove('visible');
+                resetExperiment();
+                state.phase = 'monitoring';
+                state.stepCompleted[0] = true;
+                updateProgressSteps();
+                startSimulationTick();
+                setTimeout(() => {
+                    if (state.phase === 'monitoring') {
+                        triggerIntruder();
+                    }
+                }, 6000);
+            });
+
+            btnDisconnect.addEventListener('click', () => {
+                if (state.tvIntruder) {
+                    disconnectTV();
+                }
+            });
+
+            btnRestore.addEventListener('click', () => {
+                restoreNaOH();
+            });
+
+            naohSlider.addEventListener('input', () => {
+                sliderVal.textContent = naohSlider.value + ' ppm';
+                if (parseInt(naohSlider.value) <= 200 && parseInt(naohSlider.value) >= 50) {
+                    sliderVal.style.color = '#22c55e';
+                } else if (parseInt(naohSlider.value) > 500) {
+                    sliderVal.style.color = '#ef4444';
+                } else {
+                    sliderVal.style.color = '#f59e0b';
+                }
+            });
+
+            reportTextarea.addEventListener('input', () => {
+                checkReportKeywords();
+                // Auto-submit hint after sufficient keywords
+                if (checkReportKeywords() && !state.reportSubmitted && state.phase === 'restored') {
+                    reportTextarea.style.borderColor = '#22c55e';
+                }
+            });
+
+            reportTextarea.addEventListener('blur', () => {
+                if (checkReportKeywords() && !state.reportSubmitted && (state.phase === 'restored' || state
+                        .phase === 'disconnected')) {
+                    submitReport();
+                }
+            });
+
+            // Also allow Ctrl+Enter to submit report
+            reportTextarea.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    if (!state.reportSubmitted && (state.phase === 'restored' || state.phase ===
+                            'disconnected')) {
+                        submitReport();
+                    }
+                }
+            });
+
+            btnToggleAnalysis.addEventListener('click', () => {
+                analysisContent.classList.toggle('visible');
+                if (analysisContent.classList.contains('visible')) {
+                    btnToggleAnalysis.textContent = '📖 收起分析报告';
+                } else {
+                    btnToggleAnalysis.textContent = '📖 查看完整分析报告';
+                }
+            });
+
+            // ============ RESIZE HANDLER ============
+            window.addEventListener('resize', () => {
+                resizeCanvas();
+                drawHMICanvas();
+            });
+
+            // ============ INITIALIZATION ============
+            function init() {
+                resizeCanvas();
+                drawHMICanvas();
+                updateParamDisplays();
+                updateProgressSteps();
+                addLog('系统启动 — HMI Station 3 在线', 'info');
+                addLog('NaOH设定值: 100 ppm — 正常', 'info');
+                countdownTimer.textContent = '--';
+                // Show briefing
+                briefingOverlay.style.display = 'flex';
+            }
+
+            // Polyfill roundRect if needed
+            if (!CanvasRenderingContext2D.prototype.roundRect) {
+                CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+                    if (typeof r === 'number') r = { tl: r, tr: r, br: r, bl: r };
+                    this.beginPath();
+                    this.moveTo(x + r.tl, y);
+                    this.lineTo(x + w - r.tr, y);
+                    this.quadraticCurveTo(x + w, y, x + w, y + r.tr);
+                    this.lineTo(x + w, y + h - r.br);
+                    this.quadraticCurveTo(x + w, y + h, x + w - r.br, y + h);
+                    this.lineTo(x + r.bl, y + h);
+                    this.quadraticCurveTo(x, y + h, x, y + h - r.bl);
+                    this.lineTo(x, y + r.tl);
+                    this.quadraticCurveTo(x, y, x + r.tl, y);
+                    this.closePath();
+                };
+            }
+
+            init();
+        })();
+    </script>
+</body>
+</html>

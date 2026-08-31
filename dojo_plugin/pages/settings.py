@@ -5,7 +5,7 @@ from CTFd.utils.helpers import get_infos, markup
 from CTFd.utils.decorators import authed_only
 from CTFd.utils.user import get_current_user
 
-from ..models import SSHKeys, DiscordUsers
+from ..models import DiscordUsers, DojoAdmins, SSHKeys
 from ..config import DISCORD_CLIENT_ID
 from ..utils.discord import get_discord_member, discord_avatar_asset
 
@@ -37,6 +37,8 @@ def settings_override():
     return render_template(
         "settings.html",
         user=user,
+        is_course_teacher=user.type == "admin"
+        or DojoAdmins.query.filter_by(user_id=user.id).first() is not None,
         tokens=tokens,
         ssh_keys=[key.value for key in ssh_keys],
         discord_enabled=bool(DISCORD_CLIENT_ID),

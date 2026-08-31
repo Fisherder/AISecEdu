@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "components/product.html" import page_header, async_boundary, status_badge %}
+
+{% block body_class %}admin-product-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+{% block footer %}{% endblock %}
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/admin-product.css', v='aisecedu-admin-product-v8-readability-v1') }}">
+{% endblock %}
+
+{% block content %}
+<section class="admin-product" aria-label="设计系统组件验收" data-component-fixture="true">
+  {{ page_header(
+    '共享组件验收台',
+    '设计系统与无障碍基线',
+    '这里集中验证全站共享状态、列表、资源、批次和工作区组件；业务页面复用相同契约。',
+    '返回平台概览',
+    '/admin'
+  ) }}
+
+  <div class="admin-design-system-grid">
+    <section class="admin-design-system-panel" aria-labelledby="fixture-status-title">
+      <h2 id="fixture-status-title">状态与恢复</h2>
+      <p>{{ status_badge('workflow', 'running') }} {{ status_badge('workflow', 'partial_success') }} {{ status_badge('runtime', 'stopped') }} {{ status_badge('workflow', 'unexpected_provider_state') }}</p>
+      {% call async_boundary('fixture-async', 'stale', '异步恢复示例') %}
+        <p>已保留上次成功加载的课程摘要。</p>
+      {% endcall %}
+    </section>
+
+    <section class="admin-design-system-panel" aria-labelledby="fixture-navigation-title">
+      <h2 id="fixture-navigation-title">键盘导航</h2>
+      <div class="admin-design-system-tabs" role="tablist" aria-label="示例内容类型">
+        <button id="fixture-tab-a" type="button" role="tab" aria-selected="true" aria-controls="fixture-panel-a" tabindex="0">题目</button>
+        <button id="fixture-tab-b" type="button" role="tab" aria-selected="false" aria-controls="fixture-panel-b" tabindex="-1">课件</button>
+      </div>
+      <div id="fixture-panel-a" class="admin-design-system-tabpanel" role="tabpanel" aria-labelledby="fixture-tab-a">题目内容</div>
+      <div id="fixture-panel-b" class="admin-design-system-tabpanel" role="tabpanel" aria-labelledby="fixture-tab-b" hidden>课件内容</div>
+      <div class="admin-design-system-combobox">
+        <label for="fixture-combobox">查找课程</label>
+        <input id="fixture-combobox" data-combobox aria-controls="fixture-options" aria-autocomplete="list" autocomplete="off">
+        <ul id="fixture-options" role="listbox" aria-label="课程建议" hidden>
+          <li id="fixture-option-1" role="option" aria-selected="false">软件安全</li>
+          <li id="fixture-option-2" role="option" aria-selected="false">密码学</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="admin-design-system-panel is-wide" aria-labelledby="fixture-table-title">
+      <h2 id="fixture-table-title">响应式数据表</h2>
+      <div class="admin-product-table-wrap">
+        <table data-data-table aria-label="课程运行摘要">
+          <thead><tr><th scope="col" data-sort-key="course">课程</th><th scope="col">状态</th><th scope="col">更新时间</th></tr></thead>
+          <tbody><tr><td>软件安全</td><td>运行正常</td><td>刚刚</td></tr><tr><td>密码学</td><td>需要复查</td><td>5 分钟前</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="admin-design-system-panel" aria-labelledby="fixture-task-title">
+      <h2 id="fixture-task-title">任务列表</h2>
+      <p data-task-list-summary role="status" aria-live="polite"></p>
+      <ol class="ae-task-list" data-task-list>
+        <li class="ae-task-list-item" data-task-state="running"><div><h3>验证题目运行环境</h3><p>任务可离开页面并继续运行。</p></div>{{ status_badge('workflow', 'running') }}</li>
+        <li class="ae-task-list-item" data-task-state="failed"><div><h3>检查发布条件</h3><p>失败项可单独重试。</p></div>{{ status_badge('workflow', 'failed') }}</li>
+      </ol>
+    </section>
+
+    <section class="admin-design-system-panel" aria-labelledby="fixture-resource-title">
+      <h2 id="fixture-resource-title">资源卡</h2>
+      <article data-resource-card>
+        <div><h3 data-resource-title>SQL 登录绕过</h3><p>Web 安全 · 认证缺陷</p><div class="ae-resource-meta"><span data-resource-availability="available"></span><span data-resource-workflow="published"></span></div></div>
+        <a class="admin-product-row-action" data-resource-primary href="/dojos">打开资源</a>
+      </article>
+    </section>
+
+    <section class="admin-design-system-panel" aria-labelledby="fixture-batch-title">
+      <h2 id="fixture-batch-title">批次进度</h2>
+      <div data-batch-progress data-requested="5" data-created="3" data-validated="2" data-failed="2" data-published="0">
+        <p data-batch-summary role="status" aria-live="polite"></p>
+        <div role="progressbar" aria-label="五题生成进度"><i></i></div>
+      </div>
+    </section>
+
+    <section class="admin-design-system-panel" aria-labelledby="fixture-workspace-title">
+      <h2 id="fixture-workspace-title">工作区组合状态</h2>
+      <div data-workspace-state data-attempt="in_progress" data-runtime="stopped" data-snapshot="true">
+        <div><span data-workspace-status></span><p data-workspace-message></p></div>
+        <button type="button" data-workspace-action></button>
+      </div>
+    </section>
+
+    <section class="admin-design-system-panel is-wide" aria-labelledby="fixture-dialog-title">
+      <h2 id="fixture-dialog-title">对话框与焦点恢复</h2>
+      <button type="button" class="admin-product-primary" data-dialog-open="fixture-dialog">打开确认对话框</button>
+      <div id="fixture-dialog" class="ae-dialog" aria-hidden="true" hidden>
+        <button class="ae-dialog-backdrop" type="button" data-dialog-close aria-label="关闭对话框"></button>
+        <section class="ae-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="fixture-dialog-heading" tabindex="-1">
+          <div style="padding:24px"><h2 id="fixture-dialog-heading">确认操作范围</h2><p>关闭后焦点会回到打开按钮。</p><button type="button" class="admin-product-primary" data-dialog-close>完成</button></div>
+        </section>
+      </div>
+    </section>
+  </div>
+</section>
+{% endblock %}

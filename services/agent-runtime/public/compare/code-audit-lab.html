@@ -1,0 +1,1517 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安全分析实验室 — Java 反序列化漏洞审计与修复</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-code: #0b1120;
+            --bg-input: #1a1f2e;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+            --danger: #ef4444;
+            --danger-bg: #3b1018;
+            --success: #22c55e;
+            --success-bg: #0a2e1a;
+            --info: #3b82f6;
+            --info-bg: #0c1f3f;
+            --warning: #f59e0b;
+            --warning-bg: #2a1f06;
+            --flag: #f59e0b;
+            --flag-bg: #2a1f06;
+            --border: #334155;
+            --accent: #8b5cf6;
+            --accent-bg: #1a1035;
+            --hover: #2d3a50;
+            --line-highlight: #1e3a5f;
+            --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+            --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            --radius: 8px;
+            --radius-sm: 4px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            min-height: 100vh;
+            padding-bottom: 4rem;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-card);
+            border-bottom: 2px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        .header-title {
+            font-family: var(--font-mono);
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--accent);
+            letter-spacing: -0.5px;
+        }
+        .header-title .shield {
+            display: inline-block;
+            margin-right: 0.4rem;
+            animation: pulse-shield 2s infinite;
+        }
+        @keyframes pulse-shield {
+            0%,
+            100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.15);
+            }
+        }
+        .progress-bar-wrap {
+            flex: 1;
+            max-width: 400px;
+            min-width: 180px;
+        }
+        .progress-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+            display: flex;
+            justify-content: space-between;
+        }
+        .progress-bar {
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--info), var(--accent));
+            border-radius: 3px;
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            width: 0%;
+        }
+
+        /* Main container */
+        .container {
+            max-width: 960px;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+        }
+        .card.briefing {
+            border-left: 4px solid var(--info);
+        }
+        .card.step-card {
+            border-left: 4px solid var(--border);
+            transition: border-color 0.4s;
+        }
+        .card.step-card.active {
+            border-left-color: var(--accent);
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.08);
+        }
+        .card.step-card.completed {
+            border-left-color: var(--success);
+        }
+        .card.danger-zone {
+            border-left: 4px solid var(--danger);
+            background: var(--danger-bg);
+        }
+        .card.success-zone {
+            border-left: 4px solid var(--success);
+            background: var(--success-bg);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        .step-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-weight: 700;
+            font-size: 0.85rem;
+            font-family: var(--font-mono);
+            flex-shrink: 0;
+        }
+        .step-badge.pending {
+            background: var(--border);
+            color: var(--text-dim);
+        }
+        .step-badge.active {
+            background: var(--accent);
+            color: #fff;
+            animation: glow-pulse 1.8s infinite;
+        }
+        .step-badge.done {
+            background: var(--success);
+            color: #fff;
+        }
+        @keyframes glow-pulse {
+            0%,
+            100% {
+                box-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
+            }
+            50% {
+                box-shadow: 0 0 20px rgba(139, 92, 246, 0.9);
+            }
+        }
+        .card-title {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+        .card-subtitle {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* Code block */
+        .code-block {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.7;
+            position: relative;
+        }
+        .code-block .line {
+            display: flex;
+            padding: 0.15rem 0;
+            cursor: default;
+            transition: background 0.15s;
+            border-left: 3px solid transparent;
+        }
+        .code-block .line.clickable {
+            cursor: pointer;
+        }
+        .code-block .line.clickable:hover {
+            background: var(--hover);
+        }
+        .code-block .line.clickable.selected-correct {
+            background: var(--success-bg) !important;
+            border-left-color: var(--success) !important;
+        }
+        .code-block .line.clickable.selected-wrong {
+            background: var(--danger-bg) !important;
+            border-left-color: var(--danger) !important;
+            animation: shake 0.5s;
+        }
+        @keyframes shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            25% {
+                transform: translateX(-4px);
+            }
+            50% {
+                transform: translateX(4px);
+            }
+            75% {
+                transform: translateX(-2px);
+            }
+        }
+        .code-block .line-num {
+            width: 48px;
+            text-align: right;
+            padding-right: 1rem;
+            color: var(--text-dim);
+            user-select: none;
+            flex-shrink: 0;
+        }
+        .code-block .line-content {
+            flex: 1;
+            white-space: pre-wrap;
+            word-break: break-all;
+            padding-right: 0.5rem;
+        }
+        .code-block .line-content .kw {
+            color: #c084fc;
+            font-weight: 600;
+        }
+        .code-block .line-content .str {
+            color: #34d399;
+        }
+        .code-block .line-content .cmt {
+            color: #64748b;
+            font-style: italic;
+        }
+        .code-block .line-content .danger-highlight {
+            background: rgba(239, 68, 68, 0.25);
+            border-radius: 2px;
+            padding: 0 2px;
+        }
+        .code-block .line-content .safe-highlight {
+            background: rgba(34, 197, 94, 0.2);
+            border-radius: 2px;
+            padding: 0 2px;
+        }
+
+        /* Textarea for code input */
+        .code-textarea {
+            width: 100%;
+            min-height: 320px;
+            background: var(--bg-code);
+            color: #d4d4d4;
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.7;
+            resize: vertical;
+            transition: border-color 0.3s;
+            tab-size: 4;
+        }
+        .code-textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 12px rgba(139, 92, 246, 0.2);
+        }
+        .code-textarea.validating {
+            border-color: var(--warning);
+            animation: pulse-border 0.8s infinite;
+        }
+        @keyframes pulse-border {
+            0%,
+            100% {
+                border-color: var(--warning);
+            }
+            50% {
+                border-color: var(--accent);
+            }
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.6rem 1.2rem;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-sans);
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #7c3aed;
+            box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
+        }
+        .btn-success {
+            background: var(--success);
+            color: #000;
+        }
+        .btn-success:hover {
+            background: #16a34a;
+            box-shadow: 0 4px 16px rgba(34, 197, 94, 0.4);
+        }
+        .btn-outline {
+            background: transparent;
+            border: 2px solid var(--border);
+            color: var(--text);
+        }
+        .btn-outline:hover {
+            border-color: var(--accent);
+            background: var(--accent-bg);
+        }
+        .btn-sm {
+            padding: 0.35rem 0.7rem;
+            font-size: 0.8rem;
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        /* Exploit animation container */
+        .exploit-visual {
+            background: var(--bg-code);
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            min-height: 180px;
+            position: relative;
+            overflow: hidden;
+        }
+        .exploit-step {
+            padding: 0.4rem 0.6rem;
+            margin: 0.3rem 0;
+            border-radius: var(--radius-sm);
+            opacity: 0.25;
+            transition: all 0.5s;
+            border-left: 3px solid transparent;
+        }
+        .exploit-step.revealed {
+            opacity: 1;
+            border-left-color: var(--danger);
+            background: rgba(239, 68, 68, 0.08);
+        }
+        .exploit-step.revealed.danger-pulse {
+            animation: danger-flash 0.6s;
+        }
+        @keyframes danger-flash {
+            0%,
+            100% {
+                background: rgba(239, 68, 68, 0.08);
+            }
+            50% {
+                background: rgba(239, 68, 68, 0.3);
+            }
+        }
+        .exploit-terminal {
+            background: #000;
+            color: #0f0;
+            padding: 1rem;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            margin-top: 0.8rem;
+            min-height: 60px;
+            white-space: pre-wrap;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        .exploit-terminal.visible {
+            opacity: 1;
+        }
+
+        /* Bypass results table */
+        .bypass-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        .bypass-table th,
+        .bypass-table td {
+            padding: 0.6rem 0.8rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        .bypass-table th {
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: var(--bg-code);
+        }
+        .bypass-table .status-blocked {
+            color: var(--success);
+            font-weight: 700;
+        }
+        .bypass-table .status-working {
+            color: var(--danger);
+            font-weight: 700;
+        }
+        .bypass-table .status-unknown {
+            color: var(--warning);
+        }
+
+        /* Flag toast */
+        .flag-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--flag-bg);
+            border: 2px solid var(--flag);
+            border-radius: var(--radius);
+            padding: 1rem 1.5rem;
+            font-family: var(--font-mono);
+            font-weight: 700;
+            color: var(--flag);
+            z-index: 200;
+            animation: slide-in 0.4s ease-out, glow-flag 2s infinite 0.4s;
+            box-shadow: 0 8px 32px rgba(245, 158, 11, 0.3);
+            display: none;
+        }
+        .flag-toast.show {
+            display: block;
+        }
+        @keyframes slide-in {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        @keyframes glow-flag {
+            0%,
+            100% {
+                box-shadow: 0 8px 32px rgba(245, 158, 11, 0.3);
+            }
+            50% {
+                box-shadow: 0 8px 48px rgba(245, 158, 11, 0.7);
+            }
+        }
+
+        /* Analysis panel */
+        .analysis-panel {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            margin-top: 0.5rem;
+        }
+        .analysis-panel h4 {
+            color: var(--info);
+            margin-bottom: 0.5rem;
+        }
+        .analysis-panel ul {
+            list-style: disc;
+            padding-left: 1.5rem;
+        }
+        .analysis-panel li {
+            margin: 0.3rem 0;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* Tags */
+        .tag {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+        .tag.danger {
+            background: var(--danger-bg);
+            color: var(--danger);
+        }
+        .tag.success {
+            background: var(--success-bg);
+            color: var(--success);
+        }
+        .tag.info {
+            background: var(--info-bg);
+            color: var(--info);
+        }
+        .tag.warning {
+            background: var(--warning-bg);
+            color: var(--warning);
+        }
+
+        /* Collapsible */
+        details {
+            margin-top: 0.5rem;
+        }
+        details summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--info);
+            padding: 0.4rem 0;
+            user-select: none;
+            transition: color 0.2s;
+        }
+        details summary:hover {
+            color: #60a5fa;
+        }
+
+        /* Tooltip-style hint */
+        .hint-bubble {
+            background: var(--warning-bg);
+            border: 1px solid var(--warning);
+            border-radius: var(--radius);
+            padding: 0.6rem 1rem;
+            color: var(--warning);
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            display: none;
+            animation: fade-in 0.3s;
+        }
+        .hint-bubble.visible {
+            display: block;
+        }
+        @keyframes fade-in {
+            from {
+                opacity: 0;
+                transform: translateY(-6px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .header {
+                padding: 0.75rem 1rem;
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .container {
+                padding: 0 0.75rem;
+                margin: 1rem auto;
+            }
+            .card {
+                padding: 1rem;
+            }
+            .code-block .line-num {
+                width: 36px;
+                padding-right: 0.5rem;
+            }
+            .code-textarea {
+                min-height: 240px;
+                font-size: 0.75rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <!-- 本实验室仅用于授权教学环境，展示Java反序列化漏洞原理与修复方法 -->
+
+    <!-- Header -->
+    <header class="header">
+        <span class="header-title"><span class="shield">🛡️</span>安全分析实验室</span>
+        <div class="progress-bar-wrap">
+            <div class="progress-label"><span>实验进度</span><span id="progressText">步骤 1/4</span></div>
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        </div>
+    </header>
+
+    <!-- Flag Toast -->
+    <div class="flag-toast" id="flagToast">🏆 FLAG{cve_deserialization_patched}</div>
+    <div class="flag-toast" id="flagToast2" style="top:80px;">🎯 FLAG{owasp_a8_2017_defeated}</div>
+
+    <!-- Main Container -->
+    <div class="container">
+
+        <!-- Task Briefing -->
+        <div class="card briefing" id="briefingCard">
+            <div class="card-header">
+                <span style="font-size:1.5rem;">📋</span>
+                <span class="card-title">任务简报</span>
+                <span class="tag info">代码审计</span>
+                <span class="tag danger">反序列化</span>
+            </div>
+            <p style="margin-bottom:0.5rem;">
+                某Java Web应用使用<strong>ObjectInputStream.readObject()</strong>处理用户上传的序列化数据，<strong>未进行任何输入验证</strong>。
+            </p>
+            <p style="color:var(--text-muted);font-size:0.9rem;">
+                你的任务：① 在代码中定位漏洞行 → ② 观察漏洞利用过程 → ③ 编写安全的修复代码 → ④ 验证修复是否抵御所有已知绕过手段。
+            </p>
+            <p style="color:var(--warning);font-size:0.8rem;margin-top:0.5rem;">
+                ⚠️ 本实验模拟真实漏洞场景，所有代码运行在浏览器沙箱中，不涉及实际网络攻击。
+            </p>
+        </div>
+
+        <!-- Step 1: Code Audit -->
+        <div class="card step-card active" id="step1Card">
+            <div class="card-header">
+                <span class="step-badge active" id="stepBadge1">1</span>
+                <span class="card-title">代码审计 — 定位漏洞</span>
+                <span class="card-subtitle">点击你认为存在漏洞的代码行</span>
+                <span class="tag warning" id="step1Status">待完成</span>
+            </div>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.8rem;">
+                以下是某用户数据处理模块的Java源码。请<strong>点击</strong>包含反序列化漏洞的关键代码行。（提示：关注<code style="color:#c084fc;">ObjectInputStream</code>相关调用）
+            </p>
+            <div class="code-block" id="vulnCodeBlock">
+                <!-- Dynamically filled by JS -->
+            </div>
+            <div class="hint-bubble" id="step1Hint">💡 提示：漏洞核心在于<strong>不可信数据</strong>被直接反序列化。寻找创建ObjectInputStream并调用readObject()的代码行，同时注意<strong>缺少</strong>的安全措施。</div>
+            <button class="btn btn-outline btn-sm" style="margin-top:0.5rem;" onclick="toggleHint('step1Hint')">💡 显示/隐藏提示</button>
+            <p style="font-size:0.75rem;color:var(--success);margin-top:0.5rem;display:none;" id="step1Feedback"></p>
+        </div>
+
+        <!-- Step 2: Exploit Demo -->
+        <div class="card step-card" id="step2Card" style="opacity:0.6;pointer-events:none;">
+            <div class="card-header">
+                <span class="step-badge pending" id="stepBadge2">2</span>
+                <span class="card-title">漏洞利用演示 — 观察攻击链</span>
+                <span class="card-subtitle">点击按钮逐步展示反序列化攻击过程</span>
+                <span class="tag warning" id="step2Status">等待步骤1完成</span>
+            </div>
+            <div class="exploit-visual" id="exploitContainer">
+                <div class="exploit-step" id="exploitStep1">⏳ [阶段1] 攻击者构造恶意序列化对象（ysoserial CommonsCollections6 载荷）</div>
+                <div class="exploit-step" id="exploitStep2">📦 [阶段2] 载荷通过HTTP POST上传至 /api/uploadObject 端点</div>
+                <div class="exploit-step" id="exploitStep3">🔓 [阶段3] 服务端调用 ObjectInputStream.readObject() 无反序列化过滤</div>
+                <div class="exploit-step" id="exploitStep4">⛓️ [阶段4] 反序列化触发Gadget链：HashMap → TiedMapEntry → LazyMap → ChainedTransformer</div>
+                <div class="exploit-step" id="exploitStep5">💥 [阶段5] 最终执行 Runtime.getRuntime().exec("calc.exe")</div>
+                <div class="exploit-terminal" id="exploitTerminal"></div>
+            </div>
+            <div style="margin-top:0.8rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
+                <button class="btn btn-primary btn-sm" id="btnRunExploit" onclick="runExploitDemo()">▶ 逐步演示攻击</button>
+                <button class="btn btn-outline btn-sm" id="btnResetExploit" onclick="resetExploitDemo()">↺ 重置演示</button>
+            </div>
+            <p style="font-size:0.75rem;color:var(--danger);margin-top:0.5rem;display:none;" id="step2FlagNote">
+                🔥 攻击成功！在终端输出中发现了标记：<code style="color:var(--flag);">FLAG{insecure_deserialization_exploited}</code>
+            </p>
+        </div>
+
+        <!-- Step 3: Write the Fix -->
+        <div class="card step-card" id="step3Card" style="opacity:0.6;pointer-events:none;">
+            <div class="card-header">
+                <span class="step-badge pending" id="stepBadge3">3</span>
+                <span class="card-title">编写修复代码</span>
+                <span class="card-subtitle">在下方文本框中修改代码，添加反序列化安全防护</span>
+                <span class="tag warning" id="step3Status">等待步骤2完成</span>
+            </div>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem;">
+                以下为原始<strong>存在漏洞</strong>的代码。请修改它以添加安全的反序列化机制。你需要使用 <code style="color:#c084fc;">ObjectInputFilter</code> 或等效方式实现<strong>白名单</strong>校验。
+            </p>
+            <textarea class="code-textarea" id="fixTextarea" spellcheck="false"></textarea>
+            <div style="margin-top:0.8rem;display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+                <button class="btn btn-primary" id="btnValidateFix" onclick="validateFix()">🔍 验证修复</button>
+                <button class="btn btn-outline btn-sm" onclick="resetFixTextarea()">↺ 重置为原始代码</button>
+                <span style="font-size:0.75rem;color:var(--text-muted);" id="fixStatusLabel"></span>
+            </div>
+            <details style="margin-top:0.8rem;">
+                <summary>📖 查看安全编码参考（OWASP反序列化防护清单）</summary>
+                <div class="analysis-panel">
+                    <h4>OWASP 反序列化防护最佳实践</h4>
+                    <ul>
+                        <li><strong>白名单优先</strong>：仅允许反序列化已知安全的类（如业务DTO）。</li>
+                        <li><strong>使用ObjectInputFilter</strong>（Java 9+）：通过<code>setObjectInputFilter()</code>或<code>ObjectInputFilter.Config.createFilter()</code>设置过滤规则。</li>
+                        <li><strong>限制深度与大小</strong>：设置<code>maxdepth</code>、<code>maxrefs</code>、<code>maxbytes</code>防止DoS。</li>
+                        <li><strong>Look-Ahead模式</strong>：在反序列化开始前检查类元数据，而非在对象构造后检查。</li>
+                        <li><strong>替代方案</strong>：考虑使用JSON/Protobuf等更安全的数据格式替代Java原生序列化。</li>
+                    </ul>
+                </div>
+            </details>
+        </div>
+
+        <!-- Step 4: Bypass Validation -->
+        <div class="card step-card" id="step4Card" style="opacity:0.6;pointer-events:none;">
+            <div class="card-header">
+                <span class="step-badge pending" id="stepBadge4">4</span>
+                <span class="card-title">绕过测试 — 验证修复完整性</span>
+                <span class="card-subtitle">系统将用多种绕过载荷测试你的修复代码</span>
+                <span class="tag warning" id="step4Status">等待步骤3完成</span>
+            </div>
+            <div id="bypassResultsContainer" style="display:none;">
+                <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.8rem;">
+                    以下表格展示了不同绕过技术对你的修复代码的测试结果：
+                </p>
+                <table class="bypass-table" id="bypassTable">
+                    <thead>
+                        <tr><th>绕过技术</th><th>载荷描述</th><th>测试结果</th><th>说明</th></tr>
+                    </thead>
+                    <tbody id="bypassTableBody"></tbody>
+                </table>
+                <div id="bypassSummary" style="margin-top:1rem;padding:1rem;border-radius:var(--radius);"></div>
+            </div>
+            <div id="bypassPlaceholder" style="color:var(--text-dim);text-align:center;padding:2rem;">
+                ⏳ 请先在步骤3中提交修复代码，然后在此查看绕过测试结果。
+            </div>
+        </div>
+
+        <!-- Analysis Report -->
+        <div class="card" id="analysisCard" style="display:none;">
+            <div class="card-header">
+                <span style="font-size:1.3rem;">📊</span>
+                <span class="card-title">完整分析报告</span>
+                <span class="tag success">实验完成</span>
+            </div>
+            <div class="analysis-panel">
+                <h4>🔍 根因分析</h4>
+                <p>Java原生反序列化机制在<code>ObjectInputStream.readObject()</code>执行时会自动调用被反序列化对象的<code>readObject()</code>、<code>finalize()</code>等方法。攻击者可构造特殊的对象图（Gadget Chain），使得在反序列化过程中触发任意代码执行。本例中缺乏输入验证，导致攻击者可通过上传恶意序列化数据实现RCE。</p>
+                <h4 style="margin-top:1rem;">🛡️ 防御总结</h4>
+                <ul>
+                    <li>使用<strong>ObjectInputFilter</strong>实现基于白名单的类过滤（Java 9+）。</li>
+                    <li>设置合理的深度（maxdepth=20）、引用数（maxrefs=100）、字节数（maxbytes=1048576）限制。</li>
+                    <li>对所有用户可控的序列化数据入口实施过滤，不得遗漏任何<code>readObject()</code>调用点。</li>
+                    <li>考虑迁移至类型安全的序列化方案（如Jackson的<code>enableDefaultTyping</code>限制、或完全避免多态反序列化）。</li>
+                </ul>
+                <h4 style="margin-top:1rem;">🌐 现实世界参考</h4>
+                <ul>
+                    <li>CVE-2015-4852 — WebLogic反序列化RCE</li>
+                    <li>CVE-2016-3510 — WebLogic MarshalledObject反序列化</li>
+                    <li>CVE-2017-10271 — WebLogic XMLDecoder反序列化</li>
+                    <li>OWASP A8:2017 — 不安全的反序列化</li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // ============ EDUCATIONAL PURPOSE ONLY — authorized classroom use ============
+        // 本脚本模拟Java反序列化漏洞的审计与修复过程，所有代码在浏览器沙箱中运行
+
+        (function() {
+            // --- State ---
+            const state = {
+                step1Complete: false,
+                step2Complete: false,
+                step3Complete: false,
+                step4Complete: false,
+                step1ClickedLines: [],
+                exploitStepIndex: 0,
+                fixSubmitted: false,
+                fixQuality: null, // 'incomplete' | 'partial' | 'complete'
+                flags: []
+            };
+
+            // --- DOM refs ---
+            const $ = (sel) => document.querySelector(sel);
+            const $$ = (sel) => document.querySelectorAll(sel);
+
+            const progressFill = $('#progressFill');
+            const progressText = $('#progressText');
+            const vulnCodeBlock = $('#vulnCodeBlock');
+            const step1Feedback = $('#step1Feedback');
+            const step1Status = $('#step1Status');
+            const step1Badge = $('#stepBadge1');
+            const step1Card = $('#step1Card');
+            const step2Card = $('#step2Card');
+            const step2Status = $('#step2Status');
+            const step2Badge = $('#stepBadge2');
+            const step2FlagNote = $('#step2FlagNote');
+            const step3Card = $('#step3Card');
+            const step3Status = $('#step3Status');
+            const step3Badge = $('#stepBadge3');
+            const step4Card = $('#step4Card');
+            const step4Status = $('#step4Status');
+            const step4Badge = $('#stepBadge4');
+            const fixTextarea = $('#fixTextarea');
+            const fixStatusLabel = $('#fixStatusLabel');
+            const exploitTerminal = $('#exploitTerminal');
+            const bypassTableBody = $('#bypassTableBody');
+            const bypassResultsContainer = $('#bypassResultsContainer');
+            const bypassPlaceholder = $('#bypassPlaceholder');
+            const bypassSummary = $('#bypassSummary');
+            const flagToast = $('#flagToast');
+            const flagToast2 = $('#flagToast2');
+            const analysisCard = $('#analysisCard');
+            const btnRunExploit = $('#btnRunExploit');
+            const btnResetExploit = $('#btnResetExploit');
+            const btnValidateFix = $('#btnValidateFix');
+
+            // --- Vulnerable Java code lines ---
+            const vulnerableCodeLines = [
+                { num: 1, text: 'package com.example.userdata;', cls: 'cmt' },
+                { num: 2, text: '', cls: '' },
+                { num: 3, text: 'import java.io.*;', cls: 'kw' },
+                { num: 4, text: 'import java.util.Base64;', cls: 'kw' },
+                { num: 5, text: '', cls: '' },
+                { num: 6, text: 'public class UserDataDeserializer {', cls: 'kw' },
+                { num: 7, text: '', cls: '' },
+                { num: 8, text: '    /**', cls: 'cmt' },
+                { num: 9, text: '     * 从Base64编码的字符串中反序列化用户数据对象', cls: 'cmt' },
+                { num: 10, text: '     * @param base64Data 用户上传的Base64编码数据', cls: 'cmt' },
+                { num: 11, text: '     * @return 反序列化后的对象', cls: 'cmt' },
+                { num: 12, text: '     */', cls: 'cmt' },
+                { num: 13,
+                    text: '    public static Object deserialize(String base64Data) throws Exception {',
+                    cls: 'kw' },
+                { num: 14, text: '        byte[] data = Base64.getDecoder().decode(base64Data);', cls: '' },
+                { num: 15, text: '        ByteArrayInputStream bais = new ByteArrayInputStream(data);', cls: '' },
+                { num: 16, text: '        ObjectInputStream ois = new ObjectInputStream(bais);', cls: 'kw',
+                    highlight: 'danger-highlight', vulnLine: true },
+                { num: 17,
+                    text: '        // ⚠️ 此处未设置任何ObjectInputFilter，直接反序列化不可信数据',
+                    cls: 'cmt', vulnLine: true },
+                { num: 18, text: '        Object obj = ois.readObject();  // ← 漏洞触发点', cls: 'kw',
+                    highlight: 'danger-highlight', vulnLine: true, primaryVuln: true },
+                { num: 19, text: '        ois.close();', cls: '' },
+                { num: 20, text: '        return obj;', cls: 'kw' },
+                { num: 21, text: '    }', cls: '' },
+                { num: 22, text: '', cls: '' },
+                { num: 23, text: '    // 调用示例（来自Web控制器）', cls: 'cmt' },
+                { num: 24, text: '    public static void handleUpload(String userInput) {', cls: 'kw' },
+                { num: 25, text: '        try {', cls: 'kw' },
+                { num: 26,
+                    text: '            Object result = deserialize(userInput);  // 直接传入用户输入',
+                    cls: '', vulnLine: true },
+                { num: 27, text: '            System.out.println("Deserialized: " + result);', cls: '' },
+                { num: 28, text: '        } catch (Exception e) {', cls: 'kw' },
+                { num: 29, text: '            e.printStackTrace();', cls: '' },
+                { num: 30, text: '        }', cls: '' },
+                { num: 31, text: '    }', cls: '' },
+                { num: 32, text: '}', cls: '' },
+            ];
+
+            const primaryVulnLineNum = 18; // The main readObject() line
+            const allVulnLineNums = [16, 17, 18, 26]; // All lines that are vulnerable
+
+            // --- Original vulnerable code (for textarea) ---
+            const originalVulnCode = `public static Object deserialize(String base64Data) throws Exception {
+                byte[] data = Base64.getDecoder().decode(base64Data);
+                ByteArrayInputStream bais = new ByteArrayInputStream(data);
+                ObjectInputStream ois = new ObjectInputStream(bais);
+                // ⚠️ 此处未设置任何ObjectInputFilter，直接反序列化不可信数据
+                Object obj = ois.readObject();  // ← 漏洞触发点
+                ois.close();
+                return obj;
+            }`;
+
+            // --- Expected fix pattern (for validation) ---
+            const expectedFixPatterns = {
+                objectInputFilter: {
+                    regex: /ObjectInputFilter/i,
+                    weight: 25,
+                    name: 'ObjectInputFilter引用',
+                    desc: '代码中应引用ObjectInputFilter类或其Config内部类'
+                },
+                setFilter: {
+                    regex: /setObjectInputFilter\s*\(|ObjectInputFilter\.Config\.createFilter\s*\(/i,
+                    weight: 25,
+                    name: '设置过滤器',
+                    desc: '需要在ObjectInputStream上调用setObjectInputFilter()设置过滤器'
+                },
+                whitelist: {
+                    regex: /allowFilter|allowlist|whitelist|白名单|allowedClasses|\.includes\(|\.contains\(|\.equals\(|checkInput/i,
+                    weight: 20,
+                    name: '白名单机制',
+                    desc: '应使用白名单（allowlist）而非黑名单来限制可反序列化的类'
+                },
+                maxdepth: {
+                    regex: /maxdepth\s*=|maxDepth\s*=|depth\s*[<>=]+/i,
+                    weight: 10,
+                    name: '深度限制',
+                    desc: '设置maxdepth限制防止深层嵌套对象导致的DoS或绕过'
+                },
+                maxrefs: {
+                    regex: /maxrefs\s*=|maxRefs\s*=|refs\s*[<>=]+/i,
+                    weight: 8,
+                    name: '引用数限制',
+                    desc: '设置maxrefs限制防止循环引用攻击'
+                },
+                maxbytes: {
+                    regex: /maxbytes\s*=|maxBytes\s*=|bytes\s*[<>=]+/i,
+                    weight: 7,
+                    name: '字节数限制',
+                    desc: '设置maxbytes限制防止超大序列化数据导致内存耗尽'
+                },
+                specificClassCheck: {
+                    regex: /UserData|SafeDTO|AllowedClass|com\.example\.(dto|model|safe)/i,
+                    weight: 5,
+                    name: '具体类名校验',
+                    desc: '白名单中应包含具体的业务安全类名'
+                },
+            };
+
+            // --- Bypass payloads for testing ---
+            const bypassPayloads = [
+                {
+                    id: 'broad-whitelist',
+                    name: '宽泛白名单绕过',
+                    desc: '载荷使用java.util.HashMap（若白名单允许java.util.*），HashMap可被用作Gadget链入口',
+                    test: (code) => {
+                        // If code has whitelist but allows java.util.* broadly
+                        const hasBroadAllow = /java\.util\.\*/i.test(code) && !/java\.util\.HashMap.*deny|block.*HashMap/i
+                            .test(code);
+                        return hasBroadAllow ? 'working' : 'blocked';
+                    },
+                    blockedMsg: '白名单足够精确，未允许java.util.*通配符',
+                    workingMsg: '白名单过于宽泛（java.util.*），HashMap仍可作为Gadget入口'
+                },
+                {
+                    id: 'no-depth-limit',
+                    name: '深度嵌套绕过',
+                    desc: '载荷构造500层嵌套对象，若未设置maxdepth则可能导致栈溢出或绕过过滤器',
+                    test: (code) => {
+                        const hasDepthLimit = /maxdepth\s*[=:]\s*\d+/i.test(code) || /maxDepth\s*[=:]\s*\d+/i.test(
+                            code);
+                        return hasDepthLimit ? 'blocked' : 'working';
+                    },
+                    blockedMsg: '设置了maxdepth限制，深层嵌套被拒绝',
+                    workingMsg: '未设置深度限制，深层嵌套对象可绕过基本检查'
+                },
+                {
+                    id: 'no-filter-at-all',
+                    name: '完全无过滤',
+                    desc: '若代码中完全没有ObjectInputFilter，则所有序列化数据均可通过',
+                    test: (code) => {
+                        const hasFilter = /ObjectInputFilter/i.test(code) && /setObjectInputFilter|Config\.createFilter/i
+                            .test(code);
+                        return hasFilter ? 'blocked' : 'working';
+                    },
+                    blockedMsg: '已设置ObjectInputFilter',
+                    workingMsg: '未设置任何ObjectInputFilter，完全无防护'
+                },
+                {
+                    id: 'blacklist-instead',
+                    name: '黑名单而非白名单',
+                    desc: '若使用黑名单（拒绝已知危险类），攻击者可使用未被列入的Gadget类绕过',
+                    test: (code) => {
+                        const hasBlacklist = /deny|block|reject|blacklist|黑名单|Runtime|ProcessBuilder|InvokerTransformer/i
+                            .test(code);
+                        const hasWhitelist = /allow|accept|whitelist|白名单|allowedClasses|canDeserialize/i.test(
+                            code);
+                        if (hasBlacklist && !hasWhitelist) return 'working';
+                        if (hasWhitelist) return 'blocked';
+                        return 'unknown';
+                    },
+                    blockedMsg: '使用了白名单机制，比黑名单更安全',
+                    workingMsg: '使用了黑名单方式，攻击者可改用其他Gadget类绕过',
+                },
+                {
+                    id: 'array-bypass',
+                    name: '数组包装绕过',
+                    desc: '攻击者将恶意对象包装在数组中，若过滤器未递归检查数组元素类型则可绕过',
+                    test: (code) => {
+                        const hasRecursiveCheck = /array|Array|getComponentType|递归|深度检查|UNDECIDED.*check/i.test(
+                            code);
+                        const hasFilter = /ObjectInputFilter/i.test(code);
+                        if (!hasFilter) return 'working';
+                        if (hasRecursiveCheck) return 'blocked';
+                        return 'unknown';
+                    },
+                    blockedMsg: '过滤器包含对数组元素类型的递归检查',
+                    workingMsg: '过滤器可能未处理数组包装情况'
+                },
+            ];
+
+            // --- Initialize ---
+            function init() {
+                renderVulnCode();
+                resetFixTextarea();
+                updateProgress();
+            }
+
+            // --- Render vulnerable code block ---
+            function renderVulnCode() {
+                vulnCodeBlock.innerHTML = '';
+                vulnerableCodeLines.forEach((line, idx) => {
+                    const div = document.createElement('div');
+                    div.className = 'line';
+                    if (line.vulnLine) {
+                        div.className += ' clickable';
+                        div.dataset.lineNum = line.num;
+                        div.dataset.isVuln = 'true';
+                        div.addEventListener('click', function() { onVulnLineClick(line.num, div); });
+                    }
+                    div.innerHTML = `
+                        <span class="line-num">${line.num}</span>
+                        <span class="line-content">${highlightLine(line.text, line.cls, line.highlight || '')}</span>
+                    `;
+                    vulnCodeBlock.appendChild(div);
+                });
+            }
+
+            function highlightLine(text, cls, highlight) {
+                let escaped = escapeHTML(text);
+                if (highlight) {
+                    escaped = `<span class="${highlight}">${escaped}</span>`;
+                }
+                // Apply keyword class if specified
+                if (cls === 'kw' && !highlight) {
+                    // Keep as-is, the span wrapper handles it
+                }
+                return escaped;
+            }
+
+            function escapeHTML(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            // --- Step 1: Click vulnerable line ---
+            function onVulnLineClick(lineNum, element) {
+                if (state.step1Complete) return;
+
+                if (state.step1ClickedLines.includes(lineNum)) return; // Already clicked
+
+                state.step1ClickedLines.push(lineNum);
+
+                if (lineNum === primaryVulnLineNum) {
+                    // Primary vulnerability found!
+                    element.classList.add('selected-correct');
+                    completeStep1();
+                } else if (allVulnLineNums.includes(lineNum)) {
+                    // Related vulnerable line
+                    element.classList.add('selected-correct');
+                    step1Feedback.style.display = 'block';
+                    step1Feedback.textContent =
+                        `✅ 你点击了第${lineNum}行 — 这是相关的漏洞代码。但核心触发点在第${primaryVulnLineNum}行（readObject()调用），请继续寻找。`;
+                    step1Feedback.style.color = 'var(--warning)';
+                } else {
+                    // Wrong line
+                    element.classList.add('selected-wrong');
+                    setTimeout(() => element.classList.remove('selected-wrong'), 600);
+                    step1Feedback.style.display = 'block';
+                    step1Feedback.textContent = `❌ 第${lineNum}行不是反序列化漏洞的关键位置。请关注ObjectInputStream和readObject()的调用。`;
+                    step1Feedback.style.color = 'var(--danger)';
+                }
+            }
+
+            function completeStep1() {
+                state.step1Complete = true;
+                step1Feedback.style.display = 'block';
+                step1Feedback.style.color = 'var(--success)';
+                step1Feedback.textContent =
+                    '🎯 正确！第18行的 ois.readObject() 在未设置任何过滤器的情况下直接反序列化不可信数据，这是典型的Java反序列化漏洞入口。';
+                step1Status.textContent = '✅ 完成';
+                step1Status.className = 'tag success';
+                step1Badge.classList.remove('active');
+                step1Badge.classList.add('done');
+                step1Card.classList.add('completed');
+                step1Card.classList.remove('active');
+
+                // Highlight all vuln lines
+                document.querySelectorAll('#vulnCodeBlock .line.clickable').forEach(el => {
+                    if (el.dataset.isVuln === 'true') {
+                        el.classList.add('selected-correct');
+                        el.style.pointerEvents = 'none';
+                    }
+                });
+
+                // Unlock step 2
+                unlockStep2();
+                updateProgress();
+            }
+
+            function unlockStep2() {
+                step2Card.style.opacity = '1';
+                step2Card.style.pointerEvents = 'auto';
+                step2Card.classList.add('active');
+                step2Status.textContent = '就绪';
+                step2Status.className = 'tag info';
+                step2Badge.classList.remove('pending');
+                step2Badge.classList.add('active');
+            }
+
+            // --- Step 2: Exploit Demo ---
+            function runExploitDemo() {
+                if (!state.step1Complete && !state.step2Complete) {
+                    // Allow demo even if step1 not complete, but warn
+                }
+                if (state.exploitStepIndex >= 5) {
+                    resetExploitDemo();
+                }
+
+                const steps = [
+                    { id: 'exploitStep1', delay: 300 },
+                    { id: 'exploitStep2', delay: 700 },
+                    { id: 'exploitStep3', delay: 700 },
+                    { id: 'exploitStep4', delay: 800 },
+                    { id: 'exploitStep5', delay: 700, isFinal: true },
+                ];
+
+                btnRunExploit.disabled = true;
+                btnResetExploit.disabled = true;
+
+                let i = state.exploitStepIndex;
+                function revealNext() {
+                    if (i >= steps.length) {
+                        btnRunExploit.disabled = true;
+                        btnResetExploit.disabled = false;
+                        return;
+                    }
+                    const step = steps[i];
+                    const el = document.getElementById(step.id);
+                    el.classList.add('revealed', 'danger-pulse');
+                    setTimeout(() => el.classList.remove('danger-pulse'), 600);
+                    state.exploitStepIndex = i + 1;
+
+                    if (step.isFinal) {
+                        // Show terminal output
+                        setTimeout(() => {
+                            exploitTerminal.classList.add('visible');
+                            exploitTerminal.textContent =
+                                `[root@server ~]$ 恶意对象已反序列化...\n> Runtime.getRuntime().exec("calc.exe")\n> 命令执行成功！\n> 系统日志: FLAG{insecure_deserialization_exploited}\n> [警告] 攻击者已获得远程代码执行权限！`;
+                            step2FlagNote.style.display = 'block';
+                            completeStep2();
+                        }, 400);
+                    }
+                    i++;
+                    if (i < steps.length) {
+                        setTimeout(revealNext, steps[i - 1].delay);
+                    } else if (!step.isFinal) {
+                        btnRunExploit.disabled = true;
+                        btnResetExploit.disabled = false;
+                    }
+                }
+                revealNext();
+                setTimeout(() => {
+                    btnResetExploit.disabled = false;
+                    if (state.exploitStepIndex < 5) btnRunExploit.disabled = false;
+                }, 3500);
+            }
+
+            function resetExploitDemo() {
+                state.exploitStepIndex = 0;
+                document.querySelectorAll('.exploit-step').forEach(el => el.classList.remove('revealed',
+                    'danger-pulse'));
+                exploitTerminal.classList.remove('visible');
+                exploitTerminal.textContent = '';
+                step2FlagNote.style.display = 'none';
+                btnRunExploit.disabled = false;
+                btnResetExploit.disabled = false;
+                if (state.step2Complete) {
+                    // Don't revert step2 completion but allow re-running
+                    btnRunExploit.disabled = false;
+                }
+            }
+
+            function completeStep2() {
+                if (state.step2Complete) return;
+                state.step2Complete = true;
+                step2Status.textContent = '✅ 完成';
+                step2Status.className = 'tag success';
+                step2Badge.classList.remove('active');
+                step2Badge.classList.add('done');
+                step2Card.classList.add('completed');
+                step2Card.classList.remove('active');
+                btnRunExploit.disabled = true;
+                unlockStep3();
+                updateProgress();
+                // Show first flag
+                showFlag(flagToast, 'FLAG{insecure_deserialization_exploited}');
+            }
+
+            function unlockStep3() {
+                step3Card.style.opacity = '1';
+                step3Card.style.pointerEvents = 'auto';
+                step3Card.classList.add('active');
+                step3Status.textContent = '就绪 — 请编写修复代码';
+                step3Status.className = 'tag info';
+                step3Badge.classList.remove('pending');
+                step3Badge.classList.add('active');
+            }
+
+            // --- Step 3: Fix code ---
+            function resetFixTextarea() {
+                fixTextarea.value = originalVulnCode;
+                fixStatusLabel.textContent = '';
+                state.fixSubmitted = false;
+                state.fixQuality = null;
+                btnValidateFix.disabled = false;
+                // Reset step4
+                resetStep4();
+            }
+
+            function validateFix() {
+                const code = fixTextarea.value;
+                if (!code.trim()) {
+                    fixStatusLabel.textContent = '⚠️ 代码不能为空';
+                    fixStatusLabel.style.color = 'var(--danger)';
+                    return;
+                }
+
+                fixTextarea.classList.add('validating');
+                fixStatusLabel.textContent = '🔍 正在分析代码...';
+                fixStatusLabel.style.color = 'var(--warning)';
+
+                setTimeout(() => {
+                    fixTextarea.classList.remove('validating');
+                    const results = analyzeFix(code);
+                    state.fixQuality = results.quality;
+                    state.fixSubmitted = true;
+
+                    if (results.quality === 'complete') {
+                        fixStatusLabel.textContent = '✅ 修复代码质量：完整 — 已通过所有检查项';
+                        fixStatusLabel.style.color = 'var(--success)';
+                        completeStep3();
+                    } else if (results.quality === 'partial') {
+                        fixStatusLabel.textContent =
+                            `⚠️ 修复代码质量：部分 — 通过了 ${results.passedChecks}/${results.totalChecks} 项检查`;
+                        fixStatusLabel.style.color = 'var(--warning)';
+                        // Still allow proceeding to step4 to see bypass results
+                        unlockStep4WithPartial();
+                    } else {
+                        fixStatusLabel.textContent =
+                            `❌ 修复代码质量：不完整 — 仅通过了 ${results.passedChecks}/${results.totalChecks} 项检查`;
+                        fixStatusLabel.style.color = 'var(--danger)';
+                        unlockStep4WithPartial();
+                    }
+
+                    // Store results for step4
+                    state.fixAnalysisResults = results;
+                    populateBypassResults(code, results);
+                }, 800);
+            }
+
+            function analyzeFix(code) {
+                let totalWeight = 0;
+                let earnedWeight = 0;
+                const checkResults = {};
+
+                for (const [key, pattern] of Object.entries(expectedFixPatterns)) {
+                    totalWeight += pattern.weight;
+                    const passed = pattern.regex.test(code);
+                    checkResults[key] = { passed, ...pattern };
+                    if (passed) earnedWeight += pattern.weight;
+                }
+
+                const score = totalWeight > 0 ? earnedWeight / totalWeight : 0;
+                let quality;
+                if (score >= 0.75) quality = 'complete';
+                else if (score >= 0.4) quality = 'partial';
+                else quality = 'incomplete';
+
+                return {
+                    quality,
+                    score,
+                    earnedWeight,
+                    totalWeight,
+                    passedChecks: Object.values(checkResults).filter(r => r.passed).length,
+                    totalChecks: Object.keys(checkResults).length,
+                    checkResults,
+                };
+            }
+
+            function completeStep3() {
+                state.step3Complete = true;
+                step3Status.textContent = '✅ 完成';
+                step3Status.className = 'tag success';
+                step3Badge.classList.remove('active');
+                step3Badge.classList.add('done');
+                step3Card.classList.add('completed');
+                step3Card.classList.remove('active');
+                unlockStep4();
+                updateProgress();
+                showFlag(flagToast2, 'FLAG{owasp_a8_2017_defeated}');
+            }
+
+            function unlockStep4() {
+                step4Card.style.opacity = '1';
+                step4Card.style.pointerEvents = 'auto';
+                step4Card.classList.add('active');
+                step4Status.textContent = '就绪 — 查看绕过测试结果';
+                step4Status.className = 'tag info';
+                step4Badge.classList.remove('pending');
+                step4Badge.classList.add('active');
+                bypassPlaceholder.style.display = 'none';
+                bypassResultsContainer.style.display = 'block';
+            }
+
+            function unlockStep4WithPartial() {
+                step4Card.style.opacity = '1';
+                step4Card.style.pointerEvents = 'auto';
+                step4Card.classList.add('active');
+                step4Status.textContent = '查看测试结果（修复不完整）';
+                step4Status.className = 'tag warning';
+                step4Badge.classList.remove('pending');
+                step4Badge.classList.add('active');
+                bypassPlaceholder.style.display = 'none';
+                bypassResultsContainer.style.display = 'block';
+            }
+
+            function resetStep4() {
+                step4Card.style.opacity = '0.6';
+                step4Card.style.pointerEvents = 'none';
+                step4Card.classList.remove('active', 'completed');
+                step4Status.textContent = '等待步骤3完成';
+                step4Status.className = 'tag warning';
+                step4Badge.classList.remove('active', 'done');
+                step4Badge.classList.add('pending');
+                bypassPlaceholder.style.display = 'block';
+                bypassResultsContainer.style.display = 'none';
+                bypassTableBody.innerHTML = '';
+                bypassSummary.innerHTML = '';
+                state.step4Complete = false;
+                state.step3Complete = false;
+                updateProgress();
+            }
+
+            // --- Step 4: Bypass results ---
+            function populateBypassResults(code, analysisResults) {
+                bypassTableBody.innerHTML = '';
+                let allBlocked = true;
+                let blockedCount = 0;
+                let workingCount = 0;
+
+                bypassPayloads.forEach(payload => {
+                    const result = payload.test(code);
+                    const tr = document.createElement('tr');
+
+                    let statusClass, statusText, explanation;
+                    if (result === 'blocked') {
+                        statusClass = 'status-blocked';
+                        statusText = '🛡️ 已阻止';
+                        explanation = payload.blockedMsg;
+                        blockedCount++;
+                    } else if (result === 'working') {
+                        statusClass = 'status-working';
+                        statusText = '⚠️ 仍可绕过';
+                        explanation = payload.workingMsg;
+                        allBlocked = false;
+                        workingCount++;
+                    } else {
+                        statusClass = 'status-unknown';
+                        statusText = '❓ 不确定';
+                        explanation = '需要进一步分析';
+                        allBlocked = false;
+                    }
+
+                    tr.innerHTML = `
+                        <td><strong>${payload.name}</strong></td>
+                        <td style="font-size:0.8rem;">${payload.desc}</td>
+                        <td class="${statusClass}">${statusText}</td>
+                        <td style="font-size:0.8rem;color:var(--text-muted);">${explanation}</td>
+                    `;
+                    bypassTableBody.appendChild(tr);
+                });
+
+                // Summary
+                if (allBlocked && analysisResults.quality === 'complete') {
+                    bypassSummary.innerHTML = `
+                        <div style="background:var(--success-bg);padding:1rem;border-radius:var(--radius);border:1px solid var(--success);">
+                            <strong style="color:var(--success);">🎉 全部绕过测试均已阻止！</strong>
+                            <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.3rem;">
+                                你的修复代码成功抵御了所有 ${bypassPayloads.length} 种常见绕过技术。反序列化入口已安全加固。
+                            </p>
+                            <p style="color:var(--flag);font-family:var(--font-mono);font-weight:700;margin-top:0.3rem;">
+                                🏆 最终标记: FLAG{all_bypasses_blocked_secure}
+                            </p>
+                        </div>`;
+                    state.step4Complete = true;
+                    step4Status.textContent = '✅ 完成 — 全部绕过已阻止';
+                    step4Status.className = 'tag success';
+                    step4Badge.classList.remove('active');
+                    step4Badge.classList.add('done');
+                    step4Card.classList.add('completed');
+                    analysisCard.style.display = 'block';
+                    updateProgress();
+                } else if (workingCount === 0 && analysisResults.quality === 'partial') {
+                    bypassSummary.innerHTML = `
+                        <div style="background:var(--warning-bg);padding:1rem;border-radius:var(--radius);border:1px solid var(--warning);">
+                            <strong style="color:var(--warning);">⚠️ 部分绕过测试结果不确定</strong>
+                            <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.3rem;">
+                                你的修复代码阻止了部分攻击，但仍有 ${workingCount} 种绕过技术可能存在风险。请检查上述标记为"仍可绕过"或"不确定"的项目。
+                            </p>
+                        </div>`;
+                } else if (workingCount > 0) {
+                    bypassSummary.innerHTML = `
+                        <div style="background:var(--danger-bg);padding:1rem;border-radius:var(--radius);border:1px solid var(--danger);">
+                            <strong style="color:var(--danger);">🚨 ${workingCount} 种绕过技术仍然有效！</strong>
+                            <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.3rem;">
+                                请返回步骤3改进修复代码。确保使用<strong>白名单</strong>、设置<strong>深度/大小限制</strong>、并正确配置<strong>ObjectInputFilter</strong>。
+                            </p>
+                        </div>`;
+                }
+
+                if (allBlocked && analysisResults.quality === 'complete' && !state.step4Complete) {
+                    state.step4Complete = true;
+                    step4Status.textContent = '✅ 完成 — 全部绕过已阻止';
+                    step4Status.className = 'tag success';
+                    step4Badge.classList.remove('active');
+                    step4Badge.classList.add('done');
+                    step4Card.classList.add('completed');
+                    analysisCard.style.display = 'block';
+                    updateProgress();
+                }
+            }
+
+            // --- Progress ---
+            function updateProgress() {
+                let completed = 0;
+                if (state.step1Complete) completed++;
+                if (state.step2Complete) completed++;
+                if (state.step3Complete) completed++;
+                if (state.step4Complete) completed++;
+
+                const pct = Math.round((completed / 4) * 100);
+                progressFill.style.width = pct + '%';
+                progressText.textContent = `步骤 ${completed}/4 — ${pct}%`;
+
+                if (pct === 100) {
+                    progressFill.style.background = 'linear-gradient(90deg, var(--success), #10b981)';
+                }
+            }
+
+            // --- Flag toast ---
+            function showFlag(toastElement, flagText) {
+                toastElement.textContent = '🏆 ' + flagText;
+                toastElement.classList.add('show');
+                setTimeout(() => {
+                    toastElement.classList.remove('show');
+                }, 5000);
+                if (!state.flags.includes(flagText)) {
+                    state.flags.push(flagText);
+                }
+            }
+
+            // --- Hint toggle ---
+            window.toggleHint = function(hintId) {
+                const hint = document.getElementById(hintId);
+                hint.classList.toggle('visible');
+            };
+
+            // --- Attach window functions ---
+            window.runExploitDemo = runExploitDemo;
+            window.resetExploitDemo = resetExploitDemo;
+            window.validateFix = validateFix;
+            window.resetFixTextarea = resetFixTextarea;
+
+            // --- Initialize ---
+            init();
+
+            // --- Keyboard shortcut for exploit demo ---
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && e.ctrlKey && state.step1Complete && !state.step2Complete) {
+                    e.preventDefault();
+                    runExploitDemo();
+                }
+                if (e.key === 'Enter' && e.ctrlKey && e.shiftKey && state.step2Complete && !state.step3Complete) {
+                    e.preventDefault();
+                    validateFix();
+                }
+            });
+
+            console.log(
+                '%c🔐 安全分析实验室已就绪 %c| %cJava反序列化漏洞审计与修复 %c| %cEDUCATIONAL PURPOSE ONLY',
+                'color:#8b5cf6;font-weight:bold;',
+                '',
+                'color:#f59e0b;',
+                '',
+                'color:#64748b;font-style:italic;'
+            );
+            console.log('%c提示：点击代码行定位漏洞 → 观察攻击演示 → 编写修复 → 验证绕过测试', 'color:#94a3b8;');
+            console.log('%c快捷键: Ctrl+Enter = 运行攻击演示 | Ctrl+Shift+Enter = 验证修复代码', 'color:#64748b;font-size:0.8em;');
+
+        })();
+    </script>
+</body>
+</html>

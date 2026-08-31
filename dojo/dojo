@@ -20,6 +20,16 @@ fi
 case "$ACTION" in
     # HELP: up: bring the dojo up
     "up")
+        # Kata's virtio-fs memory backend lives in /dev/shm. Docker otherwise
+        # caps the outer container at half of host RAM, which caused
+        # virtiofsd SIGBUS crashes once 300 workspaces started Code/Desktop.
+        dojo_shm_size=${DOJO_SHM_SIZE:-230G}
+        if [[ ! $dojo_shm_size =~ ^[1-9][0-9]*[KMGTP]$ ]]; then
+            echo "Invalid DOJO_SHM_SIZE: $dojo_shm_size" >&2
+            exit 1
+        fi
+        mount -o remount,size="$dojo_shm_size" /dev/shm
+
         if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_TOKEN" ]; then
             echo "$DOCKER_TOKEN" | docker login --username "$DOCKER_USERNAME" --password-stdin
         fi
@@ -43,6 +53,8 @@ case "$ACTION" in
         cp -rv --preserve=timestamps ctfd/* /opt/CTFd/
         cp -rv --preserve=timestamps dojo_plugin /opt/CTFd/CTFd/plugins/
         cp -rv --preserve=timestamps dojo_theme /opt/CTFd/CTFd/themes/
+        find /opt/CTFd/CTFd/plugins/dojo_plugin -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+        find /opt/CTFd/CTFd/plugins/dojo_plugin -depth -type d -name __pycache__ -empty -delete
         ;;
 
     # HELP: enter [ -s ] USER_ID: enter a user's running container. -s for entering as root

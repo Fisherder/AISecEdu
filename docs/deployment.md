@@ -1,19 +1,33 @@
-# Deployment
+# 部署
 
-This repository deploys one AISecEdu application on the proven upstream service topology and serves the AISecEdu-branded `dojo_theme` on the canonical host. Intelligent learning extends that same theme and does not require a second API, frontend, database, or terminal gateway. After the base deployment is working, see [Intelligent Learning and Evidence Assessment](./learning.md) for optional model configuration, workspace rebuilds, migration, and end-to-end verification.
+本仓库在经过验证的 pwn.college 服务拓扑上部署单一玄甲应用。智能学习直接扩展同一 CTFd 插件和 `dojo_theme`，不需要第二套账号、课程 API、数据库或终端网关。推荐使用仓库提供的固定上游构建和统一命令；历史兼容的手工 Docker 部署仍保留在后文。
 
-The following example runs AISecEdu locally while retaining the upstream-compatible environment-variable and container names:
+## 推荐部署
+
+```bash
+git clone git@github.com:Fisherder/AISecEdu.git xuanjia
+cd xuanjia
+cp ops/deployment.env.example ops/deployment.env
+${EDITOR:-vi} ops/deployment.env
+make doctor
+make deploy
+make verify
+```
+
+`ops/deployment.env` 只属于目标机器并被 Git 忽略。首次启动会在 `data/` 生成数据库、课程、Home、TLS 和内部服务密钥；`data/`、`cache/` 与 `output/` 都不会进入源码提交或 Docker 构建上下文。`make build` 固定 Kata Containers、CTFd、Moby seccomp 和 Nix 输入，`make up` 使用构建出的镜像和持久数据目录启动平台。
+
+部署前置条件、发布归档和更新方式见 [仓库、部署与发布约定](./repository-release.md)，当前实机的 TLS、离线镜像和高并发运维见 [本机部署与运维](../ops/README.md)，模型配置与数据迁移见 [全局智能体运维](./global-agent-operations.md)。
+
+## 兼容的手工部署
+
+以下方式保留上游容器名与环境变量，适合已经使用该拓扑的环境：
 
 ```sh
-curl -fsSL https://get.docker.com | /bin/sh
+DOJO_PATH="./xuanjia"
+DATA_PATH="./xuanjia/data"
 
-DOJO_PATH="./dojo"
-DATA_PATH="./dojo/data"
-
-git clone https://github.com/Fisherder/AISecEdu "$DOJO_PATH"
+git clone https://github.com/Fisherder/AISecEdu.git "$DOJO_PATH"
 docker build -t pwncollege/dojo "$DOJO_PATH"
-
-# this is needed for the dojo's networking
 modprobe br_netfilter
 
 docker run \
@@ -26,7 +40,7 @@ docker run \
     pwncollege/dojo
 ```
 
-This will run the initial setup, including building the challenge docker image.
+首次初始化会构建题目和工作区镜像。
 
 > **Warning**
 > **(MacOS)**

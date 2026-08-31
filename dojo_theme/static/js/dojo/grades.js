@@ -60,7 +60,7 @@ function createWorker(workerModule) {
 
 function createAssignmentGradesTable(gradesData) {
     const table = document.createElement("table");
-    table.classList.add("table", "table-striped");
+    table.classList.add("table", "table-striped", "content-data-table", "is-nested");
 
     const fields = [];
     gradesData.assignments.forEach(item => {
@@ -72,9 +72,17 @@ function createAssignmentGradesTable(gradesData) {
 
     const thead = document.createElement("thead");
     const headerRow = document.createElement("tr");
+    const fieldLabels = {
+        name: "名称",
+        date: "日期",
+        deadline: "截止日期",
+        weight: "权重",
+        progress: "进度",
+        credit: "计分",
+    };
     fields.forEach(key => {
-        const cell = document.createElement("td");
-        cell.textContent = key.replace(/\b\w/g, char => char.toUpperCase());
+        const cell = document.createElement("th");
+        cell.textContent = fieldLabels[key] || key.replace(/\b\w/g, char => char.toUpperCase());
         headerRow.appendChild(cell);
     });
     thead.appendChild(headerRow);
@@ -139,10 +147,9 @@ function buildGradesCsv(gradesTable) {
             continue;
         }
 
-        const summaryText = details.querySelector("summary")?.textContent.trim() || "";
-        const gradeMatch = summaryText.match(/^(.+?) \(([\d.]+)%\)$/);
-        const overallGrade = gradeMatch ? gradeMatch[1] : "";
-        const overallPercent = gradeMatch ? gradeMatch[2] : "";
+        const summary = details.querySelector("summary");
+        const overallGrade = summary?.querySelector("strong")?.textContent.trim() || "";
+        const overallPercent = (summary?.querySelector("span")?.textContent.trim() || "").replace(/%$/, "");
 
         const innerTable = details.querySelector("table");
         if (!innerTable || !innerTable.tBodies.length) {
@@ -261,22 +268,22 @@ async function loadAllGrades(selector) {
     gradesElement.innerHTML = "";
 
     const table = document.createElement("table");
-    table.classList.add("table", "table-striped");
+    table.classList.add("table", "table-striped", "content-data-table", "course-grades-table");
 
     const downloadButton = document.createElement("button");
     downloadButton.type = "button";
-    downloadButton.classList.add("btn", "btn-primary", "mb-3");
-    downloadButton.textContent = "下载 CSV";
+    downloadButton.classList.add("hub-button", "is-primary");
+    downloadButton.innerHTML = '<i class="fas fa-download" aria-hidden="true"></i>下载 CSV';
     downloadButton.addEventListener("click", () => downloadGradesCsv(table));
     gradesElement.appendChild(downloadButton);
     gradesElement.appendChild(table);
 
     const thead = document.createElement("thead");
     const headerRow = document.createElement("tr");
-    const studentHeaderCell = document.createElement("td");
+    const studentHeaderCell = document.createElement("th");
     studentHeaderCell.textContent = "学生";
     headerRow.appendChild(studentHeaderCell);
-    const gradeHeaderCell = document.createElement("td");
+    const gradeHeaderCell = document.createElement("th");
     gradeHeaderCell.textContent = "成绩";
     gradeHeaderCell.style.width = "80%";
     headerRow.appendChild(gradeHeaderCell);
@@ -292,13 +299,24 @@ async function loadAllGrades(selector) {
 
         const gradeCell = document.createElement("td");
         const details = document.createElement("details");
+        details.classList.add("content-table-details");
 
         const summary = document.createElement("summary");
-        summary.textContent = `${studentGrades.overall.letter} (${(studentGrades.overall.credit * 100).toFixed(2)}%)`;
+        const letter = document.createElement("strong");
+        letter.textContent = studentGrades.overall.letter;
+        const percent = document.createElement("span");
+        percent.textContent = `${(studentGrades.overall.credit * 100).toFixed(2)}%`;
+        const chevron = document.createElement("i");
+        chevron.classList.add("fas", "fa-chevron-down");
+        chevron.setAttribute("aria-hidden", "true");
+        summary.append(letter, percent, chevron);
         details.appendChild(summary);
 
         const gradesTable = createAssignmentGradesTable(studentGrades);
-        details.appendChild(gradesTable);
+        const nestedTable = document.createElement("div");
+        nestedTable.classList.add("content-data-table-wrap", "is-nested");
+        nestedTable.appendChild(gradesTable);
+        details.appendChild(nestedTable);
 
         gradeCell.appendChild(details);
         row.appendChild(gradeCell);

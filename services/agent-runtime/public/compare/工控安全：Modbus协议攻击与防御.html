@@ -1,0 +1,1746 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICS Security Lab — Modbus TCP Attack & Defense</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --danger: #ef4444;
+            --warn: #f59e0b;
+            --success: #22c55e;
+            --info: #3b82f6;
+            --flag: #f59e0b;
+            --accent: #06b6d4;
+            --pump: #f97316;
+            --valve: #ef4444;
+            --metal: #475569;
+            --water-safe: #1a6bcc;
+            --water-warn: #eab308;
+            --water-danger: #ef4444;
+            --font-mono: 'Courier New', 'Consolas', 'Monaco', monospace;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+            line-height: 1.5;
+        }
+        /* EDUCATIONAL PURPOSE ONLY — authorized classroom use */
+        .top-bar {
+            background: #0b1120;
+            border-bottom: 2px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .badge-ics {
+            background: #1e3a5f;
+            color: #60a5fa;
+            border: 1px solid #3b82f6;
+        }
+        .badge-active {
+            background: #1a3d1a;
+            color: #4ade80;
+            border: 1px solid #22c55e;
+            animation: pulse-badge 2s infinite;
+        }
+        @keyframes pulse-badge {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.6;
+            }
+        }
+        .top-bar h1 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            color: #f1f5f9;
+        }
+        .top-bar .subtitle {
+            font-size: 0.8rem;
+            color: var(--text2);
+        }
+        .briefing-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin: 16px 20px;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+        .briefing-card .icon {
+            font-size: 2rem;
+            flex-shrink: 0;
+        }
+        .briefing-card .content h3 {
+            color: var(--accent);
+            margin-bottom: 4px;
+            font-size: 0.95rem;
+            letter-spacing: 0.3px;
+        }
+        .briefing-card .content p {
+            color: var(--text2);
+            font-size: 0.85rem;
+            margin: 0;
+        }
+        .progress-steps {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .progress-steps .step {
+            padding: 5px 14px;
+            border-radius: 16px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: var(--border);
+            color: #64748b;
+            transition: all 0.3s;
+            cursor: default;
+            white-space: nowrap;
+        }
+        .progress-steps .step.done {
+            background: #14532d;
+            color: #4ade80;
+            border: 1px solid #22c55e;
+        }
+        .progress-steps .step.current {
+            background: #1e3a5f;
+            color: #60a5fa;
+            border: 1px solid #3b82f6;
+            animation: pulse-step 1.5s infinite;
+        }
+        @keyframes pulse-step {
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 0 8px rgba(59, 130, 246, 0);
+            }
+        }
+        .main-grid {
+            display: grid;
+            grid-template-columns: 340px 1fr 380px;
+            gap: 16px;
+            padding: 0 20px 16px;
+            min-height: 600px;
+        }
+        @media (max-width: 1300px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto;
+            }
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .panel h3 {
+            font-size: 0.9rem;
+            color: var(--accent);
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel h3 .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot-live {
+            background: #22c55e;
+            animation: pulse-dot 1s infinite;
+        }
+        @keyframes pulse-dot {
+            0%,
+            100% {
+                box-shadow: 0 0 4px #22c55e;
+            }
+            50% {
+                box-shadow: 0 0 14px #22c55e;
+            }
+        }
+        label {
+            font-size: 0.78rem;
+            color: var(--text2);
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            display: block;
+            margin-bottom: 2px;
+        }
+        select,
+        input[type="number"],
+        input[type="text"] {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: #0f172a;
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            transition: border 0.2s;
+        }
+        select:focus,
+        input:focus {
+            outline: none;
+            border-color: var(--info);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        select {
+            cursor: pointer;
+        }
+        button {
+            padding: 9px 16px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.82rem;
+            letter-spacing: 0.3px;
+            transition: all 0.2s;
+            text-transform: uppercase;
+        }
+        .btn-send {
+            background: #dc2626;
+            color: #fff;
+        }
+        .btn-send:hover {
+            background: #b91c1c;
+            box-shadow: 0 0 16px rgba(220, 38, 38, 0.5);
+            transform: translateY(-1px);
+        }
+        .btn-read {
+            background: #1d4ed8;
+            color: #fff;
+        }
+        .btn-read:hover {
+            background: #1e40af;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+        }
+        .btn-defend {
+            background: #15803d;
+            color: #fff;
+        }
+        .btn-defend:hover {
+            background: #166534;
+            box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
+        }
+        .btn-reset {
+            background: #475569;
+            color: #fff;
+        }
+        .btn-reset:hover {
+            background: #64748b;
+        }
+        .btn-small {
+            padding: 5px 10px;
+            font-size: 0.7rem;
+            border-radius: 4px;
+        }
+        .packet-hex {
+            background: #0b1120;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: #a5f3fc;
+            word-break: break-all;
+            min-height: 36px;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+        .packet-hex .field {
+            color: #fbbf24;
+        }
+        .packet-hex .fc {
+            color: #f87171;
+            font-weight: bold;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            background: #0b1120;
+            border: 2px solid var(--border);
+            cursor: default;
+        }
+        .canvas-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 450px;
+            background: #0b1120;
+            border-radius: 10px;
+            border: 2px solid var(--border);
+            overflow: hidden;
+        }
+        .canvas-container .overlay-label {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.7rem;
+            color: #64748b;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            pointer-events: none;
+        }
+        .log-entry {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            padding: 6px 8px;
+            border-radius: 4px;
+            margin-bottom: 3px;
+            border-left: 3px solid transparent;
+            animation: fadeIn 0.3s;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-4px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .log-normal {
+            border-left-color: #22c55e;
+            background: #0a1a0a;
+            color: #86efac;
+        }
+        .log-warn {
+            border-left-color: #f59e0b;
+            background: #1a1408;
+            color: #fde68a;
+        }
+        .log-danger {
+            border-left-color: #ef4444;
+            background: #1a0808;
+            color: #fca5a5;
+        }
+        .log-blocked {
+            border-left-color: #ef4444;
+            background: #1a0000;
+            color: #f87171;
+            font-weight: bold;
+        }
+        .log-flag {
+            border-left-color: #f59e0b;
+            background: #1a1000;
+            color: #fbbf24;
+            font-weight: bold;
+            animation: glow-flag 0.5s alternate 3;
+        }
+        @keyframes glow-flag {
+            from {
+                box-shadow: 0 0 0px #f59e0b;
+            }
+            to {
+                box-shadow: 0 0 20px #f59e0b;
+            }
+        }
+        .scroll-log {
+            max-height: 260px;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+        .scroll-log::-webkit-scrollbar {
+            width: 5px;
+        }
+        .scroll-log::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+        .defense-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #475569;
+            border-radius: 24px;
+            transition: 0.3s;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        input:checked+.toggle-slider {
+            background: #22c55e;
+        }
+        input:checked+.toggle-slider:before {
+            transform: translateX(20px);
+        }
+        .alert-flash {
+            animation: flash-alert 0.6s ease-out;
+        }
+        @keyframes flash-alert {
+            0% {
+                background: #7f1d1d;
+                box-shadow: 0 0 30px rgba(239, 68, 68, 0.7);
+            }
+            100% {
+                background: var(--panel);
+                box-shadow: none;
+            }
+        }
+        .flag-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #1a1000;
+            border: 2px solid #f59e0b;
+            color: #fbbf24;
+            padding: 14px 20px;
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            font-weight: bold;
+            font-size: 0.9rem;
+            z-index: 999;
+            animation: slideIn 0.5s ease-out, glow-flag 0.5s alternate 4;
+            box-shadow: 0 0 30px rgba(245, 158, 11, 0.5);
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            margin: 1px;
+        }
+        .tag-fc {
+            background: #3b1f1f;
+            color: #fca5a5;
+        }
+        .tag-reg {
+            background: #1f3b1f;
+            color: #86efac;
+        }
+        .tag-val {
+            background: #1f2f3b;
+            color: #93c5fd;
+        }
+        .analysis-section {
+            margin: 0 20px 16px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .analysis-section summary {
+            padding: 14px 20px;
+            cursor: pointer;
+            font-weight: 700;
+            color: var(--accent);
+            letter-spacing: 0.5px;
+            background: #162032;
+            user-select: none;
+            font-size: 0.9rem;
+        }
+        .analysis-section summary:hover {
+            background: #1e3044;
+        }
+        .analysis-content {
+            padding: 16px 20px;
+            color: var(--text2);
+            font-size: 0.82rem;
+            line-height: 1.7;
+        }
+        .analysis-content code {
+            background: #0f172a;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #fbbf24;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+        }
+        .highlight-box {
+            background: #1a1000;
+            border: 1px solid #f59e0b;
+            border-radius: 6px;
+            padding: 10px 14px;
+            margin: 8px 0;
+            font-family: var(--font-mono);
+            color: #fbbf24;
+            font-size: 0.8rem;
+        }
+        .footer-note {
+            text-align: center;
+            padding: 12px;
+            color: #475569;
+            font-size: 0.7rem;
+            border-top: 1px solid var(--border);
+            margin: 0 20px;
+        }
+    </style>
+</head>
+<body>
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <div class="top-bar">
+        <div>
+            <h1>🛡️ ICS Security Lab — Modbus TCP Attack & Defense</h1>
+            <span class="subtitle">SCADA Water Tank System · Modbus Protocol Analysis</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <span class="badge badge-ics">ICS / SCADA</span>
+            <span class="badge badge-active" id="statusBadge">⚡ SYSTEM ONLINE</span>
+        </div>
+        <div class="progress-steps" id="progressSteps">
+            <span class="step current" data-step="1">1. Observe</span>
+            <span class="step" data-step="2">2. Recon</span>
+            <span class="step" data-step="3">3. Attack</span>
+            <span class="step" data-step="4">4. Consequences</span>
+            <span class="step" data-step="5">5. Defend</span>
+        </div>
+    </div>
+
+    <div class="briefing-card" id="briefing">
+        <div class="icon">🔍</div>
+        <div class="content">
+            <h3>任务简报 — TASK BRIEFING</h3>
+            <p>You are a security analyst evaluating a <strong>Modbus TCP-based SCADA system</strong> controlling a water treatment tank. The system uses standard Modbus protocol with <strong>no authentication or encryption</strong>. Your objectives: <em>(1) understand normal operation, (2) craft malicious Modbus write commands to disrupt the process, (3) observe physical consequences, and (4) configure a Modbus firewall allowlist to defend against such attacks.</em> All activity is sandboxed in-browser for authorized classroom use only.</p>
+        </div>
+    </div>
+
+    <div class="main-grid">
+        <!-- LEFT PANEL: Modbus Packet Constructor -->
+        <div class="panel" id="leftPanel">
+            <h3><span class="dot dot-live"></span> Modbus Packet Constructor</h3>
+            <label>Function Code</label>
+            <select id="funcCode">
+                <option value="01">FC 01 — Read Coils</option>
+                <option value="03">FC 03 — Read Holding Registers</option>
+                <option value="04">FC 04 — Read Input Registers</option>
+                <option value="05">FC 05 — Write Single Coil</option>
+                <option value="06" selected>FC 06 — Write Single Register</option>
+                <option value="16">FC 16 — Write Multiple Registers</option>
+            </select>
+            <label>Register / Coil Address (0–9)</label>
+            <input type="number" id="regAddr" value="0" min="0" max="9" step="1">
+            <label id="valLabel">Value (0–65535)</label>
+            <input type="number" id="regValue" value="100" min="0" max="65535" step="1">
+            <label id="qtyLabel" style="display:none;">Quantity</label>
+            <input type="number" id="regQty" value="2" min="1" max="5" step="1" style="display:none;">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn-send" id="btnSend" title="Send Modbus packet to slave">⚡ SEND PACKET</button>
+                <button class="btn-read" id="btnRefresh" title="Read current tank level">📡 READ LEVEL</button>
+            </div>
+            <div>
+                <label style="margin-top:6px;">Packet Bytes (hex)</label>
+                <div class="packet-hex" id="packetHex">-- awaiting packet --</div>
+            </div>
+            <div>
+                <label>Response / Status</label>
+                <div class="packet-hex" id="packetResponse" style="color:#86efac;">-- no response yet --</div>
+            </div>
+            <div style="margin-top:4px;">
+                <span class="tag tag-fc">FC: Function Code</span>
+                <span class="tag tag-reg">Addr: Register</span>
+                <span class="tag tag-val">Val: Data</span>
+            </div>
+            <details style="margin-top:6px;">
+                <summary style="cursor:pointer;color:var(--text2);font-size:0.75rem;">📋 Register Map Reference</summary>
+                <div style="font-family:var(--font-mono);font-size:0.7rem;color:var(--text2);line-height:1.6;margin-top:4px;">
+                    <b>Coils (R/W):</b><br>
+                    &nbsp;0: Main Pump ON/OFF<br>
+                    &nbsp;1: Drain Valve OPEN/CLOSED<br>
+                    &nbsp;2: Emergency Stop<br>
+                    <b>Holding Regs (R/W):</b><br>
+                    &nbsp;0: Pump Speed % (0–100)<br>
+                    &nbsp;1: Level Setpoint (0–1000)<br>
+                    <b>Input Regs (Read-Only):</b><br>
+                    &nbsp;0: Actual Tank Level (0–1000)<br>
+                    &nbsp;1: Flow Rate (L/min)<br>
+                    &nbsp;2: Pressure (kPa)
+                </div>
+            </details>
+        </div>
+
+        <!-- CENTER: Water Tank Visualization -->
+        <div class="canvas-container" id="canvasContainer">
+            <span class="overlay-label">🏭 LIVE PROCESS VISUALIZATION</span>
+            <canvas id="tankCanvas" width="520" height="480"></canvas>
+        </div>
+
+        <!-- RIGHT PANEL: Detection & Monitoring -->
+        <div class="panel" id="rightPanel">
+            <h3>🛡️ Modbus Firewall Monitor</h3>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <span style="font-size:0.75rem;color:var(--text2);">Firewall:</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="firewallEnabled">
+                    <span class="toggle-slider"></span>
+                </label>
+                <span id="fwStatus" style="font-size:0.75rem;color:#ef4444;">OFF — All packets pass</span>
+            </div>
+            <div style="font-size:0.7rem;color:var(--text2);margin-top:4px;">
+                <strong>Allowlist Rules:</strong>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+                    <label style="font-size:0.7rem;display:flex;align-items:center;gap:3px;"><input type="checkbox" class="allowFC" value="01" checked> FC01</label>
+                    <label style="font-size:0.7rem;display:flex;align-items:center;gap:3px;"><input type="checkbox" class="allowFC" value="03" checked> FC03</label>
+                    <label style="font-size:0.7rem;display:flex;align-items:center;gap:3px;"><input type="checkbox" class="allowFC" value="04" checked> FC04</label>
+                    <label style="font-size:0.7rem;display:flex;align-items:center;gap:3px;"><input type="checkbox" class="allowFC" value="05"> FC05</label>
+                    <label style="font-size:0.7rem;display:flex;align-items:center;gap:3px;"><input type="checkbox" class="allowFC" value="06"> FC06</label>
+                    <label style="font-size:0.7rem;display:flex;align-items:center;gap:3px;"><input type="checkbox" class="allowFC" value="16"> FC16</label>
+                </div>
+            </div>
+            <button class="btn-defend btn-small" id="btnApplyDefense">🔒 Apply Allowlist</button>
+            <button class="btn-reset btn-small" id="btnResetAll">🔄 Reset Simulation</button>
+            <hr style="border-color:var(--border);margin:4px 0;">
+            <label>📋 Packet Log</label>
+            <div class="scroll-log" id="packetLog">
+                <div class="log-entry log-normal">[00:00] System initialized — Normal operation</div>
+                <div class="log-entry log-normal">[00:01] FC04 Read Input Reg 0 → Level: 500</div>
+            </div>
+            <div id="alarmIndicator" style="font-size:0.75rem;color:var(--text2);margin-top:4px;min-height:20px;"></div>
+        </div>
+    </div>
+
+    <!-- Analysis Report -->
+    <div class="analysis-section">
+        <details>
+            <summary>📊 查看完整分析 — Full Analysis Report</summary>
+            <div class="analysis-content">
+                <h4>Modbus Protocol Security Weaknesses</h4>
+                <p>The Modbus protocol, originally designed for serial communication in isolated industrial environments, lacks fundamental security features:</p>
+                <ul>
+                    <li><strong>No Authentication:</strong> Any device on the network can send commands; the slave cannot verify the master's identity.</li>
+                    <li><strong>No Encryption:</strong> All data travels in plaintext, allowing easy sniffing and manipulation.</li>
+                    <li><strong>No Integrity Checks (beyond CRC):</strong> CRC-16 catches transmission errors but offers no protection against malicious tampering.</li>
+                    <li><strong>Function Code Abuse:</strong> Attackers can scan function codes, write to critical registers, or perform DoS by flooding.</li>
+                </ul>
+                <h4>Attack Vectors Demonstrated</h4>
+                <ul>
+                    <li><strong>Unauthorized Write (FC06/FC16):</strong> Overriding pump speed to 100% while closing the drain valve causes tank overflow.</li>
+                    <li><strong>Pump Shutdown DoS (FC05):</strong> Writing 0 to the pump coil stops the pump, potentially draining the tank and causing cavitation damage.</li>
+                    <li><strong>False Data Injection:</strong> Writing to holding registers that feed the HMI can make operators see false readings while the physical process behaves differently.</li>
+                </ul>
+                <h4>Defense Strategy</h4>
+                <ul>
+                    <li><strong>Modbus Firewall with Allowlist:</strong> Only permit explicitly authorized function codes and register ranges. Block all writes (FC05, FC06, FC16) unless from known engineering stations.</li>
+                    <li><strong>Network Segmentation:</strong> Place ICS networks behind firewalls, separate from corporate IT networks (Purdue Model).</li>
+                    <li><strong>Protocol Monitoring:</strong> Detect anomalies like rapid successive writes, out-of-range values, or function code scanning.</li>
+                    <li><strong>Secure Gateways:</strong> Use Modbus-to-secure-protocol gateways that add authentication and encryption at the boundary.</li>
+                </ul>
+                <div class="highlight-box">
+                    // EDUCATIONAL PURPOSE ONLY — authorized classroom use<br>
+                    // Real ICS systems require defense-in-depth:<br>
+                    // firewalls + network segmentation + monitoring + secure protocols
+                </div>
+            </div>
+        </details>
+    </div>
+    <div class="footer-note">
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use. This simulation runs entirely in-browser with no network access. All Modbus communication is sandboxed within this page.
+    </div>
+
+    <script>
+        (function() {
+            // ============================================================
+            // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+            // Simulated Modbus TCP SCADA water tank system
+            // All processing is local and sandboxed within this browser page.
+            // ============================================================
+
+            // --- DOM refs ---
+            const canvas = document.getElementById('tankCanvas');
+            const ctx = canvas.getContext('2d');
+            const funcCodeSel = document.getElementById('funcCode');
+            const regAddrInp = document.getElementById('regAddr');
+            const regValueInp = document.getElementById('regValue');
+            const regQtyInp = document.getElementById('regQty');
+            const valLabel = document.getElementById('valLabel');
+            const qtyLabel = document.getElementById('qtyLabel');
+            const packetHexDiv = document.getElementById('packetHex');
+            const packetRespDiv = document.getElementById('packetResponse');
+            const packetLogDiv = document.getElementById('packetLog');
+            const alarmInd = document.getElementById('alarmIndicator');
+            const fwEnabledCb = document.getElementById('firewallEnabled');
+            const fwStatusSpan = document.getElementById('fwStatus');
+            const statusBadge = document.getElementById('statusBadge');
+            const progressSteps = document.getElementById('progressSteps');
+            const canvasContainer = document.getElementById('canvasContainer');
+            const briefingCard = document.getElementById('briefing');
+
+            // --- Modbus Slave State (simulated PLC) ---
+            const slave = {
+                coils: [1, 1, 0, 0, 0, 0, 0, 0, 0, 0], // 0:pump, 1:drain valve, 2:emergency stop
+                holdingRegs: [50, 500, 0, 0, 0, 0, 0, 0, 0, 0], // 0:pump speed%, 1:level setpoint
+                inputRegs: [500, 75, 30, 0, 0, 0, 0, 0, 0, 0], // 0:actual level, 1:flow rate, 2:pressure
+                // Physical simulation state
+                physLevel: 500, // actual water level (0-1000 units, >1000 = overflow)
+                physFlowIn: 0,
+                physFlowOut: 0,
+                overflowActive: false,
+                overflowParticles: [],
+                tankShake: 0,
+            };
+
+            // --- Firewall state ---
+            const firewall = {
+                enabled: false,
+                allowedFCs: new Set([1, 3, 4]), // default: only reads allowed
+                allowedWriteRegs: [], // when populated, only these regs can be written
+                packetCount: 0,
+                lastWriteTime: 0,
+                rapidWriteCount: 0,
+            };
+
+            // --- Packet log ---
+            let packetLogEntries = [];
+            let logTimeCounter = 2;
+
+            // --- Flags earned ---
+            const earnedFlags = new Set();
+
+            // --- Progress tracking ---
+            let progressState = {
+                observed: false,
+                recon: false,
+                attacked: false,
+                consequences: false,
+                defended: false,
+            };
+
+            function updateProgress() {
+                const steps = progressSteps.querySelectorAll('.step');
+                const keys = ['observed', 'recon', 'attacked', 'consequences', 'defended'];
+                steps.forEach((stepEl, i) => {
+                    stepEl.classList.remove('done', 'current');
+                    if (progressState[keys[i]]) {
+                        stepEl.classList.add('done');
+                    }
+                });
+                // Find first not done
+                for (let i = 0; i < keys.length; i++) {
+                    if (!progressState[keys[i]]) {
+                        steps[i].classList.add('current');
+                        break;
+                    }
+                }
+                if (Object.values(progressState).every(v => v)) {
+                    steps.forEach(s => s.classList.add('done'));
+                    steps[steps.length - 1].classList.add('current');
+                }
+            }
+
+            function awardFlag(flagCode) {
+                if (earnedFlags.has(flagCode)) return;
+                earnedFlags.add(flagCode);
+                const flagMap = {
+                    'overflow': 'FLAG{modbus_tank_overflow_critical}',
+                    'drain': 'FLAG{modbus_pump_shutdown_dos}',
+                    'defense': 'FLAG{modbus_allowlist_defense}',
+                };
+                const flagStr = flagMap[flagCode] || ('FLAG{' + flagCode + '}');
+                // Show toast
+                const toast = document.createElement('div');
+                toast.className = 'flag-toast';
+                toast.textContent = '🏆 ' + flagStr;
+                document.body.appendChild(toast);
+                setTimeout(() => { toast.style.opacity = '0';
+                    toast.style.transition = 'opacity 0.5s'; }, 4000);
+                setTimeout(() => toast.remove(), 4800);
+                // Log it
+                addLogEntry('flag', '🚩 FLAG CAPTURED: ' + flagStr);
+            }
+
+            function addLogEntry(type, msg) {
+                logTimeCounter++;
+                const timestamp = '00:' + String(logTimeCounter).padStart(2, '0');
+                const entry = { type, msg, timestamp };
+                packetLogEntries.push(entry);
+                // Keep only last 40
+                if (packetLogEntries.length > 40) packetLogEntries.shift();
+                renderLog();
+            }
+
+            function renderLog() {
+                const entries = packetLogEntries.slice(-30);
+                packetLogDiv.innerHTML = entries.map(e => {
+                    let cls = 'log-normal';
+                    if (e.type === 'warn') cls = 'log-warn';
+                    if (e.type === 'danger') cls = 'log-danger';
+                    if (e.type === 'blocked') cls = 'log-blocked';
+                    if (e.type === 'flag') cls = 'log-flag';
+                    return `<div class="log-entry ${cls}">[${e.timestamp}] ${e.msg}</div>`;
+                }).join('');
+                packetLogDiv.scrollTop = packetLogDiv.scrollHeight;
+            }
+
+            // --- Update function code UI ---
+            function updateFCUI() {
+                const fc = parseInt(funcCodeSel.value);
+                const isRead = [1, 3, 4].includes(fc);
+                const isWriteSingle = [5, 6].includes(fc);
+                const isWriteMulti = fc === 16;
+
+                if (isRead) {
+                    valLabel.style.display = 'none';
+                    regValueInp.style.display = 'none';
+                    qtyLabel.style.display = 'block';
+                    regQtyInp.style.display = 'block';
+                } else if (isWriteSingle) {
+                    valLabel.style.display = 'block';
+                    regValueInp.style.display = 'block';
+                    qtyLabel.style.display = 'none';
+                    regQtyInp.style.display = 'none';
+                } else if (isWriteMulti) {
+                    valLabel.style.display = 'block';
+                    regValueInp.style.display = 'block';
+                    qtyLabel.style.display = 'block';
+                    regQtyInp.style.display = 'block';
+                }
+                // Update value label
+                if (fc === 5) valLabel.textContent = 'Value (0x0000=OFF, 0xFF00=ON)';
+                else if (fc === 6) valLabel.textContent = 'Value (0–65535)';
+                else if (fc === 16) valLabel.textContent = 'Values (comma-separated)';
+                else valLabel.textContent = 'Value';
+            }
+
+            funcCodeSel.addEventListener('change', updateFCUI);
+            updateFCUI();
+
+            // --- Build Modbus packet ---
+            function buildPacket() {
+                const fc = parseInt(funcCodeSel.value);
+                const addr = parseInt(regAddrInp.value) || 0;
+                const value = parseInt(regValueInp.value) || 0;
+                const qty = parseInt(regQtyInp.value) || 1;
+                const txId = (logTimeCounter + 1) % 65536;
+                const unitId = 1;
+                let dataBytes = [];
+                dataBytes.push(fc);
+                dataBytes.push((addr >> 8) & 0xFF);
+                dataBytes.push(addr & 0xFF);
+
+                if ([1, 3, 4].includes(fc)) {
+                    // Read: quantity
+                    dataBytes.push((qty >> 8) & 0xFF);
+                    dataBytes.push(qty & 0xFF);
+                } else if (fc === 5) {
+                    // Write coil: value (0x0000 or 0xFF00)
+                    const v = (value === 0) ? 0x0000 : 0xFF00;
+                    dataBytes.push((v >> 8) & 0xFF);
+                    dataBytes.push(v & 0xFF);
+                } else if (fc === 6) {
+                    // Write single register
+                    dataBytes.push((value >> 8) & 0xFF);
+                    dataBytes.push(value & 0xFF);
+                } else if (fc === 16) {
+                    // Write multiple registers
+                    const vals = String(value).split(',').map(v => parseInt(v.trim()) || 0);
+                    const actualQty = Math.min(vals.length, qty, 5);
+                    dataBytes.push((actualQty >> 8) & 0xFF);
+                    dataBytes.push(actualQty & 0xFF);
+                    dataBytes.push(actualQty * 2); // byte count
+                    for (let i = 0; i < actualQty; i++) {
+                        const v = vals[i] || 0;
+                        dataBytes.push((v >> 8) & 0xFF);
+                        dataBytes.push(v & 0xFF);
+                    }
+                }
+
+                const length = 2 + dataBytes.length; // unitId + data
+                const fullPacket = [
+                    (txId >> 8) & 0xFF, txId & 0xFF, // transaction ID
+                    0, 0, // protocol ID (always 0)
+                    (length >> 8) & 0xFF, length & 0xFF, // length
+                    unitId,
+                    ...dataBytes
+                ];
+                return { bytes: fullPacket, fc, addr, value, qty, txId, unitId, dataBytes };
+            }
+
+            function formatHex(bytes) {
+                return bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+            }
+
+            function formatHexColored(bytes, fcIndex) {
+                return bytes.map((b, i) => {
+                    let cls = '';
+                    if (i === fcIndex) cls = 'fc';
+                    else if (i >= fcIndex + 1 && i <= fcIndex + 2) cls = 'field';
+                    else if (i >= fcIndex + 3 && i <= fcIndex + 4 && bytes[fcIndex] <= 6) cls =
+                        'field';
+                    const hex = b.toString(16).padStart(2, '0').toUpperCase();
+                    if (cls) return `<span class="${cls}">${hex}</span>`;
+                    return hex;
+                }).join(' ');
+            }
+
+            // --- Process Modbus request ---
+            function processRequest(packet) {
+                const { fc, addr, value, qty, bytes } = packet;
+                let responseData = [];
+                let exceptionCode = null;
+                let blocked = false;
+                let blockReason = '';
+
+                // Firewall inspection
+                if (firewall.enabled) {
+                    if (!firewall.allowedFCs.has(fc)) {
+                        blocked = true;
+                        blockReason = `FC ${fc.toString(16).padStart(2,'0')} not in allowlist`;
+                    }
+                    if (!blocked && [5, 6, 16].includes(fc) && firewall.allowedWriteRegs.length > 0) {
+                        if (!firewall.allowedWriteRegs.includes(addr)) {
+                            blocked = true;
+                            blockReason = `Write to register ${addr} not in allowlist`;
+                        }
+                    }
+                    // Rapid write detection
+                    if (!blocked && [5, 6, 16].includes(fc)) {
+                        const now = Date.now();
+                        if (now - firewall.lastWriteTime < 2000) {
+                            firewall.rapidWriteCount++;
+                            if (firewall.rapidWriteCount > 3) {
+                                blocked = true;
+                                blockReason = 'Rapid successive writes detected (possible DoS)';
+                            }
+                        } else {
+                            firewall.rapidWriteCount = 1;
+                        }
+                        firewall.lastWriteTime = now;
+                    }
+                }
+
+                if (blocked) {
+                    addLogEntry('blocked', `BLOCKED: ${blockReason} | FC=${fc} Addr=${addr}`);
+                    return { blocked: true, blockReason, bytes: [] };
+                }
+
+                // Process the request
+                if (fc === 1) {
+                    // Read Coils
+                    const coilStates = [];
+                    for (let i = addr; i < Math.min(addr + qty, slave.coils.length); i++) {
+                        coilStates.push(slave.coils[i]);
+                    }
+                    responseData = [fc, coilStates.length > 0 ? Math.ceil(coilStates.length / 8) : 1];
+                    let byteVal = 0;
+                    for (let i = 0; i < coilStates.length; i++) {
+                        if (coilStates[i]) byteVal |= (1 << (i % 8));
+                        if (i % 8 === 7 || i === coilStates.length - 1) {
+                            responseData.push(byteVal);
+                            byteVal = 0;
+                        }
+                    }
+                } else if (fc === 3) {
+                    // Read Holding Registers
+                    responseData = [fc, qty * 2];
+                    for (let i = addr; i < Math.min(addr + qty, slave.holdingRegs.length); i++) {
+                        const v = slave.holdingRegs[i];
+                        responseData.push((v >> 8) & 0xFF);
+                        responseData.push(v & 0xFF);
+                    }
+                } else if (fc === 4) {
+                    // Read Input Registers
+                    responseData = [fc, qty * 2];
+                    for (let i = addr; i < Math.min(addr + qty, slave.inputRegs.length); i++) {
+                        const v = slave.inputRegs[i];
+                        responseData.push((v >> 8) & 0xFF);
+                        responseData.push(v & 0xFF);
+                    }
+                } else if (fc === 5) {
+                    // Write Single Coil
+                    if (addr < slave.coils.length) {
+                        slave.coils[addr] = (value === 0xFF00 || value !== 0) ? 1 : 0;
+                        responseData = [fc, (addr >> 8) & 0xFF, addr & 0xFF, (slave.coils[addr] ? 0xFF : 0x00),
+                            0x00
+                        ];
+                        addLogEntry('warn',
+                            `Coil ${addr} WRITTEN → ${slave.coils[addr]?'ON':'OFF'} | ${addr===0?'PUMP':addr===1?'DRAIN VALVE':addr===2?'EMERGENCY STOP':'COIL '+addr}`
+                            );
+                        if (addr === 2 && slave.coils[addr] === 1) {
+                            // Emergency stop triggered
+                            slave.coils[0] = 0;
+                            slave.holdingRegs[0] = 0;
+                            addLogEntry('danger', '⚠️ EMERGENCY STOP ACTIVATED — All systems halted');
+                        }
+                    } else {
+                        exceptionCode = 2;
+                    }
+                } else if (fc === 6) {
+                    // Write Single Register
+                    if (addr < slave.holdingRegs.length) {
+                        const oldVal = slave.holdingRegs[addr];
+                        slave.holdingRegs[addr] = value;
+                        responseData = [fc, (addr >> 8) & 0xFF, addr & 0xFF, (value >> 8) & 0xFF, value & 0xFF];
+                        const regNames = { 0: 'PUMP SPEED', 1: 'LEVEL SETPOINT' };
+                        const regName = regNames[addr] || ('HOLDING REG ' + addr);
+                        addLogEntry('warn',
+                            `${regName} WRITTEN: ${oldVal} → ${value} | ${addr===0?(value>80?'⚠️ HIGH SPEED!':value===0?'🛑 PUMP STOPPED':'✓'):''}`
+                            );
+                        if (addr === 0 && value > 80) {
+                            progressState.recon = true;
+                            progressState.attacked = true;
+                            updateProgress();
+                        }
+                    } else {
+                        exceptionCode = 2;
+                    }
+                } else if (fc === 16) {
+                    // Write Multiple Registers
+                    const vals = String(value).split(',').map(v => parseInt(v.trim()) || 0);
+                    responseData = [fc, (addr >> 8) & 0xFF, addr & 0xFF, 0, Math.min(vals.length, qty)];
+                    for (let i = 0; i < Math.min(vals.length, qty); i++) {
+                        if (addr + i < slave.holdingRegs.length) {
+                            slave.holdingRegs[addr + i] = vals[i];
+                        }
+                    }
+                    addLogEntry('warn', `Multiple registers [${addr}..${addr+Math.min(vals.length,qty)-1}] written`);
+                    progressState.attacked = true;
+                    updateProgress();
+                } else {
+                    exceptionCode = 1; // illegal function
+                }
+
+                if (exceptionCode !== null) {
+                    responseData = [fc | 0x80, exceptionCode];
+                    addLogEntry('danger', `Exception: FC=${fc} code=${exceptionCode}`);
+                }
+
+                // Build response packet
+                const respBytes = [
+                    (packet.txId >> 8) & 0xFF, packet.txId & 0xFF,
+                    0, 0,
+                    ((2 + responseData.length) >> 8) & 0xFF, (2 + responseData.length) & 0xFF,
+                    packet.unitId,
+                    ...responseData
+                ];
+                return { blocked: false, bytes: respBytes, fc, addr, exceptionCode };
+            }
+
+            // --- Send packet handler ---
+            function sendPacket() {
+                const packet = buildPacket();
+                packetHexDiv.innerHTML = formatHexColored(packet.bytes, 7);
+
+                const result = processRequest(packet);
+                if (result.blocked) {
+                    packetRespDiv.innerHTML =
+                        '<span style="color:#f87171;">⛔ BLOCKED by firewall: ' + result.blockReason + '</span>';
+                    packetRespDiv.style.color = '#f87171';
+                    canvasContainer.classList.add('alert-flash');
+                    setTimeout(() => canvasContainer.classList.remove('alert-flash'), 600);
+                } else if (result.exceptionCode) {
+                    packetRespDiv.innerHTML = '<span style="color:#fbbf24;">⚠ Exception ' + result.exceptionCode +
+                        '</span>';
+                    packetRespDiv.style.color = '#fbbf24';
+                } else {
+                    packetRespDiv.innerHTML =
+                        '<span style="color:#86efac;">✓ Response: ' + formatHex(result.bytes) + '</span>';
+                    packetRespDiv.style.color = '#86efac';
+                    // Track progress
+                    if ([1, 3, 4].includes(packet.fc)) {
+                        progressState.observed = true;
+                        updateProgress();
+                    }
+                    if ([5, 6, 16].includes(packet.fc) && !firewall.enabled) {
+                        progressState.attacked = true;
+                        updateProgress();
+                    }
+                }
+                updateAlarmIndicator();
+            }
+
+            document.getElementById('btnSend').addEventListener('click', sendPacket);
+
+            // --- Quick read level ---
+            document.getElementById('btnRefresh').addEventListener('click', () => {
+                funcCodeSel.value = '04';
+                regAddrInp.value = '0';
+                regQtyInp.value = '2';
+                updateFCUI();
+                sendPacket();
+                progressState.observed = true;
+                updateProgress();
+            });
+
+            // --- Defense buttons ---
+            document.getElementById('btnApplyDefense').addEventListener('click', () => {
+                const checkboxes = document.querySelectorAll('.allowFC');
+                firewall.allowedFCs = new Set();
+                checkboxes.forEach(cb => {
+                    if (cb.checked) firewall.allowedFCs.add(parseInt(cb.value));
+                });
+                firewall.allowedWriteRegs = [0, 1]; // only allow writes to pump speed and level setpoint
+                firewall.enabled = fwEnabledCb.checked;
+                if (firewall.enabled) {
+                    fwStatusSpan.textContent = 'ON — Allowlist active';
+                    fwStatusSpan.style.color = '#22c55e';
+                    addLogEntry('normal', '🔒 Firewall ENABLED with allowlist — FCs: ' + [...firewall.allowedFCs].map(
+                        f => 'FC' + String(f).padStart(2, '0')).join(', '));
+                    progressState.defended = true;
+                    updateProgress();
+                    awardFlag('defense');
+                } else {
+                    fwStatusSpan.textContent = 'OFF — All packets pass';
+                    fwStatusSpan.style.color = '#ef4444';
+                }
+            });
+
+            fwEnabledCb.addEventListener('change', () => {
+                firewall.enabled = fwEnabledCb.checked;
+                if (firewall.enabled) {
+                    fwStatusSpan.textContent = 'ON — Allowlist active';
+                    fwStatusSpan.style.color = '#22c55e';
+                    // Apply current checkboxes
+                    const checkboxes = document.querySelectorAll('.allowFC');
+                    firewall.allowedFCs = new Set();
+                    checkboxes.forEach(cb => {
+                        if (cb.checked) firewall.allowedFCs.add(parseInt(cb.value));
+                    });
+                    firewall.allowedWriteRegs = [0, 1];
+                    addLogEntry('normal', '🔒 Firewall ENABLED');
+                } else {
+                    fwStatusSpan.textContent = 'OFF — All packets pass';
+                    fwStatusSpan.style.color = '#ef4444';
+                    addLogEntry('normal', '🔓 Firewall DISABLED — all traffic permitted');
+                }
+            });
+
+            document.getElementById('btnResetAll').addEventListener('click', () => {
+                slave.coils = [1, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+                slave.holdingRegs = [50, 500, 0, 0, 0, 0, 0, 0, 0, 0];
+                slave.inputRegs = [500, 75, 30, 0, 0, 0, 0, 0, 0, 0];
+                slave.physLevel = 500;
+                slave.overflowActive = false;
+                slave.overflowParticles = [];
+                slave.tankShake = 0;
+                firewall.packetCount = 0;
+                firewall.lastWriteTime = 0;
+                firewall.rapidWriteCount = 0;
+                packetLogEntries = [];
+                logTimeCounter = 2;
+                earnedFlags.clear();
+                progressState = { observed: false, recon: false, attacked: false, consequences: false,
+                    defended: false };
+                updateProgress();
+                packetRespDiv.innerHTML = '-- no response yet --';
+                packetRespDiv.style.color = '#86efac';
+                packetHexDiv.innerHTML = '-- awaiting packet --';
+                addLogEntry('normal', 'System reset — Normal operation restored');
+                updateAlarmIndicator();
+                statusBadge.textContent = '⚡ SYSTEM ONLINE';
+                statusBadge.className = 'badge badge-active';
+                canvasContainer.classList.remove('alert-flash');
+                updateProgress();
+                renderLog();
+            });
+
+            // --- Alarm indicator ---
+            function updateAlarmIndicator() {
+                const lvl = slave.physLevel;
+                const pumpSpd = slave.holdingRegs[0];
+                const drainOpen = slave.coils[1];
+                let alarms = [];
+                if (lvl >= 1000) alarms.push('🔴 CRITICAL: TANK OVERFLOW');
+                else if (lvl >= 900) alarms.push('🟠 WARNING: High level (' + Math.round(lvl) + '/1000)');
+                if (lvl <= 30 && drainOpen) alarms.push('🟠 WARNING: Tank nearly empty — pump cavitation risk');
+                if (pumpSpd > 90) alarms.push('🟡 Pump at extreme speed: ' + pumpSpd + '%');
+                if (slave.coils[2] === 1) alarms.push('🔴 EMERGENCY STOP ACTIVE');
+                alarmInd.innerHTML = alarms.length > 0 ? alarms.join('<br>') : '✅ All systems nominal';
+                if (alarms.length > 0 && alarms.some(a => a.includes('CRITICAL'))) {
+                    alarmInd.style.color = '#ef4444';
+                } else if (alarms.length > 0) {
+                    alarmInd.style.color = '#f59e0b';
+                } else {
+                    alarmInd.style.color = '#22c55e';
+                }
+            }
+
+            // ============================================================
+            // CANVAS RENDERING — Water Tank Visualization
+            // ============================================================
+            let animTime = 0;
+            let lastFrameTime = performance.now();
+
+            function drawTank(timestamp) {
+                const dt = Math.min((timestamp - lastFrameTime) / 1000, 0.1);
+                lastFrameTime = timestamp;
+                animTime += dt;
+
+                // --- Update physics ---
+                updatePhysics(dt);
+
+                const w = canvas.width;
+                const h = canvas.height;
+                ctx.clearRect(0, 0, w, h);
+
+                // Background grid
+                ctx.fillStyle = '#0b1120';
+                ctx.fillRect(0, 0, w, h);
+                ctx.strokeStyle = '#1a2740';
+                ctx.lineWidth = 0.5;
+                for (let gx = 0; gx < w; gx += 40) {
+                    ctx.beginPath();
+                    ctx.moveTo(gx, 0);
+                    ctx.lineTo(gx, h);
+                    ctx.stroke();
+                }
+                for (let gy = 0; gy < h; gy += 40) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, gy);
+                    ctx.lineTo(w, gy);
+                    ctx.stroke();
+                }
+
+                const shakeX = slave.tankShake * (Math.sin(animTime * 30) * 3);
+                const shakeY = slave.tankShake * (Math.cos(animTime * 27) * 2);
+                slave.tankShake = Math.max(0, slave.tankShake - dt * 2);
+
+                ctx.save();
+                ctx.translate(shakeX, shakeY);
+
+                // Tank dimensions
+                const tankLeft = 170;
+                const tankRight = 350;
+                const tankTop = 55;
+                const tankBottom = 390;
+                const tankWidth = tankRight - tankLeft;
+                const tankHeight = tankBottom - tankTop;
+
+                // --- Draw tank body ---
+                // Tank shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(tankLeft + 4, tankTop + 4, tankWidth, tankHeight);
+
+                // Main tank body with metal gradient
+                const metalGrad = ctx.createLinearGradient(tankLeft, 0, tankRight, 0);
+                metalGrad.addColorStop(0, '#3b4a5c');
+                metalGrad.addColorStop(0.15, '#5a6d80');
+                metalGrad.addColorStop(0.3, '#4a5a6a');
+                metalGrad.addColorStop(0.5, '#6b7d90');
+                metalGrad.addColorStop(0.7, '#4a5a6a');
+                metalGrad.addColorStop(0.85, '#5a6d80');
+                metalGrad.addColorStop(1, '#3b4a5c');
+                ctx.fillStyle = metalGrad;
+                ctx.fillRect(tankLeft, tankTop, tankWidth, tankHeight);
+
+                // Tank border
+                ctx.strokeStyle = '#6b7d90';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(tankLeft, tankTop, tankWidth, tankHeight);
+
+                // Rivets
+                const rivetPositions = [
+                    [tankLeft - 4, tankTop + 30],
+                    [tankLeft - 4, tankTop + tankHeight / 2],
+                    [tankLeft - 4, tankBottom - 30],
+                    [tankRight + 4, tankTop + 30],
+                    [tankRight + 4, tankTop + tankHeight / 2],
+                    [tankRight + 4, tankBottom - 30]
+                ];
+                rivetPositions.forEach(([rx, ry]) => {
+                    ctx.fillStyle = '#8b9db0';
+                    ctx.beginPath();
+                    ctx.arc(rx, ry, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#c0d0e0';
+                    ctx.beginPath();
+                    ctx.arc(rx - 1, ry - 1, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                // --- Draw water inside tank ---
+                const waterTopY = tankBottom - (slave.physLevel / 1000) * tankHeight;
+                const clampedWaterTop = Math.max(tankTop, Math.min(tankBottom, waterTopY));
+
+                // Water color based on level
+                let waterColor1, waterColor2;
+                const levelRatio = slave.physLevel / 1000;
+                if (levelRatio < 0.7) {
+                    waterColor1 = '#1a5fb4';
+                    waterColor2 = '#3584e4';
+                } else if (levelRatio < 0.9) {
+                    const t = (levelRatio - 0.7) / 0.2;
+                    waterColor1 = interpolateColor('#1a5fb4', '#d97706', t);
+                    waterColor2 = interpolateColor('#3584e4', '#f59e0b', t);
+                } else {
+                    const t = Math.min(1, (levelRatio - 0.9) / 0.1);
+                    waterColor1 = interpolateColor('#d97706', '#dc2626', t);
+                    waterColor2 = interpolateColor('#f59e0b', '#ef4444', t);
+                }
+
+                // Clip to tank interior
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(tankLeft + 2, tankTop + 2, tankWidth - 4, tankHeight - 4);
+                ctx.clip();
+
+                // Water body
+                const waterGrad = ctx.createLinearGradient(0, clampedWaterTop, 0, tankBottom);
+                waterGrad.addColorStop(0, waterColor2);
+                waterGrad.addColorStop(1, waterColor1);
+                ctx.fillStyle = waterGrad;
+                ctx.fillRect(tankLeft, clampedWaterTop, tankWidth, tankBottom - clampedWaterTop);
+
+                // Wave surface
+                const waveAmplitude = 3 + (slave.physLevel > 900 ? (slave.physLevel - 900) / 20 : 0) + slave
+                    .tankShake * 8;
+                ctx.fillStyle = waterColor2;
+                ctx.beginPath();
+                ctx.moveTo(tankLeft, clampedWaterTop);
+                for (let wx = tankLeft; wx <= tankRight; wx += 2) {
+                    const wy = clampedWaterTop + Math.sin(wx * 0.06 + animTime * 3.5) * waveAmplitude +
+                        Math.sin(wx * 0.13 + animTime * 2.1) * waveAmplitude * 0.6;
+                    ctx.lineTo(wx, wy);
+                }
+                ctx.lineTo(tankRight, tankBottom);
+                ctx.lineTo(tankLeft, tankBottom);
+                ctx.closePath();
+                ctx.fill();
+
+                // Bubbles
+                for (let i = 0; i < 8; i++) {
+                    const bx = tankLeft + 20 + ((i * 47 + animTime * 15) % (tankWidth - 40));
+                    const by = clampedWaterTop + 10 + ((i * 31 + animTime * 25) % (tankBottom - clampedWaterTop - 20));
+                    const br = 2 + Math.sin(i * 2.7 + animTime * 4) * 1.5;
+                    ctx.fillStyle = 'rgba(180,220,255,0.35)';
+                    ctx.beginPath();
+                    ctx.arc(bx, by, br, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+
+                // --- Level markings ---
+                for (let lvl = 0; lvl <= 1000; lvl += 100) {
+                    const my = tankBottom - (lvl / 1000) * tankHeight;
+                    ctx.strokeStyle = '#8899aa';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(tankRight + 6, my);
+                    ctx.lineTo(tankRight + 16, my);
+                    ctx.stroke();
+                    if (lvl % 200 === 0) {
+                        ctx.fillStyle = '#aabbcc';
+                        ctx.font = '9px monospace';
+                        ctx.fillText(lvl, tankRight + 20, my + 4);
+                    }
+                }
+
+                // --- Overflow animation ---
+                if (slave.overflowActive) {
+                    for (let i = 0; i < slave.overflowParticles.length; i++) {
+                        const p = slave.overflowParticles[i];
+                        ctx.fillStyle = `rgba(100,180,255,${p.life})`;
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    // Overflow stream
+                    ctx.fillStyle = 'rgba(120,190,255,0.7)';
+                    ctx.beginPath();
+                    ctx.moveTo(tankLeft, tankTop);
+                    ctx.quadraticCurveTo(tankLeft - 30, tankTop + 40, tankLeft - 20, tankTop + 80);
+                    ctx.lineWidth = 8;
+                    ctx.strokeStyle = 'rgba(120,190,255,0.6)';
+                    ctx.stroke();
+                    ctx.lineWidth = 1;
+                }
+
+                // --- Glass viewport highlight ---
+                ctx.fillStyle = 'rgba(255,255,255,0.04)';
+                ctx.fillRect(tankLeft + 10, tankTop + 10, tankWidth - 20, tankHeight - 20);
+                ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(tankLeft + 10, tankTop + 10, tankWidth - 20, tankHeight - 20);
+
+                // --- Inlet pipe (top) ---
+                const pipeInY = tankTop;
+                const pipeInX = tankLeft + tankWidth / 2;
+                ctx.fillStyle = '#5a6d80';
+                ctx.fillRect(pipeInX - 12, pipeInY - 30, 24, 35);
+                ctx.strokeStyle = '#6b7d90';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(pipeInX - 12, pipeInY - 30, 24, 35);
+                // Pipe connector to pump
+                ctx.fillStyle = '#5a6d80';
+                ctx.fillRect(55, pipeInY - 18, pipeInX - 55 + 12, 14);
+                ctx.strokeStyle = '#6b7d90';
+                ctx.strokeRect(55, pipeInY - 18, pipeInX - 55 + 12, 14);
+
+                // --- Pump ---
+                const pumpCX = 58;
+                const pumpCY = pipeInY - 12;
+                const pumpR = 22;
+                const pumpGrad = ctx.createRadialGradient(pumpCX - 4, pumpCY - 4, 3, pumpCX, pumpCY, pumpR);
+                pumpGrad.addColorStop(0, '#f97316');
+                pumpGrad.addColorStop(0.7, '#c2410c');
+                pumpGrad.addColorStop(1, '#7c2d12');
+                ctx.fillStyle = pumpGrad;
+                ctx.beginPath();
+                ctx.arc(pumpCX, pumpCY, pumpR, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#9a3412';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                // Pump impeller (spins when pump is on)
+                if (slave.coils[0] === 1 && slave.holdingRegs[0] > 0) {
+                    const spinSpeed = slave.holdingRegs[0] / 100 * 8;
+                    const impAngle = animTime * spinSpeed;
+                    ctx.fillStyle = '#444';
+                    ctx.beginPath();
+                    ctx.arc(pumpCX, pumpCY, 12, 0, Math.PI * 2);
+                    ctx.fill();
+                    for (let blade = 0; blade < 4; blade++) {
+                        const ba = impAngle + blade * Math.PI / 2;
+                        ctx.fillStyle = '#666';
+                        ctx.beginPath();
+                        ctx.moveTo(pumpCX, pumpCY);
+                        ctx.lineTo(pumpCX + Math.cos(ba) * 12, pumpCY + Math.sin(ba) * 12);
+                        ctx.lineTo(pumpCX + Math.cos(ba + 0.3) * 10, pumpCY + Math.sin(ba + 0.3) * 10);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                } else {
+                    ctx.fillStyle = '#444';
+                    ctx.beginPath();
+                    ctx.arc(pumpCX, pumpCY, 12, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                // Pump label
+                ctx.fillStyle = '#ddd';
+                ctx.font = 'bold 9px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('PUMP', pumpCX, pumpCY - 30);
+                ctx.fillText(slave.holdingRegs[0] + '%', pumpCX, pumpCY + 4);
+                ctx.textAlign = 'start';
+
+                // --- Drain pipe (bottom) ---
+                const drainY = tankBottom;
+                const drainX = tankLeft + tankWidth / 2;
+                ctx.fillStyle = '#5a6d80';
+                ctx.fillRect(drainX - 8, drainY, 16, 25);
+                ctx.strokeStyle = '#6b7d90';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(drainX - 8, drainY, 16, 25);
+
+                // --- Drain valve ---
+                const valveCX = drainX;
+                const valveCY = drainY + 35;
+                const valveR = 15;
+                ctx.fillStyle = slave.coils[1] ? '#22c55e' : '#ef4444';
+                ctx.beginPath();
+                ctx.arc(valveCX, valveCY, valveR, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                // Valve handle
+                const handleAngle = slave.coils[1] ? Math.PI / 4 : -Math.PI / 4;
+                ctx.strokeStyle = '#ddd';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(valveCX - Math.cos(handleAngle) * 10, valveCY - Math.sin(handleAngle) * 10);
+                ctx.lineTo(valveCX + Math.cos(handleAngle) * 10, valveCY + Math.sin(handleAngle) * 10);
+                ctx.stroke();
+                ctx.lineWidth = 1;
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 8px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(slave.coils[1] ? 'OPEN' : 'CLOSED', valveCX, valveCY + 26);
+                ctx.textAlign = 'start';
+
+                // --- Drain outlet ---
+                ctx.fillStyle = '#5a6d80';
+                ctx.fillRect(drainX - 8, valveCY + valveR, 16, 15);
+                ctx.strokeStyle = '#6b7d90';
+                ctx.strokeRect(drainX - 8, valveCY + valveR, 16, 15);
+
+                // --- Water flowing out (if drain open) ---
+                if (slave.coils[1] === 1 && slave.physLevel > 5) {
+                    const flowStrength = Math.min(1, slave.physLevel / 300);
+                    for (let i = 0; i < 5; i++) {
+                        const fx = drainX - 3 + Math.random() * 6;
+                        const fy = valveCY + valveR + 2 + i * 4 + Math.sin(animTime * 10 + i) * 3;
+                        ctx.fillStyle = `rgba(100,180,255,${0.5*flowStrength})`;
+                        ctx.beginPath();
+                        ctx.arc(fx, fy, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                // --- Water flowing in (from pump) ---
+                if (slave.coils[0] === 1 && slave.holdingRegs[0] > 0 && slave.physLevel < 1050) {
+                    const inFlowStrength = slave.holdingRegs[0] / 100;
+                    for (let i = 0; i < 4; i++) {
+                        const ix = pipeInX - 4 + Math.random() * 8;
+                        const iy = pipeInY + 2 + i * 3;
+                        ctx.fillStyle = `rgba(150,210,255,${0.6*inFlowStrength})`;
+                        ctx.beginPath();
+                        ctx.arc(ix, iy, 2.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                ctx.restore(); // remove shake transform
+
+                // --- HMI overlay values ---
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = 'bold 13px monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText('HMI Display', 15, 25);
+                ctx.font = '11px monospace';
+                ctx.fillText('Tank Level: ' + Math.round(slave.physLevel) + ' / 1000', 15, 45);
+                ctx.fillText('Pump Speed: ' + slave.holdingRegs[0] + '%', 15, 62);
+                ctx.fillText('Drain: ' + (slave.coils[1] ? 'OPEN' : 'CLOSED'), 15, 79);
+                ctx.fillText('Flow Rate: ' + Math.round(slave.inputRegs[1]) + ' L/min', 15, 96);
+
+                // Status indicator
+                const statusColor = slave.physLevel >= 1000 ? '#ef4444' : slave.physLevel >= 900 ? '#f59e0b' :
+                    '#22c55e';
+                ctx.fillStyle = statusColor;
+                ctx.beginPath();
+                ctx.arc(15, 115, 7, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#e2e8f0';
+                ctx.fillText(slave.physLevel >= 1000 ? 'CRITICAL' : slave.physLevel >= 900 ? 'WARNING' : 'NOMINAL', 28,
+                    119);
+
+                // --- Update slave input registers to match physics ---
+                slave.inputRegs[0] = Math.round(slave.physLevel);
+                slave.inputRegs[1] = Math.round(slave.physFlowIn);
+                slave.inputRegs[2] = Math.round(25 + slave.physLevel / 40);
+
+                // --- Check consequences ---
+                if (slave.physLevel >= 1000 && !progressState.consequences) {
+                    progressState.consequences = true;
+                    updateProgress();
+                    awardFlag('overflow');
+                    addLogEntry('danger', '💥 CRITICAL: Tank overflow detected! Physical damage imminent!');
+                    statusBadge.textContent = '🔴 CRITICAL ALARM';
+                    statusBadge.className = 'badge';
+                    statusBadge.style.background = '#3b1f1f';
+                    statusBadge.style.color = '#fca5a5';
+                    statusBadge.style.border = '2px solid #ef4444';
+                    canvasContainer.classList.add('alert-flash');
+                    setTimeout(() => canvasContainer.classList.remove('alert-flash'), 600);
+                }
+                if (slave.physLevel <= 15 && slave.coils[1] === 1 && slave.holdingRegs[0] === 0 && !earnedFlags.has(
+                        'drain') && progressState.attacked) {
+                    awardFlag('drain');
+                    addLogEntry('danger', '🛑 Tank drained — pump cavitation risk! DoS attack successful.');
+                }
+
+                updateAlarmIndicator();
+                requestAnimationFrame(drawTank);
+            }
+
+            function updatePhysics(dt) {
+                // Inflow from pump
+                const pumpOn = slave.coils[0] === 1;
+                const pumpSpeed = slave.holdingRegs[0]; // 0-100%
+                const maxInflow = 12; // units per second at 100%
+                const inflow = pumpOn ? (pumpSpeed / 100) * maxInflow : 0;
+                slave.physFlowIn = inflow;
+
+                // Outflow from drain
+                const drainOpen = slave.coils[1] === 1;
+                const maxOutflow = 8; // units per second
+                const outflow = drainOpen ? maxOutflow * Math.min(1, slave.physLevel / 100) : 0;
+                slave.physFlowOut = outflow;
+
+                // Net change
+                const netChange = (inflow - outflow) * dt;
+                slave.physLevel += netChange;
+
+                // Clamp and handle overflow
+                if (slave.physLevel > 1050) {
+                    slave.physLevel = 1050;
+                    slave.overflowActive = true;
+                    slave.tankShake = Math.min(1, slave.tankShake + dt * 3);
+                    // Spawn overflow particles
+                    if (Math.random() < 0.6) {
+                        slave.overflowParticles.push({
+                            x: 170 + Math.random() * 180,
+                            y: 55,
+                            size: 2 + Math.random() * 5,
+                            life: 1,
+                            vx: (Math.random() - 0.5) * 40,
+                            vy: -20 - Math.random() * 40,
+                        });
+                    }
+                } else if (slave.physLevel < 0) {
+                    slave.physLevel = 0;
+                } else if (slave.physLevel < 1000) {
+                    slave.overflowActive = false;
+                }
+
+                // Update overflow particles
+                for (let i = slave.overflowParticles.length - 1; i >= 0; i--) {
+                    const p = slave.overflowParticles[i];
+                    p.life -= dt * 1.5;
+                    p.x += p.vx * dt;
+                    p.y += p.vy * dt;
+                    p.vy += 60 * dt; // gravity
+                    if (p.life <= 0) slave.overflowParticles.splice(i, 1);
+                }
+
+                // Emergency stop check
+                if (slave.coils[2] === 1) {
+                    slave.coils[0] = 0;
+                    slave.holdingRegs[0] = 0;
+                }
+
+                // Update status badge
+                if (slave.physLevel >= 1000) {
+                    statusBadge.textContent = '🔴 CRITICAL ALARM';
+                    statusBadge.style.background = '#3b1f1f';
+                    statusBadge.style.color = '#fca5a5';
+                    statusBadge.style.border = '2px solid #ef4444';
+                    statusBadge.className = 'badge';
+                } else if (slave.physLevel >= 900) {
+                    statusBadge.textContent = '🟠 WARNING';
+                    statusBadge.style.background = '#3b2f1f';
+                    statusBadge.style.color = '#fde68a';
+                    statusBadge.style.border = '2px solid #f59e0b';
+                    statusBadge.className = 'badge';
+                } else if (statusBadge.textContent.includes('CRITICAL') && slave.physLevel < 900) {
+                    statusBadge.textContent = '⚡ SYSTEM ONLINE';
+                    statusBadge.style.background = '#1a3d1a';
+                    statusBadge.style.color = '#4ade80';
+                    statusBadge.style.border = '1px solid #22c55e';
+                    statusBadge.className = 'badge badge-active';
+                }
+
+                // Auto-update input registers
+                slave.inputRegs[0] = Math.round(slave.physLevel);
+                slave.inputRegs[1] = Math.round(slave.physFlowIn);
+                slave.inputRegs[2] = Math.round(25 + slave.physLevel / 40);
+            }
+
+            function interpolateColor(c1, c2, t) {
+                const r1 = parseInt(c1.slice(1, 3), 16);
+                const g1 = parseInt(c1.slice(3, 5), 16);
+                const b1 = parseInt(c1.slice(5, 7), 16);
+                const r2 = parseInt(c2.slice(1, 3), 16);
+                const g2 = parseInt(c2.slice(3, 5), 16);
+                const b2 = parseInt(c2.slice(5, 7), 16);
+                const r = Math.round(r1 + (r2 - r1) * t);
+                const g = Math.round(g1 + (g2 - g1) * t);
+                const b = Math.round(b1 + (b2 - b1) * t);
+                return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+            }
+
+            // --- Initialize ---
+            function init() {
+                updateFCUI();
+                updateProgress();
+                updateAlarmIndicator();
+                addLogEntry('normal', 'System initialized — Normal operation');
+                addLogEntry('normal', 'FC04 Read Input Reg 0 → Level: 500');
+                lastFrameTime = performance.now();
+                requestAnimationFrame(drawTank);
+            }
+
+            // --- Keyboard shortcut for quick attack ---
+            document.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key === 'Enter') {
+                    e.preventDefault();
+                    sendPacket();
+                }
+                if (e.ctrlKey && e.key === 'r') {
+                    e.preventDefault();
+                    document.getElementById('btnRefresh').click();
+                }
+            });
+
+            init();
+            console.log(
+                '%c// EDUCATIONAL PURPOSE ONLY — authorized classroom use%c\n%cICS Security Lab: Modbus TCP Attack & Defense%c\nSandboxed simulation — no network access. All Modbus communication is simulated locally.',
+                'color:#f59e0b;font-weight:bold;', '', 'color:#06b6d4;font-size:1.1em;', '');
+            console.log('%c💡 Tip: Try FC06 write to Holding Reg 0 with value 100, then close drain valve (FC05 to Coil 1 with value 0). Observe the tank overflow!',
+                'color:#94a3b8;');
+            console.log('%c💡 Tip: Press Ctrl+Enter to send packets quickly. Ctrl+R to read level.',
+            'color:#94a3b8;');
+        })();
+    </script>
+</body>
+</html>

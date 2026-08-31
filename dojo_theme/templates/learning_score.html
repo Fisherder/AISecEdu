@@ -9,11 +9,11 @@
         <i class="fas fa-chevron-right" aria-hidden="true"></i>
         <a href="/{{ challenge.dojo.reference_id }}/{{ challenge.module.id }}">{{ challenge.module.name }}</a>
         <i class="fas fa-chevron-right" aria-hidden="true"></i>
-        <span>题目评分</span>
+        <span>学习反馈</span>
       </nav>
-      <p class="learning-score-eyebrow">题目评分</p>
+      <p class="learning-score-eyebrow">本次学习反馈</p>
       <h1 id="learning-score-title">{{ challenge.name }}</h1>
-      <p id="learning-score-meta">正在读取本次作答的评分与证据…</p>
+      <p id="learning-score-meta">正在分别读取活动状态、评分与过程证据…</p>
     </div>
     <div class="learning-score-actions">
       <a id="learning-score-challenge-link" class="btn btn-outline-secondary" href="/{{ challenge.dojo.reference_id }}/{{ challenge.module.id }}/{{ challenge.id }}">
@@ -32,27 +32,27 @@
       <div class="learning-score-total-card">
         <div class="learning-score-ring" id="learning-score-ring">
           <div>
-            <strong id="learning-score-total">0</strong>
-            <span>/ 100</span>
+            <strong id="learning-score-total">—</strong>
+            <span id="learning-score-total-unit">/ 100</span>
           </div>
         </div>
         <div>
           <p class="learning-score-card-label">本次总分</p>
-          <h2 id="learning-score-level">评分已生成</h2>
+          <h2 id="learning-score-level">正在读取评分状态</h2>
           <p id="learning-score-feedback"></p>
         </div>
       </div>
       <div class="learning-score-metric">
         <span class="learning-score-metric-icon is-objective"><i class="fas fa-flag-checkered"></i></span>
-        <div><small>客观结果</small><strong><span id="learning-score-objective">0</span> / 60</strong></div>
+        <div><small>客观结果</small><strong id="learning-score-objective-value"><span id="learning-score-objective">—</span> <span>/ 60</span></strong></div>
       </div>
       <div class="learning-score-metric">
         <span class="learning-score-metric-icon is-process"><i class="fas fa-route"></i></span>
-        <div><small>可信过程</small><strong><span id="learning-score-process">0</span> / 40</strong></div>
+        <div><small>过程表现</small><strong id="learning-score-process-value"><span id="learning-score-process">—</span> <span>/ 40</span></strong></div>
       </div>
       <div class="learning-score-metric">
         <span class="learning-score-metric-icon is-trust"><i class="fas fa-shield-alt"></i></span>
-        <div><small>证据可信度</small><strong id="learning-score-trust">0%</strong></div>
+        <div><small>证据完整性</small><strong id="learning-score-trust">正在读取</strong></div>
       </div>
     </section>
 
@@ -106,6 +106,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-20260726-score-page') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-score.js', v='aisecedu-20260726-score-page') }}"></script>
 {% endblock %}

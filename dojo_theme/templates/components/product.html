@@ -1,0 +1,48 @@
+{% macro page_header(title, eyebrow='', description='', primary_label='', primary_href='', status_domain='', status='') -%}
+<header class="ae-page-header">
+  <div class="ae-page-header-copy">
+    {% if eyebrow %}<p class="ae-page-eyebrow">{{ eyebrow }}</p>{% endif %}
+    <div class="ae-page-title-row">
+      <h1>{{ title }}</h1>
+      {% if status_domain and status %}<span class="ae-status" data-status-domain="{{ status_domain }}" data-status="{{ status }}"></span>{% endif %}
+    </div>
+    {% if description %}<p class="ae-page-description">{{ description }}</p>{% endif %}
+  </div>
+  {% if primary_label and primary_href %}<a class="ae-primary-action" href="{{ primary_href }}">{{ primary_label }}</a>{% endif %}
+</header>
+{%- endmacro %}
+
+{% macro async_boundary(id, state='initial', label='内容区域') -%}
+<section id="{{ id }}" class="ae-async-boundary" data-async-boundary data-async-state="{{ state }}" aria-label="{{ label }}">
+  <div data-async-content>{{ caller() }}</div>
+</section>
+{%- endmacro %}
+
+{% macro status_badge(domain, state, label='') -%}
+<span class="ae-status" data-status-domain="{{ domain }}" data-status="{{ state }}"{% if label %} data-status-label="{{ label }}"{% endif %}></span>
+{%- endmacro %}
+
+{% macro resource_card(title, description='', primary_label='', primary_href='', availability='available', workflow='published') -%}
+<article data-resource-card>
+  <div>
+    <h3 data-resource-title>{{ title }}</h3>
+    {% if description %}<p>{{ description }}</p>{% endif %}
+    <div class="ae-resource-meta"><span data-resource-availability="{{ availability }}"></span><span data-resource-workflow="{{ workflow }}"></span></div>
+  </div>
+  {% if primary_label and primary_href %}<a data-resource-primary href="{{ primary_href }}">{{ primary_label }}</a>{% endif %}
+</article>
+{%- endmacro %}
+
+{% macro batch_progress(requested, created=0, validated=0, failed=0, published=0, label='批次处理进度') -%}
+<section data-batch-progress data-requested="{{ requested }}" data-created="{{ created }}" data-validated="{{ validated }}" data-failed="{{ failed }}" data-published="{{ published }}">
+  <p data-batch-summary role="status" aria-live="polite"></p>
+  <div role="progressbar" aria-label="{{ label }}"><i></i></div>
+</section>
+{%- endmacro %}
+
+{% macro workspace_state(attempt='none', runtime='none', snapshot=false, action_href='') -%}
+<section data-workspace-state data-attempt="{{ attempt }}" data-runtime="{{ runtime }}" data-snapshot="{{ 'true' if snapshot else 'false' }}">
+  <div><span data-workspace-status></span><p data-workspace-message></p></div>
+  {% if action_href %}<a data-workspace-action href="{{ action_href }}"></a>{% else %}<button type="button" data-workspace-action></button>{% endif %}
+</section>
+{%- endmacro %}

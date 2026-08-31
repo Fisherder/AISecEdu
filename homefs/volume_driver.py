@@ -9,7 +9,7 @@ import uuid
 from flask import Blueprint, jsonify, request, g
 from sqlalchemy.exc import IntegrityError
 
-from models import DockerVolumes, db
+from models import ActiveVolumes, DockerVolumes, db
 
 
 STORAGE_HOST = os.environ.get("STORAGE_HOST", "localhost")
@@ -121,11 +121,24 @@ def unmount_volume(name, id):
 @driver_route("Remove")
 def remove_volume(name):
     docker_volume = DockerVolumes.query.filter_by(name=name).first()
+    active_volume = ActiveVolumes.query.filter_by(name=name).first()
     if not docker_volume:
+        if active_volume:
+            db.session.delete(active_volume)
+            db.session.commit()
+            return jsonify({"Err": ""}), 200
         return jsonify({"Err": f"Volume {name} not found"}), 404
 
     if docker_volume.overlay:
         docker_volume.btrfs.remove_overlay(docker_volume.name)
+    else:
+        # A base volume is explicitly being forgotten by Docker. Its
+        # cluster-wide activation record must disappear in the same
+        # transaction; otherwise a later mount can be sent to a host/path
+        # that no longer exists. This also makes synthetic-user cleanup truly
+        # complete instead of growing active_volumes forever.
+        if active_volume:
+            db.session.delete(active_volume)
     # TODO: Restore snapshotting; it has been disabled for performance
     # else:
     #     docker_volume.btrfs.snapshot()

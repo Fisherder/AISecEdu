@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="workspace-empty-page">
+  <section class="workspace-empty-card" aria-labelledby="workspace-empty-title">
+    <span class="workspace-empty-icon" aria-hidden="true"><i class="fas fa-flask"></i></span>
+    <p class="workspace-empty-kicker">实验环境</p>
+    <h1 id="workspace-empty-title">{{ title }}</h1>
+    <p>{{ description }}</p>
+    <div class="workspace-empty-actions">
+      <a class="workspace-empty-primary" href="{{ primary_href }}">{{ primary_label }}<i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+      <a class="workspace-empty-secondary" href="{{ secondary_href }}">{{ secondary_label }}</a>
+    </div>
+    {% if recent_sessions %}
+    <section class="workspace-empty-recent" aria-labelledby="workspace-recent-heading">
+      <div><h2 id="workspace-recent-heading">最近实验</h2><span>只显示你仍有权限访问的内容</span></div>
+      <ul>
+        {% for session in recent_sessions %}
+        <li><a href="{{ session.href }}"><span><strong>{{ session.title }}</strong><small>{{ session.context }} · {{ session.updated.strftime('%m 月 %d 日 %H:%M') }}</small></span><em>{{ session.status }}</em><i class="fas fa-arrow-right" aria-hidden="true"></i></a></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block footer %}{% endblock %}

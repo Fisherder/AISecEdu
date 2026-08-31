@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>BB84 量子密钥分发模拟</title>
+<style>
+  html,body{margin:0;padding:0;background:#0f172a;color:#e2e8f0;font-family:ui-sans-serif,system-ui,"PingFang SC",sans-serif;}
+  .wrap{padding:16px;max-width:760px;margin:0 auto;}
+  h2{font-size:17px;margin:0 0 2px;} p.desc{font-size:12px;color:#94a3b8;margin:0 0 14px;}
+  .progress{display:flex;gap:6px;margin-bottom:14px;}
+  .dot{height:6px;flex:1;background:#334155;border-radius:3px;} .dot.on{background:#3b82f6;}
+  .scene-title{font-size:15px;color:#93c5fd;margin:0 0 6px;}
+  .narr{font-size:13px;line-height:1.6;color:#cbd5e1;margin:0 0 12px;}
+  .visual{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px;margin-bottom:12px;min-height:40px;}
+  .vis-cap{font-size:11px;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;}
+  /* cells */
+  table.cells{border-collapse:collapse;width:100%;} table.cells td,table.cells th{border:1px solid #334155;padding:6px 8px;text-align:center;font-size:13px;font-family:ui-monospace,monospace;}
+  table.cells th{color:#94a3b8;font-weight:600;background:#0f172a;}
+  td.ok{color:#4ade80;} td.bad{color:#f87171;} td.info{color:#fbbf24;}
+  /* bars */
+  .bar-row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12px;}
+  .bar-label{width:120px;color:#cbd5e1;} .bar-track{flex:1;height:14px;background:#0f172a;border-radius:7px;overflow:hidden;}
+  .bar-fill{height:100%;background:#3b82f6;border-radius:7px;} .bar-val{width:40px;color:#93c5fd;font-family:ui-monospace,monospace;}
+  /* flow */
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:12px;}
+  .flow span{background:#334155;padding:4px 10px;border-radius:6px;} .flow .arr{background:transparent;color:#64748b;}
+  /* icons */
+  .icons{display:flex;flex-wrap:wrap;gap:10px;} .icon-item{background:#334155;border-radius:8px;padding:8px 12px;text-align:center;font-size:12px;}
+  .icon-item .e{font-size:22px;display:block;} .icon-item.ok{border:1px solid #4ade80;} .icon-item.bad{border:1px solid #f87171;} .icon-item.warn{border:1px solid #fbbf24;}
+  /* metric */
+  .metric{text-align:center;padding:8px;} .metric b{display:block;font-size:34px;color:#fbbf24;font-family:ui-monospace,monospace;} .metric small{color:#94a3b8;font-size:12px;}
+  .insight{font-size:12px;background:#1e293b;border-left:3px solid #3b82f6;padding:8px 10px;border-radius:0 6px 6px 0;color:#cbd5e1;margin-bottom:12px;}
+  .nav{display:flex;gap:8px;flex-wrap:wrap;}
+  button.navbtn{background:#3b82f6;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;}
+  button.ghost{background:#334155;color:#cbd5e1;}
+</style></head>
+<body><div class="wrap">
+  <h2>🎬 BB84 量子密钥分发模拟</h2>
+  <p class="desc">模拟 BB84 量子密钥分发协议：光子制备、基矢选择、测量、窃听者检测</p>
+  <div class="progress" id="progress"></div>
+  <div id="scene"></div>
+</div>
+<script>
+(function(){
+  var cfg = {"type":"simulation-scenario","title":"BB84 量子密钥分发模拟","description":"模拟 BB84 量子密钥分发协议：光子制备、基矢选择、测量、窃听者检测","startScene":"s1","scenes":[{"id":"s1","title":"BB84 概览","narrative":"BB84 协议是第一个量子密钥分发协议。Alice 将随机比特编码到光子偏振态上发给 Bob，再通过公开比对基矢来检测窃听者 Eve。本模拟将带你走完整个过程。","visual":{"kind":"flow","caption":"BB84 协议流程","steps":["Alice 随机选比特","Alice 随机选基矢","光子制备","量子信道传输","Bob 测量","公开比对基矢","窃听检测"]},"choices":[{"label":"开始模拟","goto":"s2"}],"insight":"量子测量会扰动未知量子态——这是 BB84 能发现窃听的基石。"},{"id":"s2","title":"Alice 制备","narrative":"第一步，Alice 随机生成 8 个比特，并为每个比特随机选择基矢：＋（直线基）或 ×（对角基）。比特与基矢都完全随机，且只有 Alice 事先知道。","visual":{"kind":"cells","caption":"Alice 生成的随机比特与基矢","rows":[{"label":"Alice比特","cells":["1","0","1","1","0","0","1","0"]},{"label":"Alice基矢","cells":["+","×","+","×","×","+","×","+"]}]},"choices":[{"label":"编码并发送光子","goto":"s3"}],"insight":"比特与基矢都随机选取，且只有 Alice 事先知道全部信息。"},{"id":"s3","title":"光子编码","narrative":"Alice 按规则编码：＋基中 0→↕、1→↔；×基中 0→⤢、1→⤡。她把 8 个光子依次发往 Bob。","visual":{"kind":"cells","caption":"编码规则：＋基 0→↕、1→↔；×基 0→⤢、1→⤡","rows":[{"label":"光子态","cells":["↔","⤢","↔","⤡","⤢","↕","⤡","↕"]}]},"choices":[{"label":"让 Eve 拦截光子","goto":"s4"}],"insight":"只看单光子无法区分比特，因为必须知道基矢才能正确解读。"},{"id":"s4","title":"Eve 窃听","narrative":"Eve 在量子信道中拦截光子并测量，然后按自己的测量结果重发光子。她不知道 Alice 的基矢，只能随机猜测。猜错基矢时会扰动光子状态。你猜，Eve 的窃听会留下痕迹吗？","visual":{"kind":"cells","caption":"Eve 随机基矢测量并重发光子","rows":[{"label":"Alice光子","cells":["↔","⤢","↔","⤡","⤢","↕","⤡","↕"]},{"label":"Eve基矢","cells":["×","+","+","×","×","+","×","×"]},{"label":"Eve重发","cells":["⤡","↔","↔","⤡","⤢","↕","⤡","⤢"]},{"label":"状态改变","cells":["是","是","否","否","否","否","否","是"]}]},"choices":[{"label":"不会，量子态可完美复制","goto":"s4a"},{"label":"会，测量必然扰动未知态","goto":"s5"}],"insight":"Eve 猜错基矢的位置，光子状态就发生改变。"},{"id":"s4a","title":"不可克隆定理","narrative":"量子不可克隆定理指出：未知量子态不能被完美复制。Eve 若想确认光子状态，必须测量；一旦测错基矢，重发光子就可能与原光子不同。所以 Eve 无法完全隐藏自己的窃听行为。","visual":{"kind":"flow","caption":"为什么 Eve 不能无痕窃听","steps":["Eve 随机选基矢","测量未知光子态","扰动部分光子","重发光子 ≠ 原光子"]},"choices":[{"label":"继续，Bob 开始测量","goto":"s5"}],"insight":"不可克隆定理：未知量子态无法被完美复制，窃听必留痕迹。"},{"id":"s5","title":"Bob 测量","narrative":"Bob 并不知道 Alice 的基矢，因此也用随机基矢逐一测量收到的光子。基矢一致时结果确定，基矢不一致时结果随机。","visual":{"kind":"cells","caption":"Bob 用随机基矢测量收到的光子","rows":[{"label":"收到光子","cells":["⤡","↔","↔","⤡","⤢","↕","⤡","⤢"]},{"label":"Bob基矢","cells":["+","×","+","×","×","×","+","+"]},{"label":"Bob比特","cells":["1","1","1","1","0","0","0","1"]}]},"choices":[{"label":"比对基矢","goto":"s6"}],"insight":"Bob 的测量结果可能因基矢不匹配而随机偏离 Alice 的比特。"},{"id":"s6","title":"基矢比对","narrative":"Alice 和 Bob 通过公开信道公布各自的基矢序列。保留基矢一致的位置上的比特，丢弃其余位置，得到筛后密钥。","visual":{"kind":"cells","caption":"仅保留基矢一致的位置 1–5","rows":[{"label":"Alice基矢","cells":["+","×","+","×","×","+","×","+"]},{"label":"Bob基矢","cells":["+","×","+","×","×","×","+","+"]},{"label":"基矢一致","cells":["✓","✓","✓","✓","✓","✗","✗","✗"]},{"label":"Alice保留","cells":["1","0","1","1","0","─","─","─"]},{"label":"Bob保留","cells":["1","1","1","1","0","─","─","─"]},{"label":"比对结果","cells":["✓","✗","✓","✓","✓","─","─","─"]}]},"choices":[{"label":"检测窃听者","goto":"s7"}],"insight":"基矢一致是必要条件，但一致不代表比特一定正确——还需后续检测错误率。"},{"id":"s7","title":"窃听检测","narrative":"Alice 和 Bob 随机抽取部分筛后比特公开比对。若错误率超过 11% 的阈值，则可断定信道中存在窃听，密钥必须废弃。","visual":{"kind":"bars","caption":"筛后密钥公开比对：错误率 20%，超过阈值 11%","items":[{"label":"一致","value":0.8,"color":"#4CAF50"},{"label":"错误","value":0.2,"color":"#F44336"}]},"insight":"错误率超过阈值，密钥作废——Eve 的存在已经暴露；统计必然性让窃听无处遁形。"}]};
+  var byId = {}; cfg.scenes.forEach(function(s){ byId[s.id] = s; });
+  var order = cfg.scenes.map(function(s){return s.id;});
+  var cur = cfg.startScene || order[0];
+  var hist = [];
+  function toneClass(t){ return t==='ok'?'ok':t==='bad'?'bad':t==='warn'?'bad':t==='info'?'info':''; }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function renderVisual(v){
+    if(!v || typeof v!=='object') return '';
+    var k = v.kind, cap = v.caption ? '<div class="vis-cap">'+esc(v.caption)+'</div>' : '';
+    if(k==='cells' && Array.isArray(v.rows)){
+      var rows = v.rows.map(function(r){
+        var cells = (r.cells||[]).map(function(c){ var m=String(c); var cls = m==='✓'?'ok':m==='✗'?'bad':(m.indexOf?('⚠')>-1?'info':'') ; return '<td class="'+cls+'">'+esc(c)+'</td>'; }).join('');
+        return '<tr><th>'+esc(r.label)+'</th>'+cells+'</tr>';
+      }).join('');
+      return cap+'<table class="cells">'+rows+'</table>';
+    }
+    if(k==='bars' && Array.isArray(v.items)){
+      var bars = v.items.map(function(it){ var val = Math.max(0,Math.min(1,Number(it.value||0))); return '<div class="bar-row"><span class="bar-label">'+esc(it.label)+'</span><span class="bar-track"><span class="bar-fill" style="width:'+Math.round(val*100)+'%;background:'+(it.color||'#3b82f6')+'"></span></span><span class="bar-val">'+(Math.round(val*100))+'%</span></div>'; }).join('');
+      return cap+'<div>'+bars+'</div>';
+    }
+    if(k==='flow' && Array.isArray(v.steps)){
+      var f = v.steps.map(function(s,i){ return '<span>'+esc(s)+'</span>'+(i<v.steps.length-1?'<span class="arr">→</span>':''); }).join('');
+      return cap+'<div class="flow">'+f+'</div>';
+    }
+    if(k==='icons' && Array.isArray(v.items)){
+      var ic = v.items.map(function(it){ return '<div class="icon-item '+toneClass(it.tone)+'"><span class="e">'+esc(it.icon)+'</span>'+esc(it.label)+'</div>'; }).join('');
+      return cap+'<div class="icons">'+ic+'</div>';
+    }
+    if(k==='metric'){
+      return cap+'<div class="metric"><b>'+esc(v.value)+'</b>'+(v.unit?'<small>'+esc(v.unit)+'</small>':'')+'</div>';
+    }
+    return cap+'<div style="font-size:13px;color:#94a3b8;">'+esc(JSON.stringify(v))+'</div>';
+  }
+  function render(){
+    var s = byId[cur]; if(!s){ document.getElementById('scene').textContent='场景缺失'; return; }
+    var idx = order.indexOf(cur);
+    document.getElementById('progress').innerHTML = order.map(function(id,i){ return '<div class="dot'+(i<=idx?' on':'')+'"></div>'; }).join('');
+    var choices = (s.choices && s.choices.length) ? s.choices.map(function(c){ return '<button class="navbtn" data-goto="'+esc(c.goto)+'">'+esc(c.label)+'</button>'; }).join('') : '';
+    var nextLinear = (!choices && idx < order.length-1);
+    var html = '<p class="scene-title">'+esc(s.title)+'</p>'
+      + '<p class="narr">'+esc(s.narrative)+'</p>'
+      + (s.visual?'<div class="visual">'+renderVisual(s.visual)+'</div>':'')
+      + (s.insight?'<div class="insight">💡 '+esc(s.insight)+'</div>':'')
+      + '<div class="nav">'
+      + (hist.length?'<button class="navbtn ghost" id="back">← 上一步</button>':'')
+      + choices
+      + (nextLinear?'<button class="navbtn" id="next">下一步 →</button>':'')
+      + '</div>';
+    document.getElementById('scene').innerHTML = html;
+    if(document.getElementById('back')) document.getElementById('back').onclick=function(){ cur = hist.pop(); render(); };
+    if(document.getElementById('next')) document.getElementById('next').onclick=function(){ hist.push(cur); cur = order[idx+1]; render(); };
+    Array.prototype.forEach.call(document.querySelectorAll('[data-goto]'), function(b){ b.onclick=function(){ hist.push(cur); cur = b.getAttribute('data-goto'); render(); }; });
+  }
+  render();
+})();
+</script>
+<script type="application/json" id="widget-config">{"type":"simulation-scenario","title":"BB84 量子密钥分发模拟","description":"模拟 BB84 量子密钥分发协议：光子制备、基矢选择、测量、窃听者检测","startScene":"s1","scenes":[{"id":"s1","title":"BB84 概览","narrative":"BB84 协议是第一个量子密钥分发协议。Alice 将随机比特编码到光子偏振态上发给 Bob，再通过公开比对基矢来检测窃听者 Eve。本模拟将带你走完整个过程。","visual":{"kind":"flow","caption":"BB84 协议流程","steps":["Alice 随机选比特","Alice 随机选基矢","光子制备","量子信道传输","Bob 测量","公开比对基矢","窃听检测"]},"choices":[{"label":"开始模拟","goto":"s2"}],"insight":"量子测量会扰动未知量子态——这是 BB84 能发现窃听的基石。"},{"id":"s2","title":"Alice 制备","narrative":"第一步，Alice 随机生成 8 个比特，并为每个比特随机选择基矢：＋（直线基）或 ×（对角基）。比特与基矢都完全随机，且只有 Alice 事先知道。","visual":{"kind":"cells","caption":"Alice 生成的随机比特与基矢","rows":[{"label":"Alice比特","cells":["1","0","1","1","0","0","1","0"]},{"label":"Alice基矢","cells":["+","×","+","×","×","+","×","+"]}]},"choices":[{"label":"编码并发送光子","goto":"s3"}],"insight":"比特与基矢都随机选取，且只有 Alice 事先知道全部信息。"},{"id":"s3","title":"光子编码","narrative":"Alice 按规则编码：＋基中 0→↕、1→↔；×基中 0→⤢、1→⤡。她把 8 个光子依次发往 Bob。","visual":{"kind":"cells","caption":"编码规则：＋基 0→↕、1→↔；×基 0→⤢、1→⤡","rows":[{"label":"光子态","cells":["↔","⤢","↔","⤡","⤢","↕","⤡","↕"]}]},"choices":[{"label":"让 Eve 拦截光子","goto":"s4"}],"insight":"只看单光子无法区分比特，因为必须知道基矢才能正确解读。"},{"id":"s4","title":"Eve 窃听","narrative":"Eve 在量子信道中拦截光子并测量，然后按自己的测量结果重发光子。她不知道 Alice 的基矢，只能随机猜测。猜错基矢时会扰动光子状态。你猜，Eve 的窃听会留下痕迹吗？","visual":{"kind":"cells","caption":"Eve 随机基矢测量并重发光子","rows":[{"label":"Alice光子","cells":["↔","⤢","↔","⤡","⤢","↕","⤡","↕"]},{"label":"Eve基矢","cells":["×","+","+","×","×","+","×","×"]},{"label":"Eve重发","cells":["⤡","↔","↔","⤡","⤢","↕","⤡","⤢"]},{"label":"状态改变","cells":["是","是","否","否","否","否","否","是"]}]},"choices":[{"label":"不会，量子态可完美复制","goto":"s4a"},{"label":"会，测量必然扰动未知态","goto":"s5"}],"insight":"Eve 猜错基矢的位置，光子状态就发生改变。"},{"id":"s4a","title":"不可克隆定理","narrative":"量子不可克隆定理指出：未知量子态不能被完美复制。Eve 若想确认光子状态，必须测量；一旦测错基矢，重发光子就可能与原光子不同。所以 Eve 无法完全隐藏自己的窃听行为。","visual":{"kind":"flow","caption":"为什么 Eve 不能无痕窃听","steps":["Eve 随机选基矢","测量未知光子态","扰动部分光子","重发光子 ≠ 原光子"]},"choices":[{"label":"继续，Bob 开始测量","goto":"s5"}],"insight":"不可克隆定理：未知量子态无法被完美复制，窃听必留痕迹。"},{"id":"s5","title":"Bob 测量","narrative":"Bob 并不知道 Alice 的基矢，因此也用随机基矢逐一测量收到的光子。基矢一致时结果确定，基矢不一致时结果随机。","visual":{"kind":"cells","caption":"Bob 用随机基矢测量收到的光子","rows":[{"label":"收到光子","cells":["⤡","↔","↔","⤡","⤢","↕","⤡","⤢"]},{"label":"Bob基矢","cells":["+","×","+","×","×","×","+","+"]},{"label":"Bob比特","cells":["1","1","1","1","0","0","0","1"]}]},"choices":[{"label":"比对基矢","goto":"s6"}],"insight":"Bob 的测量结果可能因基矢不匹配而随机偏离 Alice 的比特。"},{"id":"s6","title":"基矢比对","narrative":"Alice 和 Bob 通过公开信道公布各自的基矢序列。保留基矢一致的位置上的比特，丢弃其余位置，得到筛后密钥。","visual":{"kind":"cells","caption":"仅保留基矢一致的位置 1–5","rows":[{"label":"Alice基矢","cells":["+","×","+","×","×","+","×","+"]},{"label":"Bob基矢","cells":["+","×","+","×","×","×","+","+"]},{"label":"基矢一致","cells":["✓","✓","✓","✓","✓","✗","✗","✗"]},{"label":"Alice保留","cells":["1","0","1","1","0","─","─","─"]},{"label":"Bob保留","cells":["1","1","1","1","0","─","─","─"]},{"label":"比对结果","cells":["✓","✗","✓","✓","✓","─","─","─"]}]},"choices":[{"label":"检测窃听者","goto":"s7"}],"insight":"基矢一致是必要条件，但一致不代表比特一定正确——还需后续检测错误率。"},{"id":"s7","title":"窃听检测","narrative":"Alice 和 Bob 随机抽取部分筛后比特公开比对。若错误率超过 11% 的阈值，则可断定信道中存在窃听，密钥必须废弃。","visual":{"kind":"bars","caption":"筛后密钥公开比对：错误率 20%，超过阈值 11%","items":[{"label":"一致","value":0.8,"color":"#4CAF50"},{"label":"错误","value":0.2,"color":"#F44336"}]},"insight":"错误率超过阈值，密钥作废——Eve 的存在已经暴露；统计必然性让窃听无处遁形。"}]}</script>
+</body></html>

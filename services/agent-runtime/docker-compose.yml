@@ -1,0 +1,8 @@
+# This vendored capability engine is not a standalone 玄甲 product.
+#
+# Run it only through the repository-root docker-compose.yml, which supplies
+# 玄甲 identity, scoped service credentials, authoritative storage, and the
+# /agent-runtime internal route.  Keeping an independently bootable stack here
+# would recreate the duplicate application boundary removed by the global-Agent
+# migration.
+services: {}

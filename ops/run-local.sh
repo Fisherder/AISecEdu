@@ -6,7 +6,11 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$repo_dir/ops/load-deployment-env.sh"
 
 container=${DOJO_CONTAINER:-pwncollege-dojo}
-default_image="pwncollege/dojo:local-$(git -C "$repo_dir" rev-parse --short=8 HEAD)"
+source_revision=release
+if [[ -e $repo_dir/.git ]]; then
+    source_revision=$(git -C "$repo_dir" rev-parse --short=8 HEAD)
+fi
+default_image="pwncollege/dojo:local-$source_revision"
 if [[ -f "$repo_dir/cache/local-image" ]]; then
     default_image=$(<"$repo_dir/cache/local-image")
 fi
@@ -17,6 +21,7 @@ http_port=${DOJO_HTTP_PORT:-80}
 https_port=${DOJO_HTTPS_PORT:-443}
 ssh_port=${DOJO_SSH_PORT:-2223}
 workspace_https_port=${WORKSPACE_HTTPS_PORT:-4443}
+shm_size=${DOJO_SHM_SIZE:-230g}
 dojo_host=${DOJO_HOST:-localhost.pwn.college}
 workspace_host=${WORKSPACE_HOST:-workspace.localhost.pwn.college}
 future_host=${FUTURE_HOST-}
@@ -40,6 +45,10 @@ if [[ $workspace_https_port == "$https_port" ]]; then
     echo "WORKSPACE_HTTPS_PORT must differ from DOJO_HTTPS_PORT in IP mode" >&2
     exit 1
 fi
+if [[ ! $shm_size =~ ^[1-9][0-9]*[kKmMgGtTpP]$ ]]; then
+    echo "DOJO_SHM_SIZE must be a positive Docker memory size such as 230g: $shm_size" >&2
+    exit 1
+fi
 deployment_hosts=("$dojo_host" "$workspace_host")
 if [[ -n $future_host ]]; then
     deployment_hosts+=("$future_host")
@@ -56,7 +65,8 @@ for source_path in \
     "$repo_dir/dojo_plugin" \
     "$repo_dir/dojo_theme" \
     "$repo_dir/nginx" \
-    "$repo_dir/ops"; do
+    "$repo_dir/ops" \
+    "$repo_dir/services/agent-runtime"; do
     if [[ ! -r $source_path ]]; then
         echo "Deployment source is not readable: $source_path" >&2
         exit 1
@@ -114,14 +124,14 @@ if [[ -n ${DOJO_PROXY_URL:-} ]]; then
         -e "HTTPS_PROXY=$DOJO_PROXY_URL"
         -e "http_proxy=$DOJO_PROXY_URL"
         -e "https_proxy=$DOJO_PROXY_URL"
-        -e "NO_PROXY=localhost,127.0.0.1,::1,.local,db,cache,ctfd,nginx,sshd,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-        -e "no_proxy=localhost,127.0.0.1,::1,.local,db,cache,ctfd,nginx,sshd,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+        -e "NO_PROXY=localhost,127.0.0.1,::1,.local,db,cache,ctfd,nginx,agent-runtime,sshd,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+        -e "no_proxy=localhost,127.0.0.1,::1,.local,db,cache,ctfd,nginx,agent-runtime,sshd,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
     )
     printf '%s\n' \
         '[Service]' \
         "Environment=\"HTTP_PROXY=$DOJO_PROXY_URL\"" \
         "Environment=\"HTTPS_PROXY=$DOJO_PROXY_URL\"" \
-        'Environment="NO_PROXY=localhost,127.0.0.1,::1,.local,db,cache,ctfd,nginx,sshd,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"' \
+        'Environment="NO_PROXY=localhost,127.0.0.1,::1,.local,db,cache,ctfd,nginx,agent-runtime,sshd,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"' \
         > "$repo_dir/cache/docker-proxy.conf"
     proxy_mount_args=(-v "$repo_dir/cache/docker-proxy.conf:/etc/systemd/system/docker.service.d/proxy.conf:ro")
 fi
@@ -130,6 +140,7 @@ docker run \
     --name "$container" \
     --restart unless-stopped \
     --privileged \
+    --shm-size "$shm_size" \
     --label "local.pwncollege.listen-address=$listen_address" \
     --label "local.pwncollege.dojo-host=$dojo_host" \
     --label "local.pwncollege.workspace-host=$workspace_host" \
@@ -149,4 +160,5 @@ docker run \
 
 echo "HTTPS: https://$dojo_host:$https_port"
 echo "Workspace: https://$workspace_host:$workspace_https_port"
+echo "全局智能体: https://$dojo_host:$https_port/teacher"
 echo "SSH:   $listen_address:$ssh_port"

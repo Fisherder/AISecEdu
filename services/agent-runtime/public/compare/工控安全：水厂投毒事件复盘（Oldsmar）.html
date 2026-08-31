@@ -1,0 +1,1498 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工控安全实验：Oldsmar 水厂投毒事件复盘 | ICS/SCADA 安全</title>
+    <style>
+        :root {
+            --bg: #0a0f14;
+            --panel: #111827;
+            --border: #1e293b;
+            --text: #cbd5e1;
+            --text-bright: #e2e8f0;
+            --green: #22c55e;
+            --green-glow: #16a34a;
+            --red: #ef4444;
+            --red-glow: #dc2626;
+            --amber: #f59e0b;
+            --amber-glow: #d97706;
+            --blue: #3b82f6;
+            --blue-glow: #2563eb;
+            --cyan: #06b6d4;
+            --purple: #a855f7;
+            --mono: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+            --sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            --radius: 8px;
+            --radius-sm: 4px;
+            --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            min-height: 100vh;
+            overflow-x: hidden;
+            line-height: 1.5;
+        }
+        .top-bar {
+            background: #0d1520;
+            border-bottom: 2px solid var(--border);
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .top-bar .title {
+            font-weight: 700;
+            font-size: 1.05rem;
+            color: var(--text-bright);
+            letter-spacing: 0.02em;
+        }
+        .top-bar .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .badge-scada {
+            background: #1e293b;
+            color: var(--cyan);
+            border: 1px solid var(--cyan);
+        }
+        .badge-active {
+            background: #1a2e1a;
+            color: var(--green);
+            border: 1px solid var(--green);
+            animation: pulse-badge 2s infinite;
+        }
+        .badge-critical {
+            background: #2e1a1a;
+            color: var(--red);
+            border: 1px solid var(--red);
+            animation: pulse-badge 0.6s infinite;
+        }
+        @keyframes pulse-badge {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.55;
+            }
+        }
+        .progress-strip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .progress-step {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #1e293b;
+            border: 2px solid #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: #64748b;
+            transition: var(--transition);
+        }
+        .progress-step.done {
+            background: #1a3a1a;
+            border-color: var(--green);
+            color: var(--green);
+        }
+        .progress-step.current {
+            background: #1a2a3a;
+            border-color: var(--blue);
+            color: var(--blue);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+            animation: pulse-step 1.5s infinite;
+        }
+        @keyframes pulse-step {
+            0%,
+            100% {
+                box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 20px rgba(59, 130, 246, 0.7);
+            }
+        }
+        .progress-connector {
+            width: 16px;
+            height: 2px;
+            background: #334155;
+            border-radius: 1px;
+        }
+        .progress-connector.done {
+            background: var(--green);
+        }
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            grid-template-rows: auto auto;
+            gap: 14px;
+            padding: 14px 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+            min-height: calc(100vh - 120px);
+        }
+        @media (max-width: 1024px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto;
+            }
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            position: relative;
+        }
+        .panel-header {
+            font-weight: 700;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #94a3b8;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel-header .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot-green {
+            background: var(--green);
+            box-shadow: 0 0 6px var(--green-glow);
+        }
+        .dot-red {
+            background: var(--red);
+            box-shadow: 0 0 6px var(--red-glow);
+            animation: blink-dot 0.5s infinite;
+        }
+        .dot-amber {
+            background: var(--amber);
+            box-shadow: 0 0 6px var(--amber-glow);
+            animation: blink-dot 0.8s infinite;
+        }
+        @keyframes blink-dot {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.25;
+            }
+        }
+        .hmi-area {
+            grid-column: 1;
+            grid-row: 1 / 3;
+        }
+        .side-panel {
+            grid-column: 2;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        @media (max-width: 1024px) {
+            .hmi-area {
+                grid-column: 1;
+                grid-row: 1;
+            }
+            .side-panel {
+                grid-column: 1;
+                grid-row: auto;
+            }
+        }
+        .pipeline-flow {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            flex-wrap: wrap;
+            padding: 10px 0;
+            position: relative;
+        }
+        .pipe-node {
+            padding: 12px 16px;
+            border-radius: var(--radius);
+            text-align: center;
+            font-size: 0.78rem;
+            font-weight: 600;
+            position: relative;
+            z-index: 1;
+            min-width: 70px;
+            transition: var(--transition);
+            cursor: default;
+        }
+        .pipe-node.tank {
+            background: #1e293b;
+            border: 2px solid #334155;
+            color: #94a3b8;
+            min-width: 90px;
+            min-height: 80px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+        }
+        .pipe-node.injection {
+            background: #1a1a2e;
+            border: 2px solid var(--amber);
+            color: var(--amber);
+            cursor: pointer;
+            position: relative;
+            animation: pulse-injection 2s infinite;
+        }
+        .pipe-node.injection.critical {
+            border-color: var(--red);
+            color: var(--red);
+            animation: pulse-injection-critical 0.5s infinite;
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+        }
+        @keyframes pulse-injection {
+            0%,
+            100% {
+                box-shadow: 0 0 4px rgba(245, 158, 11, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 14px rgba(245, 158, 11, 0.6);
+            }
+        }
+        @keyframes pulse-injection-critical {
+            0%,
+            100% {
+                box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+            }
+            50% {
+                box-shadow: 0 0 24px rgba(239, 68, 68, 0.9);
+            }
+        }
+        .pipe-connector {
+            width: 40px;
+            height: 4px;
+            background: #334155;
+            border-radius: 2px;
+            position: relative;
+            z-index: 0;
+            flex-shrink: 0;
+        }
+        .pipe-connector.flowing {
+            background: var(--blue);
+            animation: flow-pipe 0.8s infinite linear;
+            background-size: 8px 4px;
+            background-image: repeating-linear-gradient(90deg, var(--blue) 0px, var(--blue) 6px, #1e3a5f 6px, #1e3a5f 8px);
+        }
+        @keyframes flow-pipe {
+            0% {
+                background-position: 0 0;
+            }
+            100% {
+                background-position: 8px 0;
+            }
+        }
+        .gauge-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            margin: 10px 0;
+        }
+        .gauge-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #94a3b8;
+        }
+        .gauge-bar-outer {
+            width: 100%;
+            max-width: 320px;
+            height: 28px;
+            background: #1e293b;
+            border-radius: 14px;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid #334155;
+        }
+        .gauge-bar-inner {
+            height: 100%;
+            border-radius: 14px;
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), background 0.6s;
+            position: relative;
+        }
+        .gauge-bar-inner.safe {
+            background: linear-gradient(90deg, #166534, #22c55e);
+        }
+        .gauge-bar-inner.warning {
+            background: linear-gradient(90deg, #92400e, #f59e0b);
+        }
+        .gauge-bar-inner.danger {
+            background: linear-gradient(90deg, #7f1d1d, #ef4444);
+            animation: bar-flash 0.4s infinite;
+        }
+        @keyframes bar-flash {
+            0%,
+            100% {
+                filter: brightness(1);
+            }
+            50% {
+                filter: brightness(1.4);
+            }
+        }
+        .gauge-value {
+            font-family: var(--mono);
+            font-size: 1.6rem;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+        }
+        .gauge-value.safe {
+            color: var(--green);
+        }
+        .gauge-value.danger {
+            color: var(--red);
+            animation: text-flash 0.5s infinite;
+        }
+        @keyframes text-flash {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.4;
+            }
+        }
+        .zone-markers {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            max-width: 320px;
+            font-size: 0.6rem;
+            color: #64748b;
+            font-family: var(--mono);
+        }
+        .btn {
+            padding: 10px 18px;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: none;
+            letter-spacing: 0.03em;
+            transition: var(--transition);
+            font-family: var(--sans);
+            position: relative;
+            overflow: hidden;
+        }
+        .btn:active {
+            transform: scale(0.96);
+        }
+        .btn-primary {
+            background: var(--blue);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: var(--blue-glow);
+            box-shadow: 0 0 16px rgba(59, 130, 246, 0.5);
+        }
+        .btn-danger {
+            background: var(--red);
+            color: #fff;
+            animation: pulse-btn-danger 1.5s infinite;
+        }
+        @keyframes pulse-btn-danger {
+            0%,
+            100% {
+                box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 22px rgba(239, 68, 68, 0.8);
+            }
+        }
+        .btn-danger:hover {
+            background: var(--red-glow);
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.7);
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid #475569;
+            color: #cbd5e1;
+        }
+        .btn-outline:hover {
+            border-color: #94a3b8;
+            background: #1e293b;
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .alert-banner {
+            padding: 12px 16px;
+            border-radius: var(--radius);
+            font-weight: 600;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            animation: slide-in 0.4s ease-out;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .alert-banner.critical {
+            background: #2e1a1a;
+            border: 2px solid var(--red);
+            color: #fca5a5;
+            animation: slide-in 0.4s ease-out, alert-shake 0.3s ease-in-out 3;
+        }
+        @keyframes slide-in {
+            from {
+                transform: translateX(40px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        @keyframes alert-shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            25% {
+                transform: translateX(-6px);
+            }
+            75% {
+                transform: translateX(6px);
+            }
+        }
+        .alert-banner:hover {
+            filter: brightness(1.2);
+        }
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--mono);
+            font-size: 0.75rem;
+        }
+        .log-table th {
+            text-align: left;
+            padding: 6px 8px;
+            color: #94a3b8;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border);
+        }
+        .log-table td {
+            padding: 7px 8px;
+            border-bottom: 1px solid #1a2230;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .log-table tr:hover td {
+            background: #1a2230;
+        }
+        .log-table tr.suspicious td {
+            background: #2e1a0a;
+            border-left: 3px solid var(--amber);
+        }
+        .log-table tr.tagged td {
+            background: #1a2a1a !important;
+            border-left: 3px solid var(--green) !important;
+        }
+        .log-table tr.critical-row td {
+            background: #2e1a1a !important;
+            border-left: 3px solid var(--red) !important;
+            animation: row-pulse 1s infinite;
+        }
+        @keyframes row-pulse {
+            0%,
+            100% {
+                background: #2e1a1a !important;
+            }
+            50% {
+                background: #3e1a1a !important;
+            }
+        }
+        .countdown-display {
+            font-family: var(--mono);
+            font-size: 2.8rem;
+            font-weight: 700;
+            text-align: center;
+            letter-spacing: 0.06em;
+        }
+        .countdown-display.urgent {
+            color: var(--red);
+            animation: text-flash 0.6s infinite;
+        }
+        .countdown-display.warning-count {
+            color: var(--amber);
+        }
+        .countdown-display.safe-count {
+            color: var(--green);
+        }
+        .input-field {
+            background: #0d1520;
+            border: 2px solid #334155;
+            color: var(--text-bright);
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-family: var(--mono);
+            font-size: 0.9rem;
+            width: 100%;
+            transition: var(--transition);
+            letter-spacing: 0.03em;
+        }
+        .input-field:focus {
+            outline: none;
+            border-color: var(--blue);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.3);
+        }
+        .input-field.correct {
+            border-color: var(--green) !important;
+            box-shadow: 0 0 12px rgba(34, 197, 94, 0.4) !important;
+            background: #0a1a0a !important;
+        }
+        .input-field.wrong {
+            border-color: var(--red) !important;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.4) !important;
+            animation: shake-input 0.4s ease;
+        }
+        @keyframes shake-input {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            25% {
+                transform: translateX(-4px);
+            }
+            75% {
+                transform: translateX(4px);
+            }
+        }
+        .flag-reveal {
+            background: #1a1a0a;
+            border: 2px solid var(--amber);
+            padding: 20px;
+            border-radius: var(--radius);
+            text-align: center;
+            font-family: var(--mono);
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--amber);
+            animation: flag-glow 1s infinite alternate;
+            letter-spacing: 0.04em;
+        }
+        @keyframes flag-glow {
+            0% {
+                box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+            }
+            100% {
+                box-shadow: 0 0 30px rgba(245, 158, 11, 0.8);
+            }
+        }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fade-in 0.25s ease;
+        }
+        @keyframes fade-in {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+        .modal-box {
+            background: var(--panel);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 520px;
+            width: 90%;
+            animation: modal-pop 0.3s ease;
+        }
+        @keyframes modal-pop {
+            from {
+                transform: scale(0.9);
+                opacity: 0;
+            }
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+        .modal-box h3 {
+            margin-bottom: 12px;
+            font-size: 1.1rem;
+        }
+        .tooltip {
+            position: relative;
+            cursor: help;
+            border-bottom: 1px dotted #94a3b8;
+        }
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 300;
+            padding: 12px 18px;
+            border-radius: var(--radius);
+            font-weight: 600;
+            font-size: 0.85rem;
+            animation: slide-in 0.3s ease, fade-out 0.5s 2.5s forwards;
+            max-width: 400px;
+        }
+        @keyframes fade-out {
+            to {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+        }
+        .toast-success {
+            background: #1a3a1a;
+            border: 1px solid var(--green);
+            color: #bbf7d0;
+        }
+        .toast-error {
+            background: #2e1a1a;
+            border: 1px solid var(--red);
+            color: #fca5a5;
+        }
+        details.analysis-section {
+            margin-top: 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        details.analysis-section summary {
+            padding: 12px 16px;
+            cursor: pointer;
+            font-weight: 600;
+            background: #1a2230;
+            color: var(--blue);
+            letter-spacing: 0.03em;
+            transition: var(--transition);
+        }
+        details.analysis-section summary:hover {
+            background: #1e2a3a;
+        }
+        details.analysis-section .analysis-body {
+            padding: 16px;
+            background: #0d1520;
+            font-size: 0.85rem;
+            line-height: 1.7;
+        }
+        .highlight-box {
+            background: #1a2230;
+            border-left: 3px solid var(--blue);
+            padding: 10px 14px;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin: 8px 0;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 顶部状态栏 -->
+    <div class="top-bar">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <span class="title">🏭 Oldsmar 水处理厂 — SCADA 操作站</span>
+            <span class="badge badge-scada">ICS/SCADA</span>
+            <span id="statusBadge" class="badge badge-active">正常运行</span>
+        </div>
+        <div class="progress-strip" id="progressStrip">
+            <span class="progress-step done" title="任务简报">1</span><span class="progress-connector done"></span>
+            <span class="progress-step current" title="监控检测">2</span><span class="progress-connector"></span>
+            <span class="progress-step" title="应急响应">3</span><span class="progress-connector"></span>
+            <span class="progress-step" title="验证恢复">4</span><span class="progress-connector"></span>
+            <span class="progress-step" title="审计溯源">5</span>
+        </div>
+    </div>
+
+    <!-- 主布局 -->
+    <div class="main-grid">
+        <!-- HMI 区域 -->
+        <div class="panel hmi-area" id="hmiPanel">
+            <div class="panel-header">
+                <span class="dot dot-green" id="hmiStatusDot"></span> HMI — 水处理流程监控
+                <span style="margin-left:auto;font-size:0.7rem;color:#64748b;" id="hmiTime">2021-02-05 08:17:32</span>
+            </div>
+            <!-- 管道流程图 -->
+            <div class="pipeline-flow" id="pipelineFlow">
+                <div class="pipe-node tank">💧<br>原水<br>进水</div>
+                <div class="pipe-connector flowing"></div>
+                <div class="pipe-node tank">⚙️<br>预处理<br>沉淀池</div>
+                <div class="pipe-connector flowing"></div>
+                <div class="pipe-node injection" id="naohInjectionNode" title="NaOH 投加点 — 点击查看详情">
+                    ⚗️<br>NaOH<br>投加点
+                </div>
+                <div class="pipe-connector flowing"></div>
+                <div class="pipe-node tank">🔬<br>过滤<br>系统</div>
+                <div class="pipe-connector flowing"></div>
+                <div class="pipe-node tank">🏠<br>清水<br>储罐</div>
+                <div class="pipe-connector flowing" id="distPipe"></div>
+                <div class="pipe-node tank" style="border-color:#3b82f6;">🚰<br>供水<br>管网</div>
+            </div>
+
+            <!-- NaOH 浓度仪表 -->
+            <div class="gauge-container" style="margin-top:16px;">
+                <span class="gauge-label">📊 氢氧化钠 (NaOH) 浓度 — 实时读数</span>
+                <div class="gauge-bar-outer">
+                    <div class="gauge-bar-inner safe" id="naohGaugeBar" style="width:0.9%;"></div>
+                </div>
+                <div class="gauge-value safe" id="naohGaugeValue">100 ppm</div>
+                <div class="zone-markers">
+                    <span style="color:#22c55e;">0-500 安全</span><span style="color:#f59e0b;">500-2000 警告</span><span style="color:#ef4444;">2000+ 危险</span>
+                </div>
+                <div style="margin-top:6px;font-size:0.7rem;color:#64748b;">
+                    设定值: <span id="naohSetpointDisplay" style="font-family:var(--mono);color:var(--text-bright);">100 ppm</span>
+                    &nbsp;|&nbsp; 安全上限: <span style="color:var(--amber);">500 ppm</span>
+                </div>
+            </div>
+
+            <!-- 其他参数 -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:12px;">
+                <div style="background:#0d1520;padding:10px;border-radius:6px;text-align:center;">
+                    <span style="font-size:0.65rem;color:#94a3b8;">pH 值</span><br>
+                    <span style="font-family:var(--mono);font-weight:700;color:var(--green);">7.2</span>
+                </div>
+                <div style="background:#0d1520;padding:10px;border-radius:6px;text-align:center;">
+                    <span style="font-size:0.65rem;color:#94a3b8;">浊度 (NTU)</span><br>
+                    <span style="font-family:var(--mono);font-weight:700;color:var(--green);">0.3</span>
+                </div>
+                <div style="background:#0d1520;padding:10px;border-radius:6px;text-align:center;">
+                    <span style="font-size:0.65rem;color:#94a3b8;">氯残留 (ppm)</span><br>
+                    <span style="font-family:var(--mono);font-weight:700;color:var(--green);">1.5</span>
+                </div>
+                <div style="background:#0d1520;padding:10px;border-radius:6px;text-align:center;">
+                    <span style="font-size:0.65rem;color:#94a3b8;">流量 (GPM)</span><br>
+                    <span style="font-family:var(--mono);font-weight:700;color:var(--green);">420</span>
+                </div>
+            </div>
+
+            <!-- 供水倒计时 -->
+            <div id="countdownSection" style="margin-top:14px;text-align:center;display:none;">
+                <div style="font-size:0.7rem;text-transform:uppercase;color:#94a3b8;letter-spacing:0.05em;">⚠ 受污染水预计到达用户时间</div>
+                <div class="countdown-display safe-count" id="countdownDisplay">15:00</div>
+                <div style="font-size:0.7rem;color:#64748b;">（基于管网流速估算 — 约 15 分钟到达最近住宅区）</div>
+            </div>
+        </div>
+
+        <!-- 侧边栏 -->
+        <div class="side-panel">
+            <!-- 告警面板 -->
+            <div class="panel" id="alertPanel">
+                <div class="panel-header"><span class="dot dot-green" id="alertDot"></span> 系统告警</div>
+                <div id="alertContent" style="min-height:60px;color:#64748b;font-size:0.8rem;">
+                    暂无告警 — 系统运行正常
+                </div>
+            </div>
+
+            <!-- 远程会话状态 -->
+            <div class="panel" id="remotePanel">
+                <div class="panel-header"><span class="dot dot-green" id="remoteDot"></span> 远程访问状态</div>
+                <div id="remoteContent" style="font-size:0.8rem;color:#64748b;">
+                    无远程会话 — 仅本地操作站
+                </div>
+                <button class="btn btn-danger" id="killSessionBtn" style="display:none;width:100%;margin-top:8px;" disabled>
+                    🔌 立即断开远程会话
+                </button>
+            </div>
+
+            <!-- 审计日志 -->
+            <div class="panel" id="auditPanel">
+                <div class="panel-header">📋 审计日志 — 操作记录</div>
+                <div style="max-height:260px;overflow-y:auto;">
+                    <table class="log-table" id="logTable">
+                        <thead><tr><th>时间</th><th>操作</th><th>来源</th><th>详情</th></tr></thead>
+                        <tbody id="logBody">
+                            <tr><td>08:00:12</td><td>操作员登录</td><td>本地控制台</td><td>用户: operator1</td></tr>
+                            <tr><td>08:05:44</td><td>例行巡检</td><td>本地控制台</td><td>所有参数正常</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <button class="btn btn-outline" id="tagSuspiciousBtn" style="width:100%;margin-top:8px;display:none;">
+                    🏷️ 标记可疑条目并验证
+                </button>
+                <div id="auditFeedback" style="margin-top:6px;font-size:0.75rem;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 响应操作面板（底部） -->
+    <div style="max-width:1400px;margin:0 auto;padding:0 20px 20px;">
+        <div class="panel" id="actionPanel" style="text-align:center;">
+            <div class="panel-header">🛠️ 操作控制台</div>
+            <div id="actionContent">
+                <p style="color:#94a3b8;font-size:0.85rem;">监控系统运行中…请留意任何异常活动。</p>
+                <button class="btn btn-primary" id="investigateBtn" style="display:none;">🔍 调查异常</button>
+                <div id="remediationInput" style="display:none;margin-top:10px;">
+                    <label style="font-size:0.8rem;color:#94a3b8;">输入正确的 NaOH 设定值 (ppm):</label>
+                    <div style="display:flex;gap:8px;margin-top:6px;justify-content:center;flex-wrap:wrap;">
+                        <input type="number" class="input-field" id="naohInput" placeholder="输入 ppm 值..." style="max-width:200px;">
+                        <button class="btn btn-primary" id="submitNaohBtn">✅ 确认恢复</button>
+                    </div>
+                    <div id="naohInputFeedback" style="margin-top:6px;font-size:0.8rem;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框容器 -->
+    <div id="modalContainer"></div>
+
+    <!-- Toast 容器 -->
+    <div id="toastContainer"></div>
+
+    <!-- 隐藏的 Flag -->
+    <div id="flagSection" style="max-width:1400px;margin:0 auto;padding:0 20px 30px;display:none;">
+        <div class="flag-reveal" id="flagDisplay">
+            🏆 FLAG 已捕获！<br>
+            <code style="font-size:1rem;">FLAG{oldsmar_2021_naoh_11100ppm_teamviewer_intrusion_detected}</code>
+        </div>
+        <details class="analysis-section" style="margin-top:14px;">
+            <summary>📄 查看完整事件分析报告</summary>
+            <div class="analysis-body">
+                <h4 style="color:var(--red);">🔴 事件概述</h4>
+                <p>2021年2月5日，佛罗里达州 Oldsmar 水处理厂遭遇网络攻击。攻击者通过 <strong>TeamViewer 远程访问软件</strong> 进入水厂的 SCADA 系统，将氢氧化钠 (NaOH) 的设定值从 <strong>100 ppm 提高至 11,100 ppm</strong>——超过正常水平 110 倍。操作员及时发现并恢复了设定值，避免了公共健康灾难。</p>
+                <h4 style="color:var(--amber);margin-top:12px;">🟡 攻击链</h4>
+                <ol>
+                    <li><strong>初始访问：</strong>攻击者利用泄露的 TeamViewer 凭证（弱密码、无 MFA）建立远程连接。</li>
+                    <li><strong>横向移动：</strong>通过 TeamViewer 直接控制 SCADA 工作站。</li>
+                    <li><strong>执行：</strong>打开 HMI 界面，修改 NaOH 设定值从 100 → 11,100 ppm。</li>
+                    <li><strong>掩盖：</strong>攻击持续约 3-5 分钟，操作员观察到鼠标自行移动。</li>
+                </ol>
+                <h4 style="color:var(--green);margin-top:12px;">🟢 防御措施</h4>
+                <ul>
+                    <li>对所有远程访问启用 <strong>多因素认证 (MFA)</strong></li>
+                    <li>实施 <strong>网络分段</strong>——IT 网络与 OT/SCADA 网络隔离</li>
+                    <li>部署 <strong>远程会话监控与审计</strong>——实时告警异常连接</li>
+                    <li>遵循 <strong>最小权限原则</strong>——限制可修改关键参数的人员</li>
+                    <li>定期 <strong>安全审计</strong> 和渗透测试</li>
+                    <li>关键参数变更需 <strong>双人确认</strong></li>
+                </ul>
+                <p style="margin-top:12px;font-style:italic;color:#94a3b8;">// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境。本模拟复现旨在提升工控安全意识。</p>
+            </div>
+        </details>
+    </div>
+
+    <script>
+        // ============================================
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // Oldsmar Water Treatment Plant Attack Simulation
+        // Interactive ICS/SCADA Security Lab
+        // ============================================
+
+        (function() {
+            // --- State ---
+            const state = {
+                phase: 'briefing', // briefing | monitoring | intrusion | alert_raised | investigating | responded | verifying | remediated | auditing | complete
+                naohSetpoint: 100,
+                naohCurrent: 100,
+                remoteSessionActive: false,
+                intrusionDetected: false,
+                sessionKilled: false,
+                levelsVerified: false,
+                naohRestored: false,
+                auditComplete: false,
+                countdownSeconds: 900, // 15 minutes
+                countdownActive: false,
+                countdownInterval: null,
+                flaggedLogs: [],
+                decisions: [],
+                intrusionTime: null,
+            };
+
+            // --- DOM refs ---
+            const $ = (s) => document.querySelector(s);
+            const $$ = (s) => document.querySelectorAll(s);
+
+            const dom = {
+                statusBadge: $('#statusBadge'),
+                hmiStatusDot: $('#hmiStatusDot'),
+                hmiTime: $('#hmiTime'),
+                naohInjectionNode: $('#naohInjectionNode'),
+                naohGaugeBar: $('#naohGaugeBar'),
+                naohGaugeValue: $('#naohGaugeValue'),
+                naohSetpointDisplay: $('#naohSetpointDisplay'),
+                countdownSection: $('#countdownSection'),
+                countdownDisplay: $('#countdownDisplay'),
+                alertContent: $('#alertContent'),
+                alertDot: $('#alertDot'),
+                remoteContent: $('#remoteContent'),
+                remoteDot: $('#remoteDot'),
+                killSessionBtn: $('#killSessionBtn'),
+                logBody: $('#logBody'),
+                tagSuspiciousBtn: $('#tagSuspiciousBtn'),
+                auditFeedback: $('#auditFeedback'),
+                actionContent: $('#actionContent'),
+                investigateBtn: $('#investigateBtn'),
+                remediationInput: $('#remediationInput'),
+                naohInput: $('#naohInput'),
+                submitNaohBtn: $('#submitNaohBtn'),
+                naohInputFeedback: $('#naohInputFeedback'),
+                modalContainer: $('#modalContainer'),
+                toastContainer: $('#toastContainer'),
+                flagSection: $('#flagSection'),
+                flagDisplay: $('#flagDisplay'),
+                progressStrip: $('#progressStrip'),
+                distPipe: $('#distPipe'),
+                pipelineFlow: $('#pipelineFlow'),
+            };
+
+            // --- Utilities ---
+            function showToast(msg, type = 'success') {
+                const t = document.createElement('div');
+                t.className = 'toast toast-' + type;
+                t.textContent = msg;
+                dom.toastContainer.appendChild(t);
+                setTimeout(() => t.remove(), 3100);
+            }
+
+            function updateProgress(currentStep) {
+                const steps = dom.progressStrip.querySelectorAll('.progress-step');
+                const connectors = dom.progressStrip.querySelectorAll('.progress-connector');
+                steps.forEach((s, i) => {
+                    s.classList.remove('done', 'current');
+                    if (i + 1 < currentStep) s.classList.add('done');
+                    if (i + 1 === currentStep) s.classList.add('current');
+                });
+                connectors.forEach((c, i) => {
+                    c.classList.toggle('done', i + 1 < currentStep);
+                });
+            }
+
+            function addLog(time, action, source, detail, rowClass = '') {
+                const tr = document.createElement('tr');
+                if (rowClass) tr.className = rowClass;
+                tr.innerHTML =
+                    `<td>${time}</td><td>${action}</td><td>${source}</td><td>${detail}</td>`;
+                tr.addEventListener('click', function() {
+                    if (state.phase === 'auditing' && (rowClass === 'suspicious' || rowClass ===
+                            'critical-row')) {
+                        this.classList.toggle('tagged');
+                        updateFlaggedLogs();
+                    }
+                });
+                dom.logBody.appendChild(tr);
+                // Scroll to bottom
+                dom.logBody.parentElement.scrollTop = dom.logBody.parentElement.scrollHeight;
+            }
+
+            function updateFlaggedLogs() {
+                const tagged = dom.logBody.querySelectorAll('tr.tagged');
+                state.flaggedLogs = Array.from(tagged).map(tr => tr.cells[1]?.textContent || '');
+                if (state.flaggedLogs.length >= 3 && state.phase === 'auditing') {
+                    dom.auditFeedback.innerHTML =
+                        '<span style="color:#22c55e;">✅ 已标记 ' + state.flaggedLogs.length +
+                        ' 条可疑记录 — 点击"标记可疑条目并验证"完成审计</span>';
+                } else if (state.phase === 'auditing') {
+                    dom.auditFeedback.innerHTML = '<span style="color:#f59e0b;">已标记 ' + state.flaggedLogs
+                        .length + ' 条 — 请找出全部 3 条可疑/关键记录（点击日志行标记）</span>';
+                }
+            }
+
+            function showModal(title, bodyHTML, buttons = []) {
+                let btnHTML = buttons.map((b, i) =>
+                    `<button class="btn ${b.cls || 'btn-primary'}" data-modal-btn="${i}" style="margin:4px;">${b.label}</button>`
+                ).join('');
+                const html = `
+                <div class="modal-overlay" id="activeModal">
+                    <div class="modal-box">
+                        <h3>${title}</h3>
+                        <div style="margin:12px 0;">${bodyHTML}</div>
+                        <div style="text-align:right;">${btnHTML}</div>
+                    </div>
+                </div>`;
+                dom.modalContainer.innerHTML = html;
+                const overlay = $('#activeModal');
+                overlay.addEventListener('click', function(e) {
+                    if (e.target === overlay && buttons.some(b => b.allowBackdropClose !== false)) {
+                        closeModal();
+                        if (buttons[0] && buttons[0].onClose) buttons[0].onClose();
+                    }
+                });
+                const modalBtns = overlay.querySelectorAll('[data-modal-btn]');
+                modalBtns.forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const idx = parseInt(this.getAttribute('data-modal-btn'));
+                        if (buttons[idx] && buttons[idx].callback) buttons[idx].callback();
+                        closeModal();
+                    });
+                });
+            }
+
+            function closeModal() {
+                dom.modalContainer.innerHTML = '';
+            }
+
+            function updateGauge(ppm) {
+                const maxDisplay = 12000;
+                const pct = Math.min((ppm / maxDisplay) * 100, 100);
+                dom.naohGaugeBar.style.width = Math.max(pct, 0.3) + '%';
+                dom.naohGaugeValue.textContent = ppm.toLocaleString() + ' ppm';
+                dom.naohSetpointDisplay.textContent = state.naohSetpoint.toLocaleString() + ' ppm';
+
+                // Color zones
+                const bar = dom.naohGaugeBar;
+                const val = dom.naohGaugeValue;
+                bar.classList.remove('safe', 'warning', 'danger');
+                val.classList.remove('safe', 'danger');
+                if (ppm <= 500) {
+                    bar.classList.add('safe');
+                    val.classList.add('safe');
+                } else if (ppm <= 2000) {
+                    bar.classList.add('warning');
+                    val.classList.add('safe');
+                } else {
+                    bar.classList.add('danger');
+                    val.classList.add('danger');
+                }
+
+                // Update injection node
+                if (ppm > 2000) {
+                    dom.naohInjectionNode.classList.add('critical');
+                    dom.naohInjectionNode.querySelector('span') ||
+                        (dom.naohInjectionNode.innerHTML = '⚠️<br>NaOH<br>危险!');
+                } else if (ppm > 500) {
+                    dom.naohInjectionNode.classList.remove('critical');
+                } else {
+                    dom.naohInjectionNode.classList.remove('critical');
+                    dom.naohInjectionNode.innerHTML = '⚗️<br>NaOH<br>投加点';
+                }
+            }
+
+            function startCountdown() {
+                if (state.countdownActive) return;
+                state.countdownActive = true;
+                state.countdownSeconds = 900; // 15 min
+                dom.countdownSection.style.display = 'block';
+                updateCountdownDisplay();
+                state.countdownInterval = setInterval(() => {
+                    state.countdownSeconds = Math.max(0, state.countdownSeconds - 1);
+                    updateCountdownDisplay();
+                    if (state.countdownSeconds <= 0) {
+                        clearInterval(state.countdownInterval);
+                        state.countdownActive = false;
+                        if (state.naohSetpoint > 500 && !state.naohRestored) {
+                            showToast('⚠ 模拟：受污染水已到达供水管网！在实际事件中这可能导致公共健康危机。',
+                                'error');
+                        }
+                    }
+                    // Warning thresholds
+                    if (state.countdownSeconds === 600) {
+                        showToast('⏰ 剩余 10 分钟 — 请尽快采取行动！', 'error');
+                    }
+                    if (state.countdownSeconds === 300) {
+                        showToast('🚨 剩余 5 分钟！污染水即将到达用户！', 'error');
+                    }
+                }, 1000);
+            }
+
+            function updateCountdownDisplay() {
+                const mins = Math.floor(state.countdownSeconds / 60);
+                const secs = state.countdownSeconds % 60;
+                const display = dom.countdownDisplay;
+                display.textContent = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+                display.classList.remove('safe-count', 'warning-count', 'urgent');
+                if (state.countdownSeconds <= 180) {
+                    display.classList.add('urgent');
+                } else if (state.countdownSeconds <= 600) {
+                    display.classList.add('warning-count');
+                } else {
+                    display.classList.add('safe-count');
+                }
+                // Distribution pipe visual
+                if (state.countdownSeconds < 600 && state.naohSetpoint > 500 && !state.naohRestored) {
+                    dom.distPipe.style.background = '#ef4444';
+                    dom.distPipe.style.animation = 'flow-pipe 0.3s infinite linear';
+                    dom.distPipe.style.backgroundImage =
+                        'repeating-linear-gradient(90deg, #ef4444 0px, #ef4444 6px, #7f1d1d 6px, #7f1d1d 8px)';
+                } else if (state.naohRestored) {
+                    dom.distPipe.style.background = '#22c55e';
+                    dom.distPipe.style.animation = 'flow-pipe 0.8s infinite linear';
+                    dom.distPipe.style.backgroundImage =
+                        'repeating-linear-gradient(90deg, #22c55e 0px, #22c55e 6px, #166534 6px, #166534 8px)';
+                }
+            }
+
+            function stopCountdown() {
+                if (state.countdownInterval) clearInterval(state.countdownInterval);
+                state.countdownActive = false;
+            }
+
+            // --- Phase: Briefing ---
+            function startBriefing() {
+                state.phase = 'briefing';
+                updateProgress(1);
+                setTimeout(() => {
+                    showModal(
+                        '📋 任务简报 — Oldsmar 水厂事件复盘',
+                        `<div style="font-size:0.9rem;line-height:1.7;">
+                            <p><strong>场景：</strong>2021年2月5日，佛罗里达州 Oldsmar 水处理厂。</p>
+                            <p>你是值班操作员 <strong>Operator-1</strong>，正在监控 SCADA 系统。该厂为 <strong>15,000 户居民</strong> 提供饮用水。</p>
+                            <p>氢氧化钠 (NaOH) 用于调节水的 pH 值，<strong>安全设定值为 100 ppm</strong>。超过 500 ppm 即构成危险。</p>
+                            <p>⚠ <strong>你的任务：</strong>监控系统、发现入侵、应急响应、恢复安全、审计溯源。</p>
+                            <p style="color:#f59e0b;">🕐 注意：一旦发生异常，供水管网将在约 <strong>15 分钟</strong> 内将水送达用户。时间紧迫！</p>
+                        </div>`,
+                        [{
+                            label: '✅ 开始值班 — 进入监控',
+                            cls: 'btn-primary',
+                            callback: () => startMonitoring()
+                        }]
+                    );
+                }, 600);
+            }
+
+            // --- Phase: Monitoring ---
+            function startMonitoring() {
+                state.phase = 'monitoring';
+                updateProgress(2);
+                dom.actionContent.innerHTML =
+                    '<p style="color:#94a3b8;font-size:0.85rem;">🟢 系统运行正常 — 正在监控中…请留意任何异常活动。</p>';
+                dom.investigateBtn.style.display = 'none';
+                dom.remediationInput.style.display = 'none';
+                updateGauge(100);
+
+                // Simulate time passing, then intrusion begins
+                setTimeout(() => {
+                    simulateIntrusion();
+                }, 4000 + Math.random() * 3000);
+            }
+
+            // --- Simulate Intrusion ---
+            function simulateIntrusion() {
+                if (state.intrusionDetected) return;
+                state.phase = 'intrusion';
+                state.remoteSessionActive = true;
+                state.intrusionTime = new Date();
+
+                // Update remote panel
+                dom.remoteContent.innerHTML = `
+                <div style="color:#f59e0b;font-weight:600;">⚠ 检测到远程会话</div>
+                <div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">
+                    来源: TeamViewer<br>
+                    远程IP: 203.0.113.42<br>
+                    连接时间: ${state.intrusionTime.toTimeString().slice(0,8)}
+                </div>`;
+                dom.remoteDot.className = 'dot dot-amber';
+                dom.killSessionBtn.style.display = 'block';
+                dom.killSessionBtn.disabled = false;
+                dom.killSessionBtn.textContent = '🔌 立即断开远程会话';
+
+                // Add log entry
+                addLog('08:15:03', 'TeamViewer 远程连接', '外部 — TeamViewer', '远程会话建立 — IP: 203.0.113.42',
+                    'suspicious');
+
+                // Alert panel
+                dom.alertContent.innerHTML = `
+                <div class="alert-banner critical" id="intrusionAlert" style="cursor:pointer;">
+                    🚨 <strong>安全告警：检测到未经授权的远程访问！</strong><br>
+                    <span style="font-size:0.7rem;">TeamViewer 会话已建立 — 鼠标出现异常移动</span>
+                </div>`;
+                dom.alertDot.className = 'dot dot-red';
+                dom.statusBadge.textContent = '⚠ 异常';
+                dom.statusBadge.className = 'badge badge-critical';
+                dom.hmiStatusDot.className = 'dot dot-red';
+
+                // Make alert clickable
+                setTimeout(() => {
+                    const alertEl = $('#intrusionAlert');
+                    if (alertEl) {
+                        alertEl.addEventListener('click', () => {
+                            if (state.phase === 'intrusion') {
+                                raiseAlert();
+                            }
+                        });
+                    }
+                }, 100);
+
+                // Show investigate button
+                dom.investigateBtn.style.display = 'inline-block';
+                dom.investigateBtn.textContent = '🔍 调查异常鼠标活动';
+                dom.actionContent.innerHTML =
+                    '<p style="color:#ef4444;font-weight:600;">⚠ 操作员注意到：鼠标光标正在自行移动！HMI 界面被远程操控…</p>';
+                dom.actionContent.appendChild(dom.investigateBtn);
+
+                // Simulate attacker changing NaOH
+                setTimeout(() => {
+                    if (state.sessionKilled) return;
+                    // Attacker changes setpoint
+                    state.naohSetpoint = 11100;
+                    state.naohCurrent = 11100;
+                    updateGauge(11100);
+                    addLog('08:17:28', 'NaOH 设定值变更', '远程 — TeamViewer',
+                        '设定值从 100 ppm → 11,100 ppm', 'critical-row');
+                    dom.hmiTime.textContent = '2021-02-05 08:17:32';
+                    dom.naohInjectionNode.classList.add('critical');
+                    dom.naohInjectionNode.innerHTML = '⚠️<br>NaOH<br>11,100!';
+                    startCountdown();
+                    showToast('🔴 关键警报：NaOH 设定值已被修改为 11,100 ppm！', 'error');
+                }, 2500);
+            }
+
+            // --- Raise Alert ---
+            function raiseAlert() {
+                if (state.phase !== 'intrusion') return;
+                state.phase = 'alert_raised';
+                state.intrusionDetected = true;
+                updateProgress(3);
+                dom.investigateBtn.style.display = 'none';
+                dom.actionContent.innerHTML = `
+                <p style="color:#f59e0b;font-weight:600;">🔍 你正在调查异常——发现远程桌面被操控！</p>
+                <p style="font-size:0.8rem;color:#94a3b8;">HMI 界面显示 NaOH 设定值正在被修改…必须立即行动！</p>`;
+                showToast('✅ 正确识别入侵！立即断开远程连接！', 'success');
+                dom.killSessionBtn.focus();
+                dom.killSessionBtn.style.animation = 'pulse-btn-danger 0.6s infinite';
+            }
+
+            // --- Kill Session ---
+            dom.killSessionBtn.addEventListener('click', function() {
+                if (state.sessionKilled) return;
+                if (state.phase !== 'intrusion' && state.phase !== 'alert_raised') {
+                    showToast('当前没有需要断开的远程会话', 'error');
+                    return;
+                }
+                state.sessionKilled = true;
+                state.phase = 'responded';
+                updateProgress(3);
+                dom.killSessionBtn.disabled = true;
+                dom.killSessionBtn.textContent = '✅ 会话已断开';
+                dom.killSessionBtn.style.animation = 'none';
+                dom.killSessionBtn.style.background = '#1a3a1a';
+                dom.killSessionBtn.style.border = '2px solid #22c55e';
+                dom.remoteContent.innerHTML = `
+                <div style="color:#22c55e;font-weight:600;">✅ 远程会话已终止</div>
+                <div style="font-size:0.7rem;color:#94a3b8;">TeamViewer 连接已于 ${new Date().toTimeString().slice(0,8)} 断开</div>`;
+                dom.remoteDot.className = 'dot dot-green';
+                dom.alertDot.className = 'dot dot-amber';
+                dom.statusBadge.textContent = '恢复中';
+                dom.statusBadge.className = 'badge badge-active';
+                dom.hmiStatusDot.className = 'dot dot-amber';
+                addLog('08:18:05', '远程会话强制断开', '本地控制台', '操作员手动终止 TeamViewer 连接');
+                dom.actionContent.innerHTML = `
+                <p style="color:#22c55e;font-weight:600;">✅ 远程会话已断开！现在需要验证化学物质浓度…</p>`;
+                showToast('✅ 远程会话已断开！请检查 NaOH 浓度。', 'success');
+
+                // Enable verification
+                setTimeout(() => {
+                    if (state.naohSetpoint === 11100 && !state.naohRestored) {
+                        dom.actionContent.innerHTML = `
+                        <p style="color:#ef4444;font-weight:600;">⚠ NaOH 浓度显示异常：<strong>11,100 ppm</strong>！必须立即恢复！</p>`;
+                        dom.remediationInput.style.display = 'block';
+                        dom.naohInput.focus();
+                    }
+                }, 800);
+            });
+
+            // --- Submit NaOH Correction ---
+            dom.submitNaohBtn.addEventListener('click', function() {
+                handleNaohSubmission();
+            });
+            dom.naohInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') handleNaohSubmission();
+            });
+
+            function handleNaohSubmission() {
+                const inputVal = parseInt(dom.naohInput.value.trim());
+                if (isNaN(inputVal)) {
+                    dom.naohInput.classList.add('wrong');
+                    dom.naohInputFeedback.innerHTML = '<span style="color:#ef4444;">❌ 请输入有效的数值</span>';
+                    setTimeout(() => dom.naohInput.classList.remove('wrong'), 500);
+                    return;
+                }
+                if (inputVal === 100) {
+                    // Correct!
+                    dom.naohInput.classList.add('correct');
+                    dom.naohInputFeedback.innerHTML = '<span style="color:#22c55e;">✅ 正确！NaOH 设定值恢复至 100 ppm</span>';
+                    state.naohSetpoint = 100;
+                    state.naohCurrent = 100;
+                    state.naohRestored = true;
+                    updateGauge(100);
+                    dom.naohInjectionNode.classList.remove('critical');
+                    dom.naohInjectionNode.innerHTML = '⚗️<br>NaOH<br>投加点';
+                    stopCountdown();
+                    dom.countdownDisplay.classList.remove('urgent', 'warning-count');
+                    dom.countdownDisplay.classList.add('safe-count');
+                    dom.distPipe.style.background = '#22c55e';
+                    dom.distPipe.style.animation = 'flow-pipe 0.8s infinite linear';
+                    dom.distPipe.style.backgroundImage =
+                        'repeating-linear-gradient(90deg, #22c55e 0px, #22c55e 6px, #166534 6px, #166534 8px)';
+                    dom.statusBadge.textContent = '正常运行';
+                    dom.statusBadge.className = 'badge badge-active';
+                    dom.hmiStatusDot.className = 'dot dot-green';
+                    dom.alertDot.className = 'dot dot-green';
+                    dom.alertContent.innerHTML = '<span style="color:#22c55e;">✅ 系统恢复正常 — NaOH 浓度已恢复安全水平</span>';
+                    addLog('08:19:22', 'NaOH 设定值恢复', '本地控制台', '设定值从 11,100 ppm → 100 ppm（操作员手动恢复）');
+                    dom.remediationInput.style.display = 'none';
+                    dom.actionContent.innerHTML =
+                        '<p style="color:#22c55e;font-weight:600;">✅ NaOH 浓度已恢复正常！现在需要审计日志以溯源攻击。</p>';
+                    updateProgress(4);
+                    showToast('✅ NaOH 恢复成功！进入审计阶段。', 'success');
+                    state.phase = 'remediated';
+                    // Enable audit
+                    setTimeout(() => startAuditPhase(), 1000);
+                } else if (inputVal >= 90 && inputVal <= 110 && inputVal !== 100) {
+                    dom.naohInput.classList.add('wrong');
+                    dom.naohInputFeedback.innerHTML =
+                        '<span style="color:#f59e0b;">⚠ 接近正确值，但标准设定值为 <strong>100 ppm</strong>。请精确输入。</span>';
+                    setTimeout(() => dom.naohInput.classList.remove('wrong'), 500);
+                } else if (inputVal < 500 && inputVal > 0) {
+                    dom.naohInput.classList.add('wrong');
+                    dom.naohInputFeedback.innerHTML =
+                        '<span style="color:#f59e0b;">⚠ 该值在安全范围内，但标准操作设定值为 <strong>100 ppm</strong></span>';
+                    setTimeout(() => dom.naohInput.classList.remove('wrong'), 500);
+                } else {
+                    dom.naohInput.classList.add('wrong');
+                    dom.naohInputFeedback.innerHTML =
+                        '<span style="color:#ef4444;">❌ 该值不安全！请将 NaOH 恢复至标准设定值 <strong>100 ppm</strong></span>';
+                    setTimeout(() => dom.naohInput.classList.remove('wrong'), 500);
+                }
+            }
+
+            // --- Audit Phase ---
+            function startAuditPhase() {
+                state.phase = 'auditing';
+                updateProgress(5);
+                dom.tagSuspiciousBtn.style.display = 'block';
+                dom.auditFeedback.innerHTML =
+                    '<span style="color:#f59e0b;">📋 请点击日志中的可疑条目进行标记（需标记全部 3 条可疑/关键记录）</span>';
+                dom.actionContent.innerHTML =
+                    '<p style="color:#94a3b8;">🔍 审计阶段：在右侧审计日志中<strong>点击可疑条目</strong>进行标记，然后点击"标记可疑条目并验证"。</p>';
+
+                // Highlight existing suspicious rows
+                const suspiciousRows = dom.logBody.querySelectorAll('tr.suspicious, tr.critical-row');
+                suspiciousRows.forEach(row => {
+                    row.style.cursor = 'pointer';
+                    row.title = '点击标记此条日志';
+                });
+            }
+
+            // --- Tag Suspicious Button ---
+            dom.tagSuspiciousBtn.addEventListener('click', function() {
+                if (state.phase !== 'auditing') return;
+                const tagged = dom.logBody.querySelectorAll('tr.tagged');
+                if (tagged.length >= 3) {
+                    state.auditComplete = true;
+                    state.phase = 'complete';
+                    updateProgress(5);
+                    dom.tagSuspiciousBtn.disabled = true;
+                    dom.tagSuspiciousBtn.textContent = '✅ 审计完成';
+                    dom.tagSuspiciousBtn.style.background = '#1a3a1a';
+                    dom.tagSuspiciousBtn.style.border = '2px solid #22c55e';
+                    dom.auditFeedback.innerHTML =
+                        '<span style="color:#22c55e;">✅ 审计完成！已正确识别全部 3 条攻击相关日志记录。</span>';
+                    dom.actionContent.innerHTML =
+                        '<p style="color:#22c55e;font-weight:600;">🎯 事件响应完成！攻击链已重建，Flag 已解锁。</p>';
+                    // Reveal flag
+                    dom.flagSection.style.display = 'block';
+                    dom.flagSection.scrollIntoView({ behavior: 'smooth' });
+                    showToast('🏆 FLAG 已捕获！事件响应成功完成。', 'success');
+                    stopCountdown();
+                    // Update all progress steps
+                    const allSteps = dom.progressStrip.querySelectorAll('.progress-step');
+                    const allConns = dom.progressStrip.querySelectorAll('.progress-connector');
+                    allSteps.forEach(s => { s.classList.add('done');
+                        s.classList.remove('current'); });
+                    allConns.forEach(c => c.classList.add('done'));
+                } else {
+                    dom.auditFeedback.innerHTML =
+                        '<span style="color:#ef4444;">⚠ 还需要标记 <strong>' + (3 - tagged.length) +
+                        '</strong> 条记录。请检查所有可疑的日志条目。</span>';
+                    showToast('请标记全部 3 条攻击相关日志记录', 'error');
+                }
+            });
+
+            // --- Investigate Button ---
+            dom.investigateBtn.addEventListener('click', function() {
+                if (state.phase === 'intrusion') {
+                    raiseAlert();
+                }
+            });
+
+            // --- HMI Node Click ---
+            dom.naohInjectionNode.addEventListener('click', function() {
+                if (state.naohSetpoint > 500 && !state.naohRestored) {
+                    showModal(
+                        '⚠ NaOH 投加点 — 详细读数',
+                        `<div style="text-align:center;">
+                            <p style="color:#ef4444;font-weight:700;font-size:1.2rem;">当前 NaOH 浓度：<span style="font-size:1.6rem;">${state.naohCurrent.toLocaleString()} ppm</span></p>
+                            <p style="color:#fca5a5;">🔴 严重超标！安全上限为 500 ppm</p>
+                            <p style="font-size:0.8rem;color:#94a3b8;">设定值已被修改 — 需立即在操作控制台中恢复至 <strong>100 ppm</strong></p>
+                        </div>`,
+                        [{ label: '确认 — 立即处理', cls: 'btn-danger', callback: () => {
+                                dom.remediationInput.style.display = 'block';
+                                dom.naohInput.focus();
+                            } }]
+                    );
+                } else if (state.naohRestored) {
+                    showToast('✅ NaOH 浓度已恢复正常 — 100 ppm', 'success');
+                } else {
+                    showToast('NaOH 浓度正常 — 100 ppm（安全范围内）', 'success');
+                }
+            });
+
+            // --- Initialize ---
+            function init() {
+                updateGauge(100);
+                updateProgress(1);
+                startBriefing();
+            }
+
+            // --- Keyboard shortcuts ---
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') closeModal();
+                if (e.key === 'k' && e.ctrlKey && !state.sessionKilled && state.remoteSessionActive) {
+                    e.preventDefault();
+                    dom.killSessionBtn.click();
+                }
+            });
+
+            // Start the lab
+            init();
+
+            console.log(
+                '%c🏭 Oldsmar 水厂事件复盘实验已就绪 %c| %cEDUCATIONAL PURPOSE ONLY',
+                'font-size:1.1em;',
+                '',
+                'color:#f59e0b;'
+            );
+            console.log('%c提示：密切监控 HMI 界面，注意异常鼠标活动和 NaOH 读数变化。', 'color:#94a3b8;');
+            console.log('%c快捷键：Ctrl+K = 紧急断开远程会话', 'color:#64748b;font-style:italic;');
+
+        })();
+    </script>
+</body>
+</html>

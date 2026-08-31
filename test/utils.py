@@ -63,15 +63,28 @@ def parse_csrf_token(text):
     return match.group(1)
 
 
+def _allow_isolated_http_cookie(session):
+    if os.getenv("DOJO_TEST_ALLOW_HTTP_SECURE_COOKIE") != "1":
+        return
+    # Production correctly uses a Secure __Host- cookie. A deliberately
+    # isolated test server may be reached directly over a non-routable HTTP
+    # container network; only an explicit opt-in relaxes the client-side jar.
+    for cookie in session.cookies:
+        cookie.secure = False
+
+
 def login(name, password, *, success=True, register=False, email=None):
     session = requests.Session()
     endpoint = "login" if not register else "register"
-    nonce = parse_csrf_token(session.get(f"{DOJO_URL}/{endpoint}").text)
+    login_page = session.get(f"{DOJO_URL}/{endpoint}")
+    _allow_isolated_http_cookie(session)
+    nonce = parse_csrf_token(login_page.text)
     data = { "name": name, "password": password, "nonce": nonce }
     if register:
         data["email"] = email or f"{name}@example.com"
     while True:
         response = session.post(f"{DOJO_URL}/{endpoint}", data=data, allow_redirects=False)
+        _allow_isolated_http_cookie(session)
         if response.status_code == 429:
             time.sleep(1)
             continue
@@ -80,7 +93,9 @@ def login(name, password, *, success=True, register=False, email=None):
         assert response.status_code == 200, f"Expected {endpoint} failure (status code 200), but got {response.status_code}"
         return session
     assert response.status_code == 302, f"Expected {endpoint} success (status code 302), but got {response.status_code}"
-    session.headers["CSRF-Token"] = parse_csrf_token(session.get(f"{DOJO_URL}/").text)
+    home_page = session.get(f"{DOJO_URL}/")
+    _allow_isolated_http_cookie(session)
+    session.headers["CSRF-Token"] = parse_csrf_token(home_page.text)
     return session
 
 

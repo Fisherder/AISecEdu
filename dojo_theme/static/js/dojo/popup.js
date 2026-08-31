@@ -1,14 +1,42 @@
 document.addEventListener("DOMContentLoaded", function () {
     if (!init?.userId) return;
-
-    checkUserAwards()
-        .then(handleAwardPopup)
-        .catch(error => console.error("成就检查失败：", error));
+    const key = `aisecedu-awards-checked:${init.userId}`;
+    try {
+        const checkedAt = Number(sessionStorage.getItem(key) || 0);
+        if (Date.now() - checkedAt < 15 * 60 * 1000) return;
+    } catch (error) {
+        /* storage can be disabled */
+    }
+    const check = () => {
+        checkUserAwards()
+            .then(response => {
+                try { sessionStorage.setItem(key, String(Date.now())); } catch (error) { /* noop */ }
+                handleAwardPopup(response);
+            })
+            .catch(() => {});
+    };
+    const schedule = () => {
+        if (typeof requestIdleCallback === "function") requestIdleCallback(check, {timeout: 3000});
+        else window.setTimeout(check, 1800);
+    };
+    if (document.readyState === "complete") schedule();
+    else window.addEventListener("load", schedule, {once: true});
 });
 
 function checkUserAwards() {
     const endpoint = `/api/v1/users/${init.userId}/awards`;
-    return CTFd.fetch(endpoint, {
+    if (window.AISecEdu && typeof window.AISecEdu.get === "function") {
+        return window.AISecEdu.get(endpoint, {
+            unwrap: false,
+            timeoutMs: 7000,
+            cacheTtlMs: 30000,
+            dedupeKey: `user-awards:${init.userId}`,
+        });
+    }
+    const client = window.CTFd && typeof window.CTFd.fetch === "function"
+        ? window.CTFd.fetch.bind(window.CTFd)
+        : window.fetch.bind(window);
+    return client(endpoint, {
         method: "GET",
         credentials: "same-origin",
         headers: {"Accept": "application/json"}
@@ -34,7 +62,7 @@ function handleAwardPopup(response) {
 function showAwardPopup(award) {
     const isBelt = ["orange", "yellow", "green", "blue"].includes(award.name);
     if (isBelt) {
-        return renderPopup(`你已获得 ${award.name} AISecEdu 成就等级！`, `<i class="fas fa-award fa-5x brand-green" aria-hidden="true"></i>`)
+        return renderPopup(`你已获得 ${award.name} 玄甲成就等级！`, `<i class="fas fa-award fa-5x brand-green" aria-hidden="true"></i>`)
     }
 
     var icon = award.icon
@@ -57,16 +85,16 @@ function showAwardPopup(award) {
 }
 
 function renderPopup(message, image) {
+    const urlRoot = window.CTFd && window.CTFd.config
+        ? window.CTFd.config.urlRoot
+        : "";
     const popupContent = {
         header: "恭喜！",
         body: message,
         image: image,
         logos: {
-            platform: `${CTFd.config.urlRoot}/themes/dojo_theme/static/img/aisecedu-mark.svg`,
-            linkedin: `${CTFd.config.urlRoot}/themes/dojo_theme/static/img/dojo/linkedin_logo.svg`,
-            x: `${CTFd.config.urlRoot}/themes/dojo_theme/static/img/dojo/x_logo.svg`
-        },
-        profileUrl: `${window.location.protocol}//${window.location.host}/hacker/${init.userId}`
+            platform: `${urlRoot}/themes/dojo_theme/static/img/aisecedu-mark.svg`
+        }
     };
 
     const popup = document.createElement("div");
@@ -77,23 +105,7 @@ function renderPopup(message, image) {
             ${popupContent.image}
             <h1>${popupContent.header}</h1>
             <p>${popupContent.body}</p>
-            <img src="${popupContent.logos.platform}" class="logo-image" alt="AISecEdu">
-            <div class="social-share">
-                <a href="https://linkedin.com/share?url=${popupContent.profileUrl}"
-                    class="share-button"
-                    target="_blank"
-                    aria-label="分享到 LinkedIn">
-                    <img src="${popupContent.logos.linkedin}">
-                    <span title="分享到 LinkedIn"></span>分享
-                </a>
-                <a href="https://twitter.com/intent/tweet?url=${popupContent.profileUrl}"
-                    class="share-button"
-                    target="_blank"
-                    aria-label="分享到 X">
-                    <img src="${popupContent.logos.x}">
-                    <span title="分享到 X"></span>分享
-                </a>
-            </div>
+            <img src="${popupContent.logos.platform}" class="logo-image" alt="玄甲">
         </div>
     `;
 

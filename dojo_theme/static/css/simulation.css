@@ -10,6 +10,16 @@
     background: var(--ui-bg);
 }
 
+.scenario-runner-active #workspace-iframe,
+.scenario-runner-active [data-workspace-loading],
+.scenario-runner-active .workspace-ssh {
+    display: none !important;
+}
+
+.scenario-runner-active .challenge-workspace-surface {
+    display: flex;
+}
+
 .simulation-workspace[hidden] {
     display: none;
 }
@@ -51,7 +61,7 @@
     margin: 0.15rem 0 0;
     overflow: hidden;
     color: var(--ui-text-muted);
-    font-size: 0.78rem;
+    font-size: var(--ae-type-caption);
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -63,7 +73,7 @@
     background: var(--brand-green);
     border-radius: 0.3rem;
     font-family: "Space Mono", monospace;
-    font-size: 0.7rem;
+    font-size: var(--ae-type-caption);
     font-weight: 700;
 }
 
@@ -84,7 +94,7 @@
     background: var(--ui-field);
     border: 1px solid var(--ui-border-soft);
     border-radius: 999px;
-    font-size: 0.7rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-status.is-active,
@@ -116,7 +126,7 @@
     justify-content: space-between;
     margin-bottom: 0.3rem;
     color: var(--ui-text-muted);
-    font-size: 0.72rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-progress-track {
@@ -168,7 +178,7 @@
     background: transparent;
     border: 1px solid transparent;
     border-radius: 0.35rem;
-    font-size: 0.78rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-view-tab:hover,
@@ -253,7 +263,7 @@
 
 .simulation-section-title span {
     color: var(--ui-text-muted);
-    font-size: 0.68rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-objective-list,
@@ -294,19 +304,19 @@
 
 .simulation-objective strong {
     color: var(--ui-text);
-    font-size: 0.76rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-objective small {
     margin-top: 0.1rem;
     color: var(--ui-text-muted);
-    font-size: 0.68rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-objective-weight {
     color: var(--ui-text-muted);
     font-family: "Space Mono", monospace;
-    font-size: 0.65rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-action-group + .simulation-action-group {
@@ -316,7 +326,7 @@
 .simulation-action-group-title {
     margin: 0 0 0.35rem;
     color: var(--ui-text-muted);
-    font-size: 0.72rem;
+    font-size: var(--ae-type-caption);
     text-transform: uppercase;
 }
 
@@ -342,14 +352,14 @@
 
 .simulation-action-header strong {
     color: var(--ui-text);
-    font-size: 0.78rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-action-description,
 .simulation-action-unavailable {
     margin-top: 0.12rem;
     color: var(--ui-text-muted);
-    font-size: 0.67rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-action-unavailable {
@@ -359,7 +369,7 @@
 .simulation-action-badge {
     flex: none;
     color: var(--brand-blue);
-    font-size: 0.62rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-action-fields {
@@ -372,7 +382,7 @@
     display: block;
     margin-bottom: 0.18rem;
     color: var(--ui-text-muted);
-    font-size: 0.68rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-action-field .form-control {
@@ -381,7 +391,7 @@
     color: var(--ui-text);
     background: var(--ui-surface);
     border-color: var(--ui-border);
-    font-size: 0.75rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-action-submit {
@@ -392,7 +402,7 @@
     background: var(--brand-green);
     border: 1px solid var(--brand-green);
     border-radius: 0.35rem;
-    font-size: 0.76rem;
+    font-size: var(--ae-type-caption);
     font-weight: 700;
 }
 
@@ -432,7 +442,7 @@
 
 .simulation-loading span {
     color: var(--ui-text-muted);
-    font-size: 0.78rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-topology {
@@ -474,13 +484,13 @@
 
 .simulation-topology-node text {
     fill: var(--ui-text);
-    font-size: 12px;
+    font-size: var(--ae-type-caption);
     text-anchor: middle;
 }
 
 .simulation-topology-node .simulation-node-kind {
     fill: var(--ui-text-muted);
-    font-size: 10px;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-metrics {
@@ -505,7 +515,7 @@
 
 .simulation-metric span {
     color: var(--ui-text-muted);
-    font-size: 0.72rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-metric strong {
@@ -537,7 +547,7 @@
 .simulation-spectrum-label,
 .simulation-spectrum-value {
     fill: var(--ui-text-muted);
-    font-size: 11px;
+    font-size: var(--ae-type-caption);
     text-anchor: middle;
 }
 
@@ -601,7 +611,7 @@
 .simulation-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.76rem;
+    font-size: var(--ae-type-caption);
 }
 
 .simulation-table th,
@@ -620,7 +630,7 @@
     width: 100%;
     margin: 0;
     color: var(--ui-text);
-    font-size: 0.76rem;
+    font-size: var(--ae-type-caption);
     white-space: pre-wrap;
 }
 

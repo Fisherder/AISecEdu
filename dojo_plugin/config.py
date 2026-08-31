@@ -86,6 +86,10 @@ DOJO_IP_MODE = (os.getenv("DOJO_IP_MODE") or "false").strip().lower() in {
     "yes",
 }
 WORKSPACE_SECRET = os.environ.get("WORKSPACE_SECRET")
+WORKSPACE_SESSION_SECONDS = max(
+    900,
+    min(86400, int(os.environ.get("WORKSPACE_SESSION_SECONDS") or "21600")),
+)
 DOJO_SSH_SERVICE_KEY = os.environ.get("DOJO_SSH_SERVICE_KEY")
 HOST_DATA_PATH = os.getenv("HOST_DATA_PATH")
 MAIL_SERVER = os.getenv("MAIL_SERVER")
@@ -126,22 +130,94 @@ DOJO_AI_AUTHORING_BUILD_MODEL = (
 DOJO_AI_AUTHORING_VALIDATE_MODEL = (
     os.getenv("DOJO_AI_AUTHORING_VALIDATE_MODEL") or "deepseek-v4-pro"
 )
+DOJO_AI_COMPLEX_SCENE_MODEL = (
+    os.getenv("DOJO_AI_COMPLEX_SCENE_MODEL") or "deepseek-v4-pro"
+)
 DOJO_AI_TIMEOUT_SECONDS = float(os.getenv("DOJO_AI_TIMEOUT_SECONDS") or "120")
+DOJO_AI_TOTAL_TIMEOUT_SECONDS = max(
+    DOJO_AI_TIMEOUT_SECONDS,
+    min(600.0, float(os.getenv("DOJO_AI_TOTAL_TIMEOUT_SECONDS") or "600")),
+)
 DOJO_AI_MAX_CONTEXT_CHARS = max(
     32000, int(os.getenv("DOJO_AI_MAX_CONTEXT_CHARS") or "180000")
 )
 DOJO_AI_MAX_FILE_CHARS = max(
     4000, int(os.getenv("DOJO_AI_MAX_FILE_CHARS") or "32000")
 )
+AGENT_RUNTIME_INTERNAL_URL = (
+    os.getenv("GLOBAL_AGENT_RUNTIME_INTERNAL_URL")
+    or os.getenv("OPENMAIC_INTERNAL_URL")
+    or "http://agent-runtime:3000/agent-runtime"
+).rstrip("/")
+AGENT_RUNTIME_PUBLIC_ORIGIN = (
+    os.getenv("GLOBAL_AGENT_RUNTIME_PUBLIC_ORIGIN")
+    or os.getenv("OPENMAIC_PUBLIC_ORIGIN")
+    or f"https://{DOJO_HOST}/agent-runtime"
+).rstrip("/")
+AGENT_RUNTIME_TICKET_SECRET = (
+    os.getenv("GLOBAL_AGENT_RUNTIME_TICKET_SECRET")
+    or os.getenv("OPENMAIC_TICKET_SECRET")
+    or ""
+)
+AGENT_RUNTIME_SERVICE_SECRET = (
+    os.getenv("GLOBAL_AGENT_RUNTIME_SERVICE_SECRET")
+    or os.getenv("OPENMAIC_SERVICE_SECRET")
+    or ""
+)
+AGENT_RUNTIME_LAUNCH_TTL_SECONDS = max(
+    30,
+    min(
+        300,
+        int(
+            os.getenv("GLOBAL_AGENT_RUNTIME_LAUNCH_TTL_SECONDS")
+            or os.getenv("OPENMAIC_LAUNCH_TTL_SECONDS")
+            or "90"
+        ),
+    ),
+)
+AGENT_RUNTIME_SESSION_TTL_SECONDS = max(
+    300,
+    min(
+        86400,
+        int(
+            os.getenv("GLOBAL_AGENT_RUNTIME_SESSION_TTL_SECONDS")
+            or os.getenv("OPENMAIC_SESSION_TTL_SECONDS")
+            or "28800"
+        ),
+    ),
+)
+AGENT_RUNTIME_STORAGE_ROOT = pathlib.Path(
+    os.getenv("GLOBAL_AGENT_RUNTIME_STORAGE_ROOT")
+    or os.getenv("OPENMAIC_STORAGE_ROOT")
+    or "/var/agent-runtime"
+)
 
-missing_errors = ["DOJO_HOST", "HOST_DATA_PATH"]
+missing_errors = [
+    "DOJO_HOST",
+    "HOST_DATA_PATH",
+    "AGENT_RUNTIME_TICKET_SECRET",
+    "AGENT_RUNTIME_SERVICE_SECRET",
+]
 for config_option in missing_errors:
     config_value = globals()[config_option]
     if not config_value:
         raise RuntimeError(f"Configuration Error: {config_option} must be set in the environment")
 
+platform_secret = os.getenv("SECRET_KEY") or ""
+if AGENT_RUNTIME_TICKET_SECRET == AGENT_RUNTIME_SERVICE_SECRET:
+    raise RuntimeError(
+        "Configuration Error: global agent runtime ticket and service secrets must be distinct"
+    )
+if platform_secret and platform_secret in {
+    AGENT_RUNTIME_TICKET_SECRET,
+    AGENT_RUNTIME_SERVICE_SECRET,
+}:
+    raise RuntimeError(
+        "Configuration Error: global agent runtime secrets must be distinct from SECRET_KEY"
+    )
+
 def bootstrap():
-    set_config("ctf_name", "AISecEdu")
+    set_config("ctf_name", "玄甲")
     set_config(
         "ctf_description",
         "Hands-on cybersecurity courses, guided practice, and isolated workspaces.",

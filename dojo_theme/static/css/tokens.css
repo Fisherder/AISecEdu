@@ -1,0 +1,82 @@
+:root {
+  --ae-color-neutral-0: #ffffff;
+  --ae-color-neutral-50: #f7f9f7;
+  --ae-color-neutral-100: #eef2ed;
+  --ae-color-neutral-200: #dce3da;
+  --ae-color-neutral-500: #647166;
+  --ae-color-neutral-700: #344038;
+  --ae-color-neutral-900: #162018;
+  --ae-color-green-100: #eaf5e2;
+  --ae-color-green-600: #4f8f24;
+  --ae-color-green-700: #3f771c;
+  --ae-color-blue-100: #e4f2f8;
+  --ae-color-blue-700: #277da8;
+  --ae-color-amber-100: #fbf0dc;
+  --ae-color-amber-700: #94600f;
+  --ae-color-red-100: #f9e6e6;
+  --ae-color-red-700: #a83d3d;
+  --ae-space-1: 4px;
+  --ae-space-2: 8px;
+  --ae-space-3: 12px;
+  --ae-space-4: 16px;
+  --ae-space-5: 20px;
+  --ae-space-6: 24px;
+  --ae-space-8: 32px;
+  --ae-radius-sm: 8px;
+  --ae-radius-md: 12px;
+  --ae-radius-lg: 18px;
+  --ae-shadow-sm: 0 8px 24px rgba(24, 39, 28, 0.08);
+  --ae-shadow-lg: 0 24px 72px rgba(24, 39, 28, 0.16);
+  --ae-duration-fast: 140ms;
+  --ae-duration-normal: 200ms;
+  --ae-type-caption: max(0.75rem, 14px);
+  --ae-type-small: max(0.8125rem, 15px);
+  --ae-type-control: max(0.875rem, 16px);
+  --ae-type-body: max(0.9375rem, 17px);
+  --ae-leading-compact: 1.4;
+  --ae-leading-body: 1.6;
+  --ae-focus: 0 0 0 3px color-mix(in srgb, var(--product-accent, #4f8f24) 32%, transparent);
+  --ae-surface-page: var(--product-bg, var(--ae-color-neutral-50));
+  --ae-surface-default: var(--product-surface, var(--ae-color-neutral-0));
+  --ae-surface-subtle: var(--product-surface-soft, var(--ae-color-neutral-100));
+  --ae-text-primary: var(--product-text, var(--ae-color-neutral-900));
+  --ae-text-secondary: var(--product-muted, var(--ae-color-neutral-500));
+  --ae-border-default: var(--product-border, var(--ae-color-neutral-200));
+  --ae-action-primary: var(--product-accent, var(--ae-color-green-600));
+  --ae-action-primary-hover: var(--product-accent-strong, var(--ae-color-green-700));
+  --ae-action-on-primary: var(--theme-on-primary, #ffffff);
+  --ae-status-info: var(--product-blue, var(--ae-color-blue-700));
+  --ae-status-success: var(--product-accent, var(--ae-color-green-600));
+  --ae-status-warning: var(--product-amber, var(--ae-color-amber-700));
+  --ae-status-danger: var(--product-danger, var(--ae-color-red-700));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ae-duration-fast: 0ms;
+    --ae-duration-normal: 0ms;
+  }
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 3px !important;
+    box-shadow: none !important;
+  }
+
+  .ae-status,
+  .product-button,
+  .admin-product-primary,
+  [role="tab"],
+  [role="dialog"] {
+    border: 1px solid CanvasText !important;
+    forced-color-adjust: auto;
+  }
+
+  [aria-current="page"],
+  [aria-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}

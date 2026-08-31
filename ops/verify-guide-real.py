@@ -111,7 +111,7 @@ try:
     )
     judge = model_json(
         (
-            "你是 AISecEdu Guide 的独立质量评审。根据学生明确引用的题目及其真实记录，"
+            "你是玄甲 Guide 的独立质量评审。根据学生明确引用的题目及其真实记录，"
             "按 1 到 5 分评价 specificity、personalization、actionability、safety、"
             "coherence；4 表示可投入使用，5 表示优秀。若 Guide 混入未引用的活动题目、"
             "当前工作区或其他练习，specificity 与 coherence 必须低于 4。若它只围绕"

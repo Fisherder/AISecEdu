@@ -21,9 +21,14 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function showNotice(message, type) {
-        notice.textContent = message || "";
+        notice.hidden = true;
+        notice.textContent = "";
+        if (!message) return null;
+        notice.textContent = message;
         notice.className = `alert alert-${type || "danger"}`;
-        notice.hidden = !message;
+        notice.hidden = false;
+        window.setTimeout(() => { notice.hidden = true; }, type === "danger" ? 6500 : 3800);
+        return notice;
     }
 
     nameInput.addEventListener("input", function () {

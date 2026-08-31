@@ -1,18 +1,26 @@
 import random
 import shutil
 import string
+import subprocess
 import pytest
 import json
+import os
 
 import requests
 import requests.adapters
 from urllib3.util.retry import Retry
-from selenium.webdriver.firefox.service import Service as FirefoxService
+
+try:
+    from selenium.webdriver.firefox.service import Service as FirefoxService
+    from selenium.webdriver import Firefox, FirefoxOptions
+except ModuleNotFoundError:
+    FirefoxService = None
+    Firefox = None
+    FirefoxOptions = None
 
 #pylint:disable=redefined-outer-name,use-dict-literal,missing-timeout,unspecified-encoding,consider-using-with
 
-from utils import TEST_DOJOS_LOCATION, DOJO_URL, login, make_dojo_official, create_dojo, create_dojo_yml, start_challenge, solve_challenge, wait_for_background_worker, db_sql
-from selenium.webdriver import Firefox, FirefoxOptions
+from utils import TEST_DOJOS_LOCATION, DOJO_URL, login, make_dojo_official, create_dojo, create_dojo_yml, start_challenge, solve_challenge, wait_for_background_worker, db_sql, dojo_run
 
 # Nested-docker port publishing drops for a few seconds while user containers
 # attach/detach networks; retry connection establishment (never sent requests)
@@ -21,6 +29,10 @@ _original_session_init = requests.Session.__init__
 
 def _retrying_session_init(self, *args, **kwargs):
     _original_session_init(self, *args, **kwargs)
+    if os.getenv("DOJO_HTTP_HOST"):
+        self.headers["Host"] = os.environ["DOJO_HTTP_HOST"]
+    if os.getenv("DOJO_TLS_VERIFY", "true").strip().lower() in {"0", "false", "no"}:
+        self.verify = False
     retry = Retry(total=None, connect=6, read=0, redirect=0, status=0, other=0, backoff_factor=0.5)
     adapter = requests.adapters.HTTPAdapter(max_retries=retry)
     self.mount("http://", adapter)
@@ -28,15 +40,46 @@ def _retrying_session_init(self, *args, **kwargs):
 
 requests.Session.__init__ = _retrying_session_init
 
+
+def _admin_credentials():
+    username = os.getenv("DOJO_ADMIN_USERNAME", "admin")
+    password = os.getenv("DOJO_ADMIN_PASSWORD")
+    if password:
+        return username, password
+
+    credentials_path = os.getenv(
+        "DOJO_ADMIN_CREDENTIALS",
+        os.path.join(os.path.dirname(__file__), "..", "data", "admin-password.txt"),
+    )
+    try:
+        with open(credentials_path, encoding="utf-8") as credentials_file:
+            content = credentials_file.read().strip()
+    except (FileNotFoundError, PermissionError):
+        try:
+            content = dojo_run("cat", "/data/admin-password.txt").stdout.strip()
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            return username, "admin"
+    if "=" not in content:
+        return username, content
+    values = {"username": username}
+    for line in content.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key.strip()] = value.strip()
+    return values.get("username", username), values.get("password", "admin")
+
+
 @pytest.fixture(scope="session")
 def admin_session():
-    session = login("admin", "admin")
+    username, password = _admin_credentials()
+    session = login(username, password)
     yield session
 
 @pytest.fixture(scope="session")
 def admin_user():
-    session = login("admin", "admin")
-    yield "admin", session
+    username, password = _admin_credentials()
+    session = login(username, password)
+    yield username, session
 
 @pytest.fixture
 def random_user():
@@ -78,10 +121,21 @@ def completionist_user(simple_award_dojo, codepoints_award_dojo):
 
 
 @pytest.fixture(scope="session")
-def guest_dojo_admin():
+def guest_dojo_admin(admin_session):
     random_id = "".join(random.choices(string.ascii_lowercase, k=16))
     session = login(random_id, random_id, register=True)
     yield random_id, session
+    response = admin_session.get(
+        f"{DOJO_URL.rstrip('/')}/api/v1/users",
+        params={"q": random_id, "field": "name", "view": "admin"},
+    )
+    if response.status_code != 200:
+        return
+    for user in response.json().get("data", []):
+        if user.get("name") == random_id:
+            admin_session.delete(
+                f"{DOJO_URL.rstrip('/')}/api/v1/users/{user['id']}", json={}
+            )
 
 @pytest.fixture(scope="session")
 def example_dojo(admin_session):
@@ -116,6 +170,15 @@ def example_import_dojo(admin_session, example_dojo):
 @pytest.fixture
 def simple_award_dojo(admin_session):
     return create_dojo_yml(open(TEST_DOJOS_LOCATION / "simple_award_dojo.yml").read(), session=admin_session)
+
+
+@pytest.fixture
+def simulation_domains_dojo(admin_session):
+    return create_dojo_yml(
+        open(TEST_DOJOS_LOCATION / "simulation_domains.yml").read(),
+        session=admin_session,
+    )
+
 
 @pytest.fixture
 def codepoints_award_dojo(admin_session):
@@ -239,6 +302,8 @@ def random_private_dojo(admin_session):
 
 @pytest.fixture
 def browser_fixture():
+    if Firefox is None:
+        pytest.skip("Selenium is not installed in this test environment")
     options = FirefoxOptions()
     options.add_argument("--headless")
     geckodriver = shutil.which("geckodriver")

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block body_class %}admin-overview-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/admin-product.css', v='aisecedu-admin-product-v10-readability-v1') }}">
+{% endblock %}
+
+{% block content %}
+<section class="admin-product admin-overview" aria-labelledby="admin-overview-title" data-admin-overview-ready="true">
+  <header class="admin-product-header admin-overview-hero">
+    <div>
+      <p class="admin-product-eyebrow">平台管理 · 教育运营</p>
+      <h1 id="admin-overview-title">平台健康与待处理事项</h1>
+      <p>先看会阻断教学的风险，再进入课程、运行环境或评测记录处理；所有数字均来自当前数据库事实。</p>
+    </div>
+    <div class="admin-product-header-actions">
+      <a class="admin-product-secondary" href="/teacher"><i class="fas fa-arrow-left" aria-hidden="true"></i>返回教学平台</a>
+      <a class="admin-product-primary" href="/admin/config"><i class="fas fa-cog" aria-hidden="true"></i>平台设置</a>
+    </div>
+  </header>
+
+  <section class="admin-overview-state" data-health="{{ health_state }}" aria-labelledby="admin-health-title">
+    <div class="admin-overview-state-icon" aria-hidden="true"><i class="fas {{ 'fa-exclamation-triangle' if health_state == 'attention' else 'fa-check' }}"></i></div>
+    <div>
+      <p class="admin-product-eyebrow">当前状态</p>
+      <h2 id="admin-health-title">{{ health_label }}</h2>
+      <p>统计窗口：{{ window_label }} · 截至 {{ as_of.strftime('%Y-%m-%d %H:%M') }} UTC</p>
+    </div>
+    <dl>
+      <div><dt>正在执行</dt><dd>{{ metrics.activeJobs }}</dd></div>
+      <div><dt>失败任务</dt><dd>{{ metrics.failedJobs }}</dd></div>
+      <div><dt>投递积压</dt><dd>{{ metrics.outboxBacklog }}</dd></div>
+    </dl>
+  </section>
+
+  <section class="admin-overview-kpis" aria-label="平台关键指标">
+    <article><span class="admin-overview-kpi-icon is-blue"><i class="fas fa-user-graduate" aria-hidden="true"></i></span><div><small>24 小时活跃学习者</small><strong>{{ metrics.activeLearners }}</strong><p>共 {{ metrics.learners }} 名可用学习者</p></div></article>
+    <article><span class="admin-overview-kpi-icon is-cyan"><i class="fas fa-chalkboard-teacher" aria-hidden="true"></i></span><div><small>课程教师</small><strong>{{ metrics.teachers }}</strong><p>至少管理一门课程</p></div></article>
+    <article><span class="admin-overview-kpi-icon is-purple"><i class="fas fa-layer-group" aria-hidden="true"></i></span><div><small>课程可用性</small><strong>{{ metrics.courses - metrics.courseIssues }}/{{ metrics.courses }}</strong><p>{{ metrics.courseIssues }} 门缺少章节</p></div></article>
+    <article><span class="admin-overview-kpi-icon is-green"><i class="fas fa-check-double" aria-hidden="true"></i></span><div><small>24 小时作答</small><strong>{{ metrics.submissions }}</strong><p>{% if metrics.correctRate is not none %}正确率 {{ metrics.correctRate }}%{% else %}暂无作答样本{% endif %}</p></div></article>
+  </section>
+
+  <div class="admin-overview-main-grid">
+    <section class="admin-overview-panel" aria-labelledby="admin-alerts-title">
+      <header><div><p class="admin-product-eyebrow">按优先级处理</p><h2 id="admin-alerts-title">风险与恢复动作</h2></div><span>{{ alerts | length }} 项</span></header>
+      {% if alerts %}
+      <div class="admin-overview-alerts">
+        {% for alert in alerts %}
+        <article data-severity="{{ alert.severity }}">
+          <b>{{ alert.severity }}</b>
+          <div><h3>{{ alert.title }}</h3><p>{{ alert.description }}</p></div>
+          <a href="{{ alert.href }}">{{ alert.action }}<i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="admin-overview-empty"><i class="fas fa-check-circle" aria-hidden="true"></i><div><h3>当前没有阻断教学的系统风险</h3><p>失败任务、队列延迟、事件积压与课程结构均在当前阈值内。</p></div></div>
+      {% endif %}
+    </section>
+
+    <aside class="admin-overview-panel admin-overview-queue" aria-labelledby="admin-queue-title">
+      <header><div><p class="admin-product-eyebrow">任务队列</p><h2 id="admin-queue-title">执行链路</h2></div><a href="/admin/desktops">查看环境</a></header>
+      <dl>
+        <div><dt>活动任务</dt><dd><strong>{{ metrics.activeJobs }}</strong><small>排队、运行或取消中</small></dd></div>
+        <div><dt>最长等待</dt><dd><strong>{% if metrics.oldestActiveSeconds %}{{ (metrics.oldestActiveSeconds / 60) | round(0, 'ceil') | int }} 分钟{% else %}—{% endif %}</strong><small>超过 5 分钟进入风险区</small></dd></div>
+        <div><dt>事件投递</dt><dd><strong>{{ '正常' if metrics.outboxBacklog == 0 else '积压' }}</strong><small>{{ metrics.outboxBacklog }} 条尚未同步</small></dd></div>
+      </dl>
+      <p class="admin-overview-definition"><i class="fas fa-info-circle" aria-hidden="true"></i>这里显示任务数据库与事件队列事实；容器实时状态按需在“运行环境”中读取，避免拖慢本页。</p>
+    </aside>
+  </div>
+
+  <section class="admin-overview-panel admin-overview-areas" aria-labelledby="admin-areas-title">
+    <header><div><p class="admin-product-eyebrow">治理入口</p><h2 id="admin-areas-title">按对象进入管理</h2></div><small>每个入口只加载自身所需数据</small></header>
+    <div>
+      <a href="/admin/users"><span><i class="fas fa-user-shield" aria-hidden="true"></i></span><strong>用户与权限</strong><small>{{ metrics.learners }} 名学习者 · {{ metrics.teachers }} 名课程教师</small><i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+      <a href="/admin/dojos"><span><i class="fas fa-layer-group" aria-hidden="true"></i></span><strong>课程治理</strong><small>{{ metrics.courses }} 门课程 · {{ metrics.courseIssues }} 门需补充结构</small><i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+      <a href="/admin/desktops"><span><i class="fas fa-server" aria-hidden="true"></i></span><strong>运行环境</strong><small>容器、任务队列与故障恢复</small><i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+      <a href="/admin/challenges"><span><i class="fas fa-tasks" aria-hidden="true"></i></span><strong>内容与评测</strong><small>{{ metrics.challenges }} 道平台题目</small><i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+      <a href="/admin/submissions"><span><i class="fas fa-history" aria-hidden="true"></i></span><strong>提交与审计</strong><small>{{ window_label }} {{ metrics.submissions }} 次作答</small><i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+      <a href="/admin/config"><span><i class="fas fa-cog" aria-hidden="true"></i></span><strong>平台设置</strong><small>开放策略、安全、邮件与备份</small><i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+    </div>
+  </section>
+</section>
+{% endblock %}
+
+{% block footer %}{% endblock %}

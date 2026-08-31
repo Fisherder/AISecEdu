@@ -11,7 +11,7 @@ Challenges have two fundamental properties:
 
 ## Runtime Modes
 
-AISecEdu preserves one challenge system while supporting three runtime modes:
+玄甲 preserves one challenge system while supporting three runtime modes:
 
 - `CONTAINER` is the traditional isolated Linux/CTF environment described below.
 - `SIMULATION` runs a versioned, declarative security scenario. Learners manipulate typed actions and inspect structured views; deterministic objectives create the same normal `Solve` record as a flag.
@@ -30,6 +30,16 @@ Set `exercise_mode` and, for simulation-capable modes, a `simulation` object on 
 ```
 
 The simulation scenario is expanded and validated when the dojo is loaded. It uses bounded JSON state, typed parameters, allowlisted conditions/effects, public-only view bindings, deterministic objective evaluation, an event hash chain, snapshots, and replay. It never executes model-authored HTML, JavaScript, Python, shell commands, or arbitrary expressions. See [learning.md](learning.md#统一题目模式与模拟引擎) for the full contract.
+
+Reusable presets currently cover `WIRELESS`, `MOBILE`, `SIDE_CHANNEL`, `ICS`,
+`GNSS`, and the generic `SECURITY`/`GENERAL` workflow. Every preset expands to
+the same validated scenario schema, so courses can use a compact declaration
+without introducing a second exercise type. The domain presets expose an
+investigation brief, multi-zone dynamic topology, progressive evidence, freely
+chosen probes, parameterized experiments, recoverable mistakes, written
+diagnosis/response rationale, and independent verification. Published scenario
+versions remain immutable for existing attempts; upgrades retain the previous
+scenario and digest in package history.
 
 ## Verification Inspired by Capture The Flag Competitions
 

@@ -14,11 +14,15 @@ WORKDIR /opt/homefs
 COPY . .
 
 EXPOSE 4201
+# A Mount request calls the storage endpoint served by this same application.
+# Sync-only workers can therefore self-deadlock when a classroom burst occupies
+# every worker.  Threads leave a bounded re-entrant pool for storage callbacks.
 CMD ["gunicorn", \
      "homefs:create_app()", \
      "--bind=unix:/run/docker/plugins/homefs.sock", \
      "--bind=0.0.0.0:4201", \
      "--workers=32", \
+     "--threads=8", \
      "--access-logfile=-", \
      "--access-logformat", \
      "%(h)s %(l)s %(u)s %(t)s \"%(r)s\" %(s)s %(b)s \"%(f)s\" \"%(a)s\" %(L)s", \

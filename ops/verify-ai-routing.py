@@ -586,7 +586,11 @@ def verify_guide_routing(intelligence):
         reply["message"]["metadata"]["actions"][0]["url"]
         == "/course/platform/terminal-handshake"
     )
-    assert reply["message"]["metadata"]["actions"][1]["url"] is None
+    assert len(reply["message"]["metadata"]["actions"]) == 1
+    assert all(
+        action["url"] != "/malicious"
+        for action in reply["message"]["metadata"]["actions"]
+    )
     assert thread.context["referencedExerciseIds"] == [terminal_reference]
 
     bad_thread = SimpleNamespace(
@@ -833,42 +837,71 @@ def verify_authoring_routing(authoring):
                 },
                 "implementation": {
                     "summary": "A minimal evidence-analysis exercise",
-                    "artifacts": ["README.txt: supplied evidence"],
+                    "artifacts": ["server.py: local evidence service"],
                     "runtimeAssumptions": ["No external network"],
-                    "selfChecks": ["README is present"],
+                    "selfChecks": ["The local evidence endpoint is reachable"],
                 },
             }
         if "Pro 产物构建 Agent" in system_prompt:
             return {
                 "starterFiles": [
                     {
-                        "path": "README.txt",
-                        "content": "Inspect the evidence before acting.",
+                        "path": "server.py",
+                        "content": (
+                            "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
+                            "class Handler(BaseHTTPRequestHandler):\n"
+                            "    def do_GET(self):\n"
+                            "        self.send_response(200); self.end_headers()\n"
+                            "        self.wfile.write(b'{\"ready\":true}')\n"
+                            "HTTPServer(('127.0.0.1', 8123), Handler).serve_forever()\n"
+                        ),
                     }
                 ],
                 "oracleContract": {
-                    "type": "REPORT_JSON_V1",
-                    "requiredFields": ["evidence"],
+                    "type": "FLAG_GATE_V1",
+                    "requiredFields": ["ready"],
                     "assertions": [
                         {
-                            "field": "evidence",
-                            "operator": "contains",
-                            "value": "observed",
+                            "field": "ready",
+                            "operator": "equals",
+                            "value": True,
                         }
                     ],
+                    "liveBindings": [
+                        {
+                            "field": "ready",
+                            "service": "evidence",
+                            "method": "GET",
+                            "path": "/",
+                            "headers": {},
+                            "capture": "json_field",
+                            "selector": "ready",
+                        }
+                    ],
+                    "integrityFiles": ["server.py"],
                 },
-                "runtimeContract": {"services": []},
+                "runtimeContract": {
+                    "services": [
+                        {
+                            "name": "evidence",
+                            "interpreter": "python3",
+                            "entrypoint": "server.py",
+                            "arguments": [],
+                            "port": 8123,
+                        }
+                    ]
+                },
                 "privateSolution": {
-                    "overview": "Inspect the supplied evidence.",
+                    "overview": "Inspect the running local evidence service.",
                     "steps": [
                         {
                             "goal": "Establish a baseline",
-                            "action": "Read README.txt.",
-                            "expectedEvidence": "The supplied observation is visible.",
-                            "files": ["README.txt"],
+                            "action": "Request the existing local service.",
+                            "expectedEvidence": "The service reports ready=true.",
+                            "files": ["server.py"],
                         }
                     ],
-                    "successIndicators": ["The report contains observed evidence."],
+                    "successIndicators": ["The private Flag gate observes ready=true."],
                     "commonFailureModes": [],
                     "protectedFacts": {},
                 },
@@ -885,7 +918,7 @@ def verify_authoring_routing(authoring):
         "L3",
         [],
     )
-    secret = fallback["verificationAnswer"]
+    assert fallback["verificationAnswer"] is None
     with patch.object(authoring, "model_json", side_effect=fake_model):
         planned, plan_stage = authoring._model_plan(
             "Create an evidence analysis exercise with a reproducible completion check.",
@@ -921,8 +954,9 @@ def verify_authoring_routing(authoring):
         "model": "deepseek-v4-pro",
     }
     assert review["verdict"] == "PASS"
-    assert built["verificationAnswer"] == secret
-    assert built["starterFiles"][0]["path"] == "README.txt"
+    assert built["verificationAnswer"] is None
+    assert built["starterFiles"][0]["path"] == "server.py"
+    assert built["oracleContract"]["type"] == "FLAG_GATE_V1"
     assert [call[2]["model"] for call in calls] == [
         "deepseek-v4-flash",
         "deepseek-v4-pro",
@@ -932,18 +966,23 @@ def verify_authoring_routing(authoring):
     assert calls[0][2]["thinking"] is False
     assert calls[1][2]["thinking"] is True
     assert calls[2][2]["thinking"] is True
-    assert calls[3][2]["thinking"] is True
+    # The builder and its separate red-team preflight use long-form
+    # reasoning.  The final validator is intentionally a bounded independent
+    # structured audit over the repaired package plus deterministic gates; it
+    # must return a verdict instead of consuming the deadline in another
+    # reasoning stream.
+    assert "最终独立验证 Agent" in calls[3][0]
+    assert calls[3][2]["thinking"] is False
     assert calls[1][2]["reasoning_effort"] == "high"
     assert calls[2][2]["reasoning_effort"] == "high"
-    assert calls[3][2]["reasoning_effort"] == "max"
+    assert calls[3][2].get("reasoning_effort") is None
     for _, payload, _ in calls[:3]:
         assert "verificationAnswer" not in json.dumps(
             payload, ensure_ascii=False
         )
-        assert secret not in json.dumps(payload, ensure_ascii=False)
-    # The independent private validator may see the dynamic Oracle value, but
-    # it is never part of public generation payloads or generated artifacts.
-    assert calls[3][1]["privateBuild"]["verificationAnswer"] == secret
+    # The independent private validator sees only the private Flag-gate
+    # contract; generated tasks never carry a static answer.
+    assert calls[3][1]["privateBuild"]["verificationAnswer"] is None
 
 
 def verify_source_native_authoring(authoring):
@@ -1103,7 +1142,7 @@ def verify_source_native_authoring(authoring):
             draft_for_model, built
         )
     assert review["verdict"] == "PASS"
-    assert final_review["verdict"] == "PASS"
+    assert final_review["verdict"] == "PASS", final_review
     assert review_stage["model"] == "deepseek-v4-pro"
     assert final_stage["model"] == "deepseek-v4-pro"
     assert len(review_calls) == 2
@@ -1253,9 +1292,35 @@ def verify_model_validation_gate(authoring):
         [],
     )
     spec["authoringPipeline"] = {}
+    spec["starterFiles"] = [
+        {
+            "path": "server.py",
+            "content": (
+                "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
+                "class Handler(BaseHTTPRequestHandler):\n"
+                "    def do_GET(self):\n"
+                "        self.send_response(200); self.end_headers()\n"
+                "        self.wfile.write(b'{\"evidence\":\"verified\"}')\n"
+                "HTTPServer(('127.0.0.1', 8127), Handler).serve_forever()\n"
+            ),
+        }
+    ]
+    spec["runtimeContract"] = authoring._normalize_runtime_contract(
+        {
+            "services": [
+                {
+                    "name": "evidence",
+                    "interpreter": "python3",
+                    "entrypoint": "server.py",
+                    "arguments": [],
+                    "port": 8127,
+                }
+            ]
+        }
+    )
     spec["oracleContract"] = authoring._normalize_oracle_contract(
         {
-            "type": "REPORT_JSON_V1",
+            "type": "FLAG_GATE_V1",
             "requiredFields": ["evidence"],
             "assertions": [
                 {
@@ -1264,8 +1329,25 @@ def verify_model_validation_gate(authoring):
                     "value": "verified",
                 }
             ],
+            "liveBindings": [
+                {
+                    "field": "evidence",
+                    "service": "evidence",
+                    "method": "GET",
+                    "path": "/",
+                    "headers": {},
+                    "capture": "json_field",
+                    "selector": "evidence",
+                }
+            ],
+            "integrityFiles": ["server.py"],
         }
     )
+    spec["privateSolution"] = {
+        "overview": "Inspect the running evidence service.",
+        "steps": [{"goal": "Observe verified evidence."}],
+        "successIndicators": ["The private Flag gate observes verified."],
+    }
     low_review = {
         "verdict": "PASS",
         "summary": "A minor documentation issue should be reviewed.",
@@ -1351,7 +1433,10 @@ def verify_model_validation_gate(authoring):
     ):
         healed_report = authoring.validate_draft(draft_with(spec))
     assert healed_report["status"] == "PASS"
-    assert validate_model.call_count == 1
+    assert validate_model.call_count == 1, (
+        "post-repair attestation should reuse the independent review; "
+        f"model validation calls={validate_model.call_count}"
+    )
     final_repair.assert_called_once()
     assert (
         healed_report["agentReview"]["verdict"] == "PASS"
@@ -1386,7 +1471,9 @@ def verify_model_validation_gate(authoring):
         and attested_report["agentReview"]["model"]
         == "deepseek-v4-pro"
     )
-    attested_draft.spec["description"] += " This package changed."
+    attested_draft.spec["description"] = (
+        "This package changed. " + attested_draft.spec["description"]
+    )
     with (
         patch.object(authoring, "_audit", lambda *args, **kwargs: None),
         patch.object(
@@ -1419,7 +1506,7 @@ def verify_model_validation_gate(authoring):
     weak_outcome_spec["oracleContract"] = (
         authoring._normalize_oracle_contract(
             {
-                "type": "REPORT_JSON_V1",
+                "type": "FLAG_GATE_V1",
                 "requiredFields": ["status"],
                 "assertions": [
                     {"field": "status", "operator": "exists"}
@@ -1516,7 +1603,11 @@ def verify_runtime_contract_gate(authoring):
             "path": "server.py",
             "content": (
                 "from http.server import HTTPServer, BaseHTTPRequestHandler\n"
-                "HTTPServer(('127.0.0.1', 8123), BaseHTTPRequestHandler).serve_forever()\n"
+                "class Handler(BaseHTTPRequestHandler):\n"
+                "    def do_GET(self):\n"
+                "        self.send_response(200); self.end_headers()\n"
+                "        self.wfile.write(b'ready')\n"
+                "HTTPServer(('127.0.0.1', 8123), Handler).serve_forever()\n"
             ),
         }
     ]
@@ -1593,6 +1684,7 @@ def verify_public_secret_gate(authoring):
         "L3",
         [],
     )
+    spec["verificationAnswer"] = "private-verification-answer"
     spec["authoringPlan"] = {"teachingGoal": "Inspect evidence safely."}
     spec["starterFiles"] = [
         {
@@ -1622,7 +1714,7 @@ def verify_attempt_version_pin(context):
                     "version": 1,
                     "packagePath": "/var/dojos/.learning/example/v1",
                     "privateSolution": {"overview": "version one"},
-                    "oracleContract": {"type": "REPORT_JSON_V1"},
+                    "oracleContract": {"type": "FLAG_GATE_V1"},
                     "runtimeContract": {"services": []},
                 }
             ],
@@ -1735,7 +1827,7 @@ def verify_deterministic_preflight_repair_signal(authoring):
     spec["privateSolution"] = {
         "overview": "Compare two local requests.",
         "steps": [{"goal": "Establish a baseline"}],
-        "successIndicators": ["The report records the observed result."],
+        "successIndicators": ["The private Flag gate observes the response."],
     }
     model_pass = {
         "verdict": "PASS",
@@ -1763,6 +1855,28 @@ def verify_deterministic_preflight_repair_signal(authoring):
                 "port": 8123,
             }
         ]
+    }
+    spec["oracleContract"] = {
+        "type": "FLAG_GATE_V1",
+        "requiredFields": ["live.body_sha256"],
+        "assertions": [
+            {
+                "field": "live.body_sha256",
+                "operator": "equals",
+                "value": "b24d6d33736ecd5604a4b17bc9c6481039fac362bb7df044ef1c10a2bfd21db6",
+            }
+        ],
+        "liveBindings": [
+            {
+                "field": "live.body_sha256",
+                "service": "web",
+                "method": "GET",
+                "path": "/",
+                "headers": {},
+                "capture": "body_sha256",
+            }
+        ],
+        "integrityFiles": ["server.py"],
     }
     with patch.object(authoring, "model_json", return_value=model_pass):
         repaired, _ = authoring._model_preflight_review(
@@ -1814,15 +1928,14 @@ def verify_structural_closure_agent(authoring):
                         }
                     ],
                     "oracleContract": {
-                        "type": "REPORT_JSON_V1",
-                        "requiredFields": ["result", "conclusion"],
+                        "type": "FLAG_GATE_V1",
+                        "requiredFields": ["live.body_sha256"],
                         "assertions": [
                             {
-                                "field": "result",
+                                "field": "live.body_sha256",
                                 "operator": "equals",
-                                "value": "cross-profile-exposed",
+                                "value": "e656402eb7a45dd32438368d80c0c26f5aebf716aee9951bed938eebe7f547b1",
                             },
-                            {"field": "conclusion", "operator": "exists"},
                         ],
                         "liveBindings": [
                             {
@@ -1858,7 +1971,7 @@ def verify_structural_closure_agent(authoring):
                             }
                         ],
                         "successIndicators": [
-                            "The report distinguishes the authorization boundary."
+                            "The private Flag gate observes the target response."
                         ],
                         "commonFailureModes": [],
                         "protectedFacts": {},
@@ -1880,7 +1993,7 @@ def verify_structural_closure_agent(authoring):
             brief, {}, "L3", [], spec, initial_review
         )
     assert initial_review["verdict"] == "BLOCK"
-    assert final_review["verdict"] == "PASS"
+    assert final_review["verdict"] == "PASS", final_review
     assert stage["resolved"] is True
     assert stage["cycles"][0]["mode"] == "ARTIFACT_CLOSURE"
     assert repaired["starterFiles"][0]["path"] == "server.py"
@@ -1896,7 +2009,7 @@ def verify_structural_closure_agent(authoring):
     )
     assert closure_call[2]["model"] == "deepseek-v4-pro"
     assert closure_call[2]["thinking"] is True
-    assert spec["verificationAnswer"] not in json.dumps(
+    assert "verificationAnswer" not in json.dumps(
         closure_call[1], ensure_ascii=False
     )
 
@@ -1915,7 +2028,11 @@ def verify_contract_closure_agent(authoring):
             "path": "server.py",
             "content": (
                 "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
-                "HTTPServer(('127.0.0.1', 8125), BaseHTTPRequestHandler).serve_forever()\n"
+                "class Handler(BaseHTTPRequestHandler):\n"
+                "    def do_GET(self):\n"
+                "        self.send_response(200); self.end_headers()\n"
+                "        self.wfile.write(b'profile=alice')\n"
+                "HTTPServer(('127.0.0.1', 8125), Handler).serve_forever()\n"
             ),
         }
     ]
@@ -1934,7 +2051,7 @@ def verify_contract_closure_agent(authoring):
     )
     spec["oracleContract"] = authoring._normalize_oracle_contract(
         {
-            "type": "REPORT_JSON_V1",
+            "type": "FLAG_GATE_V1",
             "requiredFields": ["cross_response.status"],
             "assertions": [
                 {
@@ -1960,14 +2077,19 @@ def verify_contract_closure_agent(authoring):
         if "验证闭环修复 Agent" in system_prompt:
             return {
                 "oracleContract": {
-                    "type": "REPORT_JSON_V1",
+                    "type": "FLAG_GATE_V1",
                     "requiredFields": ["cross_response.status"],
                     "assertions": [
                         {
                             "field": "cross_response.status",
                             "operator": "equals",
                             "value": 200,
-                        }
+                        },
+                        {
+                            "field": "cross_response.body_sha256",
+                            "operator": "equals",
+                            "value": "e656402eb7a45dd32438368d80c0c26f5aebf716aee9951bed938eebe7f547b1",
+                        },
                     ],
                     "liveBindings": [
                         {
@@ -2105,7 +2227,7 @@ def verify_contract_closure_agent(authoring):
     assert not environment_review["findings"]
 
 
-def verify_no_key_fallback_remains_usable(authoring):
+def verify_no_key_fallback_fails_closed(authoring):
     brief = "Create a beginner evidence-verification exercise."
     fallback = authoring._base_spec(
         brief,
@@ -2130,8 +2252,18 @@ def verify_no_key_fallback_remains_usable(authoring):
         _, final_review, repair, _ = authoring._repair_until_clear(
             brief, {}, "L3", [], built, review
         )
-    assert final_review["verdict"] == "PASS"
-    assert repair["cycles"] == []
+    assert final_review["verdict"] == "BLOCK", final_review
+    assert any(
+        finding.get("id") == "det-flag-gate-live-state"
+        and finding.get("status") == "OPEN"
+        for finding in final_review.get("findings") or []
+    ), final_review
+    assert repair["resolved"] is False, repair
+    assert 1 <= len(repair["cycles"]) <= 3, repair
+    assert all(
+        cycle.get("repair", {}).get("provider") != "MODEL"
+        for cycle in repair["cycles"]
+    ), repair
 
 
 def verify_live_oracle_and_metadata_gate(authoring):
@@ -2174,10 +2306,15 @@ def verify_live_oracle_and_metadata_gate(authoring):
         ]
     }
     spec["oracleContract"] = {
-        "type": "REPORT_JSON_V1",
+        "type": "FLAG_GATE_V1",
         "requiredFields": ["cross.status"],
         "assertions": [
-            {"field": "cross.status", "operator": "equals", "value": 200}
+            {"field": "cross.status", "operator": "equals", "value": 200},
+            {
+                "field": "cross.body_sha256",
+                "operator": "equals",
+                "value": "e656402eb7a45dd32438368d80c0c26f5aebf716aee9951bed938eebe7f547b1",
+            },
         ],
     }
     weak_findings = authoring._deterministic_preflight_findings(spec)
@@ -2299,7 +2436,7 @@ def verify_live_oracle_and_metadata_gate(authoring):
 
     rejected = authoring._normalize_oracle_contract(
         {
-            "type": "REPORT_JSON_V1",
+            "type": "FLAG_GATE_V1",
             "requiredFields": ["cross.body_sha256"],
             "assertions": [
                 {
@@ -2559,12 +2696,24 @@ def verify_autonomous_authoring_orchestration(authoring):
             max_rounds=3,
         )
     assert report["status"] == "PASS"
-    assert report["autonomousLoop"]["completedRounds"] == 2
+    # `_repair_until_clear` already returns an independent Pro PASS bound to
+    # the repaired package.  The orchestrator reuses that attestation only for
+    # the exact digest and reruns every deterministic publication gate, so it
+    # completes the same autonomous round instead of spending a redundant
+    # second model-review round.
+    assert report["autonomousLoop"]["completedRounds"] == 1
+    assert report["autonomousLoop"]["rounds"][0][
+        "postRepairAttestation"
+    ] == {
+        "reused": True,
+        "status": "PASS",
+        "packageDigest": passed_report["packageDigest"],
+    }
     assert validate.call_count == 2
     repair.assert_called_once()
     assert draft.status == "VALIDATED"
     assert any(item["stage"] == "validation-repair-1" for item in progress)
-    assert any(item["stage"] == "validate-2" for item in progress)
+    assert not any(item["stage"] == "validate-2" for item in progress)
 
 
 def main():
@@ -2602,7 +2751,7 @@ def main():
         verify_structural_closure_agent(authoring)
         verify_contract_closure_agent(authoring)
         verify_live_oracle_and_metadata_gate(authoring)
-        verify_no_key_fallback_remains_usable(authoring)
+        verify_no_key_fallback_fails_closed(authoring)
         verify_autonomous_authoring_orchestration(authoring)
         verify_solution_agent_contract(solution_agent)
         print("PASS  DeepSeek Guide, Tutor, Grader, and authoring routes are correct")
@@ -2622,7 +2771,7 @@ def main():
         print("PASS  final publication gate rejects weak decisive Oracle outcomes")
         print("PASS  publish reuses only a digest-bound Pro validation attestation")
         print("PASS  self-contradictory model findings cannot override deterministic gates")
-        print("PASS  no-key deterministic fallback remains publishable")
+        print("PASS  no-key deterministic fallback remains usable but fails closed before publication")
         print("PASS  strategy selection and validate-repair-revalidate orchestration are autonomous")
         print("PASS  verified-solution Agent enforces learner identity, command policy, and account-bound flag verification")
     finally:

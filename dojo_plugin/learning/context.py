@@ -24,13 +24,11 @@ from ..models import (
     LearningDrafts,
     LearningEvidenceEvents,
     LearningRecommendations,
-    LearningSimulationRuns,
     LearningSkillStates,
     LearningTutorMessages,
 )
 from ..utils import get_current_container
 from .evidence import SENSITIVE_PATTERNS, scrub_payload, verify_evidence_chain
-from .simulation import simulation_run_view
 from .standards import ABILITY_LABELS, DEFAULT_HINT_POLICY, DEFAULT_RUBRIC
 
 
@@ -470,42 +468,6 @@ def container_snapshot(user, expected_challenge=None):
     return result
 
 
-def simulation_snapshot(attempt, expected_challenge=None):
-    run = LearningSimulationRuns.query.filter_by(attempt_id=attempt.id).first()
-    if run is None:
-        return {"available": False, "reason": "no-simulation-run"}
-    matches = bool(
-        expected_challenge is None
-        or (
-            run.dojo_id == expected_challenge.dojo_id
-            and run.module_index == expected_challenge.module_index
-            and run.challenge_index == expected_challenge.challenge_index
-        )
-    )
-    if not matches:
-        return {
-            "available": False,
-            "reason": "simulation-run-mismatch",
-            "matchesAttempt": False,
-            "runId": run.id,
-        }
-    try:
-        view = simulation_run_view(run)
-    except (LookupError, TypeError, ValueError) as exception:
-        return {
-            "available": False,
-            "reason": "simulation-view-error",
-            "matchesAttempt": True,
-            "runId": run.id,
-            "error": str(exception)[:300],
-        }
-    return {
-        "available": True,
-        "matchesAttempt": True,
-        "run": view,
-    }
-
-
 def _dojo_challenge(attempt):
     return DojoChallenges.query.filter_by(
         dojo_id=attempt.dojo_id,
@@ -731,7 +693,6 @@ def attempt_agent_context(
         }
     if include_container:
         result["liveContainer"] = container_snapshot(attempt.user, challenge)
-        result["liveSimulation"] = simulation_snapshot(attempt, challenge)
     return result
 
 
@@ -749,9 +710,23 @@ def learning_profile_context(user):
             else []
         )
     }
+    supported_challenge_ids = {
+        challenge_id
+        for challenge_id, in (
+            db.session.query(DojoChallenges.challenge_id)
+            .filter(
+                DojoChallenges.dojo_id.in_(dojo_ids),
+                DojoChallenges.supported(),
+            )
+            .all()
+            if dojo_ids
+            else []
+        )
+    }
     solved_ids = {
         row.challenge_id
         for row in Solves.query.filter_by(user_id=user.id).all()
+        if row.challenge_id in supported_challenge_ids
     }
     submission_counts = dict(
         (
@@ -763,6 +738,7 @@ def learning_profile_context(user):
             .filter(
                 Submissions.user_id == user.id,
                 DojoChallenges.dojo_id.in_(dojo_ids),
+                DojoChallenges.supported(),
             )
             .group_by(DojoChallenges.dojo_id)
             .all()
@@ -791,6 +767,7 @@ def learning_profile_context(user):
                     "url": f"/{dojo.reference_id}/{module.id}/{challenge.id}",
                 }
                 for challenge in challenges
+                if challenge.supported()
             ]
             modules.append(
                 {
@@ -842,7 +819,8 @@ def learning_profile_context(user):
         for item in DojoChallenges.query.filter(
             DojoChallenges.dojo_id.in_(
                 list({attempt.dojo_id for attempt in attempts})
-            )
+            ),
+            DojoChallenges.supported(),
         ).all()
     } if attempts else {}
     attempt_views = []
@@ -850,14 +828,21 @@ def learning_profile_context(user):
         challenge = challenge_map.get(
             (attempt.dojo_id, attempt.module_index, attempt.challenge_index)
         )
+        if challenge is None:
+            continue
         assessment = latest_assessments.get(attempt.id)
         attempt_views.append(
             {
                 "id": attempt.id,
                 "course": challenge.dojo.name if challenge else None,
+                "courseId": challenge.dojo.reference_id if challenge else None,
                 "unit": challenge.module.name if challenge else None,
+                "moduleId": challenge.module.id if challenge else None,
                 "exercise": challenge.name if challenge else None,
+                "challengeId": challenge.id if challenge else None,
                 "referenceId": challenge.reference_id if challenge else None,
+                "exerciseMode": challenge.exercise_mode if challenge else None,
+                "url": f"/{challenge.reference_id}" if challenge else None,
                 "epoch": attempt.epoch,
                 "mode": attempt.mode,
                 "status": attempt.status,
@@ -912,18 +897,31 @@ def learning_profile_context(user):
         .order_by(LearningRecommendations.created.desc(), LearningRecommendations.rank)
         .limit(20)
         .all()
+        if any(
+            challenge.challenge_id == recommendation.challenge_id
+            and challenge.supported()
+            for challenge in recommendation.dojo.challenges
+        )
     ]
-    active = next((attempt for attempt in attempts if attempt.status == "ACTIVE"), None)
+    visible_attempt_ids = {attempt["id"] for attempt in attempt_views}
+    active = next(
+        (
+            attempt
+            for attempt in attempts
+            if attempt.id in visible_attempt_ids and attempt.status == "ACTIVE"
+        ),
+        None,
+    )
     return {
         "learner": {"id": user.id, "name": user.name},
         "summary": {
             "enrolledCourses": sum(course["enrolled"] for course in courses),
             "completedExercises": len(solved_ids),
-            "attempts": len(attempts),
+            "attempts": len(attempt_views),
             "averageMastery": (
                 round(sum(skill["mastery"] for skill in skills) / len(skills), 1)
                 if skills
-                else 0
+                else None
             ),
         },
         "courses": courses,
@@ -943,7 +941,11 @@ def guide_reference_catalog(profile):
             continue
         summary = recent_attempts.setdefault(
             reference_id,
-            {"count": 0, "latestStatus": attempt.get("status")},
+            {
+                "count": 0,
+                "latestStatus": attempt.get("status"),
+                "latestAttempt": attempt,
+            },
         )
         summary["count"] += 1
 
@@ -975,6 +977,32 @@ def guide_reference_catalog(profile):
                         "url": exercise.get("url"),
                     }
                 )
+    known = {item["id"] for item in result}
+    for reference_id, recent in recent_attempts.items():
+        if reference_id in known:
+            continue
+        attempt = recent.get("latestAttempt") or {}
+        if not all(
+            attempt.get(field)
+            for field in ("courseId", "moduleId", "challengeId")
+        ):
+            continue
+        result.append(
+            {
+                "id": reference_id,
+                "courseId": attempt["courseId"],
+                "moduleId": attempt["moduleId"],
+                "challengeId": attempt["challengeId"],
+                "course": attempt.get("course") or attempt["courseId"],
+                "unit": attempt.get("unit") or attempt["moduleId"],
+                "exercise": attempt.get("exercise") or attempt["challengeId"],
+                "exerciseMode": attempt.get("exerciseMode") or "CONTAINER",
+                "completed": attempt.get("status") == "SOLVED",
+                "recentAttempts": recent.get("count", 0),
+                "latestStatus": recent.get("latestStatus"),
+                "url": attempt.get("url"),
+            }
+        )
     return result
 
 

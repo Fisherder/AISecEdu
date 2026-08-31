@@ -1,0 +1,1363 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无线安全：WPA2 KRACK 攻击演示实验室</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --card2: #1a2332;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --blue: #3b82f6;
+            --green: #22c55e;
+            --red: #ef4444;
+            --amber: #f59e0b;
+            --purple: #a855f7;
+            --cyan: #06b6d4;
+            --ap-color: #3b82f6;
+            --sta-color: #22c55e;
+            --danger-glow: #ef444466;
+            --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Monaco', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+            line-height: 1.6;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .main-container {
+            max-width: 1300px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Header */
+        .header {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header .badge {
+            background: var(--red);
+            color: #fff;
+            font-weight: 700;
+            font-size: 0.8rem;
+            padding: 4px 12px;
+            border-radius: 20px;
+            letter-spacing: 0.04em;
+            white-space: nowrap;
+        }
+        .header h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            flex: 1;
+            min-width: 200px;
+        }
+        .header .edu-note {
+            font-size: 0.7rem;
+            color: var(--text2);
+            font-family: var(--mono);
+            background: #00000033;
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+
+        /* Briefing */
+        .briefing {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px 22px;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+        }
+        .briefing .icon {
+            font-size: 2rem;
+            flex-shrink: 0;
+        }
+        .briefing .content h3 {
+            color: var(--amber);
+            margin-bottom: 4px;
+            font-size: 1rem;
+        }
+        .briefing .content p {
+            color: var(--text2);
+            font-size: 0.9rem;
+        }
+
+        /* Progress */
+        .progress-bar {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 20px;
+        }
+        .progress-step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            color: var(--text2);
+            transition: all 0.3s;
+        }
+        .progress-step .num {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.8rem;
+            border: 2px solid var(--border);
+            transition: all 0.4s;
+        }
+        .progress-step.active {
+            color: var(--text);
+        }
+        .progress-step.active .num {
+            border-color: var(--blue);
+            background: #3b82f622;
+            color: var(--blue);
+        }
+        .progress-step.done {
+            color: var(--green);
+        }
+        .progress-step.done .num {
+            border-color: var(--green);
+            background: #22c55e22;
+            color: var(--green);
+        }
+        .progress-connector {
+            width: 24px;
+            height: 2px;
+            background: var(--border);
+            border-radius: 2px;
+            transition: background 0.4s;
+        }
+        .progress-connector.done {
+            background: var(--green);
+        }
+
+        /* Main grid */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 900px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Handshake visualization */
+        .handshake-panel {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 420px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+        }
+        .handshake-panel h3 {
+            font-size: 0.95rem;
+            color: var(--text2);
+            margin-bottom: 16px;
+            letter-spacing: 0.02em;
+        }
+        .device-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            flex: 1;
+            position: relative;
+            min-height: 200px;
+        }
+        .device {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            z-index: 2;
+            flex-shrink: 0;
+        }
+        .device .icon-box {
+            width: 72px;
+            height: 72px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: 700;
+            border: 3px solid;
+            transition: all 0.5s;
+            position: relative;
+        }
+        .device.ap .icon-box {
+            background: #1e3a5f;
+            border-color: var(--ap-color);
+            color: var(--ap-color);
+        }
+        .device.sta .icon-box {
+            background: #1a3a2a;
+            border-color: var(--sta-color);
+            color: var(--sta-color);
+        }
+        .device .label {
+            font-weight: 700;
+            font-size: 0.9rem;
+            letter-spacing: 0.03em;
+        }
+        .device .sub-label {
+            font-size: 0.7rem;
+            color: var(--text2);
+            font-family: var(--mono);
+        }
+        .device .status-badge {
+            font-size: 0.65rem;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-family: var(--mono);
+            transition: all 0.5s;
+            background: #334155;
+            color: var(--text2);
+        }
+        .device .status-badge.installed {
+            background: #22c55e22;
+            color: var(--green);
+            border: 1px solid #22c55e44;
+        }
+        .device .status-badge.reinstalled {
+            background: #ef444422;
+            color: var(--red);
+            border: 1px solid #ef444444;
+            animation: pulseBadge 0.8s ease-in-out 3;
+        }
+        @keyframes pulseBadge {
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 #ef444488;
+            }
+            50% {
+                box-shadow: 0 0 20px 6px #ef444488;
+            }
+        }
+        .nonce-display {
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            background: #00000044;
+            padding: 4px 10px;
+            border-radius: 6px;
+            color: var(--text2);
+            transition: all 0.5s;
+            text-align: center;
+        }
+        .nonce-display.reset-flash {
+            color: var(--red);
+            animation: flashRed 0.6s ease-in-out 2;
+        }
+        @keyframes flashRed {
+            0%,
+            100% {
+                background: #00000044;
+            }
+            50% {
+                background: #ef444433;
+            }
+        }
+
+        /* Channel area */
+        .channel {
+            flex: 1;
+            position: relative;
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            z-index: 1;
+        }
+        .channel-line {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--border);
+            border-radius: 1px;
+            z-index: 0;
+        }
+        .msg-bubble {
+            position: relative;
+            z-index: 3;
+            font-family: var(--mono);
+            font-size: 0.7rem;
+            padding: 6px 12px;
+            border-radius: 20px;
+            background: #1e3a5f;
+            border: 1px solid var(--blue);
+            color: var(--blue);
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.5s ease;
+            cursor: pointer;
+            white-space: nowrap;
+            text-align: center;
+        }
+        .msg-bubble.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .msg-bubble.from-ap {
+            background: #1e3a5f;
+            border-color: var(--blue);
+            color: #93c5fd;
+        }
+        .msg-bubble.from-sta {
+            background: #1a3a2a;
+            border-color: var(--green);
+            color: #86efac;
+        }
+        .msg-bubble.attack-highlight {
+            background: #3a1a1a;
+            border-color: var(--red);
+            color: #fca5a5;
+            animation: glowRed 0.7s ease-in-out infinite;
+            font-weight: 700;
+        }
+        @keyframes glowRed {
+            0%,
+            100% {
+                box-shadow: 0 0 8px 2px #ef444444;
+            }
+            50% {
+                box-shadow: 0 0 22px 8px #ef444488;
+            }
+        }
+
+        /* Packet list panel */
+        .packet-panel {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 420px;
+        }
+        .packet-panel h3 {
+            font-size: 0.9rem;
+            color: var(--text2);
+            letter-spacing: 0.02em;
+        }
+        .packet-table-wrap {
+            overflow-x: auto;
+            flex-shrink: 0;
+        }
+        .packet-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.75rem;
+            font-family: var(--mono);
+        }
+        .packet-table th {
+            background: #00000033;
+            padding: 8px 10px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text2);
+            border-bottom: 2px solid var(--border);
+            font-size: 0.7rem;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+        }
+        .packet-table td {
+            padding: 7px 10px;
+            border-bottom: 1px solid #ffffff08;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .packet-table tr {
+            transition: all 0.2s;
+        }
+        .packet-table tr:hover td {
+            background: #ffffff0a;
+        }
+        .packet-table tr.selected td {
+            background: #3b82f622;
+            outline: 1px solid #3b82f644;
+        }
+        .packet-table tr.attack-row td {
+            background: #ef44441a;
+            color: #fca5a5;
+            font-weight: 600;
+        }
+        .packet-table tr.attack-row:hover td {
+            background: #ef444428;
+        }
+        .packet-table .tag-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+        .packet-table .tag-indicator.normal {
+            background: var(--blue);
+        }
+        .packet-table .tag-indicator.attack {
+            background: var(--red);
+            animation: pulseDot 0.6s infinite;
+        }
+        @keyframes pulseDot {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        /* Detail panel */
+        .detail-panel {
+            background: #00000033;
+            border-radius: 8px;
+            padding: 12px 14px;
+            font-family: var(--mono);
+            font-size: 0.7rem;
+            flex: 1;
+            overflow-y: auto;
+            max-height: 200px;
+            border: 1px solid #ffffff08;
+        }
+        .detail-panel .field-row {
+            display: flex;
+            gap: 12px;
+            padding: 3px 0;
+        }
+        .detail-panel .field-name {
+            color: var(--cyan);
+            min-width: 100px;
+            flex-shrink: 0;
+        }
+        .detail-panel .field-value {
+            color: var(--text);
+            word-break: break-all;
+        }
+        .detail-panel .field-value.highlight {
+            color: var(--amber);
+            font-weight: 600;
+        }
+        .hex-dump {
+            font-family: var(--mono);
+            font-size: 0.65rem;
+            color: var(--text2);
+            line-height: 1.8;
+            letter-spacing: 0.03em;
+            white-space: pre;
+            background: #00000022;
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 6px;
+        }
+        .hex-dump .hl {
+            color: var(--red);
+            font-weight: 700;
+            background: #ef444422;
+            padding: 1px 3px;
+            border-radius: 2px;
+        }
+
+        /* Controls */
+        .controls-section {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.25s;
+            letter-spacing: 0.02em;
+            font-family: inherit;
+            position: relative;
+            overflow: hidden;
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .btn-primary {
+            background: var(--blue);
+            color: #fff;
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: #2563eb;
+            box-shadow: 0 0 20px #3b82f644;
+        }
+        .btn-danger {
+            background: var(--red);
+            color: #fff;
+            animation: btnPulse 2s ease-in-out infinite;
+        }
+        .btn-danger:hover:not(:disabled) {
+            background: #dc2626;
+            box-shadow: 0 0 28px #ef444466;
+        }
+        @keyframes btnPulse {
+            0%,
+            100% {
+                box-shadow: 0 0 8px #ef444433;
+            }
+            50% {
+                box-shadow: 0 0 24px #ef444477;
+            }
+        }
+        .btn-success {
+            background: var(--green);
+            color: #000;
+        }
+        .btn-success:hover:not(:disabled) {
+            background: #16a34a;
+            box-shadow: 0 0 20px #22c55e44;
+        }
+        .btn-outline {
+            background: transparent;
+            border: 2px solid var(--border);
+            color: var(--text);
+        }
+        .btn-outline:hover:not(:disabled) {
+            border-color: var(--text2);
+            background: #ffffff08;
+        }
+
+        /* Consequence area */
+        .consequence-area {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px 22px;
+            display: none;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+        .consequence-area.visible {
+            display: flex;
+        }
+        .consequence-card {
+            background: #00000033;
+            border-radius: 8px;
+            padding: 14px;
+            flex: 1;
+            min-width: 200px;
+            border: 1px solid #ffffff08;
+        }
+        .consequence-card h4 {
+            font-size: 0.8rem;
+            color: var(--amber);
+            margin-bottom: 8px;
+        }
+        .keystream-viz {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            font-family: var(--mono);
+            font-size: 0.7rem;
+        }
+        .keystream-block {
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #1e3a5f;
+            color: var(--blue);
+            transition: all 0.5s;
+        }
+        .keystream-block.reused {
+            background: #3a1a1a;
+            color: var(--red);
+            border: 1px solid #ef444466;
+            animation: pulseBadge 0.6s ease-in-out 2;
+        }
+
+        /* Fix challenge */
+        .fix-section {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px 22px;
+            display: none;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .fix-section.visible {
+            display: flex;
+        }
+        .fix-section h3 {
+            font-size: 0.95rem;
+            color: var(--green);
+        }
+        .fix-section textarea {
+            width: 100%;
+            min-height: 100px;
+            background: #00000044;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            padding: 12px;
+            resize: vertical;
+            transition: border-color 0.3s;
+        }
+        .fix-section textarea:focus {
+            outline: none;
+            border-color: var(--blue);
+        }
+        .fix-feedback {
+            font-size: 0.8rem;
+            padding: 8px 12px;
+            border-radius: 6px;
+            display: none;
+        }
+        .fix-feedback.success {
+            display: block;
+            background: #22c55e22;
+            color: var(--green);
+            border: 1px solid #22c55e44;
+        }
+        .fix-feedback.partial {
+            display: block;
+            background: #f59e0b22;
+            color: var(--amber);
+            border: 1px solid #f59e0b44;
+        }
+
+        /* Flag toast */
+        .flag-toast {
+            position: fixed;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-120px);
+            background: #1a1a0a;
+            border: 2px solid var(--amber);
+            color: var(--amber);
+            padding: 16px 28px;
+            border-radius: 12px;
+            font-family: var(--mono);
+            font-size: 1rem;
+            font-weight: 700;
+            z-index: 999;
+            transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            text-align: center;
+            letter-spacing: 0.04em;
+        }
+        .flag-toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Analysis report */
+        .analysis-toggle {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .analysis-toggle summary {
+            padding: 14px 20px;
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--text2);
+            font-size: 0.9rem;
+            user-select: none;
+            transition: color 0.2s;
+        }
+        .analysis-toggle summary:hover {
+            color: var(--text);
+        }
+        .analysis-content {
+            padding: 0 20px 18px;
+            font-size: 0.85rem;
+            color: var(--text2);
+            line-height: 1.7;
+        }
+        .analysis-content code {
+            background: #00000044;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            color: var(--cyan);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- Flag Toast -->
+        <div class="flag-toast" id="flagToast">🏴 FLAG{krack_wpa2_msg3_replay_nonce_reset}</div>
+
+        <!-- Header -->
+        <div class="header">
+            <span class="badge">🔐 协议攻击分析</span>
+            <h1>无线安全：WPA2 KRACK 攻击演示</h1>
+            <span class="edu-note">// EDUCATIONAL PURPOSE ONLY — authorized classroom use</span>
+        </div>
+
+        <!-- Briefing -->
+        <div class="briefing">
+            <span class="icon">📡</span>
+            <div class="content">
+                <h3>任务简报</h3>
+                <p>2017年，Mathy Vanhoef 发现 WPA2 协议存在严重漏洞——KRACK（Key Reinstallation Attack，密钥重装攻击）。攻击者通过<strong>重放4次握手的消息3</strong>，迫使客户端重新安装已在使用的PTK密钥，导致nonce计数器重置。这将造成<strong>密钥流重用</strong>，从而可解密WiFi流量。你的任务：观察正常握手、执行重放攻击、观察后果、并编写修复方案。</p>
+            </div>
+        </div>
+
+        <!-- Progress -->
+        <div class="progress-bar" id="progressBar">
+            <div class="progress-step active" id="step1">
+                <span class="num">1</span>观察握手
+            </div>
+            <div class="progress-connector" id="conn1"></div>
+            <div class="progress-step" id="step2">
+                <span class="num">2</span>执行攻击
+            </div>
+            <div class="progress-connector" id="conn2"></div>
+            <div class="progress-step" id="step3">
+                <span class="num">3</span>观察后果
+            </div>
+            <div class="progress-connector" id="conn3"></div>
+            <div class="progress-step" id="step4">
+                <span class="num">4</span>编写修复
+            </div>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="main-grid">
+            <!-- Handshake Visualization -->
+            <div class="handshake-panel" id="handshakePanel">
+                <h3>📶 4次握手可视化 (WPA2 EAPOL)</h3>
+                <div class="device-row">
+                    <div class="device ap" id="apDevice">
+                        <div class="icon-box">AP</div>
+                        <div class="label">接入点</div>
+                        <div class="sub-label">Authenticator</div>
+                        <div class="status-badge" id="apStatus">PTK: 待安装</div>
+                    </div>
+                    <div class="channel" id="channelArea">
+                        <div class="channel-line"></div>
+                        <div class="msg-bubble from-ap" id="msgBubble1">📨 Msg1: ANonce</div>
+                        <div class="msg-bubble from-sta" id="msgBubble2">📨 Msg2: SNonce + MIC</div>
+                        <div class="msg-bubble from-ap" id="msgBubble3">📨 Msg3: ANonce+MIC+GTK</div>
+                        <div class="msg-bubble from-sta" id="msgBubble4">📨 Msg4: MIC + ACK</div>
+                        <div class="msg-bubble from-ap attack-highlight hidden" id="msgBubbleAttack">⚠ Msg3 重放!</div>
+                    </div>
+                    <div class="device sta" id="staDevice">
+                        <div class="icon-box">💻</div>
+                        <div class="label">客户端</div>
+                        <div class="sub-label">Supplicant</div>
+                        <div class="status-badge" id="staStatus">PTK: 待安装</div>
+                        <div class="nonce-display" id="nonceDisplay">Nonce: 0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Packet Inspector -->
+            <div class="packet-panel" id="packetPanel">
+                <h3>📋 Wireshark 数据包捕获 (wlan0.mon)</h3>
+                <div class="packet-table-wrap">
+                    <table class="packet-table" id="packetTable">
+                        <thead>
+                            <tr>
+                                <th>#</th><th>时间</th><th>源</th><th>目的</th><th>协议</th><th>长度</th><th>信息</th>
+                            </tr>
+                        </thead>
+                        <tbody id="packetTbody"></tbody>
+                    </table>
+                </div>
+                <div class="detail-panel" id="detailPanel">
+                    <span style="color:var(--text2);">👆 点击数据包查看详情</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls-section" id="controlsSection">
+            <button class="btn btn-primary" id="btnAdvance" title="推进握手">▶ 推进握手</button>
+            <button class="btn btn-danger hidden" id="btnReplay" title="重放消息3执行KRACK攻击">⚡ 重放消息3 (KRACK攻击)</button>
+            <button class="btn btn-outline hidden" id="btnReset" title="重置实验">🔄 重置实验</button>
+            <span style="font-size:0.75rem;color:var(--text2);" id="controlHint">点击"推进握手"观察正常的4次握手过程</span>
+        </div>
+
+        <!-- Consequence -->
+        <div class="consequence-area" id="consequenceArea">
+            <div class="consequence-card">
+                <h4>🔴 Nonce 计数器重置</h4>
+                <p style="font-size:0.8rem;color:var(--text2);">客户端重新安装PTK后，发送nonce被重置为0。攻击者可捕获使用相同nonce的加密数据包。</p>
+                <div class="nonce-display reset-flash" id="nonceConsequence" style="margin-top:8px;">TX Nonce: 0 ← 已重置!</div>
+            </div>
+            <div class="consequence-card">
+                <h4>🔓 密钥流重用演示</h4>
+                <p style="font-size:0.8rem;color:var(--text2);">同一密钥+同一nonce = 相同密钥流。XOR两个密文可消除密钥流。</p>
+                <div class="keystream-viz" id="keystreamViz">
+                    <span class="keystream-block" id="ks1">C₁ (Nonce=1)</span>
+                    <span style="color:var(--text2);">⊕</span>
+                    <span class="keystream-block reused" id="ks2">C₂ (Nonce=1)</span>
+                    <span style="color:var(--text2);">=</span>
+                    <span class="keystream-block" style="background:#1a2a1a;color:var(--green);" id="ksResult">P₁⊕P₂ 泄露!</span>
+                </div>
+            </div>
+            <div class="consequence-card">
+                <h4>🎯 攻击影响</h4>
+                <p style="font-size:0.8rem;color:var(--text2);">攻击者可解密帧、注入伪造数据包、甚至在某些配置下解密TCP连接和注入恶意内容。CVSS评分: <strong style="color:var(--red);">8.1 (HIGH)</strong></p>
+            </div>
+        </div>
+
+        <!-- Fix Challenge -->
+        <div class="fix-section" id="fixSection">
+            <h3>🛡️ 修复挑战：描述补丁行为</h3>
+            <p style="font-size:0.8rem;color:var(--text2);">请描述客户端应如何修改行为以防御KRACK攻击。关键点：收到重传的消息3时，客户端应该怎么做？<br>（提示：涉及PTK安装状态追踪、nonce处理）</p>
+            <textarea id="fixTextarea" placeholder="在此输入你的修复方案……例如：客户端应检测PTK是否已安装，若已安装则……"></textarea>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="btn btn-success" id="btnSubmitFix">✅ 提交修复方案</button>
+                <button class="btn btn-outline" id="btnRevealFix">💡 查看标准答案</button>
+            </div>
+            <div class="fix-feedback" id="fixFeedback"></div>
+        </div>
+
+        <!-- Analysis Report -->
+        <details class="analysis-toggle" id="analysisToggle">
+            <summary>📄 查看完整分析报告</summary>
+            <div class="analysis-content">
+                <p><strong>漏洞名称：</strong>KRACK (Key Reinstallation Attack) — CVE-2017-13077 等系列</p>
+                <p><strong>根因：</strong>WPA2 4次握手协议未强制要求客户端检测PTK是否已安装。当攻击者重传消息3时，客户端重新安装PTK并将发送nonce（数据包编号）重置为0，导致使用相同密钥和相同nonce加密不同数据——密钥流重用。</p>
+                <p><strong>攻击链：</strong></p>
+                <ol>
+                    <li>攻击者建立伪造的恶意AP（同SSID，同MAC）或在真实AP附近进行信道中间人</li>
+                    <li>捕获真实的4次握手消息3</li>
+                    <li>阻塞消息4使其无法到达真实AP</li>
+                    <li>重放消息3给客户端 → 客户端重新安装PTK → nonce重置</li>
+                    <li>捕获客户端使用重置后nonce发送的加密帧 → 密钥流重用 → 可解密</li>
+                </ol>
+                <p><strong>修复方案：</strong>客户端在安装PTK时应检查该密钥是否已被安装。若已安装，则<code>不应重置nonce计数器</code>，仅重新发送消息4作为确认。Linux的<code>wpa_supplicant</code>、Windows、macOS等均在2017年10月发布了补丁。</p>
+                <p><strong>参考：</strong>Mathy Vanhoef, "Key Reinstallation Attacks: Forcing Nonce Reuse in WPA2", CCS 2017.</p>
+                <p style="color:var(--amber);margin-top:8px;">⚠ 仅用于授权教学环境 — 本文档中的所有PoC均为概念演示，不包含可部署的攻击代码。</p>
+            </div>
+        </details>
+    </div>
+
+    <script>
+        // ============================================================
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // This is a conceptual demonstration of the KRACK vulnerability
+        // against a simulated in-memory target. No deployable exploit.
+        // ============================================================
+
+        (function() {
+            // --- State ---
+            const state = {
+                phase: 'observe', // 'observe' | 'readyAttack' | 'attacked' | 'consequence' | 'fix'
+                handshakeStep: 0, // 0=none, 1-4=messages shown
+                ptkInstalled: false,
+                ptkReinstalled: false,
+                nonceValue: 0,
+                attackExecuted: false,
+                fixSubmitted: false,
+                flagShown: false,
+                selectedPacket: null,
+            };
+
+            // --- Packet data ---
+            const packetsData = [
+                { id: 1, time: '0.000000', src: 'AP', dst: 'STA', protocol: 'EAPOL', length: 121, info: 'Message 1: ANonce',
+                    type: 'msg1', from: 'ap',
+                    fields: [
+                        { name: 'Frame Type', value: 'EAPOL (0x888E)' },
+                        { name: 'EAPOL Type', value: 'Key (3)' },
+                        { name: 'Key Descriptor', value: 'WPA2 (2)' },
+                        { name: 'Key Info', value: '0x008A (Key ACK + ANonce present)', highlight: true },
+                        { name: 'ANonce', value: 'a1b2c3d4e5f6a7b8... (32 bytes)' },
+                        { name: 'Replay Counter', value: '1' },
+                    ],
+                    hex: '02 03 00 8A 00 00 00 00 00 00 00 00 00 00 00 01\n<span class="hl">a1 b2 c3 d4 e5 f6 a7 b8</span> c1 d2 e3 f4 a5 b6 c7 d8\n... ANonce (32 bytes total) ...' },
+                { id: 2, time: '0.025120', src: 'STA', dst: 'AP', protocol: 'EAPOL', length: 145, info: 'Message 2: SNonce + MIC',
+                    type: 'msg2', from: 'sta',
+                    fields: [
+                        { name: 'Frame Type', value: 'EAPOL (0x888E)' },
+                        { name: 'EAPOL Type', value: 'Key (3)' },
+                        { name: 'Key Descriptor', value: 'WPA2 (2)' },
+                        { name: 'Key Info', value: '0x010A (MIC + SNonce present)', highlight: true },
+                        { name: 'SNonce', value: 'f9e8d7c6b5a49382... (32 bytes)' },
+                        { name: 'MIC', value: '0x4f2e8a1b... (验证完整性)' },
+                        { name: 'Replay Counter', value: '1' },
+                    ],
+                    hex: '02 03 01 0A 00 00 00 00 00 00 00 00 00 00 00 01\n<span class="hl">f9 e8 d7 c6 b5 a4 93 82</span> 71 60 5f 4e 3d 2c 1b 0a\n... SNonce (32 bytes) ...\nMIC: 4f 2e 8a 1b ...' },
+                { id: 3, time: '0.050340', src: 'AP', dst: 'STA', protocol: 'EAPOL', length: 189, info: 'Message 3: ANonce+MIC+GTK(encrypted)',
+                    type: 'msg3', from: 'ap', isKey: true,
+                    fields: [
+                        { name: 'Frame Type', value: 'EAPOL (0x888E)' },
+                        { name: 'EAPOL Type', value: 'Key (3)' },
+                        { name: 'Key Descriptor', value: 'WPA2 (2)' },
+                        { name: 'Key Info', value: '0x13CA (Key ACK+MIC+Secure+ENCR)', highlight: true },
+                        { name: 'ANonce', value: 'a1b2c3d4e5f6a7b8... (same as Msg1)' },
+                        { name: 'MIC', value: '0x7d3c... (验证完整性)' },
+                        { name: 'GTK (encrypted)', value: '[ENC] 0xa3f2... (加密的组密钥)', highlight: true },
+                        { name: 'Replay Counter', value: '2' },
+                    ],
+                    hex: '02 03 13 CA 00 00 00 00 00 00 00 00 00 00 00 02\n<span class="hl">a1 b2 c3 d4 e5 f6 a7 b8</span> ... ANonce\nMIC: 7d 3c 9e ... \n<span class="hl">[ENC] GTK Data:</span> a3 f2 01 7b ...' },
+                { id: 4, time: '0.075500', src: 'STA', dst: 'AP', protocol: 'EAPOL', length: 101, info: 'Message 4: MIC + ACK',
+                    type: 'msg4', from: 'sta',
+                    fields: [
+                        { name: 'Frame Type', value: 'EAPOL (0x888E)' },
+                        { name: 'EAPOL Type', value: 'Key (3)' },
+                        { name: 'Key Descriptor', value: 'WPA2 (2)' },
+                        { name: 'Key Info', value: '0x030A (Key ACK+MIC+Secure)', highlight: true },
+                        { name: 'MIC', value: '0x2b8f... (确认握手完成)' },
+                        { name: 'Replay Counter', value: '2' },
+                    ],
+                    hex: '02 03 03 0A 00 00 00 00 00 00 00 00 00 00 00 02\nMIC: 2b 8f 4d ...' },
+                { id: 5, time: '2.500000', src: 'AP', dst: 'STA', protocol: 'EAPOL', length: 189,
+                    info: '⚠ Message 3 (REPLAY): ANonce+MIC+GTK — KRACK!', type: 'msg3-replay', from: 'ap', isAttack: true,
+                    fields: [
+                        { name: 'Frame Type', value: 'EAPOL (0x888E)' },
+                        { name: 'EAPOL Type', value: 'Key (3) [RETRANSMISSION]' },
+                        { name: 'Key Descriptor', value: 'WPA2 (2)' },
+                        { name: 'Key Info', value: '0x13CA — 与原始Msg3完全相同!', highlight: true },
+                        { name: 'ANonce', value: 'a1b2c3d4e5f6a7b8... (identical)' },
+                        { name: 'MIC', value: '0x7d3c... (identical)' },
+                        { name: '⚠ ATTACK', value: '客户端将重新安装PTK并重置Nonce!', highlight: true },
+                        { name: 'Replay Counter', value: '2 (未变)' },
+                    ],
+                    hex: '02 03 13 CA 00 00 00 00 00 00 00 00 00 00 00 02\n<span class="hl">a1 b2 c3 d4 e5 f6 a7 b8</span> ... SAME ANonce\n<span class="hl">⚠ SAME MIC + SAME GTK</span>\n→ 客户端重新安装PTK → Nonce重置!' },
+            ];
+
+            // --- DOM refs ---
+            const $ = (s) => document.querySelector(s);
+            const $$ = (s) => document.querySelectorAll(s);
+
+            const packetTbody = $('#packetTbody');
+            const detailPanel = $('#detailPanel');
+            const btnAdvance = $('#btnAdvance');
+            const btnReplay = $('#btnReplay');
+            const btnReset = $('#btnReset');
+            const controlHint = $('#controlHint');
+            const consequenceArea = $('#consequenceArea');
+            const fixSection = $('#fixSection');
+            const fixTextarea = $('#fixTextarea');
+            const fixFeedback = $('#fixFeedback');
+            const btnSubmitFix = $('#btnSubmitFix');
+            const btnRevealFix = $('#btnRevealFix');
+            const flagToast = $('#flagToast');
+            const nonceDisplay = $('#nonceDisplay');
+            const staStatus = $('#staStatus');
+            const apStatus = $('#apStatus');
+            const msgBubbleAttack = $('#msgBubbleAttack');
+            const nonceConsequence = $('#nonceConsequence');
+            const keystreamViz = $('#keystreamViz');
+            const analysisToggle = $('#analysisToggle');
+
+            // --- Initialize ---
+            function init() {
+                renderPacketTable();
+                updateProgressUI();
+                updateHandshakeUI();
+                bindEvents();
+            }
+
+            function renderPacketTable() {
+                packetTbody.innerHTML = '';
+                const visiblePackets = state.attackExecuted ? packetsData : packetsData.slice(0, 4);
+                visiblePackets.forEach((p, idx) => {
+                    const tr = document.createElement('tr');
+                    if (p.isAttack) tr.classList.add('attack-row');
+                    if (state.selectedPacket === p.id) tr.classList.add('selected');
+                    const dotClass = p.isAttack ? 'attack' : 'normal';
+                    tr.innerHTML = `
+                <td><span class="tag-indicator ${dotClass}"></span>${p.id}</td>
+                <td>${p.time}</td>
+                <td>${p.src}</td>
+                <td>${p.dst}</td>
+                <td>${p.protocol}</td>
+                <td>${p.length}</td>
+                <td>${p.info}</td>
+              `;
+                    tr.addEventListener('click', () => selectPacket(p.id));
+                    packetTbody.appendChild(tr);
+                });
+            }
+
+            function selectPacket(packetId) {
+                state.selectedPacket = packetId;
+                const allPackets = state.attackExecuted ? packetsData : packetsData.slice(0, 4);
+                const p = allPackets.find(pkt => pkt.id === packetId);
+                if (!p) return;
+                renderPacketTable();
+                renderDetailPanel(p);
+            }
+
+            function renderDetailPanel(packet) {
+                let html = '<div style="font-weight:700;color:var(--text);margin-bottom:6px;">';
+                html += `📦 数据包 #${packet.id} — ${packet.info}</div>`;
+                html += '<div style="margin-bottom:4px;color:var(--text2);font-size:0.65rem;">Frame → EAPOL → Key Data</div>';
+                packet.fields.forEach(f => {
+                    const valClass = f.highlight ? 'highlight' : '';
+                    html +=
+                        `<div class="field-row"><span class="field-name">${f.name}:</span><span class="field-value ${valClass}">${f.value}</span></div>`;
+                });
+                html += '<div class="hex-dump">' + packet.hex + '</div>';
+                if (packet.isAttack) {
+                    html +=
+                        '<div style="color:var(--red);margin-top:6px;font-weight:600;font-size:0.7rem;">⚠ 这是重放的消息3！客户端将重新安装PTK，Nonce计数器重置为0。</div>';
+                }
+                detailPanel.innerHTML = html;
+            }
+
+            function updateHandshakeUI() {
+                // Show message bubbles based on handshakeStep
+                const bubbles = {
+                    1: 'msgBubble1',
+                    2: 'msgBubble2',
+                    3: 'msgBubble3',
+                    4: 'msgBubble4',
+                };
+                for (let i = 1; i <= 4; i++) {
+                    const el = $('#' + bubbles[i]);
+                    if (i <= state.handshakeStep) {
+                        el.classList.add('visible');
+                    } else {
+                        el.classList.remove('visible');
+                    }
+                }
+                // Attack bubble
+                if (state.attackExecuted && state.handshakeStep >= 4) {
+                    msgBubbleAttack.classList.remove('hidden');
+                    msgBubbleAttack.classList.add('visible');
+                } else {
+                    msgBubbleAttack.classList.add('hidden');
+                    msgBubbleAttack.classList.remove('visible');
+                }
+                // Status badges
+                if (state.handshakeStep >= 3 && !state.attackExecuted) {
+                    staStatus.textContent = 'PTK: 已安装 ✓';
+                    staStatus.className = 'status-badge installed';
+                    apStatus.textContent = 'PTK: 已安装 ✓';
+                    apStatus.className = 'status-badge installed';
+                } else if (state.attackExecuted && state.ptkReinstalled) {
+                    staStatus.textContent = 'PTK: 重新安装! ⚠';
+                    staStatus.className = 'status-badge reinstalled';
+                    apStatus.textContent = 'PTK: 已安装';
+                    apStatus.className = 'status-badge installed';
+                } else if (state.handshakeStep < 3) {
+                    staStatus.textContent = 'PTK: 待安装';
+                    staStatus.className = 'status-badge';
+                    apStatus.textContent = 'PTK: 待安装';
+                    apStatus.className = 'status-badge';
+                }
+                // Nonce display
+                if (state.ptkReinstalled && state.nonceValue === 0) {
+                    nonceDisplay.textContent = 'Nonce: 0 ⚠ 已重置!';
+                    nonceDisplay.classList.add('reset-flash');
+                } else if (state.handshakeStep >= 3) {
+                    nonceDisplay.textContent = 'Nonce: ' + state.nonceValue;
+                    nonceDisplay.classList.remove('reset-flash');
+                } else {
+                    nonceDisplay.textContent = 'Nonce: 0';
+                    nonceDisplay.classList.remove('reset-flash');
+                }
+            }
+
+            function updateProgressUI() {
+                const steps = ['step1', 'step2', 'step3', 'step4'];
+                const conns = ['conn1', 'conn2', 'conn3'];
+                let currentStep = 1;
+                if (state.phase === 'readyAttack') currentStep = 2;
+                if (state.phase === 'attacked' || state.phase === 'consequence') currentStep = 3;
+                if (state.phase === 'fix' || state.fixSubmitted) currentStep = 4;
+
+                steps.forEach((sid, i) => {
+                    const el = $('#' + sid);
+                    el.classList.remove('active', 'done');
+                    if (i + 1 < currentStep) el.classList.add('done');
+                    if (i + 1 === currentStep) el.classList.add('active');
+                });
+                conns.forEach((cid, i) => {
+                    const el = $('#' + cid);
+                    if (i + 1 < currentStep) el.classList.add('done');
+                    else el.classList.remove('done');
+                });
+            }
+
+            function bindEvents() {
+                btnAdvance.addEventListener('click', advanceHandshake);
+                btnReplay.addEventListener('click', executeKRACK);
+                btnReset.addEventListener('click', resetLab);
+                btnSubmitFix.addEventListener('click', submitFix);
+                btnRevealFix.addEventListener('click', revealFix);
+            }
+
+            function advanceHandshake() {
+                if (state.phase === 'observe' && state.handshakeStep < 4) {
+                    state.handshakeStep++;
+                    if (state.handshakeStep === 3) {
+                        state.ptkInstalled = true;
+                        state.nonceValue = 1;
+                        controlHint.textContent = '消息3已发送，客户端安装了PTK。继续推进完成握手。';
+                    }
+                    if (state.handshakeStep === 4) {
+                        state.nonceValue = 2;
+                        controlHint.textContent = '✅ 正常4次握手完成。现在可以执行KRACK攻击——点击红色按钮重放消息3。';
+                        state.phase = 'readyAttack';
+                        btnReplay.classList.remove('hidden');
+                        btnAdvance.disabled = true;
+                        btnAdvance.textContent = '✓ 握手完成';
+                    }
+                    updateHandshakeUI();
+                    updateProgressUI();
+                    // Auto-select latest packet
+                    selectPacket(state.handshakeStep);
+                    renderPacketTable();
+                }
+            }
+
+            function executeKRACK() {
+                if (state.phase !== 'readyAttack') return;
+                state.attackExecuted = true;
+                state.ptkReinstalled = true;
+                state.nonceValue = 0; // Nonce RESET — the core of KRACK
+                state.phase = 'attacked';
+                state.handshakeStep = 5; // show attack bubble
+                controlHint.textContent = '⚠ KRACK攻击执行成功！客户端重新安装了PTK，Nonce已重置为0。观察下方后果。';
+                btnReplay.disabled = true;
+                btnReplay.textContent = '✓ 攻击已执行';
+                btnReplay.classList.remove('btn-danger');
+                btnReplay.classList.add('btn-outline');
+                btnReset.classList.remove('hidden');
+
+                updateHandshakeUI();
+                updateProgressUI();
+                renderPacketTable();
+                selectPacket(5);
+                consequenceArea.classList.add('visible');
+                nonceConsequence.classList.add('reset-flash');
+
+                // Animate keystream viz
+                setTimeout(() => {
+                    const ks2 = $('#ks2');
+                    if (ks2) ks2.classList.add('reused');
+                }, 400);
+
+                // Advance to consequence phase
+                setTimeout(() => {
+                    state.phase = 'consequence';
+                    updateProgressUI();
+                    fixSection.classList.add('visible');
+                    controlHint.textContent = '现在请在下方的"修复挑战"区域描述如何防御KRACK攻击。';
+                }, 1200);
+
+                // Show flag after a moment
+                setTimeout(() => {
+                    if (!state.flagShown) {
+                        state.flagShown = true;
+                        flagToast.classList.add('show');
+                        setTimeout(() => flagToast.classList.remove('show'), 5000);
+                    }
+                }, 2000);
+            }
+
+            function resetLab() {
+                state.phase = 'observe';
+                state.handshakeStep = 0;
+                state.ptkInstalled = false;
+                state.ptkReinstalled = false;
+                state.nonceValue = 0;
+                state.attackExecuted = false;
+                state.fixSubmitted = false;
+                state.flagShown = false;
+                state.selectedPacket = null;
+                btnAdvance.disabled = false;
+                btnAdvance.textContent = '▶ 推进握手';
+                btnReplay.classList.add('hidden');
+                btnReplay.disabled = false;
+                btnReplay.textContent = '⚡ 重放消息3 (KRACK攻击)';
+                btnReplay.classList.add('btn-danger');
+                btnReplay.classList.remove('btn-outline');
+                btnReset.classList.add('hidden');
+                consequenceArea.classList.remove('visible');
+                fixSection.classList.remove('visible');
+                fixTextarea.value = '';
+                fixFeedback.className = 'fix-feedback';
+                fixFeedback.textContent = '';
+                fixFeedback.style.display = 'none';
+                controlHint.textContent = '点击"推进握手"观察正常的4次握手过程';
+                msgBubbleAttack.classList.add('hidden');
+                msgBubbleAttack.classList.remove('visible');
+                detailPanel.innerHTML = '<span style="color:var(--text2);">👆 点击数据包查看详情</span>';
+                nonceConsequence.classList.remove('reset-flash');
+                flagToast.classList.remove('show');
+                updateHandshakeUI();
+                updateProgressUI();
+                renderPacketTable();
+                // Reset keystream blocks
+                const ks2 = $('#ks2');
+                if (ks2) ks2.classList.remove('reused');
+                analysisToggle.open = false;
+            }
+
+            function submitFix() {
+                const answer = fixTextarea.value.trim().toLowerCase();
+                if (!answer) {
+                    fixFeedback.className = 'fix-feedback partial';
+                    fixFeedback.textContent = '⚠ 请输入你的修复方案。';
+                    fixFeedback.style.display = 'block';
+                    return;
+                }
+                // Check for key concepts
+                const keywords = [
+                    { word: '不重新安装', score: 25 },
+                    { word: '已安装', score: 20 },
+                    { word: '拒绝', score: 15 },
+                    { word: '不重置', score: 20 },
+                    { word: '保持', score: 10 },
+                    { word: 'nonce', score: 15 },
+                    { word: '重放', score: 10 },
+                    { word: '检测', score: 10 },
+                    { word: '跟踪', score: 5 },
+                    { word: '状态', score: 5 },
+                    { word: '仅发送消息4', score: 20 },
+                    { word: '重新发送消息4', score: 20 },
+                    { word: '不应重置', score: 20 },
+                    { word: '不要重置', score: 20 },
+                ];
+                let totalScore = 0;
+                const matched = [];
+                keywords.forEach(k => {
+                    if (answer.includes(k.word.toLowerCase())) {
+                        totalScore += k.score;
+                        matched.push(k.word);
+                    }
+                });
+                // Also check for English equivalents
+                const enKeywords = ['reinstall', 'already installed', 'reject', 'reset', 'nonce', 'replay',
+                    'detect', 'track', 'state', 'only send message 4'
+                ];
+                enKeywords.forEach(k => {
+                    if (answer.includes(k.toLowerCase()) && !matched.includes(k)) {
+                        totalScore += 10;
+                        matched.push(k);
+                    }
+                });
+
+                if (totalScore >= 50) {
+                    state.fixSubmitted = true;
+                    state.phase = 'fix';
+                    updateProgressUI();
+                    fixFeedback.className = 'fix-feedback success';
+                    fixFeedback.textContent =
+                        `✅ 优秀！你的方案包含了关键修复概念 (匹配: ${matched.join(', ')})。核心思路正确：客户端应检测PTK是否已安装，若已安装则仅重发消息4，不重新安装密钥也不重置nonce。`;
+                    fixFeedback.style.display = 'block';
+                    if (!state.flagShown) {
+                        state.flagShown = true;
+                        flagToast.classList.add('show');
+                        setTimeout(() => flagToast.classList.remove('show'), 5000);
+                    }
+                } else if (totalScore >= 20) {
+                    fixFeedback.className = 'fix-feedback partial';
+                    fixFeedback.textContent =
+                        `🔶 部分正确 (匹配: ${matched.join(', ')} 得分: ${totalScore})。请思考：客户端收到重传的消息3时，最关键的是不要重新安装PTK和不要重置nonce。再完善一下？`;
+                    fixFeedback.style.display = 'block';
+                } else {
+                    fixFeedback.className = 'fix-feedback partial';
+                    fixFeedback.textContent =
+                        '🔶 请再详细一些。关键点：客户端应追踪PTK安装状态，收到重传消息3时拒绝重新安装密钥、保持nonce不变。尝试描述这个逻辑。';
+                    fixFeedback.style.display = 'block';
+                }
+            }
+
+            function revealFix() {
+                fixTextarea.value = `客户端修复方案：
+        1. 追踪PTK安装状态：在4次握手期间，记录PTK是否已被安装。
+        2. 收到重传的消息3时：检测到PTK已安装 → 拒绝重新安装密钥。
+        3. 不重置nonce计数器：保持现有的发送nonce值不变。
+        4. 仅重新发送消息4：作为对重传消息3的确认响应，但不触发密钥重装。
+        5. 关键：一次握手仅安装一次PTK，后续消息3的重传仅触发消息4重发。`;
+                fixFeedback.className = 'fix-feedback success';
+                fixFeedback.textContent =
+                    '💡 以上是标准修复方案。核心原则：一次握手仅安装一次PTK，检测重传并拒绝重新安装，nonce保持不变。';
+                fixFeedback.style.display = 'block';
+                state.fixSubmitted = true;
+                state.phase = 'fix';
+                updateProgressUI();
+                if (!state.flagShown) {
+                    state.flagShown = true;
+                    flagToast.classList.add('show');
+                    setTimeout(() => flagToast.classList.remove('show'), 5000);
+                }
+            }
+
+            // --- Initialize ---
+            init();
+
+            // Auto-select first packet hint
+            detailPanel.innerHTML =
+                '<span style="color:var(--text2);">👆 点击上方数据包查看详情。先推进握手，观察正常的消息交换流程。</span>';
+
+            console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+            console.log('// KRACK Attack Lab initialized. Phase: observe');
+            console.log('// 该实验室模拟WPA2 4次握手中的KRACK漏洞');
+            console.log('// 配对防御措施：客户端应检测PTK安装状态，拒绝重装');
+        })();
+    </script>
+</body>
+</html>

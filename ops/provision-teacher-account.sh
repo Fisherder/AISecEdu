@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 container=${DOJO_CONTAINER:-pwncollege-dojo}
 username=${AISECEDU_TEACHER_USERNAME:-teacher}
-email=${AISECEDU_TEACHER_EMAIL:-teacher@aisecedu.local}
+email=${AISECEDU_TEACHER_EMAIL:-teacher@xuanjia.local}
 course=${AISECEDU_TEACHER_COURSE:-manual-platform-check}
 : "${AISECEDU_TEACHER_PASSWORD:?Set AISECEDU_TEACHER_PASSWORD before provisioning}"
 

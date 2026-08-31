@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block body_class %}admin-product-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+{% block footer %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/admin-product.css', v='aisecedu-admin-product-v6-readability-v1') }}">
+{% endblock %}
+
+{% block content %}
+<section class="admin-product" aria-labelledby="admin-submissions-title">
+  <header class="admin-product-header">
+    <div>
+      <p class="admin-product-eyebrow">内容与评测</p>
+      <h1 id="admin-submissions-title">提交记录</h1>
+      <p>按学习者、题目或提交编号查找判题事实；答案默认截断，批量更正与删除需要显式选择。</p>
+    </div>
+    <nav class="admin-product-header-actions" aria-label="提交状态">
+      <a class="admin-product-secondary" href="/admin/submissions">全部</a>
+      <a class="admin-product-secondary" href="/admin/submissions/correct">正确</a>
+      <a class="admin-product-secondary" href="/admin/submissions/incorrect">错误</a>
+    </nav>
+  </header>
+
+  <form class="admin-product-filters" method="get" action="{{ request.path }}" role="search">
+    <label><span>查询字段</span><select name="field">
+      <option value="challenge_name"{{ ' selected' if field == 'challenge_name' else '' }}>题目名称</option>
+      <option value="account_id"{{ ' selected' if field == 'account_id' else '' }}>学习者编号</option>
+      <option value="id"{{ ' selected' if field == 'id' else '' }}>提交编号</option>
+      <option value="provided"{{ ' selected' if field == 'provided' else '' }}>提交内容</option>
+    </select></label>
+    <label><span>搜索内容</span><input name="q" value="{{ query_text }}" placeholder="输入名称或编号"></label>
+    <button type="submit">搜索</button>
+  </form>
+
+  <section class="admin-product-summary" aria-label="提交统计">
+    <strong>{{ submissions.total }}</strong><span>条符合条件的提交</span>
+    <span>第 {{ submissions.page }} / {{ submissions.pages or 1 }} 页</span>
+  </section>
+
+  {% if submissions.items %}
+  <div class="admin-product-bulk" aria-label="批量操作">
+    <span id="submission-selection-status" role="status" aria-live="polite">尚未选择提交</span>
+    {% if submission_type == 'incorrect' %}<button type="button" id="correct-flags-button" class="admin-product-secondary" disabled><i class="fas fa-check" aria-hidden="true"></i>标记为正确</button>{% endif %}
+    <button type="button" id="submission-delete-button" class="admin-product-danger" disabled><i class="fas fa-trash-alt" aria-hidden="true"></i>删除所选</button>
+  </div>
+  <div class="admin-product-table-wrap">
+    <table class="admin-product-table" id="teamsboard">
+      <thead><tr><th scope="col"><input type="checkbox" autocomplete="off" data-checkbox-all aria-label="选择本页全部提交"></th><th scope="col">编号</th><th scope="col">学习者</th><th scope="col">题目</th><th scope="col">结果</th><th scope="col">提交内容</th><th scope="col">时间</th></tr></thead>
+      <tbody>
+      {% for submission in submissions.items %}
+        <tr>
+          <td data-checkbox data-label="选择"><input type="checkbox" value="{{ submission.id }}" data-submission-id="{{ submission.id }}" autocomplete="off" aria-label="选择提交 {{ submission.id }}"></td>
+          <td data-label="编号" id="submission-row-{{ submission.id }}">{{ submission.id }}</td>
+          <td data-label="学习者" class="team" id="submission-account-{{ submission.id }}"><a href="{{ generate_account_url(submission.account_id, admin=True) }}">{{ submission.account.name }}</a></td>
+          <td data-label="题目" class="chal" id="submission-challenge-{{ submission.id }}"><a href="{{ url_for('admin.challenges_detail', challenge_id=submission.challenge_id) }}">{{ submission.challenge.name }}</a></td>
+          <td data-label="结果"><span class="admin-product-badge" data-kind="{{ 'success' if submission.type == 'correct' else 'warning' }}">{{ '正确' if submission.type == 'correct' else '错误' if submission.type == 'incorrect' else submission.type }}</span></td>
+          <td data-label="提交内容" class="flag" id="submission-value-{{ submission.id }}"><button class="btn btn-link p-0 copy-flag" type="button" data-submission-id="{{ submission.id }}" aria-label="读取并复制提交 {{ submission.id }} 的完整内容"><i class="fas fa-clipboard" aria-hidden="true"></i></button><pre>{{ submission.provided | truncate(45, True) }}</pre></td>
+          <td data-label="时间" class="solve-time"><span data-time="{{ submission.date | isoformat }}"></span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <section class="admin-product-empty"><h2>没有符合条件的提交</h2><p>调整状态或搜索条件后重试。</p><a href="/admin/submissions">清除筛选</a></section>
+  {% endif %}
+
+  <nav class="admin-product-pagination" aria-label="提交分页">
+    {% if prev_page %}<a href="{{ prev_page }}" rel="prev">上一页</a>{% else %}<span aria-disabled="true">上一页</span>{% endif %}
+    <span>第 {{ submissions.page }} / {{ submissions.pages or 1 }} 页</span>
+    {% if next_page %}<a href="{{ next_page }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
+  </nav>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/admin-submissions.js', v='aisecedu-admin-submissions-v1') }}"></script>
+{% endblock %}

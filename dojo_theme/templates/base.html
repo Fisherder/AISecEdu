@@ -1,27 +1,65 @@
 {% set dojo_id = dojo.reference_id if dojo else None %}
 {% set module_id = module.id if module else None %}
+{% set shell_metadata = page_metadata | default({'title': '玄甲', 'description': '玄甲网络安全教学平台。', 'canonicalPath': request.path}, true) %}
+{% set shell_product = product_context | default({'mode': 'learning' if authed() else 'public'}, true) %}
 
 <!DOCTYPE html>
-<html lang="zh-CN" data-aisecedu-theme="dark">
+<html lang="zh-CN" data-aisecedu-theme="light" data-aisecedu-palette="academy" data-student-ux-variant="{{ student_ux_experience.variant if student_ux_experience else 'anonymous' }}" data-student-ux-cohort="{{ student_ux_experience.cohortBucket if student_ux_experience else '' }}">
   <head>
-    <title>{{ Configs.ctf_name }}</title>
+    <title>{{ shell_metadata.title }}{% if shell_metadata.title != '玄甲' %} · 玄甲{% endif %}</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f3f6fb">
 
-    <meta property="og:title" content="AISecEdu">
-    <meta property="og:description" content="提供隔离学习工作区的动手网络安全课程平台。">
+    <meta name="description" content="{{ shell_metadata.description }}">
+    <link rel="canonical" href="{{ request.url_root.rstrip('/') }}{{ shell_metadata.canonicalPath }}">
+    <meta property="og:title" content="{{ shell_metadata.title }}{% if shell_metadata.title != '玄甲' %} · 玄甲{% endif %}">
+    <meta property="og:description" content="{{ shell_metadata.description }}">
     <meta property="og:image" content="{{ url_for('views.themes', path='img/aisecedu-mark.svg', _external=True) }}">
     <script>
       (function () {
+        var palettes = {
+          academy: {mode: "light", color: "#f3f6fb"},
+          forest: {mode: "light", color: "#f3f6f1"},
+          sunrise: {mode: "light", color: "#faf5ed"},
+          midnight: {mode: "dark", color: "#0b1220"}
+        };
         try {
-          var saved = localStorage.getItem("aisecedu-theme");
-          var theme = saved === "light" || saved === "dark"
-            ? saved
-            : (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
-          document.documentElement.dataset.aiseceduTheme = theme;
-          document.documentElement.style.colorScheme = theme;
+          var accountPreferences = {{ account_preferences | default(none) | tojson }};
+          var saved = localStorage.getItem("aisecedu-palette");
+          var legacy = localStorage.getItem("aisecedu-theme");
+          var savedAppearance = localStorage.getItem("aisecedu-appearance");
+          var palette = accountPreferences && palettes[accountPreferences.palette]
+            ? accountPreferences.palette
+            : palettes[saved] ? saved : (legacy === "dark" ? "midnight" : "academy");
+          var appearance = accountPreferences && ["system", "light", "dark"].includes(accountPreferences.appearance)
+            ? accountPreferences.appearance
+            : ["system", "light", "dark"].includes(savedAppearance) ? savedAppearance : palettes[palette].mode;
+          if (appearance === "dark") palette = "midnight";
+          if (appearance === "light" && palettes[palette].mode === "dark") palette = "academy";
+          if (appearance === "system") {
+            palette = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "midnight"
+              : palettes[palette].mode === "light" ? palette : "academy";
+          }
+          var config = palettes[palette];
+          document.documentElement.dataset.aiseceduAppearance = appearance;
+          document.documentElement.dataset.aiseceduPalette = palette;
+          document.documentElement.dataset.aiseceduTheme = config.mode;
+          document.documentElement.dataset.aiseceduMotion = accountPreferences && accountPreferences.reducedMotion ? "reduced" : "full";
+          document.documentElement.style.colorScheme = config.mode;
+          document.querySelector('meta[name="theme-color"]').setAttribute("content", config.color);
+          if (accountPreferences) {
+            localStorage.setItem("aisecedu-appearance", accountPreferences.appearance);
+            localStorage.setItem("aisecedu-palette", accountPreferences.palette);
+            localStorage.setItem("aisecedu-reduced-motion", String(Boolean(accountPreferences.reducedMotion)));
+          }
         } catch (error) {
-          document.documentElement.dataset.aiseceduTheme = "dark";
+          document.documentElement.dataset.aiseceduAppearance = "light";
+          document.documentElement.dataset.aiseceduPalette = "academy";
+          document.documentElement.dataset.aiseceduTheme = "light";
+          document.documentElement.dataset.aiseceduMotion = "full";
+          document.documentElement.style.colorScheme = "light";
         }
       })();
     </script>
@@ -30,13 +68,11 @@
     <link rel="stylesheet" href="{{ url_for('views.themes', path='css/fonts.css') }}">
     <link rel="stylesheet" href="{{ url_for('views.themes', path='css/main.css') }}">
     <link rel="stylesheet" href="{{ url_for('views.themes', path='css/core.css') }}">
-    <link rel="preload" href="{{ url_for('views.themes', path='font/SpaceMono-Regular.ttf') }}" as="font" type="font/ttf" crossorigin="anonymous">
-    <link rel="preload" href="{{ url_for('views.themes', path='font/SpaceMono-Bold.ttf') }}" as="font" type="font/ttf" crossorigin="anonymous">
-    <link rel="preload" href="{{ url_for('views.themes', path='font/SpaceGrotesk-VariableFont_wght.ttf') }}" as="font" type="font/ttf" crossorigin="anonymous">
+    <link rel="preload" href="{{ url_for('views.themes_beta', path='font/SpaceGrotesk-VariableFont_wght.woff2', v='aisecedu-fonts-v2') }}" as="font" type="font/woff2" crossorigin="anonymous">
     <style>
       @font-face {
         font-family: 'Space Mono';
-        src: url("{{ url_for('views.themes', path='font/SpaceMono-Regular.ttf') }}") format('truetype');
+        src: url("{{ url_for('views.themes_beta', path='font/SpaceMono-Regular.woff2', v='aisecedu-fonts-v2') }}") format('woff2');
         font-weight: 400;
         font-style: normal;
         font-display: swap;
@@ -44,7 +80,7 @@
 
       @font-face {
         font-family: 'Space Mono';
-        src: url("{{ url_for('views.themes', path='font/SpaceMono-Bold.ttf') }}") format('truetype');
+        src: url("{{ url_for('views.themes_beta', path='font/SpaceMono-Bold.woff2', v='aisecedu-fonts-v2') }}") format('woff2');
         font-weight: 700;
         font-style: normal;
         font-display: swap;
@@ -52,16 +88,19 @@
 
       @font-face {
         font-family: 'Space Grotesk';
-        src: url("{{ url_for('views.themes', path='font/SpaceGrotesk-VariableFont_wght.ttf') }}") format('truetype');
+        src: url("{{ url_for('views.themes_beta', path='font/SpaceGrotesk-VariableFont_wght.woff2', v='aisecedu-fonts-v2') }}") format('woff2');
         font-weight: 100 900;
         font-style: normal;
         font-display: swap;
       }
     </style>
-    <link rel="stylesheet" href="{{ url_for('views.themes', path='css/custom.css', v='aisecedu-20260726-guide-reference-scope-v2') }}">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ url_for('views.themes', path='css/custom.css', v='aisecedu-toast-v2') }}">
     {% block stylesheets %}
     {% endblock %}
+    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/tokens.css', v='aisecedu-system-ux-v2') }}">
+    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/components.css', v='aisecedu-system-ux-v5') }}">
+    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/product-shell.css', v='aisecedu-product-shell-v9-floating-menu') }}">
+    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/learning-themes.css', v='aisecedu-learning-themes-v5') }}">
 
     {{ Plugins.styles }}
     <script type="text/javascript">
@@ -73,16 +112,49 @@
 	  'start': {{ Configs.start | tojson }},
 	  'end': {{ Configs.end | tojson }},
 	  'theme_settings': {{ Configs.theme_settings | tojson }},
+          'product': {{ product_bootstrap | tojson }},
           'dojo': "{{ dojo_id if dojo else '' }}",
           'module': "{{ module_id if module else '' }}"
       }
     </script>
+    {% if not authed() %}
+    <script>
+      // CTFd's legacy main bundle unconditionally opens `/events`. Public
+      // pages have no permission for that private stream, so intercept only
+      // that exact endpoint while preserving EventSource for public features.
+      (function () {
+        if (typeof window.EventSource !== "function") return;
+        var NativeEventSource = window.EventSource;
+        function PublicSafeEventSource(url, options) {
+          var target = new URL(String(url || ""), window.location.href);
+          if (target.origin === window.location.origin && target.pathname === "/events") {
+            this.url = target.href;
+            this.readyState = PublicSafeEventSource.CLOSED;
+            this.withCredentials = false;
+            this.close = function () {};
+            this.addEventListener = function () {};
+            this.removeEventListener = function () {};
+            return;
+          }
+          return new NativeEventSource(url, options);
+        }
+        PublicSafeEventSource.CONNECTING = NativeEventSource.CONNECTING;
+        PublicSafeEventSource.OPEN = NativeEventSource.OPEN;
+        PublicSafeEventSource.CLOSED = NativeEventSource.CLOSED;
+        PublicSafeEventSource.prototype = NativeEventSource.prototype;
+        window.EventSource = PublicSafeEventSource;
+      })();
+    </script>
+    {% endif %}
     {{ Configs.theme_header }}
   </head>
-  <body class="{% block body_class %}{% endblock %}">
+  <body class="{% block body_class %}{% endblock %}" data-product-role="{{ 'teacher' if is_course_teacher else 'learner' }}" data-product-mode="{{ shell_product.mode }}">
+    <a class="product-skip-link" href="#main-content">跳到主要内容</a>
+    {% block navigation %}
     {% include "components/navbar.html" %}
+    {% endblock %}
 
-    <main role="main">
+    <main id="main-content" role="main" tabindex="-1">
       {% block content %}
       {{ content | safe}}
       {% endblock %}
@@ -92,46 +164,130 @@
     <footer class="footer">
       <div class="container text-center" style="line-height: 20px; opacity: 0.7">
         <small>
-          <strong>AISecEdu</strong> &middot; 实践式网络安全学习<br>
+          <strong>玄甲</strong> &middot; 实践式网络安全学习<br>
           通过结构化课程、聚焦单元与可复现实验掌握网络安全技能。
         </small>
       </div>
     </footer>
     {% endblock %}
 
+    {% block legacy_runtime %}
     <script defer src="{{ url_for('views.themes', path='js/vendor.bundle.js') }}"></script>
     <script defer src="{{ url_for('views.themes', path='js/core.js') }}"></script>
     <script defer src="{{ url_for('views.themes', path='js/helpers.js') }}"></script>
+    {% endblock %}
 
     {% block entrypoint %}
     <script defer src="{{ url_for('views.themes', path='js/pages/main.js') }}"></script>
     {% endblock %}
 
-    <script defer src="{{ url_for('views.themes', path='js/dojo/util.js') }}"></script>
-    <script defer src="{{ url_for('views.themes', path='js/dojo/navbar.js') }}"></script>
-    <script defer src="{{ url_for('views.themes', path='js/dojo/ui.js', v='aisecedu-20260726-short-score-guide') }}"></script>
-    <script defer src="{{ url_for('views.themes', path='js/dojo/popup.js') }}"></script>
-
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
+    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/request-client.js', v='aisecedu-system-ux-v3') }}"></script>
+    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/url-state.js', v='aisecedu-system-ux-v1') }}"></script>
+    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/bootstrap.js', v='aisecedu-system-ux-v1') }}"></script>
+    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/telemetry.js', v='aisecedu-system-ux-v1') }}"></script>
+    <script>
+      // State components are available system-wide, but only downloaded by
+      // pages that render their corresponding contract markers.
+      (function () {
+        function load(path, ready) {
+          var script = document.createElement('script');
+          script.src = path;
+          script.onload = ready || null;
+          document.body.appendChild(script);
+        }
+        if (document.querySelector('[data-status-domain][data-status]')) {
+          load("{{ url_for('views.themes_beta', path='js/dojo/components/status-badge.js', v='aisecedu-system-ux-v2') }}", function () {
+            window.AISecEdu && window.AISecEdu.statusBadge && window.AISecEdu.statusBadge.enhance(document);
+            document.dispatchEvent(new CustomEvent('aisecedu:status-ready'));
+          });
+        }
+        if (document.querySelector('[data-async-boundary]')) {
+          load("{{ url_for('views.themes_beta', path='js/dojo/components/recovery-panel.js', v='aisecedu-system-ux-v1') }}", function () {
+            load("{{ url_for('views.themes_beta', path='js/dojo/components/async-boundary.js', v='aisecedu-system-ux-v1') }}", function () {
+              window.AISecEdu && window.AISecEdu.asyncBoundary && window.AISecEdu.asyncBoundary.enhance(document);
+            });
+          });
+        }
+        [
+          ['[role="tablist"]', "{{ url_for('views.themes_beta', path='js/dojo/components/tabs.js', v='aisecedu-system-ux-v6') }}"],
+          ['[data-combobox]', "{{ url_for('views.themes_beta', path='js/dojo/components/combobox.js', v='aisecedu-system-ux-v6') }}"],
+          ['[data-data-table]', "{{ url_for('views.themes_beta', path='js/dojo/components/data-table.js', v='aisecedu-system-ux-v6') }}"],
+          ['[data-task-list]', "{{ url_for('views.themes_beta', path='js/dojo/components/task-list.js', v='aisecedu-system-ux-v6') }}"],
+          ['[data-resource-card]', "{{ url_for('views.themes_beta', path='js/dojo/components/resource-card.js', v='aisecedu-system-ux-v6') }}"],
+          ['[data-batch-progress]', "{{ url_for('views.themes_beta', path='js/dojo/components/batch-progress.js', v='aisecedu-system-ux-v6') }}"],
+          ['[data-workspace-state]', "{{ url_for('views.themes_beta', path='js/dojo/components/workspace-state.js', v='aisecedu-system-ux-v6') }}"]
+        ].forEach(function(entry) {
+          if (document.querySelector(entry[0])) {
+            load(entry[1]);
+          }
+        });
+      })();
+    </script>
+    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/components/dialog.js', v='aisecedu-system-ux-v4') }}"></script>
+    <script defer src="{{ url_for('views.themes', path='js/dojo/navbar.js', v='aisecedu-navbar-v7') }}"></script>
+    <script defer src="{{ url_for('views.themes', path='js/dojo/ui.js', v='aisecedu-ui-v7-floating-menu') }}"></script>
+    {% if authed() %}<script defer src="{{ url_for('views.themes', path='js/dojo/popup.js', v='aisecedu-awards-v3') }}"></script>{% endif %}
 
     {% block scripts %}
     {% endblock %}
 
     <script>
-      window.addEventListener('load', function() {
-        if (typeof renderMathInElement !== 'undefined') {
-          renderMathInElement(document.body, {
-            delimiters: [
-              {left: '\\[', right: '\\]', display: true},
-              {left: '\\(', right: '\\)', display: false}
-            ],
-            throwOnError: false,
-            strict: false,
-            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      (function() {
+        function loadMathWhenNeeded() {
+          var body = document.body;
+          var hasMath = body.dataset.renderMath === 'true';
+          var pattern = /(\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\))/;
+          var walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+          while (!hasMath && walker.nextNode()) {
+            var parent = walker.currentNode.parentElement;
+            if (parent && parent.closest('script,noscript,style,textarea,pre,code')) continue;
+            hasMath = pattern.test(walker.currentNode.nodeValue || '');
+          }
+          if (!hasMath) return;
+        var style = document.createElement('link');
+        style.rel = 'stylesheet';
+        style.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
+        style.integrity = 'sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV';
+        style.crossOrigin = 'anonymous';
+        document.head.appendChild(style);
+        function load(src, integrity) {
+          return new Promise(function(resolve, reject) {
+            var script = document.createElement('script');
+            script.src = src;
+            script.integrity = integrity;
+            script.crossOrigin = 'anonymous';
+            script.onload = resolve;
+            script.onerror = reject;
+            document.body.appendChild(script);
           });
         }
-      });
+        load('https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js', 'sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8')
+          .then(function() {
+            return load('https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js', 'sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05');
+          })
+          .then(function() {
+            renderMathInElement(body, {
+              delimiters: [
+                {left: '\\[', right: '\\]', display: true},
+                {left: '\\(', right: '\\)', display: false}
+              ],
+              throwOnError: false,
+              strict: false,
+              ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+            });
+          })
+          .catch(function() {});
+        }
+        function scheduleMathCheck() {
+          if (typeof window.requestIdleCallback === 'function') {
+            window.requestIdleCallback(loadMathWhenNeeded, {timeout: 2000});
+          } else {
+            window.setTimeout(loadMathWhenNeeded, 300);
+          }
+        }
+        if (document.readyState === 'complete') scheduleMathCheck();
+        else window.addEventListener('load', scheduleMathCheck, {once: true});
+      })();
     </script>
 
     {{ Plugins.scripts }}

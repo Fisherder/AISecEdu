@@ -1,0 +1,1452 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ADS-B Ghost Flights — 雷达欺骗安全实验</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel-bg: #1a1a2e;
+            --border: #1e293b;
+            --text: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --green: #22c55e;
+            --amber: #f59e0b;
+            --red: #ef4444;
+            --blue: #3b82f6;
+            --cyan: #06b6d4;
+            --radar-bg: #0a0f0a;
+            --code-bg: #0d1117;
+            --alert-red: #ff3333;
+            --ghost-orange: #ff8c00;
+            --sweep-green: #33ff3366;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 12px 16px;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .edu-badge {
+            position: fixed;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a2ecc;
+            border: 1px solid #f59e0b55;
+            color: #f59e0b;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            letter-spacing: 0.04em;
+            z-index: 999;
+            backdrop-filter: blur(12px);
+            pointer-events: none;
+        }
+        .main-container {
+            display: flex;
+            gap: 16px;
+            width: 100%;
+            max-width: 1400px;
+            flex-wrap: wrap;
+            margin-top: 28px;
+        }
+        .radar-panel {
+            flex: 1 1 580px;
+            min-width: 480px;
+            max-width: 700px;
+            background: var(--panel-bg);
+            border-radius: 16px;
+            border: 2px solid var(--border);
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            transition: border-color 0.4s, box-shadow 0.4s;
+        }
+        .radar-panel.alert-state {
+            border-color: var(--alert-red) !important;
+            box-shadow: 0 0 40px #ef444466, 0 0 80px #ef444422, inset 0 0 40px #ef444411;
+            animation: alertBorderPulse 0.6s ease-in-out infinite;
+        }
+        @keyframes alertBorderPulse {
+            0%,
+            100% {
+                box-shadow: 0 0 30px #ef444466, 0 0 60px #ef444422, inset 0 0 30px #ef444411;
+            }
+            50% {
+                box-shadow: 0 0 70px #ef4444aa, 0 0 120px #ef444455, inset 0 0 60px #ef444433;
+            }
+        }
+        .radar-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            letter-spacing: 0.06em;
+            margin-bottom: 4px;
+        }
+        canvas#radarCanvas {
+            border-radius: 50%;
+            cursor: default;
+            background: #050a05;
+            box-shadow: 0 0 30px #22c55e15, inset 0 0 60px #00000088;
+            max-width: 100%;
+            height: auto;
+            aspect-ratio: 1/1;
+        }
+        .right-panel {
+            flex: 0 1 480px;
+            min-width: 360px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .card {
+            background: var(--panel-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            padding: 14px 16px;
+        }
+        .card h3 {
+            font-size: 0.9rem;
+            color: var(--cyan);
+            margin-bottom: 8px;
+            letter-spacing: 0.04em;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .card h3 .icon {
+            font-size: 1.1rem;
+        }
+        .progress-bar {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+        .progress-step {
+            flex: 1;
+            min-width: 60px;
+            text-align: center;
+            padding: 6px 4px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            background: #1a1a2e55;
+            transition: all 0.4s;
+        }
+        .progress-step.completed {
+            background: #22c55e22;
+            border-color: var(--green);
+            color: var(--green);
+        }
+        .progress-step.active {
+            background: #3b82f622;
+            border-color: var(--blue);
+            color: var(--blue);
+            animation: stepPulse 2s ease-in-out infinite;
+        }
+        @keyframes stepPulse {
+            0%,
+            100% {
+                box-shadow: 0 0 8px #3b82f633;
+            }
+            50% {
+                box-shadow: 0 0 20px #3b82f666;
+            }
+        }
+        .code-editor-wrap {
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #30363d;
+            background: var(--code-bg);
+        }
+        .code-editor-header {
+            background: #161b22;
+            padding: 6px 12px;
+            font-size: 0.7rem;
+            color: #8b949e;
+            letter-spacing: 0.04em;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .code-editor-header .dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 3px;
+        }
+        .dot-r {
+            background: #ef4444;
+        }
+        .dot-y {
+            background: #f59e0b;
+        }
+        .dot-g {
+            background: #22c55e;
+        }
+        textarea#codeEditor {
+            width: 100%;
+            min-height: 320px;
+            background: var(--code-bg);
+            color: #c9d1d9;
+            border: none;
+            padding: 10px 14px;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.78rem;
+            line-height: 1.55;
+            resize: vertical;
+            outline: none;
+            tab-size: 4;
+        }
+        textarea#codeEditor:focus {
+            box-shadow: inset 0 0 0 1px #3b82f644;
+        }
+        .btn-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 4px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 0.82rem;
+            letter-spacing: 0.04em;
+            cursor: pointer;
+            border: none;
+            transition: all 0.25s;
+            position: relative;
+            overflow: hidden;
+        }
+        .btn-execute {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            color: #fff;
+            box-shadow: 0 4px 16px #dc262644;
+        }
+        .btn-execute:hover {
+            box-shadow: 0 6px 24px #dc262666;
+            transform: translateY(-1px);
+        }
+        .btn-execute:active {
+            transform: scale(0.96);
+        }
+        .btn-execute:disabled {
+            background: #555;
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .btn-reset {
+            background: transparent;
+            border: 1px solid #555;
+            color: #aaa;
+        }
+        .btn-reset:hover {
+            border-color: #888;
+            color: #fff;
+        }
+        .btn-defense {
+            background: transparent;
+            border: 1px solid #3b82f6;
+            color: #3b82f6;
+        }
+        .btn-defense:hover {
+            background: #3b82f622;
+        }
+        .btn-defense.active {
+            background: #3b82f644;
+            border-color: #60a5fa;
+            color: #60a5fa;
+            box-shadow: 0 0 12px #3b82f633;
+        }
+        .console-output {
+            background: #0a0a0a;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-family: 'Cascadia Code', 'Consolas', monospace;
+            font-size: 0.7rem;
+            color: #22c55e;
+            max-height: 100px;
+            overflow-y: auto;
+            border: 1px solid #1a2a1a;
+            line-height: 1.4;
+            white-space: pre-wrap;
+        }
+        .console-output .warn {
+            color: #f59e0b;
+        }
+        .console-output .err {
+            color: #ef4444;
+        }
+        .tcas-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            font-size: 2.5rem;
+            font-weight: 900;
+            color: #ef4444;
+            letter-spacing: 0.08em;
+            text-shadow: 0 0 40px #ef4444, 0 0 80px #ef4444;
+            opacity: 0;
+            animation: none;
+            z-index: 10;
+            text-align: center;
+        }
+        .tcas-overlay.visible {
+            animation: tcasFlash 0.5s ease-in-out infinite;
+            opacity: 1;
+        }
+        @keyframes tcasFlash {
+            0%,
+            100% {
+                opacity: 0.3;
+                transform: translate(-50%, -50%) scale(0.95);
+            }
+            50% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1.08);
+            }
+        }
+        .flag-reveal {
+            background: #1a1a0a;
+            border: 2px solid #f59e0b;
+            border-radius: 10px;
+            padding: 12px 18px;
+            text-align: center;
+            font-family: monospace;
+            font-size: 1rem;
+            color: #f59e0b;
+            letter-spacing: 0.06em;
+            animation: flagGlow 1.5s ease-in-out infinite;
+            display: none;
+            margin-top: 8px;
+        }
+        .flag-reveal.visible {
+            display: block;
+        }
+        @keyframes flagGlow {
+            0%,
+            100% {
+                box-shadow: 0 0 20px #f59e0b44;
+            }
+            50% {
+                box-shadow: 0 0 50px #f59e0b88, 0 0 80px #f59e0b33;
+            }
+        }
+        .signal-compare {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .signal-col {
+            flex: 1;
+            min-width: 140px;
+            background: #0d0d0d;
+            border-radius: 8px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 0.68rem;
+            border: 1px solid #222;
+            word-break: break-all;
+            line-height: 1.5;
+        }
+        .signal-col.legit {
+            border-left: 3px solid #22c55e;
+        }
+        .signal-col.spoof {
+            border-left: 3px solid #ef4444;
+        }
+        .signal-col .label {
+            font-size: 0.65rem;
+            letter-spacing: 0.05em;
+            margin-bottom: 4px;
+            font-weight: 700;
+        }
+        details {
+            margin-top: 8px;
+        }
+        details summary {
+            cursor: pointer;
+            color: var(--cyan);
+            font-weight: 600;
+            font-size: 0.85rem;
+            padding: 6px 0;
+            letter-spacing: 0.03em;
+        }
+        details summary:hover {
+            color: #67e8f9;
+        }
+        .analysis-content {
+            padding: 10px 0;
+            font-size: 0.82rem;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+        .analysis-content strong {
+            color: var(--text);
+        }
+        .analysis-content .highlight {
+            background: #ef444422;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #ef4444;
+        }
+        @media (max-width: 900px) {
+            .main-container {
+                flex-direction: column;
+                align-items: center;
+            }
+            .radar-panel {
+                min-width: auto;
+                max-width: 100%;
+                flex: auto;
+            }
+            .right-panel {
+                min-width: auto;
+                width: 100%;
+                flex: auto;
+            }
+            canvas#radarCanvas {
+                width: 100%;
+                height: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="edu-badge">⚡ 仅用于授权教学环境 — EDUCATIONAL PURPOSE ONLY</div>
+
+    <!-- HEADER -->
+    <div style="text-align:center;max-width:900px;width:100%;">
+        <h1 style="font-size:1.5rem;letter-spacing:0.05em;color:#e2e8f0;margin-bottom:2px;">
+            🛰️ ADS-B Ghost Flights — 雷达欺骗安全实验
+        </h1>
+        <p style="font-size:0.75rem;color:#94a3b8;letter-spacing:0.04em;">Interactive Aviation Radar Spoofing Lab</p>
+    </div>
+
+    <!-- PROGRESS -->
+    <div class="progress-bar" style="max-width:900px;width:100%;margin-top:4px;" id="progressBar">
+        <div class="progress-step active" data-step="1">🔍 步骤1: 观察雷达</div>
+        <div class="progress-step" data-step="2">📖 步骤2: 漏洞分析</div>
+        <div class="progress-step" data-step="3">💻 步骤3: 编写脚本</div>
+        <div class="progress-step" data-step="4">🚀 步骤4: 执行攻击</div>
+        <div class="progress-step" data-step="5">🏁 步骤5: 获取Flag</div>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main-container">
+        <!-- RADAR PANEL -->
+        <div class="radar-panel" id="radarPanel">
+            <div class="radar-label">📡 ATC RADAR SCOPE — 1090 MHz ADS-B</div>
+            <canvas id="radarCanvas" width="580" height="580" aria-label="航空雷达显示屏"></canvas>
+            <div class="tcas-overlay" id="tcasOverlay">⚠ TRAFFIC ⚠<br><span style="font-size:1rem;">COLLISION ALERT</span></div>
+        </div>
+
+        <!-- RIGHT PANEL -->
+        <div class="right-panel">
+            <!-- BRIEFING -->
+            <div class="card" id="briefingCard">
+                <h3><span class="icon">📋</span>任务简报</h3>
+                <p style="font-size:0.8rem;line-height:1.5;color:#cbd5e1;">
+                    某机场雷达系统依赖<strong>ADS-B（广播式自动相关监视）</strong>追踪航班。你的任务是：理解ADS-B协议的<strong style="color:#ef4444;">明文广播漏洞</strong>（无认证机制），编写Python脚本生成<strong style="color:#f59e0b;">幽灵航班</strong>，观察其如何触发<strong style="color:#ef4444;">TCAS碰撞告警</strong>。
+                </p>
+                <p style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">
+                    ⚠ 本实验仅模拟概念，所有操作在浏览器沙箱内完成。
+                </p>
+            </div>
+
+            <!-- CODE EDITOR -->
+            <div class="card" id="codeCard">
+                <h3><span class="icon">🐍</span>Python 欺骗脚本编辑器</h3>
+                <div class="code-editor-wrap">
+                    <div class="code-editor-header">
+                        <span><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>&nbsp;adsb_spoofer.py</span>
+                        <span style="color:#8b949e;">ADS-B Frame Generator</span>
+                    </div>
+                    <textarea id="codeEditor" spellcheck="false"># ADS-B Ghost Flight Generator
+                    # EDUCATIONAL PURPOSE ONLY — authorized classroom use
+                    # 演示ADS-B明文广播漏洞（1090MHz无认证）
+
+                    import time
+                    import struct
+
+                    # === 目标机场坐标（雷达中心）===
+                    AIRPORT_LAT = 39.9042   # 北京首都机场
+                AIRPORT_LON = 116.4074
+
+                # === 幽灵航班参数 ===
+                # 学生任务：添加2-3架幽灵航班，让它们从不同方向
+                # 汇聚到机场，触发TCAS碰撞告警
+                GHOST_FLIGHTS = [
+                {"icao": "0xABCD01", "callsign": "GHOST1",
+                "start_lat": 40.15, "start_lon": 115.80,
+                "altitude": 5000, "speed": 450},
+                # TODO: 添加更多幽灵航班 —
+                # 提示：让它们从机场不同方位逼近
+                # {"icao": "0x______", "callsign": "GHOST2",
+                #  "start_lat": ____, "start_lon": ____,
+                #  "altitude": ____, "speed": ____},
+                # {"icao": "0x______", "callsign": "GHOST3",
+                #  "start_lat": ____, "start_lon": ____,
+                #  "altitude": ____, "speed": ____},
+                ]
+
+                def craft_adsb_frame(icao, lat, lon, alt):
+                """构造伪造的ADS-B位置帧（简化版）"""
+                # ADS-B使用112位Mode S Extended Squitter
+                # ⚠ 协议中没有任何认证字段！
+                frame = struct.pack('>I', int(icao, 16))
+                frame += struct.pack('>ddd', lat, lon, alt)
+                return frame
+
+                def broadcast_loop():
+                """持续广播伪造ADS-B帧"""
+                print("[INFO] 启动ADS-B幽灵航班生成器...")
+                print("[WARN] 1090MHz — 无认证广播")
+                while True:
+                for ghost in GHOST_FLIGHTS:
+                frame = craft_adsb_frame(
+                ghost["icao"],
+                ghost["start_lat"],
+                ghost["start_lon"],
+                ghost["altitude"]
+                )
+                print(f"[TX 1090MHz] {ghost['callsign']}: "
+                f"{frame.hex()[:40]}...")
+                time.sleep(0.5)
+
+                if __name__ == "__main__":
+                broadcast_loop()</textarea>
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-execute" id="btnExecute" title="执行脚本 — 生成幽灵航班">▶ 执行脚本 (Execute)</button>
+                <button class="btn btn-reset" id="btnReset" title="重置模拟">↻ 重置</button>
+                <button class="btn btn-defense" id="btnDefense" title="切换防御模式">🛡 防御模式</button>
+            </div>
+            <div class="console-output" id="consoleOutput">
+                [READY] 脚本已加载。请修改GHOST_FLIGHTS列表后点击"执行"。
+                [INFO] 当前配置: 1架幽灵航班 (建议添加2-3架以触发告警)
+            </div>
+            <!-- FLAG -->
+            <div class="flag-reveal" id="flagReveal">
+                🏆 FLAG{adsb_1090mhz_plaintext_no_auth}
+                <br><span style="font-size:0.7rem;color:#aaa;">ADS-B协议缺乏认证机制的证明</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- SIGNAL COMPARISON + ANALYSIS -->
+    <div style="max-width:1400px;width:100%;margin-top:12px;display:flex;gap:12px;flex-wrap:wrap;">
+        <div class="card" style="flex:1;min-width:300px;">
+            <h3><span class="icon">📶</span>信号对比：合法帧 vs 欺骗帧</h3>
+            <div class="signal-compare">
+                <div class="signal-col legit">
+                    <div class="label" style="color:#22c55e;">✅ 合法ADS-B帧（真实航班）</div>
+                    8D 4840D6 202CC371 C32C0E <br>
+                    DF=17 CA=5 ICAO=0x4840D6<br>
+                    ME: 202CC371C32C0E<br>
+                    <span style="color:#22c55e;">Type= airborne position</span><br>
+                    ── 无签名字段 ──
+                </div>
+                <div class="signal-col spoof">
+                    <div class="label" style="color:#ef4444;">⚠ 欺骗ADS-B帧（幽灵航班）</div>
+                    8D ABCD01 202CC372 D32C0F <br>
+                    DF=17 CA=5 ICAO=0xABCD01<br>
+                    ME: 202CC372D32C0F<br>
+                    <span style="color:#ef4444;">Type= airborne position</span><br>
+                    ── 同样无签名字段 ──
+                </div>
+            </div>
+            <p style="font-size:0.7rem;color:#ef4444;margin-top:6px;text-align:center;">
+                ⚠ <strong>两帧语法完全相同，ADS-B协议没有任何认证机制！</strong>
+            </p>
+        </div>
+
+        <!-- ANALYSIS -->
+        <div class="card" style="flex:1;min-width:300px;">
+            <details id="analysisDetails">
+                <summary>📊 查看完整安全分析报告</summary>
+                <div class="analysis-content">
+                    <p><strong>漏洞根因：</strong>ADS-B（1090 MHz Extended Squitter）是<strong>明文广播协议</strong>，设计之初未考虑安全威胁。任何拥有SDR（软件定义无线电）的人都可以在<span class="highlight">1090MHz频率</span>上发送任意ADS-B帧，接收方<strong>无法区分</strong>合法与伪造信号。</p>
+                    <p><strong>攻击路径：</strong></p>
+                    <ol>
+                        <li>攻击者使用廉价SDR（如RTL-SDR，$20）监听1090MHz</li>
+                        <li>构造虚假的位置帧，注入伪造的ICAO代码和坐标</li>
+                        <li>持续广播 → 雷达屏幕出现"幽灵航班"</li>
+                        <li>幽灵航班逼近真实航班 → 触发TCAS碰撞告警</li>
+                        <li>可能导致飞行员采取规避动作，造成混乱</li>
+                    </ol>
+                    <p><strong>真实案例参考：</strong></p>
+                    <ul>
+                        <li>2023年中东地区多次出现GPS/ADS-B欺骗事件</li>
+                        <li>Flightradar24等公开平台曾显示不存在的航班</li>
+                        <li>乌克兰冲突区域频繁出现ADS-B干扰</li>
+                    </ul>
+                    <p><strong>防御措施：</strong></p>
+                    <ul>
+                        <li>🔐 <strong>ADS-B认证</strong>（尚在标准化中，未广泛部署）</li>
+                        <li>📡 <strong>多点定位（MLAT）</strong> — 通过多个接收站交叉验证位置</li>
+                        <li>📶 <strong>信号方向探测</strong> — 检测异常信号来源方向</li>
+                        <li>🧠 <strong>物理异常检测</strong> — 检测不符合飞行物理规律的运动</li>
+                        <li>🛰 <strong>一次雷达交叉验证</strong> — 与主动雷达回波对比</li>
+                    </ul>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // This script simulates ADS-B spoofing in a browser sandbox.
+        // No real radio transmission occurs.
+
+        (function() {
+            // ============ DOM REFS ============
+            const canvas = document.getElementById('radarCanvas');
+            const ctx = canvas.getContext('2d');
+            const radarPanel = document.getElementById('radarPanel');
+            const tcasOverlay = document.getElementById('tcasOverlay');
+            const codeEditor = document.getElementById('codeEditor');
+            const consoleOutput = document.getElementById('consoleOutput');
+            const btnExecute = document.getElementById('btnExecute');
+            const btnReset = document.getElementById('btnReset');
+            const btnDefense = document.getElementById('btnDefense');
+            const flagReveal = document.getElementById('flagReveal');
+            const progressSteps = document.querySelectorAll('.progress-step');
+            const analysisDetails = document.getElementById('analysisDetails');
+
+            const W = canvas.width;
+            const H = canvas.height;
+            const CX = W / 2;
+            const CY = H / 2;
+            const MAX_RANGE = 240; // pixels from center = max radar range
+
+            // ============ AUDIO (TCAS beeps) ============
+            let audioCtx = null;
+
+            function initAudio() {
+                if (!audioCtx) {
+                    try {
+                        audioCtx = new(window.AudioContext || window.webkitAudioContext)();
+                    } catch (e) {
+                        audioCtx = null;
+                    }
+                }
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+            }
+
+            function playTcasBeep() {
+                if (!audioCtx) return;
+                try {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(900, audioCtx.currentTime + 0.08);
+                    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(audioCtx.currentTime);
+                    osc.stop(audioCtx.currentTime + 0.2);
+                } catch (e) { /* silent */ }
+            }
+
+            let tcasBeepInterval = null;
+
+            function startTcasBeeps() {
+                if (tcasBeepInterval) return;
+                playTcasBeep();
+                tcasBeepInterval = setInterval(() => {
+                    playTcasBeep();
+                    setTimeout(() => playTcasBeep(), 200);
+                    setTimeout(() => playTcasBeep(), 400);
+                }, 1800);
+            }
+
+            function stopTcasBeeps() {
+                if (tcasBeepInterval) {
+                    clearInterval(tcasBeepInterval);
+                    tcasBeepInterval = null;
+                }
+            }
+
+            // ============ STATE ============
+            let sweepAngle = 0;
+            let spoofingActive = false;
+            let defenseMode = false;
+            let tcasAlertActive = false;
+            let tcasAlertDuration = 0;
+            let flagCaptured = false;
+            let simulationTime = 0;
+            let ghostSpawnQueue = [];
+            let ghostSpawnTimer = 0;
+            let consoleLines = [];
+            let executedOnce = false;
+
+            // Real aircraft
+            let realAircraft = [];
+            // Ghost aircraft
+            let ghostAircraft = [];
+
+            function createRealAircraft() {
+                return [
+                    { id: 'CES5123', icao: '0x4840D6', x: -120, y: 90, heading: 0.7, speed: 1.2, alt: 35000,
+                        trail: [], color: '#22c55e', type: 'real', orbitRadius: 160, orbitAngle: Math.random() *
+                            Math.PI * 2, orbitCenterX: 30, orbitCenterY: -20, orbitSpeed: 0.008 },
+                    { id: 'CCA1502', icao: '0x7808A1', x: 150, y: -60, heading: Math.PI + 0.5, speed: 1.5, alt: 28000,
+                        trail: [], color: '#22c55e', type: 'real', linearPath: true, targetX: -180, targetY: 70,
+                        originX: 150, originY: -60, pathProgress: 0, pathSpeed: 0.003 },
+                    { id: 'CSN303', icao: '0x7809B2', x: -40, y: -170, heading: 1.2, speed: 1.0, alt: 12000,
+                        trail: [], color: '#4ade80', type: 'real', approach: true, spiralAngle: 0, spiralRadius: 180,
+                        spiralShrink: 0.04 },
+                    { id: 'UAL888', icao: '0xA1B2C3', x: 100, y: 130, heading: -1.8, speed: 1.3, alt: 33000,
+                        trail: [], color: '#22c55e', type: 'real', linearPath: true, targetX: -100, targetY: -140,
+                        originX: 100, originY: 130, pathProgress: 0, pathSpeed: 0.0025 },
+                ];
+            }
+
+            function createGhostTemplate(latOffset, lonOffset, icao, callsign, alt) {
+                // Convert lat/lon offset to approximate x,y on radar
+                // Simplified: each 0.01 deg ~ 1 pixel offset from center
+                const x = lonOffset * 80; // scale factor
+                const y = -latOffset * 80; // inverted (north is up in canvas, but lat increases north)
+                // Clamp to radar edge
+                const dist = Math.sqrt(x * x + y * y);
+                const scale = (MAX_RANGE - 10) / Math.max(dist, 1);
+                const edgeX = x * Math.min(scale, 1.2);
+                const edgeY = y * Math.min(scale, 1.2);
+                return {
+                    id: callsign,
+                    icao: icao,
+                    x: edgeX,
+                    y: edgeY,
+                    heading: Math.atan2(-edgeY, -edgeX), // toward center
+                    speed: 3.5 + Math.random() * 2,
+                    alt: alt,
+                    trail: [],
+                    color: '#f59e0b',
+                    type: 'ghost',
+                    targetX: 0,
+                    targetY: 0,
+                    converging: true,
+                    opacity: 0,
+                    fadeIn: 0,
+                };
+            }
+
+            function parseCodeForGhosts() {
+                const code = codeEditor.value;
+                // Count dictionary entries with "icao" key
+                const icaoMatches = code.match(/["']icao["']\s*:\s*["']0x[0-9A-Fa-f]+["']/g) || [];
+                const count = Math.max(1, Math.min(icaoMatches.length, 5));
+                // Extract lat/lon pairs
+                const latMatches = code.match(/["']start_lat["']\s*:\s*([0-9.]+)/g) || [];
+                const lonMatches = code.match(/["']start_lon["']\s*:\s*([0-9.]+)/g) || [];
+                const altMatches = code.match(/["']altitude["']\s*:\s*([0-9]+)/g) || [];
+                const callMatches = code.match(/["']callsign["']\s*:\s*["']([^"']+)["']/g) || [];
+
+                const ghosts = [];
+                for (let i = 0; i < count; i++) {
+                    const latStr = latMatches[i] ? parseFloat(latMatches[i].match(/[\d.]+/)[0]) : (39.9 + Math.random() *
+                        0.6);
+                    const lonStr = lonMatches[i] ? parseFloat(lonMatches[i].match(/[\d.]+/)[0]) : (116.0 + Math.random() *
+                        1.2);
+                    const alt = altMatches[i] ? parseInt(altMatches[i].match(/\d+/)[0]) : (3000 + Math.floor(Math.random() *
+                        25000));
+                    const call = callMatches[i] ? callMatches[i].match(/["']([^"']+)["']/)[1] : ('GHOST' + (i + 1));
+                    const icao = icaoMatches[i] ? icaoMatches[i].match(/0x[0-9A-Fa-f]+/)[0] : ('0xABCD0' + (i + 1));
+                    const latOff = latStr - 39.9042;
+                    const lonOff = lonStr - 116.4074;
+                    ghosts.push(createGhostTemplate(latOff, lonOff, icao, call, alt));
+                }
+                return ghosts;
+            }
+
+            function resetSimulation() {
+                spoofingActive = false;
+                tcasAlertActive = false;
+                tcasAlertDuration = 0;
+                ghostAircraft = [];
+                ghostSpawnQueue = [];
+                ghostSpawnTimer = 0;
+                realAircraft = createRealAircraft();
+                consoleLines = ['[READY] 脚本已加载。请修改GHOST_FLIGHTS列表后点击"执行"。',
+                    '[INFO] 当前配置: ' + parseCodeForGhosts().length + '架幽灵航班候命中...'
+                ];
+                updateConsole();
+                radarPanel.classList.remove('alert-state');
+                tcasOverlay.classList.remove('visible');
+                stopTcasBeeps();
+                if (!flagCaptured) {
+                    flagReveal.classList.remove('visible');
+                }
+                btnExecute.disabled = false;
+                btnExecute.textContent = '▶ 执行脚本 (Execute)';
+                updateProgress();
+            }
+
+            function updateConsole() {
+                consoleOutput.innerHTML = consoleLines.slice(-8).map(l => {
+                    let cls = '';
+                    if (l.includes('[WARN]') || l.includes('WARN')) cls = 'warn';
+                    if (l.includes('[ERR]') || l.includes('ERROR')) cls = 'err';
+                    return `<span class="${cls}">${l}</span>`;
+                }).join('\n');
+                consoleOutput.scrollTop = consoleOutput.scrollHeight;
+            }
+
+            function addConsoleLine(line) {
+                consoleLines.push(line);
+                if (consoleLines.length > 30) consoleLines.shift();
+                updateConsole();
+            }
+
+            // ============ EXECUTE ============
+            function executeSpoofing() {
+                initAudio();
+                if (spoofingActive) return;
+                spoofingActive = true;
+                executedOnce = true;
+                btnExecute.disabled = true;
+                btnExecute.textContent = '⏳ 广播中...';
+
+                const ghosts = parseCodeForGhosts();
+                ghostSpawnQueue = ghosts;
+                ghostSpawnTimer = 0;
+                ghostAircraft = [];
+
+                addConsoleLine('[INFO] ========== 开始ADS-B广播 ==========');
+                addConsoleLine('[WARN] 在1090MHz频率上发送伪造帧...');
+                addConsoleLine('[INFO] 检测到 ' + ghosts.length + ' 架幽灵航班配置');
+                ghosts.forEach((g, i) => {
+                    addConsoleLine(`[TX] ${g.id} (ICAO:${g.icao}) 帧已注入 — 坐标(${(39.9+(g.y/-80)).toFixed(4)},${(116.4+(g.x/80)).toFixed(4)})`);
+                });
+                addConsoleLine('[WARN] ⚠ ADS-B协议无认证 — 接收方无法区分真伪！');
+
+                // Mark step 4
+                updateProgress();
+            }
+
+            function spawnNextGhost() {
+                if (ghostSpawnQueue.length === 0) return;
+                const g = ghostSpawnQueue.shift();
+                g.fadeIn = 0;
+                g.opacity = 0;
+                ghostAircraft.push(g);
+                addConsoleLine(`[SPAWN] ${g.id} 出现在雷达边缘 — 正在逼近机场!`);
+            }
+
+            // ============ UPDATE ============
+            function updateAircraft(dt) {
+                // Update real aircraft
+                realAircraft.forEach(ac => {
+                    ac.trail.push({ x: ac.x, y: ac.y });
+                    if (ac.trail.length > 35) ac.trail.shift();
+
+                    if (ac.linearPath) {
+                        ac.pathProgress += ac.pathSpeed * dt * 60;
+                        if (ac.pathProgress > 1) ac.pathProgress -= 1;
+                        ac.x = ac.originX + (ac.targetX - ac.originX) * ac.pathProgress;
+                        ac.y = ac.originY + (ac.targetY - ac.originY) * ac.pathProgress;
+                        ac.heading = Math.atan2(ac.targetY - ac.originY, ac.targetX - ac.originX);
+                    } else if (ac.approach) {
+                        ac.spiralAngle += 0.015 * dt * 60;
+                        ac.spiralRadius = Math.max(15, ac.spiralRadius - ac.spiralShrink * dt * 60);
+                        ac.x = ac.spiralRadius * Math.cos(ac.spiralAngle);
+                        ac.y = ac.spiralRadius * Math.sin(ac.spiralAngle);
+                        ac.heading = ac.spiralAngle + Math.PI / 2;
+                    } else if (ac.orbitRadius) {
+                        ac.orbitAngle += ac.orbitSpeed * dt * 60;
+                        ac.x = ac.orbitCenterX + ac.orbitRadius * Math.cos(ac.orbitAngle);
+                        ac.y = ac.orbitCenterY + ac.orbitRadius * Math.sin(ac.orbitAngle);
+                        ac.heading = ac.orbitAngle + Math.PI / 2;
+                    } else {
+                        ac.x += Math.cos(ac.heading) * ac.speed * dt * 60;
+                        ac.y -= Math.sin(ac.heading) * ac.speed * dt * 60;
+                    }
+                    // Bounce at radar edge
+                    const dist = Math.sqrt(ac.x * ac.x + ac.y * ac.y);
+                    if (dist > MAX_RANGE - 15) {
+                        ac.heading = Math.atan2(-ac.y, -ac.x) + (Math.random() - 0.5) * 1.5;
+                        ac.x += Math.cos(ac.heading) * 8;
+                        ac.y -= Math.sin(ac.heading) * 8;
+                    }
+                });
+
+                // Update ghost aircraft
+                ghostAircraft.forEach(ac => {
+                    if (ac.fadeIn < 1) ac.fadeIn += dt * 3;
+                    ac.opacity = Math.min(1, ac.fadeIn);
+                    ac.trail.push({ x: ac.x, y: ac.y, opacity: ac.opacity });
+                    if (ac.trail.length > 40) ac.trail.shift();
+
+                    // Move toward target (airport center)
+                    const dx = ac.targetX - ac.x;
+                    const dy = ac.targetY - ac.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist > 2) {
+                        const nx = dx / dist;
+                        const ny = dy / dist;
+                        ac.x += nx * ac.speed * dt * 60;
+                        ac.y += ny * ac.speed * dt * 60;
+                        ac.heading = Math.atan2(ny, nx);
+                    }
+                    // If very close to center, hold
+                    if (dist < 5) {
+                        ac.x = ac.targetX + (Math.random() - 0.5) * 8;
+                        ac.y = ac.targetY + (Math.random() - 0.5) * 8;
+                    }
+                });
+
+                // Collision detection
+                let anyCollision = false;
+                const allAircraft = [...realAircraft, ...ghostAircraft];
+                for (let i = 0; i < ghostAircraft.length; i++) {
+                    const g = ghostAircraft[i];
+                    if (g.opacity < 0.5) continue;
+                    for (let j = 0; j < realAircraft.length; j++) {
+                        const r = realAircraft[j];
+                        const dx = g.x - r.x;
+                        const dy = g.y - r.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < 35) {
+                            anyCollision = true;
+                            g.color = '#ef4444';
+                            r.color = '#ef4444';
+                            // Mark for TCAS
+                            g.inCollision = true;
+                            r.inCollision = true;
+                        } else if (dist < 70 && g.opacity > 0.6) {
+                            g.color = '#ff6b35';
+                            r.color = '#ffaa00';
+                            g.inCollision = false;
+                            r.inCollision = false;
+                        } else if (g.opacity > 0.6) {
+                            if (!g.inCollision) g.color = '#f59e0b';
+                            if (!r.inCollision) r.color = '#22c55e';
+                            g.inCollision = false;
+                            r.inCollision = false;
+                        }
+                    }
+                }
+
+                // Update TCAS state
+                if (anyCollision && spoofingActive) {
+                    if (!tcasAlertActive) {
+                        tcasAlertActive = true;
+                        tcasAlertDuration = 0;
+                        radarPanel.classList.add('alert-state');
+                        tcasOverlay.classList.add('visible');
+                        startTcasBeeps();
+                        addConsoleLine('[ALERT] ⚠⚠⚠ TCAS碰撞告警触发! ⚠⚠⚠');
+                        addConsoleLine('[ALERT] 幽灵航班与真实航班航迹交汇!');
+                    }
+                    tcasAlertDuration += dt;
+                } else if (!anyCollision && tcasAlertActive && tcasAlertDuration > 1.5) {
+                    tcasAlertActive = false;
+                    tcasAlertDuration = 0;
+                    radarPanel.classList.remove('alert-state');
+                    tcasOverlay.classList.remove('visible');
+                    stopTcasBeeps();
+                    // Reset colors
+                    ghostAircraft.forEach(g => { g.color = '#f59e0b';
+                        g.inCollision = false; });
+                    realAircraft.forEach(r => { r.color = '#22c55e';
+                        r.inCollision = false; });
+                }
+
+                // Flag capture condition
+                if (tcasAlertDuration > 3 && !flagCaptured && spoofingActive) {
+                    flagCaptured = true;
+                    flagReveal.classList.add('visible');
+                    addConsoleLine('[FLAG] 🏆 FLAG CAPTURED! adsb_1090mhz_plaintext_no_auth');
+                    addConsoleLine('[FLAG] 证明了ADS-B协议缺乏认证的严重后果');
+                    updateProgress();
+                    // Auto-open analysis
+                    if (analysisDetails && !analysisDetails.open) {
+                        analysisDetails.open = true;
+                    }
+                }
+
+                // Defense mode: if active, fade out ghosts after a delay
+                if (defenseMode && spoofingActive && ghostAircraft.length > 0) {
+                    ghostAircraft.forEach(g => {
+                        if (g.opacity > 0.3 && g.fadeIn > 1) {
+                            g.opacity -= dt * 0.6;
+                            g.color = '#888888';
+                        }
+                    });
+                    // Remove faded ghosts
+                    ghostAircraft = ghostAircraft.filter(g => g.opacity > 0.05);
+                    if (ghostAircraft.length === 0 && ghostSpawnQueue.length === 0) {
+                        spoofingActive = false;
+                        tcasAlertActive = false;
+                        radarPanel.classList.remove('alert-state');
+                        tcasOverlay.classList.remove('visible');
+                        stopTcasBeeps();
+                        realAircraft.forEach(r => { r.color = '#22c55e';
+                            r.inCollision = false; });
+                        addConsoleLine('[DEFENSE] 防御模式已清除所有幽灵航班');
+                        btnExecute.disabled = false;
+                        btnExecute.textContent = '▶ 执行脚本 (Execute)';
+                    }
+                }
+            }
+
+            // ============ RENDER ============
+            function drawRadarBackground() {
+                // Background circle
+                ctx.fillStyle = '#050a05';
+                ctx.beginPath();
+                ctx.arc(CX, CY, MAX_RANGE + 5, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Range rings
+                for (let r = 60; r <= MAX_RANGE; r += 60) {
+                    ctx.strokeStyle = '#1a3a1a';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 20]);
+                    ctx.beginPath();
+                    ctx.arc(CX, CY, r, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    // Label
+                    ctx.fillStyle = '#2a4a2a';
+                    ctx.font = '9px monospace';
+                    ctx.fillText((r / 60 * 50) + ' NM', CX + r - 20, CY + 12);
+                }
+
+                // Crosshair
+                ctx.strokeStyle = '#1a3a1a';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(CX - MAX_RANGE, CY);
+                ctx.lineTo(CX + MAX_RANGE, CY);
+                ctx.moveTo(CX, CY - MAX_RANGE);
+                ctx.lineTo(CX, CY + MAX_RANGE);
+                ctx.stroke();
+
+                // Azimuth marks
+                for (let a = 0; a < 360; a += 30) {
+                    const rad = a * Math.PI / 180;
+                    const x1 = CX + (MAX_RANGE - 4) * Math.cos(rad);
+                    const y1 = CY - (MAX_RANGE - 4) * Math.sin(rad);
+                    const x2 = CX + MAX_RANGE * Math.cos(rad);
+                    const y2 = CY - MAX_RANGE * Math.sin(rad);
+                    ctx.strokeStyle = '#2a4a2a';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                }
+
+                // Airport marker at center
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(CX, CY, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(CX, CY, 9, 0, Math.PI * 2);
+                ctx.stroke();
+                // Cross at airport
+                ctx.strokeStyle = '#ffffffcc';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(CX - 14, CY);
+                ctx.lineTo(CX + 14, CY);
+                ctx.moveTo(CX, CY - 14);
+                ctx.lineTo(CX, CY + 14);
+                ctx.stroke();
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
+                ctx.fillText('ZBAA', CX + 14, CY - 10);
+            }
+
+            function drawSweepLine() {
+                const rad = sweepAngle;
+                // Glow
+                const gradient = ctx.createRadialGradient(CX, CY, MAX_RANGE * 0.1, CX, CY, MAX_RANGE);
+                gradient.addColorStop(0, '#33ff3310');
+                gradient.addColorStop(0.3, '#33ff3308');
+                gradient.addColorStop(1, '#33ff3300');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.moveTo(CX, CY);
+                ctx.arc(CX, CY, MAX_RANGE, rad - 0.04, rad + 0.04);
+                ctx.closePath();
+                ctx.fill();
+
+                // Bright line
+                ctx.strokeStyle = '#33ff3366';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(CX, CY);
+                ctx.lineTo(CX + MAX_RANGE * Math.cos(rad), CY - MAX_RANGE * Math.sin(rad));
+                ctx.stroke();
+
+                // Trailing glow
+                for (let i = 1; i <= 6; i++) {
+                    const trailRad = rad - i * 0.025;
+                    const alpha = 0.25 - i * 0.035;
+                    ctx.strokeStyle = `rgba(51,255,51,${Math.max(0.02, alpha)})`;
+                    ctx.lineWidth = 0.6;
+                    ctx.beginPath();
+                    ctx.moveTo(CX, CY);
+                    ctx.lineTo(CX + MAX_RANGE * Math.cos(trailRad), CY - MAX_RANGE * Math.sin(trailRad));
+                    ctx.stroke();
+                }
+            }
+
+            function drawAircraft(ac) {
+                const sx = CX + ac.x;
+                const sy = CY - ac.y;
+                const opacity = ac.type === 'ghost' ? (ac.opacity || 0) : 1;
+
+                if (opacity < 0.03) return;
+
+                // Trail
+                if (ac.trail.length > 1 && opacity > 0.3) {
+                    ctx.strokeStyle = ac.color.replace(')', `,${opacity*0.5})`).replace('rgb',
+                        'rgba').replace('#ef4444', 'rgba(239,68,68').replace('#f59e0b', 'rgba(245,158,11').replace(
+                        '#22c55e', 'rgba(34,197,94').replace('#4ade80', 'rgba(74,222,128').replace('#ff6b35',
+                        'rgba(255,107,53').replace('#ffaa00', 'rgba(255,170,0');
+                    if (ac.color.startsWith('#')) {
+                        const hex = ac.color;
+                        const r = parseInt(hex.slice(1, 3), 16);
+                        const g = parseInt(hex.slice(3, 5), 16);
+                        const b = parseInt(hex.slice(5, 7), 16);
+                        ctx.strokeStyle = `rgba(${r},${g},${b},${opacity*0.55})`;
+                    }
+                    ctx.lineWidth = 1.2;
+                    ctx.beginPath();
+                    const firstT = ac.trail[0];
+                    ctx.moveTo(CX + firstT.x, CY - firstT.y);
+                    for (let i = 1; i < ac.trail.length; i++) {
+                        ctx.lineTo(CX + ac.trail[i].x, CY - ac.trail[i].y);
+                    }
+                    ctx.stroke();
+                }
+
+                // Glow
+                if (opacity > 0.4) {
+                    const glowGrad = ctx.createRadialGradient(sx, sy, 2, sx, sy, 16);
+                    let glowColor = ac.color;
+                    if (ac.inCollision) glowColor = '#ef4444';
+                    glowGrad.addColorStop(0, glowColor.replace(')', `,${opacity})`).replace('rgb', 'rgba').replace(
+                        '#ef4444', 'rgba(239,68,68').replace('#f59e0b', 'rgba(245,158,11').replace('#22c55e',
+                        'rgba(34,197,94').replace('#4ade80', 'rgba(74,222,128').replace('#ff6b35', 'rgba(255,107,53')
+                        .replace('#ffaa00', 'rgba(255,170,0'));
+                    if (glowColor.startsWith('#')) {
+                        const hex = ac.inCollision ? '#ef4444' : ac.color;
+                        const r = parseInt(hex.slice(1, 3), 16);
+                        const g = parseInt(hex.slice(3, 5), 16);
+                        const b = parseInt(hex.slice(5, 7), 16);
+                        glowGrad.addColorStop(0, `rgba(${r},${g},${b},${opacity})`);
+                    }
+                    glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                    ctx.fillStyle = glowGrad;
+                    ctx.beginPath();
+                    ctx.arc(sx, sy, 16, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Aircraft dot
+                const dotColor = ac.inCollision ? '#ef4444' : ac.color;
+                ctx.fillStyle = dotColor;
+                ctx.globalAlpha = Math.max(0.3, opacity);
+                ctx.beginPath();
+                ctx.arc(sx, sy, ac.type === 'ghost' ? 4.5 : 3.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                // Heading indicator
+                const hx = sx + Math.cos(ac.heading) * 10;
+                const hy = sy - Math.sin(ac.heading) * 10;
+                ctx.strokeStyle = dotColor;
+                ctx.lineWidth = 2;
+                ctx.globalAlpha = Math.max(0.4, opacity);
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+                ctx.lineTo(hx, hy);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                // TCAS collision ring
+                if (ac.inCollision && opacity > 0.5) {
+                    const pulseR = 18 + Math.sin(simulationTime * 12) * 6;
+                    ctx.strokeStyle = '#ef4444';
+                    ctx.lineWidth = 2.5;
+                    ctx.globalAlpha = 0.7 + Math.sin(simulationTime * 15) * 0.3;
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath();
+                    ctx.arc(sx, sy, pulseR, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.globalAlpha = 1;
+
+                    // Second pulse ring
+                    const pulseR2 = 30 + Math.cos(simulationTime * 10) * 8;
+                    ctx.strokeStyle = '#ef444488';
+                    ctx.lineWidth = 1;
+                    ctx.globalAlpha = 0.4;
+                    ctx.setLineDash([3, 6]);
+                    ctx.beginPath();
+                    ctx.arc(sx, sy, pulseR2, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.globalAlpha = 1;
+                }
+
+                // Label
+                if (opacity > 0.5) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 9px "PingFang SC","Microsoft YaHei",monospace';
+                    ctx.globalAlpha = Math.max(0.5, opacity);
+                    const label = ac.id + ' FL' + Math.floor(ac.alt / 100);
+                    ctx.fillText(label, sx + 10, sy - 8);
+                    ctx.fillStyle = ac.type === 'ghost' ? '#f59e0b' : '#94a3b8';
+                    ctx.font = '8px monospace';
+                    ctx.fillText(ac.icao, sx + 10, sy + 6);
+                    ctx.globalAlpha = 1;
+                }
+            }
+
+            function render() {
+                ctx.clearRect(0, 0, W, H);
+                drawRadarBackground();
+                drawSweepLine();
+
+                // Draw all aircraft
+                [...realAircraft, ...ghostAircraft].forEach(ac => drawAircraft(ac));
+
+                // Legend
+                ctx.fillStyle = '#22c55e';
+                ctx.font = '10px monospace';
+                ctx.fillText('● 真实航班', CX - MAX_RANGE + 8, CY + MAX_RANGE - 8);
+                if (ghostAircraft.length > 0) {
+                    ctx.fillStyle = '#f59e0b';
+                    ctx.fillText('● 幽灵航班', CX - MAX_RANGE + 8, CY + MAX_RANGE - 22);
+                }
+                if (tcasAlertActive) {
+                    ctx.fillStyle = '#ef4444';
+                    ctx.font = 'bold 11px monospace';
+                    const alpha = 0.6 + Math.sin(simulationTime * 10) * 0.4;
+                    ctx.globalAlpha = alpha;
+                    ctx.fillText('⚠ TCAS COLLISION', CX - MAX_RANGE + 8, CY + MAX_RANGE - 36);
+                    ctx.globalAlpha = 1;
+                }
+                if (defenseMode) {
+                    ctx.fillStyle = '#3b82f6';
+                    ctx.font = '10px monospace';
+                    ctx.fillText('🛡 防御模式', CX - MAX_RANGE + 8, CY - MAX_RANGE + 16);
+                }
+            }
+
+            // ============ GAME LOOP ============
+            let lastTime = performance.now();
+
+            function gameLoop(timestamp) {
+                let dt = (timestamp - lastTime) / 1000;
+                if (dt <= 0) dt = 0.016;
+                if (dt > 0.2) dt = 0.2; // Cap to prevent jumps
+                lastTime = timestamp;
+                simulationTime += dt;
+
+                // Sweep rotation (~15 RPM = 90 deg/sec)
+                sweepAngle += dt * Math.PI * 1.5;
+                if (sweepAngle > Math.PI * 2) sweepAngle -= Math.PI * 2;
+
+                // Ghost spawn timing
+                if (spoofingActive && ghostSpawnQueue.length > 0) {
+                    ghostSpawnTimer += dt;
+                    if (ghostSpawnTimer > 1.2 && ghostSpawnQueue.length > 0) {
+                        ghostSpawnTimer = 0;
+                        spawnNextGhost();
+                    }
+                }
+
+                // If spoofing active but no ghosts left and queue empty, allow re-execute
+                if (spoofingActive && ghostAircraft.length === 0 && ghostSpawnQueue.length === 0 && !defenseMode) {
+                    // Ghosts have all reached center — keep them there
+                    // Don't disable spoofing
+                }
+
+                updateAircraft(dt);
+                render();
+                requestAnimationFrame(gameLoop);
+            }
+
+            // ============ PROGRESS ============
+            function updateProgress() {
+                const steps = Array.from(progressSteps);
+                let activeStep = 1;
+
+                // Step 1: Always completed (radar is visible)
+                steps[0].classList.add('completed');
+                steps[0].classList.remove('active');
+
+                // Step 2: Completed if they've expanded analysis or scrolled
+                if (analysisDetails.open || document.querySelector('.signal-compare')) {
+                    steps[1].classList.add('completed');
+                    steps[1].classList.remove('active');
+                }
+
+                // Step 3: Completed if code has been modified
+                const defaultCode = codeEditor.getAttribute('data-default') || codeEditor.value;
+                if (!codeEditor.getAttribute('data-default')) {
+                    codeEditor.setAttribute('data-default', codeEditor.value);
+                }
+                if (codeEditor.value !== codeEditor.getAttribute('data-default')) {
+                    steps[2].classList.add('completed');
+                    steps[2].classList.remove('active');
+                }
+
+                // Step 4: Completed if executed
+                if (executedOnce) {
+                    steps[3].classList.add('completed');
+                    steps[3].classList.remove('active');
+                    activeStep = 5;
+                }
+
+                // Step 5: Flag
+                if (flagCaptured) {
+                    steps[4].classList.add('completed');
+                    steps[4].classList.remove('active');
+                }
+
+                // Set active
+                if (!flagCaptured && executedOnce) activeStep = 5;
+                else if (executedOnce && !flagCaptured) activeStep = 5;
+                else if (codeEditor.value !== codeEditor.getAttribute('data-default') && !executedOnce) activeStep = 4;
+                else if (analysisDetails.open && !executedOnce) activeStep = 3;
+                else activeStep = 2;
+
+                steps.forEach((s, i) => {
+                    if (i + 1 === activeStep && !s.classList.contains('completed')) {
+                        s.classList.add('active');
+                    } else if (i + 1 !== activeStep) {
+                        s.classList.remove('active');
+                    }
+                });
+            }
+
+            // ============ EVENT LISTENERS ============
+            btnExecute.addEventListener('click', () => {
+                initAudio();
+                if (!spoofingActive) {
+                    executeSpoofing();
+                }
+            });
+
+            btnReset.addEventListener('click', () => {
+                resetSimulation();
+                btnExecute.disabled = false;
+                btnExecute.textContent = '▶ 执行脚本 (Execute)';
+                spoofingActive = false;
+                tcasAlertActive = false;
+                tcasAlertDuration = 0;
+                ghostAircraft = [];
+                ghostSpawnQueue = [];
+                realAircraft = createRealAircraft();
+                updateConsole();
+                radarPanel.classList.remove('alert-state');
+                tcasOverlay.classList.remove('visible');
+                stopTcasBeeps();
+            });
+
+            btnDefense.addEventListener('click', () => {
+                defenseMode = !defenseMode;
+                if (defenseMode) {
+                    btnDefense.classList.add('active');
+                    btnDefense.textContent = '🛡 防御模式: ON';
+                    addConsoleLine('[DEFENSE] 防御模式启用 — 检测异常航迹...');
+                    addConsoleLine('[DEFENSE] 基于物理规律过滤: 突然出现+高速直飞机场=可疑');
+                } else {
+                    btnDefense.classList.remove('active');
+                    btnDefense.textContent = '🛡 防御模式';
+                    addConsoleLine('[DEFENSE] 防御模式关闭');
+                }
+            });
+
+            codeEditor.addEventListener('input', () => {
+                updateProgress();
+                if (!spoofingActive && !executedOnce) {
+                    const ghosts = parseCodeForGhosts();
+                    consoleLines = consoleLines.filter(l => !l.includes('当前配置'));
+                    addConsoleLine('[INFO] 当前配置: ' + ghosts.length + '架幽灵航班候命中...');
+                }
+            });
+
+            // Track analysis open
+            if (analysisDetails) {
+                analysisDetails.addEventListener('toggle', () => {
+                    updateProgress();
+                });
+            }
+
+            // Also track scroll on analysis content
+            document.addEventListener('scroll', () => {
+                updateProgress();
+            }, { passive: true });
+
+            // ============ INIT ============
+            realAircraft = createRealAircraft();
+            codeEditor.setAttribute('data-default', codeEditor.value);
+            updateConsole();
+            updateProgress();
+            requestAnimationFrame(gameLoop);
+
+            // Handle canvas resize for responsiveness
+            function handleResize() {
+                const container = canvas.parentElement;
+                const maxSize = Math.min(container.clientWidth - 24, 580);
+                if (canvas.style.width !== maxSize + 'px') {
+                    canvas.style.width = maxSize + 'px';
+                    canvas.style.height = maxSize + 'px';
+                }
+            }
+            window.addEventListener('resize', handleResize);
+            handleResize();
+
+            console.log('🛰️ ADS-B Ghost Flights Lab Ready');
+            console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+            console.log('📡 Radar scope active — 1090 MHz ADS-B simulation');
+            console.log('💡 Try modifying the Python script and clicking Execute!');
+        })();
+    </script>
+</body>
+</html>

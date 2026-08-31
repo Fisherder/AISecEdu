@@ -1,0 +1,55 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "percent"}},
+      "gridPos": {"h": 7, "w": 6, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"expr": "aisecedu_student_ux_v2_rollout_percent", "refId": "A"}],
+      "title": "学生体验灰度比例",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"color": "red", "text": "已回滚"}, "1": {"color": "green", "text": "已启用"}}, "type": "value"}]}},
+      "gridPos": {"h": 7, "w": 6, "x": 6, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "aisecedu_student_ux_v2_enabled", "refId": "A"}],
+      "title": "学生体验开关",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 0},
+      "id": 3,
+      "targets": [{"expr": "sum by (event) (aisecedu_student_experience_events_total{event=~\"student_next_action_.*\"})", "legendFormat": "{{event}}", "refId": "A"}],
+      "title": "下一步推荐曝光与启动",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 7},
+      "id": 4,
+      "targets": [{"expr": "sum by (event) (aisecedu_student_experience_events_total{event=~\"learning_context_transition|resource_action_resolved|student_error_recovered\"})", "legendFormat": "{{event}}", "refId": "A"}],
+      "title": "上下文切换与恢复",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 7},
+      "id": 5,
+      "targets": [{"expr": "aisecedu_student_experience_events_total{event=\"lab_start_state_changed\"}", "refId": "A"}],
+      "title": "实验启动阶段变化",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["aisecedu", "student-experience"],
+  "templating": {"list": [{"current": {}, "hide": 2, "label": "Prometheus", "name": "DS_PROMETHEUS", "query": "prometheus", "type": "datasource"}]},
+  "time": {"from": "now-24h", "to": "now"},
+  "title": "玄甲学生学习体验",
+  "uid": "aisecedu-student-experience",
+  "version": 1
+}

@@ -1,0 +1,1494 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无线安全实验：Zigbee网状网络攻击与防御</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface2: #273449;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --info: #3b82f6;
+            --warn: #f59e0b;
+            --amber: #f59e0b;
+            --purple: #a855f7;
+            --cyan: #06b6d4;
+            --gold: #fbbf24;
+            --coordinator: #fbbf24;
+            --router: #60a5fa;
+            --lock: #ef4444;
+            --lockopen: #22c55e;
+            --bulb: #facc15;
+            --sensor: #22d3ee;
+            --thermo: #c084fc;
+            --font-mono: 'Courier New', 'Consolas', 'Monaco', monospace;
+            --font-sans: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+            --radius: 8px;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            line-height: 1.5;
+        }
+        header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            z-index: 10;
+            box-shadow: var(--shadow);
+        }
+        header .title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--gold);
+            letter-spacing: 0.02em;
+        }
+        header .badge {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: var(--text2);
+            font-family: var(--font-mono);
+        }
+        .progress-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .progress-step {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--surface2);
+            border: 2px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text2);
+            transition: all 0.35s ease;
+            position: relative;
+            cursor: default;
+        }
+        .progress-step.active {
+            border-color: var(--info);
+            color: var(--info);
+            background: #1e3a5f;
+            box-shadow: 0 0 16px rgba(59, 130, 246, 0.35);
+            animation: pulse-step 1.8s ease-in-out infinite;
+        }
+        .progress-step.done {
+            border-color: var(--success);
+            background: #14532d;
+            color: var(--success);
+        }
+        .progress-step.done::after {
+            content: '✓';
+            font-weight: 700;
+        }
+        .progress-line {
+            width: 24px;
+            height: 2px;
+            background: var(--border);
+            border-radius: 1px;
+            transition: background 0.35s;
+        }
+        .progress-line.done {
+            background: var(--success);
+        }
+        @keyframes pulse-step {
+            0%,
+            100% {
+                box-shadow: 0 0 12px rgba(59, 130, 246, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 28px rgba(59, 130, 246, 0.6);
+            }
+        }
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 420px;
+            grid-template-rows: 1fr auto;
+            gap: 0;
+            overflow: hidden;
+        }
+        @media (max-width: 1000px) {
+            main {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto;
+            }
+        }
+        .canvas-panel {
+            position: relative;
+            background: radial-gradient(ellipse at center, #1a2540 0%, #0f172a 70%);
+            border-right: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 460px;
+            cursor: crosshair;
+            overflow: hidden;
+        }
+        .canvas-panel canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .canvas-overlay {
+            position: absolute;
+            top: 12px;
+            left: 16px;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 8px 14px;
+            font-size: 0.78rem;
+            color: var(--text2);
+            font-family: var(--font-mono);
+            pointer-events: none;
+            z-index: 5;
+        }
+        .canvas-overlay span {
+            color: var(--warn);
+            font-weight: 700;
+        }
+        .side-panel {
+            background: var(--surface);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            border-left: 1px solid var(--border);
+            max-height: calc(100vh - 130px);
+        }
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            background: var(--surface2);
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 10px 8px;
+            background: transparent;
+            border: none;
+            color: var(--text2);
+            cursor: pointer;
+            font-size: 0.78rem;
+            font-weight: 600;
+            font-family: var(--font-sans);
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .tab-btn:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.03);
+        }
+        .tab-btn.active {
+            color: var(--info);
+            border-bottom-color: var(--info);
+            background: rgba(59, 130, 246, 0.08);
+        }
+        .tab-content {
+            display: none;
+            padding: 16px;
+            flex: 1;
+            overflow-y: auto;
+            font-size: 0.85rem;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .tab-content h3 {
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+            color: var(--warn);
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            font-family: var(--font-mono);
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 7px 0;
+            border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+            font-size: 0.8rem;
+        }
+        .info-row .label {
+            color: var(--text2);
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+        }
+        .info-row .value {
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-weight: 600;
+        }
+        .info-row .value.danger {
+            color: var(--danger);
+        }
+        .info-row .value.success {
+            color: var(--success);
+        }
+        .info-row .value.amber {
+            color: var(--amber);
+        }
+        .btn {
+            display: inline-block;
+            padding: 8px 18px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            color: var(--text);
+            cursor: pointer;
+            font-family: var(--font-sans);
+            font-size: 0.82rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+        }
+        .btn:hover {
+            background: #334155;
+            border-color: #64748b;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .btn.primary {
+            background: var(--info);
+            border-color: var(--info);
+            color: #fff;
+        }
+        .btn.primary:hover {
+            background: #2563eb;
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+        }
+        .btn.danger {
+            background: var(--danger);
+            border-color: var(--danger);
+            color: #fff;
+        }
+        .btn.danger:hover {
+            background: #dc2626;
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+        }
+        .btn.success {
+            background: var(--success);
+            border-color: var(--success);
+            color: #000;
+        }
+        .btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        select {
+            padding: 8px 12px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            cursor: pointer;
+            width: 100%;
+            margin: 4px 0 10px;
+        }
+        input[type="text"] {
+            padding: 8px 12px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            background: #0f172a;
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            width: 100%;
+            margin: 4px 0 10px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input[type="text"]:focus {
+            border-color: var(--info);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        .log-panel {
+            background: #0a0f18;
+            border-top: 1px solid var(--border);
+            padding: 10px 16px;
+            max-height: 140px;
+            overflow-y: auto;
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: #a0aec0;
+            grid-column: 1 / -1;
+            line-height: 1.6;
+        }
+        .log-panel .log-entry {
+            padding: 1px 0;
+            border-left: 2px solid transparent;
+            padding-left: 8px;
+            margin: 2px 0;
+            animation: fadeInLog 0.3s ease;
+        }
+        .log-panel .log-entry.warn {
+            border-left-color: var(--warn);
+            color: var(--warn);
+        }
+        .log-panel .log-entry.danger {
+            border-left-color: var(--danger);
+            color: var(--danger);
+        }
+        .log-panel .log-entry.success {
+            border-left-color: var(--success);
+            color: var(--success);
+        }
+        .log-panel .log-entry.info {
+            border-left-color: var(--info);
+            color: var(--info);
+        }
+        @keyframes fadeInLog {
+            from {
+                opacity: 0;
+                transform: translateX(-8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        .flag-reveal {
+            background: linear-gradient(135deg, #1a1a0a 0%, #2d1f00 100%);
+            border: 2px solid var(--amber);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            margin: 14px 0;
+            text-align: center;
+            animation: glowFlag 1.5s ease-in-out infinite;
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--amber);
+            letter-spacing: 0.06em;
+            display: none;
+        }
+        .flag-reveal.visible {
+            display: block;
+        }
+        @keyframes glowFlag {
+            0%,
+            100% {
+                box-shadow: 0 0 18px rgba(245, 158, 11, 0.35);
+            }
+            50% {
+                box-shadow: 0 0 40px rgba(245, 158, 11, 0.7);
+            }
+        }
+        .briefing-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            position: relative;
+            border-left: 3px solid var(--info);
+            box-shadow: var(--shadow);
+        }
+        .briefing-card .icon {
+            font-size: 1.4rem;
+            margin-right: 8px;
+        }
+        .key-display {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            background: #0a0f18;
+            padding: 8px 12px;
+            border-radius: 4px;
+            word-break: break-all;
+            color: var(--cyan);
+            border: 1px solid var(--border);
+            margin: 6px 0;
+        }
+        .highlight-box {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            border-radius: var(--radius);
+            padding: 10px 14px;
+            margin: 8px 0;
+            font-size: 0.78rem;
+        }
+        .success-box {
+            background: rgba(34, 197, 94, 0.08);
+            border: 1px solid rgba(34, 197, 94, 0.35);
+            border-radius: var(--radius);
+            padding: 10px 14px;
+            margin: 8px 0;
+            font-size: 0.78rem;
+        }
+        .tooltip {
+            position: absolute;
+            background: #1e293b;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 0.7rem;
+            pointer-events: none;
+            z-index: 20;
+            color: var(--text);
+            font-family: var(--font-mono);
+            box-shadow: var(--shadow);
+            opacity: 0;
+            transition: opacity 0.15s;
+            white-space: nowrap;
+        }
+        .tooltip.visible {
+            opacity: 1;
+        }
+        details {
+            margin: 10px 0;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        details summary {
+            padding: 10px 14px;
+            cursor: pointer;
+            background: var(--surface2);
+            font-weight: 600;
+            font-size: 0.82rem;
+            color: var(--text);
+            user-select: none;
+            transition: background 0.2s;
+        }
+        details summary:hover {
+            background: #334155;
+        }
+        details .details-content {
+            padding: 14px;
+            font-size: 0.8rem;
+            background: var(--surface);
+            color: var(--text2);
+            line-height: 1.7;
+        }
+        .device-legend {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-size: 0.7rem;
+            margin: 8px 0;
+            font-family: var(--font-mono);
+        }
+        .device-legend span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot.gold {
+            background: var(--gold);
+            box-shadow: 0 0 8px var(--gold);
+        }
+        .dot.blue {
+            background: var(--router);
+            box-shadow: 0 0 6px var(--router);
+        }
+        .dot.red {
+            background: var(--lock);
+            box-shadow: 0 0 6px var(--lock);
+        }
+        .dot.green {
+            background: var(--lockopen);
+            box-shadow: 0 0 6px var(--lockopen);
+        }
+        .dot.yellow {
+            background: var(--bulb);
+            box-shadow: 0 0 6px var(--bulb);
+        }
+        .dot.cyan {
+            background: var(--sensor);
+            box-shadow: 0 0 6px var(--sensor);
+        }
+        .dot.purple {
+            background: var(--thermo);
+            box-shadow: 0 0 6px var(--thermo);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="title">🛡️ 无线安全实验：Zigbee网状网络攻击</div>
+        <div class="badge">// EDUCATIONAL PURPOSE ONLY — authorized classroom use</div>
+        <div class="progress-bar-wrap" id="progressBar">
+            <div class="progress-step active" data-step="1">1</div>
+            <div class="progress-line" data-line="1"></div>
+            <div class="progress-step" data-step="2">2</div>
+            <div class="progress-line" data-line="2"></div>
+            <div class="progress-step" data-step="3">3</div>
+            <div class="progress-line" data-line="3"></div>
+            <div class="progress-step" data-step="4">4</div>
+        </div>
+    </header>
+    <main>
+        <div class="canvas-panel" id="canvasPanel">
+            <canvas id="meshCanvas"></canvas>
+            <div class="canvas-overlay" id="canvasOverlay">📶 网状网络拓扑 | 节点: <span id="nodeCount">?</span> | 信任链路: <span id="trustLinkCount">?</span></div>
+            <div class="tooltip" id="nodeTooltip"></div>
+        </div>
+        <div class="side-panel" id="sidePanel">
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="tab-network">📡 网络信息</button>
+                <button class="tab-btn" data-tab="tab-packet">📦 数据包检查</button>
+                <button class="tab-btn" data-tab="tab-console">💉 命令控制台</button>
+                <button class="tab-btn" data-tab="tab-defense">🛡️ 防御</button>
+            </div>
+            <div class="tab-content active" id="tab-network">
+                <div class="briefing-card">
+                    <span class="icon">🎯</span><strong>任务简报：</strong>你获得了一个Zigbee嗅探器，目标是一个智能家居网状网络。发现网络中的所有设备，分析信任链路，找到可利用的弱点。
+                </div>
+                <h3>🔍 已发现设备</h3>
+                <div id="deviceList" style="font-size:0.78rem;">
+                    <div class="info-row"><span class="label">协调器</span><span class="value amber">ZigbeeCoord-01</span></div>
+                    <div class="info-row"><span class="label">状态</span><span class="value" style="color:#94a3b8;">等待网络扫描...</span></div>
+                </div>
+                <div class="device-legend" style="margin-top:12px;">
+                    <span><span class="dot gold"></span>协调器</span>
+                    <span><span class="dot blue"></span>路由器</span>
+                    <span><span class="dot red"></span>智能锁</span>
+                    <span><span class="dot yellow"></span>灯泡</span>
+                    <span><span class="dot cyan"></span>传感器</span>
+                    <span><span class="dot purple"></span>温控器</span>
+                </div>
+                <button class="btn primary" id="btnScan" style="margin-top:10px;width:100%;">🔍 开始网络发现扫描</button>
+                <p style="font-size:0.7rem;color:var(--text2);margin-top:6px;">点击按钮执行主动网络发现，或点击画布中的节点查看详情。</p>
+            </div>
+            <div class="tab-content" id="tab-packet">
+                <h3>📦 Zigbee帧捕获</h3>
+                <p style="font-size:0.75rem;color:var(--text2);">网络扫描完成后，选中设备可查看通信数据包。</p>
+                <div id="packetView" style="font-size:0.72rem;font-family:var(--font-mono);color:var(--text2);">
+                    <em>尚无数据包 — 请先完成网络扫描，然后点击画布中的节点。</em>
+                </div>
+            </div>
+            <div class="tab-content" id="tab-console">
+                <h3>💉 Zigbee命令注入</h3>
+                <p style="font-size:0.75rem;color:var(--text2);">构造ZCL命令以操控智能锁。利用信任中心链路密钥的已知默认值。</p>
+                <label style="font-size:0.72rem;color:var(--text2);">目标簇 (Cluster ID)</label>
+                <select id="selCluster">
+                    <option value="">-- 选择簇 --</option>
+                    <option value="0x0006">0x0006 - On/Off (灯泡)</option>
+                    <option value="0x0101">0x0101 - Door Lock (智能锁)</option>
+                    <option value="0x0201">0x0201 - Thermostat (温控器)</option>
+                    <option value="0x0402">0x0402 - Temperature Sensor</option>
+                </select>
+                <label style="font-size:0.72rem;color:var(--text2);">命令ID</label>
+                <select id="selCmd">
+                    <option value="">-- 选择命令 --</option>
+                    <option value="0x00">0x00 - Unlock / Off</option>
+                    <option value="0x01">0x01 - Lock / On</option>
+                    <option value="0x02">0x02 - Toggle</option>
+                </select>
+                <label style="font-size:0.72rem;color:var(--text2);">目标地址 (0xFFFF = 广播)</label>
+                <input type="text" id="inpDst" value="0xFFFF" placeholder="0xFFFF">
+                <label style="font-size:0.72rem;color:var(--text2);">信任中心链路密钥 (Trust Center Link Key)</label>
+                <input type="text" id="inpKey" placeholder="输入密钥 (hex字符串)...">
+                <p style="font-size:0.65rem;color:var(--text2);margin-top:2px;">💡 提示：Zigbee默认信任中心链路密钥是公开已知的。</p>
+                <button class="btn danger" id="btnInject" style="width:100%;margin-top:8px;" disabled>⚡ 注入命令</button>
+                <div class="flag-reveal" id="flagReveal">🏴 FLAG{zigbee_trust_center_link_key_exploit_2024}</div>
+                <div id="injectFeedback" style="font-size:0.75rem;margin-top:8px;"></div>
+            </div>
+            <div class="tab-content" id="tab-defense">
+                <h3>🛡️ Zigbee 3.0 密钥轮换防御</h3>
+                <p style="font-size:0.78rem;color:var(--text2);">攻击成功后，学习Zigbee 3.0如何通过安装码（Install Code）和密钥轮换来防止此类攻击。</p>
+                <div class="highlight-box">
+                    <strong>⚠️ 漏洞根因：</strong>使用了公开默认的信任中心链路密钥 <code style="color:var(--cyan);">ZigBeeAlliance09</code>，攻击者可伪造协调器命令。
+                </div>
+                <div class="success-box" id="defenseBox" style="display:none;">
+                    <strong>✅ 防御已激活：</strong>每个设备使用唯一的安装码派生密钥。网络密钥已轮换。攻击面已消除。
+                </div>
+                <button class="btn success" id="btnRotateKeys" style="width:100%;margin-top:8px;">🔄 执行密钥轮换 (Zigbee 3.0)</button>
+                <div id="keyRotationLog" style="font-size:0.72rem;font-family:var(--font-mono);margin-top:8px;color:var(--text2);"></div>
+                <details style="margin-top:12px;">
+                    <summary>📖 Zigbee 3.0 安全机制说明</summary>
+                    <div class="details-content">
+                        <p><strong>1. 安装码 (Install Code)：</strong>每个设备在制造时预置唯一的128位安装码 + 16位CRC，在加入网络时用于派生唯一的链路密钥。</p>
+                        <p><strong>2. 密钥派生：</strong>使用MMO哈希从安装码派生信任中心链路密钥，取代公开默认密钥。</p>
+                        <p><strong>3. 网络密钥轮换：</strong>协调器定期广播新的网络密钥，使用各设备唯一的链路密钥加密传输。</p>
+                        <p><strong>4. 帧计数器：</strong>防止重放攻击，每个设备维护传入/传出帧计数器。</p>
+                        <p style="margin-top:6px;color:var(--warn);">🔗 参考：Zigbee Alliance Document 05-3474-21 (Zigbee 3.0 Security)</p>
+                    </div>
+                </details>
+            </div>
+        </div>
+        <div class="log-panel" id="logPanel">
+            <div class="log-entry info">[系统] 实验环境已就绪。请点击"开始网络发现扫描"以启动。</div>
+            <div class="log-entry info">[系统] 当前模拟：包含1个协调器、3个路由器、5个终端设备的Zigbee网状网络。</div>
+        </div>
+    </main>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        (function() {
+            // ============ STATE ============
+            const state = {
+                currentStep: 1,
+                scanComplete: false,
+                injectionAttempted: false,
+                injectionSuccess: false,
+                defenseActivated: false,
+                keysRotated: false,
+                selectedNode: null,
+                trustLinksExploited: [],
+            };
+
+            // ============ NODE DEFINITIONS ============
+            const nodes = [{
+                id: 0,
+                x: 0.50,
+                y: 0.42,
+                type: 'coordinator',
+                deviceType: 'coordinator',
+                name: 'ZigbeeCoord-01',
+                ieeeAddr: '0x00124B0001A2B3C4',
+                panId: '0x1A2B',
+                shortAddr: '0x0000',
+                discovered: true,
+                radius: 18,
+                active: true,
+                locked: null,
+            }, {
+                id: 1,
+                x: 0.22,
+                y: 0.18,
+                type: 'router',
+                deviceType: 'router',
+                name: 'Router-LivingRoom',
+                ieeeAddr: '0x00124B0002C3D4E5',
+                shortAddr: '0x0001',
+                discovered: false,
+                radius: 13,
+                active: true,
+                locked: null,
+            }, {
+                id: 2,
+                x: 0.78,
+                y: 0.18,
+                type: 'router',
+                deviceType: 'router',
+                name: 'Router-Bedroom',
+                ieeeAddr: '0x00124B0003D4E5F6',
+                shortAddr: '0x0002',
+                discovered: false,
+                radius: 13,
+                active: true,
+                locked: null,
+            }, {
+                id: 3,
+                x: 0.50,
+                y: 0.72,
+                type: 'router',
+                deviceType: 'router',
+                name: 'Router-Garage',
+                ieeeAddr: '0x00124B0004E5F6A7',
+                shortAddr: '0x0003',
+                discovered: false,
+                radius: 13,
+                active: true,
+                locked: null,
+            }, {
+                id: 4,
+                x: 0.10,
+                y: 0.40,
+                type: 'end-device',
+                deviceType: 'lock',
+                name: 'SmartLock-FrontDoor',
+                ieeeAddr: '0x00124B0005A6B7C8',
+                shortAddr: '0x0004',
+                discovered: false,
+                radius: 11,
+                active: true,
+                locked: true,
+            }, {
+                id: 5,
+                x: 0.88,
+                y: 0.40,
+                type: 'end-device',
+                deviceType: 'lock',
+                name: 'SmartLock-BackDoor',
+                ieeeAddr: '0x00124B0006B7C8D9',
+                shortAddr: '0x0005',
+                discovered: false,
+                radius: 11,
+                active: true,
+                locked: true,
+            }, {
+                id: 6,
+                x: 0.28,
+                y: 0.06,
+                type: 'end-device',
+                deviceType: 'bulb',
+                name: 'SmartBulb-Living',
+                ieeeAddr: '0x00124B0007C8D9E0',
+                shortAddr: '0x0006',
+                discovered: false,
+                radius: 10,
+                active: true,
+                locked: null,
+            }, {
+                id: 7,
+                x: 0.68,
+                y: 0.06,
+                type: 'end-device',
+                deviceType: 'sensor',
+                name: 'MotionSensor-Hall',
+                ieeeAddr: '0x00124B0008D9E0F1',
+                shortAddr: '0x0007',
+                discovered: false,
+                radius: 9,
+                active: true,
+                locked: null,
+            }, {
+                id: 8,
+                x: 0.50,
+                y: 0.88,
+                type: 'end-device',
+                deviceType: 'thermostat',
+                name: 'Thermostat-Main',
+                ieeeAddr: '0x00124B0009E0F1A2',
+                shortAddr: '0x0008',
+                discovered: false,
+                radius: 10,
+                active: true,
+                locked: null,
+            }, ];
+
+            // Edge definitions (routing paths + trust links)
+            const edges = [
+                { from: 0, to: 1, signalStrength: -42, trustLink: true, meshRoute: true },
+                { from: 0, to: 2, signalStrength: -45, trustLink: true, meshRoute: true },
+                { from: 0, to: 3, signalStrength: -50, trustLink: true, meshRoute: true },
+                { from: 1, to: 4, signalStrength: -55, trustLink: true, meshRoute: true },
+                { from: 2, to: 5, signalStrength: -58, trustLink: true, meshRoute: true },
+                { from: 1, to: 6, signalStrength: -48, trustLink: true, meshRoute: true },
+                { from: 2, to: 7, signalStrength: -52, trustLink: true, meshRoute: true },
+                { from: 3, to: 8, signalStrength: -60, trustLink: true, meshRoute: true },
+                { from: 1, to: 2, signalStrength: -62, trustLink: false, meshRoute: true },
+                { from: 1, to: 3, signalStrength: -68, trustLink: false, meshRoute: true },
+                { from: 2, to: 3, signalStrength: -70, trustLink: false, meshRoute: true },
+            ];
+
+            // ============ DOM REFS ============
+            const canvas = document.getElementById('meshCanvas');
+            const ctx = canvas.getContext('2d');
+            const canvasPanel = document.getElementById('canvasPanel');
+            const nodeTooltip = document.getElementById('nodeTooltip');
+            const canvasOverlay = document.getElementById('canvasOverlay');
+            const logPanel = document.getElementById('logPanel');
+            const flagReveal = document.getElementById('flagReveal');
+            const btnScan = document.getElementById('btnScan');
+            const btnInject = document.getElementById('btnInject');
+            const btnRotateKeys = document.getElementById('btnRotateKeys');
+            const selCluster = document.getElementById('selCluster');
+            const selCmd = document.getElementById('selCmd');
+            const inpDst = document.getElementById('inpDst');
+            const inpKey = document.getElementById('inpKey');
+            const injectFeedback = document.getElementById('injectFeedback');
+            const deviceList = document.getElementById('deviceList');
+            const packetView = document.getElementById('packetView');
+            const defenseBox = document.getElementById('defenseBox');
+            const keyRotationLog = document.getElementById('keyRotationLog');
+            const nodeCountSpan = document.getElementById('nodeCount');
+            const trustLinkCountSpan = document.getElementById('trustLinkCount');
+
+            let hoveredNodeId = null;
+            let mouseX = 0,
+                mouseY = 0;
+            let animationTime = 0;
+            let scanAnimationProgress = 0;
+            let scanAnimationActive = false;
+            let particles = [];
+            let commandPropagationAnim = null;
+
+            // ============ CANVAS SETUP ============
+            function resizeCanvas() {
+                const rect = canvasPanel.getBoundingClientRect();
+                const dpr = Math.min(window.devicePixelRatio || 1, 2);
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+                canvas.style.width = rect.width + 'px';
+                canvas.style.height = rect.height + 'px';
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.scale(dpr, dpr);
+            }
+
+            function getNodeScreenPos(node) {
+                const rect = canvasPanel.getBoundingClientRect();
+                return {
+                    sx: node.x * rect.width,
+                    sy: node.y * rect.height,
+                };
+            }
+
+            // ============ PARTICLES ============
+            function spawnParticles(x, y, color, count) {
+                for (let i = 0; i < count; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = 0.5 + Math.random() * 3;
+                    particles.push({
+                        x,
+                        y,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        life: 1,
+                        decay: 0.015 + Math.random() * 0.04,
+                        color,
+                        size: 1.5 + Math.random() * 3,
+                    });
+                }
+                if (particles.length > 300) particles.splice(0, particles.length - 300);
+            }
+
+            function updateParticles() {
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.life -= p.decay;
+                    if (p.life <= 0) particles.splice(i, 1);
+                }
+            }
+
+            function drawParticles(ctx, w, h) {
+                for (const p of particles) {
+                    ctx.fillStyle = p.color.replace('1)', `${p.life})`).replace('rgb',
+                        'rgba');
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // ============ DRAWING ============
+            function drawMeshNetwork(timestamp) {
+                const rect = canvasPanel.getBoundingClientRect();
+                const w = rect.width;
+                const h = rect.height;
+                ctx.clearRect(0, 0, w, h);
+
+                animationTime = timestamp * 0.001;
+
+                // Draw edges
+                for (const edge of edges) {
+                    const fromNode = nodes[edge.from];
+                    const toNode = nodes[edge.to];
+                    const fp = getNodeScreenPos(fromNode);
+                    const tp = getNodeScreenPos(toNode);
+                    const bothDiscovered = fromNode.discovered && toNode.discovered;
+
+                    if (!bothDiscovered && !scanAnimationActive) continue;
+                    if (!bothDiscovered && scanAnimationActive) {
+                        if (scanAnimationProgress < 0.15) continue;
+                    }
+
+                    let alpha = bothDiscovered ? 1 : Math.min(1, (scanAnimationProgress - 0.15) / 0.4);
+                    let lineWidth = 1.2;
+                    let color = 'rgba(100,116,139,0.4)';
+                    let dashPattern = [6, 4];
+
+                    if (edge.trustLink && bothDiscovered) {
+                        color = 'rgba(251,191,36,0.55)';
+                        lineWidth = 2.2;
+                        dashPattern = [];
+                        if (state.trustLinksExploited.includes(`${edge.from}-${edge.to}`) || state
+                            .trustLinksExploited.includes(`${edge.to}-${edge.from}`)) {
+                            color = 'rgba(239,68,68,0.7)';
+                            lineWidth = 2.8;
+                        }
+                    } else if (edge.meshRoute && bothDiscovered) {
+                        color = 'rgba(96,165,250,0.35)';
+                        lineWidth = 1;
+                        dashPattern = [4, 6];
+                    }
+
+                    const signalStr = edge.signalStrength;
+                    const signalAlpha = Math.min(1, Math.max(0.25, 1 - Math.abs(signalStr) / 90));
+                    if (edge.trustLink && bothDiscovered) {
+                        color = state.trustLinksExploited.includes(`${edge.from}-${edge.to}`) || state
+                            .trustLinksExploited.includes(`${edge.to}-${edge.from}`) ?
+                            `rgba(239,68,68,${signalAlpha})` :
+                            `rgba(251,191,36,${signalAlpha * 0.6})`;
+                    }
+
+                    ctx.save();
+                    ctx.globalAlpha = alpha;
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = lineWidth;
+                    ctx.setLineDash(dashPattern);
+                    ctx.beginPath();
+                    ctx.moveTo(fp.sx, fp.sy);
+                    ctx.lineTo(tp.sx, tp.sy);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Signal strength glow on trust links
+                    if (edge.trustLink && bothDiscovered && !dashPattern.length) {
+                        const glowAlpha = 0.15 + 0.08 * Math.sin(animationTime * 3 + edge.from + edge.to);
+                        ctx.strokeStyle = `rgba(251,191,36,${glowAlpha})`;
+                        ctx.lineWidth = lineWidth + 6;
+                        ctx.beginPath();
+                        ctx.moveTo(fp.sx, fp.sy);
+                        ctx.lineTo(tp.sx, tp.sy);
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+
+                    // Signal strength label at midpoint
+                    if (bothDiscovered && edge.trustLink) {
+                        const mx = (fp.sx + tp.sx) / 2;
+                        const my = (fp.sy + tp.sy) / 2;
+                        ctx.fillStyle = 'rgba(200,200,200,0.7)';
+                        ctx.font = '9px "Courier New", monospace';
+                        ctx.fillText(`${signalStr} dBm`, mx + 6, my - 4);
+                    }
+                }
+
+                // Draw scan ripple
+                if (scanAnimationActive) {
+                    const centerNode = nodes[0];
+                    const cp = getNodeScreenPos(centerNode);
+                    const rippleRadius = scanAnimationProgress * Math.max(w, h) * 0.9;
+                    const alpha = Math.max(0, 1 - scanAnimationProgress);
+                    ctx.strokeStyle = `rgba(59,130,246,${alpha})`;
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([8, 6]);
+                    ctx.beginPath();
+                    ctx.arc(cp.sx, cp.sy, rippleRadius, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Second ripple
+                    const ripple2 = (scanAnimationProgress + 0.3) % 1;
+                    const alpha2 = Math.max(0, 1 - ripple2) * 0.6;
+                    ctx.strokeStyle = `rgba(59,130,246,${alpha2})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([4, 8]);
+                    ctx.beginPath();
+                    ctx.arc(cp.sx, cp.sy, ripple2 * Math.max(w, h) * 0.9, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+
+                // Draw nodes
+                for (const node of nodes) {
+                    if (!node.discovered && !scanAnimationActive) continue;
+                    const pos = getNodeScreenPos(node);
+                    const alpha = node.discovered ? 1 : Math.min(1, (scanAnimationProgress - 0.05) / 0.5);
+
+                    ctx.save();
+                    ctx.globalAlpha = Math.max(0.15, alpha);
+
+                    // Glow
+                    let glowColor = 'rgba(100,116,139,0.25)';
+                    if (node.deviceType === 'coordinator') glowColor = 'rgba(251,191,36,0.5)';
+                    else if (node.deviceType === 'router') glowColor = 'rgba(96,165,250,0.35)';
+                    else if (node.deviceType === 'lock') glowColor = node.locked ? 'rgba(239,68,68,0.4)' :
+                        'rgba(34,197,94,0.4)';
+                    else if (node.deviceType === 'bulb') glowColor = 'rgba(250,204,21,0.35)';
+                    else if (node.deviceType === 'sensor') glowColor = 'rgba(34,211,238,0.35)';
+                    else if (node.deviceType === 'thermostat') glowColor = 'rgba(192,132,252,0.35)';
+
+                    const glowRadius = node.radius + 10 + 4 * Math.sin(animationTime * 2.5 + node.id);
+                    const gradient = ctx.createRadialGradient(pos.sx, pos.sy, node.radius * 0.3, pos.sx, pos.sy,
+                        glowRadius);
+                    gradient.addColorStop(0, glowColor);
+                    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(pos.sx, pos.sy, glowRadius, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Main circle
+                    let fillColor = '#64748b';
+                    if (node.deviceType === 'coordinator') fillColor = '#fbbf24';
+                    else if (node.deviceType === 'router') fillColor = '#60a5fa';
+                    else if (node.deviceType === 'lock') fillColor = node.locked ? '#ef4444' : '#22c55e';
+                    else if (node.deviceType === 'bulb') fillColor = '#facc15';
+                    else if (node.deviceType === 'sensor') fillColor = '#22d3ee';
+                    else if (node.deviceType === 'thermostat') fillColor = '#c084fc';
+
+                    if (state.selectedNode === node.id) {
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.arc(pos.sx, pos.sy, node.radius + 5, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+
+                    if (hoveredNodeId === node.id) {
+                        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.arc(pos.sx, pos.sy, node.radius + 3, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+
+                    ctx.fillStyle = fillColor;
+                    ctx.beginPath();
+                    ctx.arc(pos.sx, pos.sy, node.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+
+                    // Icon symbol
+                    ctx.fillStyle = '#0f172a';
+                    ctx.font = `${node.radius*0.9}px sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    let icon = '⬡';
+                    if (node.deviceType === 'coordinator') icon = '⬢';
+                    else if (node.deviceType === 'router') icon = '◈';
+                    else if (node.deviceType === 'lock') icon = '🔒';
+                    else if (node.deviceType === 'bulb') icon = '💡';
+                    else if (node.deviceType === 'sensor') icon = '📡';
+                    else if (node.deviceType === 'thermostat') icon = '🌡';
+                    if (node.deviceType === 'lock' && !node.locked) icon = '🔓';
+                    ctx.fillText(icon, pos.sx, pos.sy);
+
+                    // Label
+                    ctx.fillStyle = '#e2e8f0';
+                    ctx.font = '10px "Segoe UI", sans-serif';
+                    ctx.fillText(node.name, pos.sx, pos.sy + node.radius + 14);
+
+                    ctx.restore();
+                }
+
+                // Particles
+                updateParticles();
+                drawParticles(ctx, w, h);
+
+                // Update overlay
+                const discCount = nodes.filter(n => n.discovered).length;
+                const trustCount = edges.filter(e => e.trustLink &&
+                    nodes[e.from].discovered && nodes[e.to].discovered).length;
+                nodeCountSpan.textContent = discCount;
+                trustLinkCountSpan.textContent = trustCount;
+            }
+
+            // ============ ANIMATION LOOP ============
+            function animate(timestamp) {
+                if (scanAnimationActive) {
+                    scanAnimationProgress += 0.006;
+                    if (scanAnimationProgress >= 1.05) {
+                        scanAnimationProgress = 1;
+                        scanAnimationActive = false;
+                        // Reveal all nodes
+                        nodes.forEach(n => { n.discovered = true; });
+                        state.scanComplete = true;
+                        updateDeviceList();
+                        updatePacketView();
+                        updateButtonStates();
+                        addLog('success', '[扫描完成] 网络发现完毕！已找到 ' + nodes.length + ' 个Zigbee设备。');
+                        addLog('info',
+                            '[分析] 检测到信任中心链路使用默认密钥。所有终端设备通过协调器进行身份验证。');
+                        updateProgressStep(2);
+                        spawnParticles(
+                            getNodeScreenPos(nodes[0]).sx,
+                            getNodeScreenPos(nodes[0]).sy,
+                            'rgb(34,197,94)',
+                            40
+                        );
+                    }
+                    // Reveal nodes progressively
+                    const revealThreshold = 0.1;
+                    nodes.forEach((n, i) => {
+                        if (!n.discovered && scanAnimationProgress > revealThreshold + i * 0.09) {
+                            n.discovered = true;
+                            const pos = getNodeScreenPos(n);
+                            spawnParticles(pos.sx, pos.sy, 'rgb(59,130,246)', 15);
+                        }
+                    });
+                    updateDeviceList();
+                }
+                drawMeshNetwork(timestamp);
+                requestAnimationFrame(animate);
+            }
+
+            // ============ LOGGING ============
+            function addLog(type, msg) {
+                const div = document.createElement('div');
+                div.className = `log-entry ${type}`;
+                div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+                logPanel.appendChild(div);
+                logPanel.scrollTop = logPanel.scrollHeight;
+            }
+
+            // ============ UI UPDATES ============
+            function updateDeviceList() {
+                const discovered = nodes.filter(n => n.discovered);
+                if (discovered.length <= 1 && !state.scanComplete) {
+                    deviceList.innerHTML = `
+                <div class="info-row"><span class="label">协调器</span><span class="value amber">ZigbeeCoord-01</span></div>
+                <div class="info-row"><span class="label">发现进度</span><span class="value" style="color:#94a3b8;">${discovered.length}/${nodes.length} 设备可见</span></div>
+              `;
+                    return;
+                }
+                let html = '';
+                const typeOrder = ['coordinator', 'router', 'lock', 'bulb', 'sensor', 'thermostat'];
+                const typeLabels = { 'coordinator': '协调器', 'router': '路由器', 'lock': '智能锁', 'bulb': '灯泡',
+                    'sensor': '传感器', 'thermostat': '温控器' };
+                const typeColors = { 'coordinator': 'amber', 'router': '#60a5fa', 'lock': '#ef4444', 'bulb': '#facc15',
+                    'sensor': '#22d3ee', 'thermostat': '#c084fc' };
+
+                for (const dt of typeOrder) {
+                    const group = discovered.filter(n => n.deviceType === dt);
+                    if (group.length === 0) continue;
+                    for (const n of group) {
+                        const lockStatus = n.deviceType === 'lock' ? (n.locked ? ' 🔒锁定' : ' 🔓解锁') : '';
+                        html +=
+                            `<div class="info-row"><span class="label">${typeLabels[dt] || dt}</span><span class="value" style="color:${typeColors[dt]||'#e2e8f0'};">${n.name}${lockStatus}</span></div>`;
+                        html +=
+                            `<div class="info-row"><span class="label" style="font-size:0.65rem;">  IEEE</span><span class="value" style="font-size:0.68rem;color:#94a3b8;">${n.ieeeAddr}</span></div>`;
+                    }
+                }
+                html +=
+                    `<div class="info-row"><span class="label">信任链路数</span><span class="value amber">${edges.filter(e=>e.trustLink&&nodes[e.from].discovered&&nodes[e.to].discovered).length}</span></div>`;
+                html +=
+                    `<div class="info-row"><span class="label">链路密钥</span><span class="value danger">默认 (ZigBeeAlliance09)</span></div>`;
+                deviceList.innerHTML = html;
+            }
+
+            function updatePacketView() {
+                if (!state.scanComplete || state.selectedNode === null) {
+                    packetView.innerHTML =
+                        '<em style="color:#94a3b8;">点击画布中的节点以查看其通信数据包。选择智能锁节点可看到信任链路握手包。</em>';
+                    return;
+                }
+                const node = nodes[state.selectedNode];
+                if (!node) return;
+                let html = `<strong style="color:var(--warn);">选中设备：${node.name}</strong><br><br>`;
+                if (node.deviceType === 'lock') {
+                    html += `
+                <div style="background:#0a0f18;padding:10px;border-radius:4px;font-size:0.68rem;line-height:1.6;">
+                <span style="color:#60a5fa;">Frame 42:</span> Zigbee APS Data<br>
+                &nbsp;&nbsp;Src: <span style="color:#fbbf24;">0x0000</span> (Coordinator)<br>
+                &nbsp;&nbsp;Dst: <span style="color:#ef4444;">${node.shortAddr}</span><br>
+                &nbsp;&nbsp;Cluster: <span style="color:#22d3ee;">0x0101</span> (Door Lock)<br>
+                &nbsp;&nbsp;Profile: 0x0104 (ZHA)<br>
+                &nbsp;&nbsp;Security: <span style="color:#ef4444;">Network Key (默认)</span><br>
+                &nbsp;&nbsp;Trust Center Link Key: <span style="color:#ef4444;">5A6967426565416C6C69616E63653039</span><br>
+                &nbsp;&nbsp;<span style="color:#facc15;">⚠ 使用公开默认密钥 "ZigBeeAlliance09"</span><br>
+                </div>`;
+                } else if (node.deviceType === 'coordinator') {
+                    html += `
+                <div style="background:#0a0f18;padding:10px;border-radius:4px;font-size:0.68rem;line-height:1.6;">
+                <span style="color:#60a5fa;">信标帧:</span> 每隔 ~15s 广播<br>
+                &nbsp;&nbsp;PAN ID: <span style="color:#fbbf24;">0x1A2B</span><br>
+                &nbsp;&nbsp;信道: <span style="color:#22d3ee;">11 (2.405 GHz)</span><br>
+                &nbsp;&nbsp;允许加入: <span style="color:#22c55e;">是</span><br>
+                &nbsp;&nbsp;信任中心: <span style="color:#fbbf24;">0x0000</span><br>
+                &nbsp;&nbsp;安全级别: <span style="color:#ef4444;">默认网络密钥</span><br>
+                </div>`;
+                } else {
+                    html += `
+                <div style="background:#0a0f18;padding:10px;border-radius:4px;font-size:0.68rem;line-height:1.6;">
+                <span style="color:#60a5fa;">设备:</span> ${node.name}<br>
+                &nbsp;&nbsp;类型: ${node.deviceType}<br>
+                &nbsp;&nbsp;IEEE: ${node.ieeeAddr}<br>
+                &nbsp;&nbsp;父节点: 路由器<br>
+                &nbsp;&nbsp;通信: 通过网状路由<br>
+                </div>`;
+                }
+                packetView.innerHTML = html;
+            }
+
+            function updateButtonStates() {
+                btnScan.disabled = state.scanComplete;
+                if (state.scanComplete) btnScan.textContent = '✅ 网络扫描已完成';
+                else btnScan.textContent = '🔍 开始网络发现扫描';
+
+                const clusterSelected = selCluster.value === '0x0101';
+                const cmdSelected = selCmd.value === '0x00' || selCmd.value === '0x02';
+                const dstFilled = inpDst.value.trim() === '0xFFFF';
+                const keyFilled = inpKey.value.trim().length > 0;
+                btnInject.disabled = !(state.scanComplete && clusterSelected && cmdSelected && dstFilled &&
+                    keyFilled && !state.injectionSuccess);
+                if (state.injectionSuccess) {
+                    btnInject.textContent = '✅ 攻击已成功执行';
+                    btnInject.className = 'btn success';
+                }
+                btnRotateKeys.disabled = !state.injectionSuccess || state.keysRotated;
+                if (state.keysRotated) btnRotateKeys.textContent = '✅ 密钥已轮换';
+            }
+
+            function updateProgressStep(step) {
+                state.currentStep = step;
+                const steps = document.querySelectorAll('.progress-step');
+                const lines = document.querySelectorAll('.progress-line');
+                steps.forEach(s => {
+                    const sNum = parseInt(s.dataset.step);
+                    s.classList.remove('active', 'done');
+                    if (sNum < step) s.classList.add('done');
+                    if (sNum === step) s.classList.add('active');
+                });
+                lines.forEach(l => {
+                    const lNum = parseInt(l.dataset.line);
+                    l.classList.toggle('done', lNum < step);
+                });
+            }
+
+            // ============ EVENT HANDLERS ============
+            canvasPanel.addEventListener('mousemove', (e) => {
+                const rect = canvasPanel.getBoundingClientRect();
+                mouseX = e.clientX - rect.left;
+                mouseY = e.clientY - rect.top;
+                const scaleX = rect.width;
+                const scaleY = rect.height;
+
+                let found = null;
+                let minDist = Infinity;
+                for (const node of nodes) {
+                    if (!node.discovered && !scanAnimationActive) continue;
+                    const sx = node.x * scaleX;
+                    const sy = node.y * scaleY;
+                    const dist = Math.hypot(mouseX - sx, mouseY - sy);
+                    if (dist < node.radius + 12 && dist < minDist) {
+                        found = node.id;
+                        minDist = dist;
+                    }
+                }
+                hoveredNodeId = found;
+                if (found !== null) {
+                    const node = nodes[found];
+                    nodeTooltip.textContent =
+                        `${node.name} | ${node.deviceType.toUpperCase()} | ${node.ieeeAddr} | RSSI: ${node.deviceType==='coordinator'?'N/A':'-'+Math.floor(40+Math.random()*30)+' dBm'}`;
+                    nodeTooltip.classList.add('visible');
+                    nodeTooltip.style.left = (e.clientX - canvasPanel.getBoundingClientRect().left + 18) + 'px';
+                    nodeTooltip.style.top = (e.clientY - canvasPanel.getBoundingClientRect().top - 28) + 'px';
+                    canvasPanel.style.cursor = 'pointer';
+                } else {
+                    nodeTooltip.classList.remove('visible');
+                    canvasPanel.style.cursor = 'crosshair';
+                }
+            });
+
+            canvasPanel.addEventListener('click', (e) => {
+                if (hoveredNodeId !== null) {
+                    state.selectedNode = hoveredNodeId;
+                    const node = nodes[hoveredNodeId];
+                    addLog('info', `[选中] ${node.name} (${node.deviceType}) - IEEE: ${node.ieeeAddr}`);
+                    updatePacketView();
+                    // Switch to packet tab
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    const pktTab = document.querySelector('[data-tab="tab-packet"]');
+                    const pktContent = document.getElementById('tab-packet');
+                    if (pktTab) pktTab.classList.add('active');
+                    if (pktContent) pktContent.classList.add('active');
+                    updatePacketView();
+                    // Spawn particles
+                    const pos = getNodeScreenPos(node);
+                    spawnParticles(pos.sx, pos.sy, 'rgb(251,191,36)', 20);
+                }
+            });
+
+            canvasPanel.addEventListener('mouseleave', () => {
+                hoveredNodeId = null;
+                nodeTooltip.classList.remove('visible');
+                canvasPanel.style.cursor = 'crosshair';
+            });
+
+            btnScan.addEventListener('click', () => {
+                if (state.scanComplete) return;
+                addLog('info', '[扫描] 启动Zigbee网络主动发现... 发送信标请求...');
+                scanAnimationActive = true;
+                scanAnimationProgress = 0;
+                btnScan.disabled = true;
+                btnScan.textContent = '⏳ 扫描中...';
+                updateProgressStep(1);
+                const cp = getNodeScreenPos(nodes[0]);
+                spawnParticles(cp.sx, cp.sy, 'rgb(59,130,246)', 30);
+            });
+
+            btnInject.addEventListener('click', () => {
+                if (state.injectionSuccess || btnInject.disabled) return;
+                const cluster = selCluster.value;
+                const cmd = selCmd.value;
+                const dst = inpDst.value.trim();
+                const key = inpKey.value.trim();
+
+                // Check if the key matches the default Zigbee Trust Center Link Key
+                const defaultKeyHex = '5A6967426565416C6C69616E63653039';
+                const defaultKeyStr = 'ZigBeeAlliance09';
+                const keyNormalized = key.replace(/\s+/g, '').toUpperCase();
+                const isCorrectKey = keyNormalized === defaultKeyHex.toUpperCase() ||
+                    key === defaultKeyStr ||
+                    keyNormalized === '5A6967426565416C6C69616E63653039';
+
+                state.injectionAttempted = true;
+
+                if (cluster === '0x0101' && (cmd === '0x00' || cmd === '0x02') && dst === '0xFFFF' && isCorrectKey) {
+                    // SUCCESS
+                    state.injectionSuccess = true;
+                    addLog('danger',
+                        '[⚠ 攻击成功] 利用默认信任中心链路密钥注入ZCL命令！所有智能锁同时解锁！');
+                    addLog('danger',
+                        '[漏洞] 密钥 "ZigBeeAlliance09" 是Zigbee联盟公开记录的默认值，用于设备初始加入。');
+                    // Unlock all locks
+                    nodes.forEach(n => {
+                        if (n.deviceType === 'lock') {
+                            n.locked = false;
+                            const pos = getNodeScreenPos(n);
+                            spawnParticles(pos.sx, pos.sy, 'rgb(239,68,68)', 25);
+                        }
+                    });
+                    // Mark trust links as exploited
+                    edges.forEach(e => {
+                        if (e.trustLink) {
+                            const key = `${e.from}-${e.to}`;
+                            if (!state.trustLinksExploited.includes(key)) state.trustLinksExploited
+                                .push(key);
+                        }
+                    });
+                    flagReveal.classList.add('visible');
+                    injectFeedback.innerHTML =
+                        '<span style="color:#22c55e;">✅ 命令注入成功！所有智能锁已解锁。查看下方FLAG。</span>';
+                    updateDeviceList();
+                    updateButtonStates();
+                    updateProgressStep(3);
+                    // Spawn particles from coordinator to all locks
+                    const cp = getNodeScreenPos(nodes[0]);
+                    spawnParticles(cp.sx, cp.sy, 'rgb(239,68,68)', 50);
+                    // Switch to network tab to show effect
+                    setTimeout(() => {
+                        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove(
+                            'active'));
+                        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove(
+                            'active'));
+                        const netTab = document.querySelector('[data-tab="tab-network"]');
+                        const netContent = document.getElementById('tab-network');
+                        if (netTab) netTab.classList.add('active');
+                        if (netContent) netContent.classList.add('active');
+                        updateDeviceList();
+                    }, 400);
+                } else {
+                    // FAILURE
+                    let feedback = '<span style="color:#ef4444;">❌ 注入失败。请检查以下参数：</span><br>';
+                    if (cluster !== '0x0101') feedback +=
+                        '• 簇ID错误 — 智能锁使用Door Lock簇 (0x0101)<br>';
+                    if (cmd !== '0x00' && cmd !== '0x02') feedback += '• 命令ID错误 — 需要Unlock (0x00) 或 Toggle (0x02)<br>';
+                    if (dst !== '0xFFFF') feedback += '• 目标地址应为广播地址 0xFFFF<br>';
+                    if (!isCorrectKey) feedback +=
+                        '• 链路密钥错误 — 请使用默认Zigbee信任中心链路密钥<br><span style="font-size:0.68rem;color:#94a3b8;">  提示：搜索 "Zigbee default trust center link key" 或尝试已知默认值</span><br>';
+                    injectFeedback.innerHTML = feedback;
+                    addLog('warn', '[失败] 命令注入参数不正确。请检查簇ID、命令、目标地址和密钥。');
+                }
+                updateButtonStates();
+            });
+
+            btnRotateKeys.addEventListener('click', () => {
+                if (state.keysRotated || btnRotateKeys.disabled) return;
+                state.keysRotated = true;
+                state.defenseActivated = true;
+                addLog('success', '[防御] 执行Zigbee 3.0密钥轮换...');
+                addLog('success', '[防御] 为每个设备生成唯一的安装码派生链路密钥...');
+                addLog('success', '[防御] 网络密钥已更新，旧密钥失效。所有信任链路已重新建立。');
+                addLog('info', '[防御] 现在每个设备拥有唯一密钥，无法通过默认密钥伪造命令。');
+                defenseBox.style.display = 'block';
+                keyRotationLog.innerHTML = `
+              <div style="color:#22c55e;line-height:1.6;">
+              ✅ 密钥轮换完成<br>
+              • 新网络密钥: <span style="color:#22d3ee;">A7F3...</span> (AES-128)<br>
+              • 设备 0x0004 新链路密钥: <span style="color:#22d3ee;">源自安装码 CRC-16</span><br>
+              • 设备 0x0005 新链路密钥: <span style="color:#22d3ee;">源自安装码 CRC-16</span><br>
+              • 帧计数器已重置<br>
+              • 信任中心现已使用每设备唯一密钥<br>
+              <span style="color:#fbbf24;">🔒 攻击面已消除 — 无法再使用默认密钥伪造命令</span>
+              </div>`;
+                // Visual: make trust links green
+                state.trustLinksExploited = [];
+                edges.forEach(e => {
+                    if (e.trustLink) e._defended = true;
+                });
+                updateButtonStates();
+                updateProgressStep(4);
+                const cp = getNodeScreenPos(nodes[0]);
+                spawnParticles(cp.sx, cp.sy, 'rgb(34,197,94)', 60);
+                updateDeviceList();
+            });
+
+            // Tab switching
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove(
+                        'active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove(
+                        'active'));
+                    btn.classList.add('active');
+                    const targetId = btn.dataset.tab;
+                    const target = document.getElementById(targetId);
+                    if (target) target.classList.add('active');
+                    if (targetId === 'tab-packet') updatePacketView();
+                    if (targetId === 'tab-network') updateDeviceList();
+                });
+            });
+
+            // Input listeners for enabling inject button
+            [selCluster, selCmd, inpDst, inpKey].forEach(el => {
+                el.addEventListener('input', updateButtonStates);
+                el.addEventListener('change', updateButtonStates);
+            });
+
+            // ============ INITIALIZATION ============
+            function init() {
+                resizeCanvas();
+                updateDeviceList();
+                updateButtonStates();
+                updateProgressStep(1);
+                nodeCountSpan.textContent = '1';
+                trustLinkCountSpan.textContent = '0';
+                requestAnimationFrame(animate);
+            }
+
+            window.addEventListener('resize', () => {
+                resizeCanvas();
+            });
+
+            init();
+            addLog('info', '[就绪] Zigbee网状网络模拟已启动。共配置 ' + nodes.length + ' 个节点，' + edges.length + ' 条链路。');
+            addLog('info',
+                '[提示] 点击"开始网络发现扫描"按钮，或直接点击画布中可见的协调器节点查看详情。');
+        })();
+    </script>
+</body>
+</html>

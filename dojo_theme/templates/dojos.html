@@ -1,62 +1,128 @@
 {% extends "base.html" %}
 {% from "macros/widgets.html" import dojo_grid %}
 
+{% block body_class %}course-system-page course-catalog-page{% endblock %}
+
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/course-system.css', v='aisecedu-student-catalog-v2-readability-v1') }}">
+{% endblock %}
+
 {% block content %}
-<div class="jumbotron aisecedu-hero aisecedu-catalog-hero">
-  <div class="container">
-    <h1 class="brand-mono-bold wordmark-large"><span class="brand-white">AISecEdu</span><span class="brand-dot brand-blink">.</span><span class="brand-green">课程</span></h1>
-    <p class="lead">选择课程，完成其中的单元，并在隔离工作区中动手解决每一道题。</p>
-  </div>
-</div>
+<div class="course-catalog product-page">
+  {% if is_course_teacher %}
+  <header class="product-page-header">
+    <div class="product-page-header-copy">
+      <span class="product-kicker">玄甲 · 课程</span>
+      <h1>{{ '管理与组织课程' if is_course_teacher else '选择一门课程，开始实战' }}</h1>
+      <p>{{ '课程结构是课件、CTF 实践题、模拟实训和学情的共同上下文。进入课程中心即可完成日常教学操作。' if is_course_teacher else '每门课程按章节组织课件与实训；CTF 实践题和模拟实训共用统一的进度、证据与 AI 助学体验。' }}</p>
+    </div>
+    <div class="product-header-actions">
+      <a class="product-button" href="/teacher/courses/new"><i class="fas fa-plus"></i>新建课程</a>
+      <a class="product-button is-primary" href="/teacher/courses"><i class="fas fa-layer-group"></i>打开课程中心</a>
+    </div>
+  </header>
 
-<div class="container course-catalog">
-  {% if categorized_dojos["welcome"] %}
+  {% if categorized_dojos["admin"] %}
   <section class="course-catalog-section">
-    <h2>入门课程</h2>
-    <p>熟悉平台流程，并建立后续课程所需的基础。</p>
-    {{ dojo_grid(categorized_dojos["welcome"], dojo_container_counts) }}
-  </section>
-  {% endif %}
-
-  {% if categorized_dojos["topic"] %}
-  <section class="course-catalog-section">
-    <h2>核心课程</h2>
-    <p>按照推荐顺序构建网络安全能力。系统会按课程、单元和题目记录进度。</p>
-    {{ dojo_grid(categorized_dojos["topic"], dojo_container_counts) }}
-  </section>
-  {% endif %}
-
-  {% if categorized_dojos["public"] %}
-  <section class="course-catalog-section" id="specialized-courses">
-    <h2>专题课程</h2>
-    <p>探索面向 AISecEdu 社区发布的专题与额外练习。</p>
-    {{ dojo_grid(categorized_dojos["public"], dojo_container_counts) }}
-  </section>
-  {% endif %}
-
-  {% if categorized_dojos["course"] %}
-  <section class="course-catalog-section">
-    <h2>课堂课程</h2>
-    <p>教师主导的课程可能包括课表、评估、私有资料和班级专属学习路径。</p>
-    {{ dojo_grid(categorized_dojos["course"], dojo_container_counts) }}
+    <div class="product-section-heading"><div><span class="product-kicker">我的教学</span><h2>我管理的课程</h2><p>进入课程中心准备内容、实训并查看学情。</p></div><a href="/teacher/courses">统一管理 <i class="fas fa-arrow-right"></i></a></div>
+    {{ dojo_grid(categorized_dojos["admin"], dojo_container_counts, create_icon=True) }}
   </section>
   {% endif %}
 
   {% if categorized_dojos["member"] %}
   <section class="course-catalog-section">
-    <h2>我已加入的课程</h2>
-    <p>与你的账号共享的私有课程会显示在这里。</p>
+    <div class="product-section-heading"><div><span class="product-kicker">继续学习</span><h2>我已加入的课程</h2><p>回到最近的章节和实训。</p></div><a href="/learning">查看学习任务 <i class="fas fa-arrow-right"></i></a></div>
     {{ dojo_grid(categorized_dojos["member"], dojo_container_counts) }}
   </section>
   {% endif %}
 
-  {% if authed() %}
-  <section class="course-catalog-section" id="teacher-courses">
-    <h2>我教授的课程</h2>
-    <p>创建课程，或继续管理单元、题目、学生和评估数据。</p>
-    {{ dojo_grid(categorized_dojos["admin"], dojo_container_counts, create_icon=True) }}
-    <p>从课程仓库<a href="/dojos/create"><b>创建新课程</b></a>。</p>
+  {% if categorized_dojos["welcome"] or categorized_dojos["topic"] %}
+  <section class="course-catalog-section">
+    <div class="product-section-heading"><div><span class="product-kicker">能力路径</span><h2>核心课程</h2><p>从基础概念逐步进入真实网络安全实训。</p></div></div>
+    {% if categorized_dojos["welcome"] %}{{ dojo_grid(categorized_dojos["welcome"], dojo_container_counts) }}{% endif %}
+    {% if categorized_dojos["topic"] %}{{ dojo_grid(categorized_dojos["topic"], dojo_container_counts) }}{% endif %}
   </section>
+  {% endif %}
+
+  {% if categorized_dojos["course"] %}
+  <section class="course-catalog-section">
+    <div class="product-section-heading"><div><span class="product-kicker">课堂教学</span><h2>可加入课程</h2><p>教师组织的课程、章节、CTF 与模拟仿真。</p></div></div>
+    {{ dojo_grid(categorized_dojos["course"], dojo_container_counts) }}
+  </section>
+  {% endif %}
+
+  {% if categorized_dojos["public"] %}
+  <section class="course-catalog-section" id="specialized-courses">
+    <div class="product-section-heading"><div><span class="product-kicker">自主提升</span><h2>专题训练</h2><p>按主题扩展知识与攻防实践。</p></div></div>
+    {{ dojo_grid(categorized_dojos["public"], dojo_container_counts) }}
+  </section>
+  {% endif %}
+
+  {% if authed() and is_course_teacher and not categorized_dojos["admin"] %}
+  <section class="product-surface course-empty-state">
+    <span><i class="fas fa-layer-group"></i></span><div><h2>创建第一门课程</h2><p>填写课程名称和简介即可建立课程；手动页面右下角也可随时改用 AI 助手。</p></div><a class="product-button is-primary" href="/teacher/courses/new"><i class="fas fa-plus"></i>新建课程</a>
+  </section>
+  {% endif %}
+  {% else %}
+  <header class="sc-header">
+    <div><span class="cs-eyebrow">课程目录</span><h1>{{ '我的课程' if catalog.tab == 'mine' else '发现课程' }}</h1><p>{{ '继续已加入的课程，当前项与进度会在课程路径中保持同步。' if catalog.tab == 'mine' else '按目标、难度和学习方式查找课程；查看详情后再决定是否加入。' }}</p></div>
+    {% if authed() %}<a class="cs-btn cs-btn-secondary" href="/student"><i class="fas fa-arrow-left" aria-hidden="true"></i>返回今天</a>{% endif %}
+  </header>
+
+  <nav class="sc-tabs" aria-label="课程目录分类">
+    <a class="{{ 'is-active' if catalog.tab == 'mine' else '' }}" href="/dojos?tab=mine"{% if catalog.tab == 'mine' %} aria-current="page"{% endif %}><i class="fas fa-bookmark" aria-hidden="true"></i>我的课程 <span>{{ catalog.mineCount }}</span></a>
+    <a class="{{ 'is-active' if catalog.tab == 'discover' else '' }}" href="/dojos?tab=discover"{% if catalog.tab == 'discover' %} aria-current="page"{% endif %}><i class="fas fa-compass" aria-hidden="true"></i>发现课程 <span>{{ catalog.discoverCount }}</span></a>
+  </nav>
+
+  <form class="sc-filters" method="get" action="/dojos" aria-label="筛选课程">
+    <input type="hidden" name="tab" value="{{ catalog.tab | e }}">
+    <label class="sc-search"><span class="sr-only">搜索课程</span><i class="fas fa-search" aria-hidden="true"></i><input type="search" name="q" value="{{ catalog.query | e }}" placeholder="搜索课程名称、目标或主题" autocomplete="off"></label>
+    {% if catalog.tab == 'discover' %}
+    <label><span class="sr-only">主题</span><select name="topic"><option value="">全部主题</option>{% for value in catalog.topics %}<option value="{{ value | e }}"{{ ' selected' if value == catalog.topic else '' }}>{{ value }}</option>{% endfor %}</select></label>
+    <label><span class="sr-only">难度</span><select name="difficulty"><option value="">全部难度</option>{% for value in catalog.difficulties %}<option value="{{ value | e }}"{{ ' selected' if value == catalog.difficulty else '' }}>{{ value }}</option>{% endfor %}</select></label>
+    <label><span class="sr-only">类型</span><select name="type"><option value="">全部类型</option><option value="THEORY"{{ ' selected' if catalog.contentType == 'THEORY' else '' }}>理论与资料</option><option value="CTF"{{ ' selected' if catalog.contentType == 'CTF' else '' }}>CTF 实践</option><option value="SIMULATION"{{ ' selected' if catalog.contentType == 'SIMULATION' else '' }}>交互演示</option></select></label>
+    <label><span class="sr-only">预计时长</span><select name="duration"><option value="">全部时长</option><option value="short"{{ ' selected' if catalog.duration == 'short' else '' }}>2 小时以内</option><option value="medium"{{ ' selected' if catalog.duration == 'medium' else '' }}>2–10 小时</option><option value="long"{{ ' selected' if catalog.duration == 'long' else '' }}>10 小时以上</option></select></label>
+    <label><span class="sr-only">发布方</span><select name="provider"><option value="">全部发布方</option><option value="OFFICIAL"{{ ' selected' if catalog.provider == 'OFFICIAL' else '' }}>官方课程</option><option value="TEACHER"{{ ' selected' if catalog.provider == 'TEACHER' else '' }}>教师课程</option></select></label>
+    {% endif %}
+    <button class="cs-btn cs-btn-primary" type="submit">应用筛选</button>
+    {% if catalog.query or catalog.topic or catalog.difficulty or catalog.contentType or catalog.duration or catalog.provider %}<a class="cs-btn cs-btn-secondary" href="/dojos?tab={{ catalog.tab | urlencode }}">清除</a>{% endif %}
+  </form>
+
+  <div class="sc-result-heading"><p>共找到 <strong>{{ catalog.total }}</strong> 门课程</p>{% if catalog.totalPages > 1 %}<span>第 {{ catalog.page }} / {{ catalog.totalPages }} 页</span>{% endif %}</div>
+  {% if catalog.rows %}
+  <section class="sc-grid" aria-label="课程列表">
+    {% for row in catalog.rows %}
+    {% set course = row.dojo %}
+    {% set progress = ((row.solves / course.required_challenges_count) * 100) if course.required_challenges_count else none %}
+    <article class="sc-card">
+      <div class="sc-card-top"><span class="sc-course-type"><i class="fas {{ 'fa-file-alt' if row.contentType == 'THEORY' else ('fa-project-diagram' if row.contentType == 'SIMULATION' else 'fa-flag') }}" aria-hidden="true"></i>{{ {'THEORY':'理论与资料','CTF':'CTF 实践','SIMULATION':'交互演示'}.get(row.contentType, '课程') }}</span><span>{{ row.publisher }}</span></div>
+      <div><h2>{{ course.name or course.id }}</h2><p>{{ (course.description or '查看课程目标、章节安排与可用实践。') | striptags | truncate(150, True) }}</p></div>
+      <ul class="sc-card-meta" aria-label="课程信息"><li><i class="fas fa-layer-group" aria-hidden="true"></i>{{ course.modules_count }} 个章节</li><li><i class="fas fa-signal" aria-hidden="true"></i>{{ row.difficulty }}</li><li><i class="fas fa-clock" aria-hidden="true"></i>{{ ((row.durationMinutes / 60) | round(1) ~ ' 小时') if row.durationMinutes else '时长待确认' }}</li></ul>
+      {% if row.joined %}
+        {% if progress is none %}<div class="sc-reading-state"><i class="fas fa-book-open" aria-hidden="true"></i><span><strong>阅读课程</strong><small>无必修实践，按阅读进度学习</small></span></div>{% else %}<div class="sc-progress"><span><strong>已完成 {{ row.solves }} / {{ course.required_challenges_count }} 项</strong><em>{{ progress | round | int }}%</em></span><i><b style="width:{{ [progress, 100] | min }}%"></b></i></div>{% endif %}
+        <a class="cs-btn cs-btn-primary" href="/dojo/{{ course.reference_id | urlencode }}/learning">继续课程<i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+      {% else %}
+        <div class="sc-goal"><strong>课程目标</strong><span>{{ row.topic }} · {{ '尚未开放实践' if course.challenges_count == 0 else course.challenges_count ~ ' 项实践内容' }}</span></div>
+        <a class="cs-btn cs-btn-secondary" href="/{{ course.reference_id | urlencode }}">查看详情<i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </section>
+  {% else %}
+  <section class="sc-empty">
+    <span><i class="fas {{ 'fa-key' if catalog.tab == 'mine' else 'fa-search' }}" aria-hidden="true"></i></span>
+    <h2>{{ '还没有加入课程' if catalog.tab == 'mine' and not catalog.query else '没有匹配的课程' }}</h2>
+    <p>{{ '使用教师提供的课程码加入，或去发现课程中浏览。' if catalog.tab == 'mine' and not catalog.query else '尝试减少筛选条件，或换一个关键词。' }}</p>
+    <div>{% if catalog.tab == 'mine' and not catalog.query %}<a class="cs-btn cs-btn-primary" href="/student#join-course">使用课程码加入</a><a class="cs-btn cs-btn-secondary" href="/dojos?tab=discover">浏览课程</a>{% else %}<a class="cs-btn cs-btn-primary" href="/dojos?tab={{ catalog.tab | urlencode }}">清除筛选</a>{% endif %}</div>
+  </section>
+  {% endif %}
+
+  {% if catalog.previousUrl or catalog.nextUrl %}
+  <nav class="sc-pagination" aria-label="课程分页">{% if catalog.previousUrl %}<a class="cs-btn cs-btn-secondary" href="{{ catalog.previousUrl | e }}"><i class="fas fa-arrow-left" aria-hidden="true"></i>上一页</a>{% endif %}<span>第 {{ catalog.page }} / {{ catalog.totalPages }} 页</span>{% if catalog.nextUrl %}<a class="cs-btn cs-btn-secondary" href="{{ catalog.nextUrl | e }}">下一页<i class="fas fa-arrow-right" aria-hidden="true"></i></a>{% endif %}</nav>
+  {% endif %}
   {% endif %}
 </div>
 {% endblock %}

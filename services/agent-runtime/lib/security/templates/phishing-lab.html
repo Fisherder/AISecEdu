@@ -1,0 +1,1348 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>钓鱼邮件识别实验室 — 虚假登录检测</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --card2: #1a2332;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --highlight: rgba(239, 68, 68, 0.25);
+            --found: rgba(34, 197, 94, 0.3);
+            --email-bg: #f8fafc;
+            --email-text: #1e293b;
+            --email-border: #e2e8f0;
+            --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+            --font-sans: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+            --radius: 10px;
+            --radius-sm: 6px;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+            --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .lab-container {
+            max-width: 1100px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Header */
+        .lab-header {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+            box-shadow: var(--shadow);
+        }
+        .lab-header .title-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .lab-header .icon-shield {
+            font-size: 2rem;
+            filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5));
+        }
+        .lab-header h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: #fff;
+        }
+        .lab-header .badge {
+            background: var(--danger);
+            color: #fff;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            animation: pulse-badge 2s ease-in-out infinite;
+        }
+        @keyframes pulse-badge {
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5);
+            }
+            50% {
+                box-shadow: 0 0 0 12px rgba(239, 68, 68, 0);
+            }
+        }
+        .progress-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+        .progress-wrap .step-dot {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.85rem;
+            transition: var(--transition);
+            color: #64748b;
+            border: 2px solid transparent;
+        }
+        .progress-wrap .step-dot.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: #60a5fa;
+            box-shadow: 0 0 16px rgba(59, 130, 246, 0.5);
+        }
+        .progress-wrap .step-dot.done {
+            background: var(--success);
+            color: #fff;
+            border-color: #4ade80;
+        }
+        .progress-wrap .step-line {
+            width: 28px;
+            height: 2px;
+            background: var(--border);
+            border-radius: 1px;
+            transition: var(--transition);
+        }
+        .progress-wrap .step-line.done {
+            background: var(--success);
+        }
+
+        /* Score sidebar */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 280px;
+            gap: 20px;
+        }
+        @media (max-width: 850px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+            .score-panel {
+                order: -1;
+            }
+        }
+        .scene-area {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            min-height: 520px;
+            position: relative;
+        }
+        .scene-header {
+            background: #151d2b;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text2);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: 0.02em;
+        }
+        .scene-header .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .scene-header .dot.red {
+            background: #ef4444;
+        }
+        .scene-header .dot.yellow {
+            background: #f59e0b;
+        }
+        .scene-header .dot.green {
+            background: #22c55e;
+        }
+        .scene-body {
+            padding: 20px;
+            position: relative;
+        }
+
+        /* Score panel */
+        .score-panel {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            height: fit-content;
+            position: sticky;
+            top: 20px;
+        }
+        .score-panel h3 {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .score-display {
+            font-size: 3rem;
+            font-weight: 800;
+            text-align: center;
+            color: var(--warning);
+            font-family: var(--font-mono);
+            transition: var(--transition);
+            line-height: 1;
+        }
+        .score-display.pulse {
+            animation: score-pop 0.4s ease-out;
+        }
+        @keyframes score-pop {
+            0% {
+                transform: scale(1);
+            }
+            30% {
+                transform: scale(1.25);
+                color: #fbbf24;
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+        .score-max {
+            font-size: 0.85rem;
+            color: var(--text2);
+            text-align: center;
+            margin-top: -8px;
+        }
+        .found-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 280px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .found-list::-webkit-scrollbar {
+            width: 4px;
+        }
+        .found-list::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 2px;
+        }
+        .found-list li {
+            font-size: 0.8rem;
+            padding: 8px 10px;
+            border-radius: var(--radius-sm);
+            background: #151d2b;
+            border-left: 3px solid var(--success);
+            color: #86efac;
+            animation: slide-in 0.35s ease-out;
+            transition: var(--transition);
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+        }
+        @keyframes slide-in {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        .found-list li .icon-check {
+            flex-shrink: 0;
+            font-size: 0.9rem;
+        }
+
+        /* Email mockup */
+        .email-mockup {
+            background: #fff;
+            border-radius: var(--radius-sm);
+            border: 1px solid #d1d5db;
+            overflow: hidden;
+            color: #1e293b;
+            font-family: var(--font-sans);
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+        }
+        .email-mockup .email-header-bar {
+            background: #f1f5f9;
+            padding: 14px 18px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 20px;
+            font-size: 0.85rem;
+        }
+        .email-mockup .email-header-bar .field {
+            display: flex;
+            gap: 8px;
+            align-items: baseline;
+            flex-wrap: wrap;
+        }
+        .email-mockup .email-header-bar .field .label {
+            font-weight: 700;
+            color: #475569;
+            min-width: 40px;
+            text-align: right;
+        }
+        .email-mockup .email-header-bar .field .value {
+            color: #1e293b;
+            font-weight: 500;
+        }
+        .email-mockup .email-body {
+            padding: 20px 24px;
+            font-size: 0.9rem;
+            line-height: 1.7;
+            color: #334155;
+        }
+        .email-mockup .email-body p {
+            margin-bottom: 12px;
+        }
+        .email-mockup .email-body .phish-link {
+            display: inline-block;
+            background: #2563eb;
+            color: #fff;
+            padding: 10px 22px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            position: relative;
+            transition: var(--transition);
+            border: 2px solid transparent;
+        }
+        .email-mockup .email-body .phish-link:hover {
+            background: #1d4ed8;
+        }
+        .email-mockup .email-body .phish-link .hover-reveal {
+            display: none;
+            position: absolute;
+            bottom: 110%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e293b;
+            color: #fbbf24;
+            font-size: 0.75rem;
+            padding: 6px 12px;
+            border-radius: 4px;
+            white-space: nowrap;
+            font-family: var(--font-mono);
+            z-index: 10;
+            pointer-events: none;
+            border: 1px solid #f59e0b;
+        }
+        .email-mockup .email-body .phish-link:hover .hover-reveal {
+            display: block;
+        }
+        .email-mockup .email-body .phish-link .hover-reveal::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: #1e293b;
+        }
+
+        /* Browser mockup */
+        .browser-mockup {
+            background: #fff;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 1px solid #d1d5db;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+        }
+        .browser-chrome {
+            background: #e5e7eb;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid #d1d5db;
+        }
+        .browser-chrome .browser-dots {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .browser-chrome .browser-dots span {
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            background: #cbd5e1;
+        }
+        .browser-chrome .browser-dots span:nth-child(1) {
+            background: #ef4444;
+        }
+        .browser-chrome .browser-dots span:nth-child(2) {
+            background: #f59e0b;
+        }
+        .browser-chrome .browser-dots span:nth-child(3) {
+            background: #22c55e;
+        }
+        .browser-chrome .address-bar {
+            flex: 1;
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 20px;
+            padding: 7px 16px;
+            font-size: 0.8rem;
+            font-family: var(--font-mono);
+            color: #475569;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: var(--transition);
+            user-select: none;
+            position: relative;
+        }
+        .browser-chrome .address-bar .no-https {
+            color: #ef4444;
+            font-weight: 700;
+            font-size: 0.7rem;
+            background: #fef2f2;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid #fecaca;
+        }
+        .browser-content {
+            padding: 30px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 300px;
+        }
+        .fake-login-card {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 30px 28px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+            text-align: center;
+        }
+        .fake-login-card .fake-logo {
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: #1e40af;
+            margin-bottom: 6px;
+            letter-spacing: -0.02em;
+            cursor: pointer;
+            transition: var(--transition);
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        .fake-login-card .fake-logo-sub {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-bottom: 20px;
+        }
+        .fake-login-card input {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            margin-bottom: 12px;
+            font-family: var(--font-sans);
+            transition: var(--transition);
+            background: #f9fafb;
+        }
+        .fake-login-card input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            background: #fff;
+        }
+        .fake-login-card .btn-submit {
+            width: 100%;
+            padding: 11px;
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: var(--transition);
+            margin-top: 4px;
+        }
+        .fake-login-card .btn-submit:hover {
+            background: #1d4ed8;
+        }
+        .fake-login-card .extra-links {
+            font-size: 0.78rem;
+            color: #94a3b8;
+            margin-top: 14px;
+        }
+
+        /* Clickable red flag indicators */
+        .flag-clickable {
+            cursor: pointer;
+            position: relative;
+            transition: var(--transition);
+            border-radius: 3px;
+            padding: 1px 3px;
+            margin: 0 -3px;
+            border: 1px dashed transparent;
+            user-select: none;
+        }
+        .flag-clickable:hover {
+            background: rgba(239, 68, 68, 0.08);
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+        .flag-clickable.found {
+            background: rgba(34, 197, 94, 0.2) !important;
+            border-color: rgba(34, 197, 94, 0.6) !important;
+            cursor: default;
+            box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.08);
+            animation: found-glow 1.5s ease-out;
+            pointer-events: none;
+        }
+        @keyframes found-glow {
+            0% {
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
+            }
+            100% {
+                box-shadow: 0 0 0 16px rgba(34, 197, 94, 0);
+            }
+        }
+        .flag-clickable.found::after {
+            content: ' ✓';
+            color: #22c55e;
+            font-weight: 700;
+            font-size: 0.8rem;
+            animation: fade-in 0.3s ease-out;
+        }
+        @keyframes fade-in {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* Tooltip popup */
+        .flag-tooltip {
+            position: fixed;
+            background: #1e293b;
+            color: #fecaca;
+            border: 1px solid #ef4444;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 0.82rem;
+            max-width: 320px;
+            z-index: 999;
+            pointer-events: none;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            animation: tooltip-in 0.25s ease-out;
+            line-height: 1.5;
+        }
+        @keyframes tooltip-in {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .flag-tooltip .tt-title {
+            font-weight: 700;
+            color: #f87171;
+            margin-bottom: 4px;
+            font-size: 0.85rem;
+        }
+        .flag-tooltip .tt-desc {
+            color: #fecaca;
+            font-size: 0.78rem;
+        }
+
+        /* Debrief cards */
+        .debrief-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+            padding: 10px 0;
+        }
+        .debrief-card {
+            background: #151d2b;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 18px;
+            transition: var(--transition);
+            cursor: default;
+        }
+        .debrief-card:hover {
+            border-color: #475569;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        }
+        .debrief-card .dc-icon {
+            font-size: 1.6rem;
+            margin-bottom: 8px;
+        }
+        .debrief-card .dc-title {
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 6px;
+            font-size: 0.95rem;
+        }
+        .debrief-card .dc-desc {
+            color: var(--text2);
+            font-size: 0.82rem;
+            line-height: 1.5;
+        }
+        .debrief-card .dc-tactic {
+            display: inline-block;
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            font-size: 0.7rem;
+            padding: 3px 8px;
+            border-radius: 12px;
+            margin-top: 8px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+        }
+
+        /* Flag reveal */
+        .flag-reveal {
+            background: #0c0f15;
+            border: 2px dashed #f59e0b;
+            border-radius: var(--radius);
+            padding: 24px;
+            text-align: center;
+            animation: flag-appear 0.6s ease-out;
+            margin-top: 16px;
+        }
+        @keyframes flag-appear {
+            from {
+                opacity: 0;
+                transform: scale(0.9);
+                border-color: #64748b;
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+                border-color: #f59e0b;
+            }
+        }
+        .flag-reveal .flag-code {
+            font-family: var(--font-mono);
+            font-size: 1.4rem;
+            font-weight: 800;
+            color: #fbbf24;
+            letter-spacing: 0.05em;
+            word-break: break-all;
+            animation: shimmer 2s ease-in-out infinite;
+        }
+        @keyframes shimmer {
+            0%,
+            100% {
+                text-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+            }
+            50% {
+                text-shadow: 0 0 24px rgba(245, 158, 11, 0.8), 0 0 48px rgba(245, 158, 11, 0.4);
+            }
+        }
+        .flag-reveal .flag-label {
+            font-weight: 700;
+            color: #f59e0b;
+            font-size: 0.85rem;
+            letter-spacing: 0.06em;
+            margin-bottom: 6px;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: var(--transition);
+            border: 1px solid transparent;
+            font-family: var(--font-sans);
+            letter-spacing: 0.01em;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+            border-color: #60a5fa;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+        }
+        .btn-outline {
+            background: transparent;
+            color: var(--text);
+            border-color: var(--border);
+        }
+        .btn-outline:hover {
+            background: #1e293b;
+            border-color: #64748b;
+        }
+        .btn-success {
+            background: var(--success);
+            color: #000;
+            border-color: #4ade80;
+            font-weight: 700;
+        }
+        .btn-success:hover {
+            box-shadow: 0 4px 16px rgba(34, 197, 94, 0.4);
+        }
+
+        .nav-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 4px 0;
+        }
+        .hidden {
+            display: none !important;
+        }
+
+        /* Analysis report */
+        .analysis-report {
+            background: #151d2b;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px 24px;
+            margin-top: 8px;
+            line-height: 1.7;
+        }
+        .analysis-report h4 {
+            color: #fff;
+            margin-bottom: 8px;
+        }
+        .analysis-report p,
+        .analysis-report li {
+            color: var(--text2);
+            font-size: 0.85rem;
+            margin-bottom: 6px;
+        }
+        .analysis-report ul {
+            padding-left: 20px;
+        }
+        .analysis-report .highlight-good {
+            background: rgba(34, 197, 94, 0.15);
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #86efac;
+            font-weight: 600;
+        }
+        .analysis-report .highlight-bad {
+            background: rgba(239, 68, 68, 0.15);
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #fca5a5;
+            font-weight: 600;
+        }
+
+        details summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: #93c5fd;
+            padding: 8px 0;
+            transition: var(--transition);
+            user-select: none;
+        }
+        details summary:hover {
+            color: #bfdbfe;
+        }
+    </style>
+</head>
+<body>
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <div class="lab-container">
+        <!-- Header -->
+        <div class="lab-header">
+            <div class="title-group">
+                <span class="icon-shield">🛡️</span>
+                <div>
+                    <h1>钓鱼邮件识别实验室</h1>
+                    <span style="font-size:0.78rem;color:var(--text2);">虚假登录检测 · 社会工程学实战</span>
+                </div>
+            </div>
+            <span class="badge">⚠ 模拟训练</span>
+            <div class="progress-wrap" id="progressWrap">
+                <span class="step-dot active" data-step="1">1</span>
+                <span class="step-line" data-line="1"></span>
+                <span class="step-dot" data-step="2">2</span>
+                <span class="step-line" data-line="2"></span>
+                <span class="step-dot" data-step="3">3</span>
+            </div>
+        </div>
+
+        <!-- Main layout -->
+        <div class="main-layout">
+            <!-- Scene area -->
+            <div class="scene-area" id="sceneArea">
+                <div class="scene-header" id="sceneHeader">
+                    <span class="dot red"></span> <span>步骤 1/3 — 检查钓鱼邮件</span>
+                </div>
+                <div class="scene-body" id="sceneBody">
+                    <!-- Step 1: Email mockup -->
+                    <div id="step1Content">
+                        <div class="email-mockup" id="emailMockup">
+                            <div class="email-header-bar">
+                                <div class="field"><span class="label">发件人：</span><span class="value flag-clickable" data-flag="sender-domain" id="flag-sender">IT支持团队 &lt;it-support@techcorp-secure.com&gt;</span></div>
+                                <div class="field"><span class="label">收件人：</span><span class="value">zhang.wei@techcorp.com</span></div>
+                                <div class="field"><span class="label">主题：</span><span class="value flag-clickable" data-flag="urgent-subject" id="flag-subject">⚠️ 【紧急通知】请立即验证您的企业邮箱帐户</span></div>
+                                <div class="field"><span class="label">日期：</span><span class="value">2025-06-15 09:47</span></div>
+                            </div>
+                            <div class="email-body">
+                                <p><span class="flag-clickable" data-flag="generic-greeting" id="flag-greeting">亲爱的用户，</span></p>
+                                <p>我们检测到您的企业邮箱帐户存在<span class="flag-clickable" data-flag="fear-trigger" id="flag-fear">异常登录活动</span>。为保障您的帐户安全，系统要求所有用户必须在<span class="flag-clickable" data-flag="urgency-deadline" id="flag-urgency">24小时内</span>完成身份验证。</p>
+                                <p>请点击下方链接重新验证您的帐户信息：</p>
+                                <p style="text-align:center;margin:18px 0;">
+                                    <span class="phish-link flag-clickable" data-flag="misleading-link" id="flag-link">
+                                        🔗 立即验证帐户
+                                        <span class="hover-reveal">⚠ 实际链接: http://mail.tehcorp.com/verify-login</span>
+                                    </span>
+                                </p>
+                                <p style="font-size:0.78rem;color:#94a3b8;text-align:center;">（显示为 techcorp.com，但实际指向 tehcorp.com）</p>
+                                <p><span class="flag-clickable" data-flag="account-threat" id="flag-threat">注意：如在24小时内未完成验证，您的帐户将被自动暂停，您将无法访问公司邮件系统。</span></p>
+                                <p>此致，<br><span class="flag-clickable" data-flag="vague-signature" id="flag-signature">IT技术支持团队<br>TechCorp 信息技术部</span></p>
+                                <p style="font-size:0.72rem;color:#94a3b8;margin-top:16px;"><span class="flag-clickable" data-flag="grammar-issue" id="flag-grammar">*此邮件由系统自动发送，请勿回复。如有疑问请联系您的系统管理元。</span></p>
+                            </div>
+                        </div>
+                        <div class="nav-row" style="margin-top:16px;">
+                            <span style="color:var(--text2);font-size:0.85rem;">👆 点击邮件中的可疑元素进行标记</span>
+                            <button class="btn btn-primary" id="btnToStep2" disabled>进入下一步 →</button>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Browser mockup -->
+                    <div id="step2Content" class="hidden">
+                        <div class="browser-mockup" id="browserMockup">
+                            <div class="browser-chrome">
+                                <span class="browser-dots"><span></span><span></span><span></span></span>
+                                <div class="address-bar flag-clickable" data-flag="url-typo" id="flag-url">
+                                    <span class="no-https">🔓 不安全</span>
+                                    <span style="color:#ef4444;">http://</span>mail.<span style="color:#ef4444;font-weight:700;">tehcorp</span>.com/verify-login
+                                </div>
+                            </div>
+                            <div class="browser-content">
+                                <div class="fake-login-card">
+                                    <div class="flag-clickable" data-flag="logo-altered" id="flag-logo" style="display:inline-block;">
+                                        <div class="fake-logo">Tech<span style="color:#ef4444;">C0rp</span></div>
+                                        <div class="fake-logo-sub">企业邮件系统 · 帐户验证</div>
+                                    </div>
+                                    <input type="text" placeholder="用户名 / 邮箱地址" disabled style="cursor:not-allowed;opacity:0.7;">
+                                    <input type="password" placeholder="密码" disabled style="cursor:not-allowed;opacity:0.7;">
+                                    <div class="flag-clickable" data-flag="confirm-password" id="flag-confirm" style="width:100%;">
+                                        <input type="password" placeholder="确认密码" disabled style="cursor:not-allowed;opacity:0.7;margin-bottom:4px;width:100%;">
+                                    </div>
+                                    <div class="flag-clickable" data-flag="extra-field" id="flag-extrafield" style="width:100%;">
+                                        <input type="text" placeholder="员工编号 (Employee ID)" disabled style="cursor:not-allowed;opacity:0.7;margin-bottom:4px;width:100%;">
+                                    </div>
+                                    <button class="btn-submit" disabled style="cursor:not-allowed;opacity:0.6;">验证帐户</button>
+                                    <div class="extra-links flag-clickable" data-flag="no-footer" id="flag-footer" style="margin-top:16px;text-align:center;">
+                                        <span style="color:#94a3b8;font-size:0.72rem;">© 2025 TechCorp. 保留所有权利。</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="nav-row" style="margin-top:16px;">
+                            <button class="btn btn-outline" id="btnBackToStep1">← 返回邮件</button>
+                            <span style="color:var(--text2);font-size:0.85rem;">👆 点击页面中的可疑元素进行标记</span>
+                            <button class="btn btn-primary" id="btnToStep3" disabled>查看分析报告 →</button>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Debrief -->
+                    <div id="step3Content" class="hidden">
+                        <h3 style="color:#fff;margin-bottom:8px;">🧠 社会工程学战术分析</h3>
+                        <p style="color:var(--text2);margin-bottom:20px;">攻击者利用以下心理学原理来绕过你的理性判断。了解这些战术是防御钓鱼攻击的关键。</p>
+                        <div class="debrief-grid">
+                            <div class="debrief-card">
+                                <div class="dc-icon">⏰</div>
+                                <div class="dc-title">紧迫感 (Urgency)</div>
+                                <div class="dc-desc">设定"24小时"倒计时，制造时间压力。人在紧迫时倾向于快速决策，减少了对细节的审查。这是钓鱼邮件中最常见的操控手法之一。</div>
+                                <span class="dc-tactic">心理战术：时间压力</span>
+                            </div>
+                            <div class="debrief-card">
+                                <div class="dc-icon">🏛️</div>
+                                <div class="dc-title">权威性 (Authority)</div>
+                                <div class="dc-desc">冒充IT支持团队——一个拥有技术权威的内部部门。人们天生倾向于服从权威指令，尤其是涉及"账户安全"时。</div>
+                                <span class="dc-tactic">心理战术：权威服从</span>
+                            </div>
+                            <div class="debrief-card">
+                                <div class="dc-icon">😨</div>
+                                <div class="dc-title">恐惧诱导 (Fear)</div>
+                                <div class="dc-desc">"异常登录活动"+"帐户暂停"——双重恐惧刺激。恐惧情绪会抑制前额叶皮层的理性思考，使人更容易顺从攻击者的要求。</div>
+                                <span class="dc-tactic">心理战术：恐惧操控</span>
+                            </div>
+                            <div class="debrief-card">
+                                <div class="dc-icon">🏠</div>
+                                <div class="dc-title">熟悉感 (Familiarity)</div>
+                                <div class="dc-desc">使用公司品牌、logo（虽然略有篡改）和内部术语。熟悉的视觉元素降低了警惕性，使人下意识地信任页面内容。</div>
+                                <span class="dc-tactic">心理战术：品牌信任</span>
+                            </div>
+                            <div class="debrief-card">
+                                <div class="dc-icon">🎯</div>
+                                <div class="dc-title">针对性 (Spear Phishing)</div>
+                                <div class="dc-desc">收件人使用了真实的企业邮箱地址，表明攻击者做了前期侦察。定向钓鱼比群发钓鱼成功率高出数倍。</div>
+                                <span class="dc-tactic">心理战术：个性化</span>
+                            </div>
+                            <div class="debrief-card">
+                                <div class="dc-icon">🔗</div>
+                                <div class="dc-title">视觉欺骗 (Visual Deception)</div>
+                                <div class="dc-desc">链接显示文字与目标URL不一致（techcorp vs tehcorp）。利用视觉相似性（同形异义词攻击）——人眼容易忽略细微的拼写差异。</div>
+                                <span class="dc-tactic">心理战术：感知漏洞</span>
+                            </div>
+                        </div>
+                        <div class="flag-reveal" id="flagRevealArea" style="display:none;">
+                            <div class="flag-label">🏆 恭喜！你已成功完成钓鱼邮件识别训练</div>
+                            <div class="flag-code" id="flagCode">FLAG{ph1shing_d3t3ct3d_s0c14l_eng_m4st3r}</div>
+                            <p style="color:var(--text2);font-size:0.8rem;margin-top:8px;">将此Flag提交至学习平台以确认完成</p>
+                        </div>
+                        <div class="nav-row" style="margin-top:16px;">
+                            <button class="btn btn-outline" id="btnBackToStep2">← 返回登录页</button>
+                            <button class="btn btn-success" id="btnRestart">🔄 重新开始训练</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Score panel -->
+            <div class="score-panel" id="scorePanel">
+                <h3>🎯 检测分数</h3>
+                <div class="score-display" id="scoreDisplay">0</div>
+                <div class="score-max">满分：14 个红旗</div>
+                <div style="font-size:0.78rem;color:var(--text2);">已发现的威胁：</div>
+                <ul class="found-list" id="foundList">
+                    <li style="color:#64748b;border-left-color:#475569;font-style:italic;">尚未发现任何红旗…</li>
+                </ul>
+                <button class="btn btn-outline" id="btnToggleAnalysis" style="width:100%;margin-top:8px;">📋 查看完整分析</button>
+                <details style="margin-top:6px;" id="analysisDetails">
+                    <summary style="font-size:0.85rem;">防御对比：合法邮件 vs 钓鱼邮件</summary>
+                    <div style="font-size:0.78rem;color:var(--text2);padding:8px 0;line-height:1.6;">
+                        <p><span class="highlight-good">✅ 合法邮件：</span>来自真实域名（@techcorp.com），使用你的真实姓名，无紧迫威胁，链接与显示一致，有完整签名和联系方式。</p>
+                        <p><span class="highlight-bad">❌ 钓鱼邮件：</span>来自相似域名（@techcorp-secure.com），通用称呼，制造紧迫感和恐惧，链接伪装，签名模糊，有拼写错误。</p>
+                    </div>
+                </details>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tooltip -->
+    <div class="flag-tooltip hidden" id="flagTooltip"></div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        (function() {
+            // ── State ──────────────────────────────────
+            const TOTAL_FLAGS = 14;
+            const foundFlags = new Set();
+            let currentStep = 1;
+            let score = 0;
+            let tooltipTimeout = null;
+
+            // Step 1 flags (8 flags)
+            const step1Flags = [
+                'sender-domain', 'urgent-subject', 'generic-greeting', 'fear-trigger',
+                'urgency-deadline', 'misleading-link', 'account-threat', 'vague-signature',
+                'grammar-issue'
+            ];
+            // Step 2 flags (6 flags) — grammar-issue is step1 only; total unique = 14
+            const step2Flags = [
+                'url-typo', 'logo-altered', 'confirm-password', 'extra-field', 'no-footer'
+            ];
+            // All flags
+            const allFlagIds = [...new Set([...step1Flags, ...step2Flags])];
+            // Actually recount: step1 has 9, step2 has 5 = 14 total. Let me verify:
+            // step1: sender-domain, urgent-subject, generic-greeting, fear-trigger, urgency-deadline, misleading-link, account-threat, vague-signature, grammar-issue = 9
+            // step2: url-typo, logo-altered, confirm-password, extra-field, no-footer = 5
+            // Total = 14 ✓
+
+            // ── DOM refs ──────────────────────────────
+            const $ = (sel) => document.querySelector(sel);
+            const $$ = (sel) => document.querySelectorAll(sel);
+
+            const sceneHeader = $('#sceneHeader');
+            const step1Content = $('#step1Content');
+            const step2Content = $('#step2Content');
+            const step3Content = $('#step3Content');
+            const scoreDisplay = $('#scoreDisplay');
+            const foundList = $('#foundList');
+            const flagTooltip = $('#flagTooltip');
+            const btnToStep2 = $('#btnToStep2');
+            const btnToStep3 = $('#btnToStep3');
+            const btnBackToStep1 = $('#btnBackToStep1');
+            const btnBackToStep2 = $('#btnBackToStep2');
+            const btnRestart = $('#btnRestart');
+            const btnToggleAnalysis = $('#btnToggleAnalysis');
+            const analysisDetails = $('#analysisDetails');
+            const flagRevealArea = $('#flagRevealArea');
+            const progressWrap = $('#progressWrap');
+
+            // ── Flag metadata ─────────────────────────
+            const flagMeta = {
+                'sender-domain': {
+                    title: '🚩 发件人域名异常',
+                    desc: '发件地址为 @techcorp-secure.com，而非公司真实域名 @techcorp.com。攻击者注册了相似域名来冒充IT部门。这是域名欺骗（Domain Spoofing）的典型手法。',
+                    step: 1
+                },
+                'urgent-subject': {
+                    title: '🚩 紧急标题 + 表情符号',
+                    desc: '主题行使用"紧急通知"、⚠️符号和感叹号制造紧迫感。攻击者利用情绪刺激来降低收件人的警惕性，促使其快速点击而不仔细检查。',
+                    step: 1
+                },
+                'generic-greeting': {
+                    title: '🚩 通用称呼',
+                    desc: '使用"亲爱的用户"而非你的真实姓名。合法公司邮件通常会使用员工的真实姓名。通用称呼表明攻击者并不真正了解你的身份信息。',
+                    step: 1
+                },
+                'fear-trigger': {
+                    title: '🚩 恐惧触发词',
+                    desc: '"异常登录活动"——直接触发恐惧和焦虑。攻击者利用人们对账户被盗的担忧，使其在恐慌中忽略安全检查步骤。',
+                    step: 1
+                },
+                'urgency-deadline': {
+                    title: '🚩 人为制造截止期限',
+                    desc: '"24小时内"是一个经典的紧迫感施压策略。设定短期限迫使受害者匆忙行动，减少仔细审查邮件真实性的时间。',
+                    step: 1
+                },
+                'misleading-link': {
+                    title: '🚩 链接文字与实际URL不符',
+                    desc: '显示为techcorp.com，但实际指向tehcorp.com（字母顺序调换）。这是同形异义词攻击（Typo-squatting），利用视觉相似性欺骗用户。悬停即可发现不一致。',
+                    step: 1
+                },
+                'account-threat': {
+                    title: '🚩 账户暂停威胁',
+                    desc: '威胁"帐户将被自动暂停"——攻击者利用损失厌恶心理。人们对失去访问权限的恐惧远大于对获得好处的期待，因此更容易屈服于威胁。',
+                    step: 1
+                },
+                'vague-signature': {
+                    title: '🚩 签名模糊无联系方式',
+                    desc: '签名仅写"IT技术支持团队"，没有具体联系人姓名、电话或工号。合法公司邮件通常包含详细的联系信息以便员工核实。',
+                    step: 1
+                },
+                'grammar-issue': {
+                    title: '🚩 拼写/语法错误',
+                    desc: '"系统管理元"应为"系统管理员"。钓鱼邮件中常出现细微的拼写或语法错误，这是因为许多攻击者并非母语使用者，或使用机器翻译。',
+                    step: 1
+                },
+                'url-typo': {
+                    title: '🚩 URL拼写错误',
+                    desc: '地址栏显示"tehcorp.com"而非"techcorp.com"——字母顺序调换。这种细微差异极易被忽略。始终检查浏览器地址栏中的域名拼写。',
+                    step: 2
+                },
+                'logo-altered': {
+                    title: '🚩 Logo被篡改',
+                    desc: 'Logo中"Corp"被改为"C0rp"（数字0替换字母o）。这是品牌仿冒的细微信号，攻击者利用视觉相似性来建立虚假信任。',
+                    step: 2
+                },
+                'confirm-password': {
+                    title: '🚩 要求确认密码',
+                    desc: '合法登录页面通常不会在登录时要求"确认密码"。这是攻击者试图收集额外信息或确认密码准确性的手段。',
+                    step: 2
+                },
+                'extra-field': {
+                    title: '🚩 额外信息收集',
+                    desc: '要求输入"员工编号"——这是合法登录页面通常不需要的信息。攻击者在收集尽可能多的个人身份信息（PII），可能用于后续的身份盗窃。',
+                    step: 2
+                },
+                'no-footer': {
+                    title: '🚩 缺少完整页脚',
+                    desc: '页面底部仅有简短的版权声明，缺少隐私政策、帮助链接、联系信息等。合法企业登录页面通常包含完善的页脚信息。',
+                    step: 2
+                }
+            };
+
+            // ── Functions ──────────────────────────────
+            function updateScoreDisplay() {
+                score = foundFlags.size;
+                scoreDisplay.textContent = score;
+                scoreDisplay.classList.add('pulse');
+                setTimeout(() => scoreDisplay.classList.remove('pulse'), 400);
+
+                // Update found list
+                if (foundFlags.size === 0) {
+                    foundList.innerHTML =
+                        '<li style="color:#64748b;border-left-color:#475569;font-style:italic;">尚未发现任何红旗…</li>';
+                } else {
+                    foundList.innerHTML = '';
+                    foundFlags.forEach(fid => {
+                        const meta = flagMeta[fid];
+                        const li = document.createElement('li');
+                        li.innerHTML =
+                            `<span class="icon-check">✅</span> <span>${meta ? meta.title.replace('🚩 ','') : fid}</span>`;
+                        foundList.appendChild(li);
+                    });
+                }
+
+                // Enable/disable nav buttons
+                if (currentStep === 1) {
+                    const step1Found = [...foundFlags].filter(f => step1Flags.includes(f)).length;
+                    btnToStep2.disabled = step1Found < 5; // Need at least 5 from step1
+                    if (step1Found < 5 && foundFlags.size > 0) {
+                        btnToStep2.title = `还需发现至少 ${5 - step1Found} 个邮件红旗才能继续`;
+                    } else if (step1Found >= 5) {
+                        btnToStep2.title = '';
+                    }
+                }
+                if (currentStep === 2) {
+                    const step2Found = [...foundFlags].filter(f => step2Flags.includes(f)).length;
+                    btnToStep3.disabled = step2Found < 3; // Need at least 3 from step2
+                    if (step2Found < 3 && foundFlags.size > 0) {
+                        btnToStep3.title = `还需发现至少 ${3 - step2Found} 个页面红旗才能继续`;
+                    } else if (step2Found >= 3) {
+                        btnToStep3.title = '';
+                    }
+                }
+            }
+
+            function showTooltip(flagId, targetEl) {
+                const meta = flagMeta[flagId];
+                if (!meta) return;
+                const rect = targetEl.getBoundingClientRect();
+                flagTooltip.innerHTML = `
+                    <div class="tt-title">${meta.title}</div>
+                    <div class="tt-desc">${meta.desc}</div>
+                `;
+                flagTooltip.classList.remove('hidden');
+                // Position tooltip
+                let top = rect.top - flagTooltip.offsetHeight - 12;
+                let left = rect.left + rect.width / 2 - flagTooltip.offsetWidth / 2;
+                if (top < 10) top = rect.bottom + 12;
+                if (left < 10) left = 10;
+                if (left + flagTooltip.offsetWidth > window.innerWidth - 10) {
+                    left = window.innerWidth - flagTooltip.offsetWidth - 10;
+                }
+                flagTooltip.style.top = top + 'px';
+                flagTooltip.style.left = left + 'px';
+
+                if (tooltipTimeout) clearTimeout(tooltipTimeout);
+                tooltipTimeout = setTimeout(() => {
+                    flagTooltip.classList.add('hidden');
+                }, 4000);
+            }
+
+            function hideTooltip() {
+                flagTooltip.classList.add('hidden');
+                if (tooltipTimeout) clearTimeout(tooltipTimeout);
+            }
+
+            function markFlagFound(flagId, element) {
+                if (foundFlags.has(flagId)) return;
+                foundFlags.add(flagId);
+                element.classList.add('found');
+                // Add a subtle permanent pulse
+                element.style.transition = 'all 0.3s ease-out';
+                showTooltip(flagId, element);
+                updateScoreDisplay();
+
+                // Check if we should reveal the flag
+                checkFlagReveal();
+            }
+
+            function checkFlagReveal() {
+                if (foundFlags.size >= 12 && currentStep >= 3 && flagRevealArea.style.display === 'none') {
+                    flagRevealArea.style.display = 'block';
+                    flagRevealArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            function handleFlagClick(e) {
+                const target = e.target.closest('.flag-clickable');
+                if (!target) return;
+                const flagId = target.getAttribute('data-flag');
+                if (!flagId) return;
+                if (foundFlags.has(flagId)) {
+                    // Already found — briefly show tooltip again
+                    showTooltip(flagId, target);
+                    return;
+                }
+                // Check if this flag belongs to current step
+                const meta = flagMeta[flagId];
+                if (meta && meta.step !== currentStep && currentStep < 3) {
+                    // Wrong step — still allow marking but give a hint
+                    // Actually, let's allow cross-step marking for flexibility
+                }
+                markFlagFound(flagId, target);
+            }
+
+            function switchStep(step) {
+                currentStep = step;
+                hideTooltip();
+
+                // Update progress dots
+                const dots = progressWrap.querySelectorAll('.step-dot');
+                const lines = progressWrap.querySelectorAll('.step-line');
+                dots.forEach((dot, i) => {
+                    dot.classList.remove('active', 'done');
+                    if (i + 1 < step) dot.classList.add('done');
+                    if (i + 1 === step) dot.classList.add('active');
+                });
+                lines.forEach((line, i) => {
+                    if (i + 1 < step) line.classList.add('done');
+                    else line.classList.remove('done');
+                });
+
+                // Show/hide content
+                step1Content.classList.add('hidden');
+                step2Content.classList.add('hidden');
+                step3Content.classList.add('hidden');
+
+                if (step === 1) {
+                    step1Content.classList.remove('hidden');
+                    sceneHeader.innerHTML = '<span class="dot red"></span> <span>步骤 1/3 — 检查钓鱼邮件</span>';
+                } else if (step === 2) {
+                    step2Content.classList.remove('hidden');
+                    sceneHeader.innerHTML =
+                        '<span class="dot yellow"></span> <span>步骤 2/3 — 检查虚假登录页面</span>';
+                } else if (step === 3) {
+                    step3Content.classList.remove('hidden');
+                    sceneHeader.innerHTML =
+                        '<span class="dot green"></span> <span>步骤 3/3 — 社会工程学战术分析</span>';
+                    checkFlagReveal();
+                }
+                updateScoreDisplay();
+            }
+
+            function resetLab() {
+                foundFlags.clear();
+                score = 0;
+                currentStep = 1;
+                hideTooltip();
+                flagRevealArea.style.display = 'none';
+
+                // Reset all flag elements
+                $$('.flag-clickable').forEach(el => el.classList.remove('found'));
+                // Reset found styles
+                $$('.flag-clickable.found').forEach(el => {
+                    el.classList.remove('found');
+                    el.style.transition = '';
+                });
+
+                updateScoreDisplay();
+                switchStep(1);
+                analysisDetails.removeAttribute('open');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+
+            // ── Event delegation for flag clicks ──────
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('.flag-clickable') && !e.target.closest('.flag-clickable.found')) {
+                    handleFlagClick(e);
+                }
+                // Close tooltip when clicking elsewhere
+                if (!e.target.closest('.flag-clickable') && !e.target.closest('#flagTooltip')) {
+                    // Don't immediately hide — let the tooltip linger
+                }
+            });
+
+            // Hover on flag-clickable shows subtle highlight
+            document.addEventListener('mouseover', function(e) {
+                const target = e.target.closest('.flag-clickable');
+                if (target && !target.classList.contains('found')) {
+                    target.style.backgroundColor = 'rgba(239,68,68,0.1)';
+                }
+            });
+            document.addEventListener('mouseout', function(e) {
+                const target = e.target.closest('.flag-clickable');
+                if (target && !target.classList.contains('found')) {
+                    target.style.backgroundColor = '';
+                }
+            });
+
+            // ── Button handlers ────────────────────────
+            btnToStep2.addEventListener('click', () => switchStep(2));
+            btnToStep3.addEventListener('click', () => switchStep(3));
+            btnBackToStep1.addEventListener('click', () => switchStep(1));
+            btnBackToStep2.addEventListener('click', () => switchStep(2));
+            btnRestart.addEventListener('click', resetLab);
+            btnToggleAnalysis.addEventListener('click', () => {
+                if (analysisDetails.hasAttribute('open')) {
+                    analysisDetails.removeAttribute('open');
+                    btnToggleAnalysis.textContent = '📋 查看完整分析';
+                } else {
+                    analysisDetails.setAttribute('open', '');
+                    btnToggleAnalysis.textContent = '📋 隐藏完整分析';
+                    analysisDetails.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            });
+
+            // ── Initialize ─────────────────────────────
+            updateScoreDisplay();
+            switchStep(1);
+
+            // Auto-hide tooltip on scroll
+            window.addEventListener('scroll', () => {
+                if (tooltipTimeout) clearTimeout(tooltipTimeout);
+                tooltipTimeout = setTimeout(() => hideTooltip(), 200);
+            }, { passive: true });
+
+            // Keyboard shortcut: press 'R' to restart
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'r' && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
+                    e.preventDefault();
+                    resetLab();
+                }
+            });
+
+            console.log(
+                '%c🛡️ 钓鱼邮件识别实验室已就绪 %c| %cEDUCATIONAL PURPOSE ONLY',
+                'color:#fbbf24;font-size:1.1rem;',
+                '',
+                'color:#94a3b8;'
+            );
+            console.log('%c点击邮件和登录页面中的可疑元素来标记红旗。共14个红旗等待发现。', 'color:#e2e8f0;');
+            console.log('%c提示：悬停在链接上查看真实URL。按 Ctrl+R 重新开始。', 'color:#64748b;');
+        })();
+    </script>
+</body>
+</html>

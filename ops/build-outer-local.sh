@@ -9,7 +9,11 @@ kata_commit=acae4480ac84701d7354e679714cc9d084b37f44
 ctfd_commit=af5e88de115f332427894284e681ac10bb81670e
 profiles_commit=f9bc03ec19b2dc4c091449b08e88f85c0caa9f0b
 seccomp_sha256=536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74
-image=${DOJO_IMAGE:-pwncollege/dojo:local-$(git -C "$repo_dir" rev-parse --short=8 HEAD)}
+source_revision=release
+if [[ -e $repo_dir/.git ]]; then
+    source_revision=$(git -C "$repo_dir" rev-parse --short=8 HEAD)
+fi
+image=${DOJO_IMAGE:-pwncollege/dojo:local-$source_revision}
 
 ensure_repo() {
     local url=$1

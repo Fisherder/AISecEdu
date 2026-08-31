@@ -10,51 +10,133 @@
 
   function errorMessage(payload, fallback) {
     if (!payload) return fallback;
+    if (payload.error && typeof payload.error === "object") {
+      return payload.error.message || fallback;
+    }
     if (payload.error) return payload.error;
     if (payload.message) return payload.message;
     if (Array.isArray(payload.errors) && payload.errors.length) return payload.errors.join(" ");
     return fallback;
   }
 
+  function responseMessage(status) {
+    if (status === 401) return "登录状态已失效，请重新登录后继续。";
+    if (status === 403) return "当前账号无权完成此操作。";
+    if (status === 404) return "这项内容不存在或已经移动。";
+    if (status === 410) return "这项内容已经下线。";
+    if (status >= 500) return "服务暂时不可用，请稍后重试。";
+    return "请求没有完成，请检查网络后重试。";
+  }
+
+  async function readResponse(response, fallback) {
+    const raw = await response.text();
+    let payload = {};
+    if (raw) {
+      try {
+        payload = JSON.parse(raw);
+      } catch (error) {
+        if (response.status === 413) {
+          throw new Error(fallback || "提交内容超过系统限制。");
+        }
+        if (!response.ok) {
+          throw new Error(fallback || responseMessage(response.status));
+        }
+        throw new Error(fallback || "服务器返回了无法识别的响应，请稍后重试。");
+      }
+    }
+    if (!response.ok) {
+      const requestError = new Error(
+        errorMessage(payload, fallback || responseMessage(response.status)),
+      );
+      requestError.status = response.status;
+      requestError.payload = payload;
+      throw requestError;
+    }
+    return payload;
+  }
+
   async function request(path, options) {
+    if (window.AISecEdu && typeof window.AISecEdu.request === "function") {
+      return window.AISecEdu.request(path, {
+        ...(options || {}),
+        unwrap: false,
+      });
+    }
     const client = window.CTFd && typeof window.CTFd.fetch === "function"
       ? window.CTFd.fetch.bind(window.CTFd)
       : window.fetch && window.fetch.bind(window);
     if (!client) throw new Error("浏览器请求组件未就绪，请刷新页面后重试。");
+    const csrfNonce = window.init && window.init.csrfNonce;
     const response = await client(`/pwncollege_api/v1${path}`, {
       credentials: "same-origin",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        ...(csrfNonce ? {"CSRF-Token": csrfNonce} : {}),
       },
       ...(options || {}),
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok && typeof payload.success === "undefined") {
-      throw new Error(errorMessage(payload, `请求失败，状态码 ${response.status}`));
-    }
-    return payload;
+    return readResponse(response, responseMessage(response.status));
   }
 
-  function json(method, path, body) {
+  function json(method, path, body, options) {
     return request(path, {
+      ...(options || {}),
       method,
+      headers: {
+        ...((options && options.headers) || {}),
+        "Content-Type": "application/json",
+      },
       body: typeof body === "undefined" ? undefined : JSON.stringify(body),
     });
   }
 
-  function showNotice(element, message, kind) {
-    if (!element) return;
-    if (!message) {
-      element.hidden = true;
-      return;
+  async function multipart(path, formData, fallback) {
+    if (!window.fetch) {
+      throw new Error("浏览器上传组件未就绪，请刷新页面后重试。");
     }
+    const config = window.CTFd && window.CTFd.config ? window.CTFd.config : {};
+    const urlRoot = String(config.urlRoot || "").replace(/\/$/, "");
+    const headers = { Accept: "application/json" };
+    // CTFd validates JSON CSRF tokens from a header, but multipart tokens from
+    // a form field. Preserve that protection without setting Content-Type.
+    if (config.csrfNonce && formData && typeof formData.set === "function") {
+      formData.set("nonce", config.csrfNonce);
+    }
+
+    // CTFd.fetch always forces Content-Type to application/json. Native fetch
+    // must set the multipart boundary itself when the body is FormData.
+    const response = await window.fetch(`${urlRoot}/pwncollege_api/v1${path}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers,
+      body: formData,
+    });
+    return readResponse(
+      response,
+      response.status === 413
+        ? "文件超过 50 MB，请压缩或拆分后再上传。"
+        : (fallback || "文件上传失败，请稍后重试。"),
+    );
+  }
+
+  function showNotice(element, message, kind) {
+    if (element) {
+      element.hidden = true;
+      element.textContent = "";
+    }
+    if (!message) {
+      return null;
+    }
+    if (!element) return null;
     element.hidden = false;
     ["info", "success", "warning", "danger"].forEach(value => {
       element.classList.remove(`alert-${value}`);
     });
     element.classList.add("alert", `alert-${kind || "info"}`);
     element.textContent = message;
+    window.setTimeout(() => { element.hidden = true; }, kind === "danger" ? 6500 : 3800);
+    return element;
   }
 
   function formatDate(value) {
@@ -100,8 +182,10 @@
   window.DojoLearning = {
     escapeHtml,
     errorMessage,
+    readResponse,
     request,
     json,
+    multipart,
     showNotice,
     formatDate,
     courseCard,

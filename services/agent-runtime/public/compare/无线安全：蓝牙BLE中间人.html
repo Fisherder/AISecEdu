@@ -1,0 +1,1345 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLE 安全实验：蓝牙低功耗中间人攻击</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --card2: #1a2332;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --blue: #3b82f6;
+            --blue2: #1d4ed8;
+            --red: #ef4444;
+            --red2: #7f1d1d;
+            --green: #22c55e;
+            --amber: #f59e0b;
+            --gold: #fbbf24;
+            --purple: #a855f7;
+            --cyan: #06b6d4;
+            --font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', 'Monaco', monospace;
+            --font-sans: 'Segoe UI', 'Inter', system-ui, sans-serif;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        .topbar {
+            background: #0c1525;
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .topbar .title {
+            font-weight: 700;
+            font-size: 1.1rem;
+            letter-spacing: 0.5px;
+            color: #c8d6e5;
+            white-space: nowrap;
+        }
+        .topbar .title .icon {
+            color: var(--cyan);
+            margin-right: 6px;
+        }
+        .step-indicator {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .step-dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--card);
+            border: 2px solid var(--border);
+            font-size: 0.7rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            color: var(--text2);
+            position: relative;
+        }
+        .step-dot.active {
+            border-color: var(--blue);
+            background: #1e3a5f;
+            color: var(--blue);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+            animation: pulse-dot 2s infinite;
+        }
+        .step-dot.done {
+            border-color: var(--green);
+            background: #14532d;
+            color: var(--green);
+        }
+        @keyframes pulse-dot {
+            0%,
+            100% {
+                box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 20px rgba(59, 130, 246, 0.7);
+            }
+        }
+        .step-connector {
+            width: 18px;
+            height: 2px;
+            background: var(--border);
+            border-radius: 1px;
+        }
+        .step-connector.done {
+            background: var(--green);
+        }
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.1fr;
+            gap: 16px;
+            padding: 16px 20px;
+            max-width: 1500px;
+            margin: 0 auto;
+            min-height: calc(100vh - 140px);
+        }
+        @media (max-width: 1100px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .panel {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .panel-header {
+            background: #161f30;
+            padding: 10px 14px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            letter-spacing: 0.4px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-transform: uppercase;
+            color: #b0bec5;
+        }
+        .panel-header .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .dot-red {
+            background: var(--red);
+        }
+        .dot-green {
+            background: var(--green);
+        }
+        .dot-amber {
+            background: var(--amber);
+        }
+        .packet-table-wrap {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 520px;
+        }
+        .packet-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+        }
+        .packet-table th {
+            background: #111827;
+            padding: 8px 8px;
+            text-align: left;
+            font-weight: 600;
+            color: #9ca3af;
+            border-bottom: 2px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            font-size: 0.7rem;
+            letter-spacing: 0.5px;
+        }
+        .packet-table td {
+            padding: 7px 8px;
+            border-bottom: 1px solid #1e2d3d;
+            cursor: pointer;
+            transition: background 0.15s;
+            white-space: nowrap;
+        }
+        .packet-table tr {
+            transition: all 0.2s;
+        }
+        .packet-table tr:hover {
+            background: #243447;
+        }
+        .packet-table tr.selected {
+            background: #1e3a5f !important;
+            outline: 1px solid var(--blue);
+            outline-offset: -1px;
+        }
+        .packet-table tr.suspicious {
+            background: #3b1a1a !important;
+            border-left: 3px solid var(--red);
+        }
+        .packet-table tr.suspicious.selected {
+            background: #4a1a2a !important;
+            outline: 1px solid var(--red);
+        }
+        .packet-table tr.attacker-row {
+            color: #fca5a5;
+        }
+        .packet-table .tag-btn {
+            background: none;
+            border: 1px solid var(--red);
+            color: var(--red);
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .packet-table .tag-btn.tagged {
+            background: var(--red);
+            color: #fff;
+        }
+        .packet-table .tag-btn:hover {
+            background: var(--red2);
+            color: #fff;
+        }
+        .packet-table .proto-tag {
+            display: inline-block;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+        }
+        .proto-adv {
+            background: #1e3a2f;
+            color: #4ade80;
+        }
+        .proto-smp {
+            background: #3b2f1e;
+            color: #fbbf24;
+        }
+        .proto-att {
+            background: #1e2d4a;
+            color: #60a5fa;
+        }
+        .proto-ll {
+            background: #2d1e3a;
+            color: #c084fc;
+        }
+        .right-panels {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            flex: 1;
+            min-height: 0;
+        }
+        .detail-panel {
+            flex: 1;
+            min-height: 250px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .detail-tabs {
+            display: flex;
+            background: #161f30;
+            border-bottom: 1px solid var(--border);
+        }
+        .detail-tab {
+            padding: 9px 16px;
+            cursor: pointer;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #8b9cb5;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            letter-spacing: 0.3px;
+        }
+        .detail-tab.active {
+            color: var(--cyan);
+            border-bottom-color: var(--cyan);
+        }
+        .detail-tab:hover {
+            color: #c8d6e5;
+        }
+        .detail-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            line-height: 1.6;
+        }
+        .field-row {
+            display: flex;
+            padding: 3px 0;
+            border-bottom: 1px dotted #1e3040;
+        }
+        .field-name {
+            color: #60a5fa;
+            min-width: 140px;
+            font-weight: 600;
+        }
+        .field-value {
+            color: #c8d6e5;
+            word-break: break-all;
+        }
+        .field-value.highlight {
+            color: var(--amber);
+            font-weight: 700;
+        }
+        .hex-dump {
+            display: flex;
+            gap: 20px;
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            line-height: 1.55;
+        }
+        .hex-offset {
+            color: #6b7280;
+            min-width: 50px;
+            text-align: right;
+        }
+        .hex-bytes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            max-width: 340px;
+        }
+        .hex-byte {
+            color: #b0bec5;
+            cursor: default;
+            padding: 0 1px;
+            border-radius: 2px;
+        }
+        .hex-byte.hl {
+            background: #5a3e0a;
+            color: var(--amber);
+            font-weight: 700;
+        }
+        .hex-ascii {
+            color: #6ee7b7;
+            letter-spacing: 1px;
+        }
+        .workspace {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .workspace h3 {
+            font-size: 0.9rem;
+            color: #c8d6e5;
+            letter-spacing: 0.4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: #1e3040;
+            color: #c8d6e5;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }
+        .btn:hover {
+            background: #2a4055;
+            border-color: #556980;
+        }
+        .btn-primary {
+            background: var(--blue2);
+            border-color: var(--blue);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+        }
+        .btn-danger {
+            background: #7f1d1d;
+            border-color: var(--red);
+            color: #fca5a5;
+        }
+        .btn-danger:hover {
+            background: #991b1b;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+        }
+        .btn-success {
+            background: #14532d;
+            border-color: var(--green);
+            color: #86efac;
+        }
+        .btn-success:hover {
+            background: #166534;
+            box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
+        }
+        textarea,
+        input[type="text"] {
+            background: #0f172a;
+            border: 1px solid var(--border);
+            color: #c8d6e5;
+            padding: 10px;
+            border-radius: 6px;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            width: 100%;
+            resize: vertical;
+            transition: border-color 0.2s;
+        }
+        textarea:focus,
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--blue);
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.2);
+        }
+        .topology-svg {
+            width: 100%;
+            max-width: 400px;
+            height: auto;
+            margin: 0 auto;
+            display: block;
+        }
+        .flag-box {
+            background: #1a1a0a;
+            border: 2px solid var(--gold);
+            border-radius: 8px;
+            padding: 14px;
+            text-align: center;
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            color: var(--gold);
+            letter-spacing: 1px;
+            animation: glow-flag 1.5s infinite alternate;
+        }
+        @keyframes glow-flag {
+            0% {
+                box-shadow: 0 0 8px rgba(251, 191, 36, 0.3);
+            }
+            100% {
+                box-shadow: 0 0 24px rgba(251, 191, 36, 0.7);
+            }
+        }
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            z-index: 999;
+            animation: slide-in 0.4s ease-out;
+            pointer-events: none;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        }
+        .toast.success {
+            background: #14532d;
+            border: 1px solid var(--green);
+            color: #86efac;
+        }
+        .toast.error {
+            background: #7f1d1d;
+            border: 1px solid var(--red);
+            color: #fca5a5;
+        }
+        .toast.info {
+            background: #1e3a5f;
+            border: 1px solid var(--blue);
+            color: #93c5fd;
+        }
+        @keyframes slide-in {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+        }
+        .badge-danger {
+            background: #7f1d1d;
+            color: #fca5a5;
+        }
+        .badge-safe {
+            background: #14532d;
+            color: #86efac;
+        }
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .comparison-card {
+            background: #0f172a;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 0.78rem;
+        }
+        .comparison-card.insecure {
+            border-left: 3px solid var(--red);
+        }
+        .comparison-card.secure {
+            border-left: 3px solid var(--green);
+        }
+        .comparison-card h4 {
+            margin-bottom: 6px;
+            font-size: 0.82rem;
+        }
+        .lock-animation {
+            font-size: 3rem;
+            text-align: center;
+            transition: all 0.5s;
+        }
+        .lock-animation.unlocked {
+            color: var(--green);
+            animation: unlock-bounce 0.6s ease-out;
+        }
+        @keyframes unlock-bounce {
+            0%,
+            100% {
+                transform: scale(1);
+            }
+            30% {
+                transform: scale(1.3);
+            }
+            60% {
+                transform: scale(0.9);
+            }
+        }
+        .timeline {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            align-items: center;
+            padding: 8px 0;
+        }
+        .timeline-node {
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-family: var(--font-mono);
+            cursor: pointer;
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+            background: #1a2332;
+        }
+        .timeline-node.active-step {
+            border-color: var(--cyan);
+            background: #0d3338;
+            color: var(--cyan);
+        }
+        .timeline-arrow {
+            color: #556980;
+            font-size: 0.7rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <div class="topbar">
+        <span class="title"><span class="icon">🔐</span>BLE 安全实验：蓝牙低功耗中间人攻击</span>
+        <div class="step-indicator" id="stepIndicator">
+            <span class="step-dot active" data-step="1" title="设备发现">1</span><span class="step-connector"></span>
+            <span class="step-dot" data-step="2" title="Just Works配对">2</span><span class="step-connector"></span>
+            <span class="step-dot" data-step="3" title="MITM检测">3</span><span class="step-connector"></span>
+            <span class="step-dot" data-step="4" title="重放攻击">4</span><span class="step-connector"></span>
+            <span class="step-dot" data-step="5" title="Passkey对比">5</span><span class="step-connector"></span>
+            <span class="step-dot" data-step="6" title="分析与Flag">6</span>
+        </div>
+        <span style="font-size:0.75rem;color:#8899aa;" id="progressLabel">步骤 1/6 — 设备发现</span>
+    </div>
+
+    <div class="main-grid">
+        <!-- LEFT: Packet List -->
+        <div class="panel">
+            <div class="panel-header"><span class="dot dot-green"></span>BLE 数据包捕获 (Wireshark 式视图)</div>
+            <div class="packet-table-wrap">
+                <table class="packet-table" id="packetTable">
+                    <thead>
+                        <tr><th>No.</th><th>时间</th><th>源地址</th><th>目标地址</th><th>协议</th><th>长度</th><th>信息</th><th>标记</th></tr>
+                    </thead>
+                    <tbody id="packetTbody"></tbody>
+                </table>
+            </div>
+            <div style="padding:8px 12px;background:#111827;border-top:1px solid var(--border);font-size:0.7rem;color:#8899aa;">
+                💡 点击行查看数据包详情 | 点击"标记"按钮标注可疑包 | 共 <span id="totalPackets">0</span> 个数据包
+            </div>
+        </div>
+
+        <!-- RIGHT: Detail + Workspace -->
+        <div class="right-panels">
+            <!-- Packet Detail Panel -->
+            <div class="detail-panel">
+                <div class="detail-tabs">
+                    <span class="detail-tab active" data-tab="parsed">📋 字段解析</span>
+                    <span class="detail-tab" data-tab="hex">🔢 Hex Dump</span>
+                    <span class="detail-tab" data-tab="topology">🌐 拓扑视图</span>
+                </div>
+                <div class="detail-content" id="detailContent">
+                    <div style="color:#8899aa;text-align:center;padding-top:40px;">👆 点击左侧数据包查看详情</div>
+                </div>
+            </div>
+
+            <!-- Workspace -->
+            <div class="workspace" id="workspace">
+                <h3>🛠️ 当前任务</h3>
+                <div id="workspaceContent">
+                    <p style="color:#94a3b8;">浏览左侧捕获的 BLE 数据包，点击广告包（ADV_IND）了解智能锁设备信息。</p>
+                    <p style="color:#6b7280;font-size:0.75rem;">提示：寻找设备名称为 "SmartLock" 的广播包。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toastContainer"></div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // 本实验仅用于授权教学环境，演示BLE安全概念
+
+        (function() {
+            // ============ PACKET DATA ============
+            const packets = [
+                { id: 1, time: '0.000', src: 'AA:BB:CC:DD:EE:01', dst: '广播', proto: 'ADV_IND', len: 37,
+                    info: '广告包: SmartLock, Flags, UUID 0xFFE0',
+                    category: 'advertisement',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: '帧类型', value: 'ADV_IND (可连接非定向广告)' },
+                        { name: 'AdvA (广告地址)', value: 'AA:BB:CC:DD:EE:01' },
+                        { name: 'AdvData - Flags', value: '0x06 (LE General Discoverable, BR/EDR Not Supported)' },
+                        { name: 'AdvData - Complete Local Name', value: '"SmartLock"' },
+                        { name: 'AdvData - 128-bit UUID', value: '0xFFE0 (自定义主服务)' },
+                    ],
+                    hex: '02 01 06 0A 09 53 6D 61 72 74 4C 6F 63 6B 07 11 E0 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 2, time: '0.125', src: 'AA:BB:CC:DD:EE:01', dst: '广播', proto: 'ADV_IND', len: 37,
+                    info: '广告包(重传): SmartLock',
+                    category: 'advertisement',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: '帧类型', value: 'ADV_IND (重传)' }, { name: 'AdvA', value: 'AA:BB:CC:DD:EE:01' },
+                        { name: 'AdvData - Name', value: '"SmartLock"' },
+                    ],
+                    hex: '02 01 06 0A 09 53 6D 61 72 74 4C 6F 63 6B 07 11 E0 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 3, time: '0.380', src: 'BB:CC:DD:EE:FF:02', dst: '广播', proto: 'ADV_IND', len: 28,
+                    info: '广告包: PhoneApp, 手机端',
+                    category: 'advertisement',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: '帧类型', value: 'ADV_IND' }, { name: 'AdvA', value: 'BB:CC:DD:EE:FF:02' },
+                        { name: 'AdvData - Name', value: '"PhoneApp"' },
+                    ],
+                    hex: '02 01 06 08 08 50 68 6F 6E 65 41 70 70 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 4, time: '0.520', src: 'BB:CC:DD:EE:FF:02', dst: 'AA:BB:CC:DD:EE:01', proto: 'LL_CONN', len: 34,
+                    info: '连接请求: PhoneApp → SmartLock',
+                    category: 'connection',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'LLID', value: '0x03 (连接请求)' }, { name: 'InitA', value: 'BB:CC:DD:EE:FF:02' },
+                        { name: 'AdvA', value: 'AA:BB:CC:DD:EE:01' }, { name: '连接间隔', value: '30ms' },
+                    ],
+                    hex: '03 AA BB CC DD EE 01 BB CC DD EE FF 02 1E 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 5, time: '0.680', src: 'BB:CC:DD:EE:FF:02', dst: 'AA:BB:CC:DD:EE:01', proto: 'SMP', len: 15,
+                    info: '配对请求: Just Works, No MITM, No Bonding',
+                    category: 'pairing',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x01 (配对请求)' }, { name: 'IO Capability', value: '0x03 (NoInputNoOutput)' },
+                        { name: 'AuthReq', value: '0x00 (No Bonding, No MITM!)', highlight: true },
+                        { name: 'Max Key Size', value: '16 bytes' }, { name: 'OOB Data Flag', value: '0x00 (未使用)' },
+                    ],
+                    hex: '01 03 00 10 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 6, time: '0.695', src: 'AA:BB:CC:DD:EE:01', dst: 'BB:CC:DD:EE:FF:02', proto: 'SMP', len: 15,
+                    info: '配对响应: Just Works, No MITM',
+                    category: 'pairing',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x02 (配对响应)' }, { name: 'IO Capability', value: '0x03 (NoInputNoOutput)' },
+                        { name: 'AuthReq', value: '0x00 (No Bonding, No MITM!)', highlight: true },
+                    ],
+                    hex: '02 03 00 10 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 7, time: '0.780', src: 'BB:CC:DD:EE:FF:02', dst: 'AA:BB:CC:DD:EE:01', proto: 'SMP', len: 22,
+                    info: 'LTK 分发 (加密密钥传输)',
+                    category: 'encryption',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x06 (加密信息)' }, { name: 'LTK',
+                            value: '0xB47F2A91E3550CD8661F4E7B9A2D83F0', highlight: true }, { name: 'EDIV',
+                        value: '0x1234' }, { name: 'Rand', value: '0xAABBCCDDEEFF0011' },
+                    ],
+                    hex: '06 B4 7F 2A 91 E3 55 0C D8 66 1F 4E 7B 9A 2D 83 F0 34 12 11 00 FF EE' },
+                { id: 8, time: '0.810', src: 'AA:BB:CC:DD:EE:01', dst: 'BB:CC:DD:EE:FF:02', proto: 'SMP', len: 22,
+                    info: 'LTK 分发确认',
+                    category: 'encryption',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x06 (加密信息确认)' }, { name: 'LTK',
+                            value: '0xB47F2A91E3550CD8661F4E7B9A2D83F0 (相同)', highlight: true },
+                    ],
+                    hex: '06 B4 7F 2A 91 E3 55 0C D8 66 1F 4E 7B 9A 2D 83 F0 34 12 11 00 FF EE' },
+                { id: 9, time: '0.920', src: 'BB:CC:DD:EE:FF:02', dst: 'AA:BB:CC:DD:EE:01', proto: 'ATT', len: 18,
+                    info: 'GATT 读取: 服务UUID 0xFFE0, 锁状态特征',
+                    category: 'gatt',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'ATT Opcode', value: '0x0A (Read Request)' }, { name: 'Handle', value: '0x0025' },
+                        { name: 'UUID', value: '0x2A56 (锁状态)' },
+                    ],
+                    hex: '0A 25 00 56 2A 00 00 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 10, time: '0.940', src: 'AA:BB:CC:DD:EE:01', dst: 'BB:CC:DD:EE:FF:02', proto: 'ATT', len: 12,
+                    info: 'GATT 响应: 锁状态=已锁定(0x00)',
+                    category: 'gatt',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'ATT Opcode', value: '0x0B (Read Response)' }, { name: 'Value', value: '0x00 (已锁定)' },
+                    ],
+                    hex: '0B 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 11, time: '1.050', src: 'BB:CC:DD:EE:FF:02', dst: 'AA:BB:CC:DD:EE:01', proto: 'ATT', len: 14,
+                    info: 'GATT 写入: 解锁命令 (0x01) → 合法操作',
+                    category: 'gatt',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'ATT Opcode', value: '0x12 (Write Request)' }, { name: 'Handle', value: '0x0026' },
+                        { name: 'Value', value: '0x01 (解锁)', highlight: true },
+                    ],
+                    hex: '12 26 00 01 00 00 00 00 00 00 00 00 00 00' },
+                { id: 12, time: '1.070', src: 'AA:BB:CC:DD:EE:01', dst: 'BB:CC:DD:EE:FF:02', proto: 'ATT', len: 8,
+                    info: 'GATT 写入确认: 解锁成功 ✅',
+                    category: 'gatt',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'ATT Opcode', value: '0x13 (Write Response)' }, { name: 'Status', value: '0x00 (成功)' },
+                    ],
+                    hex: '13 00 00 00 00 00 00 00' },
+                // ---- ATTACKER PACKETS (MITM) ----
+                { id: 13, time: '3.200', src: 'CC:DD:EE:FF:AA:99', dst: '广播', proto: 'ADV_IND', len: 38,
+                    info: '⚠️ 广告包: SmartLock_Fake, 攻击者伪装设备',
+                    category: 'advertisement',
+                    isAttacker: true, isSuspiciousGroundTruth: true,
+                    layers: [
+                        { name: '帧类型', value: 'ADV_IND' }, { name: 'AdvA',
+                            value: 'CC:DD:EE:FF:AA:99 ⚠️ 不同MAC!', highlight: true },
+                        { name: 'AdvData - Name', value: '"SmartLock_Fake" (伪装名称)' },
+                    ],
+                    hex: '02 01 06 0D 0C 53 6D 61 72 74 4C 6F 63 6B 5F 46 61 6B 65 07 11 E0 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 14, time: '3.350', src: 'BB:CC:DD:EE:FF:02', dst: 'CC:DD:EE:FF:AA:99', proto: 'LL_CONN', len: 34,
+                    info: '⚠️ 连接请求: PhoneApp → 攻击者(伪装锁)',
+                    category: 'connection',
+                    isAttacker: true, isSuspiciousGroundTruth: true,
+                    layers: [
+                        { name: 'LLID', value: '0x03 (连接请求)' }, { name: 'InitA', value: 'BB:CC:DD:EE:FF:02' },
+                        { name: 'AdvA', value: 'CC:DD:EE:FF:AA:99 ⚠️', highlight: true },
+                    ],
+                    hex: '03 BB CC DD EE FF 02 CC DD EE FF AA 99 1E 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 15, time: '3.420', src: 'CC:DD:EE:FF:AA:99', dst: 'AA:BB:CC:DD:EE:01', proto: 'LL_CONN', len: 34,
+                    info: '⚠️ 攻击者 ↔ 真实锁建立连接(中继)',
+                    category: 'connection',
+                    isAttacker: true, isSuspiciousGroundTruth: true,
+                    layers: [
+                        { name: 'LLID', value: '0x03' }, { name: 'InitA', value: 'CC:DD:EE:FF:AA:99 (攻击者)' },
+                        { name: 'AdvA', value: 'AA:BB:CC:DD:EE:01 (真实锁)' },
+                    ],
+                    hex: '03 CC DD EE FF AA 99 AA BB CC DD EE 01 1E 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 16, time: '3.500', src: 'BB:CC:DD:EE:FF:02', dst: 'CC:DD:EE:FF:AA:99', proto: 'SMP', len: 15,
+                    info: '⚠️ 配对请求(经攻击者中继): Just Works, No MITM',
+                    category: 'pairing',
+                    isAttacker: true, isSuspiciousGroundTruth: true,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x01 (配对请求-中继)' }, { name: 'AuthReq',
+                            value: '0x00 (No MITM — 攻击者利用!)', highlight: true },
+                    ],
+                    hex: '01 03 00 10 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 17, time: '3.520', src: 'CC:DD:EE:FF:AA:99', dst: 'BB:CC:DD:EE:FF:02', proto: 'SMP', len: 15,
+                    info: '⚠️ 配对响应(攻击者伪造): Just Works',
+                    category: 'pairing',
+                    isAttacker: true, isSuspiciousGroundTruth: true,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x02 (配对响应-伪造)' }, { name: 'AuthReq',
+                            value: '0x00 (攻击者控制)', highlight: true },
+                    ],
+                    hex: '02 03 00 10 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 18, time: '3.600', src: 'CC:DD:EE:FF:AA:99', dst: 'AA:BB:CC:DD:EE:01', proto: 'SMP', len: 22,
+                    info: '⚠️ 攻击者与真实锁完成配对，获取LTK',
+                    category: 'encryption',
+                    isAttacker: true, isSuspiciousGroundTruth: true,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x06' }, { name: 'LTK (攻击者捕获)',
+                            value: '0xB47F2A91E3550CD8661F4E7B9A2D83F0', highlight: true },
+                        { name: '备注', value: '与数据包#7相同的LTK!', highlight: true },
+                    ],
+                    hex: '06 B4 7F 2A 91 E3 55 0C D8 66 1F 4E 7B 9A 2D 83 F0 34 12 11 00 FF EE' },
+                { id: 19, time: '3.700', src: 'CC:DD:EE:FF:AA:99', dst: 'AA:BB:CC:DD:EE:01', proto: 'ATT', len: 14,
+                    info: '⚠️ 重放攻击! 攻击者发送解锁命令(使用捕获的LTK加密)',
+                    category: 'gatt',
+                    isAttacker: true, isSuspiciousGroundTruth: true,
+                    layers: [
+                        { name: 'ATT Opcode', value: '0x12 (Write Request - 重放)' }, { name: 'Handle', value: '0x0026' },
+                        { name: 'Value', value: '0x01 (解锁 — 恶意!)', highlight: true },
+                        { name: '加密状态', value: '使用捕获LTK加密 ✅' },
+                    ],
+                    hex: '12 26 00 01 00 00 00 00 00 00 00 00 00 00' },
+                { id: 20, time: '3.720', src: 'AA:BB:CC:DD:EE:01', dst: 'CC:DD:EE:FF:AA:99', proto: 'ATT', len: 8,
+                    info: '⚠️ 锁响应攻击者: 解锁成功(锁被攻破!) 🔓',
+                    category: 'gatt',
+                    isAttacker: true, isSuspiciousGroundTruth: true,
+                    layers: [
+                        { name: 'ATT Opcode', value: '0x13 (Write Response)' }, { name: 'Status', value: '0x00 (成功 — 安全漏洞!)',
+                            highlight: true },
+                    ],
+                    hex: '13 00 00 00 00 00 00 00' },
+                // ---- SECURE PASKEY PACKETS ----
+                { id: 21, time: '5.000', src: 'BB:CC:DD:EE:FF:02', dst: 'AA:BB:CC:DD:EE:01', proto: 'SMP', len: 15,
+                    info: '安全配对请求: Passkey Entry, MITM Protection',
+                    category: 'pairing',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x01 (配对请求)' }, { name: 'IO Capability',
+                            value: '0x04 (KeyboardDisplay)' }, { name: 'AuthReq', value: '0x0D (Bonding + MITM保护!)',
+                            highlight: true },
+                    ],
+                    hex: '01 04 0D 10 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 22, time: '5.015', src: 'AA:BB:CC:DD:EE:01', dst: 'BB:CC:DD:EE:FF:02', proto: 'SMP', len: 15,
+                    info: '安全配对响应: Passkey, MITM Protection',
+                    category: 'pairing',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x02 (配对响应)' }, { name: 'AuthReq',
+                            value: '0x0D (MITM保护启用 ✅)', highlight: true },
+                    ],
+                    hex: '02 04 0D 10 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 23, time: '5.100', src: 'AA:BB:CC:DD:EE:01', dst: 'BB:CC:DD:EE:FF:02', proto: 'SMP', len: 20,
+                    info: 'Passkey确认: 数值比较(Numeric Comparison)',
+                    category: 'encryption',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x0B (数值比较确认)' }, { name: '显示密钥',
+                            value: '"472819" (6位随机数)' }, { name: 'MITM防护', value: '用户需在两端确认数字匹配 ✅' },
+                    ],
+                    hex: '0B 00 07 37 19 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' },
+                { id: 24, time: '5.200', src: 'BB:CC:DD:EE:FF:02', dst: 'AA:BB:CC:DD:EE:01', proto: 'SMP', len: 20,
+                    info: 'Passkey匹配确认: 安全通道建立 🛡️',
+                    category: 'encryption',
+                    isAttacker: false, isSuspiciousGroundTruth: false,
+                    layers: [
+                        { name: 'SMP Opcode', value: '0x0C (确认)' }, { name: '结果', value: 'Passkey匹配 ✅' },
+                        { name: 'ECDH密钥交换', value: '完成 (P-256曲线)' },
+                    ],
+                    hex: '0C 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00' },
+            ];
+
+            // ============ STATE ============
+            let state = {
+                currentStep: 1,
+                selectedPacketId: null,
+                taggedPackets: new Set(),
+                replayCompleted: false,
+                analysisSubmitted: false,
+                flagRevealed: false,
+                activeDetailTab: 'parsed',
+                stepsCompleted: new Set([1]),
+            };
+
+            // ============ DOM REFS ============
+            const packetTbody = document.getElementById('packetTbody');
+            const detailContent = document.getElementById('detailContent');
+            const workspaceContent = document.getElementById('workspaceContent');
+            const progressLabel = document.getElementById('progressLabel');
+            const toastContainer = document.getElementById('toastContainer');
+            const totalPacketsSpan = document.getElementById('totalPackets');
+            const stepIndicator = document.getElementById('stepIndicator');
+
+            // ============ RENDER PACKET TABLE ============
+            function renderPacketTable() {
+                packetTbody.innerHTML = '';
+                packets.forEach(p => {
+                    const tr = document.createElement('tr');
+                    if (p.isAttacker) tr.classList.add('attacker-row');
+                    if (state.taggedPackets.has(p.id)) tr.classList.add('suspicious');
+                    if (state.selectedPacketId === p.id) tr.classList.add('selected');
+                    let protoClass = 'proto-adv';
+                    if (p.proto === 'SMP') protoClass = 'proto-smp';
+                    else if (p.proto === 'ATT') protoClass = 'proto-att';
+                    else if (p.proto === 'LL_CONN') protoClass = 'proto-ll';
+                    const tagLabel = state.taggedPackets.has(p.id) ? '已标记' : '标记';
+                    const tagClass = state.taggedPackets.has(p.id) ? 'tag-btn tagged' : 'tag-btn';
+                    tr.innerHTML = `
+                <td>${p.id}</td>
+                <td>${p.time}</td>
+                <td style="color:${p.isAttacker?'#fca5a5':'#b0bec5'};">${p.src}</td>
+                <td style="color:${p.isAttacker?'#fca5a5':'#b0bec5'};">${p.dst}</td>
+                <td><span class="proto-tag ${protoClass}">${p.proto}</span></td>
+                <td>${p.len}</td>
+                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${p.info}</td>
+                <td><button class="${tagClass}" data-pid="${p.id}" onclick="event.stopPropagation();window._tagPacket(${p.id})">${tagLabel}</button></td>
+              `;
+                    tr.addEventListener('click', () => selectPacket(p.id));
+                    packetTbody.appendChild(tr);
+                });
+                totalPacketsSpan.textContent = packets.length;
+            }
+
+            window._tagPacket = function(pId) {
+                if (state.taggedPackets.has(pId)) {
+                    state.taggedPackets.delete(pId);
+                } else {
+                    state.taggedPackets.add(pId);
+                }
+                renderPacketTable();
+                if (state.selectedPacketId === pId) updateDetailPanel();
+                if (state.currentStep === 3) updateWorkspace();
+            };
+
+            function selectPacket(pId) {
+                state.selectedPacketId = pId;
+                renderPacketTable();
+                updateDetailPanel();
+            }
+
+            // ============ DETAIL PANEL ============
+            function updateDetailPanel() {
+                const p = packets.find(pk => pk.id === state.selectedPacketId);
+                if (!p) {
+                    detailContent.innerHTML =
+                        '<div style="color:#8899aa;text-align:center;padding-top:40px;">👆 点击左侧数据包查看详情</div>';
+                    return;
+                }
+                if (state.activeDetailTab === 'parsed') {
+                    let html = '<div style="font-weight:700;color:#c8d6e5;margin-bottom:8px;">📦 数据包 #' + p.id +
+                        ' — ' + p.proto + '</div>';
+                    html +=
+                        '<div style="color:#8899aa;font-size:0.7rem;margin-bottom:8px;">源: ' + p.src + ' → 目标: ' + p
+                        .dst + ' | 长度: ' + p.len + ' bytes</div>';
+                    p.layers.forEach(l => {
+                        const hl = l.highlight ? ' highlight' : '';
+                        html +=
+                            `<div class="field-row"><span class="field-name">${l.name}</span><span class="field-value${hl}">${l.value}</span></div>`;
+                    });
+                    if (p.isAttacker) {
+                        html +=
+                            '<div style="margin-top:10px;padding:8px;background:#3b1a1a;border-radius:4px;color:#fca5a5;font-size:0.75rem;">⚠️ 此数据包涉及攻击者设备 (CC:DD:EE:FF:AA:99)</div>';
+                    }
+                    detailContent.innerHTML = html;
+                } else if (state.activeDetailTab === 'hex') {
+                    let html =
+                        '<div style="font-weight:700;color:#c8d6e5;margin-bottom:8px;">🔢 Hex Dump — 数据包 #' + p.id +
+                        '</div>';
+                    html += '<div class="hex-dump"><span class="hex-offset">0000</span><div class="hex-bytes">';
+                    const hexStr = p.hex.replace(/\s+/g, '');
+                    const bytes = [];
+                    for (let i = 0; i < hexStr.length; i += 2) bytes.push(hexStr.substring(i, i + 2));
+                    bytes.forEach((b, i) => {
+                        const hl = (i < 8) ? ' hl' : '';
+                        html += `<span class="hex-byte${hl}">${b}</span>`;
+                    });
+                    html += '</div></div>';
+                    html +=
+                        '<div style="margin-top:8px;color:#6ee7b7;font-family:monospace;font-size:0.7rem;">ASCII: <span style="color:#b0bec5;">';
+                    bytes.forEach(b => {
+                        const val = parseInt(b, 16);
+                        html += (val >= 32 && val < 127) ? String.fromCharCode(val) : '.';
+                    });
+                    html += '</span></div>';
+                    html +=
+                        '<div style="margin-top:6px;color:#6b7280;font-size:0.65rem;">🟡 高亮字节为关键字段 (LTK/命令值)</div>';
+                    detailContent.innerHTML = html;
+                } else if (state.activeDetailTab === 'topology') {
+                    detailContent.innerHTML = renderTopologySVG(p);
+                }
+            }
+
+            function renderTopologySVG(p) {
+                const isAttackPhase = p.id >= 13 && p.id <= 20;
+                const isSecurePhase = p.id >= 21;
+                let phoneColor = '#60a5fa';
+                let lockColor = '#4ade80';
+                let attackerColor = '#ef4444';
+                let linePhoneLock = '#334155';
+                let linePhoneAttacker = '#334155';
+                let lineAttackerLock = '#334155';
+                if (isAttackPhase) {
+                    linePhoneAttacker = '#ef4444';
+                    lineAttackerLock = '#ef4444';
+                    linePhoneLock = '#1a1a2e';
+                    attackerColor = '#ff6b6b';
+                } else if (isSecurePhase) {
+                    linePhoneLock = '#22c55e';
+                    phoneColor = '#93c5fd';
+                    lockColor = '#86efac';
+                    attackerColor = '#4a3040';
+                } else if (p.id <= 12 && p.id >= 4) {
+                    linePhoneLock = '#3b82f6';
+                }
+                return `
+            <svg viewBox="0 0 380 200" class="topology-svg" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <filter id="glow"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              </defs>
+              <!-- Phone -->
+              <circle cx="60" cy="100" r="28" fill="${phoneColor}" opacity="0.8" filter="url(#glow)"/>
+              <text x="60" y="96" text-anchor="middle" font-size="20">📱</text>
+              <text x="60" y="145" text-anchor="middle" fill="#b0bec5" font-size="11">PhoneApp</text>
+              <text x="60" y="160" text-anchor="middle" fill="#6b7280" font-size="9">BB:CC:..:02</text>
+              <!-- Lock -->
+              <circle cx="310" cy="100" r="28" fill="${lockColor}" opacity="0.8" filter="url(#glow)"/>
+              <text x="310" y="96" text-anchor="middle" font-size="20">🔒</text>
+              <text x="310" y="145" text-anchor="middle" fill="#b0bec5" font-size="11">SmartLock</text>
+              <text x="310" y="160" text-anchor="middle" fill="#6b7280" font-size="9">AA:BB:..:01</text>
+              <!-- Attacker -->
+              <circle cx="185" cy="40" r="22" fill="${attackerColor}" opacity="${isAttackPhase?0.9:0.4}" filter="url(#glow)"/>
+              <text x="185" y="36" text-anchor="middle" font-size="16">👤</text>
+              <text x="185" y="75" text-anchor="middle" fill="#fca5a5" font-size="10">攻击者</text>
+              <text x="185" y="88" text-anchor="middle" fill="#6b7280" font-size="8">CC:DD:..:99</text>
+              <!-- Lines -->
+              <line x1="85" y1="92" x2="285" y2="92" stroke="${linePhoneLock}" stroke-width="${isSecurePhase?3:1.5}" stroke-dasharray="${isAttackPhase?'6,3':'none'}" opacity="${isAttackPhase?0.3:0.8}"/>
+              <line x1="78" y1="82" x2="168" y2="52" stroke="${linePhoneAttacker}" stroke-width="1.5" stroke-dasharray="4,3" opacity="${isAttackPhase?0.9:0.15}"/>
+              <line x1="202" y1="52" x2="288" y2="82" stroke="${lineAttackerLock}" stroke-width="1.5" stroke-dasharray="4,3" opacity="${isAttackPhase?0.9:0.15}"/>
+              ${isAttackPhase?'<text x="185" y="20" text-anchor="middle" fill="#ef4444" font-size="10" font-weight="700">⚠ MITM 攻击进行中</text>':''}
+              ${isSecurePhase?'<text x="185" y="180" text-anchor="middle" fill="#22c55e" font-size="10" font-weight="700">🛡️ Passkey 安全连接</text>':''}
+            </svg>`;
+            }
+
+            // ============ WORKSPACE ============
+            function updateWorkspace() {
+                const step = state.currentStep;
+                let html = '';
+                if (step === 1) {
+                    html = `
+                <p style="color:#94a3b8;">📡 <strong>任务：设备发现</strong> — 浏览数据包#1-#3，找到智能锁的广告包。</p>
+                <p style="color:#6b7280;font-size:0.75rem;">点击包含 "SmartLock" 名称的广告包，查看其 AdvA 地址和 GATT 服务 UUID。</p>
+                <div style="background:#0f172a;border-radius:6px;padding:10px;margin-top:6px;">
+                  <span style="color:#8899aa;font-size:0.75rem;">🔍 找到智能锁MAC地址后，请在下框中输入：</span>
+                  <input type="text" id="lockMacInput" placeholder="输入智能锁MAC地址 (如 AA:BB:CC:DD:EE:01)" style="margin-top:6px;">
+                  <button class="btn btn-primary" onclick="checkLockMac()" style="margin-top:6px;">确认设备</button>
+                  <span id="lockMacFeedback" style="margin-left:8px;font-size:0.75rem;"></span>
+                </div>`;
+                } else if (step === 2) {
+                    html = `
+                <p style="color:#94a3b8;">🔐 <strong>任务：观察Just Works配对</strong> — 数据包#4-#8 展示了完整的配对流程。</p>
+                <p style="color:#6b7280;font-size:0.75rem;">重点查看数据包#5和#6的 AuthReq 字段 — 注意 MITM 保护标志为 <span style="color:#ef4444;">0x00 (未启用)</span>。</p>
+                <p style="color:#f59e0b;font-size:0.75rem;">⚠️ Just Works 模式下 TK=0，攻击者可轻易计算 STK 并解密通信。</p>
+                <div style="background:#0f172a;border-radius:6px;padding:10px;margin-top:6px;">
+                  <span style="color:#8899aa;font-size:0.75rem;">📝 数据包#7中的LTK值是什么？（前8位即可）</span>
+                  <input type="text" id="ltkObserveInput" placeholder="如 B47F2A91" style="margin-top:4px;">
+                  <button class="btn btn-primary" onclick="checkLtkObserve()" style="margin-top:4px;">验证</button>
+                  <span id="ltkObserveFeedback" style="margin-left:8px;font-size:0.75rem;"></span>
+                </div>`;
+                } else if (step === 3) {
+                    const taggedCount = state.taggedPackets.size;
+                    html = `
+                <p style="color:#ef4444;">🚨 <strong>任务：MITM攻击检测</strong> — 攻击者数据包已混入捕获列表(#13-#20)。</p>
+                <p style="color:#94a3b8;">请标记所有涉及攻击者 (MAC: CC:DD:EE:FF:AA:99) 的可疑数据包。</p>
+                <p style="color:#6b7280;font-size:0.75rem;">在左侧数据包列表中点击"标记"按钮。已标记：<strong>${taggedCount}</strong> 个</p>
+                <button class="btn btn-danger" onclick="verifyTagging()">🔍 验证分析</button>
+                <span id="taggingFeedback" style="margin-left:8px;font-size:0.8rem;"></span>
+                <div id="taggingResult" style="margin-top:8px;"></div>`;
+                } else if (step === 4) {
+                    html = `
+                <p style="color:#f59e0b;">🎯 <strong>任务：执行重放攻击</strong> — 使用捕获的LTK构造恶意解锁命令。</p>
+                <p style="color:#94a3b8;font-size:0.78rem;">攻击者已捕获 LTK: <code style="color:#fbbf24;">0xB47F2A91E3550CD8661F4E7B9A2D83F0</code></p>
+                <div style="background:#0f172a;border-radius:6px;padding:10px;margin-top:6px;">
+                  <label style="font-size:0.75rem;color:#8899aa;">目标设备MAC:</label>
+                  <input type="text" id="replayTarget" value="AA:BB:CC:DD:EE:01" readonly style="margin-bottom:6px;">
+                  <label style="font-size:0.75rem;color:#8899aa;">GATT Handle (锁控制):</label>
+                  <input type="text" id="replayHandle" placeholder="输入Handle (提示: 数据包#11)" style="margin-bottom:6px;">
+                  <label style="font-size:0.75rem;color:#8899aa;">写入值 (0x01=解锁):</label>
+                  <input type="text" id="replayValue" placeholder="输入解锁命令值" style="margin-bottom:8px;">
+                  <button class="btn btn-danger" onclick="executeReplay()">💥 执行重放攻击</button>
+                  <span id="replayFeedback" style="margin-left:8px;font-size:0.8rem;"></span>
+                </div>
+                <div id="replayResult" style="margin-top:8px;text-align:center;"></div>`;
+                } else if (step === 5) {
+                    html = `
+                <p style="color:#22c55e;">🛡️ <strong>任务：Passkey安全对比</strong> — 数据包#21-#24展示安全配对。</p>
+                <div class="comparison-grid">
+                  <div class="comparison-card insecure">
+                    <h4>❌ Just Works (数据包#5-#8)</h4>
+                    <p style="font-size:0.7rem;color:#fca5a5;">TK = 0x000...000 (全零)</p>
+                    <p style="font-size:0.7rem;color:#fca5a5;">AuthReq MITM标志 = 0x00</p>
+                    <p style="font-size:0.7rem;color:#fca5a5;">无用户交互验证</p>
+                    <p style="font-size:0.7rem;color:#fca5a5;">攻击者可中继并解密</p>
+                  </div>
+                  <div class="comparison-card secure">
+                    <h4>✅ Passkey (数据包#21-#24)</h4>
+                    <p style="font-size:0.7rem;color:#86efac;">6位随机Passkey</p>
+                    <p style="font-size:0.7rem;color:#86efac;">AuthReq MITM标志 = 0x0D</p>
+                    <p style="font-size:0.7rem;color:#86efac;">数值比较(Numeric Comparison)</p>
+                    <p style="font-size:0.7rem;color:#86efac;">ECDH + 用户确认 → MITM防护</p>
+                  </div>
+                </div>`;
+                } else if (step === 6) {
+                    html = `
+                <p style="color:#fbbf24;">🏁 <strong>最终任务：分析报告 & 捕获Flag</strong></p>
+                <p style="color:#94a3b8;font-size:0.78rem;">请撰写一段分析，说明：攻击如何发生、利用了哪个漏洞、如何防御。</p>
+                <textarea id="analysisInput" rows="4" placeholder="在此输入你的安全分析报告...&#10;例如：本次MITM攻击利用了Just Works配对的TK=0漏洞..."></textarea>
+                <button class="btn btn-success" onclick="submitAnalysis()">📝 提交分析</button>
+                <span id="analysisFeedback" style="margin-left:8px;font-size:0.8rem;"></span>
+                <div id="flagContainer" style="margin-top:10px;"></div>`;
+                }
+                workspaceContent.innerHTML = html;
+            }
+
+            // ============ STEP NAVIGATION ============
+            function goToStep(stepNum) {
+                if (stepNum < 1 || stepNum > 6) return;
+                if (stepNum > 1 && !state.stepsCompleted.has(stepNum - 1)) {
+                    showToast('请先完成当前步骤', 'info');
+                    return;
+                }
+                state.currentStep = stepNum;
+                state.stepsCompleted.add(stepNum);
+                updateStepIndicator();
+                updateWorkspace();
+                updateProgressLabel();
+                if (stepNum >= 3 && state.selectedPacketId === null) {
+                    selectPacket(stepNum >= 3 ? 13 : 1);
+                }
+            }
+
+            function updateStepIndicator() {
+                const dots = stepIndicator.querySelectorAll('.step-dot');
+                dots.forEach(d => {
+                    const s = parseInt(d.getAttribute('data-step'));
+                    d.classList.remove('active', 'done');
+                    if (s === state.currentStep) d.classList.add('active');
+                    else if (state.stepsCompleted.has(s)) d.classList.add('done');
+                });
+                const connectors = stepIndicator.querySelectorAll('.step-connector');
+                connectors.forEach((c, i) => {
+                    if (state.stepsCompleted.has(i + 2)) c.classList.add('done');
+                    else c.classList.remove('done');
+                });
+            }
+
+            function updateProgressLabel() {
+                progressLabel.textContent = `步骤 ${state.currentStep}/6 — ${['设备发现','Just Works配对观察','MITM攻击检测','重放攻击执行','Passkey安全对比','分析与Flag捕获'][state.currentStep-1]}`;
+            }
+
+            // ============ CHECK FUNCTIONS ============
+            window.checkLockMac = function() {
+                const input = document.getElementById('lockMacInput').value.trim().toUpperCase();
+                const fb = document.getElementById('lockMacFeedback');
+                if (input === 'AA:BB:CC:DD:EE:01') {
+                    fb.innerHTML = '<span style="color:#22c55e;">✅ 正确！智能锁MAC: AA:BB:CC:DD:EE:01</span>';
+                    showToast('设备发现完成！进入下一步', 'success');
+                    state.stepsCompleted.add(2);
+                    setTimeout(() => goToStep(2), 800);
+                } else if (input.includes('AA:BB')) {
+                    fb.innerHTML = '<span style="color:#f59e0b;">接近了！检查完整地址格式</span>';
+                } else {
+                    fb.innerHTML = '<span style="color:#ef4444;">❌ 不对，请查看数据包#1的AdvA字段</span>';
+                }
+            };
+
+            window.checkLtkObserve = function() {
+                const input = document.getElementById('ltkObserveInput').value.trim().toUpperCase().replace(/\s+/g, '');
+                const fb = document.getElementById('ltkObserveFeedback');
+                if (input.startsWith('B47F2A91') || input === 'B47F2A91E3550CD8661F4E7B9A2D83F0') {
+                    fb.innerHTML = '<span style="color:#22c55e;">✅ 正确！LTK已识别</span>';
+                    showToast('配对分析完成！注意Just Works的脆弱性', 'success');
+                    state.stepsCompleted.add(3);
+                    setTimeout(() => goToStep(3), 800);
+                } else if (input.length >= 6) {
+                    fb.innerHTML = '<span style="color:#f59e0b;">格式正确但值不对，再检查数据包#7</span>';
+                } else {
+                    fb.innerHTML = '<span style="color:#ef4444;">请输入LTK前8位</span>';
+                }
+            };
+
+            window.verifyTagging = function() {
+                const fb = document.getElementById('taggingFeedback');
+                const resultDiv = document.getElementById('taggingResult');
+                const groundTruth = new Set([13, 14, 15, 16, 17, 18, 19, 20]);
+                let correct = 0;
+                let missed = [];
+                let falsePos = [];
+                groundTruth.forEach(id => {
+                    if (state.taggedPackets.has(id)) correct++;
+                    else missed.push(id);
+                });
+                state.taggedPackets.forEach(id => {
+                    if (!groundTruth.has(id)) falsePos.push(id);
+                });
+                let msg = '';
+                if (correct >= 6 && falsePos.length <= 1) {
+                    msg =
+                        '<span style="color:#22c55e;">✅ 优秀！你成功识别了MITM攻击包 (标记 ' + correct + '/8 个攻击包)</span>';
+                    fb.innerHTML = msg;
+                    resultDiv.innerHTML =
+                        '<div style="padding:8px;background:#14532d;border-radius:4px;color:#86efac;font-size:0.75rem;">🎯 关键发现：攻击者MAC CC:DD:EE:FF:AA:99 中继了配对过程并捕获了LTK</div>';
+                    state.stepsCompleted.add(4);
+                    showToast('MITM检测完成！', 'success');
+                    setTimeout(() => goToStep(4), 1000);
+                } else {
+                    msg = '<span style="color:#f59e0b;">⚠️ 标记了 ' + correct + '/8 个攻击包';
+                    if (missed.length > 0) msg += ' | 漏检: #' + missed.join(',#');
+                    if (falsePos.length > 0) msg += ' | 误报: #' + falsePos.join(',#');
+                    msg += '</span>';
+                    fb.innerHTML = msg;
+                    resultDiv.innerHTML =
+                        '<div style="padding:8px;background:#3b1a1a;border-radius:4px;color:#fca5a5;font-size:0.75rem;">💡 提示：关注MAC地址为 CC:DD:EE:FF:AA:99 的所有数据包(#13-#20)</div>';
+                }
+            };
+
+            window.executeReplay = function() {
+                const handle = document.getElementById('replayHandle').value.trim();
+                const value = document.getElementById('replayValue').value.trim();
+                const fb = document.getElementById('replayFeedback');
+                const resultDiv = document.getElementById('replayResult');
+                if (handle === '0x0026' && (value === '0x01' || value === '01' || value === '1')) {
+                    fb.innerHTML = '<span style="color:#22c55e;">✅ 重放攻击成功！锁已解锁 🔓</span>';
+                    resultDiv.innerHTML =
+                        '<div class="lock-animation unlocked">🔓</div><p style="color:#22c55e;font-weight:700;">FLAG 第一部分: BLE_MITM</p><p style="color:#fca5a5;font-size:0.75rem;">攻击者使用捕获的LTK成功发送了恶意解锁命令！</p>';
+                    state.replayCompleted = true;
+                    state.stepsCompleted.add(5);
+                    showToast('重放攻击成功执行！', 'success');
+                    setTimeout(() => goToStep(5), 1200);
+                } else if (handle === '0x0026' || value === '0x01' || value === '01') {
+                    fb.innerHTML =
+                        '<span style="color:#f59e0b;">部分正确！Handle应为0x0026，Value应为0x01（参考数据包#11）</span>';
+                } else {
+                    fb.innerHTML = '<span style="color:#ef4444;">❌ 参数错误，请检查Handle和Value</span>';
+                }
+            };
+
+            window.submitAnalysis = function() {
+                const input = document.getElementById('analysisInput').value.trim();
+                const fb = document.getElementById('analysisFeedback');
+                const flagContainer = document.getElementById('flagContainer');
+                const keywords = ['just works', 'justworks', 'tk=0', 'tk = 0', 'mitm', '中间人', '中继', '重放',
+                    'replay', 'ltk', 'passkey', '数值比较', 'numeric comparison', 'authreq', '0x00', '配对',
+                    '加密密钥', '广播包', '伪装'
+                ];
+                const found = keywords.filter(kw => input.toLowerCase().includes(kw.toLowerCase()));
+                if (found.length >= 4) {
+                    fb.innerHTML =
+                        '<span style="color:#22c55e;">✅ 分析深刻！命中关键词: ' + found.join(', ') + '</span>';
+                    state.flagRevealed = true;
+                    state.analysisSubmitted = true;
+                    state.stepsCompleted.add(6);
+                    flagContainer.innerHTML =
+                        '<div class="flag-box">🏆 FLAG: FLAG{BLE_JUST_WORKS_MITM_REPLAY_2024}</div>';
+                    flagContainer.innerHTML +=
+                        '<p style="color:#86efac;font-size:0.78rem;margin-top:6px;">🎉 恭喜！你已完成全部实验。Just Works配对因TK=0而极易遭受MITM攻击，务必在生产环境中使用Passkey或OOB配对。</p>';
+                    updateStepIndicator();
+                    updateProgressLabel();
+                    showToast('🏆 Flag 已捕获！', 'success');
+                } else if (found.length >= 2) {
+                    fb.innerHTML = '<span style="color:#f59e0b;">还不错！尝试覆盖更多安全要点（已命中: ' + found.join(
+                        ', ') + '）</span>';
+                } else {
+                    fb.innerHTML = '<span style="color:#ef4444;">分析不够全面，请提及Just Works漏洞、MITM中继、LTK捕获和Passkey防御</span>';
+                }
+            };
+
+            // ============ TOAST ============
+            function showToast(msg, type) {
+                const toast = document.createElement('div');
+                toast.className = 'toast ' + type;
+                toast.textContent = msg;
+                toastContainer.appendChild(toast);
+                setTimeout(() => {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translateX(120%)';
+                    toast.style.transition = 'all 0.4s';
+                    setTimeout(() => toast.remove(), 400);
+                }, 2500);
+            }
+
+            // ============ TAB SWITCHING ============
+            document.querySelectorAll('.detail-tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove(
+                        'active'));
+                    this.classList.add('active');
+                    state.activeDetailTab = this.getAttribute('data-tab');
+                    updateDetailPanel();
+                });
+            });
+
+            // ============ STEP DOT CLICKS ============
+            stepIndicator.querySelectorAll('.step-dot').forEach(dot => {
+                dot.addEventListener('click', function() {
+                    const s = parseInt(this.getAttribute('data-step'));
+                    if (state.stepsCompleted.has(s) || s === state.currentStep + 1 && state
+                        .stepsCompleted.has(s - 1)) {
+                        goToStep(s);
+                    } else if (s > state.currentStep) {
+                        showToast('请先完成当前步骤', 'info');
+                    } else {
+                        goToStep(s);
+                    }
+                });
+            });
+
+            // ============ INIT ============
+            function init() {
+                renderPacketTable();
+                updateStepIndicator();
+                updateWorkspace();
+                updateProgressLabel();
+                selectPacket(1);
+                totalPacketsSpan.textContent = packets.length;
+            }
+
+            init();
+            console.log(
+                '// EDUCATIONAL PURPOSE ONLY — authorized classroom use\n// BLE安全实验已就绪 — 共' + packets.length +
+                '个数据包，6个实验步骤');
+        })();
+    </script>
+</body>
+</html>

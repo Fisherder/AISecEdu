@@ -2,8 +2,8 @@ id: manual-platform-check
 name: 手动功能验收场
 type: public
 description: |
-  这门实践课程用于人工验证学生题目平台。五道题分别覆盖终端、文件检索、
-  Home 持久化、浏览器 Web 接口和声明式安全情境模拟。
+  这门实践课程用于人工验证学生题目平台。两个单元、九道题同时覆盖普通
+  容器 CTF 实践，以及无线、移动终端、侧信道、工控和 GNSS 五类安全模拟。
 image: pwncollege/challenge-legacy:latest
 privileged: true
 interfaces:
@@ -19,7 +19,7 @@ modules:
     name: 平台手动验收
     description: |
       建议按顺序完成，但题目没有强制解锁关系。提交检查程序显示的完整
-      答案凭证，即可验证作答结果和学习进度功能。
+      答案凭证，即可验证作答结果和学习进度功能；无线题用于检查基础模拟能力。
     challenges:
       - id: terminal-handshake
         name: 终端握手
@@ -76,6 +76,77 @@ modules:
           preset: WIRELESS
           title: 无线接入异常诊断
           description: 分析无线拓扑和频谱状态，形成可验证的干扰假设并恢复客户端服务。
+
+  - id: simulation-security
+    name: 安全场景模拟
+    description: |
+      本单元使用统一模拟引擎呈现难以直接搭建真实实验环境的安全场景。
+      题目不启动容器、不提交 Flag；完成调查、诊断、处置和复测目标后自动评分。
+    challenges:
+      - id: mobile-permission-simulation
+        name: 移动终端权限滥用调查
+        exercise_mode: SIMULATION
+        description: |
+          你将作为移动终端响应人员，调查一台持续耗电并向未知接口通信的
+          企业手机。请自行选择权限审计、隔离抓包、能耗关联或控制组比较，
+          配置合适的采集方式和观察窗口，再用多源证据区分应用滥用、系统
+          更新与弱网络等解释。
+
+          完成条件不是依次点击操作：你需要形成可证伪的根因假设，写明
+          证据依据，实施可回退的最小处置，并用独立观察窗口同时确认异常
+          外联消失、耗电恢复且企业业务仍可用。错误实验或判断会保留反馈，
+          可以据此调整，但会消耗有限回合。
+        interfaces:
+          - name: Simulation
+        simulation:
+          preset: MOBILE
+      - id: side-channel-simulation
+        name: 功耗侧信道泄漏评估
+        exercise_mode: SIMULATION
+        description: |
+          你将设计一组可复现的 AES 功耗实验。先判断测量链是否可信，再
+          自主选择采样数量、触发方式、泄漏模型和控制组；配置不当会产生
+          不可用轨迹或伪相关，需要根据仪器反馈重新设计实验。
+
+          完成条件包括：以足量且正确对齐的轨迹和随机密钥控制组支持一阶
+          泄漏结论，写明证据链，选择不破坏密码功能的缓解方案，并使用未
+          参与原分析的独立轨迹集同时完成泄漏阈值和功能向量验收。
+        interfaces:
+          - name: Simulation
+        simulation:
+          preset: SIDE_CHANNEL
+      - id: ics-plc-simulation
+        name: 工控 PLC 非授权写入处置
+        exercise_mode: SIMULATION
+        description: |
+          你将负责一条灌装线的 OT 事件响应。在不停掉全厂的约束下，自主
+          调查 IT/OT 访问路径、工程身份、PLC 逻辑完整性、过程历史和独立
+          安全联锁。提取 PLC 证据时必须选择可信签名基线与在线只读方式，
+          避免覆盖现场证据或把运行副本与自身比较。
+
+          完成条件包括：用网络、控制逻辑与物理过程三类证据区分传感器
+          漂移、配方误操作和非授权写入；写明处置检查点，保留安全 PLC 与
+          历史数据，隔离来源并恢复签名逻辑，最后通过双人复核和生产验收。
+        interfaces:
+          - name: Simulation
+        simulation:
+          preset: ICS
+      - id: gnss-spoofing-simulation
+        name: GNSS 欺骗信号识别与降级
+        exercise_mode: SIMULATION
+        description: |
+          你将调查一个正在平滑偏移的导航解。可自由检查多星射频功率、
+          接收机钟漂、到达方向、融合残差与独立运动轨迹；进行轨迹比较时
+          必须选择独立时间基准和至少两个独立运动源，避免把同一个受污染
+          的 GNSS 时钟或单一 INS 漂移重复当作证据。
+
+          完成条件包括：以信号、时间和运动学证据区分多径、惯导漂移与
+          协同欺骗；选择保持导航连续性的最小安全降级方案，并用独立窗口
+          验证位置残差、控制输出和完整性边界全部恢复。
+        interfaces:
+          - name: Simulation
+        simulation:
+          preset: GNSS
 files:
   - type: text
     path: manual/terminal-handshake/motd.txt

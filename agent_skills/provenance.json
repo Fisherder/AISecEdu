@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "auditedAt": "2026-08-25",
+  "selectionEvidence": {
+    "openaiSkills": {
+      "url": "https://github.com/openai/skills",
+      "observedAt": "2026-08-22",
+      "observedStars": "25.1k",
+      "observedForks": "1.7k",
+      "note": "The catalog is deprecated in favor of OpenAI Plugins; only previously audited, commit-pinned, per-skill Apache-2.0 files are retained."
+    },
+    "educationAgentSkills": {
+      "url": "https://github.com/GarethManning/education-agent-skills",
+      "observedAt": "2026-08-22",
+      "observedStars": 551,
+      "observedForks": 99,
+      "note": "Evidence-grounded education library with explicit Codex support and orchestration metadata; a focused subset is installed to avoid noisy discovery."
+    }
+  },
+  "workflowResearch": {
+    "observedAt": "2026-08-25",
+    "note": "Design and QA patterns were independently adapted into project-authored skills and runtime behavior; no source-specific or proprietary skill files were copied.",
+    "slideDeck": [
+      "https://github.com/openai/plugins/blob/main/plugins/google-drive/skills/google-slides/SKILL.md",
+      "https://github.com/openai/plugins/blob/main/plugins/figma/skills/figma-use-slides/SKILL.md",
+      "https://github.com/anthropics/skills/blob/main/skills/pptx/SKILL.md"
+    ],
+    "ctfChallenge": [
+      "https://github.com/CTFd/CTFd",
+      "https://docs.ctfd.io/docs/custom-challenges/application-target/",
+      "https://github.com/picoCTF/picoCTF/blob/master/docs/specs/challenge.py.md",
+      "https://github.com/pwncollege/challenges"
+    ],
+    "simulation": [
+      "https://github.com/mitre/caldera",
+      "https://github.com/openai/plugins/blob/main/plugins/openai-developers/skills/build-chatgpt-app/references/interactive-state-sync-patterns.md",
+      "https://stately.ai/docs",
+      "https://storybook.js.org/docs/writing-tests/interaction-testing",
+      "https://playwright.dev/docs/test-assertions"
+    ]
+  },
+  "sources": [
+    {
+      "repository": "https://github.com/openai/skills",
+      "commit": "49f948faa9258a0c61caceaf225e179651397431",
+      "license": "Apache-2.0",
+      "skills": [
+        "jupyter-notebook",
+        "pdf",
+        "playwright",
+        "security-best-practices",
+        "security-threat-model"
+      ]
+    },
+    {
+      "repository": "https://github.com/GarethManning/education-agent-skills",
+      "commit": "4be2795b574e91bdcbb6bda01ab235a05cfadbcc",
+      "license": "CC-BY-SA-4.0",
+      "skills": [
+        "assessment-validity-checker",
+        "backwards-design-unit-planner",
+        "competency-unpacker",
+        "criterion-referenced-rubric-generator",
+        "feedback-quality-analyser",
+        "retrieval-practice-generator",
+        "udl-lesson-auditor"
+      ]
+    }
+  ],
+  "rejected": [
+    {
+      "repository": "https://github.com/anthropics/skills",
+      "reason": "Selected document skills include source-specific license terms that do not permit this external project to retain and redistribute them."
+    }
+  ]
+}

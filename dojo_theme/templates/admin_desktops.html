@@ -1,32 +1,91 @@
-{% extends "admin/base.html" %}
+{% extends "base.html" %}
+
+{% block body_class %}admin-product-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/admin-product.css', v='aisecedu-admin-product-v6-readability-v1') }}">
+{% endblock %}
+{% block footer %}{% endblock %}
 
 {% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1>可加入的用户桌面会话</h1>
-  </div>
-</div>
-<div class="container">
-  <div id="desktops" class="row">
-    <div class="col-md-12">
-      <table class="table table-striped">
-        <thead>
-          <tr>
-            <td scope="col"><b>桌面会话</b></td>
-          </tr>
-        </thead>
-        <tbody>
-          {% for user in users %}
-          <tr>
-            <td><a href="/desktop/{{ user.id }}">{{ user.name }}</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+<section class="admin-product" aria-labelledby="admin-desktops-title">
+  <header class="admin-product-header">
+    <div>
+      <p class="admin-product-eyebrow">运行环境治理</p>
+      <h1 id="admin-desktops-title">正在占用资源的实验环境</h1>
+      <p>定位运行中或已过期但尚未回收的环境。这里不把“没有运行环境”误写成系统正常。</p>
     </div>
+    <a class="admin-product-secondary" href="/admin">返回平台概览</a>
+  </header>
+
+  {% if runtime_catalog.degraded %}
+  <section class="admin-product-alert" role="alert">
+    <strong>暂时无法读取运行节点</strong>
+    <p>课程与用户数据仍然安全，请检查 Docker 节点连接后重试。{% if runtime_catalog.requestId %}请求编号：{{ runtime_catalog.requestId }}{% endif %}</p>
+    <a href="{{ request.full_path }}">重新加载</a>
+  </section>
+  {% endif %}
+
+  <form class="admin-product-filters" method="get" action="/admin/desktops" role="search">
+    <label><span>搜索环境</span><input name="q" value="{{ runtime_catalog.query }}" placeholder="用户、课程或题目标识"></label>
+    <label><span>状态</span><select name="status">
+      <option value="all"{% if runtime_catalog.status == 'all' %} selected{% endif %}>全部状态</option>
+      <option value="running"{% if runtime_catalog.status == 'running' %} selected{% endif %}>运行中</option>
+      <option value="expired"{% if runtime_catalog.status == 'expired' %} selected{% endif %}>已过期</option>
+    </select></label>
+    <button type="submit">筛选</button>
+  </form>
+
+  <section class="admin-product-summary" aria-label="环境统计">
+    <strong>{{ runtime_catalog.total }}</strong><span>个符合条件的运行环境</span>
+    <span>第 {{ runtime_catalog.page }} / {{ runtime_catalog.totalPages }} 页</span>
+  </section>
+  <p class="admin-runtime-live-status sr-only" role="status" aria-live="polite"></p>
+
+  {% if runtime_rows %}
+  <div class="admin-product-table-wrap">
+    <table class="admin-product-table">
+      <thead><tr><th scope="col">学习者</th><th scope="col">状态</th><th scope="col">课程与题目</th><th scope="col">到期时间</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
+      <tbody>
+      {% for runtime in runtime_rows %}
+        <tr>
+          <td data-label="学习者"><strong>{{ runtime.userName }}</strong><small>用户 {{ runtime.userId }}</small></td>
+          <td data-label="状态"><span class="admin-product-badge" data-kind="{{ 'warning' if runtime.status == 'expired' else 'success' }}">{{ runtime.statusLabel }}</span></td>
+          <td data-label="课程与题目"><strong>{{ runtime.courseId or '课程信息不可用' }}</strong><small>{{ runtime.moduleId or '未知章节' }} · {{ runtime.challengeId or '未知题目' }}</small></td>
+          <td data-label="到期时间">{{ runtime.expiresAt.strftime('%Y-%m-%d %H:%M') if runtime.expiresAt else '未提供' }}</td>
+          <td data-label="操作">
+            <div class="admin-product-row-actions">
+              <a class="admin-product-row-action" href="{{ runtime.desktopHref }}">查看环境</a>
+              <button
+                type="button"
+                class="admin-product-row-action admin-product-row-danger"
+                data-admin-runtime-stop
+                data-user-id="{{ runtime.userId }}"
+                data-user-name="{{ runtime.userName }}"
+                data-stop-endpoint="/pwncollege_api/v1/workspace/admin/runtimes/{{ runtime.userId }}/stop"
+                aria-label="停止 {{ runtime.userName }} 的运行环境"
+              >停止环境</button>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
   </div>
-</div>
+  {% elif not runtime_catalog.degraded %}
+  <section class="admin-product-empty"><h2>当前没有符合条件的运行环境</h2><p>这表示目前没有活动容器，不代表历史学习尝试已被删除。</p>{% if runtime_catalog.query or runtime_catalog.status != 'all' %}<a href="/admin/desktops">清除筛选</a>{% endif %}</section>
+  {% endif %}
+
+  <nav class="admin-product-pagination" aria-label="环境分页">
+    {% if runtime_catalog.previousUrl %}<a href="{{ runtime_catalog.previousUrl }}" rel="prev">上一页</a>{% else %}<span aria-disabled="true">上一页</span>{% endif %}
+    <span>第 {{ runtime_catalog.page }} / {{ runtime_catalog.totalPages }} 页</span>
+    {% if runtime_catalog.nextUrl %}<a href="{{ runtime_catalog.nextUrl }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
+  </nav>
+</section>
 {% endblock %}
 
 {% block scripts %}
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/admin-runtimes.js', v='aisecedu-admin-runtimes-v1') }}"></script>
 {% endblock %}

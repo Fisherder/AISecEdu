@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block body_class %}admin-product-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+{% block footer %}{% endblock %}
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/admin-product.css', v='aisecedu-admin-product-v6-readability-v1') }}">
+{% endblock %}
+
+{% block content %}
+<section class="admin-product" aria-labelledby="admin-challenges-title" data-admin-collection="challenges">
+  <header class="admin-product-header">
+    <div>
+      <p class="admin-product-eyebrow">内容与评测治理</p>
+      <h1 id="admin-challenges-title">平台题目</h1>
+      <p>按名称、分类、类型或可见性查找题目。列表按 25 道分页，答案与 Flag 不在列表中暴露。</p>
+    </div>
+    <div class="admin-product-header-actions">
+      <a class="admin-product-secondary" href="/admin/submissions"><i class="fas fa-history" aria-hidden="true"></i>提交记录</a>
+      <a class="admin-product-primary" href="/admin/challenges/new"><i class="fas fa-plus" aria-hidden="true"></i>新建题目</a>
+    </div>
+  </header>
+
+  <form class="admin-product-filters admin-product-filters-wide" method="get" action="/admin/challenges" role="search">
+    <label><span>搜索内容</span><input name="q" value="{{ query_text }}" placeholder="输入题目名称、分类、类型或编号"></label>
+    <label><span>查询字段</span><select name="field">
+      <option value="name"{{ ' selected' if field == 'name' else '' }}>题目名称</option>
+      <option value="category"{{ ' selected' if field == 'category' else '' }}>分类</option>
+      <option value="type"{{ ' selected' if field == 'type' else '' }}>题目类型</option>
+      <option value="id"{{ ' selected' if field == 'id' else '' }}>题目编号</option>
+    </select></label>
+    <label><span>可见状态</span><select name="state">
+      <option value="all"{{ ' selected' if state == 'all' else '' }}>全部状态</option>
+      <option value="visible"{{ ' selected' if state == 'visible' else '' }}>可见</option>
+      <option value="hidden"{{ ' selected' if state == 'hidden' else '' }}>已隐藏</option>
+    </select></label>
+    <button type="submit">应用筛选</button>
+  </form>
+
+  <section class="admin-product-summary" aria-label="题目统计">
+    <strong>{{ challenges.total }}</strong><span>道符合条件的题目</span>
+    <span>第 {{ challenges.page }} / {{ challenges.pages or 1 }} 页 · 每页 25 道</span>
+  </section>
+
+  {% if rows %}
+  <div class="admin-product-table-wrap">
+    <table class="admin-product-table">
+      <thead><tr><th scope="col">题目</th><th scope="col">类型与分类</th><th scope="col">可见性</th><th scope="col">评测事实</th><th scope="col">分值</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
+      <tbody>
+      {% for challenge in rows %}
+        <tr>
+          <td data-label="题目"><a class="admin-product-title" href="{{ challenge.detailHref }}">{{ challenge.name }}</a><small>编号 {{ challenge.id }}</small></td>
+          <td data-label="类型与分类"><strong>{{ challenge.category }}</strong><small>{{ challenge.type }}</small></td>
+          <td data-label="可见性"><span class="admin-product-badge" data-kind="{{ 'success' if challenge.state == 'visible' else 'neutral' if challenge.state == 'hidden' else 'warning' }}">{{ challenge.stateLabel }}</span></td>
+          <td data-label="评测事实"><strong>{{ challenge.solveCount }} 次通过</strong><small>{{ challenge.flagCount }} 个判题凭据</small></td>
+          <td data-label="分值">{{ challenge.value if challenge.value is not none else '—' }}</td>
+          <td data-label="操作"><div class="admin-product-row-actions"><a class="admin-product-row-action" href="{{ challenge.previewHref }}">安全预览</a><a class="admin-product-row-action" href="{{ challenge.detailHref }}">编辑详情</a></div></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <section class="admin-product-empty"><h2>没有符合条件的题目</h2><p>调整可见状态或搜索条件后重试。</p><a href="/admin/challenges">清除筛选</a></section>
+  {% endif %}
+
+  <nav class="admin-product-pagination" aria-label="题目分页">
+    {% if pagination.previous %}<a href="{{ pagination.previous }}" rel="prev">上一页</a>{% else %}<span aria-disabled="true">上一页</span>{% endif %}
+    <span>第 {{ challenges.page }} / {{ challenges.pages or 1 }} 页</span>
+    {% if pagination.next %}<a href="{{ pagination.next }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
+  </nav>
+</section>
+{% endblock %}

@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block body_class %}teaching-artifact-page{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/teaching-agent.css', v='aisecedu-teaching-v22-readability-v1') }}">
+{% endblock %}
+
+{% block content %}
+<div id="teaching-artifact" class="artifact-detail-shell" data-artifact-id="{{ artifact.id }}" data-viewer-role="{{ artifact_viewer_role }}" data-return-role="{{ artifact_return_role }}" data-personal="{{ 'true' if artifact_is_personal else 'false' }}" data-return-to="{{ artifact_return_to }}" data-inspector-open="false" data-preview-state="loading">
+  <header class="artifact-detail-header">
+    <a id="artifact-back-link" href="{{ artifact_return_to }}" class="artifact-back" aria-label="{{ '返回教师工作区' if artifact_return_role == 'teacher' else ('返回我的创作' if artifact_is_personal else '返回学习进展') }}">
+      <i class="fas fa-arrow-left" aria-hidden="true"></i>
+    </a>
+    <div class="artifact-heading-copy">
+      <nav class="artifact-breadcrumb" aria-label="当前位置"><a id="artifact-course-link" href="{{ artifact_return_to }}">{{ '我的创作' if artifact_is_personal else '课程' }}</a><i class="fas fa-chevron-right" aria-hidden="true"></i><a id="artifact-module-link" href="#" hidden>章节</a><i id="artifact-module-separator" class="fas fa-chevron-right" aria-hidden="true" hidden></i><span id="artifact-type-label">教学内容</span></nav>
+      <h1 id="artifact-title">{{ artifact.title }}</h1>
+      <p><span id="artifact-meta">正在读取内容信息…</span><span id="artifact-visibility-badge" class="artifact-visibility-badge">正在确认可见性</span></p>
+    </div>
+    <div class="artifact-detail-actions">
+      {% if artifact_viewer_role == 'teacher' %}
+      <button id="artifact-student-preview" class="artifact-header-button" type="button" aria-pressed="false">
+        <i class="fas fa-user-graduate" aria-hidden="true"></i><span>学生视图</span>
+      </button>
+      <button id="artifact-inspector-toggle" class="artifact-header-button" type="button" aria-expanded="false" aria-controls="artifact-inspector">
+        <i class="fas fa-sliders-h" aria-hidden="true"></i><span>调整与版本</span>
+      </button>
+      <button id="artifact-request-publish" class="artifact-publish-button" type="button">
+        <i class="fas fa-paper-plane" aria-hidden="true"></i><span>发布</span>
+      </button>
+      {% elif artifact_is_personal %}
+      <button id="artifact-inspector-toggle" class="artifact-header-button" type="button" aria-expanded="false" aria-controls="artifact-inspector">
+        <i class="fas fa-history" aria-hidden="true"></i><span>版本与操作</span>
+      </button>
+      {% elif artifact_return_role == 'teacher' %}
+      <a id="artifact-continue-link" class="artifact-header-button" href="{{ artifact_return_to }}"><i class="fas fa-arrow-left" aria-hidden="true"></i><span>返回教师工作区</span></a>
+      {% else %}
+      <a id="artifact-continue-link" class="artifact-publish-button" href="{{ artifact_return_to }}"><i class="fas fa-arrow-right" aria-hidden="true"></i><span>继续学习</span></a>
+      {% endif %}
+    </div>
+  </header>
+
+  <div id="artifact-operation-status" class="artifact-operation-status" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <span class="artifact-operation-icon"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i></span>
+    <span class="artifact-operation-copy"><strong id="artifact-operation-title">正在处理</strong><small id="artifact-operation-detail">请稍候…</small></span>
+  </div>
+
+  <div class="artifact-detail-grid">
+    <section id="artifact-preview-panel" class="artifact-preview-panel" aria-label="课件与演示预览">
+      <header class="artifact-preview-toolbar">
+        <div class="artifact-preview-status">
+          <span id="artifact-preview-state-dot" aria-hidden="true"></span>
+          <strong id="artifact-preview-state-label" role="status" aria-live="polite">正在准备预览</strong>
+          <small>方向键翻页 · O 查看全部页面 · F 全屏</small>
+        </div>
+        <div class="artifact-preview-actions">
+          <button id="artifact-preview-reload" type="button" title="重新加载预览"><i class="fas fa-sync-alt" aria-hidden="true"></i><span>重新加载</span></button>
+          <button id="artifact-preview-fullscreen" type="button" title="全屏查看预览"><i class="fas fa-expand" aria-hidden="true"></i><span>聚焦预览</span></button>
+        </div>
+      </header>
+      <div id="artifact-preview-placeholder" class="artifact-preview-placeholder" aria-busy="true">
+        <span class="artifact-preview-loader"><i class="fas fa-layer-group" aria-hidden="true"></i></span>
+        <h2>正在准备阅读器</h2>
+        <p>正在加载预览…</p>
+        <span class="artifact-preview-loading-line" aria-hidden="true"><span></span></span>
+        <button id="artifact-preview-retry" class="artifact-preview-retry" type="button" hidden><i class="fas fa-redo" aria-hidden="true"></i>重新加载预览</button>
+      </div>
+      <iframe id="artifact-preview" title="教学内容预览" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals" allow="fullscreen" allowfullscreen referrerpolicy="no-referrer" hidden></iframe>
+    </section>
+
+    {% if artifact_viewer_role == 'teacher' or artifact_is_personal %}
+    <button id="artifact-inspector-backdrop" class="artifact-inspector-backdrop" type="button" aria-label="关闭内容信息" tabindex="-1"></button>
+    <aside id="artifact-inspector" class="artifact-revision-panel" aria-label="内容调整与版本信息" aria-hidden="true">
+      <header class="artifact-inspector-header">
+        <div><span>{{ '内容工作台' if artifact_viewer_role == 'teacher' else '我的创作' }}</span><h2>{{ '调整与版本' if artifact_viewer_role == 'teacher' else '版本与操作' }}</h2><p id="artifact-inspector-summary">正在读取当前版本…</p></div>
+        <button id="artifact-inspector-close" type="button" aria-label="关闭内容信息"><i class="fas fa-times" aria-hidden="true"></i></button>
+      </header>
+
+      <nav class="artifact-inspector-tabs" role="tablist" aria-label="内容信息分类">
+        {% if artifact_viewer_role == 'teacher' %}
+        <button id="artifact-tab-revise" type="button" role="tab" data-artifact-tab="revise" aria-selected="true" aria-controls="artifact-panel-revise"><i class="fas fa-magic" aria-hidden="true"></i>调整</button>
+        {% endif %}
+        <button id="artifact-tab-versions" type="button" role="tab" data-artifact-tab="versions" aria-selected="{{ 'false' if artifact_viewer_role == 'teacher' else 'true' }}" aria-controls="artifact-panel-versions"><i class="fas fa-history" aria-hidden="true"></i>版本</button>
+        {% if artifact_viewer_role == 'teacher' %}
+        <button id="artifact-tab-sources" type="button" role="tab" data-artifact-tab="sources" aria-selected="false" aria-controls="artifact-panel-sources"><i class="fas fa-link" aria-hidden="true"></i>来源</button>
+        {% endif %}
+      </nav>
+
+      <div class="artifact-inspector-content">
+        {% if artifact_viewer_role == 'teacher' %}
+        <section id="artifact-panel-revise" class="artifact-inspector-panel" role="tabpanel" aria-labelledby="artifact-tab-revise" data-artifact-panel="revise">
+          <div class="artifact-panel-heading"><span>自然语言调整</span><h3>告诉 AI 这版要如何改</h3><p>当前版本会保留，新结果将作为下一版本生成。</p></div>
+          <textarea id="artifact-instruction" class="form-control" rows="5" maxlength="16000" placeholder="例如：缩短理论讲解，补充一个真实案例，并在结尾增加理解检查。"></textarea>
+          <div class="artifact-revise-suggestions" aria-label="常用调整">
+            <button type="button" data-revision-suggestion="压缩文字密度，保留关键信息，并让每一页只表达一个核心观点。">精简内容</button>
+            <button type="button" data-revision-suggestion="增加一个贴近真实场景的完整案例，并明确展示分析过程与结论。">补充案例</button>
+            <button type="button" data-revision-suggestion="优化页面层次、对比度和信息可视化，让投屏与小屏阅读都更清晰。">优化呈现</button>
+          </div>
+          <button id="artifact-revise" class="artifact-revise-button" type="button"><i class="fas fa-magic" aria-hidden="true"></i>生成新版本</button>
+        </section>
+        {% endif %}
+
+        <section id="artifact-panel-versions" class="artifact-inspector-panel" role="tabpanel" aria-labelledby="artifact-tab-versions" data-artifact-panel="versions" {{ '' if artifact_viewer_role != 'teacher' else 'hidden' }}>
+          <div class="artifact-panel-heading"><span>{{ '质量与历史' if artifact_viewer_role == 'teacher' else '创作历史' }}</span><h3>版本记录</h3><p>{{ '查看发布检查结果，并在需要时比较或恢复旧版本。' if artifact_viewer_role == 'teacher' else '每次继续完善都会保留为新版本，你可以随时查看之前的创作。' }}</p></div>
+          {% if artifact_viewer_role == 'teacher' %}
+          <div id="artifact-validation"></div>
+          {% endif %}
+          <ol id="artifact-history" class="artifact-history"></ol>
+          {% if artifact_is_personal %}
+          <div class="artifact-personal-actions" aria-label="个人成果操作">
+            <button id="artifact-rename" type="button"><i class="fas fa-pen" aria-hidden="true"></i>重命名</button>
+            <button id="artifact-request-review" type="button"><i class="fas fa-user-check" aria-hidden="true"></i>提交教师审阅</button>
+            <button id="artifact-delete" class="is-danger" type="button"><i class="fas fa-trash-alt" aria-hidden="true"></i>删除创作</button>
+          </div>
+          {% endif %}
+          <section id="artifact-compare" class="artifact-compare" hidden>
+            <div class="artifact-compare-heading"><h3 id="artifact-compare-title">版本比较</h3><button id="artifact-close-compare" type="button">关闭比较</button></div>
+            <div class="artifact-compare-grid">
+              <div><strong>所选版本</strong><pre id="artifact-compare-source"></pre></div>
+              <div><strong>当前版本</strong><pre id="artifact-compare-current"></pre></div>
+            </div>
+          </section>
+        </section>
+
+        {% if artifact_viewer_role == 'teacher' %}
+        <section id="artifact-panel-sources" class="artifact-inspector-panel" role="tabpanel" aria-labelledby="artifact-tab-sources" data-artifact-panel="sources" hidden>
+          <div class="artifact-panel-heading"><span>可追溯信息</span><h3>来源与目标</h3><p>确认本版本使用的课程材料与上下文范围。</p></div>
+          <div id="artifact-sources" class="artifact-source-list"></div>
+        </section>
+        {% endif %}
+      </div>
+    </aside>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/teaching-artifact.js', v='aisecedu-teaching-v23') }}"></script>
+{% endblock %}

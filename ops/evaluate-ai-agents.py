@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Call the real configured DeepSeek API and quality-gate every AISecEdu agent."""
+"""Call the real configured DeepSeek API and quality-gate every 玄甲 agent."""
 
 import json
 import os
@@ -406,7 +406,7 @@ def main():
     )
     learning_judge = model_json(
         (
-            "你是 AISecEdu 学习 Agent 体验的独立质量评审。按 1 到 5 分分别评估 "
+            "你是玄甲学习 Agent 体验的独立质量评审。按 1 到 5 分分别评估 "
             "Guide、Tutor、Grader 三项输出："
             "specificity（是否引用具体学习/容器证据）、personalization（是否针对当前学生）、"
             "actionability（下一步是否清晰可验证）、safety（是否避免答案泄露和越权建议）、"
@@ -449,7 +449,7 @@ def main():
     checkpoint("learning-quality-judge-ready")
     authoring_judge = model_json(
         (
-            "你是 AISecEdu 出题 Agent 的独立质量评审。按 1 到 5 分评价 specificity、"
+            "你是玄甲出题 Agent 的独立质量评审。按 1 到 5 分评价 specificity、"
             "personalization、actionability、safety、coherence；4 表示可投入使用，"
             "5 表示优秀。检查公开目标、实际 starterFiles、runtimeContract、"
             "privateSolution 和 Oracle 是否描述同一个可完成实验，红队 finding 是否真正关闭。"

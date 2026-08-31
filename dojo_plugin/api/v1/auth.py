@@ -1,9 +1,11 @@
 import base64
+import secrets
 
 from flask import request, session
 from flask_restx import Namespace, Resource
 from itsdangerous.exc import BadSignature, BadTimeSignature, SignatureExpired
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_
 
 from CTFd.cache import clear_user_session
 from CTFd.models import UserFieldEntries, UserFields, Users, db
@@ -22,8 +24,30 @@ from CTFd.utils.validators import ValidationError
 auth_namespace = Namespace("auth", description="认证接口")
 
 REGISTRATION_COMMITMENT = (
-    "我已阅读并同意遵守平台公约，不公开 AISecEdu 课程题目的解题过程或答案。"
+    "我已阅读并同意遵守平台公约，不公开玄甲课程题目的解题过程或答案。"
 )
+
+
+def _course_by_reference(reference):
+    from ...models import Dojos
+
+    reference = str(reference or "").strip().strip("/")
+    if not reference or len(reference) > 96:
+        return None
+    try:
+        return Dojos.from_id(reference).first()
+    except (TypeError, ValueError):
+        return None
+
+
+def _course_summary(course):
+    return {
+        "id": course.reference_id,
+        "name": course.name or course.id,
+        "description": str(course.description or "")[:360],
+        "official": bool(course.official),
+        "access": "public" if course.type == "public" else "invite",
+    }
 
 
 def _message(message):
@@ -103,7 +127,38 @@ class AuthConfig(Resource):
                         "href": privacy_url or "/privacy",
                     },
                 },
+                "onboarding": {
+                    "roles": ["student", "teacher"],
+                    "studentDestination": "/student",
+                    "teacherDestination": "/teacher/courses/new?onboarding=1",
+                    "courseInvitationSupported": True,
+                },
             },
+        }
+
+
+@auth_namespace.route("/courses")
+class PublicRegistrationCourses(Resource):
+    def get(self):
+        """Return only courses that are intentionally public at registration."""
+        from ...models import Dojos
+
+        query = Dojos.query.filter(
+            or_(Dojos.official.is_(True), Dojos.data["type"].astext == "public")
+        )
+        text_query = str(request.args.get("q") or "").strip()
+        if text_query:
+            escaped = text_query.replace("%", "\\%").replace("_", "\\_")
+            query = query.filter(
+                or_(
+                    Dojos.name.ilike(f"%{escaped}%", escape="\\"),
+                    Dojos.id.ilike(f"%{escaped}%", escape="\\"),
+                )
+            )
+        courses = query.order_by(Dojos.official.desc(), Dojos.name).limit(80).all()
+        return {
+            "success": True,
+            "data": {"courses": [_course_summary(course) for course in courses]},
         }
 
 
@@ -155,6 +210,24 @@ class Register(Resource):
         website = _text(req, "website")
         affiliation = _text(req, "affiliation")
         country = _text(req, "country")
+        onboarding_role = _text(req, "role").lower() or "student"
+        course_reference = _text(req, "course_id")
+        course_password = _text(req, "course_password")
+        enrollment_course = None
+
+        if onboarding_role not in {"student", "teacher"}:
+            errors.append("请选择学生或教师身份。")
+        if course_reference:
+            if onboarding_role != "student":
+                errors.append("教师起点不能同时加入学生课程。")
+            else:
+                enrollment_course = _course_by_reference(course_reference)
+                if enrollment_course is None:
+                    errors.append("未找到邀请中的课程，请检查课程标识。")
+                elif enrollment_course.password and not secrets.compare_digest(
+                    str(enrollment_course.password), course_password
+                ):
+                    errors.append("课程邀请码不正确。")
 
         if req.get("commitment_accepted") is not True:
             errors.append("请先同意平台公约。")
@@ -244,12 +317,16 @@ class Register(Resource):
         user.verified = not verification_required
 
         try:
+            from ...models import DojoMembers
+
             db.session.add(user)
             db.session.flush()
             for field_id, value in fields.items():
                 db.session.add(
                     UserFieldEntries(field_id=field_id, value=value, user_id=user.id)
                 )
+            if enrollment_course is not None:
+                db.session.add(DojoMembers(dojo=enrollment_course, user=user))
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
@@ -273,10 +350,25 @@ class Register(Resource):
             if can_send_mail():
                 email.successful_registration_notification(user.email)
 
-        return {
-            "success": True,
-            "data": _auth_user_data(user),
+        destination = (
+            "/teacher/courses/new?onboarding=1"
+            if onboarding_role == "teacher"
+            else f"/{enrollment_course.reference_id}"
+            if enrollment_course is not None
+            else "/student"
+        )
+        user_data = _auth_user_data(user)
+        user_data["onboarding"] = {
+            "role": onboarding_role,
+            "destination": destination,
+            "emailVerificationRequired": verification_required,
+            "enrollment": (
+                _course_summary(enrollment_course)
+                if enrollment_course is not None
+                else None
+            ),
         }
+        return {"success": True, "data": user_data}
 
 
 @auth_namespace.route("/login")

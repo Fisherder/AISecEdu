@@ -46,7 +46,7 @@
 {%- endmacro %}
 
 {% macro accordion_item(accordion_id, item_id, is_disabled, challenge_index=None) %}
-  <div class="accordion-item">
+  <div class="accordion-item" id="{{ accordion_id }}-item-{{ item_id }}">
     <div class="accordion-item-header" id="{{ accordion_id }}-header-{{ item_id }}">
       <h2 class="mb-0 button-wrapper">
         <button id="{% if challenge_index %}challenges-header-button-{{ challenge_index }}{% else %}{{ accordion_id }}-header-button-{{ item_id }}{% endif %}" class="btn btn-link text-decoration-none w-100 challenge-button-2 collapsed {% if is_disabled %}disabled{% endif %}" type="button" data-toggle="collapse" data-target="#{% if challenge_index %}challenges-body-{{ challenge_index }}{% else %}{{ accordion_id }}-body-{{ item_id }}{% endif %}" aria-expanded="false" aria-controls="{% if challenge_index %}challenges-body-{{ challenge_index }}{% else %}{{ accordion_id }}-body-{{ item_id }}{% endif %}">
@@ -65,13 +65,8 @@
 
 
 {% set svg_add_icon %}
-<svg class="w-100 h-100">
-  <circle cx="50%" cy="50%" r="30%" stroke="gray" fill="none" stroke-width="8" stroke-dasharray="8"></circle>
-  <g stroke="gray" stroke-width="8">
-    <line x1="50%" y1="30%" x2="50%" y2="70%"></line>
-    <line x1="30%" y1="50%" x2="70%" y2="50%"></line>
-  </g>
-</svg>
+<span class="course-create-icon" aria-hidden="true"><i class="fas fa-plus"></i></span>
+<span class="course-create-copy"><strong>创建课程</strong><small>填写基本信息，也可随时改用 AI</small></span>
 {% endset %}
 
 {% macro dojo_grid(dojos, dojo_container_counts, create_icon=None) -%}
@@ -92,7 +87,7 @@
       ) }}
     {% endfor %}
     {% if create_icon %}
-      {% call card(url_for("pwncollege_dojos.dojo_create"), custom=True) %}
+      {% call card("/teacher/courses/new", custom=True) %}
         <span class="sr-only">创建新课程</span>
         {{ svg_add_icon }}
       {% endcall %}

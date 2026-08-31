@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 玄甲
+    orgId: 1
+    folder: 玄甲
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

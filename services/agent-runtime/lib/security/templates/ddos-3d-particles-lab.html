@@ -1,0 +1,1641 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DDoS 流量洪水 3D 可视化 — 安全实验</title>
+    <style>
+        :root {
+            --bg: #0a0e17;
+            --panel-bg: rgba(15, 23, 42, 0.92);
+            --border: rgba(59, 130, 246, 0.3);
+            --text: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --green: #22c55e;
+            --green-glow: rgba(34, 197, 94, 0.5);
+            --red: #ef4444;
+            --red-glow: rgba(239, 68, 68, 0.6);
+            --blue: #3b82f6;
+            --blue-glow: rgba(59, 130, 246, 0.5);
+            --amber: #f59e0b;
+            --amber-glow: rgba(245, 158, 11, 0.5);
+            --cyan: #06b6d4;
+            --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+            --font-sans: 'Inter', 'Segoe UI', 'Helvetica Neue', sans-serif;
+            --radius: 10px;
+            --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            font-family: var(--font-sans);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            color: var(--text);
+        }
+
+        #canvas-container {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+        }
+
+        #canvas-container canvas {
+            display: block;
+        }
+
+        /* Overlay UI */
+        #ui-layer {
+            position: fixed;
+            inset: 0;
+            z-index: 10;
+            pointer-events: none;
+        }
+        #ui-layer>* {
+            pointer-events: auto;
+        }
+
+        /* Briefing Modal */
+        #briefing-modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px 32px;
+            max-width: 520px;
+            width: 90%;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(59, 130, 246, 0.15);
+            z-index: 100;
+            animation: modalIn 0.4s ease-out;
+        }
+        @keyframes modalIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+        }
+        #briefing-modal.hidden {
+            display: none;
+        }
+        #briefing-modal h2 {
+            font-family: var(--font-mono);
+            color: var(--cyan);
+            font-size: 1.3rem;
+            margin-bottom: 8px;
+            letter-spacing: 0.02em;
+        }
+        #briefing-modal .subtitle {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+        #briefing-modal .scenario-desc {
+            font-size: 0.9rem;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            color: #cbd5e1;
+        }
+        #briefing-modal .scenario-desc strong {
+            color: var(--green);
+        }
+        #briefing-modal .scenario-desc .danger {
+            color: var(--red);
+        }
+        #btn-start-lab {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #1d4ed8, #2563eb);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            letter-spacing: 0.03em;
+            transition: var(--transition);
+            font-family: var(--font-sans);
+        }
+        #btn-start-lab:hover {
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            box-shadow: 0 0 24px rgba(59, 130, 246, 0.5);
+            transform: translateY(-1px);
+        }
+
+        /* Top panels */
+        .top-panel {
+            position: absolute;
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 18px;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+        #progress-panel {
+            top: 16px;
+            left: 16px;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            min-width: 180px;
+        }
+        #progress-panel .step {
+            padding: 3px 0;
+            transition: var(--transition);
+        }
+        #progress-panel .step.done {
+            color: var(--green);
+        }
+        #progress-panel .step.done::before {
+            content: '✓ ';
+            color: var(--green);
+        }
+        #progress-panel .step.active {
+            color: var(--cyan);
+            font-weight: 600;
+        }
+        #progress-panel .step.active::before {
+            content: '▸ ';
+            animation: blink 0.8s infinite;
+        }
+        @keyframes blink {
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        #traffic-meter {
+            top: 16px;
+            right: 16px;
+            text-align: right;
+            min-width: 200px;
+        }
+        #traffic-meter .meter-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+        #traffic-meter .meter-value {
+            font-family: var(--font-mono);
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: var(--green);
+            line-height: 1;
+            transition: color 0.4s;
+        }
+        #traffic-meter .meter-value.danger {
+            color: var(--red);
+            animation: pulseText 0.5s ease-in-out;
+        }
+        @keyframes pulseText {
+            0%,
+            100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.08);
+            }
+        }
+        #traffic-meter .meter-sub {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        #traffic-meter .meter-bars {
+            display: flex;
+            gap: 4px;
+            margin-top: 6px;
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        #traffic-meter .meter-bar-legit {
+            background: var(--green);
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+        #traffic-meter .meter-bar-attack {
+            background: var(--red);
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        /* Bottom control bar */
+        #control-bar {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: 40px;
+            padding: 10px 20px;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        #control-bar label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            letter-spacing: 0.04em;
+            white-space: nowrap;
+            font-family: var(--font-mono);
+        }
+        #control-bar input[type="range"] {
+            -webkit-appearance: none;
+            width: 140px;
+            height: 6px;
+            border-radius: 3px;
+            background: linear-gradient(90deg, #1e3a5f, #3b82f6);
+            outline: none;
+            cursor: pointer;
+        }
+        #control-bar input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid var(--blue);
+            cursor: pointer;
+            box-shadow: 0 0 16px var(--blue-glow);
+            transition: var(--transition);
+        }
+        #control-bar input[type="range"]::-webkit-slider-thumb:hover {
+            box-shadow: 0 0 28px rgba(59, 130, 246, 0.8);
+            transform: scale(1.1);
+        }
+        #threshold-display {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            color: var(--blue);
+            font-size: 1.1rem;
+            min-width: 36px;
+            text-align: center;
+        }
+        #btn-attack {
+            padding: 10px 22px;
+            background: linear-gradient(135deg, #b91c1c, #dc2626);
+            color: #fff;
+            border: none;
+            border-radius: 24px;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 0.9rem;
+            letter-spacing: 0.03em;
+            transition: var(--transition);
+            font-family: var(--font-sans);
+            white-space: nowrap;
+        }
+        #btn-attack:hover {
+            background: linear-gradient(135deg, #dc2626, #ef4444);
+            box-shadow: 0 0 28px var(--red-glow);
+            transform: translateY(-2px);
+        }
+        #btn-attack:active {
+            transform: scale(0.95);
+        }
+        #btn-attack.cooldown {
+            opacity: 0.5;
+            pointer-events: none;
+            cursor: not-allowed;
+        }
+        #btn-reset {
+            padding: 8px 16px;
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: var(--transition);
+            font-family: var(--font-sans);
+            white-space: nowrap;
+        }
+        #btn-reset:hover {
+            border-color: #fff;
+            color: #fff;
+        }
+
+        /* Flag toast */
+        #flag-toast {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            background: rgba(0, 0, 0, 0.9);
+            border: 2px solid var(--amber);
+            border-radius: 16px;
+            padding: 20px 28px;
+            text-align: center;
+            z-index: 90;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 0 60px var(--amber-glow);
+            pointer-events: none;
+        }
+        #flag-toast.show {
+            transform: translate(-50%, -50%) scale(1);
+            pointer-events: auto;
+        }
+        #flag-toast .flag-icon {
+            font-size: 2.5rem;
+            margin-bottom: 6px;
+        }
+        #flag-toast .flag-text {
+            font-family: var(--font-mono);
+            color: var(--amber);
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            word-break: break-all;
+        }
+        #flag-toast .flag-label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 4px;
+        }
+        #flag-toast .flag-dismiss {
+            margin-top: 10px;
+            padding: 6px 20px;
+            background: var(--amber);
+            color: #000;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8rem;
+            transition: var(--transition);
+            pointer-events: auto;
+            font-family: var(--font-sans);
+        }
+        #flag-toast .flag-dismiss:hover {
+            box-shadow: 0 0 20px var(--amber-glow);
+            transform: scale(1.05);
+        }
+
+        /* Server crash overlay */
+        #crash-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(180, 0, 0, 0.15);
+            z-index: 30;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.6s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #crash-overlay.active {
+            opacity: 1;
+        }
+        #crash-overlay .crash-text {
+            font-family: var(--font-mono);
+            font-size: 2.5rem;
+            font-weight: 900;
+            color: var(--red);
+            text-shadow: 0 0 40px var(--red-glow);
+            animation: crashPulse 1s infinite;
+            letter-spacing: 0.05em;
+        }
+        @keyframes crashPulse {
+            0%,
+            100% {
+                opacity: 0.7;
+            }
+            50% {
+                opacity: 1;
+            }
+        }
+
+        /* Tooltip for shield */
+        #shield-tooltip {
+            position: absolute;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 20;
+        }
+
+        /* Analysis report toggle */
+        #analysis-toggle {
+            position: absolute;
+            bottom: 100px;
+            right: 16px;
+            z-index: 20;
+            padding: 8px 14px;
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.78rem;
+            font-family: var(--font-sans);
+            transition: var(--transition);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        #analysis-toggle:hover {
+            color: #fff;
+            border-color: #fff;
+        }
+        #analysis-panel {
+            position: absolute;
+            bottom: 140px;
+            right: 16px;
+            width: 360px;
+            max-height: 50vh;
+            overflow-y: auto;
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 18px;
+            z-index: 20;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+            font-size: 0.82rem;
+            line-height: 1.6;
+            display: none;
+            color: #cbd5e1;
+        }
+        #analysis-panel.visible {
+            display: block;
+            animation: fadeSlide 0.3s ease-out;
+        }
+        @keyframes fadeSlide {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        #analysis-panel h4 {
+            color: var(--cyan);
+            font-family: var(--font-mono);
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        #analysis-panel .highlight {
+            color: var(--amber);
+            font-weight: 600;
+        }
+        #analysis-panel code {
+            background: rgba(255, 255, 255, 0.06);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            #control-bar {
+                gap: 8px;
+                padding: 8px 14px;
+                border-radius: 28px;
+                bottom: 10px;
+            }
+            #control-bar input[type="range"] {
+                width: 80px;
+            }
+            #traffic-meter .meter-value {
+                font-size: 1.5rem;
+            }
+            #traffic-meter {
+                min-width: 140px;
+                padding: 10px 12px;
+            }
+            #briefing-modal {
+                padding: 20px;
+                max-width: 94%;
+            }
+            #analysis-panel {
+                width: 280px;
+                right: 4px;
+                bottom: 120px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- UI Layer -->
+    <div id="ui-layer">
+        <!-- Briefing Modal -->
+        <div id="briefing-modal">
+            <h2>🛡️ 任务简报：DDoS 流量洪水防御</h2>
+            <p class="subtitle">安全实验 · 3D 可视化 · WAF 阈值调优</p>
+            <p class="scenario-desc">
+                你正在监控一台<strong>核心服务器</strong>。绿色粒子代表<strong>正常用户流量</strong>，稳定流向服务器。
+                蓝色护盾是<strong>WAF（Web应用防火墙）</strong>的CDN防护层。
+                你的任务：<span class="danger">发动DDoS攻击</span>，观察攻击流量（红色粒子）如何冲击服务器，
+                然后<strong>调整WAF阈值</strong>来有效拦截攻击，同时尽可能不误伤正常流量。
+            </p>
+            <button id="btn-start-lab">🚀 开始实验</button>
+        </div>
+
+        <!-- Progress Panel -->
+        <div class="top-panel" id="progress-panel">
+            <div class="step active" data-step="1">步骤 1/4 — 观察正常流量</div>
+            <div class="step" data-step="2">步骤 2/4 — 发动攻击（低防护）</div>
+            <div class="step" data-step="3">步骤 3/4 — 调整WAF阈值</div>
+            <div class="step" data-step="4">步骤 4/4 — 成功防御攻击</div>
+        </div>
+
+        <!-- Traffic Meter -->
+        <div class="top-panel" id="traffic-meter">
+            <div class="meter-label">📊 流量速率 (请求/秒)</div>
+            <div class="meter-value" id="rps-display">0</div>
+            <div class="meter-sub">
+                <span style="color:var(--green);">● 正常: <span id="legit-rps">0</span></span>
+                &nbsp;
+                <span style="color:var(--red);">● 攻击: <span id="attack-rps">0</span></span>
+                &nbsp;
+                <span style="color:var(--blue);">● 拦截: <span id="blocked-rps">0</span></span>
+            </div>
+            <div class="meter-bars">
+                <div class="meter-bar-legit" id="bar-legit" style="width:100%;"></div>
+                <div class="meter-bar-attack" id="bar-attack" style="width:0%;"></div>
+            </div>
+        </div>
+
+        <!-- Control Bar -->
+        <div id="control-bar">
+            <label for="threshold-slider">🛡️ WAF 阈值</label>
+            <input type="range" id="threshold-slider" min="0" max="100" value="20" step="1">
+            <span id="threshold-display">20</span>
+            <button id="btn-attack">⚠️ 发动 DDoS 攻击</button>
+            <button id="btn-reset">↺ 重置服务器</button>
+        </div>
+
+        <!-- Flag Toast -->
+        <div id="flag-toast">
+            <div class="flag-label">🏆 成就解锁</div>
+            <div class="flag-icon">🎯</div>
+            <div class="flag-text" id="flag-code"></div>
+            <button class="flag-dismiss" id="btn-dismiss-flag">确认</button>
+        </div>
+
+        <!-- Crash Overlay -->
+        <div id="crash-overlay">
+            <span class="crash-text">⚠ SERVER CRASHED</span>
+        </div>
+
+        <!-- Analysis Toggle -->
+        <button id="analysis-toggle">📋 查看完整分析</button>
+        <div id="analysis-panel">
+            <h4>📖 DDoS 攻击分析报告</h4>
+            <p><strong>攻击类型：</strong>HTTP Flood（Layer 7 DDoS）</p>
+            <p><strong>攻击特征：</strong>大量红色请求从多个方向涌入，模拟分布式僵尸网络流量。</p>
+            <p><strong>防御机制：</strong>WAF CDN 护盾在服务器外围形成过滤层。阈值决定护盾半径与拦截强度。</p>
+            <p><strong>关键发现：</strong></p>
+            <ul>
+                <li>阈值过低（&lt;30）：护盾半径小，<span class="highlight">大量攻击穿透</span>，服务器受损</li>
+                <li>阈值适中（50-75）：护盾有效拦截攻击，正常流量基本通过</li>
+                <li>阈值过高（&gt;85）：护盾过大，<span class="highlight">误伤正常流量</span>（假阳性）</li>
+            </ul>
+            <p><strong>防御建议：</strong></p>
+            <ol>
+                <li>部署<code>速率限制(Rate Limiting)</code>——限制单IP请求频率</li>
+                <li>启用<code>行为分析</code>——识别异常流量模式</li>
+                <li>使用<code>CAPTCHA</code>挑战——区分人类与机器人</li>
+                <li>配置<code>CDN + WAF</code>联合防护——分散流量并过滤恶意请求</li>
+            </ol>
+            <p style="font-size:0.7rem;color:var(--text-secondary);margin-top:8px;">
+                // EDUCATIONAL PURPOSE ONLY — authorized classroom use<br>
+                参考：MITRE ATT&CK T1498 (Denial of Service) | Cloudflare HTTP Flood DDoS
+            </p>
+        </div>
+
+        <!-- Shield Tooltip -->
+        <div id="shield-tooltip"></div>
+    </div>
+
+    <!-- Three.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js">
+    </script>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // This PoC demonstrates DDoS traffic flood visualization with WAF mitigation
+        // Mitigation: WAF threshold tuning, rate limiting concepts, CDN shield visualization
+
+        (function() {
+            // ==================== DOM ELEMENTS ====================
+            const canvasContainer = document.getElementById('canvas-container');
+            const briefingModal = document.getElementById('briefing-modal');
+            const btnStartLab = document.getElementById('btn-start-lab');
+            const thresholdSlider = document.getElementById('threshold-slider');
+            const thresholdDisplay = document.getElementById('threshold-display');
+            const btnAttack = document.getElementById('btn-attack');
+            const btnReset = document.getElementById('btn-reset');
+            const rpsDisplay = document.getElementById('rps-display');
+            const legitRpsEl = document.getElementById('legit-rps');
+            const attackRpsEl = document.getElementById('attack-rps');
+            const blockedRpsEl = document.getElementById('blocked-rps');
+            const barLegit = document.getElementById('bar-legit');
+            const barAttack = document.getElementById('bar-attack');
+            const flagToast = document.getElementById('flag-toast');
+            const flagCodeEl = document.getElementById('flag-code');
+            const btnDismissFlag = document.getElementById('btn-dismiss-flag');
+            const crashOverlay = document.getElementById('crash-overlay');
+            const analysisToggle = document.getElementById('analysis-toggle');
+            const analysisPanel = document.getElementById('analysis-panel');
+            const shieldTooltip = document.getElementById('shield-tooltip');
+            const stepEls = document.querySelectorAll('#progress-panel .step');
+
+            // ==================== THREE.JS SETUP ====================
+            const scene = new THREE.Scene();
+
+            const camera = new THREE.PerspectiveCamera(55, canvasContainer.clientWidth / canvasContainer
+                .clientHeight, 0.3, 60);
+            camera.position.set(3.5, 2.8, 7.5);
+            camera.lookAt(0, 0, 0);
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.2;
+            canvasContainer.appendChild(renderer.domElement);
+
+            // ==================== LIGHTING ====================
+            const ambientLight = new THREE.AmbientLight(0x1a2a4a, 1.8);
+            scene.add(ambientLight);
+            const pointLight = new THREE.PointLight(0x4da6ff, 30, 18, 1.5);
+            pointLight.position.set(0, 2, 0);
+            scene.add(pointLight);
+            const rimLight = new THREE.PointLight(0x2255aa, 15, 20, 2);
+            rimLight.position.set(5, -1, -3);
+            scene.add(rimLight);
+
+            // ==================== STARFIELD ====================
+            const starCount = 1800;
+            const starGeom = new THREE.BufferGeometry();
+            const starPositions = new Float32Array(starCount * 3);
+            for (let i = 0; i < starCount; i++) {
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const r = 18 + Math.random() * 22;
+                starPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+                starPositions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+                starPositions[i * 3 + 2] = r * Math.cos(phi);
+            }
+            starGeom.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+            const starMat = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.04,
+                transparent: true,
+                opacity: 0.8,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const stars = new THREE.Points(starGeom, starMat);
+            scene.add(stars);
+
+            // ==================== GRID REFERENCE ====================
+            const gridHelper = new THREE.PolarGridHelper(5, 32, 24, 64, 0x1a3050, 0x1a3050);
+            gridHelper.position.y = -3;
+            scene.add(gridHelper);
+
+            // ==================== SERVER CUBE ====================
+            const serverGroup = new THREE.Group();
+            scene.add(serverGroup);
+
+            const serverGeom = new THREE.BoxGeometry(1, 1, 1, 2, 2, 2);
+            const serverMat = new THREE.MeshStandardMaterial({
+                color: 0x22c55e,
+                emissive: 0x22c55e,
+                emissiveIntensity: 0.4,
+                roughness: 0.3,
+                metalness: 0.5,
+            });
+            const serverCube = new THREE.Mesh(serverGeom, serverMat);
+            serverGroup.add(serverCube);
+
+            // Server edge glow
+            const edgeGeom = new THREE.EdgesGeometry(serverGeom);
+            const edgeMat = new THREE.LineBasicMaterial({ color: 0x44ff88, transparent: true, opacity: 0.7,
+                linewidth: 1 });
+            const edgeLines = new THREE.LineSegments(edgeGeom, edgeMat);
+            serverGroup.add(edgeLines);
+
+            // Inner glow sphere
+            const innerGlowGeom = new THREE.SphereGeometry(0.65, 32, 32);
+            const innerGlowMat = new THREE.MeshBasicMaterial({
+                color: 0x22c55e,
+                transparent: true,
+                opacity: 0.08,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const innerGlow = new THREE.Mesh(innerGlowGeom, innerGlowMat);
+            serverGroup.add(innerGlow);
+
+            // ==================== SHIELD (WAF) ====================
+            const shieldGroup = new THREE.Group();
+            scene.add(shieldGroup);
+
+            const shieldBaseGeom = new THREE.SphereGeometry(1, 48, 48);
+            const shieldMat = new THREE.MeshPhysicalMaterial({
+                color: 0x3b82f6,
+                emissive: 0x1a4a8a,
+                emissiveIntensity: 0.2,
+                roughness: 0.1,
+                metalness: 0.05,
+                transparent: true,
+                opacity: 0.18,
+                depthWrite: false,
+                envMapIntensity: 0,
+            });
+            const shieldSphere = new THREE.Mesh(shieldBaseGeom, shieldMat);
+            shieldGroup.add(shieldSphere);
+
+            // Wireframe shield
+            const wireframeGeom = new THREE.SphereGeometry(1, 28, 28);
+            const wireframeMat = new THREE.MeshBasicMaterial({
+                color: 0x5b9cf5,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.28,
+                depthWrite: false,
+            });
+            const wireframeSphere = new THREE.Mesh(wireframeGeom, wireframeMat);
+            shieldGroup.add(wireframeSphere);
+
+            // Shield ring
+            const ringGeom = new THREE.TorusGeometry(1, 0.03, 16, 80);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: 0x88bbff,
+                transparent: true,
+                opacity: 0.6,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const shieldRing = new THREE.Mesh(ringGeom, ringMat);
+            shieldRing.rotation.x = Math.PI / 2;
+            shieldGroup.add(shieldRing);
+
+            // Second ring (vertical)
+            const shieldRing2 = new THREE.Mesh(ringGeom.clone(), ringMat.clone());
+            shieldRing2.rotation.x = 0;
+            shieldGroup.add(shieldRing2);
+
+            // Third ring (diagonal)
+            const shieldRing3 = new THREE.Mesh(ringGeom.clone(), ringMat.clone());
+            shieldRing3.rotation.z = Math.PI / 2;
+            shieldGroup.add(shieldRing3);
+
+            // ==================== GLOW TEXTURES ====================
+            function createGlowTexture(colorInner, colorOuter, size) {
+                const canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                const half = size / 2;
+                const gradient = ctx.createRadialGradient(half, half, 0, half, half, half);
+                gradient.addColorStop(0, colorInner);
+                gradient.addColorStop(0.15, colorInner);
+                gradient.addColorStop(0.5, colorOuter);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, size, size);
+                return new THREE.CanvasTexture(canvas);
+            }
+
+            const greenGlowTex = createGlowTexture('#44ff88', '#22c55e', 64);
+            const redGlowTex = createGlowTexture('#ff4444', '#dc2626', 64);
+            const burstGlowTex = createGlowTexture('#ffaa00', '#f59e0b', 48);
+            const orangeGlowTex = createGlowTexture('#ff8800', '#ef4444', 40);
+
+            // ==================== PARTICLE SYSTEMS ====================
+            // --- Green particles (normal traffic) ---
+            const GREEN_POOL = 200;
+            const greenData = {
+                positions: new Float32Array(GREEN_POOL * 3),
+                velocities: new Float32Array(GREEN_POOL * 3),
+                active: new Array(GREEN_POOL).fill(false),
+                passedShield: new Array(GREEN_POOL).fill(false),
+                spawnTimer: 0,
+                spawnInterval: 8, // frames between spawns
+            };
+            // Initialize all positions far away
+            for (let i = 0; i < GREEN_POOL; i++) {
+                greenData.positions[i * 3] = 0;
+                greenData.positions[i * 3 + 1] = -50;
+                greenData.positions[i * 3 + 2] = 0;
+            }
+            const greenGeom = new THREE.BufferGeometry();
+            greenGeom.setAttribute('position', new THREE.BufferAttribute(greenData.positions, 3));
+            const greenMat = new THREE.PointsMaterial({
+                size: 0.18,
+                map: greenGlowTex,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                transparent: true,
+                opacity: 0.85,
+                color: 0x44ff88,
+            });
+            const greenPoints = new THREE.Points(greenGeom, greenMat);
+            scene.add(greenPoints);
+
+            // --- Red particles (attack traffic) ---
+            const RED_POOL = 2000;
+            const redData = {
+                positions: new Float32Array(RED_POOL * 3),
+                velocities: new Float32Array(RED_POOL * 3),
+                active: new Array(RED_POOL).fill(false),
+                passedShield: new Array(RED_POOL).fill(false),
+                spawnQueue: 0,
+            };
+            for (let i = 0; i < RED_POOL; i++) {
+                redData.positions[i * 3] = 0;
+                redData.positions[i * 3 + 1] = -50;
+                redData.positions[i * 3 + 2] = 0;
+            }
+            const redGeom = new THREE.BufferGeometry();
+            redGeom.setAttribute('position', new THREE.BufferAttribute(redData.positions, 3));
+            const redMat = new THREE.PointsMaterial({
+                size: 0.16,
+                map: redGlowTex,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                transparent: true,
+                opacity: 0.9,
+                color: 0xff4444,
+            });
+            const redPoints = new THREE.Points(redGeom, redMat);
+            scene.add(redPoints);
+
+            // --- Burst particles (shield impact sparks) ---
+            const BURST_POOL = 500;
+            const burstData = {
+                positions: new Float32Array(BURST_POOL * 3),
+                velocities: new Float32Array(BURST_POOL * 3),
+                life: new Float32Array(BURST_POOL),
+                maxLife: new Float32Array(BURST_POOL),
+                active: new Array(BURST_POOL).fill(false),
+            };
+            for (let i = 0; i < BURST_POOL; i++) {
+                burstData.positions[i * 3] = 0;
+                burstData.positions[i * 3 + 1] = -50;
+                burstData.positions[i * 3 + 2] = 0;
+                burstData.life[i] = 0;
+                burstData.maxLife[i] = 1;
+            }
+            const burstGeom = new THREE.BufferGeometry();
+            burstGeom.setAttribute('position', new THREE.BufferAttribute(burstData.positions, 3));
+            const burstMat = new THREE.PointsMaterial({
+                size: 0.13,
+                map: burstGlowTex,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                transparent: true,
+                opacity: 0.9,
+                color: 0xffaa00,
+            });
+            const burstPoints = new THREE.Points(burstGeom, burstMat);
+            scene.add(burstPoints);
+
+            // ==================== STATE ====================
+            let wafThreshold = 20;
+            let attackActive = false;
+            let attackSpawnRemaining = 0;
+            let attackCooldown = 0;
+            const ATTACK_TOTAL = 2000;
+            const ATTACK_SPAWN_PER_FRAME = 55;
+            let serverHealth = 100;
+            const SERVER_MAX_HEALTH = 100;
+            let serverCrashed = false;
+            let shakeIntensity = 0;
+            let shieldRadius = 1.4;
+
+            // Metrics
+            let legitCounter = 0;
+            let attackCounter = 0;
+            let blockedCounter = 0;
+            let displayedRPS = 0;
+            let displayedAttackRPS = 0;
+            let displayedBlockedRPS = 0;
+            let metricAccum = 0;
+            const METRIC_WINDOW = 60; // frames (~1 second)
+
+            // Flags & Progress
+            let flagUnlocked = false;
+            let step1Done = false;
+            let step2Done = false;
+            let step3Done = false;
+            let step4Done = false;
+            let lastAttackBlockRate = 0;
+            let attacksLaunched = 0;
+            let attackHitsDuringCurrentAttack = 0;
+            let attackBlockedDuringCurrentAttack = 0;
+
+            // ==================== HELPER FUNCTIONS ====================
+            function randomOnSphere(radius) {
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const x = radius * Math.sin(phi) * Math.cos(theta);
+                const y = radius * Math.sin(phi) * Math.sin(theta);
+                const z = radius * Math.cos(phi);
+                return { x, y, z, theta, phi };
+            }
+
+            function spawnGreenParticle() {
+                for (let i = 0; i < GREEN_POOL; i++) {
+                    if (!greenData.active[i]) {
+                        const dist = 5.5 + Math.random() * 2.5;
+                        const pos = randomOnSphere(dist);
+                        greenData.positions[i * 3] = pos.x;
+                        greenData.positions[i * 3 + 1] = pos.y;
+                        greenData.positions[i * 3 + 2] = pos.z;
+                        const speed = 0.025 + Math.random() * 0.04;
+                        const len = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+                        greenData.velocities[i * 3] = -(pos.x / len) * speed;
+                        greenData.velocities[i * 3 + 1] = -(pos.y / len) * speed;
+                        greenData.velocities[i * 3 + 2] = -(pos.z / len) * speed;
+                        greenData.active[i] = true;
+                        greenData.passedShield[i] = false;
+                        return;
+                    }
+                }
+            }
+
+            function spawnRedParticle() {
+                for (let i = 0; i < RED_POOL; i++) {
+                    if (!redData.active[i]) {
+                        const dist = 6.0 + Math.random() * 2.5;
+                        const pos = randomOnSphere(dist);
+                        redData.positions[i * 3] = pos.x;
+                        redData.positions[i * 3 + 1] = pos.y;
+                        redData.positions[i * 3 + 2] = pos.z;
+                        const speed = 0.07 + Math.random() * 0.12;
+                        const len = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+                        const jitterX = (Math.random() - 0.5) * 0.04;
+                        const jitterY = (Math.random() - 0.5) * 0.04;
+                        const jitterZ = (Math.random() - 0.5) * 0.04;
+                        redData.velocities[i * 3] = -(pos.x / len) * speed + jitterX;
+                        redData.velocities[i * 3 + 1] = -(pos.y / len) * speed + jitterY;
+                        redData.velocities[i * 3 + 2] = -(pos.z / len) * speed + jitterZ;
+                        redData.active[i] = true;
+                        redData.passedShield[i] = false;
+                        return;
+                    }
+                }
+            }
+
+            function spawnBurst(x, y, z, count) {
+                let spawned = 0;
+                for (let i = 0; i < BURST_POOL && spawned < count; i++) {
+                    if (!burstData.active[i]) {
+                        burstData.positions[i * 3] = x;
+                        burstData.positions[i * 3 + 1] = y;
+                        burstData.positions[i * 3 + 2] = z;
+                        const speed = 0.03 + Math.random() * 0.09;
+                        const dir = randomOnSphere(1);
+                        burstData.velocities[i * 3] = dir.x * speed;
+                        burstData.velocities[i * 3 + 1] = dir.y * speed;
+                        burstData.velocities[i * 3 + 2] = dir.z * speed;
+                        burstData.maxLife[i] = 18 + Math.floor(Math.random() * 35);
+                        burstData.life[i] = burstData.maxLife[i];
+                        burstData.active[i] = true;
+                        spawned++;
+                    }
+                }
+            }
+
+            function updateShieldRadius() {
+                shieldRadius = 1.25 + (wafThreshold / 100) * 3.4;
+                shieldGroup.scale.setScalar(shieldRadius);
+                // Update ring sizes
+                shieldRing.scale.setScalar(shieldRadius);
+                shieldRing2.scale.setScalar(shieldRadius);
+                shieldRing3.scale.setScalar(shieldRadius);
+            }
+
+            function applyServerDamage(amount) {
+                if (serverCrashed) return;
+                serverHealth = Math.max(0, serverHealth - amount);
+                shakeIntensity = Math.min(shakeIntensity + amount * 0.025, 0.35);
+                if (serverHealth <= 0) {
+                    serverCrashed = true;
+                    crashOverlay.classList.add('active');
+                    serverMat.color.set('#4a0000');
+                    serverMat.emissive.set('#200000');
+                    serverMat.emissiveIntensity = 0.1;
+                    edgeMat.color.set('#880000');
+                    innerGlowMat.color.set('#440000');
+                    innerGlowMat.opacity = 0.03;
+                }
+            }
+
+            function resetServer() {
+                serverHealth = SERVER_MAX_HEALTH;
+                serverCrashed = false;
+                shakeIntensity = 0;
+                crashOverlay.classList.remove('active');
+                serverMat.color.set('#22c55e');
+                serverMat.emissive.set('#22c55e');
+                serverMat.emissiveIntensity = 0.4;
+                edgeMat.color.set('#44ff88');
+                innerGlowMat.color.set('#22c55e');
+                innerGlowMat.opacity = 0.08;
+                serverGroup.position.set(0, 0, 0);
+                attackHitsDuringCurrentAttack = 0;
+                attackBlockedDuringCurrentAttack = 0;
+                lastAttackBlockRate = 0;
+            }
+
+            function getBlockProbability() {
+                // At threshold, particles hitting the shield have this chance of being blocked
+                return wafThreshold / 100;
+            }
+
+            function getFalsePositiveRate() {
+                // Green particles at high thresholds may be falsely blocked
+                if (wafThreshold < 40) return 0;
+                return (wafThreshold - 40) / 100 * 0.18; // max ~10.8% at threshold 100
+            }
+
+            // ==================== ATTACK LOGIC ====================
+            function launchAttack() {
+                if (attackCooldown > 0 || serverCrashed) return;
+                attackActive = true;
+                attackSpawnRemaining = ATTACK_TOTAL;
+                attackCooldown = 90; // ~1.5 sec cooldown
+                attacksLaunched++;
+                attackHitsDuringCurrentAttack = 0;
+                attackBlockedDuringCurrentAttack = 0;
+                btnAttack.classList.add('cooldown');
+                if (!step2Done && attacksLaunched >= 1) {
+                    step2Done = true;
+                    updateProgressSteps();
+                }
+            }
+
+            // ==================== UPDATE FUNCTIONS ====================
+            function updateGreenParticles() {
+                // Spawn
+                greenData.spawnTimer++;
+                const spawnRate = Math.max(2, Math.floor(10 - wafThreshold * 0.06));
+                if (greenData.spawnTimer >= spawnRate) {
+                    greenData.spawnTimer = 0;
+                    spawnGreenParticle();
+                    if (Math.random() < 0.6) spawnGreenParticle();
+                }
+                // Ensure minimum active
+                let activeCount = greenData.active.filter(Boolean).length;
+                if (activeCount < 40) {
+                    for (let s = 0; s < 5; s++) spawnGreenParticle();
+                }
+
+                const sr = shieldRadius;
+                const hr = 0.65; // server hit radius
+                const fpRate = getFalsePositiveRate();
+
+                for (let i = 0; i < GREEN_POOL; i++) {
+                    if (!greenData.active[i]) continue;
+                    const ix = i * 3;
+                    let px = greenData.positions[ix];
+                    let py = greenData.positions[ix + 1];
+                    let pz = greenData.positions[ix + 2];
+                    const vx = greenData.velocities[ix];
+                    const vy = greenData.velocities[ix + 1];
+                    const vz = greenData.velocities[ix + 2];
+
+                    px += vx;
+                    py += vy;
+                    pz += vz;
+                    greenData.positions[ix] = px;
+                    greenData.positions[ix + 1] = py;
+                    greenData.positions[ix + 2] = pz;
+
+                    const dist = Math.sqrt(px * px + py * py + pz * pz);
+
+                    // Check shield crossing
+                    if (!greenData.passedShield[i] && dist <= sr && dist > hr) {
+                        greenData.passedShield[i] = true;
+                        // False positive check
+                        if (Math.random() < fpRate) {
+                            // Legitimate traffic blocked!
+                            spawnBurst(px, py, pz, 4);
+                            blockedCounter++;
+                            greenData.active[i] = false;
+                            greenData.positions[ix + 1] = -50;
+                            continue;
+                        }
+                    }
+
+                    // Hit server
+                    if (dist <= hr) {
+                        legitCounter++;
+                        greenData.active[i] = false;
+                        greenData.positions[ix + 1] = -50;
+                        continue;
+                    }
+                    // Went too far past
+                    if (dist < 0.2 || dist > 9) {
+                        greenData.active[i] = false;
+                        greenData.positions[ix + 1] = -50;
+                    }
+                }
+                greenGeom.attributes.position.needsUpdate = true;
+            }
+
+            function updateRedParticles() {
+                // Attack spawning
+                if (attackActive && attackSpawnRemaining > 0) {
+                    const toSpawn = Math.min(ATTACK_SPAWN_PER_FRAME, attackSpawnRemaining);
+                    for (let s = 0; s < toSpawn; s++) {
+                        spawnRedParticle();
+                    }
+                    attackSpawnRemaining -= toSpawn;
+                    if (attackSpawnRemaining <= 0) {
+                        attackActive = false;
+                    }
+                }
+
+                const sr = shieldRadius;
+                const hr = 0.65;
+                const blockProb = getBlockProbability();
+
+                for (let i = 0; i < RED_POOL; i++) {
+                    if (!redData.active[i]) continue;
+                    const ix = i * 3;
+                    let px = redData.positions[ix];
+                    let py = redData.positions[ix + 1];
+                    let pz = redData.positions[ix + 2];
+                    const vx = redData.velocities[ix];
+                    const vy = redData.velocities[ix + 1];
+                    const vz = redData.velocities[ix + 2];
+
+                    px += vx;
+                    py += vy;
+                    pz += vz;
+                    redData.positions[ix] = px;
+                    redData.positions[ix + 1] = py;
+                    redData.positions[ix + 2] = pz;
+
+                    const dist = Math.sqrt(px * px + py * py + pz * pz);
+
+                    // Check shield
+                    if (!redData.passedShield[i] && dist <= sr && dist > hr) {
+                        redData.passedShield[i] = true;
+                        if (Math.random() < blockProb) {
+                            // Blocked!
+                            spawnBurst(px, py, pz, 12 + Math.floor(Math.random() * 16));
+                            blockedCounter++;
+                            attackBlockedDuringCurrentAttack++;
+                            redData.active[i] = false;
+                            redData.positions[ix + 1] = -50;
+                            continue;
+                        }
+                    }
+
+                    // Hit server
+                    if (dist <= hr) {
+                        attackCounter++;
+                        attackHitsDuringCurrentAttack++;
+                        if (!serverCrashed) {
+                            applyServerDamage(2.5 + Math.random() * 1.5);
+                        }
+                        redData.active[i] = false;
+                        redData.positions[ix + 1] = -50;
+                        continue;
+                    }
+                    // Went past
+                    if (dist < 0.15 || dist > 10) {
+                        redData.active[i] = false;
+                        redData.positions[ix + 1] = -50;
+                    }
+                }
+                redGeom.attributes.position.needsUpdate = true;
+            }
+
+            function updateBurstParticles() {
+                for (let i = 0; i < BURST_POOL; i++) {
+                    if (!burstData.active[i]) continue;
+                    burstData.life[i]--;
+                    if (burstData.life[i] <= 0) {
+                        burstData.active[i] = false;
+                        burstData.positions[i * 3 + 1] = -50;
+                        continue;
+                    }
+                    const ix = i * 3;
+                    burstData.positions[ix] += burstData.velocities[ix];
+                    burstData.positions[ix + 1] += burstData.velocities[ix + 1];
+                    burstData.positions[ix + 2] += burstData.velocities[ix + 2];
+                    // Slow down
+                    burstData.velocities[ix] *= 0.96;
+                    burstData.velocities[ix + 1] *= 0.96;
+                    burstData.velocities[ix + 2] *= 0.96;
+                    // Fade by reducing particle size via life ratio
+                }
+                burstGeom.attributes.position.needsUpdate = true;
+                // Update opacity based on average life
+                let avgLifeRatio = 0;
+                let activeBursts = 0;
+                for (let i = 0; i < BURST_POOL; i++) {
+                    if (burstData.active[i]) {
+                        avgLifeRatio += burstData.life[i] / burstData.maxLife[i];
+                        activeBursts++;
+                    }
+                }
+                if (activeBursts > 0) {
+                    avgLifeRatio /= activeBursts;
+                    burstMat.opacity = 0.3 + avgLifeRatio * 0.6;
+                }
+            }
+
+            function updateServerShake() {
+                if (shakeIntensity > 0.001) {
+                    const sx = (Math.random() - 0.5) * shakeIntensity * 2;
+                    const sy = (Math.random() - 0.5) * shakeIntensity * 2;
+                    const sz = (Math.random() - 0.5) * shakeIntensity * 2;
+                    serverGroup.position.set(sx, sy, sz);
+                    shakeIntensity *= 0.88;
+                } else {
+                    shakeIntensity = 0;
+                    serverGroup.position.lerp(new THREE.Vector3(0, 0, 0), 0.2);
+                }
+                // Server color based on health
+                if (!serverCrashed) {
+                    const healthRatio = serverHealth / SERVER_MAX_HEALTH;
+                    const r = 0.13 + (1 - healthRatio) * 0.87;
+                    const g = 0.77 * healthRatio + 0.05 * (1 - healthRatio);
+                    const b = 0.37 * healthRatio + 0.05 * (1 - healthRatio);
+                    serverMat.color.setRGB(r, g, b);
+                    serverMat.emissive.setRGB(r * 0.6, g * 0.6, b * 0.6);
+                    serverMat.emissiveIntensity = 0.2 + healthRatio * 0.3;
+                    edgeMat.color.setRGB(r * 1.2, g * 1.3, b * 1.3);
+                }
+                // Server recovery
+                if (!serverCrashed && serverHealth < SERVER_MAX_HEALTH && !attackActive && attackSpawnRemaining <=
+                    0) {
+                    serverHealth = Math.min(SERVER_MAX_HEALTH, serverHealth + 0.08);
+                }
+            }
+
+            function updateMetrics() {
+                metricAccum++;
+                if (metricAccum >= 6) { // ~every 100ms at 60fps
+                    metricAccum = 0;
+                    const smoothRPS = legitCounter + attackCounter;
+                    displayedRPS += (smoothRPS - displayedRPS) * 0.4;
+                    displayedAttackRPS += (attackCounter - displayedAttackRPS) * 0.4;
+                    displayedBlockedRPS += (blockedCounter - displayedBlockedRPS) * 0.4;
+                    rpsDisplay.textContent = Math.round(displayedRPS);
+                    legitRpsEl.textContent = Math.round(displayedRPS - displayedAttackRPS);
+                    attackRpsEl.textContent = Math.round(displayedAttackRPS);
+                    blockedRpsEl.textContent = Math.round(displayedBlockedRPS);
+
+                    // Color the main RPS display
+                    if (displayedAttackRPS > displayedRPS * 0.4) {
+                        rpsDisplay.classList.add('danger');
+                    } else {
+                        rpsDisplay.classList.remove('danger');
+                    }
+
+                    // Update bars
+                    const totalForBar = Math.max(1, Math.round(displayedRPS + displayedBlockedRPS));
+                    const legitPct = Math.max(0, Math.round((displayedRPS - displayedAttackRPS) / totalForBar *
+                        100));
+                    const attackPct = Math.min(100 - legitPct, Math.round(displayedAttackRPS / totalForBar * 100));
+                    barLegit.style.width = legitPct + '%';
+                    barAttack.style.width = attackPct + '%';
+
+                    // Reset counters periodically
+                    if (legitCounter > 500 || attackCounter > 500 || blockedCounter > 500) {
+                        legitCounter = Math.max(0, legitCounter - 200);
+                        attackCounter = Math.max(0, attackCounter - 200);
+                        blockedCounter = Math.max(0, blockedCounter - 200);
+                    }
+                }
+            }
+
+            function checkFlagsAndProgress() {
+                // Step 1: observed normal traffic (automatic after a few seconds)
+                if (!step1Done && legitCounter > 30) {
+                    step1Done = true;
+                    updateProgressSteps();
+                }
+                // Step 3: adjusted threshold significantly
+                if (!step3Done && step2Done && (wafThreshold >= 55 || wafThreshold <= 5)) {
+                    step3Done = true;
+                    updateProgressSteps();
+                }
+                // Step 4 & Flag: successfully blocked an attack
+                const totalDuringAttack = attackHitsDuringCurrentAttack + attackBlockedDuringCurrentAttack;
+                if (totalDuringAttack > 100 && !attackActive && attackSpawnRemaining <= 0) {
+                    lastAttackBlockRate = attackBlockedDuringCurrentAttack / Math.max(1, totalDuringAttack);
+                    if (lastAttackBlockRate > 0.7 && wafThreshold >= 50) {
+                        if (!step4Done) {
+                            step4Done = true;
+                            updateProgressSteps();
+                        }
+                        if (!flagUnlocked) {
+                            flagUnlocked = true;
+                            flagCodeEl.textContent = 'FLAG{ddos_w4f_m1t1g4t10n_m4st3r_2024}';
+                            flagToast.classList.add('show');
+                        }
+                    }
+                }
+                // Track for step 2
+                if (step2Done && attacksLaunched >= 1 && attackHitsDuringCurrentAttack > 20 && wafThreshold < 35 &&
+                    !step3Done) {
+                    // Student saw attack damage with low protection
+                }
+            }
+
+            function updateProgressSteps() {
+                const steps = [step1Done, step2Done, step3Done, step4Done];
+                stepEls.forEach((el, idx) => {
+                    el.classList.remove('active', 'done');
+                    if (steps[idx]) {
+                        el.classList.add('done');
+                    } else if (idx === 0 || (idx > 0 && steps[idx - 1])) {
+                        el.classList.add('active');
+                    }
+                });
+            }
+
+            // ==================== MAIN LOOP ====================
+            function animate() {
+                requestAnimationFrame(animate);
+
+                // Update cooldown
+                if (attackCooldown > 0) {
+                    attackCooldown--;
+                    if (attackCooldown <= 0) {
+                        btnAttack.classList.remove('cooldown');
+                    }
+                }
+
+                updateGreenParticles();
+                updateRedParticles();
+                updateBurstParticles();
+                updateServerShake();
+                updateMetrics();
+                checkFlagsAndProgress();
+
+                // Subtle star rotation
+                stars.rotation.y += 0.00015;
+                stars.rotation.x += 0.00005;
+
+                // Shield subtle pulse
+                const pulse = 1 + Math.sin(Date.now() * 0.002) * 0.015;
+                shieldRing.scale.setScalar(shieldRadius * pulse);
+                shieldRing2.scale.setScalar(shieldRadius * pulse * 0.97);
+                shieldRing3.scale.setScalar(shieldRadius * pulse * 1.02);
+
+                // Point light subtle animation
+                pointLight.intensity = 28 + Math.sin(Date.now() * 0.003) * 3;
+
+                renderer.render(scene, camera);
+            }
+
+            // ==================== MOUSE ORBIT CONTROLS ====================
+            let isDragging = false;
+            let prevMouse = { x: 0, y: 0 };
+            let orbitTheta = Math.atan2(camera.position.x, camera.position.z);
+            let orbitPhi = Math.acos(camera.position.y / camera.position.length());
+            let orbitRadius = camera.position.length();
+            const orbitTarget = new THREE.Vector3(0, 0, 0);
+
+            function updateCameraPosition() {
+                const x = orbitRadius * Math.sin(orbitPhi) * Math.sin(orbitTheta);
+                const y = orbitRadius * Math.cos(orbitPhi);
+                const z = orbitRadius * Math.sin(orbitPhi) * Math.cos(orbitTheta);
+                camera.position.set(x, y, z);
+                camera.lookAt(orbitTarget);
+            }
+
+            renderer.domElement.addEventListener('pointerdown', (e) => {
+                if (e.target === renderer.domElement) {
+                    isDragging = true;
+                    prevMouse.x = e.clientX;
+                    prevMouse.y = e.clientY;
+                }
+            });
+
+            window.addEventListener('pointermove', (e) => {
+                if (!isDragging) return;
+                const dx = e.clientX - prevMouse.x;
+                const dy = e.clientY - prevMouse.y;
+                orbitTheta -= dx * 0.005;
+                orbitPhi -= dy * 0.005;
+                orbitPhi = Math.max(0.2, Math.min(2.5, orbitPhi));
+                updateCameraPosition();
+                prevMouse.x = e.clientX;
+                prevMouse.y = e.clientY;
+            });
+
+            window.addEventListener('pointerup', () => {
+                isDragging = false;
+            });
+
+            renderer.domElement.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                orbitRadius += e.deltaY * 0.01;
+                orbitRadius = Math.max(3.5, Math.min(16, orbitRadius));
+                updateCameraPosition();
+            }, { passive: false });
+
+            // Touch pinch zoom
+            let lastPinchDist = 0;
+            renderer.domElement.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 2) {
+                    lastPinchDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                }
+            }, { passive: true });
+            renderer.domElement.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 2) {
+                    const dist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    const delta = lastPinchDist - dist;
+                    orbitRadius += delta * 0.02;
+                    orbitRadius = Math.max(3.5, Math.min(16, orbitRadius));
+                    updateCameraPosition();
+                    lastPinchDist = dist;
+                }
+            }, { passive: true });
+
+            // ==================== EVENT LISTENERS ====================
+            btnStartLab.addEventListener('click', () => {
+                briefingModal.classList.add('hidden');
+                updateProgressSteps();
+            });
+
+            thresholdSlider.addEventListener('input', () => {
+                wafThreshold = parseInt(thresholdSlider.value);
+                thresholdDisplay.textContent = wafThreshold;
+                updateShieldRadius();
+                if (step2Done && (wafThreshold >= 55 || wafThreshold <= 5) && !step3Done) {
+                    step3Done = true;
+                    updateProgressSteps();
+                }
+            });
+
+            btnAttack.addEventListener('click', () => {
+                launchAttack();
+            });
+
+            btnReset.addEventListener('click', () => {
+                resetServer();
+                attackActive = false;
+                attackSpawnRemaining = 0;
+                attackCooldown = 0;
+                btnAttack.classList.remove('cooldown');
+                // Clear all red particles
+                for (let i = 0; i < RED_POOL; i++) {
+                    redData.active[i] = false;
+                    redData.positions[i * 3 + 1] = -50;
+                }
+                redGeom.attributes.position.needsUpdate = true;
+                attackHitsDuringCurrentAttack = 0;
+                attackBlockedDuringCurrentAttack = 0;
+                lastAttackBlockRate = 0;
+            });
+
+            btnDismissFlag.addEventListener('click', () => {
+                flagToast.classList.remove('show');
+            });
+
+            analysisToggle.addEventListener('click', () => {
+                analysisPanel.classList.toggle('visible');
+                if (analysisPanel.classList.contains('visible')) {
+                    analysisToggle.textContent = '📋 隐藏分析';
+                } else {
+                    analysisToggle.textContent = '📋 查看完整分析';
+                }
+            });
+
+            // Keyboard shortcuts
+            window.addEventListener('keydown', (e) => {
+                switch (e.key.toLowerCase()) {
+                    case 'a':
+                        launchAttack();
+                        break;
+                    case 'r':
+                        resetServer();
+                        attackActive = false;
+                        attackSpawnRemaining = 0;
+                        attackCooldown = 0;
+                        btnAttack.classList.remove('cooldown');
+                        for (let i = 0; i < RED_POOL; i++) {
+                            redData.active[i] = false;
+                            redData.positions[i * 3 + 1] = -50;
+                        }
+                        redGeom.attributes.position.needsUpdate = true;
+                        break;
+                    case 'arrowleft':
+                        wafThreshold = Math.max(0, wafThreshold - 5);
+                        thresholdSlider.value = wafThreshold;
+                        thresholdDisplay.textContent = wafThreshold;
+                        updateShieldRadius();
+                        break;
+                    case 'arrowright':
+                        wafThreshold = Math.min(100, wafThreshold + 5);
+                        thresholdSlider.value = wafThreshold;
+                        thresholdDisplay.textContent = wafThreshold;
+                        updateShieldRadius();
+                        break;
+                }
+            });
+
+            // Resize handler
+            window.addEventListener('resize', () => {
+                camera.aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+            });
+
+            // ==================== INITIALIZATION ====================
+            updateShieldRadius();
+            thresholdSlider.value = wafThreshold;
+            thresholdDisplay.textContent = wafThreshold;
+            updateProgressSteps();
+
+            // Pre-spawn some green particles for immediate visual
+            for (let i = 0; i < 50; i++) {
+                spawnGreenParticle();
+                // Advance them a bit so they're visible
+                const idx = GREEN_POOL - 1 - i;
+                if (idx >= 0 && greenData.active[idx]) {
+                    const ix = idx * 3;
+                    greenData.positions[ix] += greenData.velocities[ix] * (20 + Math.random() * 40);
+                    greenData.positions[ix + 1] += greenData.velocities[ix + 1] * (20 + Math.random() * 40);
+                    greenData.positions[ix + 2] += greenData.velocities[ix + 2] * (20 + Math.random() * 40);
+                }
+            }
+            greenGeom.attributes.position.needsUpdate = true;
+
+            // Start animation loop
+            animate();
+
+            // Log startup
+            console.log(
+                '%c🛡️ DDoS 流量洪水 3D 可视化实验已就绪 %c| %cEDUCATIONAL PURPOSE ONLY',
+                'color:#22c55e;font-weight:bold;',
+                '',
+                'color:#f59e0b;'
+            );
+            console.log('%c控制提示：鼠标拖拽旋转 | 滚轮缩放 | 按 A 发动攻击 | 按 R 重置 | 方向键调整阈值',
+                'color:#94a3b8;');
+            console.log('%c// EDUCATIONAL PURPOSE ONLY — authorized classroom use', 'color:#ef4444;font-style:italic;');
+        })();
+    </script>
+</body>
+</html>

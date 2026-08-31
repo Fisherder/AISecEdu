@@ -1,0 +1,71 @@
+{
+  "contractVersion": "2026-08-28",
+  "viewports": {
+    "phone": {"width": 360, "height": 800},
+    "phoneWide": {"width": 390, "height": 844},
+    "tablet": {"width": 768, "height": 1024},
+    "laptop": {"width": 1024, "height": 768},
+    "desktop": {"width": 1440, "height": 1000}
+  },
+  "fixtures": {
+    "course": "AISECEDU_UX_COURSE",
+    "module": "AISECEDU_UX_MODULE",
+    "challenge": "AISECEDU_UX_CHALLENGE",
+    "assignment": "AISECEDU_UX_ASSIGNMENT",
+    "artifact": "AISECEDU_UX_ARTIFACT"
+  },
+  "routes": [
+    {"id": "PUB-01", "path": "/", "mode": "public", "session": "public", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata", "publicNavigation", "noUnauthorizedEvents", "crawlLinks", "axe", "keyboard"]},
+    {"id": "PUB-02", "path": "/dojos?tab=discover", "mode": "public", "session": "public", "expected": [200], "viewports": ["phone", "tablet", "desktop"], "checks": ["metadata", "pagination", "search"]},
+    {"id": "PUB-05", "path": "/{course}", "mode": "public", "session": "public", "expected": [200, 302, 403], "viewports": ["phone", "desktop"], "checks": ["metadata", "safeLoginReturn"]},
+    {"id": "PUB-06", "path": "/feed", "mode": "public", "session": "public", "expected": [200, 308], "viewports": ["phone", "desktop"], "checks": ["metadata", "canonicalLinks"]},
+    {"id": "PUB-07A", "path": "/terms", "mode": "public", "session": "public", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata"]},
+    {"id": "PUB-07B", "path": "/privacy", "mode": "public", "session": "public", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata"]},
+    {"id": "PUB-08", "path": "/system-ux-missing-resource", "mode": "public", "session": "public", "expected": [404], "viewports": ["phone", "desktop"], "checks": ["metadata", "errorRecovery"]},
+    {"id": "PUB-AUX-RESEARCH", "path": "/research", "mode": "public", "session": "public", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata"]},
+    {"id": "PUB-AUX-BELTS", "path": "/belts", "mode": "public", "session": "public", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata"]},
+    {"id": "PUB-AUX-ABOUT", "path": "/about", "mode": "public", "session": "public", "expected": [200, 308], "viewports": ["phone", "desktop"], "checks": ["metadata"]},
+    {"id": "AUTH-01", "path": "/login?next=%2Fdojos", "mode": "public", "session": "public", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata", "safeLoginReturn", "formLabels"]},
+    {"id": "AUTH-02", "path": "/register", "mode": "public", "session": "public", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata", "formLabels"]},
+    {"id": "AUTH-06", "path": "/reset_password", "mode": "public", "session": "public", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata", "formLabels"]},
+    {"id": "AUTH-07", "path": "/discord/redirect", "mode": "learning", "session": "student", "expected": [400, 503], "viewports": ["phone", "desktop"], "checks": ["metadata", "errorRecovery"]},
+
+    {"id": "STU-01", "path": "/student", "mode": "learning", "session": "student", "expected": [200], "viewports": ["phone", "phoneWide", "tablet", "laptop", "desktop"], "checks": ["metadata", "onePrimaryAction", "activeNavigation", "crawlLinks", "axe", "keyboard"]},
+    {"id": "STU-04", "path": "/dojos?tab=mine", "mode": "learning", "session": "student", "expected": [200], "viewports": ["phone", "tablet", "desktop"], "checks": ["metadata", "pagination", "activeNavigation"]},
+    {"id": "STU-07", "path": "/{course}/{module}/{challenge}", "mode": "learning", "session": "student", "expected": [200, 403, 410], "viewports": ["phone", "phoneWide", "tablet", "desktop"], "checks": ["metadata", "workspaceContext"]},
+    {"id": "STU-13", "path": "/learning/assignments/{assignment}", "mode": "learning", "session": "student", "expected": [200, 403, 404], "viewports": ["phone", "desktop"], "checks": ["metadata", "autosaveStatus"]},
+    {"id": "STU-16", "path": "/learning/dashboard", "mode": "learning", "session": "student", "expected": [200, 302], "viewports": ["phone", "desktop"], "checks": ["metadata", "evidenceDefinitions"]},
+    {"id": "STU-17", "path": "/guide", "mode": "learning", "session": "student", "expected": [200], "viewports": ["phone", "phoneWide", "tablet", "desktop"], "checks": ["metadata", "activeNavigation"]},
+    {"id": "STU-19", "path": "/learning/extend", "mode": "learning", "session": "student", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata", "privateVisibility"]},
+    {"id": "STU-20", "path": "/learning/artifacts/{artifact}", "mode": "learning", "session": "student", "expected": [200, 403, 404], "viewports": ["phone", "desktop"], "checks": ["metadata", "studentSerializer"]},
+    {"id": "STU-10", "path": "/workspace", "mode": "learning", "session": "student", "expected": [200, 410], "viewports": ["phone", "phoneWide", "tablet", "desktop"], "checks": ["metadata", "workspaceContext"]},
+    {"id": "STU-PROFILE", "path": "/hacker/", "mode": "learning", "session": "student", "expected": [200, 302], "viewports": ["phone", "desktop"], "checks": ["metadata", "privateVisibility"]},
+    {"id": "STU-SETTINGS", "path": "/settings", "mode": "learning", "session": "student", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata", "activeNavigation", "formLabels"]},
+
+    {"id": "TEA-01", "path": "/teacher", "mode": "teaching", "session": "teacher", "expected": [200], "viewports": ["phone", "phoneWide", "tablet", "laptop", "desktop"], "checks": ["metadata", "onePrimaryAction", "activeNavigation", "crawlLinks", "axe", "keyboard"]},
+    {"id": "TEA-02", "path": "/teacher/courses", "mode": "teaching", "session": "teacher", "expected": [200], "viewports": ["phone", "phoneWide", "tablet", "laptop", "desktop"], "checks": ["metadata", "pagination", "activeNavigation"]},
+    {"id": "TEA-03", "path": "/teacher/courses?dojo={course}", "mode": "teaching", "session": "teacher", "expected": [200, 404], "viewports": ["phone", "phoneWide", "tablet", "laptop", "desktop"], "checks": ["metadata", "tabs", "lazyPanels"]},
+    {"id": "TEA-06", "path": "/teacher/courses/{course}/practices/new?module={module}", "mode": "teaching", "session": "teacher", "expected": [200], "viewports": ["phone", "desktop"], "checks": ["metadata", "formLabels", "autosaveStatus"]},
+    {"id": "TEA-08", "path": "/teacher/courses?dojo={course}&preview=student", "mode": "teaching", "session": "teacher", "expected": [200, 404], "viewports": ["phone", "desktop"], "checks": ["metadata", "studentSerializer"]},
+    {"id": "TEA-19", "path": "/dojo/{course}/admin/", "mode": "teaching", "session": "teacher", "expected": [200, 403, 404], "viewports": ["phone", "desktop"], "checks": ["metadata", "dangerZone"]},
+    {"id": "TEA-20", "path": "/workspace", "mode": "teaching", "session": "teacher", "expected": [200, 410], "viewports": ["phone", "desktop"], "checks": ["metadata", "workspaceContext"]},
+
+    {"id": "ADM-01", "path": "/admin", "mode": "admin", "session": "admin", "expected": [200, 302], "viewports": ["phone", "tablet", "desktop"], "checks": ["metadata", "activeNavigation", "crawlLinks", "axe", "keyboard"]},
+    {"id": "ADM-03", "path": "/admin/dojos", "mode": "admin", "session": "admin", "expected": [200], "viewports": ["phone", "phoneWide", "tablet", "desktop"], "checks": ["metadata", "pagination", "responsiveTable"]},
+    {"id": "ADM-04", "path": "/admin/desktops", "mode": "admin", "session": "admin", "expected": [200], "viewports": ["phone", "phoneWide", "tablet", "desktop"], "checks": ["metadata", "pagination", "responsiveTable"]},
+    {"id": "ADM-05", "path": "/admin/users", "mode": "admin", "session": "admin", "expected": [200], "viewports": ["phone", "tablet", "desktop"], "checks": ["metadata", "pagination", "responsiveTable"]},
+    {"id": "ADM-06", "path": "/admin/challenges", "mode": "admin", "session": "admin", "expected": [200], "viewports": ["phone", "tablet", "desktop"], "checks": ["metadata", "pagination", "responsiveTable"]},
+    {"id": "ADM-07", "path": "/admin/submissions", "mode": "admin", "session": "admin", "expected": [200], "viewports": ["phone", "tablet", "desktop"], "checks": ["metadata", "responsiveTable"]},
+    {"id": "ADM-09", "path": "/admin/config", "mode": "admin", "session": "admin", "expected": [200], "viewports": ["phone", "tablet", "desktop"], "checks": ["metadata", "formLabels"]},
+    {"id": "SYS-04-COMPONENT-FIXTURE", "path": "/admin/design-system", "mode": "admin", "session": "admin", "expected": [200], "viewports": ["phone", "phoneWide", "tablet", "laptop", "desktop"], "checks": ["metadata", "components", "axe", "keyboard", "touchTargets"]},
+
+    {"id": "SYS-BOOTSTRAP-PUBLIC", "path": "/pwncollege_api/v1/ui/bootstrap?mode=public&path=/", "mode": "public", "session": "public", "expected": [200], "viewports": ["desktop"], "checks": ["jsonEnvelope"]},
+    {"id": "SYS-CONTRACTS", "path": "/pwncollege_api/v1/ui/contracts", "mode": "public", "session": "public", "expected": [200], "viewports": ["desktop"], "checks": ["jsonEnvelope"]},
+    {"id": "SYS-BOOTSTRAP-STUDENT", "path": "/pwncollege_api/v1/ui/bootstrap?mode=learning&path=/student", "mode": "learning", "session": "student", "expected": [200], "viewports": ["desktop"], "checks": ["jsonEnvelope"]},
+    {"id": "SYS-BOOTSTRAP-TEACHER", "path": "/pwncollege_api/v1/ui/bootstrap?mode=teaching&path=/teacher", "mode": "teaching", "session": "teacher", "expected": [200], "viewports": ["desktop"], "checks": ["jsonEnvelope"]},
+    {"id": "SYS-BOOTSTRAP-ADMIN", "path": "/pwncollege_api/v1/ui/bootstrap?mode=admin&path=/admin", "mode": "admin", "session": "admin", "expected": [200], "viewports": ["desktop"], "checks": ["jsonEnvelope"]},
+    {"id": "SYS-16-PRODUCTION-FAULT-API", "path": "/pwncollege_api/v1/test_error", "mode": "public", "session": "public", "expected": [404], "viewports": [], "checks": ["productionBoundary"]},
+    {"id": "SYS-16-PRODUCTION-FAULT-PAGE", "path": "/test_page_error", "mode": "public", "session": "public", "expected": [404], "viewports": [], "checks": ["productionBoundary"]},
+    {"id": "SYS-16-PRODUCTION-METRICS", "path": "/metrics/teaching", "mode": "public", "session": "public", "expected": [404], "viewports": [], "checks": ["productionBoundary"]}
+  ]
+}

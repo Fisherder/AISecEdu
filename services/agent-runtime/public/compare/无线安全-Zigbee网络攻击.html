@@ -1,0 +1,1173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zigbee 安全分析实验室 — 智能家居网状网络攻击与防御</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --card2: #1a2332;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --blue: #3b82f6;
+            --blue2: #2563eb;
+            --red: #ef4444;
+            --green: #22c55e;
+            --amber: #f59e0b;
+            --purple: #a855f7;
+            --gold: #eab308;
+            --border: #334155;
+            --mono: 'Courier New', 'Consolas', 'JetBrains Mono', monospace;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 16px 20px;
+        }
+        header {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px 28px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        header .icon {
+            font-size: 2.4rem;
+            flex-shrink: 0;
+        }
+        header h1 {
+            font-size: 1.35rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+        }
+        header .badge {
+            display: inline-block;
+            background: var(--red);
+            color: #fff;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 99px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-left: 6px;
+        }
+        header .subtitle {
+            font-size: 0.85rem;
+            color: var(--text2);
+            margin-top: 2px;
+        }
+        .legal-note {
+            font-size: 0.7rem;
+            color: var(--amber);
+            background: #1a1a0a;
+            border: 1px solid #3d3200;
+            border-radius: 6px;
+            padding: 6px 12px;
+            margin-bottom: 12px;
+            font-family: var(--mono);
+            text-align: center;
+        }
+        .progress-bar {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .progress-step {
+            flex: 1;
+            min-width: 90px;
+            text-align: center;
+            padding: 10px 8px;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s;
+            background: var(--card);
+            border: 2px solid var(--border);
+            color: var(--text2);
+            position: relative;
+        }
+        .progress-step.active {
+            border-color: var(--blue);
+            color: #fff;
+            background: #1a2740;
+            box-shadow: 0 0 18px rgba(59, 130, 246, 0.2);
+        }
+        .progress-step.done {
+            border-color: var(--green);
+            color: var(--green);
+            background: #0f1f15;
+        }
+        .progress-step .step-num {
+            display: block;
+            font-size: 1.3rem;
+            font-weight: 800;
+            margin-bottom: 2px;
+        }
+        .main-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px 28px;
+            margin-bottom: 16px;
+            transition: all 0.3s;
+        }
+        .main-card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .main-card h2 .step-indicator {
+            font-size: 0.75rem;
+            background: var(--blue);
+            color: #fff;
+            padding: 3px 10px;
+            border-radius: 99px;
+            font-weight: 600;
+        }
+        .row-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 900px) {
+            .row-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+        canvas {
+            display: block;
+            background: #0b111e;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            width: 100%;
+            cursor: pointer;
+        }
+        .packet-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            font-family: var(--mono);
+        }
+        .packet-table th {
+            background: #111827;
+            padding: 8px 10px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text2);
+            border-bottom: 2px solid var(--border);
+            font-size: 0.7rem;
+            letter-spacing: 0.03em;
+        }
+        .packet-table td {
+            padding: 7px 10px;
+            border-bottom: 1px solid #1e293b;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .packet-table tr:hover td {
+            background: #1a2740;
+        }
+        .packet-table tr.selected td {
+            background: #1a2f40;
+            outline: 1px solid var(--blue);
+            outline-offset: -1px;
+        }
+        .packet-table tr.tagged td {
+            background: #2a1a1a;
+            outline: 1px solid var(--red);
+            outline-offset: -1px;
+        }
+        .packet-table tr.tagged td::after {
+            content: ' ⚑';
+            color: var(--red);
+            font-size: 0.9rem;
+        }
+        .detail-panel {
+            background: #0b111e;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            max-height: 420px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            color: #b0c4d8;
+        }
+        .detail-panel .field-name {
+            color: var(--blue);
+        }
+        .detail-panel .field-value {
+            color: var(--green);
+        }
+        .detail-panel .highlight-danger {
+            background: #3b1a1a;
+            color: var(--red);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: 700;
+        }
+        .hex-view {
+            font-family: var(--mono);
+            font-size: 0.73rem;
+            color: #8899aa;
+            line-height: 1.7;
+        }
+        .hex-view .offset {
+            color: var(--text2);
+            margin-right: 12px;
+        }
+        .hex-view .hex {
+            color: #aac4d8;
+        }
+        .hex-view .ascii {
+            color: #667788;
+            margin-left: 8px;
+        }
+        .hex-view .highlight {
+            background: #3a1a1a;
+            color: var(--red);
+            padding: 1px 3px;
+            border-radius: 2px;
+        }
+        input[type="text"],
+        textarea {
+            background: #0b111e;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            width: 100%;
+            transition: border-color 0.2s;
+        }
+        input[type="text"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--blue);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.15);
+        }
+        textarea {
+            min-height: 60px;
+            resize: vertical;
+        }
+        button {
+            background: var(--blue);
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: system-ui, sans-serif;
+        }
+        button:hover {
+            background: var(--blue2);
+            box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
+        }
+        button:active {
+            transform: scale(0.97);
+        }
+        button.danger {
+            background: var(--red);
+        }
+        button.success {
+            background: var(--green);
+        }
+        button.amber {
+            background: var(--amber);
+            color: #000;
+        }
+        button:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .flag-display {
+            background: #0f1a0f;
+            border: 2px dashed var(--green);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            font-family: var(--mono);
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--green);
+            animation: flagPulse 0.6s ease-out;
+            margin: 12px 0;
+        }
+        @keyframes flagPulse {
+            0% {
+                transform: scale(0.8);
+                opacity: 0;
+            }
+            60% {
+                transform: scale(1.06);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+        .tooltip {
+            position: absolute;
+            background: #1e293b;
+            border: 1px solid var(--blue);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 0.78rem;
+            pointer-events: none;
+            z-index: 100;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+            max-width: 260px;
+            transition: opacity 0.2s;
+        }
+        .signal-strength {
+            display: inline-flex;
+            gap: 2px;
+            align-items: flex-end;
+            height: 16px;
+        }
+        .signal-strength .bar {
+            width: 4px;
+            border-radius: 2px;
+            background: var(--green);
+        }
+        .signal-strength.weak .bar {
+            background: var(--red);
+        }
+        .signal-strength.medium .bar {
+            background: var(--amber);
+        }
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 12px;
+        }
+        @media (max-width: 700px) {
+            .comparison-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .comparison-card {
+            background: var(--card2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+        }
+        .comparison-card.bad {
+            border-left: 4px solid var(--red);
+        }
+        .comparison-card.good {
+            border-left: 4px solid var(--green);
+        }
+        .comparison-card h4 {
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        .key-rotation-demo {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin: 12px 0;
+        }
+        .key-chip {
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-family: var(--mono);
+            font-size: 0.73rem;
+            background: var(--card2);
+            border: 1px solid var(--border);
+            transition: all 0.3s;
+        }
+        .key-chip.active-key {
+            border-color: var(--green);
+            background: #0f2a1a;
+            color: var(--green);
+        }
+        .key-chip.expired-key {
+            border-color: var(--red);
+            background: #2a1515;
+            color: var(--red);
+            text-decoration: line-through;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .fade-in {
+            animation: fadeIn 0.4s ease-out;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .node-info-popup {
+            background: #1e293b;
+            border: 1px solid var(--blue);
+            border-radius: 8px;
+            padding: 10px 14px;
+            position: fixed;
+            z-index: 200;
+            font-size: 0.76rem;
+            pointer-events: none;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+            max-width: 240px;
+            transition: opacity 0.15s;
+        }
+        details summary {
+            cursor: pointer;
+            color: var(--blue);
+            font-weight: 600;
+            padding: 6px 0;
+        }
+        details {
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="legal-note">
+        // EDUCATIONAL PURPOSE ONLY — 仅限授权教学环境使用。所有演示均针对模拟目标，配对防御措施。
+    </div>
+    <div class="container">
+        <header>
+            <span class="icon">📡</span>
+            <div>
+                <h1>Zigbee 安全分析实验室 <span class="badge">LAB</span></h1>
+                <p class="subtitle">智能家居网状网络 — 网络发现、密钥提取、指令注入与 Zigbee 3.0 密钥轮换防御</p>
+            </div>
+        </header>
+
+        <div class="progress-bar" id="progressBar">
+            <div class="progress-step active" data-step="1"><span class="step-num">①</span>网络发现</div>
+            <div class="progress-step" data-step="2"><span class="step-num">②</span>数据包分析</div>
+            <div class="progress-step" data-step="3"><span class="step-num">③</span>密钥提取</div>
+            <div class="progress-step" data-step="4"><span class="step-num">④</span>指令注入</div>
+            <div class="progress-step" data-step="5"><span class="step-num">⑤</span>防御配置</div>
+        </div>
+
+        <!-- STEP 1: Network Discovery -->
+        <div class="main-card fade-in" id="step1Card">
+            <h2><span class="step-indicator">步骤 1/5</span> Zigbee 网状网络发现</h2>
+            <p style="color:var(--text2);margin-bottom:12px;">你正在对一栋智能家居进行授权安全评估。使用 Zigbee 嗅探器捕获到了附近的网状网络拓扑。<strong>点击画布中的节点</strong>查看设备信息，识别<strong>协调器(Coordinator)</strong>和<strong>智能门锁(Smart Lock)</strong>设备。注意观察信号强度。</p>
+            <div style="position:relative;display:inline-block;width:100%;">
+                <canvas id="meshCanvas" width="760" height="440"></canvas>
+                <div class="node-info-popup" id="nodePopup" style="opacity:0;"></div>
+            </div>
+            <div style="margin-top:10px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+                <span style="display:flex;align-items:center;gap:5px;font-size:0.75rem;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--gold);"></span>协调器</span>
+                <span style="display:flex;align-items:center;gap:5px;font-size:0.75rem;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--blue);"></span>路由器</span>
+                <span style="display:flex;align-items:center;gap:5px;font-size:0.75rem;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--purple);"></span>智能门锁</span>
+                <span style="display:flex;align-items:center;gap:5px;font-size:0.75rem;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:2px dashed var(--red);background:transparent;"></span>嗅探器(你)</span>
+                <span style="font-size:0.7rem;color:var(--text2);">已发现设备: <strong id="discoveredCount">0</strong>/6</span>
+            </div>
+            <button id="step1CompleteBtn" disabled style="margin-top:12px;">确认发现 → 进入数据包分析</button>
+        </div>
+
+        <!-- STEP 2: Packet Analysis -->
+        <div class="main-card fade-in hidden" id="step2Card">
+            <h2><span class="step-indicator">步骤 2/5</span> 捕获数据包分析</h2>
+            <p style="color:var(--text2);margin-bottom:10px;">以下是从网络中捕获的 Zigbee 数据包。<strong>点击每一行</strong>查看详细解析与十六进制转储。找出<strong>使用默认链接密钥传输网络密钥</strong>的可疑数据包，点击<strong>"标记可疑"</strong>。提示：注意 <code>Key Type: 0x01</code> 且无 Install Code 的传输密钥包。</p>
+            <div class="row-layout">
+                <div style="overflow-x:auto;max-height:380px;overflow-y:auto;">
+                    <table class="packet-table" id="packetTable">
+                        <thead><tr><th>#</th><th>时间</th><th>源地址</th><th>目的地址</th><th>协议</th><th>长度</th><th>信息</th></tr></thead>
+                        <tbody id="packetTbody"></tbody>
+                    </table>
+                </div>
+                <div>
+                    <div class="detail-panel" id="packetDetail">← 点击左侧数据包查看详情</div>
+                    <button class="danger" id="tagPacketBtn" disabled style="margin-top:8px;width:100%;">⚑ 标记为可疑数据包</button>
+                    <div style="margin-top:6px;font-size:0.73rem;color:var(--text2);">已标记: <strong id="taggedCount">0</strong> 个</div>
+                </div>
+            </div>
+            <button id="step2CompleteBtn" disabled style="margin-top:12px;">验证分析 → 进入密钥提取</button>
+            <div id="step2Feedback" style="margin-top:8px;font-size:0.8rem;"></div>
+        </div>
+
+        <!-- STEP 3: Key Extraction -->
+        <div class="main-card fade-in hidden" id="step3Card">
+            <h2><span class="step-indicator">步骤 3/5</span> 网络密钥提取</h2>
+            <p style="color:var(--text2);margin-bottom:10px;">你已识别出传输密钥数据包（使用默认链接密钥 <code>ZigbeeAlliance09</code> 加密）。现在需要<strong>解密提取网络密钥</strong>。在下方输入默认链接密钥来解密传输密钥包中的网络密钥。</p>
+            <div class="detail-panel" style="margin-bottom:12px;max-height:180px;">
+                <span class="field-name">[传输密钥包 - 关键字段]</span>
+                <span>Command ID: 0x05 (Transport Key)</span>
+                <span class="highlight-danger">Key Type: 0x01 (Trust Center Link Key - DEFAULT, no install code)</span>
+                <span>Encrypted Key Material: 9F 3A 7C 2B 8E 15 4D 06 FF E2 C1 88 D4 44 AB 9C</span>
+                <span>使用的链接密钥: <span class="highlight-danger">ZigBeeAlliance09 (默认公开密钥)</span></span>
+            </div>
+            <label style="font-weight:600;font-size:0.85rem;">输入默认链接密钥 (ASCII):</label>
+            <input type="text" id="defaultKeyInput" placeholder="例如: ZigbeeAlliance09" style="margin:6px 0 12px;">
+            <button id="decryptBtn">🔓 解密并提取网络密钥</button>
+            <div id="decryptResult" style="margin-top:10px;"></div>
+            <button id="step3CompleteBtn" class="hidden success" style="margin-top:10px;">确认密钥 → 进入指令注入</button>
+        </div>
+
+        <!-- STEP 4: Command Injection -->
+        <div class="main-card fade-in hidden" id="step4Card">
+            <h2><span class="step-indicator">步骤 4/5</span> 指令注入 — 开启智能门锁</h2>
+            <p style="color:var(--text2);margin-bottom:10px;">你已掌握网络密钥。现在<strong>构造并注入 ZCL 指令</strong>来打开智能门锁。填写以下字段，发送恶意解锁指令。</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div>
+                    <label style="font-weight:600;font-size:0.83rem;">目标设备:</label>
+                    <select id="targetDevice" style="width:100%;padding:8px;background:#0b111e;color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--mono);">
+                        <option value="">-- 选择智能门锁 --</option>
+                        <option value="lock1">Smart Lock 1 (0x3A7F) — 前门</option>
+                        <option value="lock2">Smart Lock 2 (0x5B2E) — 后门</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-weight:600;font-size:0.83rem;">网络密钥 (从步骤3获取):</label>
+                    <input type="text" id="networkKeyInput" placeholder="0xA3F7C21B8E459D06" style="width:100%;">
+                </div>
+            </div>
+            <div style="margin-top:10px;">
+                <label style="font-weight:600;font-size:0.83rem;">ZCL 指令载荷 (Door Lock Cluster 0x0101):</label>
+                <input type="text" id="zclPayload" placeholder="Cluster:0x0101 Cmd:0x01 (Unlock) — 填入 unlock 触发" style="width:100%;">
+            </div>
+            <button class="danger" id="injectBtn" style="margin-top:12px;">💥 注入指令</button>
+            <div id="injectResult" style="margin-top:10px;"></div>
+            <button id="step4CompleteBtn" class="hidden success" style="margin-top:10px;">已捕获 Flag → 进入防御学习</button>
+        </div>
+
+        <!-- STEP 5: Defense -->
+        <div class="main-card fade-in hidden" id="step5Card">
+            <h2><span class="step-indicator">步骤 5/5</span> 防御：Zigbee 3.0 密钥轮换</h2>
+            <p style="color:var(--text2);margin-bottom:10px;">攻击之所以成功，是因为网络使用<strong>静态默认链接密钥</strong>且从不轮换网络密钥。Zigbee 3.0 引入了 <strong>Install Code</strong> 和<strong>定期密钥轮换</strong>来防御此类攻击。</p>
+            <div class="comparison-grid">
+                <div class="comparison-card bad">
+                    <h4>🔴 易受攻击的配置 (Legacy)</h4>
+                    <ul style="font-size:0.8rem;padding-left:18px;color:#fca5a5;">
+                        <li>使用公开默认链接密钥 "ZigbeeAlliance09"</li>
+                        <li>网络密钥<strong>永不轮换</strong></li>
+                        <li>所有设备共享同一密钥</li>
+                        <li>攻击者一旦获取密钥即可永久访问</li>
+                    </ul>
+                </div>
+                <div class="comparison-card good">
+                    <h4>🟢 Zigbee 3.0 安全配置</h4>
+                    <ul style="font-size:0.8rem;padding-left:18px;color:#86efac;">
+                        <li>每设备唯一 Install Code (出厂预置)</li>
+                        <li>网络密钥<strong>定期轮换</strong> (建议24小时)</li>
+                        <li>密钥派生使用 AES-128-CCM</li>
+                        <li>旧密钥过期后攻击者无法注入指令</li>
+                    </ul>
+                </div>
+            </div>
+            <div style="margin-top:16px;">
+                <h4 style="margin-bottom:8px;">🔑 密钥轮换模拟</h4>
+                <div class="key-rotation-demo" id="keyRotationDemo">
+                    <span class="key-chip active-key" id="currentKeyChip">密钥 v1: A3F7C21B... (活跃)</span>
+                    <span style="color:var(--text2);">→</span>
+                    <span class="key-chip expired-key hidden" id="oldKeyChip">密钥 v1: A3F7C21B... (已过期)</span>
+                    <span class="key-chip active-key hidden" id="newKeyChip">密钥 v2: B8E219D4... (活跃)</span>
+                </div>
+                <button class="amber" id="rotateKeyBtn">🔄 执行密钥轮换</button>
+                <p id="rotationFeedback" style="margin-top:8px;font-size:0.8rem;color:var(--green);" class="hidden">✅ 密钥已轮换！攻击者捕获的旧密钥 <code>v1</code> 现已失效。任何使用旧密钥的注入指令都会被拒绝。</p>
+            </div>
+            <div id="defenseCompleteMsg" class="hidden flag-display" style="margin-top:14px;">
+                🎯 实验完成！你已掌握 Zigbee 网络攻击与防御的核心概念。<br>
+                <span style="font-size:0.85rem;">总结: 发现网络 → 识别默认密钥漏洞 → 提取密钥 → 注入指令 → 部署密钥轮换防御</span>
+            </div>
+        </div>
+
+        <!-- Analysis Report Toggle -->
+        <details style="margin-top:12px;">
+            <summary>📋 查看完整分析报告</summary>
+            <div class="detail-panel" style="max-height:500px;margin-top:8px;">
+                <strong>攻击链分析 (Attack Chain):</strong>
+                1. <b>侦察</b>: 攻击者使用 Zigbee 嗅探器被动捕获信标帧，发现网状网络拓扑。
+                2. <b>凭证获取</b>: 捕获传输密钥包(APS Transport Key)，发现使用默认链接密钥"ZigbeeAlliance09"(Key Type 0x01, 无Install Code)。
+                3. <b>密钥推导</b>: 使用公开默认密钥解密传输密钥包，获取当前网络密钥。
+                4. <b>指令注入</b>: 使用网络密钥加密恶意ZCL指令(门锁集群0x0101, 解锁命令0x01)，注入网络。
+                5. <b>影响</b>: 智能门锁被远程开启，物理安全被绕过。
+
+                <strong>根因:</strong> 遗留Zigbee设备使用众所周知的默认链接密钥("ZigbeeAlliance09")，且网络密钥从不轮换。一旦攻击者在设备入网时捕获传输密钥包，即可解密获取网络密钥，永久访问网络。
+
+                <strong>CVSS 3.1 向量 (估算):</strong> CVSS:3.1/AV:A/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H — 评分 9.3 (Critical)
+                - 攻击向量(AV): 相邻网络 (Adjacent)
+                - 攻击复杂度(AC): 低 (仅需被动嗅探)
+                - 权限要求(PR): 无
+                - 范围(S): 改变 (从Zigbee网络到物理安全)
+
+                <strong>Zigbee 3.0 防御措施:</strong>
+                - Install Code: 每设备出厂预置唯一128位代码，用于初始密钥协商。
+                - 密钥轮换: 信任中心(协调器)定期发起网络密钥更新，旧密钥在过渡期后失效。
+                - 帧计数器: 防止重放攻击。
+                - 设备认证: 使用AES-128-CCM进行消息完整性校验。
+
+                <strong>参考来源:</strong>
+                - Zigbee Alliance, "Zigbee 3.0 Security Features"
+                - Jansen, "Assessing Smart Home Security: A Zigbee Case Study" (Section 6.1.2, Attack A2)
+                - Securelist, "Zigbee Protocol Security Assessment"
+                - HKCERT, "IoT Device (Zigbee) Security Study"
+            </div>
+        </details>
+    </div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        (function() {
+            // ============ GLOBAL STATE ============
+            const state = {
+                currentStep: 1,
+                discoveredNodes: new Set(),
+                taggedPackets: new Set(),
+                extractedKey: '',
+                flagCaptured: false,
+                keyRotated: false,
+                selectedPacketId: null,
+                locksUnlocked: false
+            };
+
+            // ============ NODE DATA FOR MESH TOPOLOGY ============
+            const meshNodes = [
+                { id: 'coordinator', x: 380, y: 200, r: 22, color: '#eab308', label: '协调器', type: 'coordinator',
+                    ieee: '0x00124B0001A3F7C2', nwk: '0x0000', rssi: -42, status: 'active' },
+                { id: 'router1', x: 200, y: 130, r: 16, color: '#3b82f6', label: '路由器 1', type: 'router',
+                    ieee: '0x00124B0002B8E219', nwk: '0x0001', rssi: -58, status: 'active' },
+                { id: 'router2', x: 560, y: 150, r: 16, color: '#3b82f6', label: '路由器 2', type: 'router',
+                    ieee: '0x00124B0003C9F30A', nwk: '0x0002', rssi: -55, status: 'active' },
+                { id: 'lock1', x: 120, y: 280, r: 18, color: '#a855f7', label: 'Smart Lock 1\n(前门)', type: 'lock',
+                    ieee: '0x00124B0004D0A41B', nwk: '0x3A7F', rssi: -67, status: 'locked' },
+                { id: 'lock2', x: 600, y: 310, r: 18, color: '#a855f7', label: 'Smart Lock 2\n(后门)', type: 'lock',
+                    ieee: '0x00124B0005E1B52C', nwk: '0x5B2E', rssi: -72, status: 'locked' },
+                { id: 'enddev1', x: 310, y: 330, r: 13, color: '#22c55e', label: '传感器', type: 'enddevice',
+                    ieee: '0x00124B0006F2C63D', nwk: '0x0004', rssi: -63, status: 'active' },
+                { id: 'attacker', x: 680, y: 60, r: 15, color: 'transparent', borderColor: '#ef4444', borderDash: [4, 3],
+                    label: '嗅探器(你)', type: 'attacker', ieee: '0x00ATK0000000001', nwk: 'N/A', rssi: -88,
+                    status: 'sniffing' },
+            ];
+
+            const edges = [
+                { from: 'coordinator', to: 'router1', strength: 'strong' },
+                { from: 'coordinator', to: 'router2', strength: 'strong' },
+                { from: 'router1', to: 'lock1', strength: 'medium' },
+                { from: 'router2', to: 'lock2', strength: 'medium' },
+                { from: 'router1', to: 'enddev1', strength: 'weak' },
+                { from: 'attacker', to: 'router2', strength: 'sniffing' },
+            ];
+
+            // ============ PACKET DATA ============
+            const packets = [
+                { id: 1, time: '14:32:01.104', src: '0x00ATK', dst: 'Broadcast', proto: 'MAC', len: 22,
+                    info: 'Beacon Request (主动扫描)', hex: '04 00 00 00 FF FF FF FF FF FF 07 00 00 00 00 00 00 00 00 00 00 00',
+                    parsed: 'Frame Control: 0x0400 (Beacon Request)\nSequence: 0x00\nDest PAN: 0xFFFF\nDest Addr: 0xFFFF (Broadcast)' },
+                { id: 2, time: '14:32:01.218', src: '0x0000', dst: 'Broadcast', proto: 'MAC', len: 38,
+                    info: 'Beacon (Zigbee网络: SmartHomePAN)', hex: '80 00 00 00 3A 1F 00 00 00 00 FF FF 4B 12 53 6D 61 72 74 48 6F 6D 65 50 41 4E 00 8F 02 00 42 1C A3 F7 C2 1B 00', parsed: 'Frame Control: 0x8000 (Beacon)\nSource PAN: 0x1F3A\nSource Addr: 0x0000 (Coordinator)\nNetwork Name: "SmartHomePAN"\nProtocol ID: 0x02 (Zigbee)\nStack Profile: 0x02\nExtended PAN ID: 0x00124B0001A3F7C2' },
+                { id: 3, time: '14:32:03.441', src: '0x3A7F', dst: '0x0000', proto: 'MAC', len: 28,
+                    info: 'Association Request (设备请求入网)',
+                    hex: '23 00 00 1F 3A 00 00 00 00 3A 7F 01 8E 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00',
+                    parsed: 'Frame Control: 0x2300 (Association Request)\nSource Addr: 0x3A7F\nDest PAN: 0x1F3A\nDest Addr: 0x0000 (Coordinator)\nCapability: 0x8E (End Device, 2.4GHz)' },
+                { id: 4, time: '14:32:03.512', src: '0x0000', dst: '0x3A7F', proto: 'MAC', len: 16,
+                    info: 'Association Response (协调器接受, 分配短地址0x3A7F)',
+                    hex: '63 00 00 00 3A 7F 1F 3A 00 00 3A 7F 00 00 00 00', parsed: 'Frame Control: 0x6300 (Association Response)\nAssigned Short Addr: 0x3A7F\nStatus: 0x00 (Success)' },
+                { id: 5, time: '14:32:03.891', src: '0x0000', dst: '0x3A7F', proto: 'APS', len: 52,
+                    info: '⚠ APS: Transport Key (Default Link Key — 可疑!)',
+                    hex: '08 41 00 00 3A 7F 05 05 01 00 9F 3A 7C 2B 8E 15 4D 06 FF E2 C1 88 D4 44 AB 9C 5A 69 67 42 65 65 41 6C 6C 69 61 6E 63 65 30 39 00 00 00 00 00 00 00 00 00 00',
+                    parsed: 'Frame Control: 0x0841 (APS Transport Key)\nDest Endpoint: 0x00\nSource Endpoint: 0x00\nAPS Counter: 0x05\nCommand ID: 0x05 (Transport Key)\n>>> Key Type: 0x01 (Trust Center Link Key - DEFAULT) <<<\nEncrypted Key Material: 9F3A7C2B8E154D06FFE2C188D444AB9C\n[HEX中可见默认密钥标识: ZigBeeAlliance09 @ offset 0x1A]' },
+                { id: 6, time: '14:32:04.102', src: '0x3A7F', dst: 'Broadcast', proto: 'NWK', len: 24,
+                    info: 'Device Announce (0x3A7F 已加入网络)',
+                    hex: '13 00 3A 7F FF FF C2 00 00 00 3A 7F 00 00 00 00 00 00 00 00 00 00 00 00',
+                    parsed: 'Frame Control: 0x0013 (Device Announce)\nSource: 0x3A7F\nIEEE Addr: 0x00124B0004D0A41B\nNew NWK Addr: 0x3A7F' },
+                { id: 7, time: '14:32:10.556', src: '0x0000', dst: '0x3A7F', proto: 'APS', len: 34,
+                    info: 'APS Encrypted Data (加密应用数据)',
+                    hex: '00 01 00 00 3A 7F 02 01 01 01 00 00 EC 4B 7F 32 9A 1D 88 F2 C5 6E 0B 3D 41 7A 19 8C D3 55 00 00 00 00',
+                    parsed: 'Frame Control: 0x0100 (APS Data, encrypted)\nCluster: 0x0101 (Door Lock)\nProfile: 0x0104\nEncrypted Payload: EC4B7F329A1D88F2C56E0B3D417A198CD355...' },
+                { id: 8, time: '14:32:10.601', src: '0x3A7F', dst: '0x0000', proto: 'ZCL', len: 26,
+                    info: 'ZCL: Read Attributes Response — Lock State: LOCKED (0x01)',
+                    hex: '18 01 0A 00 01 01 00 00 00 01 00 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00',
+                    parsed: 'Frame Control: 0x18 (Profile-wide, Cluster-specific)\nCommand: 0x01 (Read Attributes Response)\nCluster: 0x0101 (Door Lock)\nAttribute: 0x0000 (Lock State)\nValue: 0x01 (LOCKED)' },
+                { id: 9, time: '14:32:10.623', src: '0x0000', dst: '0x3A7F', proto: 'APS', len: 14,
+                    info: 'APS Acknowledgement (确认收到)',
+                    hex: '00 02 00 00 3A 7F 01 00 00 00 00 00 00 00', parsed: 'Frame Control: 0x0200 (APS ACK)\nDest: 0x3A7F\nStatus: OK' },
+                { id: 10, time: '14:32:18.112', src: '0x0000', dst: '0x5B2E', proto: 'ZCL', len: 28,
+                    info: 'ZCL: Read Attributes Response — Lock State: LOCKED (0x01) [后门]',
+                    hex: '18 01 0A 00 01 01 00 00 00 01 00 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00',
+                    parsed: 'Frame Control: 0x18\nCommand: 0x01 (Read Attributes Response)\nCluster: 0x0101 (Door Lock)\nAttribute: 0x0000\nValue: 0x01 (LOCKED)\nDevice: Smart Lock 2 (0x5B2E)' },
+            ];
+
+            // ============ CANVAS RENDERING ============
+            const canvas = document.getElementById('meshCanvas');
+            const ctx = canvas.getContext('2d');
+            const popup = document.getElementById('nodePopup');
+            let hoveredNode = null;
+            let animationFrame = null;
+            let pulsePhase = 0;
+
+            function drawMesh() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                // Background grid
+                ctx.strokeStyle = '#1a2640';
+                ctx.lineWidth = 0.5;
+                for (let x = 0; x < canvas.width; x += 50) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, canvas.height);
+                    ctx.stroke();
+                }
+                for (let y = 0; y < canvas.height; y += 50) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(canvas.width, y);
+                    ctx.stroke();
+                }
+
+                // Draw edges
+                edges.forEach(edge => {
+                    const fromNode = meshNodes.find(n => n.id === edge.from);
+                    const toNode = meshNodes.find(n => n.id === edge.to);
+                    if (!fromNode || !toNode) return;
+                    ctx.beginPath();
+                    ctx.moveTo(fromNode.x, fromNode.y);
+                    ctx.lineTo(toNode.x, toNode.y);
+                    if (edge.strength === 'strong') {
+                        ctx.strokeStyle = '#4ade80';
+                        ctx.lineWidth = 3;
+                        ctx.setLineDash([]);
+                    } else if (edge.strength === 'medium') {
+                        ctx.strokeStyle = '#fbbf24';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([]);
+                    } else if (edge.strength === 'weak') {
+                        ctx.strokeStyle = '#f87171';
+                        ctx.lineWidth = 1.5;
+                        ctx.setLineDash([8, 6]);
+                    } else if (edge.strength === 'sniffing') {
+                        ctx.strokeStyle = '#ef4444';
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([3, 5]);
+                        ctx.globalAlpha = 0.55 + Math.sin(pulsePhase * 3) * 0.25;
+                    }
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.globalAlpha = 1;
+                });
+
+                // Draw nodes
+                meshNodes.forEach(node => {
+                    // Glow for coordinator
+                    if (node.type === 'coordinator') {
+                        const glow = ctx.createRadialGradient(node.x, node.y, node.r * 0.5, node.x, node.y, node
+                            .r * 1.8);
+                        glow.addColorStop(0, 'rgba(234,179,8,0.3)');
+                        glow.addColorStop(1, 'rgba(234,179,8,0)');
+                        ctx.fillStyle = glow;
+                        ctx.beginPath();
+                        ctx.arc(node.x, node.y, node.r * 1.8, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    // Attacker scanning pulse
+                    if (node.type === 'attacker') {
+                        const scanGlow = ctx.createRadialGradient(node.x, node.y, node.r, node.x, node.y, node.r *
+                            2.5 + Math.sin(pulsePhase * 4) * 10);
+                        scanGlow.addColorStop(0, 'rgba(239,68,68,0.35)');
+                        scanGlow.addColorStop(1, 'rgba(239,68,68,0)');
+                        ctx.fillStyle = scanGlow;
+                        ctx.beginPath();
+                        ctx.arc(node.x, node.y, node.r * 2.5 + Math.sin(pulsePhase * 4) * 10, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    // Lock status glow
+                    if (node.type === 'lock' && state.locksUnlocked && node.id === 'lock1') {
+                        const ug = ctx.createRadialGradient(node.x, node.y, node.r * 0.5, node.x, node.y, node.r *
+                            2);
+                        ug.addColorStop(0, 'rgba(34,197,94,0.5)');
+                        ug.addColorStop(1, 'rgba(34,197,94,0)');
+                        ctx.fillStyle = ug;
+                        ctx.beginPath();
+                        ctx.arc(node.x, node.y, node.r * 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+
+                    // Main circle
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+                    if (node.borderColor) {
+                        ctx.setLineDash(node.borderDash || []);
+                        ctx.strokeStyle = node.borderColor;
+                        ctx.lineWidth = 2.5;
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                        ctx.fillStyle = 'rgba(15,23,42,0.85)';
+                    } else {
+                        ctx.fillStyle = node.color;
+                    }
+                    ctx.fill();
+                    if (!node.borderColor) {
+                        ctx.strokeStyle = '#fff';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
+
+                    // Lock icon
+                    if (node.type === 'lock') {
+                        ctx.fillStyle = '#fff';
+                        ctx.font = 'bold 13px system-ui';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(state.locksUnlocked && node.id === 'lock1' ? '🔓' : '🔒', node.x, node.y +
+                            5);
+                    }
+                    // Coordinator star
+                    if (node.type === 'coordinator') {
+                        ctx.fillStyle = '#fff';
+                        ctx.font = 'bold 11px system-ui';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('★', node.x, node.y + 4);
+                    }
+                    // Attacker label
+                    if (node.type === 'attacker') {
+                        ctx.fillStyle = '#ef4444';
+                        ctx.font = 'bold 9px system-ui';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('📡', node.x, node.y + 4);
+                    }
+
+                    // Label below
+                    ctx.fillStyle = '#cbd5e1';
+                    ctx.font = '10px system-ui';
+                    ctx.textAlign = 'center';
+                    const lines = node.label.split('\n');
+                    lines.forEach((line, i) => {
+                        ctx.fillText(line, node.x, node.y + node.r + 13 + i * 13);
+                    });
+
+                    // RSSI for non-attacker
+                    if (node.type !== 'attacker') {
+                        ctx.fillStyle = '#94a3b8';
+                        ctx.font = '9px monospace';
+                        ctx.fillText(node.rssi + ' dBm', node.x, node.y - node.r - 7);
+                    }
+                });
+            }
+
+            function animate() {
+                pulsePhase += 0.03;
+                drawMesh();
+                animationFrame = requestAnimationFrame(animate);
+            }
+
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const sx = mx * scaleX;
+                const sy = my * scaleY;
+                let found = null;
+                for (const node of meshNodes) {
+                    const dx = sx - node.x;
+                    const dy = sy - node.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < node.r + 6) {
+                        found = node;
+                        break;
+                    }
+                }
+                if (found !== hoveredNode) {
+                    hoveredNode = found;
+                    canvas.style.cursor = found ? 'pointer' : 'default';
+                    if (found) {
+                        popup.style.opacity = '1';
+                        popup.style.left = (e.clientX + 18) + 'px';
+                        popup.style.top = (e.clientY - 40) + 'px';
+                        popup.innerHTML = `
+                            <strong>${found.label.replace('\n',' ')}</strong><br>
+                            <span style="color:#94a3b8;">类型:</span> ${found.type}<br>
+                            <span style="color:#94a3b8;">IEEE:</span> <span style="font-family:monospace;font-size:0.7rem;">${found.ieee}</span><br>
+                            <span style="color:#94a3b8;">NWK:</span> ${found.nwk}<br>
+                            <span style="color:#94a3b8;">RSSI:</span> <span style="color:${found.rssi>-60?'#4ade80':found.rssi>-75?'#fbbf24':'#f87171'}">${found.rssi} dBm</span><br>
+                            <span style="color:#94a3b8;">状态:</span> ${found.status}
+                        `;
+                    } else {
+                        popup.style.opacity = '0';
+                    }
+                }
+            });
+
+            canvas.addEventListener('click', (e) => {
+                if (!hoveredNode || hoveredNode.type === 'attacker') return;
+                state.discoveredNodes.add(hoveredNode.id);
+                document.getElementById('discoveredCount').textContent = state.discoveredNodes.size;
+                // Brief pulse on node
+                const origR = hoveredNode.r;
+                hoveredNode.r = origR + 6;
+                setTimeout(() => { hoveredNode.r = origR; }, 200);
+                if (state.discoveredNodes.size >= 6) {
+                    document.getElementById('step1CompleteBtn').disabled = false;
+                    document.getElementById('step1CompleteBtn').style.background = 'var(--green)';
+                    document.getElementById('step1CompleteBtn').textContent = '✅ 所有设备已发现 → 进入数据包分析';
+                }
+            });
+
+            // ============ PACKET TABLE ============
+            function renderPacketTable() {
+                const tbody = document.getElementById('packetTbody');
+                tbody.innerHTML = packets.map(p => {
+                    let rowClass = '';
+                    if (p.id === state.selectedPacketId) rowClass = 'selected';
+                    if (state.taggedPackets.has(p.id)) rowClass = 'tagged';
+                    return `<tr class="${rowClass}" data-packet-id="${p.id}">
+                        <td>${p.id}</td><td>${p.time}</td><td style="color:#60a5fa;">${p.src}</td>
+                        <td>${p.dst}</td><td>${p.proto}</td><td>${p.len}</td>
+                        <td style="color:${p.id===5?'#ef4444':'#e2e8f0'};">${p.info}</td></tr>`;
+                }).join('');
+            }
+
+            document.getElementById('packetTbody').addEventListener('click', (e) => {
+                const row = e.target.closest('tr');
+                if (!row) return;
+                const pid = parseInt(row.dataset.packetId);
+                state.selectedPacketId = pid;
+                renderPacketTable();
+                const p = packets.find(pk => pk.id === pid);
+                const detailDiv = document.getElementById('packetDetail');
+                // Build hex view
+                const hexBytes = p.hex.split(' ');
+                let hexView = '<span class="hex-view">';
+                hexView +=
+                    `<span class="offset">0000</span> <span class="hex">${hexBytes.slice(0,16).join(' ')}</span> <span class="ascii">${hexBytes.slice(0,16).map(b=>{const c=parseInt(b,16);return c>=32&&c<127?String.fromCharCode(c):'.'}).join('')}</span>\n`;
+                if (hexBytes.length > 16) {
+                    hexView +=
+                        `<span class="offset">0010</span> <span class="hex">${hexBytes.slice(16,32).join(' ')}</span> <span class="ascii">${hexBytes.slice(16,32).map(b=>{const c=parseInt(b,16);return c>=32&&c<127?String.fromCharCode(c):'.'}).join('')}</span>\n`;
+                }
+                if (hexBytes.length > 32) {
+                    hexView +=
+                        `<span class="offset">0020</span> <span class="hex">${hexBytes.slice(32).join(' ')}</span> <span class="ascii">${hexBytes.slice(32).map(b=>{const c=parseInt(b,16);return c>=32&&c<127?String.fromCharCode(c):'.'}).join('')}</span>\n`;
+                }
+                if (pid === 5) {
+                    hexView = hexView.replace(/ZigBeeAlliance09/g,
+                        '<span class="highlight-danger">ZigBeeAlliance09</span>');
+                }
+                hexView += '</span>';
+                detailDiv.innerHTML =
+                    `<span style="color:#60a5fa;font-weight:700;">数据包 #${p.id}</span>  |  ${p.time}  |  ${p.src} → ${p.dst}\n<span style="color:#94a3b8;">${'─'.repeat(50)}</span>\n<span class="field-name">[协议解析]</span>\n${p.parsed}\n\n<span class="field-name">[十六进制转储]</span>\n${hexView}`;
+                document.getElementById('tagPacketBtn').disabled = false;
+            });
+
+            document.getElementById('tagPacketBtn').addEventListener('click', () => {
+                if (!state.selectedPacketId) return;
+                if (state.taggedPackets.has(state.selectedPacketId)) {
+                    state.taggedPackets.delete(state.selectedPacketId);
+                } else {
+                    state.taggedPackets.add(state.selectedPacketId);
+                }
+                document.getElementById('taggedCount').textContent = state.taggedPackets.size;
+                renderPacketTable();
+                // Check if packet 5 is tagged
+                if (state.taggedPackets.has(5)) {
+                    document.getElementById('step2CompleteBtn').disabled = false;
+                    document.getElementById('step2CompleteBtn').style.background = 'var(--green)';
+                    document.getElementById('step2CompleteBtn').textContent = '✅ 正确识别可疑数据包 → 进入密钥提取';
+                    document.getElementById('step2Feedback').innerHTML =
+                        '<span style="color:#22c55e;">✅ 正确！数据包 #5 是传输密钥包，使用默认链接密钥 "ZigbeeAlliance09" (Key Type 0x01, 无Install Code)。这是关键漏洞。</span>';
+                } else if (state.taggedPackets.size > 0) {
+                    document.getElementById('step2Feedback').innerHTML =
+                        '<span style="color:#f59e0b;">⚠ 你标记了一些数据包，但尚未标记 #5（传输密钥包）。请检查使用默认链接密钥的数据包。</span>';
+                    document.getElementById('step2CompleteBtn').disabled = true;
+                }
+            });
+
+            // ============ STEP NAVIGATION ============
+            function showStep(step) {
+                state.currentStep = step;
+                ['step1Card', 'step2Card', 'step3Card', 'step4Card', 'step5Card'].forEach((id, i) => {
+                    document.getElementById(id).classList.toggle('hidden', i + 1 !== step);
+                });
+                // Update progress bar
+                document.querySelectorAll('.progress-step').forEach(el => {
+                    const s = parseInt(el.dataset.step);
+                    el.classList.remove('active', 'done');
+                    if (s === step) el.classList.add('active');
+                    if (s < step ||
+                        (s === 1 && state.discoveredNodes.size >= 6) ||
+                        (s === 2 && state.taggedPackets.has(5)) ||
+                        (s === 3 && state.extractedKey) ||
+                        (s === 4 && state.flagCaptured) ||
+                        (s === 5 && state.keyRotated)) {
+                        if (s < step) el.classList.add('done');
+                    }
+                });
+                if (step === 2) renderPacketTable();
+                if (step === 3) document.getElementById('decryptResult').innerHTML = '';
+                if (step === 4) document.getElementById('injectResult').innerHTML = '';
+            }
+
+            document.getElementById('step1CompleteBtn').addEventListener('click', () => {
+                if (state.discoveredNodes.size >= 6) showStep(2);
+            });
+            document.getElementById('step2CompleteBtn').addEventListener('click', () => {
+                if (state.taggedPackets.has(5)) showStep(3);
+            });
+            document.getElementById('step3CompleteBtn').addEventListener('click', () => {
+                if (state.extractedKey) showStep(4);
+            });
+            document.getElementById('step4CompleteBtn').addEventListener('click', () => {
+                if (state.flagCaptured) showStep(5);
+            });
+
+            document.querySelectorAll('.progress-step').forEach(el => {
+                el.addEventListener('click', () => {
+                    const target = parseInt(el.dataset.step);
+                    const canJump = target <= state.currentStep + 1 &&
+                        (target <= 2 || (target === 3 && state.taggedPackets.has(5)) || (target ===
+                            4 && state.extractedKey) || (target === 5 && state.flagCaptured) || target <=
+                            state.currentStep);
+                    if (canJump && target <= 2) showStep(target);
+                    else if (canJump && target === 3 && state.taggedPackets.has(5)) showStep(3);
+                    else if (canJump && target === 4 && state.extractedKey) showStep(4);
+                    else if (canJump && target === 5 && state.flagCaptured) showStep(5);
+                });
+            });
+
+            // ============ STEP 3: KEY EXTRACTION ============
+            document.getElementById('decryptBtn').addEventListener('click', () => {
+                const input = document.getElementById('defaultKeyInput').value.trim();
+                const correctKey = 'ZigbeeAlliance09';
+                const resultDiv = document.getElementById('decryptResult');
+                if (input.toLowerCase() === correctKey.toLowerCase() || input ===
+                    '5A6967426565416C6C69616E63653039' || input ===
+                    'ZigBeeAlliance09') {
+                    state.extractedKey = '0xA3F7C21B8E459D06';
+                    resultDiv.innerHTML = `
+                        <div class="flag-display" style="border-color:var(--blue);color:var(--blue);">
+                            🔓 解密成功！<br>
+                            <span style="font-size:0.85rem;">网络密钥: <code style="background:#0b111e;padding:2px 8px;border-radius:4px;">0xA3F7C21B8E459D06</code></span><br>
+                            <span style="font-size:0.7rem;color:var(--text2);">(使用默认链接密钥 ZigbeeAlliance09 解密传输密钥包获得)</span>
+                        </div>`;
+                    document.getElementById('step3CompleteBtn').classList.remove('hidden');
+                    document.getElementById('networkKeyInput').value = '0xA3F7C21B8E459D06';
+                } else if (input.length > 0) {
+                    resultDiv.innerHTML =
+                        '<span style="color:#ef4444;">❌ 密钥不正确。提示：回想一下 Zigbee 联盟的默认链接密钥名称（16个字符，包含 "Zigbee" 和 "09"）。</span>';
+                } else {
+                    resultDiv.innerHTML =
+                        '<span style="color:#f59e0b;">⚠ 请输入默认链接密钥。提示：在数据包 #5 的十六进制转储中可以看到它的 ASCII 表示。</span>';
+                }
+            });
+
+            // ============ STEP 4: COMMAND INJECTION ============
+            document.getElementById('injectBtn').addEventListener('click', () => {
+                const target = document.getElementById('targetDevice').value;
+                const nwkKey = document.getElementById('networkKeyInput').value.trim();
+                const payload = document.getElementById('zclPayload').value.trim().toLowerCase();
+                const resultDiv = document.getElementById('injectResult');
+                const expectedKey = '0xA3F7C21B8E459D06';
+
+                if (!target) {
+                    resultDiv.innerHTML = '<span style="color:#f59e0b;">⚠ 请选择目标智能门锁设备。</span>';
+                    return;
+                }
+                if (nwkKey !== expectedKey && nwkKey !== 'A3F7C21B8E459D06') {
+                    resultDiv.innerHTML =
+                        '<span style="color:#ef4444;">❌ 网络密钥不正确。请使用步骤3中提取的密钥: 0xA3F7C21B8E459D06</span>';
+                    return;
+                }
+                if (!payload.includes('unlock') && !payload.includes('0x01') && !payload.includes('0101')) {
+                    resultDiv.innerHTML =
+                        '<span style="color:#f59e0b;">⚠ ZCL 指令载荷需要包含解锁命令。提示：Door Lock Cluster = 0x0101, Unlock Command = 0x01，或直接输入 "unlock"。</span>';
+                    return;
+                }
+                // SUCCESS
+                state.flagCaptured = true;
+                state.locksUnlocked = true;
+                const lockNode = meshNodes.find(n => n.id === 'lock1');
+                if (lockNode) lockNode.status = 'unlocked';
+                resultDiv.innerHTML = `
+                    <div class="flag-display">
+                        🎯 指令注入成功！智能门锁已开启！<br>
+                        <span style="font-size:1.4rem;letter-spacing:0.05em;">FLAG{z1gb33_d3f4ult_k3y_3xpl01t}</span><br>
+                        <span style="font-size:0.7rem;color:var(--text2);">Zigbee 默认密钥利用 — 门锁集群 0x0101 解锁指令已注入</span>
+                    </div>`;
+                document.getElementById('step4CompleteBtn').classList.remove('hidden');
+                document.getElementById('step4CompleteBtn').textContent = '✅ Flag 已捕获 → 进入防御学习';
+            });
+
+            // ============ STEP 5: DEFENSE ============
+            document.getElementById('rotateKeyBtn').addEventListener('click', () => {
+                if (state.keyRotated) return;
+                state.keyRotated = true;
+                document.getElementById('oldKeyChip').classList.remove('hidden');
+                document.getElementById('newKeyChip').classList.remove('hidden');
+                document.getElementById('currentKeyChip').classList.remove('active-key');
+                document.getElementById('currentKeyChip').classList.add('expired-key');
+                document.getElementById('currentKeyChip').textContent = '密钥 v1: A3F7C21B... (已过期)';
+                document.getElementById('newKeyChip').classList.add('active-key');
+                document.getElementById('rotationFeedback').classList.remove('hidden');
+                document.getElementById('defenseCompleteMsg').classList.remove('hidden');
+                document.getElementById('rotateKeyBtn').disabled = true;
+                document.getElementById('rotateKeyBtn').textContent = '✅ 密钥已轮换';
+                // Update progress
+                document.querySelectorAll('.progress-step').forEach(el => {
+                    if (parseInt(el.dataset.step) === 5) el.classList.add('done');
+                });
+            });
+
+            // ============ INIT ============
+            function init() {
+                renderPacketTable();
+                document.getElementById('tagPacketBtn').disabled = true;
+                document.getElementById('step2CompleteBtn').disabled = true;
+                document.getElementById('step3CompleteBtn').classList.add('hidden');
+                document.getElementById('step4CompleteBtn').classList.add('hidden');
+                document.getElementById('rotationFeedback').classList.add('hidden');
+                document.getElementById('defenseCompleteMsg').classList.add('hidden');
+                document.getElementById('oldKeyChip').classList.add('hidden');
+                document.getElementById('newKeyChip').classList.add('hidden');
+                animate();
+            }
+            init();
+
+            // ============ CANVAS RESIZE HANDLING ============
+            function resizeCanvas() {
+                const container = canvas.parentElement;
+                const w = Math.min(container.clientWidth - 4, 760);
+                const ratio = 440 / 760;
+                canvas.style.width = w + 'px';
+                canvas.style.height = (w * ratio) + 'px';
+            }
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+
+            console.log(
+                '// EDUCATIONAL PURPOSE ONLY — Zigbee Security Lab initialized. All simulations target mock devices.'
+                );
+        })();
+    </script>
+</body>
+</html>

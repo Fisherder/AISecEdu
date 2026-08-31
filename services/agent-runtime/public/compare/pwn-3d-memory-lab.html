@@ -1,0 +1,1413 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 栈溢出可视化实验 — 缓冲区溢出攻击</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --card2: #1a2332;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --purple: #8b5cf6;
+            --border: #334155;
+            --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+            --font-sans: 'Segoe UI', 'Inter', system-ui, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            overflow-x: hidden;
+            line-height: 1.6;
+        }
+
+        /* Header */
+        .header {
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        .header .logo {
+            font-weight: 700;
+            font-size: 1.25rem;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header .logo .icon-stack {
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+        .badge-edu {
+            background: #1e3a5f;
+            color: #60a5fa;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            border: 1px solid #2563eb44;
+        }
+
+        /* Main layout */
+        .main-container {
+            display: grid;
+            grid-template-columns: 1fr 1.4fr;
+            gap: 16px;
+            padding: 16px 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+            min-height: calc(100vh - 200px);
+        }
+        @media (max-width: 900px) {
+            .main-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Cards */
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px 20px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+        }
+        .card h3 {
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: var(--text);
+            letter-spacing: -0.01em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card h3 .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot-blue {
+            background: var(--accent);
+        }
+        .dot-red {
+            background: var(--danger);
+        }
+        .dot-green {
+            background: var(--success);
+        }
+        .dot-amber {
+            background: var(--warning);
+        }
+
+        /* Progress */
+        .progress-bar {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .progress-step {
+            flex: 1;
+            min-width: 70px;
+            text-align: center;
+            padding: 8px 6px;
+            border-radius: 8px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            background: var(--card2);
+            border: 1px solid var(--border);
+            color: var(--text2);
+            transition: all 0.3s;
+            position: relative;
+        }
+        .progress-step.active {
+            border-color: var(--accent);
+            color: #60a5fa;
+            background: #1e3a5f;
+            box-shadow: 0 0 12px #3b82f644;
+            animation: pulse-step 2s infinite;
+        }
+        .progress-step.done {
+            border-color: var(--success);
+            color: #4ade80;
+            background: #0f2d1a;
+        }
+        @keyframes pulse-step {
+            0%,
+            100% {
+                box-shadow: 0 0 8px #3b82f633;
+            }
+            50% {
+                box-shadow: 0 0 20px #3b82f666;
+            }
+        }
+
+        /* Code display */
+        .code-panel {
+            background: #0d1117;
+            border-radius: 8px;
+            padding: 14px 16px;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.8;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            margin-bottom: 12px;
+        }
+        .code-line {
+            cursor: pointer;
+            padding: 3px 8px;
+            margin: 0 -8px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: block;
+            white-space: pre;
+            color: #c9d1d9;
+            position: relative;
+        }
+        .code-line:hover {
+            background: #1a2233;
+        }
+        .code-line.wrong-click {
+            background: #3d1a1a;
+            animation: shake-line 0.4s;
+        }
+        .code-line.correct-click {
+            background: #0f2d1a;
+            border: 1px solid var(--success);
+            box-shadow: 0 0 16px #22c55e44;
+        }
+        .code-line .line-num {
+            color: #484f58;
+            margin-right: 12px;
+            user-select: none;
+            font-size: 0.78rem;
+        }
+        .code-line .vuln-badge {
+            display: none;
+            color: var(--danger);
+            font-weight: 700;
+            font-size: 0.75rem;
+            margin-left: 8px;
+            animation: blink-badge 0.7s infinite;
+        }
+        .code-line.correct-click .vuln-badge {
+            display: inline;
+        }
+        @keyframes shake-line {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            25% {
+                transform: translateX(-6px);
+            }
+            75% {
+                transform: translateX(6px);
+            }
+        }
+        @keyframes blink-badge {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        /* Input area */
+        .input-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .input-group input {
+            flex: 1;
+            min-width: 180px;
+            background: #0d1117;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        .input-group input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px #3b82f622;
+        }
+        .input-group .char-counter {
+            font-size: 0.78rem;
+            color: var(--text2);
+            min-width: 60px;
+            text-align: center;
+        }
+        .input-group .char-counter.overflow-warn {
+            color: var(--warning);
+            font-weight: 700;
+        }
+        .input-group .char-counter.overflow-danger {
+            color: var(--danger);
+            font-weight: 700;
+            animation: pulse-step 1s infinite;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 0.88rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.25s;
+            letter-spacing: 0.01em;
+            font-family: var(--font-sans);
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+            box-shadow: 0 4px 16px #3b82f644;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            box-shadow: 0 6px 24px #3b82f666;
+            transform: translateY(-1px);
+        }
+        .btn-primary:active {
+            transform: scale(0.96);
+        }
+        .btn-danger {
+            background: var(--danger);
+            color: #fff;
+            box-shadow: 0 4px 16px #ef444444;
+        }
+        .btn-danger:hover {
+            background: #dc2626;
+            box-shadow: 0 6px 24px #ef444466;
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+        .btn-outline:hover {
+            border-color: var(--accent);
+            color: #60a5fa;
+        }
+        .btn-sm {
+            padding: 6px 14px;
+            font-size: 0.78rem;
+            border-radius: 6px;
+        }
+        .btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: none;
+            filter: grayscale(0.4);
+        }
+
+        /* 3D Canvas */
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4/3;
+            min-height: 420px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            background: radial-gradient(ellipse at center, #1a2740 0%, #0a0f1a 100%);
+            cursor: grab;
+        }
+        .canvas-container:active {
+            cursor: grabbing;
+        }
+        .canvas-container canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .canvas-overlay {
+            position: absolute;
+            pointer-events: none;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+        }
+        .stack-label {
+            position: absolute;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            font-weight: 700;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            white-space: nowrap;
+            text-shadow: 0 0 8px rgba(0, 0, 0, 0.9);
+            transition: color 0.5s;
+            padding: 3px 7px;
+            border-radius: 3px;
+            background: rgba(0, 0, 0, 0.55);
+            letter-spacing: 0.03em;
+        }
+        .stack-label.ret-label {
+            font-size: 0.75rem;
+        }
+        .stack-label.overwritten {
+            color: #ef4444 !important;
+            text-shadow: 0 0 14px #ef4444aa;
+            animation: label-shake 0.3s infinite;
+        }
+        @keyframes label-shake {
+            0%,
+            100% {
+                transform: translate(-50%, -50%) rotate(0deg);
+            }
+            25% {
+                transform: translate(-50%, -50%) rotate(2deg);
+            }
+            75% {
+                transform: translate(-50%, -50%) rotate(-2deg);
+            }
+        }
+        .canvas-hint {
+            position: absolute;
+            bottom: 10px;
+            right: 14px;
+            font-size: 0.68rem;
+            color: #64748b;
+            pointer-events: none;
+            z-index: 11;
+        }
+
+        /* Flag toast */
+        .flag-toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-120px);
+            background: #0f2d1a;
+            border: 2px solid #22c55e;
+            color: #4ade80;
+            padding: 14px 24px;
+            border-radius: 10px;
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 1rem;
+            z-index: 200;
+            transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 8px 32px rgba(34, 197, 94, 0.3);
+            letter-spacing: 0.02em;
+            text-align: center;
+        }
+        .flag-toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+        .flag-toast .flag-icon {
+            font-size: 1.4rem;
+            margin-right: 6px;
+        }
+
+        /* Analysis report */
+        .analysis-section {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 20px 30px;
+        }
+        .analysis-section details {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0;
+            overflow: hidden;
+        }
+        .analysis-section summary {
+            padding: 16px 20px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.95rem;
+            user-select: none;
+            color: var(--accent);
+            letter-spacing: -0.01em;
+            transition: background 0.2s;
+        }
+        .analysis-section summary:hover {
+            background: #1a2a3d;
+        }
+        .analysis-content {
+            padding: 18px 20px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .analysis-card {
+            flex: 1;
+            min-width: 250px;
+            background: var(--card2);
+            border-radius: 8px;
+            padding: 14px 16px;
+            border: 1px solid var(--border);
+        }
+        .analysis-card h4 {
+            font-size: 0.82rem;
+            margin-bottom: 6px;
+            color: var(--warning);
+            letter-spacing: 0.02em;
+        }
+        .analysis-card p,
+        .analysis-card li {
+            font-size: 0.78rem;
+            color: var(--text2);
+        }
+        .analysis-card ul {
+            list-style: disc inside;
+        }
+        .analysis-card code {
+            background: #0d1117;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.75rem;
+            color: #e2e8f0;
+        }
+
+        /* Tooltip */
+        .tooltip-3d {
+            position: absolute;
+            pointer-events: none;
+            background: #0d1117;
+            border: 1px solid #475569;
+            color: #e2e8f0;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-family: var(--font-mono);
+            z-index: 20;
+            opacity: 0;
+            transition: opacity 0.2s;
+            white-space: nowrap;
+        }
+        .tooltip-3d.visible {
+            opacity: 1;
+        }
+
+        /* Shake keyframes for RET box */
+        @keyframes ret-shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            15% {
+                transform: translateX(0.35px);
+            }
+            30% {
+                transform: translateX(-0.35px);
+            }
+            45% {
+                transform: translateX(0.25px);
+            }
+            60% {
+                transform: translateX(-0.25px);
+            }
+            75% {
+                transform: translateX(0.12px);
+            }
+            90% {
+                transform: translateX(-0.12px);
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <div class="header">
+        <div class="logo">
+            <div class="icon-stack">📦</div>
+            <span>3D 栈溢出可视化实验</span>
+        </div>
+        <span class="badge-edu">🔬 仅用于授权教学环境</span>
+    </div>
+
+    <!-- Flag Toast -->
+    <div class="flag-toast" id="flagToast">
+        <span class="flag-icon">🏴</span> <span id="flagText"></span>
+    </div>
+
+    <!-- Main Container -->
+    <div class="main-container">
+        <!-- Left Panel -->
+        <div style="display:flex;flex-direction:column;gap:14px;">
+            <!-- Briefing -->
+            <div class="card">
+                <h3><span class="dot dot-blue"></span> 任务简报</h3>
+                <p style="font-size:0.85rem;color:var(--text2);">
+                    你拿到了一段存在<strong style="color:#f59e0b;">缓冲区溢出</strong>漏洞的C代码。
+                    你的任务：<br>① 定位漏洞代码行 → ② 构造超长载荷 → ③ 注入并观察3D栈帧被覆盖 → ④ 捕获旗帜。
+                </p>
+                <!-- Progress -->
+                <div class="progress-bar" id="progressBar">
+                    <div class="progress-step active" data-step="1">🔍 步骤1<br>漏洞定位</div>
+                    <div class="progress-step" data-step="2">✍️ 步骤2<br>构造载荷</div>
+                    <div class="progress-step" data-step="3">💉 步骤3<br>注入触发</div>
+                    <div class="progress-step" data-step="4">🏴 步骤4<br>捕获旗帜</div>
+                </div>
+            </div>
+
+            <!-- Code Panel -->
+            <div class="card">
+                <h3><span class="dot dot-red"></span> 漏洞代码 (vulnerable.c)</h3>
+                <div class="code-panel" id="codePanel">
+                    <span class="code-line" data-line="1"><span class="line-num">1</span>void login_admin(char *user_input) {</span>
+                    <span class="code-line" data-line="2"><span class="line-num">2</span>    char buffer[16];          <span style="color:#6b7280;">// 仅16字节缓冲区</span></span>
+                    <span class="code-line vuln-target" data-line="3"><span class="line-num">3</span>    strcpy(buffer, user_input); <span class="vuln-badge">⚠ 漏洞点</span></span>
+                    <span class="code-line" data-line="4"><span class="line-num">4</span>    printf("Welcome: %s\n", buffer);</span>
+                    <span class="code-line" data-line="5"><span class="line-num">5</span>    check_admin(buffer);</span>
+                    <span class="code-line" data-line="6"><span class="line-num">6</span>}</span>
+                </div>
+                <p id="codeFeedback" style="font-size:0.75rem;color:#64748b;margin-top:6px;min-height:18px;"></p>
+            </div>
+
+            <!-- Payload Input -->
+            <div class="card" id="payloadCard">
+                <h3><span class="dot dot-amber"></span> 构造攻击载荷</h3>
+                <div class="input-group">
+                    <input type="text" id="payloadInput" placeholder="输入超长字符串，例如：AAAAAAAAAAAAAAAAAAAA..."
+                    maxlength="48" autocomplete="off">
+                    <span class="char-counter" id="charCounter">0 / 16</span>
+                    <button class="btn btn-danger" id="injectBtn" disabled>💉 注入 (Inject)</button>
+                </div>
+                <p style="font-size:0.72rem;color:#64748b;margin-top:6px;">
+                    提示：buffer 仅有 <strong>16字节</strong>，输入超过16字符即可触发溢出。
+                </p>
+                <button class="btn btn-outline btn-sm" id="resetBtn" style="margin-top:6px;">🔄 重置3D视图</button>
+            </div>
+        </div>
+
+        <!-- Right Panel: 3D Viewport -->
+        <div class="card" style="padding:8px;">
+            <div class="canvas-container" id="canvasContainer">
+                <div class="canvas-overlay" id="canvasOverlay"></div>
+                <div class="canvas-hint">🖱️ 拖拽旋转 · 滚轮缩放 · 右键平移</div>
+                <div class="tooltip-3d" id="tooltip3d"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Analysis Report -->
+    <div class="analysis-section">
+        <details id="analysisDetails">
+            <summary>📋 查看完整分析报告（漏洞根因 · 利用链 · 防御措施 · 现实参考）</summary>
+            <div class="analysis-content">
+                <div class="analysis-card">
+                    <h4>🔴 漏洞根因</h4>
+                    <p><code>strcpy()</code> 不检查目标缓冲区大小。当 <code>user_input</code> 长度超过16字节时，数据会连续写入栈上<strong>更高地址</strong>，依次覆盖保存的EBP和返回地址(RET)。</p>
+                </div>
+                <div class="analysis-card">
+                    <h4>🟠 利用链</h4>
+                    <ol style="font-size:0.78rem;color:var(--text2);padding-left:16px;">
+                        <li>构造超长输入（>16字节）</li>
+                        <li><code>strcpy</code> 逐字节复制，越过buffer边界</li>
+                        <li>覆盖EBP（栈帧指针）</li>
+                        <li>覆盖RET（返回地址）→ 函数返回时跳转到攻击者控制地址</li>
+                    </ol>
+                </div>
+                <div class="analysis-card">
+                    <h4>🟢 防御措施</h4>
+                    <ul>
+                        <li>使用 <code>strncpy(buf, src, sizeof(buf))</code> 限制复制长度</li>
+                        <li>启用栈保护 (<code>-fstack-protector</code>)，插入canary金丝雀值</li>
+                        <li>启用ASLR（地址空间布局随机化）</li>
+                        <li>启用NX/DEP（栈不可执行）</li>
+                        <li>使用更安全的语言（Rust, Go等）</li>
+                    </ul>
+                </div>
+                <div class="analysis-card">
+                    <h4>📚 现实参考</h4>
+                    <p>CWE-121: Stack-based Buffer Overflow<br>CVE-2019-0708 (BlueKeep) 等大量CVE均涉及缓冲区溢出。现代编译器默认启用栈保护可检测此类攻击。</p>
+                </div>
+            </div>
+        </details>
+    </div>
+
+    <!-- Three.js Import Map -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // This PoC demonstrates stack buffer overflow in a 3D sandbox environment.
+        // Defense: use strncpy(), stack canaries, ASLR, NX bit.
+
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ==================== DOM REFS ====================
+        const canvasContainer = document.getElementById('canvasContainer');
+        const canvasOverlay = document.getElementById('canvasOverlay');
+        const tooltip3d = document.getElementById('tooltip3d');
+        const codePanel = document.getElementById('codePanel');
+        const codeFeedback = document.getElementById('codeFeedback');
+        const payloadInput = document.getElementById('payloadInput');
+        const charCounter = document.getElementById('charCounter');
+        const injectBtn = document.getElementById('injectBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const flagToast = document.getElementById('flagToast');
+        const flagText = document.getElementById('flagText');
+        const progressBar = document.getElementById('progressBar');
+        const analysisDetails = document.getElementById('analysisDetails');
+
+        // ==================== STATE ====================
+        let currentStep = 1;
+        let vulnLineFound = false;
+        let overflowTriggered = false;
+        let flagCaptured = false;
+        let animationPhase = 'idle'; // idle | filling | overflowing | impact | complete
+        let animationStartTime = 0;
+        let animationData = {};
+        const BUFFER_SIZE = 16;
+        const FLAG_STRING = 'FLAG{buffer_overflow_3d_stack_smash_2024}';
+
+        // ==================== THREE.JS SETUP ====================
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0f1a);
+        scene.fog = new THREE.FogExp2(0x0a0f1a, 0.00025);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
+        canvasContainer.appendChild(renderer.domElement);
+
+        const camera = new THREE.PerspectiveCamera(50, 1.6, 0.5, 60);
+        camera.position.set(7, 2.8, 9);
+        camera.lookAt(0, 2.0, 0);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 2.1, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 4;
+        controls.maxDistance = 20;
+        controls.maxPolarAngle = Math.PI * 0.75;
+        controls.minPolarAngle = 0.2;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.3;
+        controls.update();
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x334466, 1.8);
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight(0xffeedd, 4.5);
+        sunLight.position.set(10, 14, 6);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 1024;
+        sunLight.shadow.mapSize.height = 1024;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 50;
+        sunLight.shadow.camera.left = -15;
+        sunLight.shadow.camera.right = 15;
+        sunLight.shadow.camera.top = 15;
+        sunLight.shadow.camera.bottom = -15;
+        sunLight.shadow.bias = -0.0001;
+        scene.add(sunLight);
+        const rimLight = new THREE.DirectionalLight(0x8899cc, 2.0);
+        rimLight.position.set(-4, 2, -3);
+        scene.add(rimLight);
+
+        // Ground
+        const groundGeo = new THREE.PlaneGeometry(30, 30);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.85, metalness: 0.2 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -3.5;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Grid
+        const gridHelper = new THREE.PolarGridHelper(12, 32, 24, 128, 0x1e3a5f, 0x1e3a5f);
+        gridHelper.position.y = -3.48;
+        scene.add(gridHelper);
+
+        // ==================== MEMORY STACK BOXES ====================
+        // Box dimensions: width=3, depth=2, varying heights
+        const boxWidth = 3.0;
+        const boxDepth = 2.0;
+
+        // Y positions (centers):
+        // local vars: y=0.3, h=0.55
+        // buffer: y=1.55, h=2.1 (tall to show 16-byte capacity)
+        // EBP: y=3.1, h=0.6
+        // RET: y=4.15, h=0.6
+        // Overflow wave starts at y=2.6 (top of buffer) and grows upward
+
+        const localVarsY = 0.3;
+        const localVarsH = 0.55;
+        const bufferY = 1.55;
+        const bufferH = 2.1;
+        const ebpY = 3.1;
+        const ebpH = 0.6;
+        const retY = 4.15;
+        const retH = 0.6;
+        const bufferTopY = bufferY + bufferH / 2; // 2.6
+
+        function createBox(width, height, depth, color, emissiveColor = 0x000000, emissiveIntensity = 0) {
+            const geo = new THREE.BoxGeometry(width, height, depth, 2, 2, 2);
+            const mat = new THREE.MeshStandardMaterial({
+                color,
+                roughness: 0.35,
+                metalness: 0.15,
+                emissive: emissiveColor,
+                emissiveIntensity,
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        // Local vars box
+        const localVarsBox = createBox(boxWidth, localVarsH, boxDepth, 0x64748b);
+        localVarsBox.position.set(0, localVarsY, 0);
+        scene.add(localVarsBox);
+
+        // Buffer box (split into 4 sub-blocks for fill animation)
+        const bufferSubBlocks = [];
+        const subBlockHeight = bufferH / 4; // 0.525 each
+        const subBlockColors = [0x3b82f6, 0x3b82f6, 0x3b82f6, 0x3b82f6]; // will be updated
+        for (let i = 0; i < 4; i++) {
+            const subY = bufferY - bufferH / 2 + subBlockHeight / 2 + i * subBlockHeight;
+            const box = createBox(boxWidth * 0.92, subBlockHeight * 0.88, boxDepth * 0.92, 0x3b82f6);
+            box.position.set(0, subY, 0);
+            box.userData = { index: i, baseY: subY, originalColor: 0x3b82f6 };
+            bufferSubBlocks.push(box);
+            scene.add(box);
+        }
+
+        // EBP box
+        const ebpBox = createBox(boxWidth, ebpH, boxDepth, 0x22c55e, 0x000000, 0);
+        ebpBox.position.set(0, ebpY, 0);
+        ebpBox.userData = { originalColor: 0x22c55e, originalEmissive: 0x000000 };
+        scene.add(ebpBox);
+
+        // RET box (return address) - wrap in group for shake
+        const retGroup = new THREE.Group();
+        retGroup.position.set(0, retY, 0);
+        scene.add(retGroup);
+        const retBox = createBox(boxWidth, retH, boxDepth, 0x8b5cf6, 0x000000, 0.15);
+        retBox.userData = { originalColor: 0x8b5cf6, originalEmissive: 0x000000, originalEmissiveIntensity: 0.15 };
+        retGroup.add(retBox);
+
+        // Overflow wave block (initially invisible)
+        const overflowGeo = new THREE.BoxGeometry(boxWidth * 0.85, 0.08, boxDepth * 0.85);
+        const overflowMat = new THREE.MeshStandardMaterial({
+            color: 0xef4444,
+            roughness: 0.2,
+            metalness: 0.1,
+            emissive: 0xef4444,
+            emissiveIntensity: 1.8,
+            transparent: true,
+            opacity: 0,
+        });
+        const overflowBlock = new THREE.Mesh(overflowGeo, overflowMat);
+        overflowBlock.position.set(0, bufferTopY, 0);
+        overflowBlock.scale.y = 0.01;
+        overflowBlock.visible = false;
+        scene.add(overflowBlock);
+
+        // Wireframe outlines
+        function addWireframe(mesh, color = 0xffffff, opacity = 0.25) {
+            const edgeGeo = new THREE.EdgesGeometry(mesh.geometry);
+            const edgeMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, linewidth: 1 });
+            const wireframe = new THREE.LineSegments(edgeGeo, edgeMat);
+            mesh.add(wireframe);
+            return wireframe;
+        }
+        addWireframe(localVarsBox, 0x8899aa, 0.35);
+        bufferSubBlocks.forEach(b => addWireframe(b, 0x8899cc, 0.35));
+        addWireframe(ebpBox, 0x88cc88, 0.35);
+        addWireframe(retBox, 0xaaaacc, 0.4);
+
+        // Particles for overflow effect
+        const particleGroup = new THREE.Group();
+        scene.add(particleGroup);
+        const particleMeshes = [];
+        const particleCount = 60;
+        const particleGeo = new THREE.SphereGeometry(0.06, 6, 6);
+        for (let i = 0; i < particleCount; i++) {
+            const pMat = new THREE.MeshStandardMaterial({
+                color: 0xff6644,
+                roughness: 0.3,
+                emissive: 0xff4422,
+                emissiveIntensity: 2.5,
+            });
+            const pMesh = new THREE.Mesh(particleGeo, pMat);
+            pMesh.visible = false;
+            pMesh.userData = {
+                active: false,
+                progress: 0,
+                speed: 0,
+                startY: bufferTopY,
+                endY: retY + 0.8,
+                offsetX: 0,
+                offsetZ: 0,
+            };
+            particleGroup.add(pMesh);
+            particleMeshes.push(pMesh);
+        }
+
+        // ==================== HTML OVERLAY LABELS ====================
+        const labelDefs = [
+            { id: 'labelLocalVars', text: '局部变量', y3d: localVarsY, color: '#94a3b8', cls: '' },
+            { id: 'labelBuffer', text: 'buffer[16]', y3d: bufferY, color: '#93c5fd', cls: '' },
+            { id: 'labelEBP', text: '保存的 EBP', y3d: ebpY, color: '#86efac', cls: '' },
+            { id: 'labelRET', text: '返回地址 (RET)', y3d: retY, color: '#c4b5fd', cls: 'ret-label' },
+            { id: 'labelHighAddr', text: '↑ 高地址 0xFFFF...', y3d: retY + 1.2, color: '#64748b', cls: '' },
+            { id: 'labelLowAddr', text: '↓ 低地址 0x0000...', y3d: localVarsY - 0.7, color: '#64748b', cls: '' },
+        ];
+        const labelElements = {};
+        labelDefs.forEach(def => {
+            const el = document.createElement('div');
+            el.className = 'stack-label ' + def.cls;
+            el.textContent = def.text;
+            el.style.color = def.color;
+            el.id = def.id;
+            canvasOverlay.appendChild(el);
+            labelElements[def.id] = { el, y3d: def.y3d, baseColor: def.color, baseText: def.text };
+        });
+
+        function updateLabelPositions() {
+            const rect = renderer.domElement.getBoundingClientRect();
+            const halfW = rect.width / 2;
+            const halfH = rect.height / 2;
+            Object.entries(labelElements).forEach(([id, data]) => {
+                const worldPos = new THREE.Vector3(2.2, data.y3d, 0);
+                const screenPos = worldPos.clone().project(camera);
+                const x = (screenPos.x * halfW) + halfW;
+                const y = -(screenPos.y * halfH) + halfH;
+                const behindCamera = screenPos.z > 1;
+                data.el.style.left = x + 'px';
+                data.el.style.top = y + 'px';
+                data.el.style.opacity = behindCamera ? '0' : '1';
+            });
+        }
+
+        // ==================== RAYCASTER FOR HOVER ====================
+        const raycaster = new THREE.Raycaster();
+        raycaster.far = 15;
+        const allInteractiveBoxes = [
+            localVarsBox,
+            ...bufferSubBlocks,
+            ebpBox,
+            retBox,
+        ];
+        const mouse = new THREE.Vector2();
+        let hoveredObject = null;
+
+        function onMouseMove(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(allInteractiveBoxes, false);
+            if (intersects.length > 0) {
+                const obj = intersects[0].object;
+                if (hoveredObject !== obj) {
+                    resetHoverHighlight();
+                    hoveredObject = obj;
+                    highlightObject(obj, true);
+                    // Tooltip
+                    const screenPos = new THREE.Vector3().copy(obj.position).project(camera);
+                    const rect2 = renderer.domElement.getBoundingClientRect();
+                    const tx = (screenPos.x * 0.5 + 0.5) * rect2.width;
+                    const ty = (-screenPos.y * 0.5 + 0.5) * rect2.height;
+                    tooltip3d.style.left = (tx + 20) + 'px';
+                    tooltip3d.style.top = (ty - 20) + 'px';
+                    tooltip3d.textContent = getBoxTooltip(obj);
+                    tooltip3d.classList.add('visible');
+                }
+            } else {
+                resetHoverHighlight();
+                hoveredObject = null;
+                tooltip3d.classList.remove('visible');
+            }
+        }
+
+        function getBoxTooltip(obj) {
+            if (obj === localVarsBox) return '局部变量区';
+            if (bufferSubBlocks.includes(obj)) return `buffer 字节块 #${obj.userData.index + 1} (4字节)`;
+            if (obj === ebpBox) return '保存的 EBP (栈帧指针)';
+            if (obj === retBox) return '返回地址 (RET) — 关键区域';
+            return '';
+        }
+
+        function highlightObject(obj, on) {
+            if (!obj || !obj.material) return;
+            if (on) {
+                obj.material._savedEmissive = obj.material.emissive ? obj.material.emissive.getHex() : 0;
+                obj.material._savedEmissiveIntensity = obj.material.emissiveIntensity || 0;
+                obj.material.emissive = new THREE.Color(0xffffff);
+                obj.material.emissiveIntensity = 0.45;
+            }
+        }
+
+        function resetHoverHighlight() {
+            if (hoveredObject && hoveredObject.material) {
+                if (hoveredObject.material._savedEmissive !== undefined) {
+                    hoveredObject.material.emissive.setHex(hoveredObject.material._savedEmissive);
+                    hoveredObject.material.emissiveIntensity = hoveredObject.material._savedEmissiveIntensity || 0;
+                }
+            }
+        }
+
+        // ==================== SCENE SETUP COMPLETE ====================
+        function resizeRenderer() {
+            const container = canvasContainer;
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+            if (w === 0 || h === 0) return;
+            renderer.setSize(w, h, false);
+            camera.aspect = w / Math.max(h, 1);
+            camera.updateProjectionMatrix();
+        }
+        window.addEventListener('resize', resizeRenderer);
+        resizeRenderer();
+
+        // ==================== ANIMATION LOOP ====================
+        const clock = new THREE.Clock();
+        function animate(timestamp) {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.1);
+            controls.update();
+            updateLabelPositions();
+            updateAnimation(timestamp, dt);
+            renderer.render(scene, camera);
+        }
+
+        function updateAnimation(timestamp, dt) {
+            if (animationPhase === 'idle') {
+                // Subtle floating for buffer blocks
+                const t = timestamp * 0.001;
+                bufferSubBlocks.forEach((b, i) => {
+                    b.position.y = b.userData.baseY + Math.sin(t * 1.5 + i * 0.7) * 0.04;
+                });
+                // Ensure overflow block hidden
+                overflowBlock.visible = false;
+                overflowBlock.scale.y = 0.01;
+                overflowMat.opacity = 0;
+            } else if (animationPhase === 'filling') {
+                const elapsed = (timestamp - animationStartTime) / 1000;
+                const fillProgress = Math.min(elapsed / 1.0, 1.0);
+                // Fill buffer sub-blocks from bottom to top with orange glow
+                bufferSubBlocks.forEach((b, i) => {
+                    const threshold = i / 4;
+                    const individualProgress = Math.max(0, Math.min(1, (fillProgress - threshold) * 4));
+                    const col = new THREE.Color().lerpColors(
+                        new THREE.Color(0x3b82f6),
+                        new THREE.Color(0xf59e0b),
+                        individualProgress
+                    );
+                    b.material.color.copy(col);
+                    b.material.emissive = new THREE.Color().lerpColors(
+                        new THREE.Color(0x000000),
+                        new THREE.Color(0xf59e0b),
+                        individualProgress
+                    );
+                    b.material.emissiveIntensity = individualProgress * 1.5;
+                });
+                if (fillProgress >= 1.0) {
+                    animationPhase = 'overflowing';
+                    animationStartTime = timestamp;
+                    overflowBlock.visible = true;
+                    overflowBlock.position.y = bufferTopY;
+                    overflowBlock.scale.y = 0.01;
+                    overflowMat.opacity = 0.7;
+                    // Spawn particles
+                    spawnOverflowParticles();
+                }
+            } else if (animationPhase === 'overflowing') {
+                const elapsed = (timestamp - animationStartTime) / 1000;
+                const overflowProgress = Math.min(elapsed / 1.8, 1.0);
+                // Overflow block grows upward
+                const maxGrowHeight = (retY + retH / 2) - bufferTopY + 0.4;
+                const growHeight = overflowProgress * maxGrowHeight;
+                overflowBlock.scale.y = Math.max(0.01, growHeight / 0.08);
+                overflowBlock.position.y = bufferTopY + growHeight / 2;
+                overflowMat.opacity = 0.55 + 0.3 * Math.sin(elapsed * 12);
+                // Update particles
+                updateParticles(dt, overflowProgress);
+                // Check if overflow reaches EBP
+                const overflowTopY = bufferTopY + growHeight;
+                if (overflowTopY >= ebpY - ebpH / 2 && overflowProgress > 0.3) {
+                    ebpBox.material.color.setHex(0xf59e0b);
+                    ebpBox.material.emissive = new THREE.Color(0xf59e0b);
+                    ebpBox.material.emissiveIntensity = 1.2;
+                    if (labelElements['labelEBP']) {
+                        labelElements['labelEBP'].el.style.color = '#f59e0b';
+                        labelElements['labelEBP'].el.textContent = 'EBP ⚠ 被覆盖';
+                    }
+                }
+                // Check if overflow reaches RET
+                if (overflowTopY >= retY - retH / 2 && overflowProgress > 0.6) {
+                    if (animationPhase === 'overflowing') {
+                        animationPhase = 'impact';
+                        animationStartTime = timestamp;
+                        animationData.impactStartTime = timestamp;
+                        retBox.material.color.setHex(0xef4444);
+                        retBox.material.emissive = new THREE.Color(0xef4444);
+                        retBox.material.emissiveIntensity = 2.5;
+                        if (labelElements['labelRET']) {
+                            labelElements['labelRET'].el.classList.add('overwritten');
+                            labelElements['labelRET'].el.textContent = 'RET = 0x41414141 ⚠';
+                            labelElements['labelRET'].el.style.color = '#ef4444';
+                        }
+                    }
+                }
+                if (overflowProgress >= 1.0 && animationPhase === 'overflowing') {
+                    animationPhase = 'impact';
+                    animationStartTime = timestamp;
+                    animationData.impactStartTime = timestamp;
+                }
+            } else if (animationPhase === 'impact') {
+                const elapsed = (timestamp - animationData.impactStartTime) / 1000;
+                // Shake RET group
+                const shakeAmount = Math.max(0, 0.35 * Math.exp(-elapsed * 2.5));
+                const shakeX = shakeAmount * Math.sin(elapsed * 55) * (1 + Math.random() * 0.5);
+                const shakeZ = shakeAmount * Math.cos(elapsed * 47) * (1 + Math.random() * 0.5);
+                retGroup.position.x = shakeX;
+                retGroup.position.z = shakeZ;
+                // Flash RET emissive
+                retBox.material.emissiveIntensity = 2.0 + 1.5 * Math.abs(Math.sin(elapsed * 18));
+                // Flash overflow block
+                overflowMat.emissiveIntensity = 1.5 + 2.0 * Math.abs(Math.sin(elapsed * 14));
+                overflowMat.opacity = 0.5 + 0.4 * Math.abs(Math.sin(elapsed * 10));
+                // Update lingering particles
+                updateParticles(dt, 1.0);
+                // After impact settles
+                if (elapsed > 3.5) {
+                    animationPhase = 'complete';
+                    animationStartTime = timestamp;
+                    retGroup.position.x = 0;
+                    retGroup.position.z = 0;
+                    retBox.material.emissiveIntensity = 1.8;
+                    retBox.material.color.setHex(0xef4444);
+                    overflowMat.emissiveIntensity = 1.2;
+                    overflowMat.opacity = 0.35;
+                    if (!flagCaptured) {
+                        revealFlag();
+                    }
+                }
+            } else if (animationPhase === 'complete') {
+                const elapsed = (timestamp - animationStartTime) / 1000;
+                // Gentle residual glow
+                retBox.material.emissiveIntensity = 1.5 + 0.4 * Math.sin(elapsed * 3);
+                overflowMat.emissiveIntensity = 1.0 + 0.3 * Math.sin(elapsed * 2.5);
+                updateParticles(dt, 1.0);
+                // Slowly reset overflow block
+                if (elapsed > 6) {
+                    overflowMat.opacity = Math.max(0.15, overflowMat.opacity - 0.003);
+                }
+            }
+        }
+
+        function spawnOverflowParticles() {
+            particleMeshes.forEach(p => {
+                p.userData.active = true;
+                p.userData.progress = Math.random() * 0.1;
+                p.userData.speed = 0.3 + Math.random() * 0.9;
+                p.userData.offsetX = (Math.random() - 0.5) * 1.8;
+                p.userData.offsetZ = (Math.random() - 0.5) * 1.2;
+                p.userData.startY = bufferTopY + Math.random() * 0.3;
+                p.userData.endY = retY + 0.6 + Math.random() * 0.6;
+                p.position.set(
+                    p.userData.offsetX,
+                    p.userData.startY,
+                    p.userData.offsetZ
+                );
+                p.visible = true;
+                p.material.opacity = 0.85;
+                p.scale.setScalar(0.6 + Math.random() * 1.0);
+            });
+        }
+
+        function updateParticles(dt, overflowProgress) {
+            particleMeshes.forEach(p => {
+                if (!p.userData.active) return;
+                p.userData.progress += p.userData.speed * dt * (0.8 + overflowProgress * 0.4);
+                if (p.userData.progress >= 1.0) {
+                    // Respawn
+                    p.userData.progress = Math.random() * 0.15;
+                    p.userData.speed = 0.3 + Math.random() * 0.9;
+                    p.userData.offsetX = (Math.random() - 0.5) * 1.8;
+                    p.userData.offsetZ = (Math.random() - 0.5) * 1.2;
+                    p.userData.startY = bufferTopY + Math.random() * 0.4;
+                    p.userData.endY = retY + 0.6 + Math.random() * 0.6;
+                }
+                const y = THREE.MathUtils.lerp(p.userData.startY, p.userData.endY, p.userData.progress);
+                p.position.set(p.userData.offsetX, y, p.userData.offsetZ);
+                p.material.emissiveIntensity = 2.0 + 1.5 * Math.sin(p.userData.progress * Math.PI);
+                p.material.opacity = 0.5 + 0.5 * (1 - p.userData.progress);
+                p.visible = overflowProgress > 0.05;
+            });
+            // Hide particles when no overflow
+            if (overflowProgress < 0.02 && animationPhase === 'idle') {
+                particleMeshes.forEach(p => { p.visible = false;
+                    p.userData.active = false; });
+            }
+        }
+
+        function resetAllParticles() {
+            particleMeshes.forEach(p => {
+                p.visible = false;
+                p.userData.active = false;
+                p.userData.progress = 0;
+            });
+        }
+
+        // ==================== REVEAL FLAG ====================
+        function revealFlag() {
+            flagCaptured = true;
+            flagText.textContent = FLAG_STRING;
+            flagToast.classList.add('show');
+            updateProgressStep(4);
+            // Auto-hide toast after 8 seconds
+            setTimeout(() => {
+                flagToast.classList.remove('show');
+            }, 8000);
+            // Also open analysis
+            if (analysisDetails && !analysisDetails.open) {
+                setTimeout(() => { analysisDetails.open = true; }, 1500);
+            }
+        }
+
+        // ==================== PROGRESS TRACKING ====================
+        function updateProgressStep(step) {
+            currentStep = Math.max(currentStep, step);
+            const steps = progressBar.querySelectorAll('.progress-step');
+            steps.forEach(s => {
+                const sNum = parseInt(s.dataset.step);
+                s.classList.remove('active', 'done');
+                if (sNum < currentStep) s.classList.add('done');
+                if (sNum === currentStep) s.classList.add('active');
+            });
+        }
+
+        // ==================== CODE PANEL INTERACTION ====================
+        const vulnLine = codePanel.querySelector('.vuln-target');
+        const allCodeLines = codePanel.querySelectorAll('.code-line');
+
+        allCodeLines.forEach(line => {
+            line.addEventListener('click', function(e) {
+                if (vulnLineFound) return; // Already found
+                if (this === vulnLine) {
+                    // Correct!
+                    this.classList.add('correct-click');
+                    vulnLineFound = true;
+                    codeFeedback.textContent = '✅ 正确！strcpy() 不检查边界，是缓冲区溢出的根源。';
+                    codeFeedback.style.color = '#4ade80';
+                    updateProgressStep(2);
+                    injectBtn.disabled = false;
+                    payloadInput.focus();
+                } else {
+                    // Wrong
+                    this.classList.add('wrong-click');
+                    setTimeout(() => this.classList.remove('wrong-click'), 450);
+                    codeFeedback.textContent = '❌ 不是这一行。仔细看：哪一行在向固定大小的buffer写入数据？';
+                    codeFeedback.style.color = '#ef4444';
+                }
+            });
+        });
+
+        // ==================== PAYLOAD INPUT ====================
+        payloadInput.addEventListener('input', () => {
+            const len = payloadInput.value.length;
+            charCounter.textContent = `${len} / ${BUFFER_SIZE} 字节`;
+            charCounter.classList.remove('overflow-warn', 'overflow-danger');
+            if (len > BUFFER_SIZE && len <= BUFFER_SIZE + 4) {
+                charCounter.classList.add('overflow-warn');
+            } else if (len > BUFFER_SIZE + 4) {
+                charCounter.classList.add('overflow-danger');
+            }
+            // Enable inject if vuln found and input not empty
+            injectBtn.disabled = !vulnLineFound || len === 0;
+        });
+
+        // ==================== INJECT BUTTON ====================
+        injectBtn.addEventListener('click', () => {
+            if (!vulnLineFound) return;
+            const payload = payloadInput.value;
+            if (payload.length === 0) return;
+            if (payload.length <= BUFFER_SIZE) {
+                // No overflow - show buffer filling but no spill
+                codeFeedback.textContent =
+                    '⚠️ 载荷未超过16字节，缓冲区刚好填满但未溢出。请尝试更长的输入（>16字符）。';
+                codeFeedback.style.color = '#f59e0b';
+                // Brief fill animation
+                triggerFillOnlyAnimation();
+                return;
+            }
+            // Overflow!
+            overflowTriggered = true;
+            codeFeedback.textContent =
+                `🔥 溢出触发！${payload.length}字节数据冲破了buffer边界，正在覆盖EBP和返回地址...`;
+            codeFeedback.style.color = '#ef4444';
+            updateProgressStep(3);
+            triggerOverflowAnimation();
+        });
+
+        function triggerFillOnlyAnimation() {
+            resetAnimationState();
+            animationPhase = 'filling';
+            animationStartTime = performance.now();
+            // Only fill to 100%, then return to idle
+            setTimeout(() => {
+                if (animationPhase === 'filling') {
+                    resetAnimationState();
+                }
+            }, 1500);
+        }
+
+        function triggerOverflowAnimation() {
+            resetAnimationState();
+            animationPhase = 'filling';
+            animationStartTime = performance.now();
+            // filling -> overflowing -> impact -> complete transitions are handled in updateAnimation
+        }
+
+        function resetAnimationState() {
+            animationPhase = 'idle';
+            animationStartTime = 0;
+            animationData = {};
+            overflowBlock.visible = false;
+            overflowBlock.scale.y = 0.01;
+            overflowBlock.position.y = bufferTopY;
+            overflowMat.opacity = 0;
+            overflowMat.emissiveIntensity = 1.8;
+            retGroup.position.x = 0;
+            retGroup.position.z = 0;
+            retBox.material.color.setHex(retBox.userData.originalColor);
+            retBox.material.emissive.setHex(retBox.userData.originalEmissive || 0);
+            retBox.material.emissiveIntensity = retBox.userData.originalEmissiveIntensity || 0.15;
+            ebpBox.material.color.setHex(ebpBox.userData.originalColor);
+            ebpBox.material.emissive.setHex(ebpBox.userData.originalEmissive || 0);
+            ebpBox.material.emissiveIntensity = 0;
+            bufferSubBlocks.forEach(b => {
+                b.material.color.setHex(b.userData.originalColor);
+                b.material.emissive.setHex(0x000000);
+                b.material.emissiveIntensity = 0;
+            });
+            if (labelElements['labelRET']) {
+                labelElements['labelRET'].el.classList.remove('overwritten');
+                labelElements['labelRET'].el.textContent = labelElements['labelRET'].baseText;
+                labelElements['labelRET'].el.style.color = labelElements['labelRET'].baseColor;
+            }
+            if (labelElements['labelEBP']) {
+                labelElements['labelEBP'].el.textContent = labelElements['labelEBP'].baseText;
+                labelElements['labelEBP'].el.style.color = labelElements['labelEBP'].baseColor;
+            }
+            resetAllParticles();
+        }
+
+        // ==================== RESET BUTTON ====================
+        resetBtn.addEventListener('click', () => {
+            resetAnimationState();
+            if (!flagCaptured && overflowTriggered && payloadInput.value.length > BUFFER_SIZE) {
+                // Re-trigger for demo
+                setTimeout(() => triggerOverflowAnimation(), 300);
+            }
+            // Reset camera
+            controls.target.set(0, 2.1, 0);
+            camera.position.set(7, 2.8, 9);
+            camera.lookAt(0, 2.0, 0);
+            controls.update();
+        });
+
+        // ==================== GLOBAL CLICK TO DISMISS TOAST ====================
+        flagToast.addEventListener('click', () => {
+            flagToast.classList.remove('show');
+        });
+
+        // ==================== MOUSE EVENTS FOR RAYCASTER ====================
+        renderer.domElement.addEventListener('mousemove', onMouseMove, { passive: true });
+        renderer.domElement.addEventListener('mouseleave', () => {
+            resetHoverHighlight();
+            hoveredObject = null;
+            tooltip3d.classList.remove('visible');
+        });
+
+        // ==================== INITIAL SETUP ====================
+        updateProgressStep(1);
+        injectBtn.disabled = true;
+        // Start animation loop
+        requestAnimationFrame(animate);
+
+        // ==================== KEYBOARD SHORTCUT ====================
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && document.activeElement === payloadInput && !injectBtn.disabled) {
+                injectBtn.click();
+            }
+            if (e.key === 'r' && e.ctrlKey && document.activeElement !== payloadInput) {
+                e.preventDefault();
+                resetBtn.click();
+            }
+        });
+
+        console.log(
+            '%c🔬 3D栈溢出可视化实验已就绪 %c| %c仅用于授权教学环境',
+            'color:#4ade80;font-weight:bold;',
+            '',
+            'color:#94a3b8;'
+        );
+        console.log('%c步骤1: 点击代码中的漏洞行 | 步骤2: 输入超长载荷 | 步骤3: 点击注入 | 步骤4: 捕获旗帜',
+            'color:#f59e0b;');
+        console.log('%c🏴 目标旗帜: ' + FLAG_STRING, 'color:#c4b5fd;font-size:1.1em;');
+    </script>
+</body>
+</html>

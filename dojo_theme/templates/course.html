@@ -82,13 +82,13 @@
         {% endif %}
         <div class="tab-pane fade" id="setup" role="tabpanel">
           <ol>
-            <li class="setup-{{ setup.create_account }}">在<a href="/register">此处</a>创建 AISecEdu 账号，或使用已有账号。用户名可能显示在课程排行榜中，请注意其可见性。</li>
+            <li class="setup-{{ setup.create_account }}">在<a href="/register">此处</a>创建玄甲账号，或使用已有账号。用户名可能显示在课程排行榜中，请注意其可见性。</li>
             {% if discord_role %}
               <li class="setup-{{ setup.create_discord }}">在<a href="https://discord.com/register">此处</a>创建 Discord 账号。你可以使用已有账号，或专门为本课程创建一个账号。</li>
               <li class="setup-{{ setup.join_discord }}">加入教师提供的交流空间。课程公告和允许的同伴讨论都会在这里进行。</li>
-              <li class="setup-{{ setup.link_discord }}">在<a href="/settings#discord">此处</a>关联 AISecEdu 与 Discord 账号，以便课程分配正确的学生角色。</li>
+              <li class="setup-{{ setup.link_discord }}">在<a href="/settings#discord">此处</a>关联玄甲与 Discord 账号，以便课程分配正确的学生角色。</li>
             {% endif %}
-            <li class="setup-{{ setup.link_student }}">在<a href="identity">此处</a>将 AISecEdu 账号与 {{ identity.name }} 关联。教师会用此信息将进度和成绩关联到正确的学生记录。</li>
+            <li class="setup-{{ setup.link_student }}">在<a href="identity">此处</a>将玄甲账号与 {{ identity.name }} 关联。教师会用此信息将进度和成绩关联到正确的学生记录。</li>
           </ol>
           {% if setup_complete %}
             <p>设置已完成！</p>

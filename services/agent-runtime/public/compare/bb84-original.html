@@ -1,0 +1,1529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BB84 量子密钥分发模拟</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel-bg: #1e293b;
+            --text: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --accent: #6366f1;
+            --accent-light: #818cf8;
+            --basis-plus: #3b82f6;
+            --basis-cross: #f59e0b;
+            --match-green: #10b981;
+            --mismatch-gray: #475569;
+            --eve-red: #ef4444;
+            --eve-red-glow: #f87171;
+            --card-bg: #1e293b;
+            --border: #334155;
+            --slider-track: #334155;
+            --btn-bg: #6366f1;
+            --btn-hover: #4f46e5;
+            --btn-text: #fff;
+            --highlight: rgba(99, 102, 241, 0.3);
+            --radius: 12px;
+            --radius-sm: 8px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            min-height: 100dvh;
+            overflow-x: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 8px;
+            gap: 8px;
+        }
+
+        @media (min-width: 768px) {
+            .app-container {
+                flex-direction: row;
+                padding: 16px;
+                gap: 16px;
+                height: 100vh;
+                height: 100dvh;
+            }
+        }
+
+        /* Control Panel */
+        .control-panel {
+            background: var(--panel-bg);
+            border-radius: var(--radius);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            border: 1px solid var(--border);
+            flex-shrink: 0;
+            max-height: 38vh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            z-index: 10;
+            position: relative;
+        }
+
+        @media (min-width: 768px) {
+            .control-panel {
+                width: 320px;
+                min-width: 300px;
+                max-height: none;
+                height: 100%;
+                overflow-y: auto;
+                padding: 20px;
+                gap: 16px;
+            }
+        }
+
+        @media (max-width: 767px) {
+            .control-panel.collapsed {
+                max-height: 56px;
+                overflow: hidden;
+                padding: 10px 16px;
+                gap: 0;
+            }
+            .control-panel.collapsed .panel-content {
+                display: none;
+            }
+            .control-panel .collapse-toggle {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                cursor: pointer;
+                padding: 4px 0;
+                font-weight: 600;
+                font-size: 15px;
+                color: var(--text);
+                flex-shrink: 0;
+            }
+            .control-panel .collapse-toggle .toggle-icon {
+                transition: transform 0.3s;
+                font-size: 18px;
+                color: var(--text-secondary);
+            }
+            .control-panel.collapsed .collapse-toggle .toggle-icon {
+                transform: rotate(-90deg);
+            }
+        }
+
+        @media (min-width: 768px) {
+            .control-panel .collapse-toggle {
+                display: none;
+            }
+        }
+
+        .panel-content {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        @media (min-width: 768px) {
+            .panel-content {
+                gap: 16px;
+            }
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: 0.02em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel-title .icon {
+            font-size: 22px;
+        }
+
+        .var-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .var-group label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .var-group label .val {
+            color: var(--accent-light);
+            font-weight: 700;
+            font-size: 14px;
+            font-variant-numeric: tabular-nums;
+            font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+        }
+        .var-group input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: var(--slider-track);
+            outline: none;
+            cursor: pointer;
+        }
+        .var-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--accent-light);
+            border: 3px solid #fff;
+            cursor: pointer;
+            box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+            transition: box-shadow 0.2s;
+        }
+        .var-group input[type="range"]::-webkit-slider-thumb:active {
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.7);
+        }
+        @media (max-width: 767px) {
+            .var-group input[type="range"]::-webkit-slider-thumb {
+                width: 34px;
+                height: 34px;
+                border-width: 4px;
+            }
+            .var-group input[type="range"] {
+                height: 10px;
+            }
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .toggle-row span {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
+        }
+        .toggle-switch {
+            position: relative;
+            width: 52px;
+            height: 30px;
+            flex-shrink: 0;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-switch .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--slider-track);
+            border-radius: 30px;
+            transition: 0.3s;
+        }
+        .toggle-switch .slider::before {
+            content: '';
+            position: absolute;
+            height: 24px;
+            width: 24px;
+            left: 3px;
+            bottom: 3px;
+            background: #fff;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        .toggle-switch input:checked+.slider {
+            background: var(--eve-red);
+        }
+        .toggle-switch input:checked+.slider::before {
+            transform: translateX(22px);
+        }
+
+        .preset-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .preset-btn {
+            flex: 1;
+            min-width: 60px;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: var(--card-bg);
+            color: var(--text);
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+            text-align: center;
+            white-space: nowrap;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .preset-btn:hover {
+            border-color: var(--accent-light);
+            background: rgba(99, 102, 241, 0.1);
+        }
+        .preset-btn:active {
+            transform: scale(0.96);
+            background: var(--highlight);
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .btn-main {
+            flex: 2;
+            padding: 13px 20px;
+            border-radius: var(--radius-sm);
+            border: none;
+            background: var(--btn-bg);
+            color: var(--btn-text);
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            transition: all 0.25s;
+            min-height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+        }
+        .btn-main:hover {
+            background: var(--btn-hover);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.45);
+        }
+        .btn-main:active {
+            transform: scale(0.97);
+        }
+        .btn-main.rerun {
+            background: #10b981;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);
+        }
+        .btn-main.rerun:hover {
+            background: #059669;
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.45);
+        }
+        .btn-reset {
+            flex: 1;
+            padding: 13px 16px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: var(--card-bg);
+            color: var(--text);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s;
+            min-height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-reset:hover {
+            border-color: #94a3b8;
+            background: #2d3a4f;
+        }
+
+        /* Stats bar */
+        .stats-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 10px 14px;
+            background: var(--panel-bg);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            font-size: 12px;
+            font-weight: 600;
+        }
+        @media (min-width: 768px) {
+            .stats-bar {
+                font-size: 13px;
+                gap: 14px;
+                padding: 12px 18px;
+            }
+        }
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            color: var(--text-secondary);
+        }
+        .stat-item .stat-val {
+            color: var(--text);
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace;
+        }
+        .stat-item.warn .stat-val {
+            color: #f59e0b;
+        }
+        .stat-item.danger .stat-val {
+            color: #ef4444;
+        }
+        .stat-item.good .stat-val {
+            color: #10b981;
+        }
+
+        /* Canvas container */
+        .canvas-container {
+            flex: 1;
+            background: var(--panel-bg);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            position: relative;
+            overflow: hidden;
+            min-height: 320px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        @media (min-width: 768px) {
+            .canvas-container {
+                min-height: 500px;
+            }
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .canvas-placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            color: var(--text-secondary);
+            font-size: 15px;
+            font-weight: 500;
+            text-align: center;
+            padding: 20px;
+            opacity: 0.7;
+        }
+        .canvas-placeholder .placeholder-icon {
+            font-size: 48px;
+            display: block;
+            margin-bottom: 10px;
+            opacity: 0.5;
+        }
+        @media (min-width: 768px) {
+            .canvas-placeholder {
+                font-size: 17px;
+            }
+            .canvas-placeholder .placeholder-icon {
+                font-size: 60px;
+            }
+        }
+
+        /* Legend */
+        .legend-inline {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            padding: 4px 0;
+        }
+        @media (min-width: 768px) {
+            .legend-inline {
+                font-size: 12px;
+                gap: 14px;
+            }
+        }
+        .legend-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 3px;
+            vertical-align: middle;
+        }
+        .legend-dot.plus {
+            background: var(--basis-plus);
+        }
+        .legend-dot.cross {
+            background: var(--basis-cross);
+        }
+        .legend-dot.match {
+            background: var(--match-green);
+        }
+        .legend-dot.eve {
+            background: var(--eve-red);
+        }
+
+        @keyframes pulse-highlight {
+            0%,
+            100% {
+                outline-color: rgba(99, 102, 241, 0.8);
+            }
+            50% {
+                outline-color: rgba(99, 102, 241, 0.35);
+            }
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        @keyframes glowPulse {
+            0%,
+            100% {
+                filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.6));
+            }
+            50% {
+                filter: drop-shadow(0 0 14px rgba(239, 68, 68, 0.9));
+            }
+        }
+        .teacher-annotation {
+            pointer-events: none;
+            z-index: 1000;
+            animation: fadeIn 0.3s;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Canvas Area -->
+        <div class="canvas-container" id="canvas-container">
+            <canvas id="main-canvas"></canvas>
+            <div class="canvas-placeholder" id="placeholder">
+                <div>
+                    <span class="placeholder-icon">🔬</span>
+                    点击 <strong>「运行模拟」</strong> 开始 BB84 量子密钥分发
+                </div>
+            </div>
+        </div>
+
+        <!-- Control Panel -->
+        <div class="control-panel" id="control-panel">
+            <div class="collapse-toggle" id="collapse-toggle" role="button" aria-label="折叠控制面板" tabindex="0">
+                <span>🎛️ 控制面板</span>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="panel-content" id="panel-content">
+                <div class="panel-title"><span class="icon">⚛️</span>BB84 协议参数</div>
+
+                <div class="var-group">
+                    <label for="photon-slider">光子数量 <span class="val" id="photon-display">16</span></label>
+                    <input type="range" id="photon-slider" data-var="photon" min="8" max="30" value="16" step="2" aria-label="光子数量">
+                </div>
+
+                <div class="var-group">
+                    <label for="basis-slider">基矢展示模式 <span class="val" id="basis-display">标准</span></label>
+                    <input type="range" id="basis-slider" data-var="basis" min="0" max="1" value="0" step="1" aria-label="基矢展示模式">
+                </div>
+
+                <div class="toggle-row">
+                    <span>🕵️ 窃听者 (Eve)</span>
+                    <label class="toggle-switch" aria-label="窃听者开关">
+                        <input type="checkbox" id="eve-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="legend-inline">
+                    <span><span class="legend-dot plus"></span>+基矢</span>
+                    <span><span class="legend-dot cross"></span>×基矢</span>
+                    <span><span class="legend-dot match"></span>基矢匹配</span>
+                    <span><span class="legend-dot eve"></span>Eve干扰</span>
+                </div>
+
+                <div class="preset-buttons">
+                    <button class="preset-btn" id="preset-normal" aria-label="预设：正常通信">📡 正常通信</button>
+                    <button class="preset-btn" id="preset-eve" aria-label="预设：窃听检测">🕵️ 窃听检测</button>
+                    <button class="preset-btn" id="preset-large" aria-label="预设：大量采样">📊 大量采样</button>
+                    <button class="preset-btn" id="preset-alert" aria-label="预设：安全告警">🚨 安全告警</button>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="btn-main" id="main-btn" aria-label="运行模拟">▶ 运行模拟</button>
+                    <button class="btn-reset" id="reset-btn" aria-label="重置">↺ 重置</button>
+                </div>
+
+                <div class="stats-bar" id="stats-bar">
+                    <span class="stat-item">密钥长度: <span class="stat-val" id="stat-keylen">-</span></span>
+                    <span class="stat-item">基矢匹配: <span class="stat-val" id="stat-match">-</span></span>
+                    <span class="stat-item" id="stat-err-item">误码率: <span class="stat-val" id="stat-error">-</span></span>
+                    <span class="stat-item" id="stat-eve-item" style="display:none;">Eve检测: <span class="stat-val danger" id="stat-eve-detect">-</span></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Widget Config -->
+    <script type="application/json" id="widget-config">
+        {
+            "type": "simulation",
+            "concept": "bb84_qkd",
+            "description": "BB84 量子密钥分发协议模拟：光子制备、基矢选择、测量与窃听者检测",
+            "variables": [
+                { "name": "photon", "label": "光子数量", "min": 8, "max": 30, "default": 16, "unit": "个" },
+                { "name": "basis", "label": "基矢展示模式", "min": 0, "max": 1, "default": 0, "unit": "" }
+            ],
+            "presets": [
+                { "name": "正常通信", "variables": { "photon": 16, "basis": 0 }, "eve": false },
+                { "name": "窃听检测", "variables": { "photon": 16, "basis": 0 }, "eve": true },
+                { "name": "大量采样", "variables": { "photon": 30, "basis": 0 }, "eve": false },
+                { "name": "安全告警", "variables": { "photon": 30, "basis": 0 }, "eve": true }
+            ]
+        }
+    </script>
+
+    <script>
+        (function() {
+            // ──────────────────────────────────────
+            // DOM References
+            // ──────────────────────────────────────
+            const canvas = document.getElementById('main-canvas');
+            const ctx = canvas.getContext('2d');
+            const canvasContainer = document.getElementById('canvas-container');
+            const placeholder = document.getElementById('placeholder');
+            const photonSlider = document.getElementById('photon-slider');
+            const basisSlider = document.getElementById('basis-slider');
+            const photonDisplay = document.getElementById('photon-display');
+            const basisDisplay = document.getElementById('basis-display');
+            const eveToggle = document.getElementById('eve-toggle');
+            const mainBtn = document.getElementById('main-btn');
+            const resetBtn = document.getElementById('reset-btn');
+            const collapseToggle = document.getElementById('collapse-toggle');
+            const controlPanel = document.getElementById('control-panel');
+            const statsBar = document.getElementById('stats-bar');
+            const statKeylen = document.getElementById('stat-keylen');
+            const statMatch = document.getElementById('stat-match');
+            const statError = document.getElementById('stat-error');
+            const statErrItem = document.getElementById('stat-err-item');
+            const statEveItem = document.getElementById('stat-eve-item');
+            const statEveDetect = document.getElementById('stat-eve-detect');
+
+            // ──────────────────────────────────────
+            // State
+            // ──────────────────────────────────────
+            const state = {
+                photonCount: 16,
+                basisMode: 0, // 0=标准模式, 1=详细模式
+                evePresent: false,
+                running: false,
+                paused: false,
+                completed: false,
+                animationId: null,
+                animationProgress: 0,
+                totalPhotons: [],
+                // Pre-generated simulation data
+                simData: null,
+                // Canvas dimensions
+                canvasW: 800,
+                canvasH: 500,
+                dpr: 1,
+            };
+
+            // ──────────────────────────────────────
+            // Helper: Seeded random (for reproducibility)
+            // ──────────────────────────────────────
+            function seededRandom(seed) {
+                let s = seed | 0;
+                return function() {
+                    s = (s * 1664525 + 1013904223) | 0;
+                    return (s >>> 0) / 4294967296;
+                };
+            }
+
+            // ──────────────────────────────────────
+            // Generate simulation data
+            // ──────────────────────────────────────
+            function generateSimData(photonCount, evePresent, seed) {
+                const rand = seededRandom(seed || Date.now());
+                const photons = [];
+
+                for (let i = 0; i < photonCount; i++) {
+                    // Alice: random bit and random basis
+                    const aliceBit = rand() < 0.5 ? 0 : 1;
+                    const aliceBasis = rand() < 0.5 ? '+' : '×';
+
+                    // Polarization angle based on Alice's bit and basis
+                    let polarizationAngle;
+                    if (aliceBasis === '+') {
+                        polarizationAngle = aliceBit === 0 ? 0 : 90; // 0°=horizontal, 90°=vertical
+                    } else {
+                        polarizationAngle = aliceBit === 0 ? 45 : 135; // 45°=diagonal, 135°=anti-diagonal
+                    }
+
+                    // Eve (if present)
+                    let eveBasis = null;
+                    let eveResult = null;
+                    let photonAfterEve = polarizationAngle; // If no Eve, photon unchanged
+                    if (evePresent) {
+                        eveBasis = rand() < 0.5 ? '+' : '×';
+                        // Eve measures
+                        if (eveBasis === aliceBasis) {
+                            eveResult = aliceBit; // Correct measurement
+                            photonAfterEve = polarizationAngle; // Re-prepare same
+                        } else {
+                            // Random result (50% correct)
+                            eveResult = rand() < 0.5 ? 0 : 1;
+                            // Re-prepare in Eve's basis
+                            if (eveBasis === '+') {
+                                photonAfterEve = eveResult === 0 ? 0 : 90;
+                            } else {
+                                photonAfterEve = eveResult === 0 ? 45 : 135;
+                            }
+                        }
+                    }
+
+                    // Bob: random basis
+                    const bobBasis = rand() < 0.5 ? '+' : '×';
+                    // Bob measures the photon (possibly altered by Eve)
+                    const bobResult = measurePhoton(photonAfterEve, bobBasis, rand);
+
+                    // Check if Alice and Bob bases match
+                    const basisMatch = aliceBasis === bobBasis;
+
+                    // If bases match, check if bits match
+                    let bitMatch = null;
+                    if (basisMatch) {
+                        bitMatch = aliceBit === bobResult;
+                    }
+
+                    photons.push({
+                        index: i,
+                        aliceBit,
+                        aliceBasis,
+                        polarizationAngle,
+                        eveBasis,
+                        eveResult,
+                        photonAfterEve,
+                        bobBasis,
+                        bobResult,
+                        basisMatch,
+                        bitMatch,
+                        eveIntercepted: evePresent,
+                        eveCausedError: basisMatch && evePresent && !bitMatch,
+                    });
+                }
+
+                return {
+                    photons,
+                    photonCount,
+                    evePresent,
+                    seed,
+                    matchingCount: photons.filter(p => p.basisMatch).length,
+                    errorCount: photons.filter(p => p.basisMatch && !p.bitMatch).length,
+                    keyBits: photons.filter(p => p.basisMatch).map(p => p.aliceBit),
+                };
+            }
+
+            function measurePhoton(polarizationAngle, basis, rand) {
+                if (basis === '+') {
+                    // + basis: 0°→bit0, 90°→bit1
+                    if (Math.abs(polarizationAngle - 0) < 5 || Math.abs(polarizationAngle - 360) < 5) return 0;
+                    if (Math.abs(polarizationAngle - 90) < 5) return 1;
+                    // Diagonal/anti-diagonal in + basis: random result
+                    return rand() < 0.5 ? 0 : 1;
+                } else {
+                    // × basis: 45°→bit0, 135°→bit1
+                    if (Math.abs(polarizationAngle - 45) < 5) return 0;
+                    if (Math.abs(polarizationAngle - 135) < 5) return 1;
+                    // Horizontal/vertical in × basis: random result
+                    return rand() < 0.5 ? 0 : 1;
+                }
+            }
+
+            // ──────────────────────────────────────
+            // Canvas Drawing
+            // ──────────────────────────────────────
+            function resizeCanvas() {
+                const rect = canvasContainer.getBoundingClientRect();
+                const dpr = window.devicePixelRatio || 1;
+                const w = rect.width;
+                const h = rect.height;
+                state.canvasW = w;
+                state.canvasH = h;
+                state.dpr = dpr;
+                canvas.width = w * dpr;
+                canvas.height = h * dpr;
+                canvas.style.width = w + 'px';
+                canvas.style.height = h + 'px';
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.scale(dpr, dpr);
+            }
+
+            function drawPlaceholder() {
+                if (!state.simData && !state.running && !state.completed) {
+                    placeholder.style.display = 'flex';
+                } else {
+                    placeholder.style.display = 'none';
+                }
+            }
+
+            function drawSimulation() {
+                const w = state.canvasW;
+                const h = state.canvasH;
+                const dpr = state.dpr;
+                ctx.clearRect(0, 0, w, h);
+
+                if (!state.simData && state.animationProgress === 0) {
+                    drawPlaceholder();
+                    return;
+                }
+                placeholder.style.display = 'none';
+
+                const simData = state.simData;
+                if (!simData) return;
+
+                const photons = simData.photons;
+                const totalCount = photons.length;
+                const visibleCount = state.completed ? totalCount : Math.min(state.animationProgress, totalCount);
+                if (visibleCount === 0 && !state.completed) {
+                    drawPlaceholder();
+                    return;
+                }
+                if (visibleCount === 0) return;
+
+                // Layout calculation
+                const isMobile = w < 600;
+                const topPadding = isMobile ? 40 : 50;
+                const bottomPadding = isMobile ? 30 : 40;
+                const sidePadding = isMobile ? 16 : 30;
+                const availableWidth = w - 2 * sidePadding;
+                const availableHeight = h - topPadding - bottomPadding;
+
+                // Determine grid: how many columns and rows
+                let cols, rows;
+                if (isMobile) {
+                    cols = Math.min(visibleCount, Math.max(3, Math.floor(availableWidth / 70)));
+                    rows = Math.ceil(visibleCount / cols);
+                } else {
+                    cols = Math.min(visibleCount, Math.max(4, Math.floor(availableWidth / 90)));
+                    rows = Math.ceil(visibleCount / cols);
+                }
+
+                const cellW = availableWidth / cols;
+                const cellH = Math.min(availableHeight / Math.max(rows, 1), cellW * 1.5);
+                const totalGridH = cellH * rows;
+                const gridTop = topPadding + (availableHeight - totalGridH) / 2;
+                const gridLeft = sidePadding;
+
+                // Photon circle radius
+                const circleR = Math.min(cellW * 0.28, cellH * 0.3, 22);
+                const arrowLen = circleR * 0.85;
+
+                // Draw each visible photon
+                for (let i = 0; i < visibleCount; i++) {
+                    const photon = photons[i];
+                    const col = i % cols;
+                    const row = Math.floor(i / cols);
+                    const cx = gridLeft + col * cellW + cellW / 2;
+                    const cyTop = gridTop + row * cellH + cellH * 0.28;
+                    const cyBot = gridTop + row * cellH + cellH * 0.72;
+                    const cyMid = (cyTop + cyBot) / 2;
+
+                    // ── Alice's photon (top) ──
+                    drawPhotonCircle(cx, cyTop, circleR, photon.polarizationAngle, photon.aliceBasis, photon.aliceBit,
+                        false, false);
+
+                    // ── Bob's photon (bottom) ──
+                    const bobDisplayAngle = getDisplayAngle(photon.bobResult, photon.bobBasis);
+                    const bobError = photon.basisMatch && !photon.bitMatch;
+                    drawPhotonCircle(cx, cyBot, circleR, bobDisplayAngle, photon.bobBasis, photon.bobResult, bobError,
+                    true);
+
+                    // ── Connection line ──
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cyTop + circleR);
+                    ctx.lineTo(cx, cyBot - circleR);
+                    if (photon.basisMatch) {
+                        ctx.strokeStyle = photon.bitMatch ? 'rgba(16,185,129,0.7)' : 'rgba(239,68,68,0.7)';
+                        ctx.lineWidth = photon.bitMatch ? 2.5 : 3;
+                        if (!photon.bitMatch) {
+                            ctx.setLineDash([6, 3]);
+                        } else {
+                            ctx.setLineDash([]);
+                        }
+                    } else {
+                        ctx.strokeStyle = 'rgba(71,85,105,0.5)';
+                        ctx.lineWidth = 1.5;
+                        ctx.setLineDash([3, 4]);
+                    }
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // ── Eve marker (if intercepted) ──
+                    if (photon.eveIntercepted) {
+                        const eveY = cyMid;
+                        ctx.beginPath();
+                        ctx.arc(cx, eveY, circleR * 0.35, 0, Math.PI * 2);
+                        ctx.fillStyle = '#ef4444';
+                        ctx.fill();
+                        ctx.strokeStyle = '#fca5a5';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                        // Small X inside
+                        ctx.strokeStyle = '#fff';
+                        ctx.lineWidth = 1.2;
+                        const exr = circleR * 0.16;
+                        ctx.beginPath();
+                        ctx.moveTo(cx - exr, eveY - exr);
+                        ctx.lineTo(cx + exr, eveY + exr);
+                        ctx.moveTo(cx + exr, eveY - exr);
+                        ctx.lineTo(cx - exr, eveY + exr);
+                        ctx.stroke();
+                        ctx.lineWidth = 1;
+                    }
+
+                    // ── Index label ──
+                    if (cellW > 50) {
+                        ctx.fillStyle = 'rgba(148,163,184,0.6)';
+                        ctx.font = `${Math.max(9, circleR * 0.55)}px 'Inter','PingFang SC','Microsoft YaHei',sans-serif`;
+                        ctx.textAlign = 'center';
+                        ctx.fillText(`#${i+1}`, cx, cyTop - circleR - (isMobile ? 6 : 10));
+                    }
+
+                    // ── Basis labels ──
+                    if (cellW > 55) {
+                        const labelFont = `${Math.max(8, circleR * 0.5)}px 'Inter','PingFang SC','Microsoft YaHei',sans-serif`;
+                        ctx.fillStyle = photon.aliceBasis === '+' ? '#60a5fa' : '#fbbf24';
+                        ctx.font = labelFont;
+                        ctx.textAlign = 'center';
+                        ctx.fillText(photon.aliceBasis, cx, cyTop - circleR - (isMobile ? 16 : 20));
+                        ctx.fillStyle = photon.bobBasis === '+' ? '#60a5fa' : '#fbbf24';
+                        ctx.fillText(photon.bobBasis, cx, cyBot + circleR + (isMobile ? 12 : 16));
+                    }
+                }
+
+                // ── Title ──
+                ctx.fillStyle = 'rgba(226,232,240,0.9)';
+                const titleFont = isMobile ? '13px' : '15px';
+                ctx.font = `700 ${titleFont} 'Inter','PingFang SC','Microsoft YaHei',sans-serif`;
+                ctx.textAlign = 'center';
+                const titleY = isMobile ? 18 : 26;
+                ctx.fillText('Alice 制备', w * 0.25, titleY);
+                ctx.fillText('Bob 测量', w * 0.75, titleY);
+                if (simData.evePresent) {
+                    ctx.fillStyle = 'rgba(239,68,68,0.8)';
+                    ctx.fillText('Eve 窃听', w * 0.5, titleY);
+                } else {
+                    ctx.fillStyle = 'rgba(148,163,184,0.5)';
+                    ctx.fillText('量子信道', w * 0.5, titleY);
+                }
+
+                // ── Summary at bottom ──
+                if (state.completed && visibleCount > 0) {
+                    const summaryY = h - (isMobile ? 8 : 14);
+                    ctx.fillStyle = 'rgba(226,232,240,0.8)';
+                    const sumFont = `${isMobile ? 10 : 11}px 'Inter','PingFang SC','Microsoft YaHei',sans-serif`;
+                    ctx.font = sumFont;
+                    ctx.textAlign = 'center';
+                    const errRate = simData.matchingCount > 0 ?
+                        ((simData.errorCount / simData.matchingCount) * 100).toFixed(1) :
+                        '0.0';
+                    let summaryText =
+                        `密钥长度: ${simData.matchingCount} bit | 误码率: ${errRate}% | 基矢匹配: ${simData.matchingCount}/${totalCount}`;
+                    if (simData.evePresent && simData.errorCount > 0) {
+                        summaryText += ' | ⚠️ 检测到异常误码';
+                    }
+                    ctx.fillText(summaryText, w / 2, summaryY);
+                }
+
+                // ── Progress indicator ──
+                if (!state.completed && visibleCount < totalCount) {
+                    const progY = h - (isMobile ? 8 : 14);
+                    ctx.fillStyle = 'rgba(148,163,184,0.7)';
+                    ctx.font = `${isMobile ? 10 : 11}px 'Inter','PingFang SC','Microsoft YaHei',sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`显示中: ${visibleCount}/${totalCount} 光子`, w / 2, progY);
+                }
+            }
+
+            function drawPhotonCircle(cx, cy, r, angleDeg, basis, bit, isError, isBob) {
+                // Background circle
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+
+                // Fill based on basis
+                if (basis === '+') {
+                    ctx.fillStyle = 'rgba(59,130,246,0.2)';
+                } else {
+                    ctx.fillStyle = 'rgba(245,158,11,0.2)';
+                }
+                ctx.fill();
+
+                // Border
+                if (isError) {
+                    ctx.strokeStyle = '#ef4444';
+                    ctx.lineWidth = 2.5;
+                    ctx.shadowColor = 'rgba(239,68,68,0.6)';
+                    ctx.shadowBlur = 8;
+                } else if (isBob && basis === '+') {
+                    ctx.strokeStyle = '#60a5fa';
+                    ctx.lineWidth = 2;
+                    ctx.shadowColor = 'transparent';
+                    ctx.shadowBlur = 0;
+                } else if (isBob && basis === '×') {
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.lineWidth = 2;
+                    ctx.shadowColor = 'transparent';
+                    ctx.shadowBlur = 0;
+                } else {
+                    ctx.strokeStyle = basis === '+' ? '#60a5fa' : '#fbbf24';
+                    ctx.lineWidth = 2;
+                    ctx.shadowColor = 'transparent';
+                    ctx.shadowBlur = 0;
+                }
+                ctx.stroke();
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+
+                // Polarization arrow
+                const angleRad = (angleDeg - 90) * Math.PI / 180; // Canvas: 0°=right, adjust so 0°=up
+                const ax = cx + Math.cos(angleRad) * arrowLen;
+                const ay = cy + Math.sin(angleRad) * arrowLen;
+                const bx = cx - Math.cos(angleRad) * arrowLen;
+                const by = cy - Math.sin(angleRad) * arrowLen;
+
+                ctx.beginPath();
+                ctx.moveTo(bx, by);
+                ctx.lineTo(ax, ay);
+                ctx.strokeStyle = isError ? '#fca5a5' : '#e2e8f0';
+                ctx.lineWidth = isError ? 2.5 : 2;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+                ctx.lineCap = 'butt';
+
+                // Arrowhead
+                const headLen = r * 0.35;
+                const headAngle = Math.PI / 6;
+                const hx1 = ax - headLen * Math.cos(angleRad - headAngle);
+                const hy1 = ay - headLen * Math.sin(angleRad - headAngle);
+                const hx2 = ax - headLen * Math.cos(angleRad + headAngle);
+                const hy2 = ay - headLen * Math.sin(angleRad + headAngle);
+                ctx.beginPath();
+                ctx.moveTo(ax, ay);
+                ctx.lineTo(hx1, hy1);
+                ctx.lineTo(hx2, hy2);
+                ctx.closePath();
+                ctx.fillStyle = isError ? '#fca5a5' : '#e2e8f0';
+                ctx.fill();
+
+                // Bit label in center
+                const bitFont = Math.max(8, r * 0.6);
+                ctx.fillStyle = '#fff';
+                ctx.font = `700 ${bitFont}px 'SF Mono','JetBrains Mono','Consolas',monospace`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(bit, cx, cy);
+                ctx.textBaseline = 'alphabetic';
+            }
+
+            function getDisplayAngle(bit, basis) {
+                if (basis === '+') {
+                    return bit === 0 ? 0 : 90;
+                } else {
+                    return bit === 0 ? 45 : 135;
+                }
+            }
+
+            function drawAll() {
+                resizeCanvas();
+                if (state.simData || state.animationProgress > 0) {
+                    drawSimulation();
+                } else {
+                    ctx.clearRect(0, 0, state.canvasW, state.canvasH);
+                    drawPlaceholder();
+                }
+            }
+
+            // ──────────────────────────────────────
+            // Animation Loop
+            // ──────────────────────────────────────
+            function startAnimation() {
+                if (!state.simData) return;
+                const totalCount = state.simData.photons.length;
+                const batchSize = Math.max(1, Math.floor(totalCount / 15)); // Show over ~15 frames
+                const interval = 60; // ms between batches
+
+                let lastTime = 0;
+                let accumulated = 0;
+
+                function animate(timestamp) {
+                    if (!state.running) {
+                        state.animationId = null;
+                        return;
+                    }
+                    if (state.paused) {
+                        state.animationId = requestAnimationFrame(animate);
+                        lastTime = timestamp;
+                        return;
+                    }
+
+                    if (lastTime === 0) lastTime = timestamp;
+                    const delta = timestamp - lastTime;
+                    lastTime = timestamp;
+                    accumulated += delta;
+
+                    while (accumulated >= interval && state.animationProgress < totalCount) {
+                        state.animationProgress = Math.min(totalCount, state.animationProgress + batchSize);
+                        accumulated -= interval;
+                    }
+
+                    drawAll();
+
+                    if (state.animationProgress >= totalCount) {
+                        completeSimulation();
+                        return;
+                    }
+
+                    state.animationId = requestAnimationFrame(animate);
+                }
+
+                state.animationId = requestAnimationFrame(animate);
+            }
+
+            function completeSimulation() {
+                state.running = false;
+                state.paused = false;
+                state.completed = true;
+                state.animationProgress = state.simData.photons.length;
+                if (state.animationId) {
+                    cancelAnimationFrame(state.animationId);
+                    state.animationId = null;
+                }
+                updateStats();
+                updateMainButton();
+                drawAll();
+            }
+
+            function pauseAnimation() {
+                state.paused = true;
+                updateMainButton();
+            }
+
+            function resumeAnimation() {
+                state.paused = false;
+                updateMainButton();
+            }
+
+            // ──────────────────────────────────────
+            // Stats Update
+            // ──────────────────────────────────────
+            function updateStats() {
+                if (!state.simData || !state.completed) {
+                    statKeylen.textContent = '-';
+                    statMatch.textContent = '-';
+                    statError.textContent = '-';
+                    statEveItem.style.display = 'none';
+                    statErrItem.classList.remove('warn', 'danger', 'good');
+                    return;
+                }
+                const sd = state.simData;
+                statKeylen.textContent = sd.matchingCount + ' bit';
+                statMatch.textContent = sd.matchingCount + '/' + sd.photonCount;
+                const errRate = sd.matchingCount > 0 ?
+                    ((sd.errorCount / sd.matchingCount) * 100).toFixed(1) :
+                    '0.0';
+                statError.textContent = errRate + '%';
+
+                // Color coding
+                statErrItem.classList.remove('warn', 'danger', 'good');
+                const errNum = parseFloat(errRate);
+                if (sd.evePresent && errNum > 5) {
+                    statErrItem.classList.add('danger');
+                    statEveItem.style.display = 'flex';
+                    statEveDetect.textContent = '⚠ 疑似窃听';
+                    statEveDetect.style.color = '#ef4444';
+                } else if (!sd.evePresent && errNum < 5) {
+                    statErrItem.classList.add('good');
+                    statEveItem.style.display = 'flex';
+                    statEveDetect.textContent = '✓ 安全';
+                    statEveDetect.style.color = '#10b981';
+                } else if (errNum > 8) {
+                    statErrItem.classList.add('danger');
+                    statEveItem.style.display = 'flex';
+                    statEveDetect.textContent = '⚠ 异常';
+                    statEveDetect.style.color = '#ef4444';
+                } else if (errNum > 3) {
+                    statErrItem.classList.add('warn');
+                    statEveItem.style.display = 'flex';
+                    statEveDetect.textContent = '⚠ 需关注';
+                    statEveDetect.style.color = '#f59e0b';
+                } else {
+                    statEveItem.style.display = 'flex';
+                    statEveDetect.textContent = '✓ 正常';
+                    statEveDetect.style.color = '#10b981';
+                }
+            }
+
+            // ──────────────────────────────────────
+            // Button State Management
+            // ──────────────────────────────────────
+            function updateMainButton() {
+                mainBtn.classList.remove('rerun');
+                if (state.completed) {
+                    mainBtn.textContent = '🔄 重新运行';
+                    mainBtn.classList.add('rerun');
+                } else if (state.running && !state.paused) {
+                    mainBtn.textContent = '⏸ 暂停动画';
+                } else if (state.running && state.paused) {
+                    mainBtn.textContent = '▶ 继续动画';
+                } else {
+                    mainBtn.textContent = '▶ 运行模拟';
+                }
+            }
+
+            function handleMainButton() {
+                if (state.completed) {
+                    // Reset and run again
+                    resetSimulation();
+                    runSimulation();
+                } else if (state.running && !state.paused) {
+                    pauseAnimation();
+                } else if (state.running && state.paused) {
+                    resumeAnimation();
+                } else {
+                    runSimulation();
+                }
+            }
+
+            function runSimulation() {
+                // Generate data
+                const seed = Date.now();
+                state.simData = generateSimData(state.photonCount, state.evePresent, seed);
+                state.animationProgress = 0;
+                state.running = true;
+                state.paused = false;
+                state.completed = false;
+                if (state.animationId) {
+                    cancelAnimationFrame(state.animationId);
+                    state.animationId = null;
+                }
+                updateMainButton();
+                updateStats();
+                drawAll();
+                startAnimation();
+            }
+
+            function resetSimulation() {
+                if (state.animationId) {
+                    cancelAnimationFrame(state.animationId);
+                    state.animationId = null;
+                }
+                state.simData = null;
+                state.running = false;
+                state.paused = false;
+                state.completed = false;
+                state.animationProgress = 0;
+                updateMainButton();
+                updateStats();
+                drawAll();
+            }
+
+            // ──────────────────────────────────────
+            // Event Handlers
+            // ──────────────────────────────────────
+            photonSlider.addEventListener('input', function() {
+                state.photonCount = parseInt(this.value);
+                photonDisplay.textContent = state.photonCount;
+                resetSimulation();
+            });
+
+            basisSlider.addEventListener('input', function() {
+                state.basisMode = parseInt(this.value);
+                basisDisplay.textContent = state.basisMode === 0 ? '标准' : '详细';
+                resetSimulation();
+            });
+
+            eveToggle.addEventListener('change', function() {
+                state.evePresent = this.checked;
+                resetSimulation();
+            });
+
+            mainBtn.addEventListener('click', handleMainButton);
+            resetBtn.addEventListener('click', resetSimulation);
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', function(e) {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    handleMainButton();
+                } else if (e.code === 'KeyR') {
+                    e.preventDefault();
+                    resetSimulation();
+                }
+            });
+
+            // Preset buttons
+            document.getElementById('preset-normal').addEventListener('click', function() {
+                photonSlider.value = 16;
+                state.photonCount = 16;
+                photonDisplay.textContent = '16';
+                eveToggle.checked = false;
+                state.evePresent = false;
+                basisSlider.value = 0;
+                state.basisMode = 0;
+                basisDisplay.textContent = '标准';
+                resetSimulation();
+                runSimulation();
+            });
+
+            document.getElementById('preset-eve').addEventListener('click', function() {
+                photonSlider.value = 16;
+                state.photonCount = 16;
+                photonDisplay.textContent = '16';
+                eveToggle.checked = true;
+                state.evePresent = true;
+                basisSlider.value = 0;
+                state.basisMode = 0;
+                basisDisplay.textContent = '标准';
+                resetSimulation();
+                runSimulation();
+            });
+
+            document.getElementById('preset-large').addEventListener('click', function() {
+                photonSlider.value = 30;
+                state.photonCount = 30;
+                photonDisplay.textContent = '30';
+                eveToggle.checked = false;
+                state.evePresent = false;
+                basisSlider.value = 0;
+                state.basisMode = 0;
+                basisDisplay.textContent = '标准';
+                resetSimulation();
+                runSimulation();
+            });
+
+            document.getElementById('preset-alert').addEventListener('click', function() {
+                photonSlider.value = 30;
+                state.photonCount = 30;
+                photonDisplay.textContent = '30';
+                eveToggle.checked = true;
+                state.evePresent = true;
+                basisSlider.value = 0;
+                state.basisMode = 0;
+                basisDisplay.textContent = '标准';
+                resetSimulation();
+                runSimulation();
+            });
+
+            // Mobile collapse toggle
+            collapseToggle.addEventListener('click', function() {
+                controlPanel.classList.toggle('collapsed');
+            });
+            collapseToggle.addEventListener('keydown', function(e) {
+                if (e.code === 'Enter' || e.code === 'Space') {
+                    e.preventDefault();
+                    controlPanel.classList.toggle('collapsed');
+                }
+            });
+
+            // Window resize
+            let resizeTimeout;
+            window.addEventListener('resize', function() {
+                clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(drawAll, 150);
+            });
+
+            // ──────────────────────────────────────
+            // postMessage Listener for Widget Actions
+            // ──────────────────────────────────────
+            window.addEventListener('message', function(event) {
+                const { type, target, state: widgetState, content } = event.data || {};
+
+                switch (type) {
+                    case 'SET_WIDGET_STATE':
+                        if (widgetState) {
+                            Object.entries(widgetState).forEach(([key, value]) => {
+                                if (key === 'photon') {
+                                    const slider = document.getElementById('photon-slider');
+                                    if (slider) {
+                                        slider.value = value;
+                                        state.photonCount = parseInt(value);
+                                        photonDisplay.textContent = value;
+                                        slider.dispatchEvent(new Event('input',
+                                            { bubbles: true }));
+                                    }
+                                }
+                                if (key === 'basis') {
+                                    const slider = document.getElementById('basis-slider');
+                                    if (slider) {
+                                        slider.value = value;
+                                        state.basisMode = parseInt(value);
+                                        basisDisplay.textContent = value === 0 ? '标准' : '详细';
+                                        slider.dispatchEvent(new Event('input',
+                                            { bubbles: true }));
+                                    }
+                                }
+                            });
+                            resetSimulation();
+                        }
+                        break;
+
+                    case 'HIGHLIGHT_ELEMENT':
+                        const highlightEl = document.querySelector(target);
+                        if (highlightEl) {
+                            highlightEl.style.outline = '3px solid rgba(99,102,241,0.8)';
+                            highlightEl.style.outlineOffset = '4px';
+                            highlightEl.style.animation = 'pulse-highlight 2s infinite';
+                            setTimeout(() => {
+                                highlightEl.style.outline = '';
+                                highlightEl.style.animation = '';
+                            }, 3000);
+                        }
+                        break;
+
+                    case 'ANNOTATE_ELEMENT':
+                        const annotateEl = document.querySelector(target);
+                        if (annotateEl && content) {
+                            const rect = annotateEl.getBoundingClientRect();
+                            const tooltip = document.createElement('div');
+                            tooltip.className = 'teacher-annotation';
+                            tooltip.style.cssText =
+                                'position:fixed; top:' + (rect.top - 40) + 'px; left:' + rect.left +
+                                'px; background:rgba(99,102,241,0.95); color:white; padding:8px 14px; border-radius:8px; font-size:14px; z-index:1000; animation:fadeIn 0.3s; pointer-events:none;';
+                            tooltip.textContent = content;
+                            document.body.appendChild(tooltip);
+                            setTimeout(() => tooltip.remove(), 4000);
+                        }
+                        break;
+
+                    case 'REVEAL_ELEMENT':
+                        const revealEl = document.querySelector(target);
+                        if (revealEl) {
+                            revealEl.style.display = '';
+                            revealEl.style.opacity = '1';
+                        }
+                        break;
+                }
+            });
+
+            // ──────────────────────────────────────
+            // Initialize
+            // ──────────────────────────────────────
+            function init() {
+                state.photonCount = parseInt(photonSlider.value);
+                state.basisMode = parseInt(basisSlider.value);
+                state.evePresent = eveToggle.checked;
+                photonDisplay.textContent = state.photonCount;
+                basisDisplay.textContent = state.basisMode === 0 ? '标准' : '详细';
+                updateMainButton();
+                updateStats();
+                resizeCanvas();
+                drawAll();
+                // On mobile, start collapsed for better canvas visibility
+                if (window.innerWidth < 768) {
+                    // Default: expanded but user can collapse
+                    controlPanel.classList.remove('collapsed');
+                }
+            }
+
+            init();
+        })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+[
+  {
+    "id": "3182111060",
+    "name": "网络空间安全导论",
+    "semester": 1,
+    "domain": "intro",
+    "core": true,
+    "credits": 2,
+    "type": "必修",
+    "knowledgePoints": [
+      "网络空间安全学科体系与基本概念",
+      "信息安全CIA三性与安全属性",
+      "密码学、网络安全、系统安全概览",
+      "常见安全威胁与攻击面",
+      "安全防护基本框架与法规概述"
+    ],
+    "prerequisites": [],
+    "relatedCourses": ["现代密码学", "网络安全", "信息系统安全"]
+  },
+  {
+    "id": "3182131080",
+    "name": "现代密码学",
+    "semester": 4,
+    "domain": "crypto",
+    "core": true,
+    "credits": 3,
+    "type": "必修",
+    "knowledgePoints": [
+      "对称加密与分组密码 (DES/AES)",
+      "工作模式 (ECB/CBC/CTR/GCM) 及其安全性",
+      "公钥密码体制 (RSA/ECC)",
+      "哈希函数与消息认证码 (MAC)",
+      "数字签名与公钥基础设施 (PKI)",
+      "密钥管理与分配协议"
+    ],
+    "prerequisites": ["信息安全数学基础", "概率论与数理统计"],
+    "relatedCourses": ["密码分析", "信息论与编码", "量子计算与后量子密码"]
+  },
+  {
+    "id": "3182100080",
+    "name": "计算机网络",
+    "semester": 4,
+    "domain": "network",
+    "core": true,
+    "credits": 3,
+    "type": "必修",
+    "knowledgePoints": [
+      "OSI 七层模型与 TCP/IP 体系",
+      "物理层与数据链路层协议",
+      "网络层 (IP/路由/ICMP)",
+      "传输层 (TCP/UDP) 与可靠性机制",
+      "应用层协议 (HTTP/DNS/SMTP)",
+      "协议安全性分析基础"
+    ],
+    "prerequisites": ["计算机组成与系统结构", "操作系统"],
+    "relatedCourses": ["网络安全", "复杂网络", "网络流量监控"]
+  },
+  {
+    "id": "3182100040",
+    "name": "操作系统",
+    "semester": 4,
+    "domain": "system",
+    "core": true,
+    "credits": 3,
+    "type": "必修",
+    "knowledgePoints": [
+      "进程与线程、调度与并发控制",
+      "内存管理与虚拟内存",
+      "文件系统与访问控制",
+      "I/O 系统与设备管理",
+      "操作系统的安全机制 (隔离/权限/审计)"
+    ],
+    "prerequisites": ["计算机组成与系统结构", "数据结构"],
+    "relatedCourses": ["信息系统安全", "软件安全", "汇编语言与逆向工程"]
+  },
+  {
+    "id": "3182121110",
+    "name": "汇编语言与逆向工程",
+    "semester": 4,
+    "domain": "system",
+    "core": true,
+    "credits": 3,
+    "type": "必修",
+    "knowledgePoints": [
+      "x86/x64 指令集与寄存器",
+      "汇编程序结构与调用约定",
+      "反汇编与反编译技术",
+      "静态分析与动态调试方法",
+      "恶意代码分析基础流程"
+    ],
+    "prerequisites": ["计算机组成与系统结构", "C++高级语言程序设计"],
+    "relatedCourses": ["软件安全", "漏洞分析技术实验"]
+  },
+  {
+    "id": "3182131101",
+    "name": "网络安全",
+    "semester": 5,
+    "domain": "network",
+    "core": true,
+    "credits": 3,
+    "type": "必修",
+    "knowledgePoints": [
+      "网络攻击模型与攻击链",
+      "侦察/扫描与嗅探技术",
+      "防火墙与入侵检测系统 (IDS/IPS)",
+      "VPN 与安全协议 (TLS/IPSec)",
+      "DDoS 攻击原理与防护",
+      "无线与移动网络安全基础"
+    ],
+    "prerequisites": ["计算机网络"],
+    "relatedCourses": ["网络流量监控", "移动通信安全", "云计算安全"]
+  },
+  {
+    "id": "3182121121",
+    "name": "软件安全",
+    "semester": 5,
+    "domain": "system",
+    "core": true,
+    "credits": 3,
+    "type": "必修",
+    "knowledgePoints": [
+      "内存安全漏洞 (栈/堆溢出、UAF)",
+      "控制流劫持 (ROP/返回导向编程)",
+      "漏洞利用与缓解机制 (ASLR/DEP/CFG)",
+      "模糊测试与漏洞挖掘",
+      "安全编码规范与软件供应链安全"
+    ],
+    "prerequisites": ["操作系统", "汇编语言与逆向工程"],
+    "relatedCourses": ["漏洞分析技术实验", "信息系统安全"]
+  },
+  {
+    "id": "3182131111",
+    "name": "信息系统安全",
+    "semester": 5,
+    "domain": "system",
+    "core": true,
+    "credits": 3,
+    "type": "必修",
+    "knowledgePoints": [
+      "安全体系结构与纵深防御",
+      "身份认证与访问控制模型",
+      "安全评估与等级保护",
+      "风险评估与安全策略",
+      "安全运维与应急响应流程"
+    ],
+    "prerequisites": ["操作系统", "计算机网络"],
+    "relatedCourses": ["信息安全管理", "信息系统灾备", "信息安全工程概论"]
+  }
+]

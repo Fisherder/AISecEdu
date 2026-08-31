@@ -19,7 +19,13 @@ from CTFd.utils.user import get_current_user, is_admin
 from CTFd.utils.decorators import authed_only
 from CTFd.exceptions import UserNotFoundException, UserTokenExpiredException
 
-from ...config import HOST_DATA_PATH, INTERNET_FOR_ALL, SECCOMP, USER_FIREWALL_ALLOWED
+from ...config import (
+    HOST_DATA_PATH,
+    INTERNET_FOR_ALL,
+    SECCOMP,
+    USER_FIREWALL_ALLOWED,
+    WORKSPACE_SESSION_SECONDS,
+)
 from ...models import DojoModules, DojoChallenges
 from ...utils import (
     container_name,
@@ -75,6 +81,17 @@ def remove_container(user):
                 docker_client.volumes.get(volume).remove()
             except (docker.errors.NotFound, docker.errors.APIError):
                 pass
+
+
+def optional_container(user):
+    try:
+        return get_current_container(user)
+    except docker.errors.DockerException:
+        logger.warning(
+            "Docker is unavailable while resolving an optional container"
+        )
+        return None
+
 
 def get_available_devices(docker_client):
     key = f"devices-{docker_client.api.base_url}"
@@ -147,12 +164,15 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
         if "workspace_net_admin" in resolved_dojo_challenge.dojo.permissions:
             capabilities.append("NET_ADMIN")
 
+    expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        seconds=WORKSPACE_SESSION_SECONDS
+    )
     container_create_attributes = dict(
         image=resolved_dojo_challenge.image,
         entrypoint=[
             "/nix/var/nix/profiles/dojo-workspace/bin/dojo-init",
             f"{dojo_bin_path}/sleep",
-            "6h",
+            f"{WORKSPACE_SESSION_SECONDS}s",
         ],
         name=container_name(user),
         hostname=hostname,
@@ -174,6 +194,7 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
             "dojo.as_user_id": str(as_user.id),
             "dojo.auth_token": auth_token,
             "dojo.mode": "privileged" if practice else "standard",
+            "dojo.expires_at": expires_at.isoformat().replace("+00:00", "Z"),
         },
         mounts=mounts,
         devices=devices,
@@ -444,7 +465,6 @@ class NextChallenge(Resource):
             dojo_id=dojo_challenge.dojo_id,
             module_index=dojo_challenge.module_index
         ).order_by(DojoChallenges.challenge_index).all()
-
         # Find the current challenge index
         current_idx = next((i for i, c in enumerate(module_challenges) if c.challenge_index == dojo_challenge.challenge_index), None)
 
@@ -580,10 +600,7 @@ class RunDocker(Resource):
                 db.session.commit()
             else:
                 if exercise_mode == "CONTAINER":
-                    interrupt_simulation_runs(
-                        user.id,
-                        reason="container-started",
-                    )
+                    interrupt_simulation_runs(user.id, reason="container-started")
                 _, attempt = start_challenge_session(
                     user,
                     dojo_challenge,
@@ -621,7 +638,7 @@ class RunDocker(Resource):
             return {"success": False, "error": "当前没有活动题目。"}
 
         user = get_current_user()
-        container = get_current_container(user)
+        container = optional_container(user)
         simulation_run = current_simulation_run(user.id, dojo_challenge)
         if not container and not simulation_run:
             return {"success": False, "error": "未找到活动题目运行环境。"}
@@ -631,15 +648,13 @@ class RunDocker(Resource):
             if container
             else False
         )
-        exercise_mode = challenge_exercise_mode(dojo_challenge)
-
         return {
             "success": True,
             "dojo": dojo_challenge.dojo.reference_id,
             "module": dojo_challenge.module.id,
             "challenge": dojo_challenge.id,
             "practice" : practice,
-            "exerciseMode": exercise_mode,
+            "exerciseMode": challenge_exercise_mode(dojo_challenge),
             "simulationRunId": simulation_run.id if simulation_run else None,
         }
 
@@ -647,7 +662,7 @@ class RunDocker(Resource):
     @docker_locked
     def delete(self):
         user = get_current_user()
-        container = get_current_container(user)
+        container = optional_container(user)
         simulation_run = active_simulation_run(user.id)
 
         if not container and not simulation_run:
@@ -675,7 +690,7 @@ class RunDocker(Resource):
             return {
                 "success": True,
                 "message": (
-                    "题目模拟运行已停止。"
+                    "题目情境运行已停止。"
                     if simulation_run and not container
                     else "题目运行环境已停止。"
                 ),
@@ -692,7 +707,7 @@ class ResetDocker(Resource):
     @docker_locked
     def post(self):
         user = get_current_user()
-        container = get_current_container(user)
+        container = optional_container(user)
         dojo_challenge = get_current_dojo_challenge(user)
         simulation_run = current_simulation_run(user.id, dojo_challenge)
         if not dojo_challenge or (not container and not simulation_run):
@@ -717,7 +732,7 @@ class ResetDocker(Resource):
                 "lab.reset.requested",
                 {
                     "scope": (
-                        "simulation-state"
+                        "scenario-state"
                         if exercise_mode == "SIMULATION"
                         else "container-and-home"
                     ),
@@ -774,7 +789,7 @@ class ResetDocker(Resource):
         return {
             "success": True,
             "message": (
-                "模拟场景已恢复到初始状态。"
+                "情境题已恢复到初始状态。"
                 if exercise_mode == "SIMULATION"
                 else "题目已恢复到初始状态。"
             ),

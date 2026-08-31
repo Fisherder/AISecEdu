@@ -182,6 +182,7 @@ class Dojos(db.Model):
         return db.column_property(
             db.select([db.func.count()])
             .where(Dojos.dojo_id == DojoChallenges.dojo_id)
+            .where(DojoChallenges.supported())
             .scalar_subquery(),
             deferred=True)
 
@@ -190,6 +191,7 @@ class Dojos(db.Model):
         return db.column_property(
             db.select([db.func.count()])
             .where(Dojos.dojo_id == DojoChallenges.dojo_id)
+            .where(DojoChallenges.supported())
             .where(DojoChallenges.required)
             .scalar_subquery(),
             deferred=True)
@@ -256,7 +258,16 @@ class Dojos(db.Model):
                            db.func.count().label("solve_count"),
                            db.func.max(Solves.date).label("last_solve"))
             .group_by(Solves.user_id)
-            .having(db.func.count() == len([challenge for challenge in self.challenges if challenge.required]))
+            .having(
+                db.func.count()
+                == len(
+                    [
+                        challenge
+                        for challenge in self.challenges
+                        if challenge.required and challenge.supported()
+                    ]
+                )
+            )
             .subquery()
         )
         return (
@@ -281,7 +292,16 @@ class Dojos(db.Model):
         return awards
 
     def completed(self, user):
-        return self.solves(user=user, ignore_visibility=True, ignore_admins=False).count() == len([challenge for challenge in self.challenges if challenge.required])
+        required = [
+            challenge
+            for challenge in self.challenges
+            if challenge.required and challenge.supported()
+        ]
+        return self.solves(
+            user=user,
+            ignore_visibility=True,
+            ignore_admins=False,
+        ).count() == len(required)
 
     def is_admin(self, user=None):
         if user is None:
@@ -492,6 +512,7 @@ class DojoModules(db.Model):
             .filter(
                 not required_only or DojoChallenges.required
             )
+            .filter(DojoChallenges.supported())
             .order_by(DojoChallenges.challenge_index)
         )
 
@@ -615,20 +636,44 @@ class DojoChallenges(db.Model):
         return cls.query.filter_by(id=id).join(DojoModules.from_id(dojo_reference_id, module_id).subquery())
 
     @hybrid_method
+    def supported(self):
+        return str(self.exercise_mode or "CONTAINER").strip().upper() in {
+            "CONTAINER",
+            "SIMULATION",
+            "HYBRID",
+        }
+
+    @supported.expression
+    def supported(cls):
+        return db.func.upper(
+            db.func.coalesce(cls.data["exercise_mode"].astext, "CONTAINER")
+        ).in_(
+            ("CONTAINER", "SIMULATION", "HYBRID")
+        )
+
+    @hybrid_method
     def visible(self, when=None):
         when = when or datetime.datetime.utcnow()
-        return not self.visibility or all((
-            not self.visibility.start or when >= self.visibility.start,
-            not self.visibility.stop or when <= self.visibility.stop,
-        ))
+        return self.supported() and (
+            not self.visibility
+            or all(
+                (
+                    not self.visibility.start or when >= self.visibility.start,
+                    not self.visibility.stop or when <= self.visibility.stop,
+                )
+            )
+        )
 
     @visible.expression
     def visible(cls, when=None):
         when = when or datetime.datetime.utcnow()
-        return or_(cls.visibility == None, and_(
-            cls.visibility.has(or_(DojoChallengeVisibilities.start == None, when >= DojoChallengeVisibilities.start)),
-            cls.visibility.has(or_(DojoChallengeVisibilities.stop == None, when <= DojoChallengeVisibilities.stop)),
-        ))
+        return and_(
+            cls.supported(),
+            or_(cls.visibility == None, and_(
+                cls.visibility.has(or_(DojoChallengeVisibilities.start == None, when >= DojoChallengeVisibilities.start)),
+                cls.visibility.has(or_(DojoChallengeVisibilities.stop == None, when <= DojoChallengeVisibilities.stop)),
+            )),
+        )
 
     # note: currently unused, may need future testing
     @hybrid_method
@@ -663,6 +708,7 @@ class DojoChallenges(db.Model):
                 or_(Dojos.official, Dojos.data["type"].astext == "public", DojoUsers.user_id != None),
                 ))
             .join(Users, Users.id == Solves.user_id)
+            .filter(DojoChallenges.supported())
         )
 
         if not ignore_visibility:
@@ -979,4 +1025,36 @@ from .learning import (
     LearningSolutionRuns,
     LearningSkillStates,
     LearningTutorMessages,
+)
+from .global_agent import (
+    ConversationCards,
+    ModelInvocations,
+    ObjectiveMappings,
+    AgentRuntimeLaunchTickets,
+    SelfLearningWorkspaces,
+    StudentAgentMemories,
+    TeachingAgentActions,
+    TeachingAgentApprovals,
+    TeachingAgentMessages,
+    TeachingAgentThreads,
+    TeachingArtifactCandidates,
+    TeachingArtifactRevisions,
+    TeachingArtifacts,
+    TeachingCandidateSets,
+    TeachingGenerationBatchItems,
+    TeachingGenerationBatches,
+    TeachingJobEvents,
+    TeachingJobOutbox,
+    TeachingJobs,
+    TeachingMaterialChunks,
+    TeachingMaterialRevisions,
+    TeachingMaterials,
+    TeachingSessionEvents,
+    TeachingSessions,
+    UserAccountPreferences,
+)
+from .coursework import (
+    TeachingAssignmentItems,
+    TeachingAssignments,
+    TeachingAssignmentSubmissions,
 )

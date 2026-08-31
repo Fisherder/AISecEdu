@@ -1,0 +1,36 @@
+id: simulation-domains
+name: 多领域模拟引擎验收
+type: public
+description: 验证多类非 CTF 安全实践与普通题目共享统一运行、评分和回放链路。
+modules:
+  - id: scenarios
+    name: 安全情境模拟
+    challenges:
+      - id: mobile-permission
+        name: 移动终端权限滥用调查
+        exercise_mode: SIMULATION
+        interfaces:
+          - name: Simulation
+        simulation:
+          preset: MOBILE
+      - id: side-channel-leakage
+        name: 功耗侧信道泄漏评估
+        exercise_mode: SIMULATION
+        interfaces:
+          - name: Simulation
+        simulation:
+          preset: SIDE_CHANNEL
+      - id: ics-plc-write
+        name: 工控 PLC 非授权写入处置
+        exercise_mode: SIMULATION
+        interfaces:
+          - name: Simulation
+        simulation:
+          preset: ICS
+      - id: gnss-spoofing
+        name: GNSS 欺骗信号识别与降级
+        exercise_mode: SIMULATION
+        interfaces:
+          - name: Simulation
+        simulation:
+          preset: GNSS

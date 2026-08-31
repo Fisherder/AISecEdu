@@ -1,0 +1,1327 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>玄甲登录后学生端 UX 重构执行方案</title>
+  <style>
+    :root {
+      --bg: #07101f;
+      --bg-raised: #0b1628;
+      --panel: #101d32;
+      --panel-2: #15243c;
+      --panel-3: #1b2d49;
+      --line: #2a3c58;
+      --line-strong: #3b5273;
+      --text: #eef4ff;
+      --muted: #a6b5cc;
+      --subtle: #7587a2;
+      --blue: #7da5ff;
+      --blue-strong: #5f8eff;
+      --cyan: #55d4dd;
+      --green: #61d5a4;
+      --amber: #ffc873;
+      --red: #ff858f;
+      --purple: #bb9cff;
+      --shadow: 0 22px 70px rgba(0, 0, 0, .32);
+      --radius: 18px;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 82% -12%, rgba(90, 133, 255, .18), transparent 34rem),
+        radial-gradient(circle at 6% 16%, rgba(48, 202, 211, .08), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.68;
+    }
+    a { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { color: #a8c0ff; }
+    button { font: inherit; }
+    code {
+      padding: .12rem .36rem;
+      border: 1px solid rgba(125, 165, 255, .2);
+      border-radius: 6px;
+      background: rgba(4, 10, 20, .55);
+      color: #c8d7ff;
+      font-family: var(--mono);
+      font-size: .9em;
+      overflow-wrap: anywhere;
+    }
+    pre {
+      margin: 0;
+      padding: 1rem;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #07101c;
+      color: #cbd8ec;
+      font: .8rem/1.6 var(--mono);
+      white-space: pre-wrap;
+    }
+    h1, h2, h3, h4, p { margin-top: 0; }
+    h1 { max-width: 980px; margin-bottom: 1rem; font-size: clamp(2.4rem, 6vw, 5.6rem); line-height: .98; letter-spacing: -.06em; }
+    h2 { margin-bottom: .7rem; font-size: clamp(1.8rem, 3vw, 3.15rem); line-height: 1.08; letter-spacing: -.04em; }
+    h3 { margin-bottom: .55rem; font-size: 1.18rem; line-height: 1.3; }
+    h4 { margin-bottom: .38rem; font-size: .98rem; }
+    p:last-child { margin-bottom: 0; }
+    ul, ol { padding-left: 1.25rem; }
+    li + li { margin-top: .36rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: .76rem .8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: #c7d7ef; font-size: .76rem; letter-spacing: .06em; text-transform: uppercase; }
+    td { color: var(--muted); font-size: .9rem; }
+    strong { color: var(--text); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 270px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 1.25rem 1rem;
+      overflow: auto;
+      border-right: 1px solid var(--line);
+      background: rgba(7, 16, 31, .92);
+      backdrop-filter: blur(18px);
+      z-index: 20;
+    }
+    .brand {
+      display: flex;
+      gap: .75rem;
+      align-items: center;
+      margin-bottom: 1.2rem;
+      padding: .5rem .55rem 1rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand-mark {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border-radius: 11px;
+      background: linear-gradient(135deg, var(--blue), var(--cyan));
+      color: #07101f;
+      font-weight: 900;
+    }
+    .brand strong { display: block; font-size: .92rem; }
+    .brand small { display: block; color: var(--subtle); font-size: .72rem; }
+    .nav-label {
+      display: block;
+      margin: 1rem .65rem .35rem;
+      color: var(--subtle);
+      font-size: .66rem;
+      font-weight: 800;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    .sidebar a {
+      display: flex;
+      gap: .65rem;
+      align-items: center;
+      padding: .54rem .65rem;
+      border-radius: 9px;
+      color: var(--muted);
+      font-size: .82rem;
+      text-decoration: none;
+    }
+    .sidebar a:hover { background: var(--panel); color: var(--text); }
+    .nav-index { min-width: 1.55rem; color: var(--blue); font: .72rem var(--mono); }
+    main { min-width: 0; }
+    .hero, .section { padding: 5.5rem clamp(1.4rem, 6vw, 6.7rem); }
+    .hero {
+      min-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      border-bottom: 1px solid var(--line);
+    }
+    .section { border-bottom: 1px solid rgba(42, 60, 88, .7); }
+    .section-inner { max-width: 1240px; margin: 0 auto; }
+    .eyebrow {
+      display: inline-flex;
+      gap: .48rem;
+      align-items: center;
+      margin-bottom: 1rem;
+      color: var(--blue);
+      font-size: .72rem;
+      font-weight: 850;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before { content: ""; width: 22px; height: 2px; background: currentColor; }
+    .lede { max-width: 920px; color: #bdcbe0; font-size: clamp(1.03rem, 1.8vw, 1.32rem); }
+    .hero-meta, .pill-row { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: 1.7rem; }
+    .pill, .priority, .status {
+      display: inline-flex;
+      gap: .34rem;
+      align-items: center;
+      width: fit-content;
+      padding: .28rem .58rem;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(15, 29, 50, .7);
+      font-size: .7rem;
+      font-weight: 750;
+    }
+    .priority.p0 { border-color: rgba(255, 133, 143, .5); color: #ffc1c6; background: rgba(255, 133, 143, .09); }
+    .priority.p1 { border-color: rgba(255, 200, 115, .5); color: #ffdda4; background: rgba(255, 200, 115, .09); }
+    .priority.p2 { border-color: rgba(97, 213, 164, .4); color: #a3e7c9; background: rgba(97, 213, 164, .08); }
+    .status.good { color: #a3e7c9; border-color: rgba(97, 213, 164, .4); }
+    .status.bad { color: #ffc1c6; border-color: rgba(255, 133, 143, .45); }
+    .status.info { color: #bfd0ff; border-color: rgba(125, 165, 255, .45); }
+    .hero-rule {
+      max-width: 1060px;
+      margin-top: 2.2rem;
+      padding: 1.2rem 1.3rem;
+      border: 1px solid rgba(125, 165, 255, .34);
+      border-left: 4px solid var(--blue);
+      border-radius: 13px;
+      background: linear-gradient(90deg, rgba(95, 142, 255, .13), rgba(16, 29, 50, .72));
+    }
+    .hero-rule strong { display: block; margin-bottom: .25rem; }
+    .section-intro { max-width: 860px; margin-bottom: 2rem; color: var(--muted); }
+    .grid-2, .grid-3, .grid-4 {
+      display: grid;
+      gap: 1rem;
+    }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .card {
+      min-width: 0;
+      padding: 1.2rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(155deg, rgba(23, 40, 67, .88), rgba(12, 24, 42, .9));
+      box-shadow: 0 10px 32px rgba(0, 0, 0, .12);
+    }
+    .card p, .card li { color: var(--muted); font-size: .9rem; }
+    .card-number { color: var(--blue); font: 800 .75rem var(--mono); letter-spacing: .08em; }
+    .callout {
+      margin: 1rem 0;
+      padding: 1rem 1.1rem;
+      border-left: 3px solid var(--cyan);
+      border-radius: 8px;
+      background: rgba(85, 212, 221, .07);
+      color: var(--muted);
+    }
+    .callout.warning { border-left-color: var(--amber); background: rgba(255, 200, 115, .07); }
+    .callout.danger { border-left-color: var(--red); background: rgba(255, 133, 143, .07); }
+    .decision {
+      padding: 1.25rem;
+      border: 1px solid rgba(97, 213, 164, .35);
+      border-radius: var(--radius);
+      background: rgba(97, 213, 164, .06);
+    }
+    .decision h3 { color: #a8eccf; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(12, 24, 42, .72); }
+    .table-wrap table { min-width: 760px; }
+    .evidence-row { display: grid; grid-template-columns: 115px minmax(0, 1fr) 120px; gap: 1rem; align-items: start; padding: 1rem 0; border-bottom: 1px solid var(--line); }
+    .evidence-row:last-child { border-bottom: 0; }
+    .evidence-row p { margin: 0; color: var(--muted); }
+    .metric-value { color: var(--cyan); font: 800 .9rem var(--mono); text-align: right; }
+
+    .flow {
+      display: flex;
+      gap: .55rem;
+      align-items: stretch;
+      margin: 1.2rem 0;
+      overflow-x: auto;
+      padding-bottom: .4rem;
+    }
+    .flow-node {
+      min-width: 145px;
+      flex: 1;
+      padding: .9rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+    .flow-node strong { display: block; font-size: .87rem; }
+    .flow-node small { color: var(--subtle); }
+    .flow-arrow { display: grid; place-items: center; color: var(--blue); font-weight: 900; }
+    .flow-node.is-broken { border-color: rgba(255, 133, 143, .46); }
+    .flow-node.is-target { border-color: rgba(97, 213, 164, .46); }
+
+    .mock-window {
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 20px;
+      background: #091426;
+      box-shadow: var(--shadow);
+    }
+    .mock-bar {
+      display: flex;
+      gap: .7rem;
+      align-items: center;
+      padding: .8rem 1rem;
+      border-bottom: 1px solid var(--line);
+      background: #101c30;
+      color: var(--subtle);
+      font-size: .72rem;
+    }
+    .mock-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
+    .mock-nav {
+      display: flex;
+      gap: 1.15rem;
+      align-items: center;
+      padding: .8rem 1rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .mock-nav strong { margin-right: auto; }
+    .mock-nav span { color: var(--muted); font-size: .78rem; }
+    .mock-nav .active { color: var(--blue); }
+    .mock-body { padding: 1.1rem; }
+    .today-grid { display: grid; grid-template-columns: 1.55fr .85fr; gap: .9rem; }
+    .mock-card { padding: 1rem; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+    .mock-card small { display: block; color: var(--blue); font-size: .66rem; font-weight: 800; letter-spacing: .08em; }
+    .mock-card h3 { margin: .4rem 0 .35rem; }
+    .mock-card p { color: var(--muted); font-size: .78rem; }
+    .mock-action { display: inline-flex; padding: .48rem .72rem; border-radius: 8px; background: var(--blue-strong); color: white; font-size: .75rem; font-weight: 800; }
+    .mock-list { display: grid; gap: .55rem; margin-top: .8rem; }
+    .mock-row { display: flex; gap: .7rem; align-items: center; padding: .65rem; border: 1px solid var(--line); border-radius: 10px; }
+    .mock-row b { display: block; font-size: .76rem; }
+    .mock-row em { margin-left: auto; color: var(--subtle); font-size: .7rem; font-style: normal; }
+    .mock-progress { height: 5px; margin-top: .65rem; overflow: hidden; border-radius: 9px; background: #263750; }
+    .mock-progress i { display: block; width: 42%; height: 100%; background: var(--green); }
+    .course-mock { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 430px; }
+    .course-outline { padding: .9rem; border-right: 1px solid var(--line); background: #0d192b; }
+    .course-outline .mock-row { margin-bottom: .48rem; }
+    .course-content { padding: 1.25rem; }
+    .course-next { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-top: 1.2rem; padding: .9rem; border: 1px solid rgba(125, 165, 255, .4); border-radius: 12px; background: rgba(95, 142, 255, .08); }
+    .workspace-mock { display: grid; grid-template-columns: minmax(250px, 32%) minmax(0, 1fr); min-height: 430px; }
+    .workspace-task { padding: 1rem; border-right: 1px solid var(--line); }
+    .workspace-env { display: grid; grid-template-rows: auto 1fr; background: #050a12; }
+    .workspace-tabs { display: flex; gap: .45rem; padding: .7rem; border-bottom: 1px solid var(--line); }
+    .workspace-tabs span { padding: .34rem .58rem; border-radius: 7px; color: var(--muted); font-size: .7rem; }
+    .workspace-tabs .active { background: var(--panel-3); color: var(--text); }
+    .terminal-lines { padding: 1rem; color: #8fd7b5; font: .75rem/1.8 var(--mono); }
+    .semantic-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; }
+    .semantic-grid article { padding: 1rem; border-top: 3px solid var(--blue); border-radius: 12px; background: var(--panel); }
+    .semantic-grid article:nth-child(2) { border-top-color: var(--purple); }
+    .semantic-grid article:nth-child(3) { border-top-color: var(--amber); }
+    .semantic-grid article:nth-child(4) { border-top-color: var(--green); }
+    .semantic-grid small { color: var(--subtle); }
+    .semantic-grid strong { display: block; margin: .25rem 0; }
+
+    .work-package { position: relative; padding-left: 4.4rem; }
+    .work-id {
+      position: absolute;
+      left: 1.1rem;
+      top: 1.15rem;
+      display: grid;
+      width: 2.6rem;
+      height: 2.6rem;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      color: var(--blue);
+      background: #091426;
+      font: 800 .7rem var(--mono);
+    }
+    .acceptance { counter-reset: acceptance; list-style: none; padding: 0; }
+    .acceptance li { position: relative; min-height: 2.4rem; padding: .7rem .8rem .7rem 3.5rem; border-bottom: 1px solid var(--line); color: var(--muted); }
+    .acceptance li::before {
+      counter-increment: acceptance;
+      content: "A" counter(acceptance, decimal-leading-zero);
+      position: absolute;
+      left: .7rem;
+      color: var(--cyan);
+      font: 800 .72rem var(--mono);
+    }
+    details { border: 1px solid var(--line); border-radius: 12px; background: rgba(12, 24, 42, .7); }
+    details + details { margin-top: .65rem; }
+    summary { padding: .85rem 1rem; cursor: pointer; color: var(--text); font-weight: 800; }
+    details > div { padding: 0 1rem 1rem; color: var(--muted); }
+    .source-card a { display: inline-block; margin-top: .45rem; overflow-wrap: anywhere; }
+    .checklist { list-style: none; padding: 0; }
+    .checklist li { position: relative; padding-left: 1.65rem; }
+    .checklist li::before { content: "□"; position: absolute; left: 0; color: var(--green); font-weight: 900; }
+    .footer { padding: 2.5rem clamp(1.4rem, 6vw, 6.7rem); color: var(--subtle); }
+
+    @media (max-width: 1050px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: sticky; height: auto; padding: .65rem .8rem; border-right: 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+      .brand { display: none; }
+      .sidebar nav { display: flex; gap: .3rem; overflow-x: auto; }
+      .nav-label { display: none; }
+      .sidebar a { flex: 0 0 auto; }
+      .grid-4 { grid-template-columns: repeat(2, 1fr); }
+      .semantic-grid { grid-template-columns: repeat(2, 1fr); }
+      .hero { min-height: auto; padding-top: 4.5rem; }
+    }
+    @media (max-width: 760px) {
+      .hero, .section { padding: 3.7rem 1rem; }
+      .grid-2, .grid-3, .grid-4, .today-grid, .semantic-grid { grid-template-columns: 1fr; }
+      .evidence-row { grid-template-columns: 1fr; gap: .3rem; }
+      .metric-value { text-align: left; }
+      .course-mock, .workspace-mock { grid-template-columns: 1fr; }
+      .course-outline, .workspace-task { border-right: 0; border-bottom: 1px solid var(--line); }
+      .course-outline { max-height: 180px; overflow: hidden; }
+      .flow-arrow { transform: rotate(90deg); }
+      .flow { flex-direction: column; }
+      h1 { font-size: 2.65rem; }
+      .work-package { padding-left: 1.1rem; padding-top: 4.2rem; }
+      .work-id { top: 1rem; }
+    }
+    @media print {
+      :root { color-scheme: light; --bg: #fff; --panel: #f5f7fb; --panel-2: #eef2f8; --panel-3: #e5ebf5; --line: #ccd5e3; --line-strong: #abb8cc; --text: #172033; --muted: #445069; --subtle: #66728a; }
+      body { background: white; }
+      .layout { display: block; }
+      .sidebar { display: none; }
+      .hero { min-height: auto; }
+      .section, .hero { break-inside: avoid; padding: 2rem; }
+      .card, .mock-window { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" aria-label="方案目录">
+      <div class="brand">
+        <span class="brand-mark">S</span>
+        <span><strong>Student UX Plan</strong><small>可直接交付开发 Agent</small></span>
+      </div>
+      <nav>
+        <span class="nav-label">判断</span>
+        <a href="#brief"><span class="nav-index">00</span>执行说明</a>
+        <a href="#evidence"><span class="nav-index">01</span>实机证据</a>
+        <a href="#diagnosis"><span class="nav-index">02</span>深层诊断</a>
+        <a href="#benchmarks"><span class="nav-index">03</span>竞品基准</a>
+        <span class="nav-label">目标体验</span>
+        <a href="#principles"><span class="nav-index">04</span>产品原则</a>
+        <a href="#ia"><span class="nav-index">05</span>信息架构</a>
+        <a href="#screens"><span class="nav-index">06</span>逐页规格</a>
+        <a href="#semantics"><span class="nav-index">07</span>状态语义</a>
+        <span class="nav-label">开发执行</span>
+        <a href="#contracts"><span class="nav-index">08</span>接口与权限</a>
+        <a href="#packages"><span class="nav-index">09</span>工作包</a>
+        <a href="#responsive"><span class="nav-index">10</span>移动与无障碍</a>
+        <a href="#metrics"><span class="nav-index">11</span>指标与埋点</a>
+        <a href="#acceptance"><span class="nav-index">12</span>验收场景</a>
+        <a href="#delivery"><span class="nav-index">13</span>交付顺序</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="hero" id="brief">
+        <span class="eyebrow">玄甲 · logged-in student experience</span>
+        <h1>把“很多页面”重构成一条可继续的学习路径</h1>
+        <p class="lede">本文件是学生端 UI、交互、信息架构和关键数据语义的开发执行合同。开发 Agent 应按优先级直接修改项目，不需要重新发散产品方向；任何视觉调整都必须服务于“学生此刻知道做什么、为什么做、完成后发生什么”。</p>
+        <div class="hero-meta">
+          <span class="pill">实机审查：2026-08-28</span>
+          <span class="pill">范围：登录后学生端全旅程</span>
+          <span class="pill">桌面：1440 × 1000</span>
+          <span class="pill">移动：390 × 844</span>
+          <span class="pill">依据：真实学生会话 + 当前代码 + 官方产品资料</span>
+        </div>
+        <div class="hero-rule">
+          <strong>唯一北极星判断</strong>
+          首页不是数据橱窗，AI 不是第二套产品，学习分析不是审计后台，工作区也不是孤立终端。它们必须共同回答：<strong>我现在应该完成哪一步，系统会如何保存和评价这次学习？</strong>
+        </div>
+      </header>
+
+      <section class="section" aria-labelledby="execution-title">
+        <div class="section-inner">
+          <span class="eyebrow">00 · Agent contract</span>
+          <h2 id="execution-title">如何使用这份文件</h2>
+          <p class="section-intro">这不是灵感展示，也不是要求开发者“自行优化”的提示词。以下决定、状态模型、工作包和验收条件共同构成实现边界。</p>
+          <div class="grid-3">
+            <article class="card">
+              <span class="card-number">DO</span>
+              <h3>先修正确性，再修层级</h3>
+              <p>先处理错误能力、失效链接、错误状态语义与不可恢复错误，再重排导航、首页和课程路径，最后统一视觉和动效。</p>
+            </article>
+            <article class="card">
+              <span class="card-number">PRESERVE</span>
+              <h3>保留可用业务与旧链接</h3>
+              <p>尽量扩展现有 API；已有 canonical 路由继续可用。需要更名时只改界面术语，并提供兼容跳转，不破坏教师端和历史深链。</p>
+            </article>
+            <article class="card">
+              <span class="card-number">PROVE</span>
+              <h3>每个工作包独立验收</h3>
+              <p>必须有真实学生、空账号、已加入课程、已批改任务、失效资源、无权限尝试和移动视口测试；不可只做静态截图验收。</p>
+            </article>
+          </div>
+          <div class="callout warning">
+            <strong>范围边界：</strong>主要修改学生端。共享导航、资源查看器、设置页和 API 权限会同时影响教师端，必须补教师回归测试；不在本轮重做教师端课程创作流程。
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="evidence">
+        <div class="section-inner">
+          <span class="eyebrow">01 · Live evidence</span>
+          <h2>真实页面给出的证据</h2>
+          <p class="section-intro">以下结论来自当前运行项目的学生登录态，不是根据模板猜测。审查覆盖首页、课程目录、课程、章节、容器题、作业、学习分析、评分、AI 助学、个人生成空间、成果查看器、实验环境、搜索和设置。</p>
+
+          <div class="evidence-row">
+            <span class="priority p0">P0 · 能力错误</span>
+            <p><strong>学生自有成果详情同时显示“仅教师可见”和“发布”。</strong>页面以 student viewer 渲染，但 API 对资源所有者返回 <code>canRequestPublish: true</code>；真正提交时服务端又要求教师权限。界面承诺、API 能力与服务端授权互相矛盾。</p>
+            <span class="metric-value">发布按钮可见</span>
+          </div>
+          <div class="evidence-row">
+            <span class="priority p0">P0 · 失效动作</span>
+            <p><strong>AI 历史消息中的“打开无线模拟练习”指向 404。</strong>对话卡片长期保存了资源 URL，但渲染时不重新校验资源是否仍存在，也没有“已下线 / 查看替代内容”的恢复路径。</p>
+            <span class="metric-value">真实 404</span>
+          </div>
+          <div class="evidence-row">
+            <span class="priority p0">P0 · 错误裸露</span>
+            <p><strong>评分页直接显示“请求失败，状态码 403”。</strong>学生无法区分记录不存在、已归档、无权限或数据迁移失败；页面保留“正在读取”文案，没有提供回到有效尝试的操作。</p>
+            <span class="metric-value">真实 403</span>
+          </div>
+          <div class="evidence-row">
+            <span class="priority p1">P1 · 空首页</span>
+            <p><strong>零数据学生首页在移动端高达 2107px。</strong>首屏先展示四个“0”，之后是多个只有标题的空容器；AI 入口在主导航、Hero、下一步、成长区和页尾重复出现，却没有形成一次清晰的新手引导。</p>
+            <span class="metric-value">2107 px</span>
+          </div>
+          <div class="evidence-row">
+            <span class="priority p1">P1 · 目录失控</span>
+            <p><strong>课程目录桌面页面高达 11251px。</strong>大量测试课程以近似名称重复平铺；同一已加入课程又出现在“可加入课程”；没有搜索前置、筛选、分页、归档或环境隔离。</p>
+            <span class="metric-value">11251 px</span>
+          </div>
+          <div class="evidence-row">
+            <span class="priority p1">P1 · 状态混写</span>
+            <p><strong>学习分析首屏把“课程进度、S1–S4 证据可信度、结果 + 过程”并列为同级 KPI。</strong>这会让学生把完成度、能力掌握、评分结果和证据完整性误认为同一件事；“能力缺口 100%”又在没有有效证据时显得像确定结论。</p>
+            <span class="metric-value">4 种语义</span>
+          </div>
+          <div class="evidence-row">
+            <span class="priority p1">P1 · 冗长任务</span>
+            <p><strong>三题已批改作业在移动端高达 2755px。</strong>题目、答案、长反馈和整份总结全部串行展开；右侧桌面总结落到移动页尾，学生无法快速先看结果、再定位错题。</p>
+            <span class="metric-value">2755 px</span>
+          </div>
+          <div class="evidence-row">
+            <span class="priority p1">P1 · 双工作区</span>
+            <p><strong>“个人工作区”和终端图标“工作区”代表两个完全不同的对象。</strong>前者是 AI 生成的个人课件/模拟，后者是题目运行环境；AI 页、个人工作区页和成果详情又分别承担生成、管理与查看，边界模糊。</p>
+            <span class="metric-value">同名异义</span>
+          </div>
+          <div class="evidence-row">
+            <span class="priority p1">P1 · 空实验态</span>
+            <p><strong><code>/workspace</code> 在无会话时只显示英文 “No active challenge session; start a challenge!”。</strong>移动端形成一整屏空白，没有返回课程、选择题目或最近会话入口。</p>
+            <span class="metric-value">无 CTA</span>
+          </div>
+          <div class="evidence-row">
+            <span class="priority p2">P2 · 移动降级</span>
+            <p><strong>页面虽然没有横向溢出，但主要策略只是纵向堆叠。</strong>AI 快捷动作被裁切，标题截断；课程/分析卡片成倍拉长；章节缺少移动端固定的上一项/下一项操作。无横向滚动不等于移动体验成立。</p>
+            <span class="metric-value">390 px 实测</span>
+          </div>
+
+          <div class="callout">
+            <strong>审查补充：</strong>课程页把“0 项必修实训 / 0 / 0”的阅读章节也渲染成空进度；章节页用 Accordion 混合课程资料和实训；已批改作业默认展示参考答案；设置页仍出现“教学对话”等教师口吻；首页数据、课程会员关系与 AI 历史上下文可能不同步。
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="diagnosis">
+        <div class="section-inner">
+          <span class="eyebrow">02 · Root-cause diagnosis</span>
+          <h2>问题不在“卡片太多”，而在产品模型没有合拢</h2>
+          <p class="section-intro">当前学生端像四个独立产品共享一条导航：LMS 课程、网络安全实验、证据评分系统、AI 内容生成器。每个局部都有功能，但系统没有一个稳定的“学习会话”作为主轴。</p>
+
+          <div class="flow" aria-label="当前断裂流程">
+            <div class="flow-node"><strong>学习中心</strong><small>多个空区块 / 多个 AI 入口</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node"><strong>课程 / 章节</strong><small>卡片 + Accordion</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node"><strong>题目</strong><small>启动环境 / Flag</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node is-broken"><strong>工作区</strong><small>脱离课程的独立工具</small></div>
+            <div class="flow-arrow">↘</div>
+            <div class="flow-node is-broken"><strong>评分 / 分析</strong><small>证据术语与原始状态</small></div>
+          </div>
+          <div class="flow" aria-label="当前旁路流程">
+            <div class="flow-node"><strong>AI 助学</strong><small>对话 + 任务 + 历史动作</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node"><strong>个人工作区</strong><small>再次输入自然语言</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node is-broken"><strong>成果详情</strong><small>返回 AI / 发布权限混乱</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node is-broken"><strong>失效深链</strong><small>404 / 无恢复</small></div>
+          </div>
+
+          <div class="grid-2">
+            <article class="card">
+              <span class="card-number">ROOT 01</span>
+              <h3>导航按系统模块分，不按学生意图分</h3>
+              <p>“学习中心 / 课程 / 个人工作区 / AI 助学 / 工作区”要求学生先理解后台对象。学生真正的意图只有继续今天的任务、浏览课程、进入实验、求助和查看进展。</p>
+            </article>
+            <article class="card">
+              <span class="card-number">ROOT 02</span>
+              <h3>推荐是算法输出，不是可解释承诺</h3>
+              <p>“下一步”分散在首页、课程、学习分析和 AI 中；缺少统一排序规则、预计时间、前置条件、推荐依据与替代选项，学生无法判断应该信哪一个入口。</p>
+            </article>
+            <article class="card">
+              <span class="card-number">ROOT 03</span>
+              <h3>完成事实被错误地提升为能力判断</h3>
+              <p>完成一道题、拿到一个分数、有完整事件链、掌握某项能力是四种不同事实。当前界面把它们压缩成进度百分比、可信度和能力缺口，造成虚假精确。</p>
+            </article>
+            <article class="card">
+              <span class="card-number">ROOT 04</span>
+              <h3>资源生命周期没有进入 UI 模型</h3>
+              <p>AI 消息保存静态 URL，课程和资源被关闭、清理或迁移后仍呈现为可执行按钮；查看器也不保留来源页。系统记录了对象，却没有管理对象的可用性与去向。</p>
+            </article>
+            <article class="card">
+              <span class="card-number">ROOT 05</span>
+              <h3>角色通过模板猜测，能力通过所有权猜测</h3>
+              <p>学生拥有个人成果时得到编辑/发布类字段，但页面又以 student viewer 隐藏部分功能；权限逻辑分散在模板、API 和动作端点，导致“看得到但做不了”。</p>
+            </article>
+            <article class="card">
+              <span class="card-number">ROOT 06</span>
+              <h3>响应式只处理宽度，没有处理任务模式</h3>
+              <p>移动端把桌面多列全部向下排。实验、AI 对话、长作业在手机上的任务方式本来就不同，应该一次聚焦一个面板、固定主要动作并减少历史细节。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="benchmarks">
+        <div class="section-inner">
+          <span class="eyebrow">03 · Current official benchmarks</span>
+          <h2>借鉴机制，不复制皮肤</h2>
+          <p class="section-intro">资料于 2026-08-28 核对，优先使用官方产品文档。下表只提炼与本项目直接相关的机制，并明确不应照搬的部分。</p>
+          <div class="grid-2">
+            <article class="card source-card">
+              <span class="card-number">CANVAS LMS</span>
+              <h3>模块要求直接贴在学习项上</h3>
+              <p>Canvas Modules 能显示 View、Mark as done、Submit、Score at least X 等完成要求，也支持先修和顺序完成。</p>
+              <p><strong>采用：</strong>每个课程项明确类型、完成条件、状态和锁定原因。<br><strong>不采用：</strong>把所有教学对象继续做成后台式长列表。</p>
+              <a href="https://community.canvaslms.com/html/assets/Canvas_Basics_Guide.pdf" target="_blank" rel="noopener">Canvas Basics Guide ↗</a>
+            </article>
+            <article class="card source-card">
+              <span class="card-number">MOODLE 5.2</span>
+              <h3>完成条件与课程完成分开</h3>
+              <p>Moodle 将活动完成条件、课程完成和能力分开；活动可由查看、提交、成绩等不同条件触发。</p>
+              <p><strong>采用：</strong>进度必须来自明确完成条件，阅读项不能用“0/0 实训”表示。<br><strong>不采用：</strong>暴露复杂的 LMS 配置术语给学生。</p>
+              <a href="https://docs.moodle.org/502/en/Tracking_progress" target="_blank" rel="noopener">Moodle Tracking progress ↗</a>
+            </article>
+            <article class="card source-card">
+              <span class="card-number">KHAN ACADEMY</span>
+              <h3>掌握度是可升可降的独立学习状态</h3>
+              <p>Khan Academy 用 Attempted、Familiar、Proficient、Mastered 等层级表达技能证据，并在活动后说明哪些技能变化。</p>
+              <p><strong>采用：</strong>未知不是 0%，掌握度要显示证据来源、更新时间和变化。<br><strong>不采用：</strong>在证据不足时制造游戏化精确分数。</p>
+              <a href="https://support.khanacademy.org/hc/en-us/articles/360007253831-Using-self-paced-practice-and-Mastery-in-the-classroom" target="_blank" rel="noopener">Khan Academy Mastery ↗</a>
+            </article>
+            <article class="card source-card">
+              <span class="card-number">TRYHACKME</span>
+              <h3>实验环境在题目上下文内启动</h3>
+              <p>AttackBox 直接从 Room 的环境任务卡启动，并以 split view 呈现；关闭页面不等同于关闭机器。</p>
+              <p><strong>采用：</strong>题目是环境入口，启动状态、剩余时间和关闭含义要明确。<br><strong>不采用：</strong>在手机上机械压缩桌面分屏。</p>
+              <a href="https://help.tryhackme.com/en/articles/6721845-the-attackbox-explained" target="_blank" rel="noopener">TryHackMe AttackBox ↗</a>
+            </article>
+            <article class="card source-card">
+              <span class="card-number">HTB ACADEMY</span>
+              <h3>Path → Module → Section，理论与交互类型可辨认</h3>
+              <p>HTB Academy 把路径、模块、章节分层；阅读与交互沙箱使用不同类型，目录持续显示当前位置，实践问题与工作站保留同一上下文。</p>
+              <p><strong>采用：</strong>稳定三层路径、类型图标、当前项与目录。<br><strong>不采用：</strong>把平台货币、解锁商业机制带入教学。</p>
+              <a href="https://help.hackthebox.com/en/articles/12741910-academy-modules-paths" target="_blank" rel="noopener">HTB Academy Modules &amp; Paths ↗</a>
+            </article>
+            <article class="card source-card">
+              <span class="card-number">CODECADEMY</span>
+              <h3>首页优先恢复最近学习</h3>
+              <p>Codecademy Dashboard 把最近使用的 Course 或 Path 放在可直接 Resume 的位置，并把 My Learning 与 Workspaces 分开。</p>
+              <p><strong>采用：</strong>首页主卡只承载最近有效下一步；创作与课程学习分区但不争抢首屏。<br><strong>不采用：</strong>为了“内容丰富”重复展示同一对象。</p>
+              <a href="https://help.codecademy.com/hc/en-us/articles/1260801844089-Updates-to-your-Dashboard" target="_blank" rel="noopener">Codecademy Dashboard ↗</a>
+            </article>
+            <article class="card source-card">
+              <span class="card-number">CHATGPT STUDY MODE</span>
+              <h3>AI 默认促进思考，不代替完成</h3>
+              <p>Study Mode 强调苏格拉底式提问、分层解释、知识检查、认知负荷管理和反思，而不是直接给最终答案。</p>
+              <p><strong>采用：</strong>课程题目中的 AI 默认进入“提示与理解检查”；生成内容是显式动作。<br><strong>不采用：</strong>让 AI 对话成为进入所有功能的唯一门槛。</p>
+              <a href="https://openai.com/index/chatgpt-study-mode/" target="_blank" rel="noopener">OpenAI Study Mode ↗</a>
+            </article>
+            <article class="decision">
+              <span class="card-number">PRODUCT DECISION</span>
+              <h3>本项目的组合优势</h3>
+              <p>用 Canvas/Moodle 的明确完成条件做骨架，用 Khan 的证据化掌握度做反馈，用 HTB/TryHackMe 的题目内实验做实践，用 Study Mode 的渐进式 AI 做辅导。不要把四套导航同时暴露给学生。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="principles">
+        <div class="section-inner">
+          <span class="eyebrow">04 · Product principles</span>
+          <h2>实现时不可被牺牲的七条原则</h2>
+          <div class="grid-3">
+            <article class="card"><span class="card-number">01</span><h3>一个权威下一步</h3><p>所有页面使用同一排序服务。首页显示一项主要动作，课程内显示该课程的一项；AI 可以解释或替换建议，不能另造不一致的推荐。</p></article>
+            <article class="card"><span class="card-number">02</span><h3>先状态，再数字</h3><p>先回答未开始、进行中、待批改、已完成、需补强、暂无证据；只有在定义清楚且证据充分时才显示百分比。</p></article>
+            <article class="card"><span class="card-number">03</span><h3>上下文不断线</h3><p>课程、章节、题目、环境、评分和 AI 共享同一个 learning context；返回操作回到来源位置，而不是固定跳到 AI 或课程首页。</p></article>
+            <article class="card"><span class="card-number">04</span><h3>角色决定能力</h3><p>界面只能渲染服务端授权的 capability。所有权不等于教师权；学生个人成果使用“仅自己可见 / 提交审核”，不能出现课程发布。</p></article>
+            <article class="card"><span class="card-number">05</span><h3>失效也可继续</h3><p>资源不存在、环境过期、评分不可见时，使用产品化状态和恢复路径；禁止把 403、404、原始枚举或任务 ID 直接交给学生。</p></article>
+            <article class="card"><span class="card-number">06</span><h3>AI 是上下文能力</h3><p>保留一个完整 AI 对话空间；课程与题目中以侧栏/抽屉携带上下文进入。默认辅导，生成、规划、复盘由明确的意图触发。</p></article>
+            <article class="card"><span class="card-number">07</span><h3>移动端一次做一件事</h3><p>移动端不是缩小版桌面：课程显示当前项，作业一次聚焦一题，AI 固定输入，实验环境使用全屏标签切换或明确提示改用桌面。</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="ia">
+        <div class="section-inner">
+          <span class="eyebrow">05 · Target information architecture</span>
+          <h2>从五个模块入口收敛为三种学生意图</h2>
+          <p class="section-intro">保留现有路由以降低迁移风险，但重写导航命名、入口优先级和页面之间的返回关系。</p>
+
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>当前术语 / 入口</th><th>目标术语 / 位置</th><th>决定</th><th>现有路由</th></tr></thead>
+              <tbody>
+                <tr><td>学习中心</td><td><strong>今天</strong></td><td>全局首项；显示唯一下一步、近期任务与正在学课程</td><td><code>/student</code></td></tr>
+                <tr><td>课程</td><td><strong>课程</strong></td><td>二级分为“我的课程 / 发现课程”，不混排重复卡片</td><td><code>/dojos</code></td></tr>
+                <tr><td>AI 助学 / 学习智能体</td><td><strong>AI 学习助手</strong></td><td>全局唯一完整对话面；课程内入口携带上下文</td><td><code>/guide</code></td></tr>
+                <tr><td>个人工作区</td><td><strong>我的创作</strong></td><td>移出主导航，放入 AI 学习助手和“今天”的次级入口</td><td><code>/learning/extend</code></td></tr>
+                <tr><td>工作区</td><td><strong>实验环境</strong></td><td>全局工具图标保留；空态引导从课程题目启动</td><td><code>/workspace</code></td></tr>
+                <tr><td>学习分析</td><td><strong>学习进展</strong></td><td>并入课程页 Tab；旧深链保留</td><td><code>/dojo/&lt;course&gt;/learning</code></td></tr>
+                <tr><td>课程资源与教师发布成果</td><td><strong>课程资料</strong></td><td>归入对应课程/章节；首页只显示最近使用或教师置顶</td><td><code>/learning/artifacts/&lt;id&gt;</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 style="margin-top:2rem">目标主路径</h3>
+          <div class="flow" aria-label="目标学生学习路径">
+            <div class="flow-node is-target"><strong>今天</strong><small>唯一下一步 + 原因 + 用时</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node is-target"><strong>课程上下文壳</strong><small>路径 / 当前项 / 完成条件</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node is-target"><strong>学习或实践</strong><small>阅读 / 作业 / 实验</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node is-target"><strong>反馈</strong><small>结果 / 能力 / 证据状态</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node is-target"><strong>继续下一项</strong><small>原上下文内推进</small></div>
+          </div>
+
+          <div class="callout">
+            <strong>路由策略：</strong>本轮不强制新增 <code>/today</code> 或 <code>/courses</code>。界面命名可先更新，旧路径作为 canonical；如未来迁移 URL，必须加服务端 308、保留 query 和 fragment，并在 E2E 中验证历史深链。
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="screens">
+        <div class="section-inner">
+          <span class="eyebrow">06 · Page-by-page specifications</span>
+          <h2>逐页目标与交互规格</h2>
+
+          <h3>6.1 “今天”首页：从空数据展板变成行动面</h3>
+          <div class="mock-window" aria-label="目标学生首页示意">
+            <div class="mock-bar"><span class="mock-dot"></span><span class="mock-dot"></span><span class="mock-dot"></span><span>目标示意 · Today</span></div>
+            <div class="mock-nav"><strong>玄甲</strong><span class="active">今天</span><span>课程</span><span>AI 学习助手</span><span>搜索</span><span>实验环境</span></div>
+            <div class="mock-body">
+              <div class="today-grid">
+                <article class="mock-card">
+                  <small>继续学习 · 预计 18 分钟</small>
+                  <h3>日志检索：定位异常认证行为</h3>
+                  <p>推荐原因：这是《软件安全》当前未完成的第一项必修实践；完成后将更新“日志研判”能力证据。</p>
+                  <div class="mock-progress"><i></i></div>
+                  <p>已完成 2 / 5 个步骤 · 实验状态已保留</p>
+                  <span class="mock-action">继续实验 →</span>
+                </article>
+                <article class="mock-card">
+                  <small>本周</small>
+                  <h3>2 项待办</h3>
+                  <div class="mock-list">
+                    <div class="mock-row"><span>作业</span><b>SQL 注入自检</b><em>明天截止</em></div>
+                    <div class="mock-row"><span>复习</span><b>输入验证</b><em>10 分钟</em></div>
+                  </div>
+                </article>
+              </div>
+              <div class="mock-list">
+                <div class="mock-row"><span>课程</span><b>软件安全 · 2 / 6 项必修实践</b><em>查看路径 →</em></div>
+                <div class="mock-row"><span>进展</span><b>日志研判有新证据；另外 4 项能力尚无足够证据</b><em>查看进展 →</em></div>
+              </div>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-top:1rem">
+            <article class="card">
+              <h3>有数据状态</h3>
+              <ul>
+                <li>首屏只保留一个 <strong>Primary next action</strong>，显示类型、课程、预计用时、推荐原因、当前保存状态和一个主按钮。</li>
+                <li>第二优先级是截止任务；第三优先级是最多 3 门正在学习的课程；能力摘要只显示“有新证据 / 待补强 / 暂无足够证据”。</li>
+                <li>“我的创作”和“课程资料”降为可折叠次级区或跳转，不占据空白大卡。</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>零数据状态</h3>
+              <ul>
+                <li>不渲染四个“0” KPI 和七个空容器。</li>
+                <li>显示三步 onboarding：加入课程 → 选择第一项 → 启动实践；课程码为主动作，浏览课程为次动作。</li>
+                <li>AI 是“帮我选择课程 / 制定目标”的辅助入口，不取代加入课程的明确路径。</li>
+              </ul>
+            </article>
+          </div>
+
+          <h3 style="margin-top:2.5rem">6.2 课程目录：先分“我的”和“发现”，再展示卡片</h3>
+          <div class="grid-2">
+            <article class="card">
+              <h3>目录规则</h3>
+              <ul>
+                <li>默认 Tab 为“我的课程”；“发现课程”才显示可加入内容。同一课程不可在两个区块同时出现。</li>
+                <li>发现页顶部固定搜索与筛选：主题、难度、类型（理论/CTF/模拟）、预计时长、官方/教师课程。</li>
+                <li>每页最多 24 门课程，分页或可访问的“加载更多”；URL 保存筛选参数，浏览器前进后退可恢复。</li>
+                <li>测试、验收、已归档内容由后端可见性隔离，不通过前端名称规则隐藏。</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>课程卡信息</h3>
+              <ul>
+                <li>标题、教师/发布方、适合水平、预计总时长、实践类型、最新更新时间。</li>
+                <li>已加入课程显示当前项与进度；未加入课程显示课程目标和“查看详情”，不在卡片上混入内部 reference ID。</li>
+                <li>0 个活动的课程必须标记“仅资料 / 尚未开放实践”，不能伪装成可立即实战。</li>
+              </ul>
+            </article>
+          </div>
+
+          <h3 style="margin-top:2.5rem">6.3 课程与章节：统一课程上下文壳</h3>
+          <div class="mock-window" aria-label="目标课程学习壳示意">
+            <div class="mock-bar"><span class="mock-dot"></span><span class="mock-dot"></span><span class="mock-dot"></span><span>目标示意 · Course learning shell</span></div>
+            <div class="course-mock">
+              <aside class="course-outline">
+                <small style="color:var(--blue)">软件安全 · 33%</small>
+                <h3 style="margin:.45rem 0 .8rem">课程路径</h3>
+                <div class="mock-row"><span>✓</span><b>01 基础概念</b><em>完成</em></div>
+                <div class="mock-row" style="border-color:var(--blue)"><span>●</span><b>02 日志检索</b><em>当前</em></div>
+                <div class="mock-row"><span>○</span><b>03 修复验证</b><em>18 分钟</em></div>
+                <div class="mock-row"><span>◇</span><b>04 阅读资料</b><em>无实践</em></div>
+              </aside>
+              <section class="course-content">
+                <span class="pill">实践 · 必修 · 预计 18 分钟</span>
+                <h2 style="font-size:2rem;margin-top:.8rem">日志检索</h2>
+                <p style="color:var(--muted)">目标：从认证日志中识别异常模式，并用可复核证据说明判断。</p>
+                <div class="mock-card">
+                  <small>完成条件</small>
+                  <div class="mock-list">
+                    <div class="mock-row"><span>1</span><b>启动实验并完成日志查询</b><em>未完成</em></div>
+                    <div class="mock-row"><span>2</span><b>提交动态 Flag</b><em>未完成</em></div>
+                    <div class="mock-row"><span>3</span><b>完成简短复盘</b><em>可选</em></div>
+                  </div>
+                </div>
+                <div class="course-next"><span><small>下一步</small><strong>启动隔离实验环境</strong></span><span class="mock-action">开始实践 →</span></div>
+              </section>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-top:1rem">
+            <article class="card">
+              <h3>课程页</h3>
+              <ul>
+                <li>Hero 缩短；主要动作是“继续当前项”，不是笼统“开始第一章”。</li>
+                <li>课程内容、进展、资料使用 Tab 或同一壳内二级导航；旧学习分析页仍可深链。</li>
+                <li>章节显示混合项总数与状态。没有必修实践时写“阅读章节 · 无必修实践”，绝不显示 0/0 进度条。</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>章节 / 题目页</h3>
+              <ul>
+                <li>用稳定目录 + 当前内容替代一组互相独立的 Accordion。每项显示资源类型、完成条件、状态、预计用时。</li>
+                <li>桌面保留左侧路径；移动端使用可展开目录和固定“上一项 / 下一项”底栏。</li>
+                <li>题目说明、环境、提交和反馈仍在同一学习壳；AI 从当前上下文抽屉打开。</li>
+              </ul>
+            </article>
+          </div>
+
+          <h3 style="margin-top:2.5rem">6.4 作业：先看状态，再聚焦作答或错题</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>状态</th><th>页面首屏</th><th>主要动作</th><th>反馈规则</th></tr></thead>
+              <tbody>
+                <tr><td>未开始</td><td>说明、截止、题数、预计时长、尝试次数、AI 使用政策</td><td>开始作答</td><td>不显示答案或评分信息</td></tr>
+                <tr><td>作答中</td><td>当前题 + 题目导航 + 自动保存状态</td><td>保存并下一题 / 提交</td><td>提交前不显示正确性</td></tr>
+                <tr><td>待批改</td><td>已提交时间和待批改说明</td><td>返回课程</td><td>不以 0 分占位</td></tr>
+                <tr><td>已批改</td><td>总结果、错题数、教师反馈摘要</td><td>查看错题 / 再次练习</td><td>参考答案由教师策略、尝试次数和截止状态决定</td></tr>
+                <tr><td>已关闭</td><td>结果与可见反馈</td><td>查看复习建议</td><td>只显示策略允许的答案与解析</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout">
+            桌面可保留“全部题目”模式，但右栏只放题目导航、自动保存与提交摘要；长总结进入提交后的结果页。移动端默认一题一屏，固定底栏展示“第 2 / 10 题、上一题、保存并下一题”。
+          </div>
+
+          <h3 style="margin-top:2.5rem">6.5 AI 学习助手与“我的创作”：一个入口，两种结果</h3>
+          <div class="grid-2">
+            <article class="card">
+              <h3>AI 学习助手</h3>
+              <ul>
+                <li>保持 <code>/guide</code> 为唯一完整对话空间；左栏是对话，主栏是消息，任务抽屉按需打开。</li>
+                <li>从课程/章节/题目进入时显示可移除的上下文 chip：课程、当前题、可用资料、学习目标；发送前学生知道 AI 会引用什么。</li>
+                <li>默认“辅导”行为：先询问卡点、给提示、分层解释和理解检查；涉及作业时遵守教师 AI 政策，不直接泄露私有答案。</li>
+                <li>“创建练习/课件/模拟”是明确的生成意图，结果进入“我的创作”；分析与解释不创建工作区。</li>
+                <li>消息动作卡渲染前重新解析资源。资源不可用时显示“已下线”，提供回到课程或查找替代项，不保留可点击 404。</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>我的创作</h3>
+              <ul>
+                <li><code>/learning/extend</code> 界面名称改为“我的创作”，删除第二套宽泛自然语言入口；主动作是“在 AI 学习助手中创建”。</li>
+                <li>列表按创建目标、课程、类型和更新时间分组；相同任务生成的重复对象合并为版本，不重复展示相同卡片。</li>
+                <li>可见性仅使用“仅自己可见、已提交教师、课程可见”。学生不得看到“发布课程”能力。</li>
+                <li>若产品需要学生分享，新增独立的“提交教师查看”流程；不能复用教师 <code>request-publish</code>。</li>
+              </ul>
+            </article>
+          </div>
+
+          <h3 style="margin-top:2.5rem">6.6 成果查看器：学习内容，不是教师流水线</h3>
+          <div class="grid-3">
+            <article class="card"><h3>学生查看已发布课程成果</h3><p>只显示课程面包屑、标题、内容类型、完成/继续操作。隐藏发布检查、版本比较、生成任务、内部来源和教师私有指令。</p></article>
+            <article class="card"><h3>学生查看个人成果</h3><p>可显示自己的版本和“继续改进”入口，但标签必须是“仅自己可见”；允许复制、重命名、删除或提交教师查看，不能发布到课程。</p></article>
+            <article class="card"><h3>返回与来源</h3><p>优先使用经过 allowlist 校验的 <code>returnTo</code> 或 history state；否则回到对应课程/我的创作。禁止所有学生成果固定返回 <code>/guide</code>。</p></article>
+          </div>
+
+          <h3 style="margin-top:2.5rem">6.7 实验环境：从孤立终端变成题目内工具</h3>
+          <div class="mock-window" aria-label="目标实验工作区示意">
+            <div class="mock-bar"><span class="mock-dot"></span><span class="mock-dot"></span><span class="mock-dot"></span><span>目标示意 · Active lab</span></div>
+            <div class="workspace-mock">
+              <section class="workspace-task">
+                <small style="color:var(--blue)">软件安全 / 日志检索</small>
+                <h3 style="margin-top:.5rem">识别异常认证行为</h3>
+                <p style="color:var(--muted);font-size:.78rem">环境剩余 47 分钟 · 状态已保存</p>
+                <div class="mock-list">
+                  <div class="mock-row"><span>✓</span><b>读取日志</b></div>
+                  <div class="mock-row"><span>●</span><b>过滤失败登录</b></div>
+                  <div class="mock-row"><span>○</span><b>提交 Flag</b></div>
+                </div>
+                <div class="course-next"><span><strong>卡住了？</strong><small>AI 只读取当前题目与已授权证据</small></span><span class="mock-action">获得提示</span></div>
+              </section>
+              <section class="workspace-env">
+                <div class="workspace-tabs"><span class="active">终端</span><span>桌面</span><span>代码</span><span>连接信息</span><span style="margin-left:auto">停止环境</span></div>
+                <div class="terminal-lines">$ grep "Failed password" auth.log<br>Aug 28 09:18:11 sshd[214] Failed password ...<br>$ <span style="opacity:.7">输入下一条命令</span></div>
+              </section>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-top:1rem">
+            <article class="card">
+              <h3>无会话与启动</h3>
+              <ul>
+                <li>无会话空态必须中文化：说明环境从题目启动，提供“返回当前课程”“浏览实践题”和最近会话。</li>
+                <li>启动过程显示排队、准备容器、连接服务等可理解阶段、预计等待、取消和重试；不以空白 iframe 代替状态。</li>
+                <li>离开页面与停止环境含义明确；保留状态、剩余时间和自动关闭提示可见。</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>移动端策略</h3>
+              <ul>
+                <li>不显示压缩分屏；题目、终端、桌面、连接信息一次只显示一个全屏 Tab。</li>
+                <li>若某环境不支持手机交互，明确提示“建议在桌面继续”，提供复制连接信息与返回题目；不能留下巨大空白。</li>
+                <li>Flag 提交和当前步骤使用固定底栏，但不遮挡终端输入和软键盘。</li>
+              </ul>
+            </article>
+          </div>
+
+          <h3 style="margin-top:2.5rem">6.8 搜索、设置与错误页</h3>
+          <div class="grid-3">
+            <article class="card"><h3>搜索</h3><p>升级为分组命令面板：最近、我的课程、章节/题目、作业、我的创作。支持键盘上下选择、Esc 关闭、空结果建议；查询结果必须遵守当前用户可见性。</p></article>
+            <article class="card"><h3>设置</h3><p>学生设置只使用学生口吻，“教学对话”改为“AI 对话”。危险操作（重置 Home）展示影响范围、备份位置、二次确认和不可逆部分。</p></article>
+            <article class="card"><h3>错误页</h3><p>403/404/410/5xx 分别映射为无权查看、内容不存在、内容已下线、暂时不可用。每类至少提供一个有效恢复动作，并带 request ID 供支持排查。</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="semantics">
+        <div class="section-inner">
+          <span class="eyebrow">07 · Learning-state semantics</span>
+          <h2>四种状态必须拆开存、拆开算、拆开说</h2>
+          <p class="section-intro">这是本次重构最关键的数据与文案约束。任何页面不得再用一个百分比同时暗示完成、得分、掌握和证据可信。</p>
+          <div class="semantic-grid">
+            <article>
+              <small>ACTIVITY</small>
+              <strong>活动进度</strong>
+              <p>学生是否完成了明确条件。</p>
+              <code>NOT_STARTED</code><br><code>IN_PROGRESS</code><br><code>SUBMITTED</code><br><code>COMPLETED</code>
+            </article>
+            <article>
+              <small>MASTERY</small>
+              <strong>能力掌握</strong>
+              <p>多次学习证据支持的能力判断。</p>
+              <code>UNKNOWN</code><br><code>EMERGING</code><br><code>DEVELOPING</code><br><code>PROFICIENT</code><br><code>MASTERED</code>
+            </article>
+            <article>
+              <small>ASSESSMENT</small>
+              <strong>本次评分</strong>
+              <p>某次作答/实践的结果。</p>
+              <code>NOT_APPLICABLE</code><br><code>PENDING</code><br><code>READY</code><br><code>FAILED</code>
+            </article>
+            <article>
+              <small>EVIDENCE</small>
+              <strong>证据完整性</strong>
+              <p>过程记录是否足以复核，不代表学会。</p>
+              <code>NONE</code><br><code>PARTIAL</code><br><code>COMPLETE</code><br><code>INVALID</code>
+            </article>
+          </div>
+
+          <div class="table-wrap" style="margin-top:1.2rem">
+            <table>
+              <thead><tr><th>数据情况</th><th>禁止显示</th><th>目标显示</th></tr></thead>
+              <tbody>
+                <tr><td>从未产生能力证据</td><td>掌握度 0%、能力缺口 100%</td><td><strong>尚无足够证据</strong> · 完成一次相关实践后更新</td></tr>
+                <tr><td>作答已提交但未评分</td><td>0 / 100、继续加强</td><td><strong>等待评分</strong> · 已提交于 09:18</td></tr>
+                <tr><td>评分数据无权读取</td><td>请求失败，状态码 403</td><td><strong>无法查看这次记录</strong> · 查看我的最近尝试</td></tr>
+                <tr><td>事件链完整但得分低</td><td>证据可信度 100% 与总分并列</td><td><strong>得分 42</strong>；详情内写“过程记录完整，可复核本次判断”</td></tr>
+                <tr><td>章节没有必修实践</td><td>0 / 0、0% 进度条</td><td><strong>阅读章节</strong> · 无必修实践；按配置显示阅读完成条件</td></tr>
+                <tr><td>后端返回原始状态</td><td>SOLVED、ACTIVE、CLOSED、任务 ID</td><td>已完成、进行中、已关闭；技术值仅在诊断日志中保留</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="contracts">
+        <div class="section-inner">
+          <span class="eyebrow">08 · API, permission and lifecycle contracts</span>
+          <h2>前端重排必须由正确的数据契约支撑</h2>
+
+          <h3>8.1 学习中心扩展契约</h3>
+          <p class="section-intro">在 <code>GET /pwncollege_api/v1/learning/overview</code> 上增量扩展，旧字段至少保留一个发布周期。由服务端生成权威 next action，前端不得重新拼一套排序。</p>
+          <pre>{
+  "state": "ONBOARDING | READY | EMPTY | DEGRADED",
+  "nextAction": {
+    "type": "ASSIGNMENT | CONTINUE_ATTEMPT | COURSE_ITEM | REVIEW",
+    "title": "日志检索",
+    "href": "/course/module/challenge",
+    "reason": "当前课程第一项未完成的必修实践",
+    "estimatedMinutes": 18,
+    "dueAt": null,
+    "savedState": "环境与步骤已保留",
+    "context": {"courseId": "...", "moduleId": "...", "challengeId": "..."}
+  },
+  "courses": [{
+    "membershipStatus": "ENROLLED | AVAILABLE | ARCHIVED",
+    "currentItem": {},
+    "progress": {"completed": 2, "total": 6, "percent": 33.3, "basis": "REQUIRED_ITEMS"}
+  }],
+  "masterySummary": {"state": "UNKNOWN | AVAILABLE", "updatedAt": null}
+}</pre>
+
+          <h3 style="margin-top:2rem">8.2 查看器能力契约</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>查看者 / 内容</th><th>view</th><th>edit</th><th>requestReview</th><th>publishToCourse</th><th>内部来源/验证</th></tr></thead>
+              <tbody>
+                <tr><td>学生 / 已发布课程成果</td><td>是（student-safe）</td><td>否</td><td>否</td><td>否</td><td>否</td></tr>
+                <tr><td>学生 / 自己的个人成果</td><td>是</td><td>是</td><td>可选</td><td><strong>否</strong></td><td>只显示用户可理解的版本，不显示流水线</td></tr>
+                <tr><td>教师 / 自己的课程成果</td><td>是</td><td>是</td><td>不适用</td><td>是</td><td>是</td></tr>
+                <tr><td>教师 / 已提交查看的学生成果</td><td>是</td><td>按产品规则</td><td>反馈</td><td>必须复制/采用后再发布</td><td>只限授权范围</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout danger">
+            <strong>强制修改：</strong><code>canRequestPublish</code> 不能只依据 <code>owner_id</code> 和 <code>dojo_id</code>。统一返回 <code>capabilities: {view, edit, requestReview, publishToCourse}</code>，由角色 + 课程管理员关系 + 内容类型共同计算。模板和 JS 只依据此对象渲染；动作端点仍独立鉴权。
+          </div>
+
+          <h3 style="margin-top:2rem">8.3 资源生命周期与返回上下文</h3>
+          <div class="grid-2">
+            <article class="card">
+              <h3>动作引用</h3>
+              <ul>
+                <li>AI 消息保存稳定对象引用（type + id），URL 只是缓存。</li>
+                <li>渲染时批量 resolve；返回 <code>AVAILABLE / MOVED / ARCHIVED / DELETED / FORBIDDEN</code>。</li>
+                <li>MOVED 自动更新链接；ARCHIVED/DELETED 显示不可用卡和课程级替代入口；FORBIDDEN 不泄露对象详情。</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>返回关系</h3>
+              <ul>
+                <li>使用同源 allowlist 的 <code>returnTo</code>，或在 history state 保存 origin route、scroll anchor、tab。</li>
+                <li>资源详情、评分、AI 抽屉返回时恢复课程章节、当前 Tab 和滚动位置。</li>
+                <li>不接受外部 URL，不把未经验证的 query 直接写入 href。</li>
+              </ul>
+            </article>
+          </div>
+
+          <h3 style="margin-top:2rem">8.4 错误契约</h3>
+          <pre>{
+  "success": false,
+  "error": {
+    "code": "ATTEMPT_NOT_VISIBLE",
+    "message": "无法查看这次学习记录。",
+    "recovery": {
+      "label": "查看我的最近尝试",
+      "href": "/dojo/course/learning#attempts"
+    },
+    "requestId": "req_..."
+  }
+}</pre>
+          <p style="color:var(--muted);margin-top:.7rem">前端按稳定 <code>code</code> 映射页面状态；HTTP 状态仍保留正确语义，但不直接成为学生文案。未知错误显示“暂时无法加载”与重试，不显示堆栈、原始枚举或内部 ID。</p>
+        </div>
+      </section>
+
+      <section class="section" id="packages">
+        <div class="section-inner">
+          <span class="eyebrow">09 · Engineering work packages</span>
+          <h2>按依赖执行的开发工作包</h2>
+          <p class="section-intro">每个工作包都必须包含实现、单元/API 测试、Playwright 场景与真实浏览器截图。P0 未完成前，不应先做大范围视觉换肤。</p>
+
+          <div class="grid-2">
+            <article class="card work-package">
+              <span class="work-id">SP00</span>
+              <span class="priority p0">基础护栏</span>
+              <h3>建立学生旅程 fixture 与状态矩阵</h3>
+              <p><strong>实现：</strong>准备新学生、已入课学生、进行中实验、已提交/已批改作业、个人成果、失效资源、无权限评分记录等稳定 fixture。</p>
+              <p><strong>文件：</strong><code>test/test_learning.py</code>、<code>test/test_coursework.py</code>、<code>test/test_complete_teaching_learning_lifecycle.py</code>、现有 Playwright acceptance 脚本。</p>
+              <p><strong>完成：</strong>后续每个工作包可复用这些状态，不依赖脆弱的历史 ID。</p>
+            </article>
+
+            <article class="card work-package">
+              <span class="work-id">SP01</span>
+              <span class="priority p0">权限与生命周期</span>
+              <h3>修正成果能力、失效链接和错误输出</h3>
+              <p><strong>实现：</strong>新增统一 capabilities；学生永不获得 publishToCourse；动作卡渲染时 resolve；403/404/410 使用恢复模型。</p>
+              <p><strong>文件：</strong><code>dojo_plugin/agent_runtime/artifacts.py</code>、<code>dojo_plugin/api/v1/teaching.py</code>、<code>dojo_plugin/pages/learning.py</code>、<code>dojo_theme/templates/teaching_artifact.html</code>、<code>dojo_theme/static/js/dojo/teaching-artifact.js</code>、<code>teaching-agent.js</code>。</p>
+              <p><strong>依赖：</strong>SP00。<strong>验收：</strong>A05–A08。</p>
+            </article>
+
+            <article class="card work-package">
+              <span class="work-id">SP02</span>
+              <span class="priority p0">状态语义</span>
+              <h3>拆分进度、掌握、评分和证据完整性</h3>
+              <p><strong>实现：</strong>引入显式 unknown/pending/error 状态；删除“无证据 = 0% / 缺口 100%”；证据完整性移入详情。</p>
+              <p><strong>文件：</strong><code>dojo_plugin/api/v1/learning.py</code>、<code>dojo_plugin/learning/context.py</code>、<code>dojo_theme/templates/learning_dashboard.html</code>、<code>learning_score.html</code>、<code>learning-dashboard.js</code>、<code>learning-score.js</code>。</p>
+              <p><strong>依赖：</strong>SP00。<strong>验收：</strong>A13–A16。</p>
+            </article>
+
+            <article class="card work-package">
+              <span class="work-id">SP03</span>
+              <span class="priority p1">全局 IA</span>
+              <h3>统一导航、命名、搜索和返回关系</h3>
+              <p><strong>实现：</strong>主导航改为今天/课程/AI 学习助手；个人工作区改“我的创作”并移出主导航；工作区改“实验环境”；搜索按对象分组；保留旧路由。</p>
+              <p><strong>文件：</strong><code>dojo_theme/templates/components/navbar.html</code>、<code>dojo_theme/static/js/dojo/navbar.js</code>、<code>dojo_plugin/api/v1/search.py</code>、<code>dojo_theme/static/css/product-shell.css</code>、相关 dev/min 构建产物。</p>
+              <p><strong>依赖：</strong>SP01。<strong>验收：</strong>A01、A22、A23。</p>
+            </article>
+
+            <article class="card work-package">
+              <span class="work-id">SP04</span>
+              <span class="priority p1">首页</span>
+              <h3>重建“今天”和权威下一步</h3>
+              <p><strong>实现：</strong>服务端 nextAction；有数据/零数据/降级三套布局；删除空 KPI 展板和重复 AI CTA；最多展示三门活跃课程。</p>
+              <p><strong>文件：</strong><code>dojo_plugin/api/v1/learning.py</code>、<code>dojo_theme/templates/learning.html</code>、<code>dojo_theme/static/js/dojo/learning-overview.js</code>、<code>dojo_theme/static/css/course-system.css</code>。</p>
+              <p><strong>依赖：</strong>SP02、SP03。<strong>验收：</strong>A01–A03、A17。</p>
+            </article>
+
+            <article class="card work-package">
+              <span class="work-id">SP05</span>
+              <span class="priority p1">课程路径</span>
+              <h3>重构目录、课程、章节和题目壳</h3>
+              <p><strong>实现：</strong>我的/发现课程分离、去重与分页；课程稳定目录；类型/完成条件/预计用时；0 项实践章节使用正确语义；固定前后项导航。</p>
+              <p><strong>文件：</strong><code>dojo_plugin/pages/dojos.py</code>、<code>dojo_plugin/pages/dojo.py</code>、<code>dojo_theme/templates/dojos.html</code>、<code>dojo.html</code>、<code>module.html</code>、<code>dojo_theme/static/js/dojo/course.js</code>、<code>challenges.js</code>、<code>course-system.css</code>。</p>
+              <p><strong>依赖：</strong>SP03。<strong>验收：</strong>A04、A09–A12。</p>
+            </article>
+
+            <article class="card work-package">
+              <span class="work-id">SP06</span>
+              <span class="priority p1">作业</span>
+              <h3>建立作答、提交与反馈状态机</h3>
+              <p><strong>实现：</strong>题目导航、autosave 明示、未答检查、移动单题模式、待批改状态、答案可见策略和错题优先结果视图。</p>
+              <p><strong>文件：</strong><code>dojo_plugin/api/v1/coursework.py</code>、<code>dojo_theme/templates/learning_assignment.html</code>、<code>dojo_theme/static/js/dojo/learning-assignment.js</code>、<code>course-system.css</code>。</p>
+              <p><strong>依赖：</strong>SP02。<strong>验收：</strong>A18–A20。</p>
+            </article>
+
+            <article class="card work-package">
+              <span class="work-id">SP07</span>
+              <span class="priority p1">AI 与创作</span>
+              <h3>合并 AI 入口并明确辅导/生成边界</h3>
+              <p><strong>实现：</strong>上下文 chips、默认辅导、可解释权限、动作引用重解析；个人页改“我的创作”，去掉重复自然语言入口并合并重复结果。</p>
+              <p><strong>文件：</strong><code>dojo_theme/templates/teacher_agent.html</code>、<code>self_learning_extend.html</code>、<code>dojo_theme/static/js/dojo/teaching-agent.js</code>、<code>self-learning-extend.js</code>、<code>learning-tutor.js</code>、<code>teaching-agent.css</code>、<code>dojo_plugin/learning/student_agent.py</code>。</p>
+              <p><strong>依赖：</strong>SP01、SP03。<strong>验收：</strong>A05、A21、A24。</p>
+            </article>
+
+            <article class="card work-package">
+              <span class="work-id">SP08</span>
+              <span class="priority p1">实验环境</span>
+              <h3>把环境状态并回题目上下文</h3>
+              <p><strong>实现：</strong>中文可恢复空态、分阶段启动、剩余时间/保存语义、桌面分屏、移动全屏 Tab、AI 当前题上下文与提交固定区。</p>
+              <p><strong>文件：</strong><code>dojo_plugin/pages/workspace.py</code>、<code>dojo_plugin/api/v1/workspace.py</code>、<code>dojo_theme/templates/workspace.html</code>、<code>dojo_theme/static/js/dojo/workspace.js</code>、<code>challenges.js</code>、共享 shell CSS。</p>
+              <p><strong>依赖：</strong>SP05。<strong>验收：</strong>A25–A27。</p>
+            </article>
+
+            <article class="card work-package">
+              <span class="work-id">SP09</span>
+              <span class="priority p2">移动与无障碍</span>
+              <h3>按任务模式完成响应式与键盘体验</h3>
+              <p><strong>实现：</strong>移动固定动作区、AI composer 安全区、单面板工作区、对话/目录抽屉、焦点返回、动态状态播报、对比度和 reduced motion。</p>
+              <p><strong>文件：</strong><code>product-shell.css</code>、<code>course-system.css</code>、<code>teaching-agent.css</code>、上述所有交互 JS。</p>
+              <p><strong>依赖：</strong>SP03–SP08。<strong>验收：</strong>A28–A32。</p>
+            </article>
+
+            <article class="card work-package">
+              <span class="work-id">SP10</span>
+              <span class="priority p2">观测与发布</span>
+              <h3>埋点、性能预算与渐进启用</h3>
+              <p><strong>实现：</strong>学习旅程事件、错误恢复率、动作链接健康度；按学生 cohort feature flag 发布；旧 API/路由兼容监控。</p>
+              <p><strong>文件：</strong>现有 metrics/telemetry 模块、<code>dojo_plugin/pages/learning.py</code>、客户端事件层和部署配置。</p>
+              <p><strong>依赖：</strong>全部。<strong>验收：</strong>指标仪表与回滚开关可用。</p>
+            </article>
+
+            <article class="decision">
+              <span class="card-number">BUILD RULE</span>
+              <h3>不要同时维护三套 CSS 真相</h3>
+              <p>确认项目当前 dev/min 生成链后，只编辑源文件并通过既有构建命令生成产物。禁止手工分别修改 <code>.css</code>、<code>.dev.css</code>、<code>.min.css</code> 造成漂移；若当前普通文件就是运行源，则在计划记录中写明。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="responsive">
+        <div class="section-inner">
+          <span class="eyebrow">10 · Responsive, accessibility and resilience</span>
+          <h2>质量门槛不是“能缩到 390px”</h2>
+          <div class="grid-3">
+            <article class="card">
+              <h3>断点与任务模式</h3>
+              <ul>
+                <li><strong>≥ 1200：</strong>课程目录/内容双栏，环境分屏。</li>
+                <li><strong>768–1199：</strong>可折叠目录，主内容优先。</li>
+                <li><strong>&lt; 768：</strong>一次一个面板，固定主要动作；避免长页右栏落到页尾。</li>
+                <li>在 320、390、768、1024、1440 宽度做截图与交互测试。</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>WCAG 2.2 AA 基线</h3>
+              <ul>
+                <li>文本对比度、4.5:1；非文本状态至少 3:1。</li>
+                <li>触控目标最小 44 × 44 CSS px；不只靠颜色表示状态。</li>
+                <li>完整键盘路径、可见 focus、焦点不被 sticky 区遮挡。</li>
+                <li>Modal/Drawer 焦点陷阱与关闭后焦点归位。</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>异步与失败</h3>
+              <ul>
+                <li>加载超过 400ms 显示与结构一致的 skeleton；超过 8s 提供进度说明。</li>
+                <li>网络重试不能重复提交作业、Flag、AI 消息或启动环境。</li>
+                <li>所有保存状态使用 <code>aria-live</code>，但避免每次键入都播报。</li>
+                <li>离线/断线后保留本地草稿并说明同步状态。</li>
+              </ul>
+            </article>
+          </div>
+          <div class="callout warning">
+            <strong>AI 移动端特例：</strong>输入框、快捷动作与系统软键盘必须共同测试。快捷动作可横向滚动时要显示截断暗示与可访问名称；更推荐折叠为“学习方式”菜单，避免当前首屏按钮被裁掉。
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="metrics">
+        <div class="section-inner">
+          <span class="eyebrow">11 · Success metrics and telemetry</span>
+          <h2>衡量学生是否更快进入有效学习</h2>
+          <div class="grid-4">
+            <article class="card"><span class="card-number">NORTH STAR</span><h3>首次有效行动时间</h3><p>登录后到打开有效课程项、开始作业或启动实验的中位时长。</p></article>
+            <article class="card"><span class="card-number">CORE</span><h3>下一步启动率</h3><p>看到权威 next action 后 10 分钟内启动的比例，按推荐类型分层。</p></article>
+            <article class="card"><span class="card-number">CORE</span><h3>上下文连续率</h3><p>完成一项后直接进入反馈或下一项、没有回到首页重新寻找的比例。</p></article>
+            <article class="card"><span class="card-number">GUARDRAIL</span><h3>不可恢复错误率</h3><p>学生可见 403/404/原始错误、失效 AI 动作和空白环境的会话比例。</p></article>
+          </div>
+
+          <div class="table-wrap" style="margin-top:1.2rem">
+            <table>
+              <thead><tr><th>事件</th><th>必要字段</th><th>用途</th><th>不得采集</th></tr></thead>
+              <tbody>
+                <tr><td><code>student_next_action_viewed</code></td><td>type、reasonCode、courseId、state</td><td>推荐曝光与空态质量</td><td>完整 AI prompt</td></tr>
+                <tr><td><code>student_next_action_started</code></td><td>type、latencyMs、sourcePage</td><td>首次有效行动与转化</td><td>Flag、终端命令</td></tr>
+                <tr><td><code>learning_context_transition</code></td><td>fromType、toType、preserved</td><td>上下文连续率</td><td>资源正文</td></tr>
+                <tr><td><code>resource_action_resolved</code></td><td>objectType、status、recoveryUsed</td><td>AI 深链健康度</td><td>私有对象标题（可哈希）</td></tr>
+                <tr><td><code>student_error_recovered</code></td><td>errorCode、recoveryType、requestId</td><td>恢复设计有效性</td><td>堆栈与敏感参数</td></tr>
+                <tr><td><code>lab_start_state_changed</code></td><td>stage、durationMs、result</td><td>环境启动感知性能</td><td>容器凭据</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p style="color:var(--muted);margin-top:.8rem">上线前记录至少 7 天基线；先观察任务成功率与错误率，再观察留存。不能用“页面停留更久”证明学习体验更好。</p>
+        </div>
+      </section>
+
+      <section class="section" id="acceptance">
+        <div class="section-inner">
+          <span class="eyebrow">12 · Acceptance scenarios</span>
+          <h2>必须自动化的端到端验收</h2>
+          <ol class="acceptance">
+            <li><strong>新学生：</strong>登录后不显示四个 0 与空白大卡；首屏显示课程码加入、浏览课程和三步 onboarding，主导航使用目标术语。</li>
+            <li><strong>已入课学生：</strong>首页只有一个权威下一步，包含推荐原因、预计用时和保存状态；点击进入正确课程上下文。</li>
+            <li><strong>降级首页：</strong>overview 某个子数据源失败时，仍显示可用课程与恢复提示，不把整个首页变为空白。</li>
+            <li><strong>课程目录：</strong>已加入课程不会同时出现在可加入列表；筛选写入 URL；超过 24 条不一次渲染；归档/测试内容按权限隐藏。</li>
+            <li><strong>AI 失效动作：</strong>被删除或下线的 resource action 显示“已不可用”和恢复 CTA，点击不进入 404。</li>
+            <li><strong>学生个人成果：</strong>显示“仅自己可见”，无“发布”按钮；API capabilities 中 publishToCourse 为 false。</li>
+            <li><strong>发布端点防线：</strong>学生直接 POST 教师发布端点仍被拒绝；响应不泄露课程或资源私有细节。</li>
+            <li><strong>已发布课程成果：</strong>学生只收到 student-safe 数据，不包含教师指令、生成任务、验证详情和私有来源。</li>
+            <li><strong>无实践章节：</strong>课程卡显示“阅读章节 · 无必修实践”，没有 0/0 进度条；若配置阅读完成条件则能正确完成。</li>
+            <li><strong>课程路径：</strong>桌面目录持续标记当前位置；上一项/下一项保留 Tab、滚动与课程上下文。</li>
+            <li><strong>移动章节：</strong>390px 下目录可打开，固定下一项按钮不遮内容；触控目标达到 44px。</li>
+            <li><strong>题目到环境：</strong>从题目启动时环境继承 course/module/challenge，上屏显示启动阶段、取消/重试和剩余时间。</li>
+            <li><strong>未知掌握度：</strong>无能力证据时显示“尚无足够证据”，不显示 0% 或缺口 100%。</li>
+            <li><strong>待评分：</strong>提交后评估未完成时显示“等待评分”，页面不先渲染 0/100、0/60、0/40。</li>
+            <li><strong>完整证据低分：</strong>评分低但事件链完整时，两种事实分开展示；“证据完整”不被写成学习结果可信 100%。</li>
+            <li><strong>无权评分记录：</strong>学生访问他人/过期 attempt 时看到可理解状态和“查看我的最近尝试”，不显示状态码 403。</li>
+            <li><strong>首页当前课程：</strong>课程会员关系与 AI 当前上下文不一致时，以授权 membership 为准，并提示切换/清除过期上下文。</li>
+            <li><strong>作业自动保存：</strong>刷新、断网恢复和多标签页冲突不会丢失答案或覆盖较新版本；保存状态明确。</li>
+            <li><strong>作业答案策略：</strong>未到教师允许条件时不返回/不渲染参考答案；条件满足后结果页只优先展开错题。</li>
+            <li><strong>移动作业：</strong>390px 下默认一题一屏；题目导航可达；提交前列出未答题；结果先展示摘要再展示详情。</li>
+            <li><strong>AI 上下文：</strong>从题目进入显示课程和题目 chips；移除 chip 后服务端不再使用对应上下文；默认先给提示而非私有答案。</li>
+            <li><strong>搜索：</strong>键盘可打开、输入、上下选择和关闭；结果按对象分组且只包含用户可见内容；空结果提供下一步。</li>
+            <li><strong>历史深链：</strong><code>/learning</code>、<code>/guide</code>、旧课程/章节/题目和成果 URL 继续可达或正确 308，query/fragment 不丢失。</li>
+            <li><strong>我的创作去重：</strong>同一生成任务的版本合并显示；继续操作回到对应对话/成果，不产生重复卡片。</li>
+            <li><strong>实验环境空态：</strong>无 active session 时显示中文说明、返回当前课程/浏览实践入口和最近会话，不出现英文孤立句。</li>
+            <li><strong>实验环境移动端：</strong>一次只显示题目、终端、桌面或连接信息；不发生三栏压缩、嵌套横滚或软键盘遮挡。</li>
+            <li><strong>启动失败：</strong>环境准备失败提供阶段化原因、幂等重试和返回题目；重复点击不会创建多个 session。</li>
+            <li><strong>AI 移动输入：</strong>390px 下消息列表、快捷方式和 composer 均可操作；标题不影响返回/任务按钮，安全区适配软键盘。</li>
+            <li><strong>键盘与焦点：</strong>导航、Tab、Modal、Drawer、课程目录、问题导航和查看器完整可用；关闭后焦点返回触发器。</li>
+            <li><strong>动态播报：</strong>autosave、环境启动、AI 任务和错误使用合适 live region，不重复刷屏。</li>
+            <li><strong>视觉状态：</strong>完成、当前、锁定、失败、未知不只靠颜色；深色主题达到 WCAG 2.2 AA 对比度。</li>
+            <li><strong>教师回归：</strong>教师成果编辑、验证、发布、学生安全预览与课程中心不因共享查看器/导航修改而退化。</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section" id="delivery">
+        <div class="section-inner">
+          <span class="eyebrow">13 · Delivery order and definition of done</span>
+          <h2>建议四阶段交付，不做一次性大爆炸</h2>
+          <div class="grid-4">
+            <article class="card"><span class="card-number">PHASE 0</span><h3>正确性</h3><p>SP00–SP02：fixture、权限、资源生命周期、错误和状态语义。</p></article>
+            <article class="card"><span class="card-number">PHASE 1</span><h3>主路径</h3><p>SP03–SP05：首页、导航、目录、课程学习壳与题目路径。</p></article>
+            <article class="card"><span class="card-number">PHASE 2</span><h3>深任务</h3><p>SP06–SP08：作业、AI/创作、成果查看器与实验环境。</p></article>
+            <article class="card"><span class="card-number">PHASE 3</span><h3>硬化发布</h3><p>SP09–SP10：移动、无障碍、性能、埋点、灰度与回滚。</p></article>
+          </div>
+
+          <div class="grid-2" style="margin-top:1.2rem">
+            <article class="card">
+              <h3>Definition of Done</h3>
+              <ul class="checklist">
+                <li>P0 问题全部有 API 与浏览器回归测试。</li>
+                <li>32 个验收场景通过，关键页面有桌面/移动截图。</li>
+                <li>无学生可见原始 403/404、SOLVED、ACTIVE、S1–S4 或内部任务 ID。</li>
+                <li>新学生、有效学生和降级数据三种首页均成立。</li>
+                <li>学生资源能力与服务端授权一致，教师发布回归通过。</li>
+                <li>320–1440px 无意外横向滚动、遮挡或不可达动作。</li>
+                <li>键盘、焦点、live region、对比度与 reduced motion 检查通过。</li>
+                <li>关键指标、错误恢复和 feature flag 可观测、可回滚。</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h3>开发 Agent 最终交付内容</h3>
+              <ul class="checklist">
+                <li>按 SP 编号列出改动文件与决策，说明兼容处理。</li>
+                <li>给出 API schema 变更和迁移/弃用窗口。</li>
+                <li>附测试命令、通过结果、未运行项与原因。</li>
+                <li>附 1440 × 1000、390 × 844 的关键前后截图。</li>
+                <li>列出剩余风险，不能用“后续优化”代替 P0 未完成项。</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="hero-rule">
+            <strong>完成判定</strong>
+            当一个学生从登录开始，能在十秒内判断下一步；在课程、题目、环境、AI 和反馈之间移动时不丢上下文；在没有数据、没有权限或资源失效时仍然知道如何继续——本次重构才算完成。
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        玄甲学生端 UX 重构执行方案 · 基于 2026-08-28 实机学生登录态与当前代码审查 · 该文件可直接作为开发 Agent 的实现依据
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

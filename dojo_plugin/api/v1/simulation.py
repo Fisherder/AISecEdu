@@ -1,12 +1,11 @@
 import logging
 
-from flask import abort, g, request
+from flask import abort, request
 from flask_restx import Namespace, Resource
 
 from CTFd.models import Solves, db
-from CTFd.plugins.challenges import get_chal_class
 from CTFd.utils.decorators import authed_only, ratelimit
-from CTFd.utils.user import get_current_user
+from CTFd.utils.user import get_current_user, get_ip
 
 from ...learning.assessment import assess_attempt
 from ...learning.simulation import (
@@ -24,7 +23,7 @@ from ...models import LearningSimulationRuns
 logger = logging.getLogger(__name__)
 simulation_namespace = Namespace(
     "simulations",
-    description="AISecEdu deterministic and agent-assisted simulation engine",
+    description="玄甲可复核的题目情境运行器",
 )
 
 
@@ -63,9 +62,23 @@ def _complete_if_ready(run):
         attempt = mark_simulation_solved(run)
         assess_attempt(attempt, run_model=False)
         return True
-    g.aisecedu_simulation_completion = run.id
-    challenge_class = get_chal_class(challenge.challenge.type)
-    challenge_class.solve(learner, None, challenge.challenge, request)
+    # A native simulation has no Flag submission. Calling BaseChallenge.solve
+    # would both require a fabricated ``submission`` field and commit midway
+    # through this state transition. Persist the ordinary CTFd completion row
+    # in the current transaction, then let the simulation evidence path mark
+    # and assess the linked learning attempt without recording fake Flag
+    # evidence.
+    db.session.add(
+        Solves(
+            user_id=learner.id,
+            team_id=None,
+            challenge_id=challenge.challenge_id,
+            ip=get_ip(req=request),
+            provided=f"simulation:{run.id}",
+        )
+    )
+    attempt = mark_simulation_solved(run)
+    assess_attempt(attempt, run_model=False)
     return True
 
 

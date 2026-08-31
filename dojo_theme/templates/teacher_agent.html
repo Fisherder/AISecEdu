@@ -1,0 +1,729 @@
+{% extends "base.html" %}
+{% set agent_role = agent_role | default("teacher", true) %}
+{% set is_student_agent = agent_role == "student" %}
+{% set agent_label = "AI 学习助手" if is_student_agent else "AI 教学助手" %}
+{% set agent_home = "/guide" if is_student_agent else "/teacher" %}
+{% block body_class %}teacher-agent-page{% if is_student_agent %} student-agent-page{% endif %}{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+{% block stylesheets %}
+<link
+  rel="stylesheet"
+  href="{{ url_for('views.themes', path='css/teaching-agent.css', v='aisecedu-agent-workbench-v40') }}"
+/>
+{% endblock %} {% block content %}
+{% if is_student_agent %}<h1 class="sr-only">AI 学习助手</h1>{% endif %}
+<div id="teacher-agent" class="teaching-shell" data-role="{{ agent_role }}" aria-busy="true">
+  <select id="teaching-dojo" hidden aria-hidden="true" tabindex="-1"></select>
+  <select id="teaching-module" hidden aria-hidden="true" tabindex="-1"></select>
+  <select id="teaching-artifact-type" hidden aria-hidden="true" tabindex="-1">
+    <option value="auto" selected>自动识别</option>
+    <option value="lesson-plan">教案</option>
+    <option value="slide-deck">课件</option>
+    <option value="attack-defense-scene">攻防演示</option>
+    <option value="simulation">模拟实训</option>
+    <option value="question-set">CTF 实践题</option>
+    <option value="assessment">评分方案</option>
+  </select>
+  <select id="teaching-candidate-mode" hidden aria-hidden="true" tabindex="-1">
+    <option value="auto" selected>自动判断</option>
+    <option value="single">单一草稿</option>
+    <option value="multiple">多个候选</option>
+  </select>
+  <span id="teaching-candidate-count-row" hidden
+    ><select id="teaching-candidate-count" tabindex="-1">
+      <option value="2">2</option>
+      <option value="3" selected>3</option>
+      <option value="4">4</option>
+    </select></span
+  >
+
+  <button
+    id="teaching-sidebar-overlay"
+    class="teaching-sidebar-overlay"
+    type="button"
+    aria-label="关闭对话列表"
+    hidden
+  ></button>
+  <aside id="teaching-sidebar" class="teaching-sidebar" aria-label="对话管理">
+    <div class="teaching-sidebar-header">
+      <div class="teaching-sidebar-brand-row">
+        <a
+          class="teaching-wordmark"
+          href="{{ agent_home }}"
+          aria-label="玄甲 {{ agent_label }}"
+        >
+          <span class="teaching-wordmark-icon"
+            ><i class="fas fa-magic" aria-hidden="true"></i
+          ></span>
+          <span><strong>玄甲</strong><small>{{ agent_label }}</small></span>
+        </a>
+        <button
+          id="teaching-sidebar-collapse"
+          class="teaching-icon-button"
+          type="button"
+          title="收起对话列表"
+          aria-label="收起对话列表"
+        >
+          <i class="fas fa-angle-left"></i>
+        </button>
+      </div>
+      <button
+        id="teaching-new-thread"
+        class="teaching-new-button"
+        type="button"
+      >
+        <i class="fas fa-edit"></i><span>新建对话</span><kbd>Alt N</kbd>
+      </button>
+      <label class="teaching-thread-search" for="teaching-thread-search">
+        <i class="fas fa-search" aria-hidden="true"></i>
+        <input
+          id="teaching-thread-search"
+          type="search"
+          autocomplete="off"
+          placeholder="搜索对话"
+          aria-label="搜索对话标题和内容"
+        />
+        <kbd>⌘ K</kbd>
+      </label>
+    </div>
+    <div
+      id="teaching-thread-list"
+      class="teaching-thread-list"
+      role="listbox"
+      aria-label="{{ '学习对话' if is_student_agent else '教学对话' }}"
+      aria-live="polite"
+    ></div>
+    {% if is_student_agent %}
+    <nav class="teaching-sidebar-nav" aria-label="学习入口">
+      <button id="student-archived-toggle" type="button"><i class="fas fa-archive" aria-hidden="true"></i><span>已归档对话</span></button>
+      <a href="/student"><i class="fas fa-compass" aria-hidden="true"></i><span>今天</span></a>
+      <a href="/dojos"><i class="fas fa-book-open" aria-hidden="true"></i><span>课程中心</span></a>
+      <a href="/learning/extend"><i class="fas fa-cube" aria-hidden="true"></i><span>我的创作</span></a>
+    </nav>
+    {% endif %}
+  </aside>
+
+  {% if not is_student_agent %}
+  <div id="teaching-dashboard" class="teaching-dashboard" aria-labelledby="teaching-dashboard-title" hidden>
+    <header class="teaching-dashboard-header">
+      <div>
+        <span class="teaching-eyebrow">教师工作台</span>
+        <h1 id="teaching-dashboard-title">今天先处理最重要的教学工作</h1>
+        <p id="teaching-dashboard-updated">正在汇总跨课程事实…</p>
+      </div>
+      <div>
+        <a href="/teacher/courses"><i class="fas fa-layer-group" aria-hidden="true"></i><span>课程中心</span></a>
+        <button id="teaching-dashboard-conversations" type="button"><i class="far fa-comments" aria-hidden="true"></i><span>AI 共创记录</span></button>
+      </div>
+    </header>
+
+    <section class="teaching-dashboard-command" aria-labelledby="teaching-dashboard-command-title">
+      <div class="teaching-dashboard-command-heading">
+        <span class="teaching-agent-mark" aria-hidden="true"><i class="fas fa-magic"></i></span>
+        <div><span class="teaching-eyebrow">上下文操作</span><h2 id="teaching-dashboard-command-title">告诉 AI 你要完成什么教学工作</h2></div>
+      </div>
+      <div class="teaching-dashboard-scope">
+        <label><span>课程</span><select id="teaching-dashboard-course" aria-label="选择课程"></select></label>
+        <label><span>章节</span><select id="teaching-dashboard-module" aria-label="选择章节"></select></label>
+      </div>
+      <div class="teaching-dashboard-input-row">
+        <textarea id="teaching-dashboard-input" rows="2" maxlength="16000" aria-label="向 AI 教学助手描述教学任务" placeholder="例如：为逆向工程章节准备 5 道彼此独立、难度递进的动态 Flag CTF 题"></textarea>
+        <button id="teaching-dashboard-send" type="button" aria-label="开始 AI 教学任务"><i class="fas fa-arrow-up" aria-hidden="true"></i><span>开始任务</span></button>
+      </div>
+      <div class="teaching-dashboard-quick-actions" aria-label="常用教学目标">
+        <button type="button" data-dashboard-prompt="为当前章节准备本节课所需的课件与教学活动"><i class="fas fa-chalkboard-teacher"></i><span>准备本节课</span></button>
+        <button type="button" data-dashboard-prompt="为当前章节设计彼此独立、可核验的 CTF 实践题"><i class="fas fa-flag"></i><span>为当前章节出题</span></button>
+        <button type="button" data-dashboard-prompt="设计一段适合课堂使用的交互演示"><i class="fas fa-project-diagram"></i><span>设计课堂演示</span></button>
+        <button type="button" data-dashboard-prompt="找出当前课程最需要关注的学生并给出证据与行动建议"><i class="fas fa-user-check"></i><span>找出需关注学生</span></button>
+        <button id="teaching-dashboard-more-actions" class="teaching-dashboard-more-actions" type="button" aria-expanded="false"><i class="fas fa-ellipsis-h" aria-hidden="true"></i><span>更多</span></button>
+      </div>
+    </section>
+
+    <div id="teaching-dashboard-notice" class="teaching-notice" role="alert" hidden></div>
+    <div class="teaching-dashboard-grid">
+      <section class="teaching-dashboard-card is-attention" aria-labelledby="teaching-dashboard-attention-title">
+        <header><div><span class="teaching-eyebrow">下一步</span><h2 id="teaching-dashboard-attention-title">需要我处理</h2></div><b id="teaching-dashboard-attention-count">0</b></header>
+        <div id="teaching-dashboard-attention" class="teaching-dashboard-list" aria-live="polite" aria-busy="true"><div class="teaching-dashboard-skeleton" role="status"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span>正在汇总待处理事项…</span></div></div>
+      </section>
+      <section class="teaching-dashboard-card" aria-labelledby="teaching-dashboard-tasks-title">
+        <header><div><span class="teaching-eyebrow">异步执行</span><h2 id="teaching-dashboard-tasks-title">AI 任务</h2></div><b id="teaching-dashboard-active-count">0</b></header>
+        <div id="teaching-dashboard-tasks" class="teaching-dashboard-list" aria-live="polite" aria-busy="true"><div class="teaching-dashboard-skeleton" role="status"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span>正在读取任务状态…</span></div></div>
+      </section>
+      <section class="teaching-dashboard-card is-wide" aria-labelledby="teaching-dashboard-courses-title">
+        <header><div><span class="teaching-eyebrow">继续工作</span><h2 id="teaching-dashboard-courses-title">最近课程</h2></div><a href="/teacher/courses">查看全部</a></header>
+        <div id="teaching-dashboard-courses" class="teaching-dashboard-course-list" aria-live="polite" aria-busy="true"><div class="teaching-dashboard-skeleton" role="status"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span>正在读取最近课程…</span></div></div>
+      </section>
+      <section class="teaching-dashboard-card is-wide" aria-labelledby="teaching-dashboard-learning-title">
+        <header><div><span class="teaching-eyebrow">行动信号</span><h2 id="teaching-dashboard-learning-title">学情变化</h2></div><small>仅展示有真实证据的异常与趋势</small></header>
+        <div id="teaching-dashboard-learning" class="teaching-dashboard-learning-list" aria-live="polite" aria-busy="true"><div class="teaching-dashboard-skeleton" role="status"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span>正在准备证据分析…</span></div></div>
+      </section>
+    </div>
+  </div>
+  {% endif %}
+
+  <section class="teaching-conversation" aria-label="{{ agent_label }}对话">
+    <header class="teaching-conversation-header">
+      <div class="teaching-header-brand">
+        <button
+          id="teaching-sidebar-toggle"
+          class="teaching-icon-button teaching-sidebar-toggle"
+          type="button"
+          title="打开对话列表"
+          aria-label="打开对话列表"
+          aria-expanded="false"
+          aria-controls="teaching-sidebar"
+        >
+          <i class="fas fa-bars"></i>
+        </button>
+        <span class="teaching-agent-mark" aria-hidden="true"
+          ><i class="fas fa-magic"></i
+        ></span>
+        <div class="teaching-brand-copy">
+          <strong id="teaching-thread-title">{{ agent_label }}</strong>
+        </div>
+      </div>
+      <div class="teaching-header-actions">
+        <button
+          id="teaching-drawer-open"
+          type="button"
+          title="查看执行详情"
+          aria-label="查看执行详情"
+          aria-expanded="false"
+          aria-controls="teaching-drawer"
+        >
+          <i class="fas fa-tasks"></i><span>任务</span
+          ><b id="teaching-task-count" class="teaching-task-count" hidden>0</b>
+        </button>
+      </div>
+    </header>
+    <div id="teaching-notice" class="teaching-notice" role="alert" hidden></div>
+    <div
+      id="teaching-messages"
+      class="teaching-messages"
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions text"
+      aria-busy="false"
+      tabindex="-1"
+    ></div>
+    <button
+      id="teaching-jump-latest"
+      class="teaching-jump-latest"
+      type="button"
+      hidden
+    >
+      <i class="fas fa-arrow-down"></i><span>回到最新</span>
+    </button>
+
+    <div class="teaching-composer">
+      <div
+        id="teaching-archived-banner"
+        class="teaching-archived-banner"
+        hidden
+      >
+        <span
+          ><i class="fas fa-archive"></i
+          >此对话已归档，恢复后可以继续交流。</span
+        >
+        <button id="teaching-restore-thread" type="button">恢复对话</button>
+      </div>
+      <div class="teaching-quick-prompts" aria-label="常用任务">
+        {% if is_student_agent %}
+        <button type="button" data-student-prompt="根据我最近的学习情况，帮我安排下一次 45 分钟练习。">
+          <i class="fas fa-route"></i><span>规划下一步</span>
+        </button>
+        <button type="button" data-student-prompt="分析我目前最薄弱的能力，并给出可以立即开始的补强方案。">
+          <i class="fas fa-bullseye"></i><span>分析薄弱点</span>
+        </button>
+        <button type="button" data-student-prompt="总结我最近几次练习的进步和重复出现的问题。">
+          <i class="fas fa-chart-line"></i><span>复盘学习</span>
+        </button>
+        <button type="button" data-student-prompt="根据我的课程和任务，帮我选择今天最值得完成的一项。">
+          <i class="fas fa-compass"></i><span>选择今日任务</span>
+        </button>
+        {% else %}
+        <button
+          type="button"
+          data-quick-action="slide-deck"
+          data-command="生成一份可直接授课的课件"
+          data-detail-placeholder="例如：90 分钟授课，加入案例、演示步骤和随堂练习"
+          data-artifact="slide-deck"
+        >
+          <i class="fas fa-file-powerpoint"></i><span>生成课件</span>
+        </button>
+        <button
+          type="button"
+          data-quick-action="ctf"
+          data-command="生成一道采用 Flag 提交与校验的 CTF 实践题"
+          data-detail-placeholder="例如：栈溢出，中等难度，提供隔离容器和动态 Flag"
+          data-artifact="auto"
+        >
+          <i class="fas fa-flag"></i><span>生成 CTF 实践题</span>
+        </button>
+        <button
+          type="button"
+          data-quick-action="simulation"
+          data-command="生成一个可操作的模拟实训演示"
+          data-detail-placeholder="例如：包含参数调节、状态变化、即时反馈和复盘"
+          data-artifact="simulation"
+        >
+          <i class="fas fa-project-diagram"></i><span>生成实训演示</span>
+        </button>
+        <button
+          type="button"
+          data-quick-action="learning-analysis"
+          data-command="分析真实学习完成情况，并给出需要关注的知识点和下一步教学动作"
+          data-detail-placeholder="例如：重点比较各章节完成率、常见错误和学生分层"
+          data-artifact="auto"
+        >
+          <i class="fas fa-chart-line"></i><span>分析学情</span>
+        </button>
+        {% endif %}
+      </div>
+      <section
+        id="teaching-approval-tray"
+        class="teaching-approval-tray"
+        aria-live="assertive"
+        aria-atomic="true"
+        hidden
+      ></section>
+      <section
+        id="teaching-upload-status"
+        class="teaching-upload-status"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        hidden
+      ></section>
+      {% if is_student_agent %}
+      <div id="student-reference-summary" class="student-reference-summary" aria-label="本对话引用题目" hidden></div>
+      {% endif %}
+      <div class="teaching-composer-row">
+        <textarea
+          id="teaching-input"
+          rows="1"
+          placeholder="{{ '告诉智能体你想学习、分析、复盘或继续什么…' if is_student_agent else '告诉智能体你要完成什么教学工作…' }}"
+          aria-label="向 {{ agent_label }}发送消息"
+          aria-describedby="teaching-composer-hint"
+        ></textarea>
+        <button
+          id="teaching-send"
+          type="button"
+          class="btn btn-primary"
+          aria-label="发送消息"
+          title="发送消息"
+        >
+          <i class="fas fa-arrow-up"></i>
+        </button>
+      </div>
+      <div class="teaching-composer-tools">
+        {% if is_student_agent %}
+        <button
+          id="student-reference-trigger"
+          class="teaching-upload-label"
+          type="button"
+          aria-controls="student-reference-dialog"
+          aria-expanded="false"
+        >
+          <i class="fas fa-paperclip" aria-hidden="true"></i><span>引用题目</span>
+          <b id="student-reference-count" hidden>0</b>
+        </button>
+        {% else %}
+        <button
+          id="teaching-upload-trigger"
+          class="teaching-upload-label"
+          type="button"
+          aria-controls="teaching-upload"
+        >
+          <i class="fas fa-paperclip" aria-hidden="true"></i
+          ><span>上传文件</span>
+        </button>
+        <input
+          id="teaching-upload"
+          type="file"
+          accept=".pdf,.ppt,.pptx,.doc,.docx,.txt,.md,.jpeg,.jpg,.png,.webp"
+          aria-label="选择要交给智能体处理的文件"
+          hidden
+        />
+        {% endif %}
+        <span id="teaching-composer-hint" class="teaching-composer-hint"
+          ><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> +
+          <kbd>Enter</kbd> 换行</span
+        >
+      </div>
+    </div>
+  </section>
+
+  {% if is_student_agent %}
+  <dialog
+    id="student-reference-dialog"
+    class="teaching-quick-scope-dialog student-reference-dialog"
+    aria-labelledby="student-reference-title"
+  >
+    <form method="dialog" novalidate>
+      <header>
+        <div>
+          <span>对话依据</span>
+          <h2 id="student-reference-title">引用课程题目</h2>
+        </div>
+        <button id="student-reference-close" type="button" aria-label="关闭题目选择">
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="student-reference-body">
+        <p>选中的题目会持续用于当前对话，智能体只读取你自己的学习记录。最多选择 6 道。</p>
+        <label class="student-reference-search" for="student-reference-search">
+          <i class="fas fa-search" aria-hidden="true"></i>
+          <input id="student-reference-search" type="search" autocomplete="off" placeholder="搜索课程、章节或题目" />
+        </label>
+        <div id="student-reference-options" class="student-reference-options" role="listbox" aria-multiselectable="true"></div>
+      </div>
+      <footer>
+        <span id="student-reference-selection">尚未选择题目</span>
+        <button id="student-reference-done" type="button" class="is-primary">完成</button>
+      </footer>
+    </form>
+  </dialog>
+  {% else %}
+  <dialog
+    id="teaching-quick-scope-dialog"
+    class="teaching-quick-scope-dialog"
+    aria-labelledby="teaching-quick-scope-title"
+  >
+    <form id="teaching-quick-scope-form" novalidate>
+      <header>
+        <div>
+          <span>快捷任务</span>
+          <h2 id="teaching-quick-scope-title">选择任务范围</h2>
+        </div>
+        <button
+          id="teaching-quick-scope-close"
+          type="button"
+          aria-label="关闭范围选择"
+        >
+          <i class="fas fa-times"></i>
+        </button>
+      </header>
+      <div class="teaching-quick-scope-fields">
+        <label
+          class="teaching-quick-scope-field"
+          for="teaching-quick-scope-course"
+        >
+          <span>课程</span>
+          <select id="teaching-quick-scope-course"></select>
+        </label>
+        <fieldset
+          id="teaching-quick-scope-modes"
+          class="teaching-quick-scope-modes"
+        >
+          <legend>作用范围</legend>
+          <div>
+            <label
+              ><input
+                type="radio"
+                name="teaching-quick-scope-mode"
+                value="course"
+                checked
+              /><span
+                ><strong>整门课程</strong><small>综合全部章节处理</small></span
+              ></label
+            >
+            <label
+              ><input
+                id="teaching-quick-scope-module-mode"
+                type="radio"
+                name="teaching-quick-scope-mode"
+                value="module"
+              /><span
+                ><strong>指定章节</strong><small>只针对一个章节</small></span
+              ></label
+            >
+          </div>
+        </fieldset>
+        <label
+          id="teaching-quick-scope-module-row"
+          class="teaching-quick-scope-field"
+          for="teaching-quick-scope-module"
+          hidden
+        >
+          <span>章节</span>
+          <select id="teaching-quick-scope-module"></select>
+        </label>
+        <label
+          class="teaching-quick-scope-field"
+          for="teaching-quick-scope-detail"
+        >
+          <span>补充要求 <small>可选</small></span>
+          <textarea
+            id="teaching-quick-scope-detail"
+            rows="3"
+            maxlength="4000"
+          ></textarea>
+        </label>
+      </div>
+      <footer>
+        <button id="teaching-quick-scope-cancel" type="button">取消</button>
+        <button id="teaching-quick-scope-confirm" type="submit">
+          <span>填入输入框</span><i class="fas fa-arrow-right"></i>
+        </button>
+      </footer>
+    </form>
+  </dialog>
+  <dialog
+    id="teaching-generation-confirm-dialog"
+    class="teaching-quick-scope-dialog teaching-generation-confirm-dialog"
+    aria-labelledby="teaching-generation-confirm-title"
+  >
+    <form id="teaching-generation-confirm-form" novalidate>
+      <header>
+        <div>
+          <span>生成前确认</span>
+          <h2 id="teaching-generation-confirm-title">核对独立题目计划</h2>
+        </div>
+        <button id="teaching-generation-confirm-close" type="button" aria-label="关闭生成计划">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
+      </header>
+      <div class="teaching-generation-confirm-body">
+        <div id="teaching-generation-confirm-context" class="teaching-generation-confirm-context"></div>
+        <p id="teaching-generation-confirm-summary"></p>
+        <div id="teaching-generation-confirm-items" class="teaching-generation-confirm-items"></div>
+        <p id="teaching-generation-confirm-error" class="teaching-generation-confirm-error" role="alert" hidden></p>
+      </div>
+      <footer>
+        <button id="teaching-generation-confirm-cancel" type="button">返回调整</button>
+        <button id="teaching-generation-confirm-submit" type="submit" class="is-primary">
+          <i class="fas fa-check" aria-hidden="true"></i><span>确认并生成</span>
+        </button>
+      </footer>
+    </form>
+  </dialog>
+  {% endif %}
+
+  <div
+    id="teaching-thread-action-menu"
+    class="teaching-thread-action-menu"
+    role="menu"
+    aria-hidden="true"
+    hidden
+  >
+    <button type="button" role="menuitem" data-thread-action="rename">
+      <i class="fas fa-pen"></i><span>重命名</span>
+    </button>
+    <button type="button" role="menuitem" data-thread-action="pin">
+      <i class="fas fa-thumbtack"></i><span id="teaching-pin-label">置顶</span>
+    </button>
+    <button type="button" role="menuitem" data-thread-action="archive">
+      <i class="fas fa-archive"></i><span>归档</span>
+    </button>
+    <button type="button" role="menuitem" data-thread-action="restore">
+      <i class="fas fa-undo-alt"></i><span>恢复</span>
+    </button>
+    <span class="teaching-thread-menu-separator" role="separator"></span>
+    <button
+      type="button"
+      role="menuitem"
+      data-thread-action="delete"
+      class="is-danger"
+    >
+      <i class="fas fa-trash"></i><span>删除</span>
+    </button>
+  </div>
+
+  <button
+    id="teaching-drawer-overlay"
+    class="teaching-drawer-overlay"
+    type="button"
+    aria-label="关闭任务列表"
+    hidden
+  ></button>
+  <aside
+    id="teaching-drawer"
+    class="teaching-drawer"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="teaching-drawer-title"
+    aria-hidden="true"
+  >
+    <div class="teaching-panel-heading">
+      <div>
+        <h2 id="teaching-drawer-title">{{ '学习任务与资源' if is_student_agent else '任务' }}</h2>
+        <small id="teaching-drawer-subtitle">0 项进行中 · 0 项已完成</small>
+      </div>
+      <div>
+        <button
+          id="teaching-refresh"
+          type="button"
+          title="刷新进度"
+          aria-label="刷新进度"
+        >
+          <i class="fas fa-sync-alt"></i>
+        </button>
+        <button
+          id="teaching-drawer-close"
+          type="button"
+          title="关闭"
+          aria-label="关闭任务列表"
+        >
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+    </div>
+    {% if not is_student_agent %}
+    <div class="teaching-task-filters" aria-label="筛选任务">
+      <select id="teaching-task-course-filter" aria-label="按课程筛选任务"><option value="">全部课程</option></select>
+      <select id="teaching-task-type-filter" aria-label="按任务类型筛选"><option value="">全部类型</option><option value="question_batch">独立题目批次</option><option value="question">题目生成与修订</option><option value="content">课件与演示</option><option value="conversation">AI 对话任务</option><option value="other">其他任务</option></select>
+      <select id="teaching-task-status-filter" aria-label="按任务状态筛选"><option value="">全部状态</option><option value="active">进行中</option><option value="attention">需要处理</option><option value="completed">已完成</option></select>
+      <button id="teaching-task-filter-reset" type="button"><i class="fas fa-undo-alt" aria-hidden="true"></i><span>重置</span></button>
+    </div>
+    {% endif %}
+    <section class="teaching-drawer-panel is-active">
+      <div
+        id="teaching-job-list"
+        class="teaching-job-list"
+        aria-live="polite"
+      ></div>
+    </section>
+  </aside>
+
+  <div class="teaching-background-data" hidden aria-hidden="true">
+    <section id="teaching-action-section" hidden>
+      <h3 id="teaching-action-title">等待你的决定</h3>
+      <div id="teaching-action-list"></div>
+    </section>
+    <div id="teaching-material-list"></div>
+    <div id="teaching-artifact-list"></div>
+    <div id="teaching-session">当前没有运行中的场景。</div>
+    <button id="teaching-session-start" type="button">启动场景</button>
+    <button id="teaching-session-end" type="button" disabled>结束场景</button>
+    <button id="teaching-session-open" type="button" hidden>
+      打开实训场景
+    </button>
+    <div id="teaching-progress">选择课程后读取可核验完成情况。</div>
+  </div>
+</div>
+
+{% if not is_student_agent %}
+<div
+  id="material-modal"
+  class="ae-dialog teaching-native-modal"
+  aria-hidden="true"
+  hidden
+>
+  <button class="ae-dialog-backdrop" type="button" data-dialog-close aria-label="关闭课件分析"></button>
+  <div class="modal-dialog modal-xl ae-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="material-modal-title" tabindex="-1">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <span class="teaching-eyebrow">课件分析</span>
+          <h2 id="material-modal-title" class="modal-title">
+            功能点、知识图谱与章节候选
+          </h2>
+        </div>
+        <button
+          type="button"
+          class="close"
+          data-dialog-close
+          aria-label="关闭"
+        >
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="material-modal-notice" role="status"></div>
+        <p id="material-summary"></p>
+        <div class="material-analysis-grid">
+          <section>
+            <h3>功能点</h3>
+            <ul id="material-functions"></ul>
+          </section>
+          <section>
+            <h3>知识图谱</h3>
+            <div id="material-graph"></div>
+          </section>
+        </div>
+        <section class="mt-3">
+          <h3>章节候选</h3>
+          <div id="material-chapters" class="candidate-modal-grid"></div>
+          <button
+            id="material-apply-chapters"
+            type="button"
+            class="btn btn-primary mt-3"
+          >
+            提交所选章节并确认写入课程
+          </button>
+          <button
+            id="material-reanalyze"
+            type="button"
+            class="btn btn-outline-secondary mt-3 ml-2"
+          >
+            重新分析课件
+          </button>
+        </section>
+        <details class="mt-4">
+          <summary>查看可追溯来源片段</summary>
+          <div id="material-sources" class="material-source-list"></div>
+        </details>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  id="candidate-modal"
+  class="ae-dialog teaching-native-modal"
+  aria-hidden="true"
+  hidden
+>
+  <button class="ae-dialog-backdrop" type="button" data-dialog-close aria-label="关闭候选方案"></button>
+  <div class="modal-dialog modal-xl ae-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="candidate-modal-title" tabindex="-1">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <span class="teaching-eyebrow">候选方案</span>
+          <h2 id="candidate-modal-title" class="modal-title">比较与选择</h2>
+        </div>
+        <button
+          type="button"
+          class="close"
+          data-dialog-close
+          aria-label="关闭"
+        >
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="candidate-modal-notice" role="status"></div>
+        <div id="candidate-modal-grid" class="candidate-modal-grid"></div>
+        <div id="candidate-derive-box" class="candidate-derive-box">
+          <label for="candidate-derive-instruction">用自然语言合并或派生</label>
+          <textarea
+            id="candidate-derive-instruction"
+            class="form-control"
+            rows="3"
+            placeholder="例如：使用方案 3 的实战路径，加入方案 1 的原理图，并确保不依赖公网。"
+          ></textarea>
+          <button
+            id="candidate-derive"
+            type="button"
+            class="btn btn-outline-primary mt-2"
+          >
+            生成新一组候选
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %} {% block footer %}{% endblock %} {% block scripts %}
+<script
+  defer
+  src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-upload-v3') }}"
+></script>
+<script
+  defer
+  src="{{ url_for('views.themes', path=('js/dojo/learning-guide.js' if is_student_agent else 'js/dojo/teaching-agent.js'), v=('aisecedu-student-agent-unified-v5' if is_student_agent else 'aisecedu-global-agent-v79')) }}"
+></script>
+{% endblock %}

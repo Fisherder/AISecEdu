@@ -1,6 +1,7 @@
 
 import datetime
 import logging
+import secrets
 import sys
 import traceback
 
@@ -10,13 +11,16 @@ from CTFd.models import Solves, Users, db
 from CTFd.plugins.challenges import get_chal_class
 from CTFd.utils.decorators import admins_only, authed_only, ratelimit
 from CTFd.utils.user import get_current_user, get_ip, is_admin
-from flask import request
+from flask import abort, request
 from flask_restx import Namespace, Resource
+from sqlalchemy.exc import IntegrityError
 
 from .user import authed_only_cli, authed_only_ssh
+from ...course_codes import find_course_by_join_code
 from ...models import (DojoChallenges, DojoMembers, DojoModules, Dojos,
                        DojoStudents, DojoUsers, Emojis, SurveyResponses)
 from ...utils import is_challenge_locked, render_markdown
+from ...learning.exercise_modes import is_supported_exercise
 from ...utils.dojo import (
     dojo_admins_only,
     dojo_create,
@@ -33,6 +37,23 @@ logger = logging.getLogger(__name__)
 dojos_namespace = Namespace(
     "dojos", description="Course catalog and enrollment services"
 )
+
+
+def _enroll_user(course, user):
+    membership = DojoUsers.query.filter_by(dojo=course, user=user).first()
+    if membership:
+        return membership, False
+    membership = DojoMembers(dojo=course, user=user)
+    db.session.add(membership)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        membership = DojoUsers.query.filter_by(dojo=course, user=user).first()
+        if membership is None:
+            raise
+        return membership, False
+    return membership, True
 
 
 @dojos_namespace.route("")
@@ -69,22 +90,66 @@ class DojoList(Resource):
 @dojos_namespace.route("/<dojo>/enrollment")
 class CourseEnrollment(Resource):
     @authed_only
-    @dojo_route
     def post(self, dojo):
+        try:
+            course = Dojos.from_id(dojo).first()
+        except (TypeError, ValueError):
+            course = None
+        if course is None or (
+            not course.official and course.type not in {"public", "course"}
+        ):
+            abort(404)
+        dojo = course
         user = get_current_user()
-        membership = DojoUsers.query.filter_by(dojo=dojo, user=user).first()
-        if membership:
+        data = request.get_json(silent=True) or {}
+        supplied_password = str(
+            data.get("course_password") or data.get("password") or ""
+        )
+        if dojo.password and not secrets.compare_digest(
+            str(dojo.password), supplied_password
+        ):
             return {
-                "success": True,
-                "enrollment": {"courseId": dojo.reference_id, "role": membership.type},
-            }
-        membership = DojoMembers(dojo=dojo, user=user)
-        db.session.add(membership)
-        db.session.commit()
+                "success": False,
+                "error": "课程邀请码不正确。",
+            }, 403
+        membership, created = _enroll_user(dojo, user)
         return {
             "success": True,
             "enrollment": {"courseId": dojo.reference_id, "role": membership.type},
-        }, 201
+        }, 201 if created else 200
+
+
+@dojos_namespace.route("/enrollment/code")
+class CourseCodeEnrollment(Resource):
+    @authed_only
+    @ratelimit(method="POST", limit=10, interval=60)
+    def post(self):
+        data = request.get_json(silent=True) or {}
+        course = find_course_by_join_code(
+            data.get("course_code") or data.get("courseCode") or data.get("code")
+        )
+        if course is None or (
+            not course.official and course.type not in {"public", "course"}
+        ):
+            return {
+                "success": False,
+                "error": "课程码无效或已失效，请向授课教师确认后重试。",
+            }, 404
+        membership, created = _enroll_user(course, get_current_user())
+        return {
+            "success": True,
+            "enrollment": {
+                "courseId": course.reference_id,
+                "courseName": course.name or course.id,
+                "role": membership.type,
+                "alreadyEnrolled": not created,
+            },
+            "course": {
+                "id": course.reference_id,
+                "name": course.name or course.id,
+                "learningUrl": f"/dojo/{course.reference_id}/learning",
+            },
+        }, 201 if created else 200
 
 
 @dojos_namespace.route("/<dojo>/awards/prune")
@@ -246,6 +311,7 @@ class DojoModuleList(Resource):
                          description=challenge.description)
                     for challenge in (module.visible_challenges() if not is_dojo_admin
                                       else module.challenges)
+                    if is_supported_exercise(challenge)
                  ],
                  unified_items=[
                      dict(
@@ -261,6 +327,7 @@ class DojoModuleList(Resource):
                          description=getattr(item, 'description', None),
                          required=getattr(item, 'required', None) if item.item_type == 'challenge' else None
                      ) for item in module.unified_items
+                     if item.item_type != "challenge" or is_supported_exercise(item)
                  ])
 
             for module in dojo.modules

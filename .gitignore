@@ -1,6 +1,45 @@
-*.pyc
+# Operating systems and editors
 .DS_Store
-opt/
-sensai/
-data/
-cache/
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Python caches, coverage and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+
+# JavaScript dependencies and generated output
+node_modules/
+.next/
+.next-*/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+!*.env.example
+ops/deployment.env
+
+# Runtime state, build caches and verification artifacts
+/data/
+/cache/
+/output/
+/opt/
+/sensai/
+/ai_secedu_dev.db
+/*.sqlite
+/*.sqlite3

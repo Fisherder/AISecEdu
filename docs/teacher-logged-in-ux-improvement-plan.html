@@ -1,0 +1,2890 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="玄甲教师登录态首页、课程中心、AI 共创与批量出题流程完整开发计划和实施规格"
+    />
+    <title>玄甲教师工作台与课程中心完整开发计划</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --page: #f3f6fc;
+        --surface: #ffffff;
+        --surface-soft: #f7f9fe;
+        --ink: #101828;
+        --muted: #667085;
+        --line: #dfe5f0;
+        --line-strong: #c9d3e5;
+        --blue: #315bd8;
+        --blue-strong: #2448b5;
+        --blue-soft: #eaf0ff;
+        --green: #16845b;
+        --green-soft: #e6f7ef;
+        --amber: #a86209;
+        --amber-soft: #fff3dc;
+        --red: #c43a3a;
+        --red-soft: #fff0ef;
+        --shadow: 0 18px 50px rgba(30, 54, 100, 0.1);
+        --radius: 18px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 10% 0%, #e8efff 0, transparent 28rem),
+          var(--page);
+        font-family:
+          Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system,
+          sans-serif;
+        font-size: 16px;
+        line-height: 1.65;
+      }
+
+      a {
+        color: var(--blue);
+      }
+
+      code {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      :focus-visible {
+        outline: 3px solid rgba(49, 91, 216, 0.35);
+        outline-offset: 3px;
+      }
+
+      .page-shell {
+        width: min(1180px, calc(100% - 40px));
+        margin: 0 auto;
+      }
+
+      .topbar {
+        position: sticky;
+        z-index: 10;
+        top: 0;
+        border-bottom: 1px solid rgba(201, 211, 229, 0.8);
+        background: rgba(255, 255, 255, 0.88);
+        backdrop-filter: blur(18px);
+      }
+
+      .topbar-inner {
+        display: flex;
+        min-height: 58px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--ink);
+        font-weight: 750;
+        text-decoration: none;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 9px;
+        color: #fff;
+        background: #101216;
+        font-size: 13px;
+        letter-spacing: -0.04em;
+      }
+
+      .topnav {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 16px;
+      }
+
+      .topnav a {
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 650;
+        text-decoration: none;
+      }
+
+      .topnav a:hover {
+        color: var(--blue);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(290px, 0.65fr);
+        gap: 32px;
+        padding: 72px 0 46px;
+        align-items: end;
+      }
+
+      .eyebrow {
+        margin: 0 0 12px;
+        color: var(--blue);
+        font-size: 13px;
+        font-weight: 750;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        max-width: 780px;
+        margin-bottom: 18px;
+        font-size: clamp(38px, 6vw, 68px);
+        line-height: 1.06;
+        letter-spacing: -0.055em;
+      }
+
+      .hero-copy {
+        max-width: 760px;
+        margin-bottom: 0;
+        color: var(--muted);
+        font-size: clamp(17px, 2vw, 20px);
+      }
+
+      .decision-box {
+        padding: 24px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: var(--shadow);
+      }
+
+      .decision-box strong {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--blue);
+        font-size: 13px;
+        letter-spacing: 0.06em;
+      }
+
+      .decision-box p {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 680;
+        line-height: 1.55;
+      }
+
+      .section {
+        padding: 56px 0;
+      }
+
+      .section + .section {
+        border-top: 1px solid var(--line);
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 28px;
+      }
+
+      .section-number {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--blue);
+        font-size: 13px;
+        font-weight: 760;
+      }
+
+      h2 {
+        margin-bottom: 0;
+        font-size: clamp(28px, 4vw, 42px);
+        line-height: 1.15;
+        letter-spacing: -0.035em;
+      }
+
+      h3 {
+        margin-bottom: 8px;
+        font-size: 18px;
+        line-height: 1.35;
+      }
+
+      .section-note {
+        max-width: 520px;
+        margin: 0;
+        color: var(--muted);
+        text-align: right;
+      }
+
+      .verdict-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .verdict {
+        min-height: 180px;
+        padding: 26px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+
+      .verdict.current {
+        border-color: #f0c8c5;
+        background: linear-gradient(145deg, var(--surface), var(--red-soft));
+      }
+
+      .verdict.target {
+        border-color: #bfd0ff;
+        background: linear-gradient(145deg, var(--surface), var(--blue-soft));
+      }
+
+      .status-label {
+        display: inline-flex;
+        margin-bottom: 18px;
+        padding: 4px 9px;
+        border-radius: 999px;
+        color: var(--red);
+        background: var(--red-soft);
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .target .status-label {
+        color: var(--blue-strong);
+        background: #dfe8ff;
+      }
+
+      .verdict p {
+        margin-bottom: 0;
+        color: var(--muted);
+      }
+
+      .evidence-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .evidence-item {
+        padding: 20px;
+        border-left: 3px solid var(--line-strong);
+        background: rgba(255, 255, 255, 0.55);
+      }
+
+      .evidence-item b {
+        display: block;
+        margin-bottom: 7px;
+      }
+
+      .evidence-item p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .priority {
+        display: inline-block;
+        margin-bottom: 10px;
+        color: var(--red);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .priority.p1 {
+        color: var(--amber);
+      }
+
+      .audit-summary {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+        gap: 18px;
+        margin-bottom: 22px;
+      }
+
+      .audit-callout,
+      .audit-kpis {
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+
+      .audit-callout p,
+      .audit-kpi small {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .audit-kpis {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .audit-kpi strong,
+      .audit-kpi small {
+        display: block;
+      }
+
+      .audit-kpi strong {
+        color: var(--blue-strong);
+        font-size: 26px;
+        line-height: 1.1;
+      }
+
+      .audit-kpi small {
+        margin-top: 5px;
+        font-size: 12px;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.65);
+      }
+
+      .audit-table {
+        width: 100%;
+        min-width: 900px;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      .audit-table th,
+      .audit-table td {
+        padding: 14px 12px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .audit-table tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .audit-table th {
+        color: var(--muted);
+        background: #f7f9fe;
+        font-size: 11px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .audit-table td:first-child {
+        width: 17%;
+        font-weight: 760;
+      }
+
+      .audit-table td:nth-child(2) {
+        width: 34%;
+        color: var(--muted);
+      }
+
+      .finding-chip {
+        display: inline-flex;
+        margin-top: 7px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        color: var(--red);
+        background: var(--red-soft);
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .finding-chip.p1 {
+        color: var(--amber);
+        background: var(--amber-soft);
+      }
+
+      .benchmark-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .benchmark-card {
+        display: flex;
+        min-height: 250px;
+        flex-direction: column;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 15px;
+        background: var(--surface);
+      }
+
+      .benchmark-card > span {
+        color: var(--blue);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+      }
+
+      .benchmark-card h3 {
+        margin-top: 8px;
+      }
+
+      .benchmark-card p {
+        margin-bottom: 14px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .benchmark-card .source-link {
+        margin-top: auto;
+        font-size: 12px;
+        font-weight: 720;
+      }
+
+      .principle-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 22px;
+      }
+
+      .principle-card {
+        padding: 19px;
+        border-top: 3px solid var(--blue);
+        background: rgba(255, 255, 255, 0.6);
+      }
+
+      .principle-card strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 14px;
+      }
+
+      .principle-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .ia-map {
+        padding: 24px;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+
+      .ia-row {
+        display: grid;
+        grid-template-columns: 170px minmax(0, 1fr);
+        gap: 16px;
+        padding: 14px 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .ia-row:first-child {
+        padding-top: 0;
+        border-top: 0;
+      }
+
+      .ia-label {
+        color: var(--blue-strong);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .ia-nodes {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .ia-node {
+        padding: 7px 10px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: var(--surface-soft);
+        font-size: 12px;
+        font-weight: 680;
+      }
+
+      .ia-node.primary {
+        border-color: #b9c9ec;
+        color: var(--blue-strong);
+        background: var(--blue-soft);
+      }
+
+      .decision-banner {
+        margin: 18px 0;
+        padding: 18px 20px;
+        border-left: 4px solid var(--blue);
+        background: #edf3ff;
+      }
+
+      .decision-banner strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .decision-banner p {
+        margin: 0;
+        color: #3e527d;
+        font-size: 14px;
+      }
+
+      .course-tabs {
+        display: flex;
+        gap: 20px;
+        padding: 0 22px;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+        white-space: nowrap;
+      }
+
+      .course-tabs span {
+        padding: 13px 0 11px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 720;
+      }
+
+      .course-tabs .active {
+        border-bottom: 2px solid var(--blue);
+        color: var(--blue);
+      }
+
+      .course-workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 0.68fr) minmax(300px, 0.32fr);
+        gap: 16px;
+        padding: 22px;
+      }
+
+      .workspace-panel {
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #fff;
+      }
+
+      .workspace-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 13px;
+      }
+
+      .workspace-toolbar h3,
+      .workspace-toolbar p {
+        margin: 0;
+      }
+
+      .workspace-toolbar p {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .content-row {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 11px;
+        align-items: center;
+        padding: 12px 0;
+        border-top: 1px solid #edf0f5;
+      }
+
+      .content-row strong,
+      .content-row small {
+        display: block;
+      }
+
+      .content-row strong {
+        font-size: 13px;
+      }
+
+      .content-row small {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .status-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .status-pill {
+        padding: 5px 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        background: #fff;
+        font-size: 11px;
+        font-weight: 720;
+      }
+
+      .status-pill.review {
+        color: var(--amber);
+        background: var(--amber-soft);
+      }
+
+      .status-pill.published {
+        color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .page-spec-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 24px;
+      }
+
+      .page-spec {
+        min-width: 0;
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 15px;
+        background: var(--surface);
+        overflow-wrap: anywhere;
+      }
+
+      .page-spec code {
+        word-break: break-word;
+      }
+
+      .page-spec > span {
+        color: var(--blue);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+      }
+
+      .page-spec h3 {
+        margin-top: 7px;
+      }
+
+      .page-spec ul {
+        margin: 12px 0 0;
+        padding-left: 18px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .page-spec li + li {
+        margin-top: 5px;
+      }
+
+      .mockup-caption {
+        margin: -12px 0 16px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .app-window {
+        overflow: hidden;
+        border: 1px solid var(--line-strong);
+        border-radius: 22px;
+        background: #eef3fc;
+        box-shadow: var(--shadow);
+      }
+
+      .app-nav {
+        display: flex;
+        min-height: 56px;
+        align-items: center;
+        gap: 28px;
+        padding: 0 22px;
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .app-logo {
+        margin-right: 10px;
+        color: var(--ink);
+      }
+
+      .app-nav .active {
+        align-self: stretch;
+        display: grid;
+        place-items: center;
+        border-bottom: 2px solid var(--blue);
+        color: var(--blue);
+      }
+
+      .app-spacer {
+        flex: 1;
+      }
+
+      .task-dot {
+        display: inline-grid;
+        min-width: 20px;
+        height: 20px;
+        margin-left: 4px;
+        padding: 0 5px;
+        place-items: center;
+        border-radius: 99px;
+        color: #fff;
+        background: var(--red);
+        font-size: 11px;
+      }
+
+      .app-content {
+        padding: 26px;
+      }
+
+      .app-welcome {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 18px;
+      }
+
+      .app-welcome h3 {
+        margin: 0;
+        font-size: 26px;
+      }
+
+      .context-chip {
+        display: inline-flex;
+        padding: 6px 10px;
+        border: 1px solid #c5d2ee;
+        border-radius: 9px;
+        color: var(--blue-strong);
+        background: #fff;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .ai-command {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 18px;
+        padding: 11px 12px;
+        border: 1px solid #b9c9ec;
+        border-radius: 14px;
+        background: #fff;
+        box-shadow: 0 8px 24px rgba(44, 75, 145, 0.08);
+      }
+
+      .ai-glyph {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 10px;
+        color: #fff;
+        background: var(--blue);
+        font-weight: 800;
+      }
+
+      .ai-placeholder {
+        color: #7a879c;
+        font-size: 14px;
+      }
+
+      .send-label {
+        padding: 8px 12px;
+        border-radius: 9px;
+        color: #fff;
+        background: var(--blue);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+        gap: 16px;
+      }
+
+      .dashboard-panel {
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 15px;
+        background: #fff;
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 13px;
+        font-size: 14px;
+        font-weight: 760;
+      }
+
+      .panel-head small {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .action-row,
+      .course-row {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 11px;
+        align-items: center;
+        padding: 11px 0;
+        border-top: 1px solid #edf0f5;
+      }
+
+      .action-row:first-of-type,
+      .course-row:first-of-type {
+        border-top: 0;
+      }
+
+      .row-icon {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border-radius: 9px;
+        color: var(--blue);
+        background: var(--blue-soft);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .action-row strong,
+      .course-row strong {
+        display: block;
+        font-size: 13px;
+      }
+
+      .action-row small,
+      .course-row small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .row-action {
+        color: var(--blue);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 26px;
+        margin: 28px 0 36px;
+      }
+
+      .flow-step {
+        position: relative;
+        padding-top: 14px;
+        border-top: 3px solid var(--blue);
+      }
+
+      .flow-step:not(:last-child)::after {
+        position: absolute;
+        top: -8px;
+        right: -21px;
+        color: #93a4c7;
+        content: "→";
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .flow-step span {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--blue);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .flow-step b {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 15px;
+      }
+
+      .flow-step small {
+        color: var(--muted);
+      }
+
+      .generation-demo {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+        gap: 18px;
+      }
+
+      .plan-card,
+      .task-card {
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+
+      .scope-line {
+        margin-bottom: 14px;
+        color: var(--blue);
+        font-size: 13px;
+        font-weight: 740;
+      }
+
+      .plan-title {
+        margin-bottom: 5px;
+        font-size: 20px;
+        font-weight: 760;
+      }
+
+      .plan-subtitle {
+        margin-bottom: 18px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .plan-list,
+      .task-list,
+      .check-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .plan-list li,
+      .task-list li {
+        display: grid;
+        grid-template-columns: 24px minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        padding: 9px 0;
+        border-top: 1px solid #edf0f5;
+        font-size: 13px;
+      }
+
+      .plan-list li:first-child,
+      .task-list li:first-child {
+        border-top: 0;
+      }
+
+      .item-index {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border-radius: 7px;
+        color: var(--blue);
+        background: var(--blue-soft);
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .difficulty,
+      .state {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .state.ok {
+        color: var(--green);
+      }
+
+      .state.fail {
+        color: var(--red);
+      }
+
+      .card-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 9px;
+        margin-top: 18px;
+      }
+
+      .ghost-action,
+      .primary-action {
+        padding: 9px 13px;
+        border: 1px solid var(--line-strong);
+        border-radius: 9px;
+        font-size: 12px;
+        font-weight: 720;
+      }
+
+      .ghost-action {
+        color: var(--ink);
+        background: #fff;
+      }
+
+      .primary-action {
+        border-color: var(--blue);
+        color: #fff;
+        background: var(--blue);
+      }
+
+      .task-summary {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+
+      .task-summary strong {
+        display: block;
+        font-size: 20px;
+      }
+
+      .task-summary p {
+        margin: 3px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .fraction {
+        color: var(--amber);
+        font-size: 25px;
+        font-weight: 820;
+        letter-spacing: -0.04em;
+      }
+
+      .progress-track {
+        height: 7px;
+        margin-bottom: 13px;
+        overflow: hidden;
+        border-radius: 99px;
+        background: #edf0f5;
+      }
+
+      .progress-value {
+        width: 80%;
+        height: 100%;
+        background: var(--amber);
+      }
+
+      .mobile-grid {
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr);
+        gap: 36px;
+        align-items: center;
+      }
+
+      .phone {
+        width: 280px;
+        padding: 9px;
+        border: 1px solid #aebad0;
+        border-radius: 32px;
+        background: #11151d;
+        box-shadow: var(--shadow);
+      }
+
+      .phone-screen {
+        min-height: 520px;
+        overflow: hidden;
+        border-radius: 24px;
+        background: #f2f6fd;
+      }
+
+      .phone-nav {
+        display: flex;
+        min-height: 50px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .phone-body {
+        padding: 14px;
+      }
+
+      .phone-context {
+        margin-bottom: 9px;
+        color: var(--blue);
+        font-size: 10px;
+        font-weight: 760;
+      }
+
+      .phone-command {
+        margin-bottom: 12px;
+        padding: 12px;
+        border: 1px solid #b9c9ec;
+        border-radius: 12px;
+        color: var(--muted);
+        background: #fff;
+        font-size: 11px;
+      }
+
+      .phone-panel {
+        margin-top: 10px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+      }
+
+      .phone-panel b {
+        font-size: 12px;
+      }
+
+      .phone-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 9px 0;
+        border-top: 1px solid #edf0f5;
+        font-size: 10px;
+      }
+
+      .phone-row:first-of-type {
+        margin-top: 7px;
+      }
+
+      .mobile-rules {
+        display: grid;
+        gap: 13px;
+      }
+
+      .mobile-rule {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr);
+        gap: 13px;
+        align-items: start;
+      }
+
+      .rule-index {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        place-items: center;
+        border-radius: 11px;
+        color: var(--blue);
+        background: var(--blue-soft);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .mobile-rule p {
+        margin-bottom: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .roadmap {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .roadmap-stage {
+        padding: 22px;
+        border-top: 4px solid var(--line-strong);
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .roadmap-stage.p0 {
+        border-color: var(--red);
+      }
+
+      .roadmap-stage.p1 {
+        border-color: var(--blue);
+      }
+
+      .roadmap-stage.p2 {
+        border-color: var(--green);
+      }
+
+      .roadmap-stage > span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .roadmap-stage ul {
+        margin: 14px 0 0;
+        padding-left: 18px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .acceptance {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px 28px;
+      }
+
+      .check-list li {
+        position: relative;
+        padding: 12px 0 12px 30px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .check-list li::before {
+        position: absolute;
+        top: 13px;
+        left: 0;
+        display: grid;
+        width: 20px;
+        height: 20px;
+        place-items: center;
+        border-radius: 6px;
+        color: var(--green);
+        background: var(--green-soft);
+        content: "✓";
+        font-size: 12px;
+        font-weight: 850;
+      }
+
+      .check-list strong {
+        display: block;
+        font-size: 14px;
+      }
+
+      .check-list small {
+        color: var(--muted);
+      }
+
+      .implementation-lead {
+        max-width: 880px;
+        margin: -8px 0 26px;
+        color: var(--muted);
+        font-size: 17px;
+      }
+
+      .spec-overview {
+        padding: 26px;
+        border: 1px solid #b8c8ed;
+        border-radius: var(--radius);
+        background: linear-gradient(145deg, #ffffff, #edf3ff);
+        box-shadow: var(--shadow);
+      }
+
+      .spec-overview > h3 {
+        margin-bottom: 15px;
+        color: var(--blue-strong);
+        font-size: 20px;
+      }
+
+      .spec-overview pre,
+      .code-contract {
+        margin: 0;
+        padding: 18px;
+        overflow-x: auto;
+        border: 1px solid #ced8eb;
+        border-radius: 12px;
+        color: #d9e5ff;
+        background: #111a2b;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 13px;
+        line-height: 1.7;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .dev-packages {
+        display: grid;
+        gap: 16px;
+        margin-top: 22px;
+      }
+
+      .dev-package {
+        padding: 0;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+
+      .dev-package summary {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: center;
+        min-height: 72px;
+        padding: 16px 20px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      .dev-package summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .dev-package summary::after {
+        color: var(--blue);
+        content: "展开";
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .dev-package[open] summary::after {
+        content: "收起";
+      }
+
+      .package-index {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border-radius: 12px;
+        color: var(--blue);
+        background: var(--blue-soft);
+        font-size: 12px;
+        font-weight: 820;
+      }
+
+      .package-title strong,
+      .package-title small {
+        display: block;
+      }
+
+      .package-title strong {
+        font-size: 17px;
+      }
+
+      .package-title small {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .package-body {
+        padding: 0 20px 22px 76px;
+        border-top: 1px solid #edf0f5;
+      }
+
+      .dev-columns {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 24px;
+        padding-top: 20px;
+      }
+
+      .dev-columns h3,
+      .package-body > h3 {
+        margin: 0 0 9px;
+        color: var(--blue-strong);
+        font-size: 14px;
+        letter-spacing: 0.02em;
+      }
+
+      .dev-columns ul,
+      .package-body > ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .dev-columns li + li,
+      .package-body > ul li + li {
+        margin-top: 6px;
+      }
+
+      .constraint-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      .constraint-item {
+        padding: 18px;
+        border-left: 3px solid var(--blue);
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .constraint-item strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 14px;
+      }
+
+      .constraint-item p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .file-map {
+        width: 100%;
+        border-collapse: collapse;
+        background: rgba(255, 255, 255, 0.55);
+        font-size: 13px;
+      }
+
+      .file-map th,
+      .file-map td {
+        padding: 12px 10px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .file-map th {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.04em;
+      }
+
+      .file-map code {
+        color: var(--blue-strong);
+        font-size: 12px;
+        word-break: break-word;
+      }
+
+      .scenario-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .scenario {
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--surface);
+      }
+
+      .scenario > span {
+        display: inline-block;
+        margin-bottom: 10px;
+        color: var(--blue);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .scenario dl {
+        display: grid;
+        grid-template-columns: 58px minmax(0, 1fr);
+        gap: 7px 10px;
+        margin: 0;
+        font-size: 13px;
+      }
+
+      .scenario dt {
+        color: var(--muted);
+        font-weight: 760;
+      }
+
+      .scenario dd {
+        margin: 0;
+      }
+
+      .definition-box {
+        margin-top: 24px;
+        padding: 22px;
+        border: 1px solid #b8dcca;
+        border-radius: var(--radius);
+        background: var(--green-soft);
+      }
+
+      .definition-box h3 {
+        color: var(--green);
+      }
+
+      .definition-box ol {
+        margin-bottom: 0;
+        padding-left: 20px;
+        color: #315b4b;
+        font-size: 14px;
+      }
+
+      .footer {
+        padding: 36px 0 60px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .footer-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 30px;
+      }
+
+      .footer p {
+        margin-bottom: 7px;
+      }
+
+      @media (max-width: 900px) {
+        .hero,
+        .generation-demo,
+        .mobile-grid,
+        .audit-summary,
+        .course-workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .evidence-grid,
+        .roadmap,
+        .benchmark-grid,
+        .principle-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .phone {
+          margin: 0 auto;
+        }
+      }
+
+      @media (max-width: 680px) {
+        .page-shell {
+          width: min(100% - 24px, 1180px);
+        }
+
+        .topbar-inner {
+          align-items: flex-start;
+          padding: 10px 0;
+        }
+
+        .topnav {
+          gap: 9px 13px;
+        }
+
+        .topnav a {
+          font-size: 12px;
+        }
+
+        .hero {
+          padding-top: 48px;
+        }
+
+        .section {
+          padding: 42px 0;
+        }
+
+        .section-head,
+        .app-welcome,
+        .task-summary {
+          align-items: start;
+          flex-direction: column;
+        }
+
+        .section-note {
+          text-align: left;
+        }
+
+        .verdict-grid,
+        .evidence-grid,
+        .roadmap,
+        .acceptance,
+        .dashboard-grid,
+        .dev-columns,
+        .constraint-grid,
+        .benchmark-grid,
+        .principle-grid,
+        .page-spec-grid,
+        .scenario-grid,
+        .footer-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .ia-row {
+          grid-template-columns: 1fr;
+          gap: 7px;
+        }
+
+        .audit-kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .dev-package summary {
+          grid-template-columns: auto minmax(0, 1fr);
+        }
+
+        .dev-package summary::after {
+          grid-column: 2;
+        }
+
+        .package-body {
+          padding: 0 16px 20px;
+        }
+
+        .flow {
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+
+        .flow-step {
+          padding: 10px 0 10px 16px;
+          border-top: 0;
+          border-left: 3px solid var(--blue);
+        }
+
+        .flow-step:not(:last-child)::after {
+          display: none;
+        }
+
+        .app-nav {
+          gap: 13px;
+          padding: 0 12px;
+          overflow: hidden;
+        }
+
+        .app-nav .optional {
+          display: none;
+        }
+
+        .app-content {
+          padding: 14px;
+        }
+
+        .ai-command {
+          grid-template-columns: auto minmax(0, 1fr);
+        }
+
+        .send-label {
+          grid-column: 1 / -1;
+          text-align: center;
+        }
+
+        .card-actions {
+          flex-direction: column-reverse;
+        }
+
+        .ghost-action,
+        .primary-action {
+          width: 100%;
+          text-align: center;
+        }
+      }
+
+      @media print {
+        .topbar {
+          position: static;
+        }
+
+        .section {
+          break-inside: avoid;
+        }
+
+        .app-window,
+        .phone,
+        .decision-box {
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="page-shell topbar-inner">
+        <a class="brand" href="#top" aria-label="返回方案顶部">
+          <span class="brand-mark">AI</span>
+          <span>玄甲 Dev Plan</span>
+        </a>
+        <nav class="topnav" aria-label="方案目录">
+          <a href="#diagnosis">诊断</a>
+          <a href="#course-audit">课程审计</a>
+          <a href="#benchmarks">对标</a>
+          <a href="#target-ia">目标架构</a>
+          <a href="#implementation">开发任务</a>
+          <a href="#generation">五题流程</a>
+          <a href="#roadmap">路线图</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="page-shell hero" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">教师登录态 · 全链路开发规格</p>
+          <h1 id="page-title">重构教师工作台与课程中心</h1>
+          <p class="hero-copy">
+            这是一份可直接交给开发 Agent 执行的完整任务规格：把教师首页改造成跨课程工作台，统一课程概览、课件、题目、演示、学情的导航与内容生命周期，并用结构化任务契约、逐题子任务和确定性验收修复“五题变一题”。示意图只解释目标层级，工作包、接口约束与验收场景才是实现依据。
+          </p>
+        </div>
+        <aside class="decision-box" aria-label="核心产品决策">
+          <strong>核心决策</strong>
+          <p>实现必须同时统一课程中心信息架构、内容状态模型与生成任务契约；只改样式、只换文案或只补提示词，都不算完成。</p>
+        </aside>
+      </section>
+
+      <section id="diagnosis" class="page-shell section" aria-labelledby="diagnosis-title">
+        <div class="section-head">
+          <div>
+            <span class="section-number">01 / PRODUCT DIAGNOSIS</span>
+            <h2 id="diagnosis-title">问题不是“不好看”，而是首页职责错误</h2>
+          </div>
+          <p class="section-note">
+            依据真实教师登录态，检查桌面 1440 × 900 与移动端 390 × 844。
+          </p>
+        </div>
+
+        <div class="verdict-grid">
+          <article class="verdict current">
+            <span class="status-label">当前</span>
+            <h3>教师登录后看到上一条长对话</h3>
+            <p>旧会话、空对话和模型输出占据首屏；待办、失败任务、最近课程与学生风险不可见。</p>
+          </article>
+          <article class="verdict target">
+            <span class="status-label">目标</span>
+            <h3>教师登录后看到跨课程工作台</h3>
+            <p>先呈现“需要我处理、AI 任务、最近课程、学情变化”，再通过带上下文的 AI 指令栏发起工作。</p>
+          </article>
+        </div>
+
+        <div class="evidence-grid" style="margin-top: 18px">
+          <article class="evidence-item">
+            <span class="priority">P0</span>
+            <b>五题被合并为一题</b>
+            <p>生成前没有确认“5 道独立题”，生成后没有核对“目标 5 / 实际 1”。</p>
+          </article>
+          <article class="evidence-item">
+            <span class="priority">P0</span>
+            <b>课程上下文不持续</b>
+            <p>会话标题无法稳定说明课程、章节和产物，写入目标难以核对。</p>
+          </article>
+          <article class="evidence-item">
+            <span class="priority">P0</span>
+            <b>任务完成状态失真</b>
+            <p>抽屉只给出 100% 与“定位到对话”，看不到目标数量、失败项和结果审核。</p>
+          </article>
+          <article class="evidence-item">
+            <span class="priority p1">P1</span>
+            <b>会话历史被噪声淹没</b>
+            <p>大量同名和空对话让工作记录退化为运行日志。</p>
+          </article>
+          <article class="evidence-item">
+            <span class="priority p1">P1</span>
+            <b>课程卡只有库存数字</b>
+            <p>章节、题目、学生数量不能回答“现在应先处理哪门课程”。</p>
+          </article>
+          <article class="evidence-item">
+            <span class="priority">P0</span>
+            <b>移动端存在真实阻断</b>
+            <p>快捷操作被裁切、CTA 竖排；屏外侧栏仍进入键盘焦点顺序。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="course-audit" class="page-shell section" aria-labelledby="course-audit-title">
+        <div class="section-head">
+          <div>
+            <span class="section-number">02 / LIVE COURSE-CENTER AUDIT</span>
+            <h2 id="course-audit-title">课程中心的问题来自结构分裂，不是单页细节</h2>
+          </div>
+          <p class="section-note">2026-08-27 使用真实教师登录态，覆盖桌面与移动端的课程列表、五个课程页签及创建、管理、详情深链。</p>
+        </div>
+
+        <div class="audit-summary">
+          <article class="audit-callout">
+            <h3>审计结论</h3>
+            <p>视觉样式已经较统一，但同一对象存在“课程页签、独立管理页、AI 会话、生成任务页”四套入口；主操作重复、状态口径不同、详情缺少课程上下文。教师必须先理解系统结构，才能完成本应围绕课程内容展开的工作。</p>
+          </article>
+          <div class="audit-kpis" aria-label="实机审计覆盖">
+            <div class="audit-kpi"><strong>17</strong><small>关键页面 / 状态组合</small></div>
+            <div class="audit-kpi"><strong>5</strong><small>课程核心页签</small></div>
+            <div class="audit-kpi"><strong>2</strong><small>桌面与移动断点</small></div>
+            <div class="audit-kpi"><strong>0</strong><small>抽样 4xx / 控制台错误</small></div>
+          </div>
+        </div>
+
+        <div class="decision-banner">
+          <strong>实机覆盖范围</strong>
+          <p><code>/teacher/courses</code>；课程壳层 <code>tab=overview/courseware/questions/demos/students</code>；<code>/teacher/courses/&lt;dojo&gt;/questions</code> 的 library/author/jobs/quality；章节与题目手工创建；课件与演示产物详情；以及课件、题目、演示、题目管理、题目创建的 390px 移动视图。</p>
+        </div>
+
+        <div class="table-wrap">
+          <table class="audit-table">
+            <thead><tr><th>页面 / 流程</th><th>真实体验问题与原因</th><th>开发决策</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>课程列表<br><span class="finding-chip p1">P1 · 决策效率</span></td>
+                <td>课程卡主要展示章节、题目、学生等库存数字；整卡和“进入课程工作台”重复跳转，编辑与删除常驻暴露。教师无法按待审核、失败、风险或最近工作决定先做什么。</td>
+                <td>增加搜索、状态过滤、最近工作和待处理信号；整卡保留一个主入口，编辑/删除进入更多菜单；课程数字必须标明统计范围。</td>
+              </tr>
+              <tr>
+                <td>课程概览<br><span class="finding-chip p1">P1 · 层级</span></td>
+                <td>“全部课程 / 切换课程”语义重复；完成率没有分母、时间范围和趋势；课程动态常为空；课程码与设置占据与教学决策同级的位置。</td>
+                <td>首屏改为课程待办、发布准备度和有定义的关键指标；课程码降为辅助信息；没有事件事实时不保留空的“课程动态”面板。</td>
+              </tr>
+              <tr>
+                <td>课件管理<br><span class="finding-chip">P0 · 心智模型</span></td>
+                <td>“输入资料”和“输出课件”并列，但空状态把资料称为课件；上传资料、AI 生成课件和打开 AI 助手重复分散。列表没有章节归属、来源到产物的血缘、更新时间和待审核状态。</td>
+                <td>建立“原始资料 → 课件草稿 → 版本 → 发布”的可见链路；每页只保留一个主创建入口，入口内再选择上传资料或 AI 生成。</td>
+              </tr>
+              <tr>
+                <td>课程题目页签<br><span class="finding-chip">P0 · 重复入口</span></td>
+                <td>页首、区块标题和每个章节重复“新建题目”，同时存在页内管理模式与独立题目管理页。空章节逐个展开，页面随章节数线性变长；题目行缺少草稿、验证、发布、尝试和更新时间。</td>
+                <td>题目页签成为唯一主工作区；一个“新建题目”菜单承载手工、AI 批量、导入；章节默认可折叠，统一工具栏切换排序管理模式。</td>
+              </tr>
+              <tr>
+                <td>题目管理 / 题库<br><span class="finding-chip">P0 · 双重产品</span></td>
+                <td>独立页先显示大型统计 Hero，再进入题库；列表展示完整长描述，桌面密度高，移动端列表和详情整页串联。课程页显示 6 道而题库显示 10 道，但没有说明前者是已发布、后者是全部。</td>
+                <td>移除第二套 Hero 与导航；复用课程壳层。统计统一返回 total/draft/published/needsReview；移动端列表与详情分步打开，列表摘要限制行数。</td>
+              </tr>
+              <tr>
+                <td>AI 出题与生成任务<br><span class="finding-chip">P0 · 结果可信度</span></td>
+                <td>结构化 AI 出题页已支持数量 1–5，但与自然语言智能体分离；任务页暴露原始长提示词、内部流水线和重复 100%，教师看不到目标数量与真实产物的直接核对。</td>
+                <td>两种入口共享同一批次契约与审核页；任务默认只显示教师目标、阶段、requested/created/validated/failed 和下一步，调试细节只向管理员按需展开。</td>
+              </tr>
+              <tr>
+                <td>演示管理<br><span class="finding-chip">P0 · 动作歧义</span></td>
+                <td>“生成攻防演示”和“AI 生成演示”并列但差异不清，又叠加区块和逐章节新建入口。列表没有缩略预览、教学目标、预计时长、可上课状态；大量空章节产生重复空状态。</td>
+                <td>保留一个“新建演示”，先选择攻防演练或交互模拟并解释用途；卡片补充预览、目标、时长、状态和更新时间，空章节默认折叠。</td>
+              </tr>
+              <tr>
+                <td>学情<br><span class="finding-chip p1">P1 · 数据解释</span></td>
+                <td>证据覆盖提示较完整，但面板密集、行动名单靠后；基于极少测评的数据可能显示 1% 等高精度结论。题目管理里的“质量与学情”又复制一套指标入口。</td>
+                <td>学情成为课程唯一分析入口；先显示需干预对象和建议动作，再展示趋势与维度；置信度、样本数和时间范围必须与分数同屏。</td>
+              </tr>
+              <tr>
+                <td>手工新建题目 / 章节<br><span class="finding-chip p1">P1 · 流程成本</span></td>
+                <td>简单章节表单也套用三步仪式与大面积预览；复杂题目表单则是单页长表，步骤条没有真实分步，保存按钮在页面底部。浮动“改用 AI 助手”覆盖右侧预览。</td>
+                <td>简单对象使用紧凑表单；复杂对象才使用真实分步或分区导航。主操作粘底、自动保存；AI 变为字段内“协助填写”，不再作为覆盖内容的替代入口。</td>
+              </tr>
+              <tr>
+                <td>课件 / 演示详情<br><span class="finding-chip p1">P1 · 上下文</span></td>
+                <td>预览壳层清晰，但只有通用“调整与版本”；缺少课程/章节返回路径、来源资料、版本差异、发布对象、学生视图和下一步主操作。</td>
+                <td>详情页固定展示面包屑、生命周期、来源血缘、版本历史、学生预览与发布动作；返回时保留原筛选和滚动位置。</td>
+              </tr>
+              <tr>
+                <td>移动端<br><span class="finding-chip">P0 · 可完成性</span></td>
+                <td>没有横向溢出，但题目/演示因逐章节 CTA 变成超长页面；题库把统计、列表、详情全部纵向堆叠；题目新建页超过 3000px，主操作直到末尾才出现。</td>
+                <td>移动端使用“列表 → 详情”单任务模式；工具栏粘顶、主操作粘底；章节折叠且只在当前章节显示创建入口，筛选进入底部抽屉。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="principle-grid" aria-label="根因归纳">
+          <article class="principle-card"><strong>导航模型分裂</strong><p>课程页签、独立管理页、AI 会话与任务页各自建立入口和统计，导致教师在系统结构之间跳转。</p></article>
+          <article class="principle-card"><strong>状态模型不可见</strong><p>草稿、验证、待审核、发布和失败没有贯穿列表、详情与任务，UI 只能用模糊数字补位。</p></article>
+          <article class="principle-card"><strong>操作层级失控</strong><p>全局、页面、区块和章节级 CTA 同时出现；主操作越多，教师越难判断哪个入口最安全。</p></article>
+          <article class="principle-card"><strong>对象关系被切断</strong><p>资料、课件、版本、题目批次和演示之间缺少来源与归属，详情页成为脱离课程的孤岛。</p></article>
+          <article class="principle-card"><strong>数据缺少口径</strong><p>“6 道”和“10 道”可能都正确，但未注明已发布/全部；低样本指标仍呈现高精度，削弱可信度。</p></article>
+          <article class="principle-card"><strong>桌面布局被直接压缩</strong><p>移动端虽不溢出，却把全部桌面信息串成长页，没有转化为更聚焦的任务流。</p></article>
+        </div>
+      </section>
+
+      <section id="benchmarks" class="page-shell section" aria-labelledby="benchmarks-title">
+        <div class="section-head">
+          <div>
+            <span class="section-number">03 / PRODUCT BENCHMARKS</span>
+            <h2 id="benchmarks-title">借鉴成熟行为，不复制产品外观</h2>
+          </div>
+          <p class="section-note">只采用能解决当前证据问题的模式；链接均为官方文档，调研日期 2026-08-27。</p>
+        </div>
+
+        <div class="benchmark-grid">
+          <article class="benchmark-card">
+            <span>CANVAS LMS</span>
+            <h3>章节是课程主线</h3>
+            <p>Modules 在一个索引中嵌套内容，支持折叠保持、重排、批量发布和查看学习进度。映射到本项目：课件、题目、演示都应共享章节组织，而不是各自造一套结构。</p>
+            <a class="source-link" href="https://community.canvaslms.com/t5/%E6%8C%87%E5%8D%97%E4%B8%AD%E6%96%87%E7%89%88-%E8%AE%B2%E5%B8%88%E6%8C%87%E5%8D%97-instructor/%E6%88%91%E8%AF%A5%E5%A6%82%E4%BD%95%E4%BD%BF%E7%94%A8%E5%8D%95%E5%85%83%E7%B4%A2%E5%BC%95-Modules-Index-%E9%A1%B5%E9%9D%A2/ta-p/440454">官方 Modules 指南 ↗</a>
+          </article>
+          <article class="benchmark-card">
+            <span>MOODLE</span>
+            <h3>题库直接呈现治理信息</h3>
+            <p>Question Bank 在同一列表提供分类、草稿/可用状态、版本历史、评论、使用次数、最后使用和需检查信号。映射到本项目：题目列表必须支持审核与质量治理，而不是只展示题干。</p>
+            <a class="source-link" href="https://docs.moodle.org/405/en/Question_bank">官方 Question Bank 文档 ↗</a>
+          </article>
+          <article class="benchmark-card">
+            <span>GOOGLE CLASSROOM</span>
+            <h3>一个创建入口，多种完成状态</h3>
+            <p>Classwork 通过单一 Create 入口创建内容，并把草稿、立即发布、定时发布和 Topic 组织放在同一流程。映射到本项目：手工与 AI 是创建方式，不能成为平行产品。</p>
+            <a class="source-link" href="https://support.google.com/edu/classroom/answer/6020265?hl=en">官方作业创建指南 ↗</a>
+          </article>
+          <article class="benchmark-card">
+            <span>WAYGROUND</span>
+            <h3>AI 前置结构参数，结果先审后发</h3>
+            <p>AI 生成前显式选择题量、学科、年级、语言与认知深度，生成后先编辑审阅，再发布。映射到本项目：自然语言与结构化表单必须写入同一不可变数量契约。</p>
+            <a class="source-link" href="https://help.wayground.com/support/solutions/articles/158000405091-wayground-ai-generate-assessments-from-prompts-documents-videos-more">官方 AI 生成指南 ↗</a>
+          </article>
+          <article class="benchmark-card">
+            <span>H5P</span>
+            <h3>互动内容可预览、复用与嵌入</h3>
+            <p>H5P 将互动类型作为可复用内容模板，支持复制片段、导入导出和 LMS 嵌入。映射到本项目：演示应有明确类型、预览与复用入口，并保存来源和版本。</p>
+            <a class="source-link" href="https://h5p.org/documentation/for-authors/">官方作者指南 ↗</a>
+          </article>
+        </div>
+
+        <div class="decision-banner">
+          <strong>本项目采用的共同原则</strong>
+          <p>一个对象一个主工作区；一个页面一个主创建动作；章节承担组织；状态承担协作；发布前必须预览；AI 负责提效但不能绕过数量、验证、审核和权限边界。</p>
+        </div>
+      </section>
+
+      <section id="target-ia" class="page-shell section" aria-labelledby="target-ia-title">
+        <div class="section-head">
+          <div>
+            <span class="section-number">04 / TARGET INFORMATION ARCHITECTURE</span>
+            <h2 id="target-ia-title">建立一个课程壳层、五个主工作区</h2>
+          </div>
+          <p class="section-note">保留现有课程对象与权限；重构导航、路由归一、页面视图模型和状态表达。</p>
+        </div>
+
+        <div class="ia-map" aria-label="目标教师端信息架构">
+          <div class="ia-row"><span class="ia-label">跨课程层</span><div class="ia-nodes"><span class="ia-node primary">/teacher · 工作台</span><span class="ia-node">/teacher/courses · 课程列表</span><span class="ia-node">全局任务中心</span><span class="ia-node">全局 AI 指令栏</span></div></div>
+          <div class="ia-row"><span class="ia-label">课程壳层</span><div class="ia-nodes"><span class="ia-node primary">课程标题 + 发布准备度</span><span class="ia-node">面包屑</span><span class="ia-node">学生视图</span><span class="ia-node">唯一“新建”菜单</span></div></div>
+          <div class="ia-row"><span class="ia-label">五个主工作区</span><div class="ia-nodes"><span class="ia-node primary">概览</span><span class="ia-node primary">课件</span><span class="ia-node primary">题目</span><span class="ia-node primary">演示</span><span class="ia-node primary">学情</span></div></div>
+          <div class="ia-row"><span class="ia-label">对象深链</span><div class="ia-nodes"><span class="ia-node">创建 / 编辑</span><span class="ia-node">审核</span><span class="ia-node">预览</span><span class="ia-node">版本</span><span class="ia-node">发布</span><span class="ia-node">质量下钻</span></div></div>
+        </div>
+
+        <div class="decision-banner">
+          <strong>路由归一规则</strong>
+          <p><code>/teacher/courses/&lt;dojo&gt;/questions</code> 不再渲染第二套题目管理首页；它只兼容重定向或深链到课程壳层的 <code>tab=questions&amp;view=library</code>。生成任务进入全局任务中心并可按课程过滤；“质量与学情”并入课程学情。旧链接必须可恢复到相同对象和视图。</p>
+        </div>
+
+        <p class="mockup-caption">课程题目主工作区目标态示意：单一工具栏、统一计数、列表与审核同屏</p>
+        <figure class="app-window" aria-label="课程中心题目工作区目标态示意图">
+          <div class="app-nav">
+            <span class="app-logo">玄甲 · 教师端</span>
+            <span>工作台</span><span class="active">课程中心</span><span class="app-spacer"></span><span>任务<span class="task-dot">2</span></span>
+          </div>
+          <div class="app-content" style="padding-bottom: 14px">
+            <div class="app-welcome">
+              <div><div class="eyebrow" style="margin-bottom: 4px">全部课程 / 软件安全</div><h3>软件安全</h3></div>
+              <div class="card-actions" style="margin: 0"><span class="ghost-action">学生视图</span><span class="primary-action">新建题目 ▾</span></div>
+            </div>
+          </div>
+          <div class="course-tabs" aria-label="课程页签示意"><span>概览</span><span>课件</span><span class="active">题目</span><span>演示</span><span>学情</span></div>
+          <div class="course-workspace">
+            <section class="workspace-panel">
+              <div class="workspace-toolbar"><div><h3>课程题目</h3><p>全部 10 · 草稿 4 · 已发布 6 · 需处理 1</p></div><span class="ghost-action">筛选与排序</span></div>
+              <div class="content-row"><span class="row-icon">1</span><span><strong>静态字符串与入口定位</strong><small>逆向工程 · CTF · v2 · 更新于 18 分钟前</small></span><span class="state ok">已发布</span></div>
+              <div class="content-row"><span class="row-icon">2</span><span><strong>动态调试与输入追踪</strong><small>逆向工程 · CTF · 环境验证失败</small></span><span class="state fail">需处理</span></div>
+              <div class="content-row"><span class="row-icon">3</span><span><strong>反调试识别与绕过</strong><small>逆向工程 · CTF · AI 批次 5/5</small></span><span class="state">草稿</span></div>
+            </section>
+            <aside class="workspace-panel">
+              <div class="workspace-toolbar"><div><h3>审核摘要</h3><p>当前选择：动态调试与输入追踪</p></div></div>
+              <div class="action-row"><span class="row-icon">!</span><span><strong>环境验证失败</strong><small>其余草稿不受影响</small></span><span class="row-action">重试</span></div>
+              <div class="action-row"><span class="row-icon">眼</span><span><strong>学生安全预览</strong><small>隐藏 Flag 与标准解</small></span><span class="row-action">打开</span></div>
+              <div class="card-actions"><span class="ghost-action">编辑</span><span class="primary-action">验证后发布</span></div>
+            </aside>
+          </div>
+        </figure>
+
+        <div class="status-strip" aria-label="统一内容状态词汇">
+          <span class="status-pill">草稿 draft</span><span class="status-pill">生成中 generating</span><span class="status-pill">验证中 validating</span><span class="status-pill review">需处理 needs_attention</span><span class="status-pill review">待审核 needs_review</span><span class="status-pill published">已发布 published</span><span class="status-pill">已归档 archived</span>
+        </div>
+
+        <div class="page-spec-grid" aria-label="各页面目标规格">
+          <article class="page-spec"><span>OVERVIEW</span><h3>课程概览：显示准备度与下一步</h3><ul><li>首屏顺序固定为待处理、发布准备度、课程进度、最近活动。</li><li>完成率必须带分母、时间范围、定义和趋势；证据不足显示“暂无足够证据”。</li><li>章节列表显示课件/题目/演示的已发布与待处理数量；课程码和设置降级到辅助区。</li><li>课程动态只能来自真实事件；无数据时改为起步建议，不显示永久空框。</li></ul></article>
+          <article class="page-spec"><span>COURSEWARE</span><h3>课件：让资料到发布的关系可追踪</h3><ul><li>一个主按钮“新建课件”，菜单内选择上传资料、从资料生成、从空白创建。</li><li>按章节分组并支持搜索、状态/来源过滤；显示原始资料、派生产物、版本、更新时间和负责人。</li><li>资料行与产物行使用明确类型和动作；删除进入更多菜单并展示影响范围。</li><li>生成完成进入待审核，不自动发布；详情可回到原筛选与章节。</li></ul></article>
+          <article class="page-spec"><span>QUESTIONS</span><h3>题目：合并题库、AI 出题与审核</h3><ul><li>题目页签是唯一主工作区；页首显示全部、草稿、已发布、需处理四种有口径计数。</li><li>一个新建菜单承载手工创建、AI 批量、导入/复用；自然语言与表单共享 batch contract。</li><li>章节可折叠；列表摘要最多三行，详情在侧栏或独立深链；工具栏统一切换排序管理。</li><li>生成任务只显示摘要和结果入口；质量问题下钻到学情，不复制完整分析首页。</li></ul></article>
+          <article class="page-spec"><span>DEMOS</span><h3>演示：先选教学形态，再进入编辑</h3><ul><li>一个“新建演示”打开类型选择：攻防演练、交互模拟；说明适用场景、预计准备成本和学生体验。</li><li>卡片展示缩略预览、教学目标、时长、章节、版本、发布状态和最后编辑。</li><li>支持预览、复制复用、移动章节、版本和发布；危险操作进入更多菜单。</li><li>空章节默认折叠，提供当前章节的单一创建入口。</li></ul></article>
+          <article class="page-spec"><span>LEARNING</span><h3>学情：唯一分析入口，先行动后解释</h3><ul><li>首屏优先呈现需干预学生、停滞任务和可执行建议；总览图表排在行动队列之后。</li><li>所有分数同屏展示样本数、覆盖率、时间窗和置信等级；低样本不显示虚假精确百分比。</li><li>支持章节、题目、学生和时间过滤，筛选状态写入 URL 并可分享。</li><li>题目质量作为学情下钻，不在题目管理建立第二套分析主页。</li></ul></article>
+          <article class="page-spec"><span>CREATE / EDIT</span><h3>创建：复杂度决定页面形态</h3><ul><li>章节等简单对象使用紧凑表单；只有存在真实跨步依赖时才使用步骤器。</li><li>长表单提供分区导航、自动保存和粘底主操作；离开时提示未保存改动。</li><li>AI 作为字段级“协助填写/基于资料生成”，保持课程与章节上下文，不使用遮挡预览的浮动入口。</li><li>保存草稿、验证、发布是明确不同动作，发布前必须学生安全预览。</li></ul></article>
+          <article class="page-spec"><span>DETAIL / VERSION</span><h3>详情：让上下文、版本和发布同屏</h3><ul><li>固定面包屑“课程 / 章节 / 对象”，返回时恢复列表筛选、分页和滚动位置。</li><li>页首同时展示对象类型、当前版本、生命周期、学生可见性和唯一下一步动作。</li><li>版本面板展示来源资料、生成任务、差异、作者与时间；允许预览历史版本但只发布一个有效版本。</li><li>学生视图必须隐藏标准解、Flag 与教师备注，并与真实学生权限使用相同序列化边界。</li></ul></article>
+          <article class="page-spec"><span>CONTENT MODEL</span><h3>统一对象与计数语义</h3><ul><li>资料 → 课件草稿 → 课件版本 → 已发布版本；批次 → N 个题目草稿 → 验证 → 审核 → 发布。</li><li>所有计数返回 <code>total/draft/published/needsAttention</code>，页面不得自行从不同集合推导。</li><li>“课程有 6 道题”必须写成“已发布 6 / 全部 10”，并允许下钻到相同过滤结果。</li><li>列表、详情、任务中心和工作台使用同一状态枚举与显示映射。</li></ul></article>
+        </div>
+      </section>
+
+      <section id="implementation" class="page-shell section" aria-labelledby="implementation-title">
+        <div class="section-head">
+          <div>
+            <span class="section-number">05 / IMPLEMENTATION BRIEF</span>
+            <h2 id="implementation-title">实施范围、约束与交付要求</h2>
+          </div>
+          <p class="section-note">本节定义开发边界；后续工作包定义具体改动。</p>
+        </div>
+
+        <p class="implementation-lead">
+          实施建立在现有玄甲全局智能体、课程事实和持久任务模型之上。工程顺序固定为“批量正确性 → 统一状态/计数 → 路由与课程壳层 → 各内容工作区 → 创建/详情 → 移动端与端到端验收”，每一阶段均须提交可自动复核的证据。
+        </p>
+
+        <article class="spec-overview" aria-labelledby="target-results-title">
+          <h3 id="target-results-title">目标结果</h3>
+          <div class="dev-columns">
+            <div>
+              <h3>产品要求</h3>
+              <ul>
+                <li><strong>R-01：</strong>直接访问 <code>/teacher</code> 且未指定会话时显示跨课程教师工作台，不自动恢复旧对话。</li>
+                <li><strong>R-02：</strong>工作台首屏包含“需要我处理、AI 任务、最近课程、学情变化”和带课程/章节上下文的 AI 指令栏。</li>
+                <li><strong>R-03：</strong>教师明确要求 N 道独立题时，生成前确认 N，执行时创建 N 个独立子任务，结果页验收 N 个独立题目事实。</li>
+                <li><strong>R-04：</strong>生成计划可修改；未确认不写课程；审核前草稿对学生不可见；失败子项可独立重试。</li>
+                <li><strong>R-05：</strong>任务中心显示真实阶段、数量、失败项与结果入口，刷新和重新登录后状态一致。</li>
+                <li><strong>R-06：</strong>320–430px 下主操作完整可见，关闭侧栏不再接收键盘焦点。</li>
+                <li><strong>R-07：</strong>课程概览、课件、题目、演示、学情共享同一课程壳层、面包屑、上下文和返回行为。</li>
+                <li><strong>R-08：</strong>每个工作区只有一个主要创建入口；页面、区块和逐章节不得重复同语义 CTA。</li>
+                <li><strong>R-09：</strong>课程列表、概览、题库和工作台使用一致的 total、draft、published、needsAttention 计数口径。</li>
+                <li><strong>R-10：</strong>课件展示资料来源、派生产物、版本、章节、审核和发布关系；详情可追溯来源。</li>
+                <li><strong>R-11：</strong>题目页签合并题库、AI 批量、排序管理与审核；旧题目管理 URL 只作为相同工作区的兼容深链。</li>
+                <li><strong>R-12：</strong>演示创建先选择攻防演练或交互模拟，列表显示预览、目标、时长、版本和可上课状态。</li>
+                <li><strong>R-13：</strong>学情是课程唯一分析入口；分数必须与样本数、覆盖率、时间窗和置信等级同屏。</li>
+                <li><strong>R-14：</strong>创建页按真实复杂度选择紧凑表单或分步流程，支持自动保存、粘底操作和离开保护。</li>
+                <li><strong>R-15：</strong>课件、题目和演示详情持续显示课程/章节、版本、学生可见性、来源血缘和学生安全预览。</li>
+                <li><strong>R-16：</strong>移动端使用列表到详情的单任务流，章节可折叠、筛选进抽屉、主操作粘底，不能只是把桌面内容纵向堆叠。</li>
+              </ul>
+            </div>
+            <div>
+              <h3>工程要求</h3>
+              <ul>
+                <li><strong>E-01：</strong>复用 teacher-agent、teaching API、GlobalAgentTask 和 challenge authoring，不建立第二套出题应用。</li>
+                <li><strong>E-02：</strong>课程、章节、题目、发布和验证状态继续以玄甲持久事实为唯一来源。</li>
+                <li><strong>E-03：</strong><code>requestedCount</code> 与 <code>independence</code> 在教师确认后不可被模型、重试或恢复流程静默修改。</li>
+                <li><strong>E-04：</strong>批次执行和单项重试具备幂等性；成功子项不因兄弟任务失败而被覆盖或重复创建。</li>
+                <li><strong>E-05：</strong>保留既有权限、审批、动态 Flag、标准解验证和学生发布隔离边界。</li>
+                <li><strong>E-06：</strong>任务成功由真实子任务和产物计数确定；模型答复与前端百分比不参与终态判定。</li>
+                <li><strong>E-07：</strong>为课程壳层建立共享 view model / API DTO，统一上下文、状态枚举、计数、权限和下一步动作。</li>
+                <li><strong>E-08：</strong>保留旧 URL 兼容性并执行可测试的重定向或深链映射；不得同时维护两套题目管理 DOM 与业务逻辑。</li>
+                <li><strong>E-09：</strong>资料、产物、版本、生成批次和发布记录使用稳定 ID 关联；列表不能依赖标题或数组位置拼接关系。</li>
+                <li><strong>E-10：</strong>所有统计由服务端同一查询口径生成，响应附带 scope、asOf 与 evidenceCount；前端只格式化不重算。</li>
+                <li><strong>E-11：</strong>原始提示词、模型路由、内部阶段名和作者 ID 默认不进入教师 UI；仅管理员调试视图可按需查看并脱敏。</li>
+                <li><strong>E-12：</strong>共享组件满足键盘、焦点、语义状态、减少动效、200% 缩放和 320px 最小宽度要求。</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <div class="constraint-grid" aria-label="不可妥协的实现约束">
+          <article class="constraint-item">
+            <strong>数量约束属于服务端</strong>
+            <p>模型负责理解内容，服务端负责保证 requestedCount 与独立题目数量一致。</p>
+          </article>
+          <article class="constraint-item">
+            <strong>首页只展示真实聚合</strong>
+            <p>待办、任务和风险必须来自持久 API；没有数据时显示空状态，不使用示意数字。</p>
+          </article>
+          <article class="constraint-item">
+            <strong>保留单一全局智能体</strong>
+            <p>工作台、课程入口和 AI 共创共享同一会话与任务模型，不另建“AI 出题中心”。</p>
+          </article>
+          <article class="constraint-item">
+            <strong>一个对象一个工作区</strong>
+            <p>题目、课件、演示不得再由互不一致的页签与独立管理首页同时承担主入口。</p>
+          </article>
+          <article class="constraint-item">
+            <strong>状态先于展示文案</strong>
+            <p>先统一服务端状态与转移规则，再映射界面标签；页面不可用“完成 100%”猜测业务终态。</p>
+          </article>
+          <article class="constraint-item">
+            <strong>发布边界不可弱化</strong>
+            <p>任何 AI 或手工产物都先成为教师草稿，经过验证、审核和学生安全预览后才能发布。</p>
+          </article>
+        </div>
+
+        <div class="decision-banner">
+          <strong>明确不在本轮扩张的范围</strong>
+          <p>不重写学生学习工作区、不替换 CTFd/现有 API 技术栈、不新建第二个 Agent 或题库后端、不做脱离任务流程的品牌视觉翻新。允许为学生安全预览和发布隔离补充只读契约，但不得借此扩大为学生端全面重构。</p>
+        </div>
+
+        <div class="section-head" style="margin-top: 42px">
+          <div>
+            <span class="section-number">EXECUTION ORDER</span>
+            <h2 style="font-size: 30px">实施顺序与交付物</h2>
+          </div>
+        </div>
+        <div class="dev-columns">
+          <div>
+            <h3>实施顺序</h3>
+            <ol style="margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px">
+              <li>审计现有数量解析、方案选择、任务入队、草稿创建和状态聚合链路，记录数量可能丢失的边界。</li>
+              <li>完成 WP01 的持久批次契约和幂等子任务，再补足 API 状态，不先用前端补丁遮盖后端问题。</li>
+              <li>完成 WP02 的确认与审核流程，并先用 API 测试证明 requested、created、validated 的真实数量一致。</li>
+              <li>完成 WP06 的共享课程 view model、状态/计数口径和兼容路由，再改造任何单独页签。</li>
+              <li>完成 WP03–WP04 的工作台与任务中心，使课程待办和内容状态能够跨页面恢复。</li>
+              <li>按 WP07 课件、WP08 题目、WP09 演示、WP10 学情、WP11 创建与详情逐域迁移；每完成一域就删除对应重复入口和旧 DOM。</li>
+              <li>最后执行 WP05 与 WP12 的移动端、无障碍、性能和全链路回归；根据失败继续修复，直至完成定义全部满足。</li>
+            </ol>
+          </div>
+          <div>
+            <h3>必需交付物</h3>
+            <ul>
+              <li>后端模型/迁移、批次状态聚合、幂等创建与失败项重试实现。</li>
+              <li>教师工作台聚合 API、课程壳层 DTO、统一计数/状态、生成确认 API 和逐项结果契约。</li>
+              <li>登录首页、课程列表、五个课程工作区、创建/详情、任务中心、审核页和会话治理实现。</li>
+              <li>旧题目管理路由兼容映射、旧入口移除清单，以及不再双写/双算的代码证据。</li>
+              <li>数量归一化、状态迁移、统计口径、版本血缘、权限、幂等和部分成功的自动化测试。</li>
+              <li>真实教师登录态的五题闭环、全课程中心导航、刷新恢复、390px/320px 和键盘验收记录。</li>
+              <li>最终变更说明：涉及文件、迁移、API 兼容性、测试结果与尚存风险。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="dev-packages" aria-label="开发工作包">
+          <details class="dev-package" open>
+            <summary>
+              <span class="package-index">WP01</span>
+              <span class="package-title"><strong>建立批量出题的持久任务契约</strong><small>先修正确性；这是其他 UI 改造的前置依赖</small></span>
+            </summary>
+            <div class="package-body">
+              <div class="dev-columns">
+                <div>
+                  <h3>实现步骤</h3>
+                  <ul>
+                    <li>在模型规划结果进入执行器前，统一解析中文数字、全角数字和阿拉伯数字；显式题量优先于模型默认值。</li>
+                    <li>教师确认后持久化批次契约；保存课程、章节、题型、目标数量、独立性、难度策略和幂等键。</li>
+                    <li>先生成恰好 N 个题目规格，再为每个规格创建独立子任务；每个子任务保存稳定的 itemIndex 和独立草稿标识。</li>
+                    <li>队列恢复、失败重试和人工续跑只能读取原批次契约，禁止重新从自然语言猜数量。</li>
+                    <li>聚合器按真实子任务计算 createdCount、validatedCount 和 failedCount；小于目标数量时禁止进入 completed。</li>
+                  </ul>
+                </div>
+                <div>
+                  <h3>失败与恢复规则</h3>
+                  <ul>
+                    <li>五个子任务之一失败时，批次进入 partial_success，其余成功草稿继续可审核。</li>
+                    <li>“只重试失败项”复用原 itemIndex 和题目规格，不创建新的兄弟任务。</li>
+                    <li>用户取消批次时只取消仍在运行的子任务，不删除已经生成的草稿。</li>
+                    <li>超过单批上限时在确认前明确阻止执行，不得静默截断为五道或一道。</li>
+                    <li>并发创建时用批次幂等键和 itemIndex 唯一约束防止重复题目。</li>
+                  </ul>
+                </div>
+              </div>
+              <h3 style="margin-top: 20px">建议持久契约</h3>
+              <pre class="code-contract">{
+  "operation": "challenge.batch.generate",
+  "batchId": "stable-id",
+  "idempotencyKey": "teacher-thread-turn-scope",
+  "scope": { "dojoId": "...", "moduleIndex": 2 },
+  "requestedCount": 5,
+  "independence": "independent_challenges",
+  "exerciseMode": "CTF",
+  "publishMode": "draft",
+  "status": "waiting_confirmation",
+  "counts": { "created": 0, "validated": 0, "failed": 0 },
+  "items": [
+    { "itemIndex": 1, "taskId": null, "draftId": null, "status": "planned" }
+  ]
+}</pre>
+            </div>
+          </details>
+
+          <details class="dev-package" open>
+            <summary>
+              <span class="package-index">WP02</span>
+              <span class="package-title"><strong>增加生成前确认与生成后审核</strong><small>把模型理解转换为教师可核对的任务计划</small></span>
+            </summary>
+            <div class="package-body">
+              <div class="dev-columns">
+                <div>
+                  <h3>确认卡</h3>
+                  <ul>
+                    <li>持续显示课程、章节、产物类型、题目数量、独立性和难度分布。</li>
+                    <li>展示五个拟生成题目的标题或能力目标；教师可在执行前修改。</li>
+                    <li>主按钮必须写为“确认并生成 5 道题”，不能只写“继续”或“确认”。</li>
+                    <li>未经确认，不创建任务、草稿、环境或学生可见事实。</li>
+                  </ul>
+                </div>
+                <div>
+                  <h3>审核页</h3>
+                  <ul>
+                    <li>逐题显示标题、难度、技能、草稿状态、环境状态和标准解验证结果。</li>
+                    <li>支持逐题预览、修订、重试、删除和发布，也支持批量修订与批量发布。</li>
+                    <li>页首固定显示“目标 5 / 已创建 5 / 已验证 4”，禁止用模糊百分比替代。</li>
+                    <li>发布前再次显示目标课程和章节；学生只读取已发布的有效版本。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="dev-package" open>
+            <summary>
+              <span class="package-index">WP03</span>
+              <span class="package-title"><strong>把 /teacher 改造成教师工作台</strong><small>默认登录落点负责跨课程决策，而不是恢复随机旧会话</small></span>
+            </summary>
+            <div class="package-body">
+              <div class="dev-columns">
+                <div>
+                  <h3>页面行为</h3>
+                  <ul>
+                    <li>直接访问 <code>/teacher</code> 且未指定 thread 时显示工作台；选择会话或任务后再进入对话视图。</li>
+                    <li>首屏依次展示“需要我处理、AI 任务、最近课程、学情变化”；每一项都有明确下一步。</li>
+                    <li>AI 指令栏在提交前展示当前课程/章节；无上下文的写操作必须先选择或澄清范围。</li>
+                    <li>工作台空状态提供真实的起步操作，不自动打开最后一条长对话。</li>
+                  </ul>
+                </div>
+                <div>
+                  <h3>数据规则</h3>
+                  <ul>
+                    <li>“需要我处理”只包含 waiting_confirmation、needs_review、partial_success、failed 和真实学情异常。</li>
+                    <li>“AI 任务”只包含 queued、generating 和 validating，显示真实阶段和数量。</li>
+                    <li>“最近课程”按教师最近有效操作排序，显示待处理数量与继续工作入口。</li>
+                    <li>后端数据缺失时展示空状态或不可用说明，不在前端推测完成率和风险。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="dev-package">
+            <summary>
+              <span class="package-index">WP04</span>
+              <span class="package-title"><strong>统一任务中心与会话治理</strong><small>任务结果优先于聊天过程；空会话不再污染历史</small></span>
+            </summary>
+            <div class="package-body">
+              <div class="dev-columns">
+                <div>
+                  <h3>任务中心</h3>
+                  <ul>
+                    <li>任务卡显示课程、章节、教师目标、requested/created/validated、真实耗时和下一步。</li>
+                    <li>完成后的主操作是“审核结果”或“打开产物”，不再只提供“定位到对话”。</li>
+                    <li>刷新与重登后从持久任务和事件恢复状态；模型消息不是状态来源。</li>
+                  </ul>
+                </div>
+                <div>
+                  <h3>会话治理</h3>
+                  <ul>
+                    <li>新对话在发送第一条有效请求后才持久化；空白或取消输入不落库。</li>
+                    <li>首轮计划形成后按“课程｜动作｜对象”命名，例如“软件安全｜生成 5 道逆向题”。</li>
+                    <li>同一批次的修订、重试和发布复用原会话；允许按课程、任务类型和状态筛选。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="dev-package">
+            <summary>
+              <span class="package-index">WP05</span>
+              <span class="package-title"><strong>修复移动端与键盘可用性</strong><small>移动端采用单列重排，关闭组件退出焦点树</small></span>
+            </summary>
+            <div class="package-body">
+              <ul style="padding-top: 20px">
+                <li>320–430px 下快捷操作展示两个主项和一个“更多”，不使用无提示横向裁切。</li>
+                <li>课程卡主 CTA 保持全宽横排；编辑、删除进入更多菜单，触控目标建议不小于 44 × 44。</li>
+                <li>关闭会话侧栏时设置 <code>inert</code>、更新 <code>aria-hidden</code> 并归还触发按钮焦点；打开后把焦点移入首个可操作控件。</li>
+                <li>任务抽屉使用对话语义、焦点圈定和 Escape 关闭；动态进度通过非打断式 <code>aria-live</code> 更新。</li>
+                <li>200% 文本缩放与减少动效模式下，数量、错误状态和主操作仍完整可用。</li>
+              </ul>
+            </div>
+          </details>
+
+          <details class="dev-package" open>
+            <summary>
+              <span class="package-index">WP06</span>
+              <span class="package-title"><strong>统一课程壳层、路由、状态与计数</strong><small>所有课程页面的前置依赖；先统一事实，再迁移界面</small></span>
+            </summary>
+            <div class="package-body">
+              <div class="dev-columns">
+                <div>
+                  <h3>服务端与路由</h3>
+                  <ul>
+                    <li>建立课程工作区共享 DTO：courseContext、modules、counts、attention、permissions、recentActivity、asOf；五个页签不得各自拼装同名字段。</li>
+                    <li>定义统一内容状态与允许转移；把旧状态映射集中在一处，并为未知状态提供显式降级而非显示“完成”。</li>
+                    <li>使 <code>/teacher/courses/&lt;dojo&gt;/questions</code> 兼容深链到课程壳层；保存 view、filter、selectedId、module 等 URL 状态。</li>
+                    <li>为 total/draft/published/needsAttention 编写同源聚合查询；响应附带 scope、asOf、evidenceCount 和口径说明。</li>
+                  </ul>
+                </div>
+                <div>
+                  <h3>壳层与完成证据</h3>
+                  <ul>
+                    <li>抽取课程标题、面包屑、五页签、学生视图、通知区、单一主动作与返回恢复逻辑，所有页签复用。</li>
+                    <li>删除“全部课程 / 切换课程”等重复导航；危险动作只出现在明确对象的更多菜单，并带影响确认。</li>
+                    <li>API 测试证明同一课程在列表、概览和题目工作区返回相同已发布/全部计数；浏览器测试证明旧 URL 打开相同选中对象。</li>
+                    <li>迁移期间使用单一功能开关切换完整新壳层，禁止按页面混用新旧壳层造成双重导航。</li>
+                  </ul>
+                </div>
+              </div>
+              <h3 style="margin-top: 20px">建议课程工作区契约</h3>
+              <pre class="code-contract">{
+  "course": { "id": "stable-dojo-id", "name": "软件安全", "canManage": true },
+  "scope": { "kind": "course", "courseId": "stable-dojo-id" },
+  "counts": {
+    "questions": { "total": 10, "draft": 4, "published": 6, "needsAttention": 1 },
+    "courseware": { "total": 2, "draft": 1, "published": 1, "needsAttention": 0 },
+    "demos": { "total": 2, "draft": 0, "published": 2, "needsAttention": 0 }
+  },
+  "attention": [
+    { "objectType": "question", "objectId": "stable-id", "moduleIndex": 2,
+      "status": "needs_attention", "nextAction": "retry_validation" }
+  ],
+  "evidence": { "asOf": "ISO-8601", "timeRange": "course_lifetime" }
+}</pre>
+            </div>
+          </details>
+
+          <details class="dev-package">
+            <summary>
+              <span class="package-index">WP07</span>
+              <span class="package-title"><strong>重构课件管理与内容血缘</strong><small>把“资料 / 产物”双栏改为可检索、可追踪的教学内容工作区</small></span>
+            </summary>
+            <div class="package-body">
+              <div class="dev-columns">
+                <div>
+                  <h3>实现任务</h3>
+                  <ul>
+                    <li>将上传资料、从资料生成和空白创建收敛到“新建课件”菜单；移除页内重复 AI 助手入口。</li>
+                    <li>为资料和产物建立 sourceId / artifactId / versionId 关系；显示章节、来源、版本、状态、更新时间和负责人。</li>
+                    <li>提供搜索、章节、类型、状态过滤，支持列表/章节分组视图；超过 30 项必须分页或游标加载，不再静默截断。</li>
+                    <li>空状态区分“尚无原始资料”“尚无课件产物”“筛选无结果”，分别给出唯一下一步。</li>
+                  </ul>
+                </div>
+                <div>
+                  <h3>完成证据</h3>
+                  <ul>
+                    <li>从资料发起生成后，任务、课件草稿和版本详情都能反向打开同一来源资料。</li>
+                    <li>生成成功只进入 needs_review；学生 API 在发布前不可见，发布后只返回有效版本。</li>
+                    <li>删除来源前显示受影响产物；若已有发布版本，默认阻止硬删除并改为归档。</li>
+                    <li>桌面与 390px 下完成上传、筛选、打开详情、预览、发布和返回恢复，不丢筛选状态。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="dev-package" open>
+            <summary>
+              <span class="package-index">WP08</span>
+              <span class="package-title"><strong>合并题目页签、题库、AI 出题与审核</strong><small>保留已有能力，移除第二套首页和相互矛盾的统计</small></span>
+            </summary>
+            <div class="package-body">
+              <div class="dev-columns">
+                <div>
+                  <h3>界面与路由</h3>
+                  <ul>
+                    <li>将 learning studio 的题库列表、筛选、详情审核能力嵌入课程题目页签；删除独立页的大型 Hero 和重复主导航。</li>
+                    <li>页面只保留一个“新建题目”菜单：手工创建、AI 批量生成、导入/复用；章节级操作放入当前章节菜单。</li>
+                    <li>将拖拽排序作为同一工作区的 manage 模式；切换和保存后 URL、焦点与章节展开状态保持稳定。</li>
+                    <li>移动端列表只显示标题、章节、类型、状态和两行摘要；选择后进入详情页/全屏抽屉，不把完整描述串在列表后。</li>
+                  </ul>
+                </div>
+                <div>
+                  <h3>生成、任务与质量</h3>
+                  <ul>
+                    <li>结构化 AI 表单和全局自然语言智能体调用同一 batch plan、确认 API、N 子任务和审核组件。</li>
+                    <li>生成任务页移入全局任务中心的课程过滤视图；教师默认只看目标、真实数量、阶段、失败项和结果入口。</li>
+                    <li>原始 prompt、模型路由和内部流水线折叠到管理员调试详情；教师界面不得把长 prompt 用作任务标题。</li>
+                    <li>“质量与学情”迁入课程学情的题目质量下钻；题目页只保留每题的质量警告和下钻链接。</li>
+                    <li>验收必须证明旧题目 URL、页签入口、AI 对话结果均打开同一题目事实，不产生重复 draftId。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="dev-package">
+            <summary>
+              <span class="package-index">WP09</span>
+              <span class="package-title"><strong>重构演示管理与类型选择</strong><small>消除“生成攻防演示 / AI 生成演示”的入口歧义</small></span>
+            </summary>
+            <div class="package-body">
+              <div class="dev-columns">
+                <div>
+                  <h3>实现任务</h3>
+                  <ul>
+                    <li>以一个“新建演示”打开类型选择器；类型卡解释攻防演练与交互模拟的目标、输入、输出、时长和学生交互方式。</li>
+                    <li>演示卡片补充缩略预览、目标、预计时长、章节、版本、状态、更新时间和是否可供学生使用。</li>
+                    <li>复用章节折叠、过滤、排序管理和更多菜单；不在每个空章节常驻一个大按钮。</li>
+                    <li>提供复制复用、预览、移动章节、版本和发布；AI 生成继续使用全局任务与审核状态。</li>
+                  </ul>
+                </div>
+                <div>
+                  <h3>完成证据</h3>
+                  <ul>
+                    <li>教师从类型选择到草稿预览不会遇到两个同义 AI 入口，浏览器返回后仍保留类型与章节上下文。</li>
+                    <li>发布前学生预览与真实学生序列化一致；预览不得泄漏教师备注、答案或环境管理信息。</li>
+                    <li>空课程、六个空章节和 100 个演示三种数据规模下均有稳定布局与分页策略。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="dev-package">
+            <summary>
+              <span class="package-index">WP10</span>
+              <span class="package-title"><strong>收敛学情与题目质量分析</strong><small>把“看指标”改为“识别对象并采取行动”</small></span>
+            </summary>
+            <div class="package-body">
+              <div class="dev-columns">
+                <div>
+                  <h3>数据契约</h3>
+                  <ul>
+                    <li>每个指标返回 value、numerator、denominator、evidenceCount、timeRange、confidence、updatedAt 和 definition。</li>
+                    <li>为“风险”“停滞”“掌握度”建立服务端定义与阈值版本；缺少证据时返回 unavailableReason，不用 0 代替未知。</li>
+                    <li>学生、章节、题目和时间过滤由同一查询层处理，URL 可复现；导出与界面必须使用相同过滤范围。</li>
+                  </ul>
+                </div>
+                <div>
+                  <h3>页面行为</h3>
+                  <ul>
+                    <li>顶部先列需干预学生、停滞任务和推荐动作；点击动作直接进入有上下文的学生/题目详情。</li>
+                    <li>低样本分数用区间、等级或“证据不足”表达，不显示类似 1% 的虚假精度。</li>
+                    <li>将题目质量维度作为学情子视图；移除 learning studio 的重复质量首页和重复统计请求。</li>
+                    <li>浏览器测试覆盖无数据、低样本、充分样本和筛选后空结果，确保文案与数值不矛盾。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="dev-package">
+            <summary>
+              <span class="package-index">WP11</span>
+              <span class="package-title"><strong>统一创建、详情、版本与学生预览</strong><small>让对象在课程上下文中完成，而不是进入孤立页面</small></span>
+            </summary>
+            <div class="package-body">
+              <div class="dev-columns">
+                <div>
+                  <h3>创建 / 编辑</h3>
+                  <ul>
+                    <li>章节创建改为紧凑表单；题目等长表单增加分区导航、自动保存、离开保护和粘底“保存草稿 / 验证”操作。</li>
+                    <li>步骤器只在步骤会改变后续字段或需要独立提交时出现；装饰性“填写 / 检查 / 发布”改为实际状态提示。</li>
+                    <li>AI 协助嵌入标题、描述、目标等字段或页面工具栏，打开后继承 courseId/moduleIndex/objectType，不遮挡预览。</li>
+                  </ul>
+                </div>
+                <div>
+                  <h3>详情 / 版本 / 发布</h3>
+                  <ul>
+                    <li>课件与演示详情增加课程/章节面包屑、来源、生成任务、版本历史、差异、可见性和下一步主操作。</li>
+                    <li>“学生视图”调用学生权限序列化或等价只读端点；教师端 CSS 隐藏不算安全实现。</li>
+                    <li>发布动作校验必填元数据、验证结果和权限；失败原地显示可修复原因，成功后返回稳定对象 URL。</li>
+                    <li>历史版本只读预览；回滚创建新版本并保留审计记录，不覆盖既有发布事实。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="dev-package">
+            <summary>
+              <span class="package-index">WP12</span>
+              <span class="package-title"><strong>清理重复实现并完成全课程中心验收</strong><small>以代码删除、真实数据和跨路由测试证明重构完成</small></span>
+            </summary>
+            <div class="package-body">
+              <ul style="padding-top: 20px">
+                <li>移除或停止渲染 learning studio 的重复 Hero、独立页签、质量首页和教师可见调试 prompt；删除失去调用方的 CSS/JS 分支。</li>
+                <li>建立共享空状态、状态徽标、计数摘要、章节折叠、过滤工具栏、更多菜单、粘底操作和学生预览组件。</li>
+                <li>为 0、1、6、100 个对象以及超长标题/描述建立数据夹具；校验分页、骨架屏、错误恢复和重新加载。</li>
+                <li>运行单元、API、模板、现有 ops 回归与新增 Playwright 流程；桌面 1440、移动 390/320、键盘和 200% 缩放全部留存证据。</li>
+                <li>对比改造前后：同义主 CTA 数、完成关键任务点击数、计数冲突数、移动端页面长度和待处理项到结果的可达性。</li>
+              </ul>
+            </div>
+          </details>
+        </div>
+
+        <div class="section-head" style="margin-top: 46px">
+          <div>
+            <span class="section-number">CHANGE MAP</span>
+            <h2 style="font-size: 30px">建议修改边界</h2>
+          </div>
+        </div>
+        <div style="overflow-x: auto">
+          <table class="file-map">
+            <thead><tr><th>领域</th><th>主要文件</th><th>开发要求</th></tr></thead>
+            <tbody>
+              <tr><td>模型规划</td><td><code>services/agent-runtime/lib/server/teacher-agent.ts</code></td><td>保留显式题量，生成结构化批次计划；超过上限时阻止而非缩水。</td></tr>
+              <tr><td>任务执行</td><td><code>dojo_plugin/agent_runtime/jobs.py</code></td><td>创建 N 个独立子任务，保证幂等、部分成功和单项重试。</td></tr>
+              <tr><td>持久状态</td><td><code>dojo_plugin/models/global_agent.py</code><br><code>dojo_plugin/models/learning.py</code></td><td>持久化 requestedCount、itemIndex、聚合计数、内容血缘、版本与批次状态；新增迁移必须向后兼容现有事实。</td></tr>
+              <tr><td>教师 / 课程 API</td><td><code>dojo_plugin/api/v1/teaching.py</code><br><code>dojo_plugin/api/v1/learning.py</code></td><td>返回工作台、共享课程 DTO、统一统计、确认计划、逐项结果、学情证据与学生安全预览，不暴露私有答案。</td></tr>
+              <tr><td>页面与兼容路由</td><td><code>dojo_plugin/pages/learning.py</code></td><td>统一课程壳层入口，映射旧题目管理 URL，保留对象深链和返回状态；禁止继续渲染两套主工作区。</td></tr>
+              <tr><td>教师界面</td><td><code>dojo_theme/templates/teacher_agent.html</code><br /><code>dojo_theme/static/js/dojo/teaching-agent.js</code><br /><code>dojo_theme/static/css/teaching-agent.css</code></td><td>实现工作台、确认卡、任务计数、结果审核和移动端焦点管理。</td></tr>
+              <tr><td>课程壳层与五页签</td><td><code>dojo_theme/templates/teacher_courses.html</code><br /><code>dojo_theme/static/js/dojo/teacher-courses.js</code><br /><code>dojo_theme/static/css/course-hub.css</code></td><td>实现共享上下文、计数、唯一主动作、章节组织、课件/题目/演示/学情工作区和响应式行为。</td></tr>
+              <tr><td>题目管理迁移</td><td><code>dojo_theme/templates/learning_studio.html</code><br /><code>dojo_theme/static/js/dojo/learning-studio.js</code></td><td>复用题库、筛选、审核与排序能力；移除独立 Hero、重复导航、教师可见内部任务信息和重复学情首页。</td></tr>
+              <tr><td>创建 / 编辑</td><td><code>dojo_theme/templates/teacher_manual_create.html</code><br /><code>dojo_theme/static/js/dojo/teacher-manual-create.js</code></td><td>按对象复杂度调整布局，增加自动保存、离开保护、粘底操作和上下文内 AI 协助。</td></tr>
+              <tr><td>产物详情</td><td><code>dojo_theme/templates/teaching_artifact.html</code><br /><code>dojo_theme/static/js/dojo/teaching-artifact.js</code><br /><code>dojo_theme/static/css/teaching-agent.css</code></td><td>补充课程/章节、来源、版本、差异、学生视图、发布动作和返回恢复。</td></tr>
+              <tr><td>现有自动化</td><td><code>ops/verify-natural-language-teaching-lifecycle.py</code><br /><code>ops/verify-teacher-agent-ui.py</code><br /><code>ops/verify-teacher-manual-create-ui.py</code></td><td>扩充真实五题、刷新恢复、部分失败、创建/详情、390/320px 和键盘焦点覆盖。</td></tr>
+              <tr><td>新增课程中心验收</td><td><code>ops/verify-course-center-ui.py</code>（新增）<br><code>ops/verify-course-content-contracts.py</code>（新增）</td><td>覆盖五页签、旧 URL 兼容、统一计数、血缘、学情置信、学生安全预览和 0/1/6/100 数据规模。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="dashboard" class="page-shell section" aria-labelledby="dashboard-title">
+        <div class="section-head">
+          <div>
+            <span class="section-number">06 / TARGET HOME</span>
+            <h2 id="dashboard-title">目标首页：先决策，再执行</h2>
+          </div>
+          <p class="section-note">示意数据只用于表达信息层级，不代表当前实时业务数据。</p>
+        </div>
+
+        <p class="mockup-caption">桌面端目标态示意</p>
+        <figure class="app-window" aria-label="教师工作台桌面端目标态示意图">
+          <div class="app-nav">
+            <span class="app-logo">玄甲 · 教师端</span>
+            <span class="active">工作台</span>
+            <span>课程中心</span>
+            <span class="optional">AI 共创</span>
+            <span class="app-spacer"></span>
+            <span>任务<span class="task-dot">3</span></span>
+            <span class="optional">账户</span>
+          </div>
+          <div class="app-content">
+            <div class="app-welcome">
+              <div>
+                <div class="eyebrow" style="margin-bottom: 4px">教师工作台</div>
+                <h3>今天先处理 3 件事</h3>
+              </div>
+              <span class="context-chip">软件安全 / 逆向工程</span>
+            </div>
+
+            <div class="ai-command">
+              <span class="ai-glyph">AI</span>
+              <span class="ai-placeholder">告诉 AI 你要完成什么教学工作…</span>
+              <span class="send-label">开始</span>
+            </div>
+
+            <div class="dashboard-grid">
+              <section class="dashboard-panel" aria-label="需要我处理">
+                <div class="panel-head"><span>需要我处理</span><small>3 项</small></div>
+                <div class="action-row">
+                  <span class="row-icon">题</span>
+                  <span><strong>5 道逆向题等待审核</strong><small>软件安全 · 逆向工程</small></span>
+                  <span class="row-action">审核</span>
+                </div>
+                <div class="action-row">
+                  <span class="row-icon">!</span>
+                  <span><strong>1 道题验证失败</strong><small>已保留其余 4 道成功结果</small></span>
+                  <span class="row-action">修复</span>
+                </div>
+                <div class="action-row">
+                  <span class="row-icon">人</span>
+                  <span><strong>3 名学生需要关注</strong><small>连续两次实践未完成</small></span>
+                  <span class="row-action">查看</span>
+                </div>
+              </section>
+
+              <section class="dashboard-panel" aria-label="AI 任务">
+                <div class="panel-head"><span>AI 任务</span><small>跨课程</small></div>
+                <div class="action-row">
+                  <span class="row-icon">4/5</span>
+                  <span><strong>生成逆向 CTF</strong><small>部分成功 · 等待处理</small></span>
+                  <span class="row-action">详情</span>
+                </div>
+                <div class="action-row">
+                  <span class="row-icon">…</span>
+                  <span><strong>修订 SQL 注入课件</strong><small>正在生成讲稿 · 8/14 页</small></span>
+                  <span class="row-action">查看</span>
+                </div>
+              </section>
+
+              <section class="dashboard-panel" aria-label="最近课程" style="grid-column: 1 / -1">
+                <div class="panel-head"><span>最近课程</span><small>按最近工作排序</small></div>
+                <div class="course-row">
+                  <span class="row-icon">课</span>
+                  <span><strong>软件安全</strong><small>6 道题 · 1 项待审核 · 最近更新 18 分钟前</small></span>
+                  <span class="row-action">继续工作</span>
+                </div>
+              </section>
+            </div>
+          </div>
+        </figure>
+      </section>
+
+      <section id="generation" class="page-shell section" aria-labelledby="generation-title">
+        <div class="section-head">
+          <div>
+            <span class="section-number">07 / BATCH GENERATION</span>
+            <h2 id="generation-title">五题流程：数量是硬约束，不是提示词愿望</h2>
+          </div>
+          <p class="section-note">任何会写入课程的生成任务，都要经历五个可恢复阶段。</p>
+        </div>
+
+        <div class="flow" role="list" aria-label="批量出题五阶段流程">
+          <div class="flow-step" role="listitem"><span>01</span><b>理解</b><small>提取课程、章节、数量与独立性</small></div>
+          <div class="flow-step" role="listitem"><span>02</span><b>确认</b><small>教师确认“创建 5 道独立题”</small></div>
+          <div class="flow-step" role="listitem"><span>03</span><b>执行</b><small>创建 5 个独立子任务与草稿</small></div>
+          <div class="flow-step" role="listitem"><span>04</span><b>验收</b><small>系统核对数量、环境和标准解</small></div>
+          <div class="flow-step" role="listitem"><span>05</span><b>审核</b><small>逐题修改、重试或批量发布</small></div>
+        </div>
+
+        <div class="generation-demo">
+          <article class="plan-card" aria-label="生成前确认卡示意">
+            <div class="scope-line">软件安全 / 逆向工程</div>
+            <div class="plan-title">将创建 5 道独立 CTF 题</div>
+            <div class="plan-subtitle">每题拥有独立草稿、环境、动态 Flag 和验证记录。</div>
+            <ol class="plan-list">
+              <li><span class="item-index">1</span><span>静态字符串与入口定位</span><span class="difficulty">简单</span></li>
+              <li><span class="item-index">2</span><span>动态调试与输入追踪</span><span class="difficulty">简单</span></li>
+              <li><span class="item-index">3</span><span>反调试识别与绕过</span><span class="difficulty">中等</span></li>
+              <li><span class="item-index">4</span><span>加壳程序解包与验证</span><span class="difficulty">中等</span></li>
+              <li><span class="item-index">5</span><span>多阶段综合逆向</span><span class="difficulty">困难</span></li>
+            </ol>
+            <div class="card-actions"><span class="ghost-action">调整要求</span><span class="primary-action">确认并生成 5 道题</span></div>
+          </article>
+
+          <article class="task-card" aria-label="部分成功任务卡示意">
+            <div class="task-summary">
+              <div><strong>生成逆向 CTF</strong><p>系统验收结果 · 不是模型自报完成</p></div>
+              <span class="fraction">4 / 5</span>
+            </div>
+            <div class="progress-track" role="progressbar" aria-label="五道题中四道验证通过" aria-valuemin="0" aria-valuemax="5" aria-valuenow="4"><div class="progress-value"></div></div>
+            <ul class="task-list">
+              <li><span class="item-index">1</span><span>静态字符串与入口定位</span><span class="state ok">已验证</span></li>
+              <li><span class="item-index">2</span><span>动态调试与输入追踪</span><span class="state ok">已验证</span></li>
+              <li><span class="item-index">3</span><span>反调试识别与绕过</span><span class="state fail">验证失败</span></li>
+              <li><span class="item-index">4</span><span>加壳程序解包与验证</span><span class="state ok">已验证</span></li>
+              <li><span class="item-index">5</span><span>多阶段综合逆向</span><span class="state ok">已验证</span></li>
+            </ul>
+            <div class="card-actions"><span class="ghost-action">审核 4 道结果</span><span class="primary-action">只重试失败项</span></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="mobile" class="page-shell section" aria-labelledby="mobile-title">
+        <div class="section-head">
+          <div>
+            <span class="section-number">08 / MOBILE & ACCESSIBILITY</span>
+            <h2 id="mobile-title">移动端重新编排，不再挤压桌面布局</h2>
+          </div>
+        </div>
+
+        <div class="mobile-grid">
+          <figure class="phone" aria-label="教师工作台移动端目标态示意图">
+            <div class="phone-screen">
+              <div class="phone-nav"><span>玄甲 · 教师端</span><span>任务 3　菜单</span></div>
+              <div class="phone-body">
+                <div class="phone-context">软件安全 / 逆向工程</div>
+                <div class="phone-command">告诉 AI 你要完成什么教学工作…</div>
+                <section class="phone-panel">
+                  <b>需要我处理</b>
+                  <div class="phone-row"><span>5 道逆向题待审核</span><strong>审核</strong></div>
+                  <div class="phone-row"><span>1 项生成失败</span><strong>修复</strong></div>
+                </section>
+                <section class="phone-panel">
+                  <b>AI 任务</b>
+                  <div class="phone-row"><span>生成逆向 CTF · 4/5</span><strong>详情</strong></div>
+                </section>
+                <section class="phone-panel">
+                  <b>最近课程</b>
+                  <div class="phone-row"><span>软件安全</span><strong>继续工作</strong></div>
+                </section>
+              </div>
+            </div>
+          </figure>
+
+          <div class="mobile-rules">
+            <div class="mobile-rule"><span class="rule-index">01</span><div><h3>关键操作首屏可见</h3><p>快捷操作最多展示两个，其余进入“更多”；不裁切、不制造无提示横向滚动。</p></div></div>
+            <div class="mobile-rule"><span class="rule-index">02</span><div><h3>关闭侧栏同时退出焦点树</h3><p>使用 <code>inert</code> 管理屏外侧栏；关闭后 Tab 不得进入任何不可见会话。</p></div></div>
+            <div class="mobile-rule"><span class="rule-index">03</span><div><h3>主操作保持完整横排</h3><p>课程 CTA 使用全宽按钮；编辑、删除收进更多菜单，触控目标建议不小于 44 × 44。</p></div></div>
+            <div class="mobile-rule"><span class="rule-index">04</span><div><h3>任务可离开、可恢复</h3><p>切换课程或关闭页面后，进行中、部分成功和待审核状态保持一致。</p></div></div>
+            <div class="mobile-rule"><span class="rule-index">05</span><div><h3>列表与详情分步</h3><p>题目、课件和演示列表不再把完整详情堆在其后；打开详情后提供明确返回，并恢复筛选与滚动位置。</p></div></div>
+            <div class="mobile-rule"><span class="rule-index">06</span><div><h3>章节默认折叠</h3><p>仅展开当前或包含待处理项的章节；创建入口属于当前上下文，不为每个空章节复制。</p></div></div>
+            <div class="mobile-rule"><span class="rule-index">07</span><div><h3>长表单操作粘底</h3><p>保存草稿、验证和下一步始终可达，并避开安全区；软键盘打开时不遮住当前字段与错误。</p></div></div>
+            <div class="mobile-rule"><span class="rule-index">08</span><div><h3>筛选使用抽屉</h3><p>页签可水平滚动但当前项始终可见；复杂筛选进入有焦点管理的底部抽屉，结果数量即时反馈。</p></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="roadmap" class="page-shell section" aria-labelledby="roadmap-title">
+        <div class="section-head">
+          <div>
+            <span class="section-number">09 / DELIVERY</span>
+            <h2 id="roadmap-title">实施顺序：先正确，再清晰，最后提效</h2>
+          </div>
+        </div>
+
+        <div class="roadmap">
+          <article class="roadmap-stage p0"><span>P0 · 事实正确</span><h3>批量契约、状态与计数</h3><ul><li>数量和独立性服务端硬约束</li><li>逐题任务、部分成功、单项重试</li><li>统一内容状态、统计口径与发布边界</li><li>旧 URL 映射到同一对象事实</li></ul></article>
+          <article class="roadmap-stage p1"><span>P1 · 结构统一</span><h3>工作台与课程主工作区</h3><ul><li>默认首页展示待办和运行任务</li><li>建立共享课程壳层与五个页签</li><li>合并题目管理，去除重复 CTA/分析页</li><li>课件、演示建立来源和版本关系</li></ul></article>
+          <article class="roadmap-stage p2"><span>P2 · 完成效率</span><h3>创建、详情、学情与多端</h3><ul><li>自动保存、粘底操作和字段内 AI</li><li>学生预览、版本差异与发布闭环</li><li>行动优先、带置信度的学情</li><li>移动列表到详情、性能与无障碍</li></ul></article>
+        </div>
+
+        <div class="section-head" style="margin-top: 48px">
+          <div><span class="section-number">ROLLOUT &amp; MEASUREMENT</span><h2 style="font-size: 30px">灰度发布与效果验证</h2></div>
+          <p class="section-note">先证明事实一致与任务可完成，再根据真实基线验证效率提升。</p>
+        </div>
+        <div class="dev-columns">
+          <div>
+            <h3>发布顺序</h3>
+            <ol style="margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px">
+              <li>先上线只读统一 DTO、状态映射与计数对账日志，不改变页面；在两类真实课程上消除统计差异。</li>
+              <li>批量契约与新课程壳层分别置于服务端功能开关后；先开放给内部教师和测试课程。</li>
+              <li>逐域启用课件、题目、演示、学情；每一域达到验收门槛后才重定向旧入口。</li>
+              <li>至少一个稳定观察周期无 P0 回归后，移除旧 DOM、重复请求和功能开关；数据库迁移保留可回滚路径。</li>
+            </ol>
+          </div>
+          <div>
+            <h3>成功指标与护栏</h3>
+            <ul>
+              <li><strong>硬正确性：</strong>1–5 题数量契约自动化通过率 100%；跨页面计数差异、草稿泄漏和旧深链失效均为 0。</li>
+              <li><strong>任务效率：</strong>以改造前同任务基线为对照，课程进入到“可审核草稿”的中位时间降低至少 20%，无效往返导航降低至少 30%。</li>
+              <li><strong>可完成性：</strong>内部可用性测试中，教师无培训完成上传课件、AI 五题、创建演示、查看风险四项任务的成功率不低于 90%。</li>
+              <li><strong>移动护栏：</strong>390px 关键任务成功率与桌面差值不超过 10 个百分点；前端错误率、API p95 和发布失败率不得劣化。</li>
+              <li>埋点只记录对象类型、稳定 ID、状态、耗时和入口，不记录题干、答案、Flag、原始 prompt 或学生敏感内容。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="section-head" style="margin-top: 48px">
+          <div><span class="section-number">ACCEPTANCE GATES</span><h2 style="font-size: 30px">上线门槛</h2></div>
+        </div>
+        <div class="acceptance">
+          <ul class="check-list">
+            <li><strong>明确要求 N 道，必须创建 N 个独立题目事实</strong><small>1–5，道数与自然语言完全一致。</small></li>
+            <li><strong>一题失败时显示 4/5，而不是 100%</strong><small>仅重试失败项不会复制其余结果。</small></li>
+            <li><strong>确认前不写课程事实</strong><small>审核发布前学生不可见。</small></li>
+            <li><strong>同一计数在所有页面含义一致</strong><small>全部、草稿、已发布、需处理可下钻到相同对象集合。</small></li>
+            <li><strong>题目只有一个主工作区</strong><small>旧 URL、课程页签和任务结果打开相同壳层与题目事实。</small></li>
+            <li><strong>资料、产物与版本可双向追溯</strong><small>课件和演示详情能回到来源、课程与章节。</small></li>
+          </ul>
+          <ul class="check-list">
+            <li><strong>登录后无需打开旧对话即可决定下一步</strong><small>待办、任务、最近课程首屏可见。</small></li>
+            <li><strong>390 与 320 像素宽度无主操作裁切</strong><small>课程 CTA 不竖排，快捷入口可发现。</small></li>
+            <li><strong>关闭侧栏后 Tab 不进入屏外控件</strong><small>键盘完成任务审核与发布流程。</small></li>
+            <li><strong>每个工作区只有一个主创建动作</strong><small>页首、区块和空章节不重复同语义 CTA。</small></li>
+            <li><strong>学情结论说明证据强度</strong><small>低样本显示证据不足，不输出虚假精确分数。</small></li>
+            <li><strong>学生预览使用真实权限边界</strong><small>标准解、Flag、教师备注和内部任务信息不可见。</small></li>
+          </ul>
+        </div>
+
+        <div class="section-head" style="margin-top: 48px">
+          <div><span class="section-number">EXECUTABLE SCENARIOS</span><h2 style="font-size: 30px">必须自动化的验收场景</h2></div>
+          <p class="section-note">每个场景都要验证持久事实和浏览器可见结果，不能只断言模型答复文本。</p>
+        </div>
+        <div class="scenario-grid">
+          <article class="scenario">
+            <span>SCENARIO 01 · 五道独立题</span>
+            <dl>
+              <dt>Given</dt><dd>教师已进入“软件安全 / 逆向工程”，该章节当前题目数记为 B。</dd>
+              <dt>When</dt><dd>教师输入“一次生成五道彼此独立的动态 Flag CTF 题”，选择方案并确认。</dd>
+              <dt>Then</dt><dd>批次 requestedCount=5；存在五个不同 taskId、draftId、itemIndex 和题目入口；章节题目事实变为 B+5；不存在用单题五关满足数量的结果。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 02 · 部分失败与单项重试</span>
+            <dl>
+              <dt>Given</dt><dd>五个子任务中四个验证通过，一个因环境构建失败。</dd>
+              <dt>When</dt><dd>批次聚合完成，教师点击“只重试失败项”。</dd>
+              <dt>Then</dt><dd>页面与 API 均显示 4/5 和 partial_success；只新增或恢复失败项的执行，四个成功 draftId 保持不变；重试通过后批次进入 needs_review，而不是自动发布。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 03 · 登录工作台</span>
+            <dl>
+              <dt>Given</dt><dd>教师有多门课程、待审核草稿和一个运行中任务，历史中存在旧会话。</dd>
+              <dt>When</dt><dd>教师重新登录并直接访问 <code>/teacher</code>。</dd>
+              <dt>Then</dt><dd>默认显示工作台而不是旧会话；待审核项、运行任务和最近课程来自 API；点击某项后打开对应会话或产物，课程/章节上下文保持一致。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 04 · 移动端焦点与布局</span>
+            <dl>
+              <dt>Given</dt><dd>浏览器视口为 390 × 844 或 320 × 568，会话侧栏处于关闭状态。</dd>
+              <dt>When</dt><dd>用户依次按 Tab，打开并关闭侧栏、任务抽屉，再查看课程卡。</dd>
+              <dt>Then</dt><dd>焦点只进入当前可见控件并正确归还；页面无水平溢出；主 CTA 不竖排；快捷操作、错误状态和任务数量均可见。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 05 · 数量表达归一化</span>
+            <dl>
+              <dt>Given</dt><dd>教师分别使用“5 道”“五道”“５道”“生成三题”等明确数量表达。</dd>
+              <dt>When</dt><dd>规划器形成生成方案并提交任务契约。</dd>
+              <dt>Then</dt><dd>requestedCount 分别为 5、5、5、3；模型若返回不同数量，服务端拒绝执行并要求重新规划，不静默采用模型值。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 06 · 回归边界</span>
+            <dl>
+              <dt>Given</dt><dd>现有单题生成、批量修订、发布、课程权限与学生预览流程可用。</dd>
+              <dt>When</dt><dd>批量契约和工作台改造上线。</dd>
+              <dt>Then</dt><dd>单题仍只创建一个任务；未发布草稿对学生不可见；跨课程写入被拒绝；动态 Flag 和标准解验证仍按原安全边界运行。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 07 · 题目主工作区归一</span>
+            <dl>
+              <dt>Given</dt><dd>同一课程可从课程题目页签、旧题目管理 URL、任务结果和智能体结果进入题目。</dd>
+              <dt>When</dt><dd>教师分别从四个入口打开题目库或同一个 draftId。</dd>
+              <dt>Then</dt><dd>均进入同一课程壳层与题目工作区；选中对象、过滤和统计一致；页面不存在第二套 Hero、页签或重复创建按钮。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 08 · 计数口径一致</span>
+            <dl>
+              <dt>Given</dt><dd>课程有 10 道题，其中 4 道草稿、6 道已发布、1 道需处理。</dd>
+              <dt>When</dt><dd>教师查看课程卡、课程概览、题目工作区和工作台待办。</dd>
+              <dt>Then</dt><dd>所有位置分别显示相同口径且带标签；点击“已发布 6”得到恰好 6 个对象，点击“全部 10”得到恰好 10 个对象，响应 scope 与 asOf 一致。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 09 · 课件来源与发布</span>
+            <dl>
+              <dt>Given</dt><dd>教师上传一份资料，并据此生成课件草稿 v1。</dd>
+              <dt>When</dt><dd>教师打开课件详情、预览、修订为 v2 并发布。</dd>
+              <dt>Then</dt><dd>资料、生成任务、v1、v2 和课程章节可双向追溯；发布前学生不可见，发布后只看到 v2；返回列表恢复原筛选与滚动位置。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 10 · 演示类型选择</span>
+            <dl>
+              <dt>Given</dt><dd>课程演示页同时支持攻防演练和交互模拟。</dd>
+              <dt>When</dt><dd>教师点击唯一“新建演示”，选择一种类型并创建草稿。</dd>
+              <dt>Then</dt><dd>类型选择器明确展示差异；后续表单只出现该类型所需字段；列表卡显示预览、目标、时长、版本和状态，不再出现两个同义 AI CTA。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 11 · 低证据学情</span>
+            <dl>
+              <dt>Given</dt><dd>某课程只有一名学生的一次有效测评，证据覆盖不足。</dd>
+              <dt>When</dt><dd>教师打开课程学情和题目质量下钻。</dd>
+              <dt>Then</dt><dd>页面显示样本数、时间窗和低置信提示，不用 1% 等精确数字暗示确定结论；题目管理不再出现第二套“质量与学情”首页。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 12 · 移动端创建题目</span>
+            <dl>
+              <dt>Given</dt><dd>视口为 390 × 844，教师从逆向工程章节手工新建题目。</dd>
+              <dt>When</dt><dd>教师填写长表单、触发校验、打开软键盘、保存草稿并返回。</dd>
+              <dt>Then</dt><dd>课程/章节上下文持续可见；主操作粘底且不遮挡字段；错误聚焦到对应区块；返回后题目列表恢复章节、筛选和滚动位置。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 13 · 学生安全预览</span>
+            <dl>
+              <dt>Given</dt><dd>某题目或演示草稿包含标准解、动态 Flag、教师备注和内部生成信息。</dd>
+              <dt>When</dt><dd>教师打开“学生视图”，并分别以教师和学生身份请求对象接口。</dd>
+              <dt>Then</dt><dd>学生预览与学生接口均不包含私有字段；教师详情保留审计信息；发布只改变有效版本与可见性，不复制对象。</dd>
+            </dl>
+          </article>
+          <article class="scenario">
+            <span>SCENARIO 14 · 数据规模与空状态</span>
+            <dl>
+              <dt>Given</dt><dd>分别准备 0、1、6、100 个课件/题目/演示，以及超长标题和描述。</dd>
+              <dt>When</dt><dd>教师在桌面、390px 和 320px 下浏览、过滤、分页、展开章节和打开详情。</dd>
+              <dt>Then</dt><dd>空状态给出一个相关动作；空章节默认折叠；100 项不静默截断；长文不挤掉状态和主操作；页面无水平溢出和不可达控件。</dd>
+            </dl>
+          </article>
+        </div>
+
+        <aside class="definition-box" aria-labelledby="done-title">
+          <h3 id="done-title">Definition of Done</h3>
+          <ol>
+            <li>代码、迁移和 API 契约完成；首页、课程中心、计数与学情没有使用前端假数据或重复计算满足展示。</li>
+            <li>数量解析、批次聚合、幂等重试、状态转移、统一计数、版本血缘和学生序列化的单元/API 测试通过。</li>
+            <li>真实模型、真实队列、真实教师浏览器完成五题生成、部分失败恢复、审核和发布闭环。</li>
+            <li>课程列表、概览、课件、题目、演示、学情、创建与详情均完成新壳层迁移；旧题目 URL 只映射到同一工作区。</li>
+            <li>重复 Hero、重复主 CTA、重复学情首页、教师可见原始 prompt 和失去调用方的旧分支已移除，并记录删除清单。</li>
+            <li>资料到课件版本、批次到 N 个题目、演示到发布版本可追溯；未发布内容和私有答案对学生不可见。</li>
+            <li>0/1/6/100 项、无数据、低证据、失败、重试、刷新与重新登录场景均通过自动化验收。</li>
+            <li>桌面 1440、390px、320px、键盘、200% 文本缩放和减少动效检查通过，并保存可复核截图或结构化输出。</li>
+            <li>单题生成、课程权限、动态 Flag、标准解验证、现有发布内容和学生学习路径无回归。</li>
+            <li>只有上述证据全部成立，任务才可标记完成；“提示词已修改”“页面显示正确”或“旧页仍可用”都不是充分证据。</li>
+          </ol>
+        </aside>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="page-shell footer-grid">
+        <div>
+          <p><strong>玄甲教师工作台与课程中心完整开发计划</strong></p>
+          <p>范围：登录首页、课程列表、概览、课件、题目、演示、学情、创建/详情、AI 共创、任务中心与移动端。</p>
+          <p>日期：2026-08-27</p>
+        </div>
+        <div>
+          <p><strong>官方对标依据</strong></p>
+          <p><a href="https://community.canvaslms.com/t5/%E6%8C%87%E5%8D%97%E4%B8%AD%E6%96%87%E7%89%88-%E8%AE%B2%E5%B8%88%E6%8C%87%E5%8D%97-instructor/%E6%88%91%E8%AF%A5%E5%A6%82%E4%BD%95%E4%BD%BF%E7%94%A8%E5%8D%95%E5%85%83%E7%B4%A2%E5%BC%95-Modules-Index-%E9%A1%B5%E9%9D%A2/ta-p/440454">Canvas Modules</a> · <a href="https://docs.moodle.org/405/en/Question_bank">Moodle Question Bank</a></p>
+          <p><a href="https://support.google.com/edu/classroom/answer/6020265?hl=en">Google Classroom Classwork</a> · <a href="https://help.wayground.com/support/solutions/articles/158000405091-wayground-ai-generate-assessments-from-prompts-documents-videos-more">Wayground AI</a> · <a href="https://h5p.org/documentation/for-authors/">H5P Authoring</a></p>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

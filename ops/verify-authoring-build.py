@@ -190,20 +190,28 @@ require(
     "repaired artifact stage exceeded its file-content budget",
 )
 require(
-    (final_spec.get("oracleContract") or {}).get("type") == "REPORT_JSON_V1"
+    (final_spec.get("oracleContract") or {}).get("type") == "FLAG_GATE_V1"
     and (final_spec.get("oracleContract") or {}).get("assertions"),
-    "build did not produce a declarative report Oracle",
+    "build did not produce a declarative Flag gate",
 )
 live_bindings = final_spec["oracleContract"].get("liveBindings") or []
 require(
-    any(
-        assertion["operator"] != "exists"
-        for assertion in final_spec["oracleContract"]["assertions"]
-    )
-    or live_bindings,
-    "declarative Oracle only checked field existence without live evidence",
+    all(
+        any(
+            assertion["field"] == field
+            and assertion["operator"] != "exists"
+            for assertion in final_spec["oracleContract"]["assertions"]
+        )
+        for field in final_spec["oracleContract"].get("requiredFields") or []
+    ),
+    "Flag gate contains a field without a concrete target value",
 )
-require(live_bindings, "Web exercise did not declare live Oracle evidence")
+require(live_bindings, "Web exercise did not declare live Flag-gate evidence")
+require(
+    set(final_spec["oracleContract"].get("requiredFields") or [])
+    <= {binding["field"] for binding in live_bindings},
+    "Flag gate still depends on learner-supplied fields",
+)
 require(
     any(
         binding.get("capture") in {"body_sha256", "json_field"}
@@ -249,8 +257,10 @@ require(
     "private solution tried to restart a platform-managed service",
 )
 require(
-    "/home/hacker/solution.json" in final_spec["description"],
-    "public description did not receive Oracle submission instructions",
+    "/challenge/check" in final_spec["description"]
+    and "动态 Flag" in final_spec["description"]
+    and "solution.json" not in final_spec["description"],
+    "public description did not receive Flag-only submission instructions",
 )
 
 package_root = pathlib.Path(tempfile.mkdtemp(prefix="aisecedu-authoring-"))
@@ -313,7 +323,7 @@ require(
         "/challenge/runtime-launcher.py"
     )
     in init_source,
-    "private Oracle source is not root-owned before it starts",
+    "private Flag-gate source is not root-owned before it starts",
 )
 print(
     json.dumps(

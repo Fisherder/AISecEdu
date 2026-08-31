@@ -37,12 +37,32 @@ x-ctfd-env: &ctfd-env
   DOJO_AI_AUTHORING_PLAN_MODEL: ${DOJO_AI_AUTHORING_PLAN_MODEL:-deepseek-v4-flash}
   DOJO_AI_AUTHORING_BUILD_MODEL: ${DOJO_AI_AUTHORING_BUILD_MODEL:-deepseek-v4-pro}
   DOJO_AI_AUTHORING_VALIDATE_MODEL: ${DOJO_AI_AUTHORING_VALIDATE_MODEL:-deepseek-v4-pro}
+  DOJO_AI_AUTHORING_VALIDATION_MAX_ROUNDS: ${DOJO_AI_AUTHORING_VALIDATION_MAX_ROUNDS:-5}
   DOJO_AI_TIMEOUT_SECONDS: ${DOJO_AI_TIMEOUT_SECONDS:-120}
+  # Deep reasoning authoring calls can legitimately need a retry after a
+  # nearly complete JSON response.  Keep the per-request idle timeout bounded,
+  # but give the whole retry budget enough wall-clock time to finish.
+  DOJO_AI_TOTAL_TIMEOUT_SECONDS: ${DOJO_AI_TOTAL_TIMEOUT_SECONDS:-600}
   DOJO_AI_MAX_CONTEXT_CHARS: ${DOJO_AI_MAX_CONTEXT_CHARS:-180000}
   DOJO_AI_MAX_FILE_CHARS: ${DOJO_AI_MAX_FILE_CHARS:-32000}
+  DOJO_CODE_START_CONCURRENCY: ${DOJO_CODE_START_CONCURRENCY:-64}
+  DOJO_DESKTOP_START_CONCURRENCY: ${DOJO_DESKTOP_START_CONCURRENCY:-64}
+  DOJO_CODE_START_TIMEOUT_SECONDS: ${DOJO_CODE_START_TIMEOUT_SECONDS:-240}
+  DOJO_DESKTOP_START_TIMEOUT_SECONDS: ${DOJO_DESKTOP_START_TIMEOUT_SECONDS:-120}
+  DOJO_TERMINAL_START_TIMEOUT_SECONDS: ${DOJO_TERMINAL_START_TIMEOUT_SECONDS:-30}
+  DOJO_SERVICE_START_WAIT_SECONDS: ${DOJO_SERVICE_START_WAIT_SECONDS:-600}
+  DOJO_SERVICE_START_LEASE_SECONDS: ${DOJO_SERVICE_START_LEASE_SECONDS:-300}
+  DOJO_CTF_CORPUS_DIR: /var/ctf-corpus
+  GLOBAL_AGENT_RUNTIME_INTERNAL_URL: http://agent-runtime:3000/agent-runtime
+  GLOBAL_AGENT_RUNTIME_PUBLIC_ORIGIN: ${GLOBAL_AGENT_RUNTIME_PUBLIC_ORIGIN:-https://${DOJO_HOST}/agent-runtime}
+  GLOBAL_AGENT_RUNTIME_TICKET_SECRET: ${GLOBAL_AGENT_RUNTIME_TICKET_SECRET:?GLOBAL_AGENT_RUNTIME_TICKET_SECRET must be set by dojo init}
+  GLOBAL_AGENT_RUNTIME_SERVICE_SECRET: ${GLOBAL_AGENT_RUNTIME_SERVICE_SECRET:?GLOBAL_AGENT_RUNTIME_SERVICE_SECRET must be set by dojo init}
 
 x-ctfd-volumes: &ctfd-volumes
   - /data/dojos:/var/dojos
+  - /data/ctf-corpus:/var/ctf-corpus:ro
+  - /data/agent-runtime:/var/agent-runtime
+  - /data/platform-removal:/data/platform-removal
   - /data/workspace_nodes.json:/var/workspace_nodes.json:ro
   - ./user_firewall.allowed:/var/user_firewall.allowed:ro
   - /etc/docker/seccomp.json:/etc/docker/seccomp.json:ro
@@ -152,12 +172,17 @@ services:
     environment:
       <<: *ctfd-env
       UPLOAD_FOLDER: /var/uploads
-      WORKERS: 8
+      # Page rendering is CPU-bound under classroom-wide bursts.  The target
+      # host has 64 cores; 32 workers leave capacity for PostgreSQL, nginx and
+      # hundreds of Kata workspace VMs while avoiding the eight-core ceiling
+      # observed at 200 concurrent learners.
+      WORKERS: ${CTFD_WORKERS:-32}
+      CTFD_GEVENT_PSYCOPG: ${CTFD_GEVENT_PSYCOPG:-true}
       # DeepSeek Pro authoring can run several bounded build/review/repair
       # calls in one request. Keep Gunicorn aligned with the 3600-second
       # learning API proxy window instead of killing a healthy worker at the
       # default timeout.
-      GUNICORN_CMD_ARGS: ${GUNICORN_CMD_ARGS:---timeout 3600 --graceful-timeout 3600}
+      GUNICORN_CMD_ARGS: ${GUNICORN_CMD_ARGS:---config /etc/ctfd/gunicorn.py --timeout 3600 --graceful-timeout 3600}
       LOG_FOLDER: /var/log/CTFd
       ACCESS_LOG: "-"
       ERROR_LOG: "-"
@@ -174,10 +199,14 @@ services:
       - /data/mac:/var/mac
       - /data/homes:/var/homes:shared
       - /data/dojos:/var/dojos
+      - /data/ctf-corpus:/var/ctf-corpus:ro
+      - /data/agent-runtime:/var/agent-runtime
+      - /data/platform-removal:/data/platform-removal
       - /data/ctfd-ipython:/root/.ipython
       - ./data/coverage:/var/coverage
       - /data/workspace_nodes.json:/var/workspace_nodes.json:ro
       - /data/ssh_host_keys/ssh_known_hosts:/etc/ssh/ssh_known_hosts:ro
+      - ./ops/gunicorn-ctfd.py:/etc/ctfd/gunicorn.py:ro
       - ./user_firewall.allowed:/var/user_firewall.allowed:ro
       - /etc/docker/seccomp.json:/etc/docker/seccomp.json:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -205,6 +234,7 @@ services:
       - main
     restart: always
     image: postgres:17.5
+    command: ["postgres", "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-256}"]
     environment:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASS}
@@ -231,7 +261,12 @@ services:
       AUTH_TYPE: scram-sha-256
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 10000
-      DEFAULT_POOL_SIZE: 20
+      # Keep enough transaction slots for interactive bursts while retaining
+      # headroom below PostgreSQL's explicitly raised connection ceiling.
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-160}
+      RESERVE_POOL_SIZE: ${PGBOUNCER_RESERVE_POOL_SIZE:-32}
+      RESERVE_POOL_TIMEOUT: ${PGBOUNCER_RESERVE_POOL_TIMEOUT:-2}
+      MAX_DB_CONNECTIONS: ${PGBOUNCER_MAX_DB_CONNECTIONS:-192}
     depends_on:
       db:
         condition: service_started
@@ -245,6 +280,48 @@ services:
     image: redis:8
     volumes:
       - /data/redis:/data
+
+  agent-runtime:
+    container_name: agent-runtime
+    hostname: agent-runtime
+    profiles:
+      - main
+    restart: always
+    build:
+      context: ${GLOBAL_AGENT_RUNTIME_BUILD_CONTEXT:-./services/agent-runtime}
+      args:
+        AISECEDU_INTEGRATED: "true"
+        NEXT_PUBLIC_AISECEDU_INTEGRATED: "true"
+        NEXT_PUBLIC_BASE_PATH: /agent-runtime
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      AISECEDU_INTEGRATED: "true"
+      NEXT_PUBLIC_AISECEDU_INTEGRATED: "true"
+      NEXT_PUBLIC_BASE_PATH: /agent-runtime
+      AISECEDU_INTERNAL_URL: http://ctfd:8000
+      AISECEDU_PUBLIC_ORIGIN: ${AISECEDU_PUBLIC_ORIGIN:-https://${DOJO_HOST}}
+      AISECEDU_SERVICE_SECRET: ${GLOBAL_AGENT_RUNTIME_SERVICE_SECRET:?GLOBAL_AGENT_RUNTIME_SERVICE_SECRET must be set by dojo init}
+      AISECEDU_AGENT_SKILLS_DIR: /app/agent-skills
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-${DOJO_AI_API_KEY:-}}
+      DEEPSEEK_BASE_URL: ${DOJO_AI_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODELS: ${GLOBAL_AGENT_RUNTIME_MODELS:-deepseek-v4-flash,deepseek-v4-pro}
+      DEFAULT_MODEL: ${GLOBAL_AGENT_RUNTIME_DEFAULT_MODEL:-deepseek:deepseek-v4-flash}
+      MODEL_ROUTES: ${GLOBAL_AGENT_RUNTIME_MODEL_ROUTES:-{"scene-content":"deepseek:deepseek-v4-pro","scene-actions":"deepseek:deepseek-v4-pro","generate-classroom":"deepseek:deepseek-v4-pro","pbl-v2-runtime":"deepseek:deepseek-v4-pro","pbl-chat":"deepseek:deepseek-v4-pro","chat-adapter":"deepseek:deepseek-v4-pro","security-roleplay":"deepseek:deepseek-v4-pro","maic-agent":"deepseek:deepseek-v4-pro"}}
+      ALLOWED_FRAME_ANCESTORS: ${GLOBAL_AGENT_RUNTIME_FRAME_ANCESTORS:-https://${DOJO_HOST} http://${DOJO_HOST}}
+    volumes:
+      - agent-runtime-data:/app/data
+      - ./agent_skills:/app/agent-skills:ro
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/agent-runtime/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   stats-worker:
     <<: *ctfd-base
@@ -273,6 +350,83 @@ services:
     volumes: *ctfd-volumes
     depends_on:
       <<: *ctfd-depends
+
+  teaching-worker:
+    <<: *ctfd-base
+    container_name: teaching-worker
+    hostname: teaching-worker
+    profiles:
+      - main
+    restart: always
+    command: ["flask", "shell", "/opt/CTFd/CTFd/plugins/dojo_plugin/worker/teaching_main.py"]
+    environment:
+      <<: *ctfd-env
+    volumes: *ctfd-volumes
+    depends_on:
+      <<: *ctfd-depends
+      agent-runtime:
+        condition: service_healthy
+
+  # A second interactive consumer keeps material analysis, grading and normal
+  # Agent requests responsive while another worker is handing legacy stream
+  # entries off to the dedicated native-authoring queue.
+  teaching-interactive-worker:
+    <<: *ctfd-base
+    container_name: teaching-interactive-worker
+    hostname: teaching-interactive-worker
+    profiles:
+      - main
+    restart: always
+    command: ["flask", "shell", "/opt/CTFd/CTFd/plugins/dojo_plugin/worker/teaching_main.py"]
+    environment:
+      <<: *ctfd-env
+    volumes: *ctfd-volumes
+    depends_on:
+      <<: *ctfd-depends
+      agent-runtime:
+        condition: service_healthy
+
+  # Native challenge authoring and autonomous solution validation can run for
+  # minutes.  Isolating them in their own Redis stream prevents a busy course
+  # from starving unrelated courseware and classroom work.
+  teaching-authoring-worker:
+    <<: *ctfd-base
+    container_name: teaching-authoring-worker
+    hostname: teaching-authoring-worker
+    profiles:
+      - main
+    restart: always
+    command: ["flask", "shell", "/opt/CTFd/CTFd/plugins/dojo_plugin/worker/teaching_main.py"]
+    environment:
+      <<: *ctfd-env
+      TEACHING_WORKER_STREAM: teaching:authoring
+    volumes: *ctfd-volumes
+    depends_on:
+      <<: *ctfd-depends
+      agent-runtime:
+        condition: service_healthy
+
+  # Keep native authoring concurrency deliberately bounded at two.  Most of
+  # the wall time is remote model inference, so a second consumer removes
+  # head-of-line blocking for independent questions without creating an
+  # unbounded burst against the model provider or shared validation runtime.
+  teaching-authoring-worker-2:
+    <<: *ctfd-base
+    image: pwncollege-teaching-authoring-worker:latest
+    container_name: teaching-authoring-worker-2
+    hostname: teaching-authoring-worker-2
+    profiles:
+      - main
+    restart: always
+    command: ["flask", "shell", "/opt/CTFd/CTFd/plugins/dojo_plugin/worker/teaching_main.py"]
+    environment:
+      <<: *ctfd-env
+      TEACHING_WORKER_STREAM: teaching:authoring
+    volumes: *ctfd-volumes
+    depends_on:
+      <<: *ctfd-depends
+      agent-runtime:
+        condition: service_healthy
 
   sshd:
     container_name: sshd
@@ -323,6 +477,8 @@ services:
       - /data/acme:/var/cache/nginx/acme-letsencrypt
       - /data/local-tls:/etc/nginx/local-tls:ro
       - /data/local-tls/ca.crt:/usr/share/nginx/html/pwncollege-local-ca.crt:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d/location-theme-assets.conf:/etc/nginx/conf.d/location-theme-assets.conf:ro
       - ./ops/nginx-local/server-http.conf:/etc/nginx/conf.d/server-http.prod.conf:ro
       - ./ops/nginx-local/server-https.conf:/etc/nginx/conf.d/server-https.prod.conf:ro
       - ./ops/nginx-local/disabled.conf:/etc/nginx/conf.d/server-http-future.prod.conf:ro
@@ -330,12 +486,16 @@ services:
       - ./ops/nginx-local/disabled.conf:/etc/nginx/conf.d/workspace-http.prod.conf:ro
       - ./ops/nginx-local/workspace-https.conf:/etc/nginx/conf.d/workspace-https.prod.conf:ro
       - ./nginx/conf.d/location-learning-ai.conf:/etc/nginx/conf.d/location-learning-ai.conf:ro
+      - ./nginx/conf.d/location-workspace-api.conf:/etc/nginx/conf.d/location-workspace-api.conf:ro
     networks:
       default:
       workspace_net:
         aliases:
           - nginx
         ipv4_address: 10.0.0.3
+    depends_on:
+      agent-runtime:
+        condition: service_started
 
   nginx-workspace:
     container_name: nginx-workspace
@@ -406,6 +566,7 @@ services:
     image: prom/prometheus
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/global-agent-runtime.rules.yml:/etc/prometheus/rules/global-agent-runtime.rules.yml:ro
       - prometheus_targets:/etc/prometheus/targets:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
@@ -494,7 +655,7 @@ services:
     restart: always
     image: grafana/grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "true"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
@@ -504,6 +665,8 @@ services:
       GF_PLUGINS_PREINSTALL_AUTO_UPDATE: "false"
     volumes:
       - ./grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./grafana/dashboard-provider.yml:/etc/grafana/provisioning/dashboards/aisecedu.yml:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       prometheus:
         condition: service_healthy
@@ -530,6 +693,8 @@ services:
 
 volumes:
   prometheus_targets:
+  agent-runtime-data:
+    name: ${GLOBAL_AGENT_RUNTIME_DATA_VOLUME:-pwncollege_agent-runtime-data}
 
 networks:
   default:

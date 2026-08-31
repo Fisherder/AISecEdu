@@ -1,0 +1,1576 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工控安全实验：HMI界面欺骗与数据篡改</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface2: #1a2332;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --text3: #64748b;
+            --green: #22c55e;
+            --green-bg: #052e16;
+            --red: #ef4444;
+            --red-bg: #2e0505;
+            --amber: #f59e0b;
+            --amber-bg: #2e1f05;
+            --blue: #3b82f6;
+            --blue-bg: #051b3d;
+            --cyan: #06b6d4;
+            --spoofed: #22c55e;
+            --real: #ef4444;
+            --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Consolas', 'Monaco', monospace;
+            --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* === HEADER === */
+        .header {
+            background: var(--surface);
+            border-bottom: 2px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+        }
+        .header-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            color: #f1f5f9;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header-title .icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #1e3a5f, #0f172a);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+            border: 1px solid var(--border);
+        }
+        .badge-scenario {
+            background: var(--blue-bg);
+            color: var(--blue);
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+        }
+        .progress-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            color: var(--text2);
+        }
+        .progress-step {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.75rem;
+            border: 2px solid var(--border);
+            background: var(--surface2);
+            color: var(--text3);
+            transition: all 0.4s;
+        }
+        .progress-step.active {
+            border-color: var(--blue);
+            color: var(--blue);
+            background: var(--blue-bg);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.3);
+        }
+        .progress-step.done {
+            border-color: var(--green);
+            color: var(--green);
+            background: var(--green-bg);
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.3);
+        }
+        .progress-line {
+            width: 24px;
+            height: 2px;
+            background: var(--border);
+            border-radius: 1px;
+            transition: background 0.4s;
+        }
+        .progress-line.done {
+            background: var(--green);
+        }
+
+        /* === MAIN GRID === */
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px 16px 40px;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+
+        /* === SECTION CARDS === */
+        .section-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+            transition: box-shadow 0.3s;
+        }
+        .section-card:hover {
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+        .section-header {
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            background: var(--surface2);
+        }
+        .section-header h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-body {
+            padding: 20px;
+        }
+        .section-tag {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            padding: 4px 10px;
+            border-radius: 4px;
+        }
+        .tag-spoofed {
+            background: var(--green-bg);
+            color: var(--green);
+            border: 1px solid rgba(34, 197, 94, 0.5);
+        }
+        .tag-real {
+            background: var(--red-bg);
+            color: var(--red);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+        }
+
+        /* === HMI DASHBOARD === */
+        .dashboard-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 16px;
+            padding: 8px 0;
+        }
+        .gauge-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            position: relative;
+        }
+        .gauge-container svg {
+            width: 100%;
+            max-width: 150px;
+            height: auto;
+            filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.3));
+        }
+        .gauge-value-arc {
+            transition: stroke-dashoffset 0.9s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                stroke 0.6s ease-out;
+        }
+        .gauge-label-small {
+            font-size: 0.7rem;
+            color: var(--text2);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: -4px;
+        }
+        .alarm-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            position: absolute;
+            top: -2px;
+            right: 10px;
+            animation: pulse-alarm 1s infinite;
+        }
+        .alarm-dot.green {
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+            animation: none;
+        }
+        .alarm-dot.red {
+            background: var(--red);
+            box-shadow: 0 0 12px var(--red);
+        }
+        @keyframes pulse-alarm {
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.4;
+                transform: scale(1.6);
+            }
+        }
+        .status-banner {
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            letter-spacing: 0.03em;
+            margin-top: 8px;
+            transition: all 0.5s;
+        }
+        .status-banner.normal {
+            background: var(--green-bg);
+            color: var(--green);
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        }
+        .status-banner.danger {
+            background: var(--red-bg);
+            color: var(--red);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            animation: banner-flash 1.5s infinite;
+        }
+        @keyframes banner-flash {
+            0%,
+            100% {
+                background: var(--red-bg);
+            }
+            50% {
+                background: #3d0000;
+            }
+        }
+        .view-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .divider-dash {
+            border: none;
+            border-top: 1px dashed var(--border);
+            margin: 16px 0;
+        }
+
+        /* === PROTOCOL ANALYZER === */
+        .pcap-table-wrap {
+            overflow-x: auto;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .pcap-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            min-width: 750px;
+        }
+        .pcap-table th {
+            background: var(--surface2);
+            color: var(--text2);
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.7rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            border-bottom: 2px solid var(--border);
+            position: sticky;
+            top: 0;
+        }
+        .pcap-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #1e2d3d;
+            cursor: pointer;
+            transition: background 0.2s;
+            vertical-align: middle;
+        }
+        .pcap-table tbody tr {
+            transition: background 0.2s;
+        }
+        .pcap-table tbody tr:hover {
+            background: #1a2740;
+        }
+        .pcap-table tbody tr.expanded {
+            background: #1a2740;
+            border-left: 3px solid var(--blue);
+        }
+        .pcap-table tbody tr.tagged {
+            background: #2e1f05 !important;
+            border-left: 3px solid var(--amber) !important;
+        }
+        .pcap-table tbody tr.tagged td {
+            color: var(--amber);
+        }
+        .pcap-no {
+            color: var(--text3);
+            font-weight: 600;
+            width: 40px;
+        }
+        .pcap-src {
+            color: #a78bfa;
+        }
+        .pcap-dst {
+            color: #67e8f9;
+        }
+        .pcap-info {
+            max-width: 280px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .pcap-info.spoofed-highlight {
+            color: var(--green);
+            font-weight: 600;
+        }
+        .pcap-info.real-highlight {
+            color: var(--red);
+            font-weight: 600;
+        }
+        .tag-btn {
+            background: transparent;
+            border: 1px solid var(--amber);
+            color: var(--amber);
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            white-space: nowrap;
+            font-family: var(--font-sans);
+        }
+        .tag-btn:hover {
+            background: var(--amber-bg);
+        }
+        .tag-btn.tagged-active {
+            background: var(--amber);
+            color: #000;
+            font-weight: 700;
+        }
+        .packet-detail-row td {
+            padding: 0;
+            background: #0d1520;
+        }
+        .packet-detail-panel {
+            padding: 16px 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            border-top: 1px solid #1e2d3d;
+        }
+        .packet-detail-panel .field-label {
+            color: var(--text3);
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .packet-detail-panel .field-value {
+            color: var(--cyan);
+            font-weight: 600;
+        }
+        .packet-detail-panel .field-value.modified {
+            color: var(--amber);
+            background: var(--amber-bg);
+            padding: 2px 6px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        .hex-dump {
+            grid-column: 1 / -1;
+            background: #0a0f18;
+            padding: 12px;
+            border-radius: 6px;
+            color: #a0aec0;
+            font-size: 0.7rem;
+            overflow-x: auto;
+            letter-spacing: 0.03em;
+            border: 1px solid #1a2535;
+        }
+        .hex-dump .hl {
+            color: var(--amber);
+            font-weight: 700;
+        }
+        .verify-btn {
+            background: var(--blue);
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.85rem;
+            letter-spacing: 0.03em;
+            transition: all 0.3s;
+            margin-top: 12px;
+        }
+        .verify-btn:hover {
+            background: #2563eb;
+            box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+        }
+        .verify-btn:disabled {
+            background: #475569;
+            cursor: not-allowed;
+        }
+
+        /* === ANALYSIS === */
+        .analysis-textarea {
+            width: 100%;
+            min-height: 120px;
+            background: #0a0f18;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            padding: 14px;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            resize: vertical;
+            transition: border-color 0.3s;
+            line-height: 1.7;
+        }
+        .analysis-textarea:focus {
+            outline: none;
+            border-color: var(--blue);
+            box-shadow: 0 0 16px rgba(59, 130, 246, 0.2);
+        }
+        .keyword-match {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin: 3px;
+            background: var(--green-bg);
+            color: var(--green);
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        }
+        .keyword-miss {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            margin: 3px;
+            background: #1a1a1a;
+            color: var(--text3);
+            border: 1px solid var(--border);
+        }
+        .feedback-box {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-top: 12px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            display: none;
+            transition: all 0.3s;
+        }
+        .feedback-box.success {
+            display: block;
+            background: var(--green-bg);
+            color: var(--green);
+            border: 1px solid rgba(34, 197, 94, 0.5);
+        }
+        .feedback-box.partial {
+            display: block;
+            background: var(--amber-bg);
+            color: var(--amber);
+            border: 1px solid rgba(245, 158, 11, 0.5);
+        }
+        .feedback-box.info {
+            display: block;
+            background: var(--blue-bg);
+            color: var(--blue);
+            border: 1px solid rgba(59, 130, 246, 0.5);
+        }
+
+        /* === FLAG PANEL === */
+        .flag-panel {
+            background: #0a0f18;
+            border: 2px dashed var(--amber);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            display: none;
+            animation: flag-reveal 0.6s ease-out;
+        }
+        .flag-panel.revealed {
+            display: block;
+        }
+        @keyframes flag-reveal {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+                border-color: var(--border);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+                border-color: var(--amber);
+            }
+        }
+        .flag-text {
+            font-family: var(--font-mono);
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--amber);
+            letter-spacing: 0.05em;
+            word-break: break-all;
+            text-shadow: 0 0 20px rgba(245, 158, 11, 0.5);
+        }
+        .achievement-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 8px;
+        }
+        .achievement-badge {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            transition: all 0.4s;
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            color: var(--text3);
+        }
+        .achievement-badge.earned {
+            border-color: var(--green);
+            color: var(--green);
+            background: var(--green-bg);
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.25);
+        }
+
+        /* === BUTTONS === */
+        .btn-toggle {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 8px 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8rem;
+            transition: all 0.3s;
+            letter-spacing: 0.03em;
+        }
+        .btn-toggle:hover {
+            border-color: var(--blue);
+            background: #1a2740;
+        }
+        .btn-toggle.active-spoofed {
+            border-color: var(--green);
+            color: var(--green);
+            background: var(--green-bg);
+        }
+        .btn-toggle.active-real {
+            border-color: var(--red);
+            color: var(--red);
+            background: var(--red-bg);
+        }
+        .btn-reveal {
+            background: transparent;
+            border: 1px solid var(--amber);
+            color: var(--amber);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+            font-size: 0.8rem;
+        }
+        .btn-reveal:hover {
+            background: var(--amber-bg);
+        }
+
+        /* === RESPONSIVE === */
+        @media (max-width: 768px) {
+            .dashboard-row {
+                grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+                gap: 8px;
+            }
+            .gauge-container svg {
+                max-width: 100px;
+            }
+            .packet-detail-panel {
+                grid-template-columns: 1fr;
+            }
+            .pcap-table {
+                font-size: 0.65rem;
+            }
+            .header {
+                padding: 10px 14px;
+            }
+            .header-title {
+                font-size: 1rem;
+            }
+            .section-body {
+                padding: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <!-- 本实验模拟工控安全教学场景，所有数据均为模拟数据，不连接任何真实PLC或工业控制系统 -->
+
+    <!-- HEADER -->
+    <div class="header">
+        <div class="header-title">
+            <div class="icon">🏭</div>
+            <span>工控安全实验：HMI欺骗与数据篡改</span>
+        </div>
+        <span class="badge-scenario">📋 任务简报：震网式中间人攻击分析</span>
+        <div class="progress-bar-wrap" id="progressBar">
+            <span>步骤</span>
+            <div class="progress-step active" id="ps1">1</div>
+            <div class="progress-line" id="pl1"></div>
+            <div class="progress-step" id="ps2">2</div>
+            <div class="progress-line" id="pl2"></div>
+            <div class="progress-step" id="ps3">3</div>
+            <div class="progress-line" id="pl3"></div>
+            <div class="progress-step" id="ps4">4</div>
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="main-container">
+
+        <!-- SCENARIO BRIEFING -->
+        <div class="section-card">
+            <div class="section-header">
+                <h3>📋 任务简报</h3>
+            </div>
+            <div class="section-body">
+                <p style="margin-bottom:8px;">你是某工业设施的<strong>安全审计员</strong>。操作员报告离心机运行"一切正常"——HMI显示转速<strong style="color:#22c55e;">1064 Hz</strong>，温度<strong style="color:#22c55e;">42°C</strong>，所有指标绿色。但你收到了来自振动传感器的独立警报。</p>
+                <p>你的任务：<strong>对比操作员HMI视图与工程视图，检查Modbus协议报文，找出攻击者如何欺骗了HMI界面。</strong></p>
+                <p style="color:var(--text3);font-size:0.8rem;margin-top:6px;">💡 提示：上下两排仪表显示的是<em>同一组寄存器</em>的不同数据——上面是HMI收到的，下面是PLC实际的值。仔细检查协议分析器中的报文。</p>
+            </div>
+        </div>
+
+        <!-- DUAL-VIEW DASHBOARD -->
+        <div class="section-card" id="dashboardCard">
+            <div class="section-header">
+                <h3>
+                    <span>🖥️</span> 离心机监控仪表盘
+                </h3>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <span class="section-tag tag-spoofed">⬆ 操作员HMI视图（欺骗数据）</span>
+                    <span class="section-tag tag-real">⬇ 工程视图（真实PLC数据）</span>
+                </div>
+            </div>
+            <div class="section-body">
+                <!-- SPOOFED VIEW (Operator HMI) -->
+                <div style="position:relative; border:2px solid rgba(34,197,94,0.3); border-radius:12px; padding:16px; background:rgba(34,197,94,0.03); margin-bottom:4px;">
+                    <div class="view-label" style="color:var(--green);margin-bottom:10px;">
+                        🟢 操作员HMI视图 — 攻击者伪造的正常数据
+                    </div>
+                    <div class="dashboard-row" id="spoofedGauges"></div>
+                    <div class="status-banner normal" id="spoofedBanner">
+                        ✅ 所有系统正常 — 离心机转速稳定
+                    </div>
+                </div>
+
+                <div class="divider-dash"></div>
+
+                <!-- REAL VIEW (Engineering/PLC actual) -->
+                <div style="position:relative; border:2px solid rgba(239,68,68,0.4); border-radius:12px; padding:16px; background:rgba(239,68,68,0.04);">
+                    <div class="view-label" style="color:var(--red);margin-bottom:10px;">
+                        🔴 工程视图 — PLC实际寄存器值（被攻击者隐藏）
+                    </div>
+                    <div class="dashboard-row" id="realGauges"></div>
+                    <div class="status-banner danger" id="realBanner">
+                        ⚠️ 危险！离心机超速运行 — 转速超标 · 温度异常 · 振动超标
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PROTOCOL ANALYZER -->
+        <div class="section-card" id="protocolSection">
+            <div class="section-header">
+                <h3>📡 Modbus TCP 协议分析器</h3>
+                <span style="font-size:0.75rem;color:var(--text3);">点击报文行查看详情 · 标记可疑报文</span>
+            </div>
+            <div class="section-body">
+                <p style="font-size:0.8rem;color:var(--text2);margin-bottom:12px;">
+                    以下是从<strong>PLC侧</strong>和<strong>HMI侧</strong>分别捕获的Modbus TCP报文。攻击者处于中间位置，拦截并修改了部分通信。
+                </p>
+                <div class="pcap-table-wrap">
+                    <table class="pcap-table" id="pcapTable">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>时间</th>
+                                <th>源</th>
+                                <th>目的</th>
+                                <th>协议</th>
+                                <th>信息</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pcapBody"></tbody>
+                    </table>
+                </div>
+                <button class="verify-btn" id="verifyBtn" onclick="verifyTaggedPackets()">
+                    🔍 验证标记分析
+                </button>
+                <div id="verifyFeedback" style="margin-top:10px;font-size:0.85rem;"></div>
+            </div>
+        </div>
+
+        <!-- ANALYSIS SECTION -->
+        <div class="section-card" id="analysisSection">
+            <div class="section-header">
+                <h3>🕵️ 攻击分析报告</h3>
+            </div>
+            <div class="section-body">
+                <p style="font-size:0.8rem;color:var(--text2);margin-bottom:8px;">
+                    请用<strong>一段话</strong>描述攻击者如何实现了HMI欺骗。你的分析应包含关键要素：攻击类型、被篡改的协议、欺骗手法、以及攻击者隐藏了什么。
+                </p>
+                <textarea class="analysis-textarea" id="analysisInput"
+                placeholder="在此输入你的分析报告（例如：攻击者通过______方式，在______之间实施______攻击，具体手法是______，导致操作员看到______而实际______……）"></textarea>
+                <button class="verify-btn" id="submitAnalysisBtn" onclick="submitAnalysis()" style="margin-top:8px;">
+                    📝 提交分析
+                </button>
+                <div class="feedback-box" id="analysisFeedback"></div>
+                <div id="keywordDisplay" style="margin-top:8px;min-height:24px;"></div>
+            </div>
+        </div>
+
+        <!-- FLAG & ACHIEVEMENTS -->
+        <div class="section-card">
+            <div class="section-header">
+                <h3>🏆 成就与旗帜</h3>
+            </div>
+            <div class="section-body">
+                <div class="achievement-row" id="achievementRow">
+                    <span class="achievement-badge" id="ach1">🔍 异常发现者</span>
+                    <span class="achievement-badge" id="ach2">📡 协议分析师</span>
+                    <span class="achievement-badge" id="ach3">🕵️ 威胁猎人</span>
+                    <span class="achievement-badge" id="ach4">🏆 Stuxnet解密者</span>
+                </div>
+                <div class="flag-panel" id="flagPanel">
+                    <p style="color:var(--amber);font-weight:700;margin-bottom:6px;">🎯 实验完成！捕获旗帜：</p>
+                    <span class="flag-text" id="flagText">FLAG{stuxnet_modbus_mitm_hmi_spoof_2010}</span>
+                    <p style="font-size:0.7rem;color:var(--text3);margin-top:8px;">此Flag仅在完成所有分析步骤后出现</p>
+                </div>
+                <button class="btn-reveal" id="revealAnalysisBtn" onclick="revealFullAnalysis()" style="margin-top:12px;">
+                    📖 查看完整分析报告
+                </button>
+                <div id="fullAnalysisReport" style="display:none;margin-top:12px;padding:16px;background:#0a0f18;border-radius:8px;border:1px solid var(--border);font-size:0.85rem;line-height:1.8;">
+                    <!-- Filled by JS -->
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // 本模拟实验仅用于授权教学环境，所有PLC通信均为内存模拟，不连接真实工业控制系统
+
+        (function() {
+            // ============ GAUGE ENGINE ============
+            const GAUGE_CONFIGS = [
+                { id: 'rpm', label: '转速 RPM', unit: 'Hz', min: 0, max: 1500, greenUpTo: 1100, yellowUpTo: 1300,
+                    spoofedVal: 1064, realVal: 1410 },
+                { id: 'temp', label: '温度 TEMP', unit: '°C', min: 0, max: 100, greenUpTo: 50, yellowUpTo: 70,
+                    spoofedVal: 42, realVal: 78 },
+                { id: 'vib', label: '振动 VIB', unit: 'mm/s', min: 0, max: 15, greenUpTo: 3, yellowUpTo: 7, spoofedVal: 1.2,
+                    realVal: 8.7 },
+                { id: 'pres', label: '压力 PRES', unit: 'bar', min: 0, max: 10, greenUpTo: 3, yellowUpTo: 5, spoofedVal: 2.1,
+                    realVal: 5.8 },
+                { id: 'valve', label: '阀门 VALVE', unit: '%', min: 0, max: 100, greenUpTo: 60, yellowUpTo: 80,
+                    spoofedVal: 45, realVal: 82 },
+            ];
+
+            function getGaugeColor(value, cfg) {
+                const ratio = (value - cfg.min) / (cfg.max - cfg.min);
+                const g = cfg.greenUpTo / cfg.max;
+                const y = cfg.yellowUpTo / cfg.max;
+                if (ratio <= g) return '#22c55e';
+                if (ratio <= y) return '#f59e0b';
+                return '#ef4444';
+            }
+
+            function createGaugeSVG(cfg, initialValue) {
+                const svgNS = 'http://www.w3.org/2000/svg';
+                const svg = document.createElementNS(svgNS, 'svg');
+                svg.setAttribute('viewBox', '0 0 130 140');
+                svg.setAttribute('width', '150');
+                svg.setAttribute('height', '160');
+
+                const cx = 65,
+                    cy = 72,
+                    r = 44;
+                const fullCirc = 2 * Math.PI * r;
+                const arc270 = (270 / 360) * fullCirc; // ~207.35
+
+                // Background arc
+                const bgArc = document.createElementNS(svgNS, 'circle');
+                bgArc.setAttribute('cx', cx);
+                bgArc.setAttribute('cy', cy);
+                bgArc.setAttribute('r', r);
+                bgArc.setAttribute('fill', 'none');
+                bgArc.setAttribute('stroke', '#334155');
+                bgArc.setAttribute('stroke-width', '10');
+                bgArc.setAttribute('stroke-linecap', 'round');
+                bgArc.setAttribute('stroke-dasharray', `${arc270.toFixed(2)} ${fullCirc.toFixed(2)}`);
+                bgArc.setAttribute('transform', `rotate(135 ${cx} ${cy})`);
+                svg.appendChild(bgArc);
+
+                // Value arc
+                const valArc = document.createElementNS(svgNS, 'circle');
+                valArc.setAttribute('cx', cx);
+                valArc.setAttribute('cy', cy);
+                valArc.setAttribute('r', r);
+                valArc.setAttribute('fill', 'none');
+                valArc.setAttribute('stroke', getGaugeColor(initialValue, cfg));
+                valArc.setAttribute('stroke-width', '10');
+                valArc.setAttribute('stroke-linecap', 'round');
+                valArc.setAttribute('stroke-dasharray', `${arc270.toFixed(2)} ${fullCirc.toFixed(2)}`);
+                valArc.setAttribute('transform', `rotate(135 ${cx} ${cy})`);
+                valArc.classList.add('gauge-value-arc');
+                svg.appendChild(valArc);
+
+                // Value text
+                const valText = document.createElementNS(svgNS, 'text');
+                valText.setAttribute('x', cx);
+                valText.setAttribute('y', cy - 2);
+                valText.setAttribute('text-anchor', 'middle');
+                valText.setAttribute('fill', '#f1f5f9');
+                valText.setAttribute('font-size', '18');
+                valText.setAttribute('font-weight', '700');
+                valText.setAttribute('font-family', "'JetBrains Mono','Consolas',monospace");
+                valText.textContent = initialValue.toFixed(initialValue % 1 === 0 ? 0 : 1);
+                svg.appendChild(valText);
+
+                // Unit text
+                const unitText = document.createElementNS(svgNS, 'text');
+                unitText.setAttribute('x', cx);
+                unitText.setAttribute('y', cy + 18);
+                unitText.setAttribute('text-anchor', 'middle');
+                unitText.setAttribute('fill', '#94a3b8');
+                unitText.setAttribute('font-size', '10');
+                unitText.textContent = cfg.unit;
+                svg.appendChild(unitText);
+
+                // Label below
+                const labelText = document.createElementNS(svgNS, 'text');
+                labelText.setAttribute('x', cx);
+                labelText.setAttribute('y', cy + 48);
+                labelText.setAttribute('text-anchor', 'middle');
+                labelText.setAttribute('fill', '#cbd5e1');
+                labelText.setAttribute('font-size', '10');
+                labelText.setAttribute('font-weight', '600');
+                labelText.setAttribute('letter-spacing', '0.04em');
+                labelText.textContent = cfg.label;
+                svg.appendChild(labelText);
+
+                return {
+                    svg,
+                    valArc,
+                    valText,
+                    cfg,
+                    arc270,
+                    fullCirc,
+                    _currentValue: initialValue,
+                    update(newValue) {
+                        this._currentValue = newValue;
+                        const normalized = Math.max(0, Math.min(1, (newValue - cfg.min) / (cfg.max - cfg
+                            .min)));
+                        const dashOffset = this.arc270 * (1 - normalized);
+                        this.valArc.setAttribute('stroke-dashoffset', dashOffset.toFixed(2));
+                        this.valArc.setAttribute('stroke', getGaugeColor(newValue, cfg));
+                        this.valText.textContent = newValue.toFixed(newValue % 1 === 0 ? 0 : 1);
+                    },
+                };
+            }
+
+            // ============ BUILD GAUGES ============
+            const spoofedContainer = document.getElementById('spoofedGauges');
+            const realContainer = document.getElementById('realGauges');
+            const spoofedGaugeObjs = [];
+            const realGaugeObjs = [];
+
+            GAUGE_CONFIGS.forEach(cfg => {
+                // Spoofed gauge
+                const sWrapper = document.createElement('div');
+                sWrapper.className = 'gauge-container';
+                const sAlarmDot = document.createElement('div');
+                sAlarmDot.className = 'alarm-dot green';
+                sWrapper.appendChild(sAlarmDot);
+                const sObj = createGaugeSVG(cfg, cfg.spoofedVal);
+                sWrapper.appendChild(sObj.svg);
+                spoofedContainer.appendChild(sWrapper);
+                spoofedGaugeObjs.push({ obj: sObj, alarmDot: sAlarmDot, cfg });
+
+                // Real gauge
+                const rWrapper = document.createElement('div');
+                rWrapper.className = 'gauge-container';
+                const rAlarmDot = document.createElement('div');
+                rAlarmDot.className = 'alarm-dot red';
+                rWrapper.appendChild(rAlarmDot);
+                const rObj = createGaugeSVG(cfg, cfg.realVal);
+                rWrapper.appendChild(rObj.svg);
+                realContainer.appendChild(rWrapper);
+                realGaugeObjs.push({ obj: rObj, alarmDot: rAlarmDot, cfg });
+            });
+
+            // ============ PROTOCOL ANALYZER - PACKET DATA ============
+            const packetData = [{
+                no: 1,
+                time: '14:32:01.104',
+                src: '192.168.1.10',
+                dst: '192.168.1.200',
+                protocol: 'Modbus/TCP',
+                length: 66,
+                info: 'Query: Read Holding Registers (FC=03) — Regs 40001-40005',
+                infoClass: '',
+                isSuspicious: false,
+                detailType: 'request',
+                detail: {
+                    transId: '0x002A',
+                    protoId: '0x0000',
+                    len: '0x0006',
+                    unitId: '0x01',
+                    funcCode: '0x03 (Read Holding Registers)',
+                    startAddr: '0x0000 (40001)',
+                    quantity: '0x0005 (5 registers)',
+                    hexDump: '00 2A 00 00 00 06 01 03 00 00 00 05',
+                },
+            }, {
+                no: 2,
+                time: '14:32:01.128',
+                src: '192.168.1.200',
+                dst: '192.168.1.10',
+                protocol: 'Modbus/TCP',
+                length: 78,
+                info: '⚠ Response (PLC侧真实值): RPM=1410Hz Temp=78°C Vib=8.7 Pres=5.8 Valve=82%',
+                infoClass: 'real-highlight',
+                isSuspicious: false,
+                detailType: 'response-real',
+                detail: {
+                    transId: '0x002A',
+                    protoId: '0x0000',
+                    len: '0x000D',
+                    unitId: '0x01',
+                    funcCode: '0x03',
+                    byteCount: '0x0A (10 bytes)',
+                    registers: [
+                        { addr: '40001', name: 'RPM', valueHex: '0x0582', valueDec: 1410, unit: 'Hz' },
+                        { addr: '40002', name: 'Temp', valueHex: '0x004E', valueDec: 78, unit: '°C' },
+                        { addr: '40003', name: 'Vib', valueHex: '0x0057', valueDec: 87, unit: '0.1mm/s→8.7' },
+                        { addr: '40004', name: 'Pres', valueHex: '0x003A', valueDec: 58, unit: '0.1bar→5.8' },
+                        { addr: '40005', name: 'Valve', valueHex: '0x0052', valueDec: 82, unit: '%' },
+                    ],
+                    hexDump: '00 2A 00 00 00 0D 01 03 0A 05 82 00 4E 00 57 00 3A 00 52',
+                    note: '这是PLC实际发出的响应——离心机处于危险状态',
+                },
+            }, {
+                no: 3,
+                time: '14:32:01.131',
+                src: '192.168.1.200',
+                dst: '192.168.1.10',
+                protocol: 'Modbus/TCP',
+                length: 78,
+                info: '🚨 Response (HMI侧-被篡改): RPM=1064Hz Temp=42°C Vib=1.2 Pres=2.1 Valve=45%',
+                infoClass: 'spoofed-highlight',
+                isSuspicious: true,
+                detailType: 'response-spoofed',
+                detail: {
+                    transId: '0x002A',
+                    protoId: '0x0000',
+                    len: '0x000D',
+                    unitId: '0x01',
+                    funcCode: '0x03',
+                    byteCount: '0x0A',
+                    registers: [
+                        { addr: '40001', name: 'RPM', valueHex: '0x0428', valueDec: 1064, unit: 'Hz',
+                            modified: true },
+                        { addr: '40002', name: 'Temp', valueHex: '0x002A', valueDec: 42, unit: '°C',
+                            modified: true },
+                        { addr: '40003', name: 'Vib', valueHex: '0x000C', valueDec: 12, unit: '0.1mm/s→1.2',
+                            modified: true },
+                        { addr: '40004', name: 'Pres', valueHex: '0x0015', valueDec: 21, unit: '0.1bar→2.1',
+                            modified: true },
+                        { addr: '40005', name: 'Valve', valueHex: '0x002D', valueDec: 45, unit: '%',
+                            modified: true },
+                    ],
+                    hexDump: '00 2A 00 00 00 0D 01 03 0A <span class="hl">04 28 00 2A 00 0C 00 15 00 2D</span>',
+                    note: '⚠ 攻击者截获了PLC的真实响应(#2)，将寄存器值替换为正常值后发送给HMI',
+                },
+            }, {
+                no: 4,
+                time: '14:32:02.401',
+                src: '192.168.1.10',
+                dst: '192.168.1.200',
+                protocol: 'Modbus/TCP',
+                length: 66,
+                info: 'Query: Read Holding Registers (FC=03) — Regs 40001-40005',
+                infoClass: '',
+                isSuspicious: false,
+                detailType: 'request',
+                detail: {
+                    transId: '0x002B',
+                    protoId: '0x0000',
+                    len: '0x0006',
+                    unitId: '0x01',
+                    funcCode: '0x03',
+                    startAddr: '0x0000',
+                    quantity: '0x0005',
+                    hexDump: '00 2B 00 00 00 06 01 03 00 00 00 05',
+                },
+            }, {
+                no: 5,
+                time: '14:32:02.424',
+                src: '192.168.1.200',
+                dst: '192.168.1.10',
+                protocol: 'Modbus/TCP',
+                length: 78,
+                info: '⚠ Response (PLC侧真实值): RPM=1412Hz Temp=79°C Vib=9.1 Pres=6.0 Valve=83%',
+                infoClass: 'real-highlight',
+                isSuspicious: false,
+                detailType: 'response-real',
+                detail: {
+                    transId: '0x002B',
+                    protoId: '0x0000',
+                    len: '0x000D',
+                    unitId: '0x01',
+                    funcCode: '0x03',
+                    byteCount: '0x0A',
+                    registers: [
+                        { addr: '40001', name: 'RPM', valueHex: '0x0584', valueDec: 1412, unit: 'Hz' },
+                        { addr: '40002', name: 'Temp', valueHex: '0x004F', valueDec: 79, unit: '°C' },
+                        { addr: '40003', name: 'Vib', valueHex: '0x005B', valueDec: 91, unit: '0.1mm/s→9.1' },
+                        { addr: '40004', name: 'Pres', valueHex: '0x003C', valueDec: 60, unit: '0.1bar→6.0' },
+                        { addr: '40005', name: 'Valve', valueHex: '0x0053', valueDec: 83, unit: '%' },
+                    ],
+                    hexDump: '00 2B 00 00 00 0D 01 03 0A 05 84 00 4F 00 5B 00 3C 00 53',
+                    note: 'PLC真实值持续恶化——转速、温度、振动均在上升',
+                },
+            }, {
+                no: 6,
+                time: '14:32:02.427',
+                src: '192.168.1.200',
+                dst: '192.168.1.10',
+                protocol: 'Modbus/TCP',
+                length: 78,
+                info: '🚨 Response (HMI侧-被篡改): RPM=1065Hz Temp=42°C Vib=1.3 Pres=2.1 Valve=45%',
+                infoClass: 'spoofed-highlight',
+                isSuspicious: true,
+                detailType: 'response-spoofed',
+                detail: {
+                    transId: '0x002B',
+                    protoId: '0x0000',
+                    len: '0x000D',
+                    unitId: '0x01',
+                    funcCode: '0x03',
+                    byteCount: '0x0A',
+                    registers: [
+                        { addr: '40001', name: 'RPM', valueHex: '0x0429', valueDec: 1065, unit: 'Hz',
+                            modified: true },
+                        { addr: '40002', name: 'Temp', valueHex: '0x002A', valueDec: 42, unit: '°C',
+                            modified: true },
+                        { addr: '40003', name: 'Vib', valueHex: '0x000D', valueDec: 13, unit: '0.1mm/s→1.3',
+                            modified: true },
+                        { addr: '40004', name: 'Pres', valueHex: '0x0015', valueDec: 21, unit: '0.1bar→2.1',
+                            modified: true },
+                        { addr: '40005', name: 'Valve', valueHex: '0x002D', valueDec: 45, unit: '%',
+                            modified: true },
+                    ],
+                    hexDump: '00 2B 00 00 00 0D 01 03 0A <span class="hl">04 29 00 2A 00 0D 00 15 00 2D</span>',
+                    note: '⚠ 攻击者再次篡改响应——HMI显示的值几乎不变，而真实值在持续恶化。这是典型的"录制-回放"欺骗。',
+                },
+            }, {
+                no: 7,
+                time: '14:32:03.100',
+                src: '192.168.1.10',
+                dst: '192.168.1.200',
+                protocol: 'Modbus/TCP',
+                length: 66,
+                info: 'Query: Write Single Register (FC=06) — Reg 40006 Setpoint=1100Hz',
+                infoClass: '',
+                isSuspicious: false,
+                detailType: 'write-request',
+                detail: {
+                    transId: '0x002C',
+                    protoId: '0x0000',
+                    len: '0x0006',
+                    unitId: '0x01',
+                    funcCode: '0x06 (Write Single Register)',
+                    regAddr: '0x0005 (40006 — Speed Setpoint)',
+                    valueHex: '0x044C',
+                    valueDec: 1100,
+                    hexDump: '00 2C 00 00 00 06 01 06 00 05 04 4C',
+                    note: '操作员尝试将转速设定值调整为1100Hz（正常操作）',
+                },
+            }, {
+                no: 8,
+                time: '14:32:03.105',
+                src: '192.168.1.200',
+                dst: '192.168.1.200',
+                protocol: 'Modbus/TCP',
+                length: 66,
+                info: '🚨 Write (被篡改): Reg 40006 Setpoint=1450Hz — 攻击者修改了设定值！',
+                infoClass: 'spoofed-highlight',
+                isSuspicious: true,
+                detailType: 'write-spoofed',
+                detail: {
+                    transId: '0x002C',
+                    protoId: '0x0000',
+                    len: '0x0006',
+                    unitId: '0x01',
+                    funcCode: '0x06',
+                    regAddr: '0x0005 (40006)',
+                    valueHex: '0x05AA',
+                    valueDec: 1450,
+                    hexDump: '00 2C 00 00 00 06 01 06 00 05 <span class="hl">05 AA</span>',
+                    note: '⚠ 攻击者拦截了操作员的写入请求，将设定值从1100Hz改为1450Hz——远超安全极限！',
+                },
+            }, ];
+
+            // ============ BUILD PACKET TABLE ============
+            const pcapBody = document.getElementById('pcapBody');
+            const taggedPackets = new Set();
+
+            packetData.forEach((pkt, idx) => {
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-pkt-idx', idx);
+                tr.innerHTML = `
+                    <td class="pcap-no">${pkt.no}</td>
+                    <td>${pkt.time}</td>
+                    <td class="pcap-src">${pkt.src}</td>
+                    <td class="pcap-dst">${pkt.dst}</td>
+                    <td>${pkt.protocol}</td>
+                    <td class="pcap-info ${pkt.infoClass}">${pkt.info}</td>
+                    <td><button class="tag-btn" data-idx="${idx}" onclick="toggleTag(event, ${idx})">🏴 标记可疑</button></td>
+                `;
+                tr.style.cursor = 'pointer';
+                tr.addEventListener('click', function(e) {
+                    if (e.target.closest('.tag-btn')) return;
+                    togglePacketDetail(tr, idx);
+                });
+                pcapBody.appendChild(tr);
+
+                // Detail row (hidden)
+                const detailTr = document.createElement('tr');
+                detailTr.className = 'packet-detail-row';
+                detailTr.setAttribute('data-detail-idx', idx);
+                detailTr.style.display = 'none';
+                detailTr.innerHTML = `
+                    <td colspan="7">
+                        <div class="packet-detail-panel" id="detailPanel${idx}">
+                            ${buildDetailHTML(pkt)}
+                        </div>
+                    </td>
+                `;
+                pcapBody.appendChild(detailTr);
+            });
+
+            function buildDetailHTML(pkt) {
+                const d = pkt.detail;
+                let html = `
+                    <div><span class="field-label">Transaction ID:</span> <span class="field-value">${d.transId}</span></div>
+                    <div><span class="field-label">Protocol ID:</span> <span class="field-value">${d.protoId}</span></div>
+                    <div><span class="field-label">Length:</span> <span class="field-value">${d.len}</span></div>
+                    <div><span class="field-label">Unit ID:</span> <span class="field-value">${d.unitId}</span></div>
+                    <div><span class="field-label">Function Code:</span> <span class="field-value">${d.funcCode}</span></div>`;
+                if (d.startAddr) {
+                    html +=
+                        `<div><span class="field-label">Start Address:</span> <span class="field-value">${d.startAddr}</span></div>`;
+                }
+                if (d.quantity) {
+                    html +=
+                        `<div><span class="field-label">Quantity:</span> <span class="field-value">${d.quantity}</span></div>`;
+                }
+                if (d.byteCount) {
+                    html +=
+                        `<div><span class="field-label">Byte Count:</span> <span class="field-value">${d.byteCount}</span></div>`;
+                }
+                if (d.regAddr) {
+                    html +=
+                        `<div><span class="field-label">Register Addr:</span> <span class="field-value">${d.regAddr}</span></div>`;
+                }
+                if (d.valueHex) {
+                    html +=
+                        `<div><span class="field-label">Value:</span> <span class="field-value ${d.valueDec > 1300 ? 'modified' : ''}">${d.valueHex} (${d.valueDec})</span></div>`;
+                }
+                if (d.registers && d.registers.length > 0) {
+                    html += `<div style="grid-column:1/-1;margin-top:4px;"><span class="field-label">寄存器值详解:</span></div>`;
+                    d.registers.forEach(r => {
+                        const modClass = r.modified ? ' modified' : '';
+                        html +=
+                            `<div><span class="field-label">${r.addr} (${r.name}):</span> <span class="field-value${modClass}">${r.valueHex} → ${r.valueDec} ${r.unit}</span></div>`;
+                    });
+                }
+                if (d.note) {
+                    html +=
+                        `<div style="grid-column:1/-1;margin-top:6px;padding:8px;background:#1a1510;border-radius:4px;color:var(--amber);font-size:0.75rem;">📌 ${d.note}</div>`;
+                }
+                html +=
+                    `<div class="hex-dump" style="grid-column:1/-1;">📦 Hex Dump: ${d.hexDump || 'N/A'}</div>`;
+                return html;
+            }
+
+            let expandedIdx = -1;
+
+            function togglePacketDetail(tr, idx) {
+                const detailTr = document.querySelector(`[data-detail-idx="${idx}"]`);
+                if (expandedIdx === idx) {
+                    // Collapse
+                    detailTr.style.display = 'none';
+                    tr.classList.remove('expanded');
+                    expandedIdx = -1;
+                } else {
+                    // Collapse previous
+                    if (expandedIdx >= 0) {
+                        const prevTr = document.querySelector(`[data-pkt-idx="${expandedIdx}"]`);
+                        const prevDetail = document.querySelector(`[data-detail-idx="${expandedIdx}"]`);
+                        if (prevTr) prevTr.classList.remove('expanded');
+                        if (prevDetail) prevDetail.style.display = 'none';
+                    }
+                    // Expand new
+                    detailTr.style.display = '';
+                    tr.classList.add('expanded');
+                    expandedIdx = idx;
+                    // Auto-scroll detail into view
+                    detailTr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            }
+
+            window.toggleTag = function(event, idx) {
+                event.stopPropagation();
+                const tr = document.querySelector(`[data-pkt-idx="${idx}"]`);
+                const btn = tr.querySelector('.tag-btn');
+                if (taggedPackets.has(idx)) {
+                    taggedPackets.delete(idx);
+                    tr.classList.remove('tagged');
+                    btn.classList.remove('tagged-active');
+                    btn.textContent = '🏴 标记可疑';
+                } else {
+                    taggedPackets.add(idx);
+                    tr.classList.add('tagged');
+                    btn.classList.add('tagged-active');
+                    btn.textContent = '✅ 已标记';
+                    // Also expand the packet
+                    if (expandedIdx !== idx) {
+                        togglePacketDetail(tr, idx);
+                    }
+                }
+                updateProgress();
+            };
+
+            function getSuspiciousIndices() {
+                return packetData
+                    .map((p, i) => (p.isSuspicious ? i : -1))
+                    .filter(i => i >= 0);
+            }
+
+            window.verifyTaggedPackets = function() {
+                const suspicious = new Set(getSuspiciousIndices());
+                const feedbackDiv = document.getElementById('verifyFeedback');
+                if (taggedPackets.size === 0) {
+                    feedbackDiv.innerHTML =
+                        '<div class="feedback-box info">请先在协议分析器中点击 <strong>🏴 标记可疑</strong> 按钮标记你认为可疑的报文。</div>';
+                    return;
+                }
+                let correctTags = 0;
+                let falsePositives = 0;
+                taggedPackets.forEach(idx => {
+                    if (suspicious.has(idx)) correctTags++;
+                    else falsePositives++;
+                });
+                const missedCount = suspicious.size - correctTags;
+                if (correctTags >= suspicious.size && falsePositives === 0) {
+                    feedbackDiv.innerHTML =
+                        '<div class="feedback-box success">✅ 完美！你正确标记了所有被篡改的报文（#3、#6、#8）。攻击者拦截并修改了Modbus响应和写入请求。</div>';
+                    earnAchievement('ach2');
+                } else if (correctTags >= 2 && falsePositives <= 1) {
+                    feedbackDiv.innerHTML =
+                        `<div class="feedback-box partial">🟡 不错！你标记了 ${correctTags} 个正确的可疑报文。${missedCount > 0 ? '还有 ' + missedCount + ' 个被篡改报文未标记。' : ''}${falsePositives > 0 ? '有 ' + falsePositives + ' 个正常报文被误标记。' : ''}请再仔细检查。</div>`;
+                } else if (correctTags >= 1) {
+                    feedbackDiv.innerHTML =
+                        '<div class="feedback-box info">🔵 你找到了一些线索，但还有更多可疑报文。提示：关注那些<strong>寄存器值明显不同</strong>的响应报文，以及<strong>写入值被修改</strong>的报文。</div>';
+                } else {
+                    feedbackDiv.innerHTML =
+                        '<div class="feedback-box info">🔵 你标记的报文看起来都是正常的。请仔细对比<strong>PLC侧真实响应</strong>和<strong>HMI侧收到的响应</strong>之间的寄存器值差异。</div>';
+                }
+                if (correctTags >= suspicious.size && falsePositives === 0) {
+                    earnAchievement('ach2');
+                }
+                updateProgress();
+            };
+
+            // ============ ANALYSIS SUBMISSION ============
+            const KEYWORDS = [
+                { kw: '中间人', alias: ['mitm', 'man-in-the-middle', '中间人攻击'] },
+                { kw: 'Modbus', alias: ['modbus'] },
+                { kw: '拦截', alias: ['截获', 'intercept', '捕获'] },
+                { kw: '篡改', alias: ['修改', '伪造', 'tamper', 'modify', 'spoof', '欺骗'] },
+                { kw: '响应', alias: ['response', '应答', '回报文'] },
+                { kw: '寄存器', alias: ['register', 'holding register'] },
+                { kw: 'HMI', alias: ['hmi', '人机界面', '操作员界面'] },
+                { kw: '回放', alias: ['replay', '录制', 'record', '循环'] },
+                { kw: 'PLC', alias: ['plc', '控制器'] },
+                { kw: '写入', alias: ['write', '设定值', 'setpoint'] },
+            ];
+
+            window.submitAnalysis = function() {
+                const input = document.getElementById('analysisInput').value.trim().toLowerCase();
+                const feedbackDiv = document.getElementById('analysisFeedback');
+                const keywordDisplay = document.getElementById('keywordDisplay');
+                if (input.length < 20) {
+                    feedbackDiv.className = 'feedback-box info';
+                    feedbackDiv.textContent = '请提供更详细的分析（至少20个字符）。描述攻击者如何实现了HMI欺骗。';
+                    feedbackDiv.style.display = 'block';
+                    return;
+                }
+                const matchedKeywords = [];
+                const allKeywords = [];
+                KEYWORDS.forEach(kwGroup => {
+                    const allTerms = [kwGroup.kw.toLowerCase(), ...kwGroup.alias.map(a => a
+                        .toLowerCase())];
+                    let matched = false;
+                    for (const term of allTerms) {
+                        if (input.includes(term)) {
+                            matched = true;
+                            break;
+                        }
+                    }
+                    allKeywords.push({ display: kwGroup.kw, matched });
+                    if (matched) matchedKeywords.push(kwGroup.kw);
+                });
+                // Display keyword match status
+                keywordDisplay.innerHTML = allKeywords.map(k =>
+                    `<span class="${k.matched ? 'keyword-match' : 'keyword-miss'}">${k.matched ? '✅' : '⬜'} ${k.display}</span>`
+                ).join('');
+
+                const score = matchedKeywords.length;
+                if (score >= 7) {
+                    feedbackDiv.className = 'feedback-box success';
+                    feedbackDiv.textContent =
+                        '✅ 出色！你的分析涵盖了攻击的关键要素：中间人攻击、Modbus协议篡改、响应欺骗、寄存器值伪造、以及回放攻击手法。这与Stuxnet攻击手法高度一致。';
+                    feedbackDiv.style.display = 'block';
+                    earnAchievement('ach3');
+                    revealFlag();
+                } else if (score >= 4) {
+                    feedbackDiv.className = 'feedback-box partial';
+                    feedbackDiv.textContent =
+                        `🟡 分析不错（覆盖了 ${score}/10 个关键要素）。请补充更多细节：攻击者是如何维持欺骗的？写入请求是否也被篡改？`;
+                    feedbackDiv.style.display = 'block';
+                } else if (score >= 2) {
+                    feedbackDiv.className = 'feedback-box info';
+                    feedbackDiv.textContent =
+                        `🔵 分析有待完善（覆盖了 ${score}/10 个关键要素）。请思考：攻击者处于什么位置？篡改了哪些类型的数据？使用了什么手法让操作员无法察觉？`;
+                    feedbackDiv.style.display = 'block';
+                } else {
+                    feedbackDiv.className = 'feedback-box info';
+                    feedbackDiv.textContent =
+                        '🔵 请尝试描述攻击场景。提示：攻击者在HMI和PLC之间处于什么位置？他如何让操作员看到正常数据而实际设备却在危险运行？';
+                    feedbackDiv.style.display = 'block';
+                }
+                updateProgress();
+            };
+
+            // ============ ACHIEVEMENT SYSTEM ============
+            const earnedAchievements = new Set();
+            let allStepsComplete = false;
+
+            function earnAchievement(id) {
+                if (earnedAchievements.has(id)) return;
+                earnedAchievements.add(id);
+                const el = document.getElementById(id);
+                if (el) {
+                    el.classList.add('earned');
+                    el.style.animation = 'flag-reveal 0.5s ease-out';
+                }
+                // Auto-earn ach1 when student has viewed both dashboards (they load visible, so earn on first interaction)
+                if (id === 'ach2' && !earnedAchievements.has('ach1')) {
+                    earnAchievement('ach1');
+                }
+                updateProgress();
+                checkAllComplete();
+            }
+
+            function checkAllComplete() {
+                if (earnedAchievements.has('ach1') && earnedAchievements.has('ach2') && earnedAchievements.has(
+                        'ach3')) {
+                    allStepsComplete = true;
+                    revealFlag();
+                }
+            }
+
+            function revealFlag() {
+                if (!allStepsComplete && !(earnedAchievements.has('ach3'))) return;
+                const flagPanel = document.getElementById('flagPanel');
+                flagPanel.classList.add('revealed');
+                earnAchievement('ach4');
+                // Update all progress steps
+                document.querySelectorAll('.progress-step').forEach(s => s.classList.add('done'));
+                document.querySelectorAll('.progress-line').forEach(l => l.classList.add('done'));
+            }
+
+            function updateProgress() {
+                const ps1 = document.getElementById('ps1');
+                const ps2 = document.getElementById('ps2');
+                const ps3 = document.getElementById('ps3');
+                const ps4 = document.getElementById('ps4');
+                const pl1 = document.getElementById('pl1');
+                const pl2 = document.getElementById('pl2');
+                const pl3 = document.getElementById('pl3');
+
+                // Step 1: Student has viewed the dashboard (always active on load, marked done when they interact)
+                ps1.classList.add('done');
+                ps1.classList.remove('active');
+
+                // Step 2: Tagged packets correctly
+                if (earnedAchievements.has('ach2')) {
+                    ps2.classList.add('done');
+                    ps2.classList.remove('active');
+                    pl1.classList.add('done');
+                } else if (taggedPackets.size > 0) {
+                    ps2.classList.add('active');
+                }
+
+                // Step 3: Submitted analysis
+                if (earnedAchievements.has('ach3')) {
+                    ps3.classList.add('done');
+                    ps3.classList.remove('active');
+                    pl2.classList.add('done');
+                } else if (document.getElementById('analysisInput').value.trim().length > 20) {
+                    ps3.classList.add('active');
+                }
+
+                // Step 4: Flag captured
+                if (earnedAchievements.has('ach4')) {
+                    ps4.classList.add('done');
+                    ps4.classList.remove('active');
+                    pl3.classList.add('done');
+                }
+            }
+
+            // Auto-earn ach1 after a few seconds (student has seen the dual-view dashboard)
+            setTimeout(() => {
+                if (!earnedAchievements.has('ach1')) {
+                    earnAchievement('ach1');
+                }
+            }, 3000);
+
+            // ============ FULL ANALYSIS REVEAL ============
+            window.revealFullAnalysis = function() {
+                const report = document.getElementById('fullAnalysisReport');
+                if (report.style.display === 'none' || !report.style.display) {
+                    report.style.display = 'block';
+                    report.innerHTML = `
+                        <h4 style="color:var(--amber);margin-bottom:10px;">📖 完整攻击分析报告</h4>
+                        <p><strong>攻击类型：</strong>基于Modbus TCP协议的中间人（MITM）攻击——HMI界面欺骗与数据篡改</p>
+                        <p><strong>攻击手法（震网Stuxnet经典模式）：</strong></p>
+                        <ol style="padding-left:20px;color:var(--text2);">
+                            <li><strong>流量拦截：</strong>攻击者在HMI（192.168.1.10）与PLC（192.168.1.200）之间的网络路径上建立中间人位置，拦截所有Modbus TCP通信。</li>
+                            <li><strong>响应篡改（录制-回放）：</strong>攻击者截获PLC发出的<em>真实</em>Read Holding Registers响应（报文#2、#5），将其中的寄存器值替换为<em>正常范围</em>的伪造值（报文#3、#6），然后发送给HMI。操作员看到的始终是"一切正常"。</li>
+                            <li><strong>写入劫持：</strong>当操作员尝试将转速设定值调整为安全的1100Hz时（报文#7），攻击者拦截该写入请求并将值改为危险的1450Hz（报文#8），直接导致离心机超速运行。</li>
+                            <li><strong>持续性欺骗：</strong>伪造的HMI数据显示高度一致（RPM≈1064，Temp≈42°C），而真实PLC数据持续恶化（RPM从1410升至1412，Temp从78升至79°C）。这种"稳定得不自然"的数据本身就是异常信号。</li>
+                        </ol>
+                        <p style="margin-top:10px;"><strong>防御措施：</strong></p>
+                        <ul style="padding-left:20px;color:var(--text2);">
+                            <li>部署工业网络流量监控（如IDS/IPS），检测异常的Modbus响应模式</li>
+                            <li>对Modbus TCP通信实施<strong>加密与认证</strong>（如Modbus Security或OPC UA）</li>
+                            <li>在PLC侧设置<strong>独立的物理安全限值</strong>（如最大转速硬件保护）</li>
+                            <li>建立<strong>带外验证通道</strong>：使用独立的传感器网络直接读取过程值，与HMI显示值进行交叉验证</li>
+                            <li>定期对HMI显示值与PLC寄存器进行<strong>哈希校验比对</strong></li>
+                        </ul>
+                        <p style="color:var(--text3);font-size:0.7rem;margin-top:12px;">// EDUCATIONAL PURPOSE ONLY — 本分析基于Stuxnet公开披露的攻击手法，仅用于授权教学环境</p>
+                    `;
+                    document.getElementById('revealAnalysisBtn').textContent = '📖 隐藏完整分析报告';
+                } else {
+                    report.style.display = 'none';
+                    document.getElementById('revealAnalysisBtn').textContent = '📖 查看完整分析报告';
+                }
+            };
+
+            // ============ PERIODIC DATA UPDATE (SIMULATED) ============
+            // Slightly vary real values to show the process is degrading
+            let updateCounter = 0;
+            setInterval(() => {
+                updateCounter++;
+                const drift = Math.sin(updateCounter * 0.3) * 0.5;
+                // Update real gauges with slight variations
+                const realUpdates = [1410 + updateCounter * 0.4 + drift, 78 + updateCounter * 0.3, 8.7 +
+                    updateCounter * 0.2, 5.8 + updateCounter * 0.15, 82 + updateCounter * 0.3
+                ];
+                realGaugeObjs.forEach((gObj, i) => {
+                    const newVal = Math.min(gObj.cfg.max, realUpdates[i]);
+                    gObj.obj.update(newVal);
+                });
+                // Update status banner time
+                const realBanner = document.getElementById('realBanner');
+                if (updateCounter > 5 && realBanner.textContent.indexOf('持续恶化') === -1) {
+                    realBanner.textContent = '⚠️ 危险！离心机超速运行 — 转速持续恶化 · 温度攀升 · 振动超标 · 即将解体！';
+                }
+            }, 4000);
+
+            // ============ INITIALIZATION ============
+            // Ensure progress step 1 is visible
+            document.getElementById('ps1').classList.add('active');
+            updateProgress();
+
+            console.log('%c🔐 工控安全实验已就绪 %c| %cHMI欺骗与数据篡改 %c| %cEDUCATIONAL PURPOSE ONLY',
+                'color:#f59e0b;font-size:1.2em;',
+                '',
+                'color:#ef4444;',
+                '',
+                'color:#64748b;font-size:0.8em;');
+            console.log('%c💡 提示：对比上下两排仪表 → 检查协议分析器 → 标记可疑报文 → 提交分析报告',
+                'color:#3b82f6;font-size:0.9em;');
+        })();
+    </script>
+</body>
+</html>

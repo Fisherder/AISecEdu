@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>PKI 证书信任链</title>
+<style>
+  html,body{margin:0;padding:0;background:#f8fafc;font-family:ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;color:#0f172a;}
+  .wrap{padding:16px;}
+  h2{font-size:18px;margin:0 0 4px;}
+  p.desc{font-size:12px;color:#64748b;margin:0 0 12px;}
+  svg{width:100%;height:auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>PKI 证书信任链</h2>
+  <p class="desc">展示 Root CA → Intermediate CA → 叶证书的信任层次结构</p>
+  <svg viewBox="0 0 930 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PKI 证书信任链">
+    <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker></defs>
+    <line x1="345" y1="91" x2="585" y2="91" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="451" y="82" width="28" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="465" y="95" text-anchor="middle" font-size="10" fill="#475569">签发</text><line x1="585" y1="91" x2="825" y2="91" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="691" y="82" width="28" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="705" y="95" text-anchor="middle" font-size="10" fill="#475569">签发</text><line x1="585" y1="91" x2="825" y2="171" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="691" y="122" width="28" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="705" y="135" text-anchor="middle" font-size="10" fill="#475569">签发</text><line x1="105" y1="91" x2="345" y2="91" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="191" y="82" width="68" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="225" y="95" text-anchor="middle" font-size="10" fill="#475569">信任锚（预装）</text><line x1="105" y1="171" x2="825" y2="91" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="439" y="122" width="52" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="465" y="135" text-anchor="middle" font-size="10" fill="#475569">验证叶证书</text><line x1="105" y1="171" x2="585" y2="91" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="315" y="122" width="60" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="345" y="135" text-anchor="middle" font-size="10" fill="#475569">验证中间CA</text><line x1="105" y1="171" x2="345" y2="91" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrow)"/><rect x="199" y="122" width="52" height="18" rx="4" fill="#ffffff" stroke="#e2e8f0"/><text x="225" y="135" text-anchor="middle" font-size="10" fill="#475569">验证根CA</text>
+    <g>
+        <rect x="270" y="64" width="150" height="54" rx="8" fill="#16a34a" opacity="0.12" stroke="#16a34a" stroke-width="1.6"/>
+        <text x="345" y="86" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">根CA</text>
+        <text x="345" y="104" text-anchor="middle" font-size="10" fill="#475569">信任锚点，离线安全保存并预装在客户端信任库中</text>
+      </g><g>
+        <rect x="510" y="64" width="150" height="54" rx="8" fill="#16a34a" opacity="0.12" stroke="#16a34a" stroke-width="1.6"/>
+        <text x="585" y="86" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">中间CA</text>
+        <text x="585" y="104" text-anchor="middle" font-size="10" fill="#475569">由根CA签发，用于向下签发用户/服务器证书</text>
+      </g><g>
+        <rect x="750" y="64" width="150" height="54" rx="8" fill="#d97706" opacity="0.12" stroke="#d97706" stroke-width="1.6"/>
+        <text x="825" y="86" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">服务器证书</text>
+        <text x="825" y="104" text-anchor="middle" font-size="10" fill="#475569">网站 example.com 使用的端实体证书</text>
+      </g><g>
+        <rect x="750" y="144" width="150" height="54" rx="8" fill="#d97706" opacity="0.12" stroke="#d97706" stroke-width="1.6"/>
+        <text x="825" y="166" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">客户端证书</text>
+        <text x="825" y="184" text-anchor="middle" font-size="10" fill="#475569">用户身份认证使用的端实体证书</text>
+      </g><g>
+        <rect x="30" y="64" width="150" height="54" rx="8" fill="#16a34a" opacity="0.12" stroke="#16a34a" stroke-width="1.6"/>
+        <text x="105" y="86" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">信任库</text>
+        <text x="105" y="104" text-anchor="middle" font-size="10" fill="#475569">客户端预装根CA证书，作为信任锚起点</text>
+      </g><g>
+        <rect x="30" y="144" width="150" height="54" rx="8" fill="#2563eb" opacity="0.12" stroke="#2563eb" stroke-width="1.6"/>
+        <text x="105" y="166" text-anchor="middle" font-size="13" font-weight="600" fill="#0f172a">信任链验证</text>
+        <text x="105" y="184" text-anchor="middle" font-size="10" fill="#475569">自下而上逐级验证证书签名、有效期与吊销状态</text>
+      </g>
+  </svg>
+</div>
+<script type="application/json" id="widget-config">{"type":"diagram","diagramType":"flowchart","title":"PKI 证书信任链","description":"展示 Root CA → Intermediate CA → 叶证书的信任层次结构","nodes":[{"id":"n1","label":"根CA","details":"信任锚点，离线安全保存并预装在客户端信任库中","kind":"control"},{"id":"n2","label":"中间CA","details":"由根CA签发，用于向下签发用户/服务器证书","kind":"control"},{"id":"n3","label":"服务器证书","details":"网站 example.com 使用的端实体证书","kind":"asset"},{"id":"n4","label":"客户端证书","details":"用户身份认证使用的端实体证书","kind":"asset"},{"id":"n5","label":"信任库","details":"客户端预装根CA证书，作为信任锚起点","kind":"control"},{"id":"n6","label":"信任链验证","details":"自下而上逐级验证证书签名、有效期与吊销状态","kind":"action"}],"edges":[{"from":"n1","to":"n2","label":"签发"},{"from":"n2","to":"n3","label":"签发"},{"from":"n2","to":"n4","label":"签发"},{"from":"n5","to":"n1","label":"信任锚（预装）"},{"from":"n6","to":"n3","label":"验证叶证书"},{"from":"n6","to":"n2","label":"验证中间CA"},{"from":"n6","to":"n1","label":"验证根CA"}]}</script>
+</body>
+</html>

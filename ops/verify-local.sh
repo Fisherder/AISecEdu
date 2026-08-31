@@ -93,7 +93,9 @@ pass "application systemd service is active"
 
 required_services=(
     prometheus grafana node-exporter db pgbouncer cache homefs
-    image-pull-worker nginx sshd dojofs watchdog cadvisor stats-worker ctfd
+    image-pull-worker teaching-worker teaching-interactive-worker \
+    teaching-authoring-worker teaching-authoring-worker-2 nginx sshd dojofs \
+    watchdog cadvisor stats-worker ctfd agent-runtime
 )
 for service in "${required_services[@]}"; do
     state=$(docker exec "$container" docker inspect -f '{{.State.Status}}' "$service")
@@ -105,7 +107,7 @@ done
 pass "all long-running inner services are running"
 
 if docker exec "$container" docker inspect -f '{{.State.Running}}' frontend 2>/dev/null | grep -qx true; then
-    echo "The optional frontend container must not run on the canonical AISecEdu UI deployment" >&2
+    echo "The optional frontend container must not run on the canonical 玄甲 UI deployment" >&2
     exit 1
 fi
 pass "the optional frontend service is not running"
@@ -120,7 +122,7 @@ for service in pwncollege-create-workspace-net-1 pwncollege-prometheus-generate-
 done
 pass "all one-shot initialization services completed"
 
-for service in db ctfd prometheus; do
+for service in db ctfd prometheus agent-runtime; do
     wait_for "$service health check" service_is_healthy "$service"
     health=$(docker exec "$container" docker inspect -f '{{.State.Health.Status}}' "$service")
     if [[ $health != healthy ]]; then
@@ -128,7 +130,7 @@ for service in db ctfd prometheus; do
         exit 1
     fi
 done
-pass "database, application, and metrics health checks are healthy"
+pass "database, application, global-agent runtime, and metrics health checks are healthy"
 
 prometheus_result=$(docker exec "$container" docker exec prometheus \
     wget -qO- 'http://127.0.0.1:9090/api/v1/query?query=up')
@@ -155,23 +157,50 @@ nginx_config=$(docker exec "$container" docker exec nginx nginx -T 2>&1)
 grep -Fq 'location ^~ /pwncollege_api/v1/learning/' <<<"$nginx_config"
 grep -Fq 'proxy_read_timeout 3600s' <<<"$nginx_config"
 grep -Fq 'listen 4443 ssl' <<<"$nginx_config"
+grep -Fq 'location ^~ /agent-runtime/' <<<"$nginx_config"
+grep -Fq 'proxy_pass http://agent_runtime_upstream' <<<"$nginx_config"
+grep -Fq 'proxy_set_header Cookie $agent_runtime_cookie' <<<"$nginx_config"
+if grep -Fq 'listen 4444' <<<"$nginx_config"; then
+    echo "A retired standalone runtime listener is still enabled" >&2
+    exit 1
+fi
 grep -Fq 'proxy_set_header Cookie $workspace_cookie' <<<"$nginx_config"
 grep -Fq 'proxy_cookie_path ~^.*$' <<<"$nginx_config"
 grep -Fq 'location ~ "^/w/(?P<container_id>[0-9a-f]{12})/auth/' <<<"$nginx_config"
 grep -Fq 'secure_link_hmac "$cookie_aisecedu_workspace_cap"' <<<"$nginx_config"
 ctfd_environment=$(docker exec "$container" docker inspect -f \
     '{{range .Config.Env}}{{println .}}{{end}}' ctfd)
-grep -Fq 'GUNICORN_CMD_ARGS=--timeout 3600 --graceful-timeout 3600' \
+grep -Eq '^GUNICORN_CMD_ARGS=.*--timeout 3600 .*--graceful-timeout 3600$' \
     <<<"$ctfd_environment"
 grep -Fxq "WORKSPACE_HTTPS_PORT=$workspace_https_port" <<<"$ctfd_environment"
 grep -Fxq 'DOJO_IP_MODE=true' <<<"$ctfd_environment"
 pass "AI learning requests retain aligned 3600-second proxy and worker windows"
+
+agent_runtime_health=$(curl -fsS \
+    --noproxy '*' \
+    --cacert "$repo_dir/data/local-tls/ca.crt" \
+    --resolve "$dojo_host:$https_port:$listen_address" \
+    "https://$dojo_host:$https_port/agent-runtime/api/health")
+grep -Fq '"status":"ok"' <<<"$agent_runtime_health"
+pass "global-agent runtime is available only under the canonical 玄甲 origin"
+
+legacy_runtime_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+    --noproxy '*' \
+    --cacert "$repo_dir/data/local-tls/ca.crt" \
+    --resolve "$dojo_host:$https_port:$listen_address" \
+    "https://$dojo_host:$https_port/openmaic/")
+[[ $legacy_runtime_code == 301 || $legacy_runtime_code == 302 || $legacy_runtime_code == 307 || $legacy_runtime_code == 308 ]]
+pass "retired product route no longer exposes an independent application"
 
 docker exec "$container" docker exec db pg_isready -q
 pass "PostgreSQL accepts connections"
 
 [[ $(docker exec "$container" docker exec cache redis-cli ping) == PONG ]]
 pass "Redis responds"
+
+teaching_worker_logs=$(docker exec "$container" docker logs teaching-worker 2>&1)
+grep -Fq 'Starting durable 玄甲 global-agent worker' <<<"$teaching_worker_logs"
+pass "durable teaching worker is consuming the Redis Stream"
 
 docker exec "$container" docker cp \
     /opt/pwn.college/ops/verify-ai-routing.py \
@@ -189,7 +218,7 @@ http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
 pass "HTTP redirects to HTTPS"
 
 lan_health=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/lan-health")
-[[ $lan_health == "AISecEdu LAN endpoint ready" ]]
+[[ $lan_health == "玄甲 LAN endpoint ready" ]]
 downloaded_fingerprint=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/local-tls.crt" \
     | openssl x509 -noout -fingerprint -sha256)
 local_fingerprint=$(openssl x509 -in "$repo_dir/data/local-tls/ca.crt" \
@@ -202,14 +231,14 @@ body=$(curl -sS --fail \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
     --resolve "$dojo_host:$https_port:$listen_address" \
     "https://$dojo_host:$https_port/")
-grep -Fq 'brand-mono-bold wordmark-large' <<<"$body"
-grep -Fq '在动手实践中学习网络安全。' <<<"$body"
-grep -Fq '<span class="brand-white">AISecEdu</span>' <<<"$body"
+grep -Fq 'class="product-home product-page"' <<<"$body"
+grep -Fq '从理解，到实战，再到可验证的成长' <<<"$body"
+grep -Fq '<strong>玄甲</strong>' <<<"$body"
 if grep -Fiq 'pwn.college' <<<"$body"; then
-    echo "Legacy pwn.college branding remains on the AISecEdu homepage" >&2
+    echo "Legacy pwn.college branding remains on the 玄甲 homepage" >&2
     exit 1
 fi
-pass "the AISecEdu course homepage renders with the local CA"
+pass "the 玄甲 course homepage renders with the local CA"
 
 session_headers=$(curl -sS -D - -o /dev/null \
     --noproxy '*' \
@@ -226,23 +255,30 @@ for path in /login /register /reset_password; do
         --cacert "$repo_dir/data/local-tls/ca.crt" \
         --resolve "$dojo_host:$https_port:$listen_address" \
         "https://$dojo_host:$https_port$path")
-    grep -Fq 'brand-mono-bold wordmark' <<<"$learner_page"
-    grep -Fq '>AISecEdu</span>' <<<"$learner_page"
+    grep -Fq 'class="product-brand"' <<<"$learner_page"
+    grep -Fq '<strong>玄甲</strong>' <<<"$learner_page"
     if grep -Fiq 'pwn.college' <<<"$learner_page"; then
         echo "Legacy pwn.college branding remains on $path" >&2
         exit 1
     fi
 done
-pass "authentication pages use AISecEdu branding"
+pass "authentication pages use 玄甲 branding"
 
-for asset in ui learning-common learning-overview learning-dashboard learning-studio learning-tutor learning-guide learning-score; do
+for asset in ui navbar learning-common learning-overview learning-dashboard learning-tutor learning-guide learning-score product-error course-admin self-learning-extend teacher-courses teaching-agent teaching-artifact; do
     curl -sS --fail -o /dev/null \
         --noproxy '*' \
         --cacert "$repo_dir/data/local-tls/ca.crt" \
         --resolve "$dojo_host:$https_port:$listen_address" \
         "https://$dojo_host:$https_port/themes/dojo_theme/static/js/dojo/$asset.min.js"
 done
-pass "all native learning theme scripts are served"
+for stylesheet in teaching-agent product-shell course-hub; do
+    curl -sS --fail -o /dev/null \
+        --noproxy '*' \
+        --cacert "$repo_dir/data/local-tls/ca.crt" \
+        --resolve "$dojo_host:$https_port:$listen_address" \
+        "https://$dojo_host:$https_port/themes/dojo_theme/static/css/$stylesheet.min.css"
+done
+pass "all active learning, teaching, and product-shell assets are served"
 
 if grep -Eq 'installAlertPromoter|promoteInlineAlert' \
     "$repo_dir/dojo_theme/static/js/dojo/ui.js"; then
@@ -252,11 +288,11 @@ fi
 unexpected_dialog_users=$(
     find "$repo_dir/dojo_theme/static/js/dojo" -maxdepth 1 -type f -name '*.js' \
         ! -name 'ui.js' \
-        ! -name 'learning-studio.js' \
-        -exec grep -El 'window\.AISecEduUI\.(notify|dialog)[[:space:]]*\(' {} + || true
+        ! -name 'teacher-courses.js' \
+        -exec grep -El 'window\.AISecEduUI\.dialog[[:space:]]*\(' {} + || true
 )
 if [[ -n $unexpected_dialog_users ]]; then
-    echo "Ordinary learner notices leaked into blocking dialogs:" >&2
+    echo "Unexpected blocking dialogs remain outside the deliberate teacher review flow:" >&2
     echo "$unexpected_dialog_users" >&2
     exit 1
 fi
@@ -265,21 +301,20 @@ native_dialog_users=$(
         -exec grep -El 'window\.(confirm|prompt|alert)[[:space:]]*\(' {} + || true
 )
 if [[ -n $native_dialog_users ]]; then
-    echo "Browser-native dialogs remain in the AISecEdu interface:" >&2
+    echo "Browser-native dialogs remain in the 玄甲 interface:" >&2
     echo "$native_dialog_users" >&2
     exit 1
 fi
-grep -Fq 'id="workspace-notification-banner"' \
+grep -Fq 'class="workspace-notification-banner"' \
     "$repo_dir/dojo_theme/templates/components/actionbar.html"
 grep -Fq 'pointer-events: none;' \
     "$repo_dir/dojo_theme/templates/components/actionbar.html"
-grep -Fq 'function showStudioNotice' \
-    "$repo_dir/dojo_theme/static/js/dojo/learning-studio.js"
-if grep -Eq 'id="studio-level"|id="studio-validate"' \
-    "$repo_dir/dojo_theme/templates/learning_studio.html"; then
-    echo "Teacher authoring still exposes manual strategy or validation controls" >&2
-    exit 1
-fi
+test ! -e "$repo_dir/dojo_theme/static/js/dojo/learning-studio.js"
+test ! -e "$repo_dir/dojo_theme/templates/learning_studio.html"
+grep -Fq '@learning.route("/dojo/<dojo>/studio")' \
+    "$repo_dir/dojo_plugin/pages/learning.py"
+grep -Fq 'query["tab"] = "questions"' \
+    "$repo_dir/dojo_plugin/pages/learning.py"
 if grep -Fq 'data.get("level"' \
     "$repo_dir/dojo_plugin/api/v1/learning.py"; then
     echo "Teacher-controlled strategy still reaches the authoring API" >&2
@@ -300,7 +335,7 @@ grep -Fq 'challengeAttemptWithTimeout' \
     "$repo_dir/dojo_theme/static/js/dojo/actionbar.js"
 grep -Fq '.finally(function () {' \
     "$repo_dir/dojo_theme/static/js/dojo/actionbar.js"
-grep -Fq 'id="challenge-stop"' \
+grep -Fq 'workspace-stop challenge-stop' \
     "$repo_dir/dojo_theme/templates/components/actionbar.html"
 grep -Fq '<span>重启</span>' \
     "$repo_dir/dojo_theme/templates/components/actionbar.html"
@@ -325,14 +360,14 @@ dojo_listing=$(curl -sS --fail \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
     --resolve "$dojo_host:$https_port:$listen_address" \
     "https://$dojo_host:$https_port/dojos")
-grep -Fq 'AISecEdu</span><span class="brand-dot brand-blink">.</span><span class="brand-green">课程</span>' <<<"$dojo_listing"
-grep -Fq 'class="container course-catalog"' <<<"$dojo_listing"
-grep -Fq 'class="card-list"' <<<"$dojo_listing"
+grep -Fq '<h1>发现课程</h1>' <<<"$dojo_listing"
+grep -Fq 'class="course-catalog product-page"' <<<"$dojo_listing"
+grep -Fq 'class="sc-grid"' <<<"$dojo_listing"
 if grep -Fiq 'pwn.college' <<<"$dojo_listing"; then
     echo "Legacy pwn.college branding remains in the course catalog" >&2
     exit 1
 fi
-pass "the grouped AISecEdu course catalog renders directly"
+pass "the grouped 玄甲 course catalog renders directly"
 
 forgot_redirect=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' \
     --noproxy '*' \
@@ -349,7 +384,7 @@ if [[ -n $future_host ]]; then
         --resolve "$future_host:$https_port:$listen_address" \
         "https://$future_host:$https_port/dojos")
     [[ $future_redirect == "308 https://$dojo_host/dojos" || $future_redirect == "308 https://$dojo_host:$https_port/dojos" ]]
-    pass "the historical Future host redirects to the canonical AISecEdu UI"
+    pass "the historical Future host redirects to the canonical 玄甲 UI"
 fi
 
 auth_config=$(curl -sS --fail \
@@ -359,8 +394,8 @@ auth_config=$(curl -sS --fail \
     "https://$dojo_host:$https_port/pwncollege_api/v1/auth/config")
 grep -Fq 'registrationEnabled' <<<"$auth_config"
 commitment=$(jq -r '.data.commitment.text' <<<"$auth_config")
-grep -Fq 'AISecEdu 课程题目' <<<"$commitment"
-if grep -Fq 'AISecEdu DOJO' <<<"$commitment"; then
+grep -Fq '玄甲课程题目' <<<"$commitment"
+if grep -Fq '玄甲 DOJO' <<<"$commitment"; then
     echo "Legacy product name was returned by authentication configuration" >&2
     exit 1
 fi
@@ -400,7 +435,7 @@ workspace_trust=$(curl -sS --fail \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
     --resolve "$workspace_host:$workspace_https_port:$listen_address" \
     "https://$workspace_host:$workspace_https_port/trust-check")
-[[ $workspace_trust == "AISecEdu Workspace TLS is trusted and reachable" ]]
+[[ $workspace_trust == "玄甲 Workspace TLS is trusted and reachable" ]]
 pass "the IP Workspace port is reachable with the local CA"
 
 unsigned_code=$(curl -sS -o /dev/null -w '%{http_code}' \

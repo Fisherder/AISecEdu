@@ -4,32 +4,40 @@
 
 {% block content %}
 <div id="learning-guide" class="guide-shell">
-  <aside class="guide-sidebar" aria-label="Guide 对话列表">
+  <aside class="guide-sidebar" aria-label="AI 学习助手对话列表">
     <div class="guide-sidebar-header">
-      <a href="/guide" class="guide-wordmark">AISecEdu<span>.</span>Guide</a>
+      <a href="/guide" class="guide-wordmark">玄甲<span>.</span>Agent</a>
       <button id="guide-new" type="button" class="btn guide-new-button">
         <i class="fas fa-plus"></i><span>新建对话</span>
       </button>
     </div>
     <div id="guide-thread-list" class="guide-thread-list"></div>
+    <section class="guide-agent-context" aria-label="学习工作区与记忆">
+      <div class="guide-agent-context-heading"><strong>我的创作</strong><a href="/learning/extend">全部</a></div>
+      <div id="guide-workspace-list" class="guide-agent-context-list"></div>
+      <div class="guide-agent-context-heading"><strong>长期记忆</strong><span>可管理</span></div>
+      <div id="guide-memory-list" class="guide-agent-context-list"></div>
+      <div class="guide-agent-context-heading"><strong>课程内容</strong><a href="/student">今天</a></div>
+      <div id="guide-resource-list" class="guide-agent-context-list"></div>
+    </section>
     <div class="guide-sidebar-footer">
-      <a href="/learning"><i class="fas fa-chart-line"></i> 学习概览</a>
+      <a href="/student"><i class="fas fa-chart-line"></i> 今天</a>
       <a href="/dojos"><i class="fas fa-graduation-cap"></i> 课程</a>
     </div>
   </aside>
 
-  <main class="guide-main">
+  <div class="guide-main">
     <header class="guide-header">
       <button id="guide-sidebar-toggle" class="guide-mobile-toggle" type="button" aria-label="展开或收起对话列表">
         <i class="fas fa-bars"></i>
       </button>
       <div class="guide-header-copy">
-        <h1>Guide</h1>
-        <p>基于真实学习证据的个人学习顾问</p>
+        <h1>AI 学习助手</h1>
+        <p>理解目标、调用学习工具，并用真实证据持续推进</p>
       </div>
       <div class="guide-model-state">
         <span class="guide-live-dot"></span>
-        <span>DeepSeek V4 Flash 已连接</span>
+        <span>AI 学习助手已就绪</span>
       </div>
     </header>
 
@@ -47,7 +55,7 @@
         <div class="guide-avatar"><i class="fas fa-compass"></i></div>
         <div class="guide-message">
           <div class="guide-thinking-dots"><span></span><span></span><span></span></div>
-          <small>正在分析你的学习证据…</small>
+          <small>正在理解要求并选择所需能力…</small>
         </div>
       </div>
     </section>
@@ -60,7 +68,7 @@
           <i class="fas fa-paperclip" aria-hidden="true"></i>
           <span class="sr-only">引用题目</span>
         </button>
-        <textarea id="guide-question" rows="1" maxlength="6000" placeholder="向 Guide 发送消息；输入 @ 可引用题目…"></textarea>
+        <textarea id="guide-question" rows="1" maxlength="6000" placeholder="直接告诉智能体你想分析、学习、制作或继续什么；输入 @ 可引用题目…"></textarea>
         <button id="guide-send" class="guide-send" type="button" aria-label="发送消息">
           <i class="fas fa-arrow-up"></i>
         </button>
@@ -68,7 +76,7 @@
           <div class="guide-reference-picker-header">
             <div>
               <strong>选择本对话题目</strong>
-              <small>选中后持续生效；Guide 只会围绕这些题目的真实记录回答</small>
+              <small>选中后持续生效；AI 学习助手只会围绕这些题目的真实记录回答</small>
             </div>
             <span>最多 6 题</span>
           </div>
@@ -80,13 +88,13 @@
         </section>
       </div>
     </footer>
-  </main>
+  </div>
 </div>
 {% endblock %}
 
 {% block footer %}{% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-20260726-pwn-notices') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-guide.js', v='aisecedu-20260726-guide-reference-scope-v2') }}"></script>
 {% endblock %}

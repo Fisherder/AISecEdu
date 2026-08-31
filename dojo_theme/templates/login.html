@@ -1,43 +1,83 @@
 {% extends "base.html" %}
 
+{% block body_class %}account-auth-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/account-auth.css', v='aisecedu-auth-system-v1-readability-v1') }}">
+{% endblock %}
+
 {% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1>登录</h1>
-  </div>
-</div>
-<div class="container">
-  <div class="row">
-    <div class="col-md-6 offset-md-3">
+<div class="account-auth-shell" data-auth-page="login">
+  <aside class="account-auth-story" aria-label="玄甲课程学习平台">
+    <a class="account-auth-story-brand" href="/">
+      <img src="{{ url_for('views.themes', path='img/aisecedu-mark.svg') }}" alt="">
+      <span><strong>玄甲</strong><small>课程 · 智能体 · 实践工作区</small></span>
+    </a>
+    <div class="account-auth-story-copy">
+      <span><i class="fas fa-shield-alt" aria-hidden="true"></i> 安全教育工作台</span>
+      <h1>从课程目标，走到真实能力。</h1>
+      <p>登录后继续你的课程、实验工作区和智能体对话。教师与学生共享同一套系统，但始终遵守各自的数据与操作边界。</p>
+      <div class="account-auth-proof">
+        <div><i class="fas fa-route"></i><strong>连续学习</strong><small>进度、任务与证据自动衔接</small></div>
+        <div><i class="fas fa-magic"></i><strong>全局智能体</strong><small>围绕真实课程上下文协作</small></div>
+        <div><i class="fas fa-cube"></i><strong>隔离实践</strong><small>每次实验都有独立工作区</small></div>
+      </div>
+    </div>
+    <div class="account-auth-story-footer"><i class="fas fa-lock"></i><span>会话与课程权限由平台统一保护</span></div>
+  </aside>
+
+  <section class="account-auth-panel">
+    <div class="account-auth-card">
+      <header class="account-auth-heading">
+        <span>欢迎回来</span>
+        <h2>登录玄甲</h2>
+        <p>使用用户名或电子邮箱继续。</p>
+      </header>
+
       {% include "components/errors.html" %}
+      <div id="account-auth-errors" class="account-auth-errors" role="alert" aria-live="assertive" hidden>
+        <i class="fas fa-exclamation-circle" aria-hidden="true"></i><span></span>
+      </div>
 
       {% if integrations.mlc() %}
-      <a class="btn btn-secondary btn-lg btn-block" href="{{ url_for('auth.oauth_login') }}">使用 Major League Cyber 登录</a>
-      <hr>
+      <a class="account-auth-oauth" href="{{ url_for('auth.oauth_login') }}"><i class="fas fa-university"></i>使用 Major League Cyber 登录</a>
+      <div class="account-auth-divider">或使用账号</div>
       {% endif %}
 
       {% with form = Forms.auth.LoginForm() %}
-      <form method="post" accept-charset="utf-8" autocomplete="off">
-        <div class="form-group">
-          <b>用户名或电子邮箱</b>
-          {{ form.name(class="form-control", value=name, placeholder="用户名或电子邮箱") }}
+      <form id="account-login-form" method="post" accept-charset="utf-8" autocomplete="on" novalidate>
+        <label class="account-auth-field" for="name">
+          <span>用户名或电子邮箱</span>
+          {{ form.name(class="form-control", value=name, placeholder="例如：lin 或 lin@example.edu", autocomplete="username", required=true) }}
+        </label>
+        <label class="account-auth-field" for="password">
+          <span class="account-auth-label-row"><span>密码</span><a href="{{ url_for('auth.reset_password') }}">忘记密码？</a></span>
+          <span class="account-auth-input-wrap">
+            {{ form.password(class="form-control", value=password, placeholder="输入账号密码", autocomplete="current-password", required=true) }}
+            <button class="account-auth-password-toggle" type="button" data-password-toggle="password" aria-label="显示密码"><i class="far fa-eye"></i></button>
+          </span>
+        </label>
+        <div class="account-auth-row">
+          <label class="account-auth-check"><input id="remember-me" name="remember_me" type="checkbox"><span>在这台设备上保持登录</span></label>
         </div>
-        <div class="form-group">
-          <b>密码</b>
-          {{ form.password(class="form-control", value=password, placeholder="密码") }}
-        </div>
-        <div class="row pt-3">
-          <div class="col-md-6">
-            <a class="float-left align-text-to-button" href="{{ url_for('auth.reset_password') }}">忘记密码？</a>
-          </div>
-          <div class="col-md-6">
-            {{ form.submit(class="btn btn-md btn-primary btn-outlined float-right", value="登录") }}
-          </div>
-        </div>
+        <input id="account-auth-next" type="hidden" value="{{ request.args.get('next', '') }}">
         {{ form.nonce() }}
+        <button id="_submit" class="account-auth-submit" type="submit">
+          <span>登录并继续</span><i class="fas fa-arrow-right" aria-hidden="true"></i>
+        </button>
       </form>
       {% endwith %}
+
+      <p class="account-auth-switch">还没有账号？<a href="{{ url_for('auth.register', next=request.args.get('next', '')) }}">创建课程系统账号</a></p>
     </div>
-  </div>
+  </section>
 </div>
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/account-auth.js', v='aisecedu-auth-system-v1') }}"></script>
 {% endblock %}

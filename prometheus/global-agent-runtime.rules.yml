@@ -1,0 +1,92 @@
+groups:
+  - name: aisecedu-global-agent-runtime
+    rules:
+      - alert: GlobalAgentRuntimeUnavailable
+        expr: absent(aisecedu_agent_runtime_up) or aisecedu_agent_runtime_up != 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 全局智能体运行时不可用
+          description: 全局智能体运行时健康指标已连续 2 分钟缺失或不为 1。
+
+      - alert: TeachingQueueStalled
+        expr: aisecedu_teaching_oldest_queued_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 教学生成队列阻塞
+          description: 最老的待执行教学生成任务已等待超过 5 分钟。
+
+      - alert: TeachingOutboxBacklog
+        expr: aisecedu_teaching_outbox_unpublished > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 教学任务发件箱存在积压
+          description: PostgreSQL 中有任务连续 2 分钟未发布到 Redis Streams。
+
+      - alert: GlobalAgentRuntimeUnavailableDuringClass
+        expr: aisecedu_teaching_sessions_live > 0 and on() (absent(aisecedu_agent_runtime_up) or max(aisecedu_agent_runtime_up) != 1)
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: 直播课堂期间 全局智能体运行时不可用
+          description: 当前存在直播课堂，但 全局智能体运行时健康指标不可用。
+
+      - alert: TeachingModelFailureBurst
+        expr: sum(aisecedu_model_invocations_recent_10m{status="FAILED"}) >= 3
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 教学模型调用集中失败
+          description: 最近 10 分钟至少有 3 次模型调用失败，请按 route、trace ID 和 provider 排查。
+
+      - alert: TeachingProRouteDegraded
+        expr: sum(aisecedu_model_invocations_recent_10m{route="deepseek-v4-pro",degraded="true"}) > 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: 复杂场景 Pro 路由发生降级
+          description: 最近 10 分钟存在 deepseek-v4-pro 降级调用，禁止将其结果标记为 Pro 生成。
+
+      - alert: TeachingJobFailureBurst
+        expr: sum(aisecedu_teaching_job_failures_recent_10m) >= 3
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 教学生成任务集中失败
+          description: 最近 10 分钟至少有 3 个持久任务失败，请按 kind、stage 和 trace ID 排查。
+
+      - alert: GlobalAgentClassroomRenderFailure
+        expr: sum(increase(aisecedu_agent_runtime_requests_total{operation="classroom_render",result!="success"}[10m])) > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: 全局智能体课堂渲染失败
+          description: 最近 10 分钟发生课堂 Stage 渲染失败，请使用同一 trace ID 检查产物结构和 全局智能体运行时日志。
+
+      - alert: TeachingApiHighErrorRatio
+        expr: (sum(rate(aisecedu_teaching_api_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(aisecedu_teaching_api_requests_total[5m])), 0.001) > 0.05) and (sum(rate(aisecedu_teaching_api_requests_total[5m])) > 0.02)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 玄甲教学 API 错误率过高
+          description: 教学 API 在有持续流量时 5xx 比例连续 5 分钟超过 5%，请按路由模板和 trace ID 排查。
+
+      - alert: TeachingApiMetricsUnavailable
+        expr: absent(aisecedu_teaching_api_metrics_up) or aisecedu_teaching_api_metrics_up != 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 玄甲教学 API 聚合指标不可用
+          description: Redis 中的跨 Worker 教学 API 指标连续 2 分钟不可读，请检查 cache 服务。

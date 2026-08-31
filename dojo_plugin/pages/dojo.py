@@ -100,12 +100,48 @@ def listing(dojo):
     stats["active"] = sum(module_container_counts.values())
 
     description_edit_url = None
-    if dojo.description and dojo.path.exists():
+    # Source edit links only exist for official, repository-backed courses.
+    # Avoid spawning `git rev-parse` and walking files on every learner page
+    # for normal teacher-created courses. A 300-user synchronized module load
+    # otherwise creates hundreds of pointless subprocesses per request wave.
+    if dojo.description and dojo.official and dojo.repository and dojo.path.exists():
         description_edit_url = find_description_edit_url(
             dojo, ["DESCRIPTION.md", "dojo.yml"],
             search_pattern=re.compile(r"^description:"),
             branch=get_dojo_branch(dojo)
         )
+    solved_ids = set()
+    if user:
+        solved_ids = {
+            challenge_id
+            for (challenge_id,) in DojoChallenges.solves(
+                user=user,
+                dojo=dojo,
+                ignore_visibility=True,
+                ignore_admins=False,
+            ).with_entities(DojoChallenges.challenge_id).all()
+        }
+    course_modules = []
+    for module in dojo.modules:
+        if not (module.visible() or dojo.is_admin(user)):
+            continue
+        required = list(module.visible_challenges(required_only=True))
+        solved = sum(row.challenge_id in solved_ids for row in required)
+        course_modules.append(
+            {
+                "module": module,
+                "required": len(required),
+                "solved": solved,
+                "nextChallenge": next(
+                    (row for row in required if row.challenge_id not in solved_ids),
+                    None,
+                ),
+            }
+        )
+    next_module = next(
+        (row for row in course_modules if row["nextChallenge"] is not None),
+        course_modules[0] if course_modules else None,
+    )
 
     return render_template(
         "dojo.html",
@@ -117,6 +153,13 @@ def listing(dojo):
         awards=awards,
         module_container_counts=module_container_counts,
         description_edit_url=description_edit_url,
+        student_course_context={
+            "modules": course_modules,
+            "byModuleId": {row["module"].id: row for row in course_modules},
+            "next": next_module,
+            "required": sum(row["required"] for row in course_modules),
+            "solved": sum(row["solved"] for row in course_modules),
+        },
     )
 
 
@@ -129,7 +172,11 @@ def view_dojo_path(dojo, path, subpath=None):
     module = DojoModules.query.filter_by(dojo=dojo, id=path).first()
     if module:
         if subpath:
-            DojoChallenges.query.filter_by(dojo=dojo, module=module, id=subpath).first_or_404()
+            DojoChallenges.query.filter_by(
+                dojo=dojo,
+                module=module,
+                id=subpath,
+            ).first_or_404()
             return view_module(dojo, module, scroll_to_challenge=subpath)
         return view_module(dojo, module)
     elif path in dojo.pages and not subpath:
@@ -149,7 +196,11 @@ def active_module():
     g.dojo = active_challenge.dojo
 
     current_challenge = active_challenge
-    challenges = list(filter(lambda x: x.visible(), current_challenge.module.challenges))
+    challenges = [
+        challenge
+        for challenge in current_challenge.module.challenges
+        if challenge.visible()
+    ]
     current_index = challenges.index(current_challenge)
 
     previous_challenge = challenges[current_index - 1] if current_index > 0 else None
@@ -182,17 +233,35 @@ def view_dojo(dojo):
     return redirect(url_for("pwncollege_dojo.listing", dojo=dojo.reference_id))
 
 
-@dojo.route("/dojo/<dojo>/join")
-@dojo.route("/dojo/<dojo>/join/")
-@dojo.route("/dojo/<dojo>/join/<password>")
+def _no_store_redirect(location, *, code=303):
+    response = redirect(location, code=code)
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@dojo.route("/dojo/<dojo>/join", methods=["GET", "POST"])
+@dojo.route("/dojo/<dojo>/join/", methods=["GET", "POST"])
 @authed_only
-def join_dojo(dojo, password=None):
+def join_dojo(dojo):
     dojo = Dojos.from_id(dojo).first()
     if not dojo:
         abort(404)
 
-    if dojo.password and dojo.password != password:
-        abort(403)
+    course_url = url_for("pwncollege_dojo.listing", dojo=dojo.reference_id)
+    if request.method != "POST":
+        # Enrollment is a state change and must never happen through a GET.
+        # Keep the legacy entrypoint as a clean redirect so old bookmarks do
+        # not break, while requiring an explicit user action on the course.
+        return _no_store_redirect(course_url)
+
+    if not (dojo.official or dojo.type in {"public", "course"}):
+        abort(404)
+    if dojo.password:
+        # Password-protected legacy courses now use the course-code flow. A
+        # secret is never accepted in a URL or reflected into navigation.
+        return _no_store_redirect("/student#join-course")
 
     try:
         member = DojoMembers(dojo=dojo, user=get_current_user())
@@ -201,7 +270,22 @@ def join_dojo(dojo, password=None):
     except IntegrityError:
         db.session.rollback()
 
-    return redirect(url_for("pwncollege_dojo.listing", dojo=dojo.reference_id))
+    return _no_store_redirect(course_url)
+
+
+@dojo.route("/dojo/<dojo>/join/<path:_legacy_secret>", methods=["GET"])
+@authed_only
+def legacy_join_dojo(dojo, _legacy_secret):
+    """Retire password-bearing enrollment URLs without performing a write."""
+    course = Dojos.from_id(dojo).first()
+    if not course:
+        abort(404)
+    destination = (
+        "/student#join-course"
+        if course.password
+        else url_for("pwncollege_dojo.listing", dojo=course.reference_id)
+    )
+    return _no_store_redirect(destination)
 
 
 @dojo.route("/dojo/<dojo>/update/", methods=["GET", "POST"])
@@ -392,6 +476,7 @@ def view_module(dojo, module, scroll_to_challenge=None):
         ))
     container = get_current_container()
     practice = container.labels.get("dojo.mode") == "privileged" if container else False
+    current_challenge = get_current_dojo_challenge(user)
 
     student = DojoStudents.query.filter_by(dojo=dojo, user=user).first()
     assessments = []
@@ -426,7 +511,11 @@ def view_module(dojo, module, scroll_to_challenge=None):
     challenge_description_edit_urls = {}
     resource_description_edit_urls = {}
 
-    if dojo.path.exists():
+    # The helpers below are exclusively for GitHub edit links and immediately
+    # return None for non-official courses. Gate the whole block so student
+    # traffic never pays for git subprocesses and filesystem scans it cannot
+    # use.
+    if dojo.official and dojo.repository and dojo.path.exists():
         branch = get_dojo_branch(dojo)
 
         if module.description:
@@ -458,7 +547,22 @@ def view_module(dojo, module, scroll_to_challenge=None):
                     branch=branch
                 )
 
-    visible_challenges = set(module.visible_challenges())
+    visible_challenges = {
+        challenge
+        for challenge in module.visible_challenges()
+        if challenge.exercise_mode not in {"SIMULATION", "HYBRID"}
+    }
+    visible_modules = [
+        row for row in dojo.modules
+        if row.visible() or dojo.is_admin(user)
+    ]
+    module_position = visible_modules.index(module)
+    previous_module = visible_modules[module_position - 1] if module_position else None
+    next_module = (
+        visible_modules[module_position + 1]
+        if module_position < len(visible_modules) - 1
+        else None
+    )
 
     return render_template(
         "module.html",
@@ -475,6 +579,23 @@ def view_module(dojo, module, scroll_to_challenge=None):
         challenge_description_edit_urls=challenge_description_edit_urls,
         resource_description_edit_urls=resource_description_edit_urls,
         scroll_to_challenge=scroll_to_challenge,
+        current_dojo_challenge=(
+            {
+                "dojo_id": current_challenge.dojo.reference_id,
+                "module_id": current_challenge.module.id,
+                "challenge_id": current_challenge.id,
+            }
+            if current_challenge
+            else None
+        ),
+        current_challenge_id=(current_challenge.challenge_id if current_challenge else None),
+        current_dojo_custom_js=(current_challenge.dojo.custom_js if current_challenge else None),
+        course_outline={
+            "position": module_position + 1,
+            "total": len(visible_modules),
+            "previous": previous_module,
+            "next": next_module,
+        },
     )
 
 

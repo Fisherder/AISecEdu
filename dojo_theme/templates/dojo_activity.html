@@ -1,34 +1,49 @@
 {% extends "base.html" %}
 
+{% block body_class %}course-system-page content-management-page course-activity-page{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='aisecedu-course-hub-v12-readability-v1') }}">
+{% endblock %}
+
 {% block content %}
-<div class="jumbotron">
-    <div class="container">
-        <h1>课程活动</h1>
+<div class="content-management-shell course-activity-shell">
+  <nav class="content-breadcrumbs" aria-label="面包屑">
+    <a href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}">课程中心</a>
+    <i class="fas fa-chevron-right" aria-hidden="true"></i>
+    <a href="/dojo/{{ dojo.reference_id }}/admin/">成员与设置</a>
+    <i class="fas fa-chevron-right" aria-hidden="true"></i>
+    <span>实时活动</span>
+  </nav>
+
+  <header class="content-management-header">
+    <div class="content-management-heading">
+      <span class="hub-kicker"><i class="fas fa-satellite-dish" aria-hidden="true"></i>实时状态</span>
+      <h1>课程活动</h1>
+      <p>{{ dojo.name }} · 查看学生当前正在运行的实践环境。</p>
     </div>
-</div>
-<div class="container">
-    <h2>正在进行的练习</h2>
+    <div class="content-management-actions">
+      <a class="hub-button" href="/dojo/{{ dojo.reference_id }}/admin/"><i class="fas fa-users-cog" aria-hidden="true"></i>成员与设置</a>
+      <a class="hub-button is-primary" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}&amp;tab=students"><i class="fas fa-chart-line" aria-hidden="true"></i>查看学情</a>
+    </div>
+  </header>
+
+  <section class="content-surface">
+    <header class="content-section-heading"><div><span class="hub-kicker">运行环境</span><h2>正在进行的练习</h2><p>仅显示当前仍在运行的学生环境。</p></div><span class="content-status is-{{ 'info' if actives else 'secondary' }}">{{ actives | length }} 个运行中</span></header>
     {% if actives %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>用户</th>
-                <th>题目</th>
-                <th>运行时长</th>
-            </tr>
-        </thead>
+    <div class="content-data-table-wrap">
+      <table class="content-data-table">
+        <thead><tr><th>学生</th><th>当前题目</th><th>运行时长</th></tr></thead>
         <tbody>
-            {% for active in actives %}
-            <tr>
-                <td><a href="{{ generate_account_url(active.user.id, admin=True) }}">{{ active.user.name }}</a></td>
-                <td>{{ active.challenge.module.name }} - {{ active.challenge.name}}</td>
-                <td>{{ active.uptime.days }} 天 {{ active.uptime.seconds // 3600 }} 小时 {{ (active.uptime.seconds // 60) % 60 }} 分钟</td>
-            </tr>
-            {% endfor %}
+          {% for active in actives %}
+          <tr><td><a href="{{ generate_account_url(active.user.id, admin=True) }}">{{ active.user.name }}</a></td><td>{{ active.challenge.module.name }} · {{ active.challenge.name }}</td><td>{{ active.uptime.days }} 天 {{ active.uptime.seconds // 3600 }} 小时 {{ (active.uptime.seconds // 60) % 60 }} 分钟</td></tr>
+          {% endfor %}
         </tbody>
-    </table>
+      </table>
+    </div>
     {% else %}
-    <p>当前没有正在进行的练习。</p>
+    <div class="content-empty-state is-compact"><span><i class="fas fa-power-off" aria-hidden="true"></i></span><h3>当前没有运行中的练习</h3><p>学生启动实践环境后，实时状态会显示在这里。</p></div>
     {% endif %}
+  </section>
 </div>
 {% endblock %}

@@ -12,7 +12,7 @@ import tempfile
 import bleach
 import docker
 import docker.errors
-from flask import current_app, Response, Markup, abort, g
+from flask import current_app, Response, Markup, abort, g, has_request_context
 from itsdangerous.url_safe import URLSafeSerializer
 from CTFd.exceptions import UserNotFoundException, UserTokenExpiredException
 from CTFd.models import db, Solves, Challenges, Users
@@ -49,12 +49,24 @@ def get_current_container(user=None):
     if not user:
         return None
 
+    cache = None
+    if has_request_context():
+        cache = getattr(g, "_dojo_current_containers", None)
+        if cache is None:
+            cache = {}
+            g._dojo_current_containers = cache
+        if user.id in cache:
+            return cache[user.id]
+
     docker_client = user_docker_client(user)
 
     try:
-        return docker_client.containers.get(container_name(user))
+        container = docker_client.containers.get(container_name(user))
     except docker.errors.NotFound:
-        return None
+        container = None
+    if cache is not None:
+        cache[user.id] = container
+    return container
 
 
 def get_all_containers(dojo=None):
@@ -227,10 +239,35 @@ def generate_workspace_token(user, expiration=None):
 
 
 def is_challenge_locked(dojo_challenge: DojoChallenges, user: Users) -> bool:
-    if all((dojo_challenge.progression_locked, dojo_challenge.challenge_index != 0, not dojo_challenge.dojo.is_admin())):
-        previous_dojo_challenge = dojo_challenge.module.challenges[dojo_challenge.challenge_index - 1]
-        return not (Solves.query.filter_by(user=user, challenge=dojo_challenge.challenge).first() or
-                Solves.query.filter_by(user=user, challenge=previous_dojo_challenge.challenge).first())
+    module_challenges = [
+        challenge
+        for challenge in dojo_challenge.module.challenges
+        if challenge.supported()
+    ]
+    position = next(
+        (
+            index
+            for index, challenge in enumerate(module_challenges)
+            if challenge.challenge_index == dojo_challenge.challenge_index
+        ),
+        0,
+    )
+    if all(
+        (
+            dojo_challenge.progression_locked,
+            position > 0,
+            not dojo_challenge.dojo.is_admin(),
+        )
+    ):
+        previous_dojo_challenge = module_challenges[position - 1]
+        return not (
+            Solves.query.filter_by(
+                user=user, challenge=dojo_challenge.challenge
+            ).first()
+            or Solves.query.filter_by(
+                user=user, challenge=previous_dojo_challenge.challenge
+            ).first()
+        )
     return False
 
 

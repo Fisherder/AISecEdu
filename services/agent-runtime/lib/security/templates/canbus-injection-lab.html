@@ -1,0 +1,1461 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAN Bus 注入实验 — 汽车仪表盘劫持</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --card2: #1a2332;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --blue: #3b82f6;
+            --green: #22c55e;
+            --red: #ef4444;
+            --amber: #f59e0b;
+            --cyan: #06b6d4;
+            --purple: #a855f7;
+            --terminal-bg: #0d1117;
+            --border: #334155;
+            --font-mono: 'Courier New', 'Consolas', 'Monaco', monospace;
+            --font-sans: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+            line-height: 1.5;
+        }
+
+        .main-container {
+            max-width: 1400px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Header */
+        .header {
+            background: var(--card);
+            border-radius: 16px;
+            padding: 20px 28px;
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .header-title .icon {
+            font-size: 2rem;
+        }
+        .header-title h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+        }
+        .header-title .badge {
+            font-size: 0.7rem;
+            background: var(--red);
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            animation: pulse-badge 2s infinite;
+        }
+        @keyframes pulse-badge {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.6;
+            }
+        }
+        .progress-steps {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .step-pill {
+            padding: 8px 16px;
+            border-radius: 24px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            background: var(--card2);
+            border: 2px solid var(--border);
+            color: var(--text2);
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+        .step-pill.active {
+            border-color: var(--blue);
+            color: var(--blue);
+            background: #1e3a5f;
+            box-shadow: 0 0 18px rgba(59, 130, 246, 0.3);
+        }
+        .step-pill.done {
+            border-color: var(--green);
+            color: var(--green);
+            background: #1a3d2a;
+        }
+
+        /* Main grid */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 16px;
+            min-height: 600px;
+        }
+        @media (max-width: 1000px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Dashboard card */
+        .dashboard-card {
+            background: var(--card);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .dashboard-card h2 {
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text2);
+            font-weight: 600;
+            margin: 0;
+        }
+        .gauges-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: flex-end;
+        }
+        .gauge-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+        .gauge-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text2);
+        }
+        .gauge-value-text {
+            font-size: 1.1rem;
+            font-weight: 700;
+            font-family: var(--font-mono);
+            color: var(--text);
+            margin-top: -4px;
+        }
+        canvas.gauge-canvas {
+            display: block;
+        }
+
+        /* Status indicators row */
+        .status-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 12px 0;
+            border-top: 1px solid var(--border);
+        }
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: var(--card2);
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--green);
+            transition: all 0.4s;
+        }
+        .status-dot.unlocked {
+            background: var(--red);
+            box-shadow: 0 0 10px var(--red);
+        }
+        .status-dot.warning-on {
+            background: var(--amber);
+            box-shadow: 0 0 10px var(--amber);
+            animation: pulse-warn 1s infinite;
+        }
+        @keyframes pulse-warn {
+            0%,
+            100% {
+                box-shadow: 0 0 6px var(--amber);
+            }
+            50% {
+                box-shadow: 0 0 20px var(--amber), 0 0 30px var(--amber);
+            }
+        }
+
+        /* Right panel */
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Terminal card */
+        .terminal-card {
+            background: var(--terminal-bg);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex: 1;
+            min-height: 300px;
+        }
+        .terminal-header {
+            padding: 10px 16px;
+            background: #161b22;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text2);
+            letter-spacing: 0.04em;
+        }
+        .terminal-header .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot-red {
+            background: #ff5f56;
+        }
+        .dot-yellow {
+            background: #ffbd2e;
+        }
+        .dot-green {
+            background: #27c93f;
+        }
+        .terminal-output {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            line-height: 1.6;
+            color: #c9d1d9;
+            max-height: 220px;
+            min-height: 140px;
+        }
+        .terminal-output .line {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .terminal-output .prompt {
+            color: var(--green);
+        }
+        .terminal-output .sent {
+            color: var(--cyan);
+        }
+        .terminal-output .info {
+            color: #8b949e;
+        }
+        .terminal-output .success {
+            color: var(--green);
+        }
+        .terminal-output .warn {
+            color: var(--amber);
+        }
+        .terminal-output .error {
+            color: var(--red);
+        }
+        .terminal-output .flag-line {
+            color: var(--amber);
+            font-weight: 700;
+            font-size: 0.9rem;
+            animation: glow-flag 1.5s infinite;
+        }
+        @keyframes glow-flag {
+            0%,
+            100% {
+                text-shadow: 0 0 8px var(--amber);
+            }
+            50% {
+                text-shadow: 0 0 24px var(--amber), 0 0 40px #f59e0b;
+            }
+        }
+        .terminal-input-row {
+            display: flex;
+            border-top: 1px solid var(--border);
+            background: #161b22;
+            padding: 8px 12px;
+            gap: 8px;
+            align-items: center;
+        }
+        .terminal-input-row .prompt-symbol {
+            color: var(--green);
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 0.9rem;
+            flex-shrink: 0;
+        }
+        .terminal-input-row input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #c9d1d9;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            outline: none;
+            caret-color: var(--green);
+        }
+        .terminal-input-row input::placeholder {
+            color: #484f58;
+        }
+        .terminal-input-row button {
+            background: var(--blue);
+            color: #fff;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8rem;
+            letter-spacing: 0.03em;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .terminal-input-row button:hover {
+            background: #2563eb;
+            box-shadow: 0 0 14px rgba(59, 130, 246, 0.4);
+        }
+        .terminal-input-row button:active {
+            transform: scale(0.95);
+        }
+
+        /* Reference table */
+        .ref-table-card {
+            background: var(--card);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            padding: 16px;
+        }
+        .ref-table-card h3 {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text2);
+            margin-bottom: 10px;
+        }
+        .ref-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.78rem;
+            font-family: var(--font-mono);
+        }
+        .ref-table th {
+            text-align: left;
+            padding: 8px 10px;
+            background: var(--card2);
+            color: var(--text2);
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            border-bottom: 2px solid var(--border);
+        }
+        .ref-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+        }
+        .ref-table tr {
+            transition: all 0.3s;
+        }
+        .ref-table tr:hover {
+            background: #1e3a5f;
+        }
+        .ref-table .hidden-id {
+            color: #6b7280;
+            font-style: italic;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.3s;
+        }
+        .ref-table .hidden-id:hover {
+            color: var(--amber);
+            text-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+        }
+        .ref-table .hidden-id.revealed {
+            color: var(--amber);
+            font-style: normal;
+            font-weight: 700;
+        }
+        .ref-table .known-badge {
+            display: inline-block;
+            background: #1a3d2a;
+            color: var(--green);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            font-weight: 700;
+        }
+        .ref-table .unknown-badge {
+            display: inline-block;
+            background: #3d2a1a;
+            color: var(--amber);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            font-weight: 700;
+        }
+
+        /* Educational panel */
+        .edu-panel {
+            background: var(--card);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+        .edu-panel summary {
+            padding: 16px 20px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.95rem;
+            letter-spacing: 0.03em;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            user-select: none;
+        }
+        .edu-panel summary::-webkit-details-marker {
+            display: none;
+        }
+        .edu-panel summary .arrow {
+            transition: transform 0.3s;
+            font-size: 0.7rem;
+        }
+        .edu-panel[open] summary .arrow {
+            transform: rotate(90deg);
+        }
+        .edu-content {
+            padding: 0 20px 20px;
+            font-size: 0.85rem;
+            color: var(--text2);
+            line-height: 1.7;
+        }
+        .edu-content h4 {
+            color: var(--text);
+            margin-top: 14px;
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+        .edu-content code {
+            background: #0d1117;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--cyan);
+        }
+        .edu-content .vuln-box {
+            background: #2d1a1a;
+            border: 1px solid #5c2a2a;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 10px 0;
+            color: #fca5a5;
+        }
+        .edu-content .defense-box {
+            background: #1a2d1a;
+            border: 1px solid #2a5c2a;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 10px 0;
+            color: #86efac;
+        }
+        .legal-note {
+            font-size: 0.7rem;
+            color: #6b7280;
+            margin-top: 12px;
+            font-style: italic;
+            border-top: 1px solid var(--border);
+            padding-top: 10px;
+        }
+
+        /* Flag toast */
+        .flag-toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-120px);
+            background: #1a1a0a;
+            border: 2px solid var(--amber);
+            border-radius: 14px;
+            padding: 16px 28px;
+            z-index: 100;
+            text-align: center;
+            transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 0 40px rgba(245, 158, 11, 0.5);
+        }
+        .flag-toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+        .flag-toast .flag-icon {
+            font-size: 2.5rem;
+        }
+        .flag-toast .flag-text {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--amber);
+            letter-spacing: 0.04em;
+        }
+        .flag-toast .flag-sub {
+            font-size: 0.75rem;
+            color: #b45309;
+            margin-top: 4px;
+        }
+
+        /* Reset button */
+        .reset-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text2);
+            padding: 6px 14px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            letter-spacing: 0.04em;
+        }
+        .reset-btn:hover {
+            border-color: var(--text2);
+            color: var(--text);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <!-- 本模拟器仅用于授权教学环境，演示CAN总线概念性漏洞 -->
+    <div class="main-container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-title">
+                <span class="icon">🚗</span>
+                <div>
+                    <h1>CAN Bus 注入实验 — 仪表盘劫持</h1>
+                    <span style="font-size:0.75rem;color:var(--text2);"> Automotive Security · V2X · 概念验证 </span>
+                </div>
+                <span class="badge">⚡ 实验环境</span>
+            </div>
+            <div class="progress-steps">
+                <span class="step-pill active" id="step1">① 了解CAN总线</span>
+                <span class="step-pill" id="step2">② 探索CAN ID</span>
+                <span class="step-pill" id="step3">③ 注入速度消息</span>
+                <span class="step-pill" id="step4">🏴 捕获Flag</span>
+            </div>
+        </div>
+
+        <!-- Main content -->
+        <div class="content-grid">
+            <!-- Dashboard -->
+            <div class="dashboard-card" id="dashboardCard">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                    <h2>📊 虚拟仪表盘 — 实时模拟</h2>
+                    <button class="reset-btn" onclick="resetAll()" title="重置所有仪表">↻ 重置仪表</button>
+                </div>
+                <div class="gauges-row">
+                    <!-- Speedometer -->
+                    <div class="gauge-wrapper">
+                        <canvas id="speedoCanvas" class="gauge-canvas" width="280" height="210"></canvas>
+                        <span class="gauge-label">车速 km/h</span>
+                        <span class="gauge-value-text" id="speedValueText">0</span>
+                    </div>
+                    <!-- Tachometer -->
+                    <div class="gauge-wrapper">
+                        <canvas id="tachoCanvas" class="gauge-canvas" width="200" height="160"></canvas>
+                        <span class="gauge-label">转速 RPM</span>
+                        <span class="gauge-value-text" id="tachoValueText">800</span>
+                    </div>
+                    <!-- Fuel -->
+                    <div class="gauge-wrapper">
+                        <canvas id="fuelCanvas" class="gauge-canvas" width="140" height="120"></canvas>
+                        <span class="gauge-label">燃油 %</span>
+                        <span class="gauge-value-text" id="fuelValueText">65</span>
+                    </div>
+                </div>
+                <!-- Status row -->
+                <div class="status-row">
+                    <div class="status-item" id="doorDriver">
+                        <span class="status-dot" id="dotDriver"></span> 驾驶门
+                    </div>
+                    <div class="status-item" id="doorPassenger">
+                        <span class="status-dot" id="dotPassenger"></span> 副驾门
+                    </div>
+                    <div class="status-item" id="doorRearL">
+                        <span class="status-dot" id="dotRearL"></span> 左后门
+                    </div>
+                    <div class="status-item" id="doorRearR">
+                        <span class="status-dot" id="dotRearR"></span> 右后门
+                    </div>
+                    <div class="status-item" id="warningLight">
+                        <span class="status-dot" id="dotWarning"></span> 警告灯
+                    </div>
+                    <div class="status-item" id="turnSignalInd">
+                        <span class="status-dot" id="dotTurn"></span> 转向灯
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right panel: Terminal + Reference -->
+            <div class="right-panel">
+                <!-- Terminal -->
+                <div class="terminal-card">
+                    <div class="terminal-header">
+                        <span class="dot dot-red"></span>
+                        <span class="dot dot-yellow"></span>
+                        <span class="dot dot-green"></span>
+                        &nbsp;CAN 注入终端 — /dev/can0
+                    </div>
+                    <div class="terminal-output" id="terminalOutput">
+                        <div class="line info">// EDUCATIONAL PURPOSE ONLY — 授权教学环境</div>
+                        <div class="line info">// 输入格式: ID:0x____ Data:__ __ __ __</div>
+                        <div class="line info">// 示例: ID:0x2A0 Data:1F 40 00 00</div>
+                        <div class="line info">// 输入 'help' 查看参考表，'clear' 清屏</div>
+                        <div class="line" style="height:8px;"></div>
+                    </div>
+                    <div class="terminal-input-row">
+                        <span class="prompt-symbol">can0&gt;</span>
+                        <input type="text" id="terminalInput" placeholder="ID:0x1E5 Data:C8 00 00 00" autofocus autocomplete="off" spellcheck="false">
+                        <button onclick="sendCanMessage()">发送 ⏎</button>
+                    </div>
+                </div>
+
+                <!-- Reference table -->
+                <div class="ref-table-card">
+                    <h3>📋 CAN ID 参考表（部分已知）</h3>
+                    <table class="ref-table">
+                        <thead>
+                            <tr><th>Arbitration ID</th><th>功能描述</th><th>数据字节</th><th>状态</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>0x2A0</code></td>
+                                <td>发动机转速 (Tachometer)</td>
+                                <td>Byte 0-1: RPM值</td>
+                                <td><span class="known-badge">已知</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>0x3B1</code></td>
+                                <td>燃油油位 (Fuel Gauge)</td>
+                                <td>Byte 0: 百分比</td>
+                                <td><span class="known-badge">已知</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>0x4C2</code></td>
+                                <td>门锁控制 (Door Locks)</td>
+                                <td>Byte 0: 位掩码</td>
+                                <td><span class="known-badge">已知</span></td>
+                            </tr>
+                            <tr id="hiddenRow" style="background:#1a1f2a;">
+                                <td><code>0x1E5</code></td>
+                                <td class="hidden-id" id="hiddenIdCell" title="点击尝试解码" onclick="revealHint()">
+                                    ⚡ 车速控制 — <em>OEM私有协议</em>
+                                </td>
+                                <td>Byte 0: 车速值</td>
+                                <td><span class="unknown-badge" id="hiddenBadge">未确认</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>0x5D3</code></td>
+                                <td>转向灯控制</td>
+                                <td>Byte 0: 方向</td>
+                                <td><span class="known-badge">已知</span></td>
+                            </tr>
+                            <tr>
+                                <td><code>0x6E4</code></td>
+                                <td>警告指示灯</td>
+                                <td>Byte 0: 标志位</td>
+                                <td><span class="known-badge">已知</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p style="font-size:0.7rem;color:var(--text2);margin-top:8px;">
+                        💡 提示：注意观察哪些ID在参考表中<em>未完全公开</em>。实验任务：找到车速控制ID并让速度表指向 <strong>200 km/h</strong>。
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Educational panel -->
+        <details class="edu-panel" id="eduPanel">
+            <summary>
+                <span class="arrow">▶</span> 📖 CAN总线安全分析 — 点击展开完整教育内容
+            </summary>
+            <div class="edu-content">
+                <h4>🔍 CAN总线概述</h4>
+                <p>CAN（Controller Area Network）是汽车内部电子控制单元（ECU）之间通信的主流协议。所有ECU共享<strong>同一广播总线</strong>——任何节点发送的消息都会被总线上所有其他节点接收。</p>
+
+                <div class="vuln-box">
+                    <strong>⚠️ 核心漏洞：</strong> CAN协议<strong>没有内置认证机制</strong>、<strong>没有加密</strong>、<strong>没有发送方身份验证</strong>。任何能接触到总线（如通过OBD-II端口、信息娱乐系统漏洞、或无线攻击面）的攻击者都可以注入任意CAN帧，而接收ECU会<strong>无条件信任并执行</strong>。
+                </div>
+
+                <h4>📋 Arbitration ID 与优先级</h4>
+                <p>每条CAN消息以<strong>Arbitration ID</strong>（11位或29位）开头。ID不仅标识消息类型，还决定<strong>总线仲裁优先级</strong>——ID值越小，优先级越高。攻击者可利用低ID值抢占总线，淹没合法消息。</p>
+
+                <h4>🎯 攻击场景</h4>
+                <ul>
+                    <li><strong>仪表盘欺骗：</strong>注入伪造的速度/转速数据，使驾驶员看到虚假读数</li>
+                    <li><strong>门锁控制：</strong>发送解锁命令，绕过安全系统</li>
+                    <li><strong>拒绝服务：</strong>以极高频率发送高优先级（低ID）帧，阻塞合法通信</li>
+                    <li><strong>安全功能禁用：</strong>抑制安全气囊、ABS等关键消息</li>
+                </ul>
+
+                <div class="defense-box">
+                    <strong>🛡️ 防御措施：</strong>
+                    <ul>
+                        <li><strong>CAN ID白名单：</strong>ECU仅接受预设ID范围的消息</li>
+                        <li><strong>消息认证码（MAC）：</strong>在数据帧中附加加密签名</li>
+                        <li><strong>入侵检测系统（IDS）：</strong>监控总线异常流量模式</li>
+                        <li><strong>网络分段：</strong>使用网关隔离关键系统（动力总成 vs 信息娱乐）</li>
+                        <li><strong>安全车载通信（SecOC）：</strong>AUTOSAR标准中的安全通信模块</li>
+                    </ul>
+                </div>
+
+                <h4>📊 相关标准与框架</h4>
+                <p><code>ISO 11898</code> — CAN协议标准 &nbsp;|&nbsp; <code>AUTOSAR SecOC</code> — 安全车载通信 &nbsp;|&nbsp; <code>UN R155</code> — 汽车网络安全法规</p>
+                <p><strong>CWE映射：</strong>CWE-306（关键功能缺少认证）、CWE-287（不当认证）、CWE-74（注入）</p>
+
+                <p class="legal-note">
+                    // EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境。本模拟器为纯前端概念验证，不连接任何真实车辆或CAN硬件。实际车辆安全测试需在受控环境（如台架/测试场）中进行，并遵守当地法律法规。
+                </p>
+            </div>
+        </details>
+
+        <!-- Flag toast -->
+        <div class="flag-toast" id="flagToast">
+            <div class="flag-icon">🏴‍☠️</div>
+            <div class="flag-text">FLAG{CAN_SPEED_INJECTION_200KMH}</div>
+            <div class="flag-sub">车速控制ID (0x1E5) 已被成功利用！</div>
+        </div>
+    </div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // 本代码为纯前端概念验证，演示CAN总线注入原理
+        // 配套防御措施见教育面板
+
+        // ============ VEHICLE STATE ============
+        const vehicleState = {
+            speed: 0, // km/h, controlled by ID 0x1E5
+            rpm: 800, // RPM, controlled by ID 0x2A0
+            fuel: 65, // percentage, controlled by ID 0x3B1
+            doors: {
+                driver: false, // false=locked, true=unlocked
+                passenger: false,
+                rearL: false,
+                rearR: false,
+            },
+            turnSignal: 0, // 0=off, 1=left, 2=right, 3=hazards
+            warningLights: false,
+        };
+
+        // Target values for smooth animation
+        const targetState = { ...vehicleState };
+        let flagRevealed = false;
+        let hiddenIdRevealed = false;
+        let commandHistory = [];
+        let historyIndex = -1;
+        let speedIdDiscovered = false;
+
+        // ============ CAN ID MAPPING ============
+        const CAN_IDS = {
+            0x2a0: { name: 'Tachometer/RPM', handler: 'rpm' },
+            0x3b1: { name: 'Fuel Gauge', handler: 'fuel' },
+            0x4c2: { name: 'Door Locks', handler: 'doors' },
+            0x1e5: { name: 'Speed Control', handler: 'speed' },
+            0x5d3: { name: 'Turn Signals', handler: 'turnSignal' },
+            0x6e4: { name: 'Warning Lights', handler: 'warningLights' },
+        };
+
+        // ============ GAUGE DRAWING ============
+        function drawGauge(canvasId, value, maxValue, zones, unit, majorStep, labelFn) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+
+            const cx = w / 2;
+            const cy = h * 0.78;
+            const radius = Math.min(cx, cy) * 0.82;
+            const startAngle = Math.PI; // 180° = 9 o'clock
+            const endAngle = 2 * Math.PI; // 360° = 3 o'clock
+            const sweepAngle = endAngle - startAngle; // Math.PI = 180°
+
+            // Background arc
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, startAngle, endAngle, false);
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 12;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // Colored zones
+            if (zones && zones.length > 0) {
+                zones.forEach(zone => {
+                    const zStart = startAngle + (zone.from / maxValue) * sweepAngle;
+                    const zEnd = startAngle + (zone.to / maxValue) * sweepAngle;
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, radius, zStart, zEnd, false);
+                    ctx.strokeStyle = zone.color;
+                    ctx.lineWidth = 10;
+                    ctx.lineCap = 'butt';
+                    ctx.stroke();
+                });
+            }
+
+            // Tick marks
+            const numMajorTicks = Math.floor(maxValue / majorStep) + 1;
+            for (let i = 0; i <= numMajorTicks; i++) {
+                const val = i * majorStep;
+                if (val > maxValue) break;
+                const angle = startAngle + (val / maxValue) * sweepAngle;
+                const innerR = radius - 16;
+                const outerR = radius - 2;
+                const x1 = cx + innerR * Math.cos(angle);
+                const y1 = cy + innerR * Math.sin(angle);
+                const x2 = cx + outerR * Math.cos(angle);
+                const y2 = cy + outerR * Math.sin(angle);
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // Label
+                const labelR = radius - 30;
+                const lx = cx + labelR * Math.cos(angle);
+                const ly = cy + labelR * Math.sin(angle);
+                ctx.fillStyle = '#cbd5e1';
+                ctx.font = 'bold 9px "Segoe UI", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const labelText = labelFn ? labelFn(val) : val.toString();
+                ctx.fillText(labelText, lx, ly);
+            }
+
+            // Minor ticks
+            const minorStep = majorStep / 4;
+            const numMinorTicks = Math.floor(maxValue / minorStep) + 1;
+            for (let i = 0; i <= numMinorTicks; i++) {
+                const val = i * minorStep;
+                if (val > maxValue) break;
+                if (val % majorStep === 0) continue;
+                const angle = startAngle + (val / maxValue) * sweepAngle;
+                const innerR = radius - 10;
+                const outerR = radius - 2;
+                const x1 = cx + innerR * Math.cos(angle);
+                const y1 = cy + innerR * Math.sin(angle);
+                const x2 = cx + outerR * Math.cos(angle);
+                const y2 = cy + outerR * Math.sin(angle);
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.strokeStyle = '#475569';
+                ctx.lineWidth = 0.8;
+                ctx.stroke();
+            }
+
+            // Needle
+            const needleAngle = startAngle + (Math.min(value, maxValue) / maxValue) * sweepAngle;
+            const needleLength = radius - 40;
+            const needleBase = 16;
+            const needleTipX = cx + needleLength * Math.cos(needleAngle);
+            const needleTipY = cy + needleLength * Math.sin(needleAngle);
+            const perpX = -Math.sin(needleAngle);
+            const perpY = Math.cos(needleAngle);
+
+            // Needle shadow
+            ctx.beginPath();
+            ctx.moveTo(cx + perpX * 3, cy + perpY * 3);
+            ctx.lineTo(needleTipX + perpX * 1.5, needleTipY + perpY * 1.5);
+            ctx.lineTo(needleTipX - perpX * 1.5, needleTipY - perpY * 1.5);
+            ctx.lineTo(cx - perpX * 3, cy - perpY * 3);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fill();
+
+            // Needle body
+            ctx.beginPath();
+            ctx.moveTo(cx + perpX * 2.5, cy + perpY * 2.5);
+            ctx.lineTo(needleTipX + perpX * 1.2, needleTipY + perpY * 1.2);
+            ctx.lineTo(needleTipX, needleTipY);
+            ctx.lineTo(needleTipX - perpX * 1.2, needleTipY - perpY * 1.2);
+            ctx.lineTo(cx - perpX * 2.5, cy - perpY * 2.5);
+            ctx.closePath();
+            const needleGrad = ctx.createLinearGradient(cx, cy, needleTipX, needleTipY);
+            needleGrad.addColorStop(0, '#ef4444');
+            needleGrad.addColorStop(1, '#dc2626');
+            ctx.fillStyle = needleGrad;
+            ctx.fill();
+            ctx.strokeStyle = '#991b1b';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Center cap
+            ctx.beginPath();
+            ctx.arc(cx, cy, 8, 0, 2 * Math.PI);
+            ctx.fillStyle = '#1e293b';
+            ctx.fill();
+            ctx.strokeStyle = '#64748b';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(cx, cy, 3.5, 0, 2 * Math.PI);
+            ctx.fillStyle = '#94a3b8';
+            ctx.fill();
+
+            // Unit text
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = 'bold 8px "Segoe UI", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(unit, cx, cy + radius * 0.55);
+        }
+
+        function drawAllGauges() {
+            drawGauge('speedoCanvas', vehicleState.speed, 240, [
+                { from: 0, to: 100, color: '#22c55e' },
+                { from: 100, to: 180, color: '#f59e0b' },
+                { from: 180, to: 240, color: '#ef4444' },
+            ], 'km/h', 20, (v) => v.toString());
+
+            drawGauge('tachoCanvas', vehicleState.rpm, 8000, [
+                { from: 0, to: 4000, color: '#22c55e' },
+                { from: 4000, to: 6500, color: '#f59e0b' },
+                { from: 6500, to: 8000, color: '#ef4444' },
+            ], 'RPM', 1000, (v) => (v / 1000).toFixed(0));
+
+            drawGauge('fuelCanvas', vehicleState.fuel, 100, [
+                { from: 0, to: 15, color: '#ef4444' },
+                { from: 15, to: 100, color: '#22c55e' },
+            ], '%', 25, (v) => v.toString());
+
+            // Update text displays
+            document.getElementById('speedValueText').textContent = Math.round(vehicleState.speed);
+            document.getElementById('tachoValueText').textContent = Math.round(vehicleState.rpm);
+            document.getElementById('fuelValueText').textContent = Math.round(vehicleState.fuel);
+        }
+
+        function updateStatusIndicators() {
+            const doors = vehicleState.doors;
+            updateDoorDot('dotDriver', doors.driver);
+            updateDoorDot('dotPassenger', doors.passenger);
+            updateDoorDot('dotRearL', doors.rearL);
+            updateDoorDot('dotRearR', doors.rearR);
+
+            const dotWarn = document.getElementById('dotWarning');
+            if (vehicleState.warningLights) {
+                dotWarn.classList.add('warning-on');
+            } else {
+                dotWarn.classList.remove('warning-on');
+            }
+
+            const dotTurn = document.getElementById('dotTurn');
+            dotTurn.classList.remove('warning-on');
+            if (vehicleState.turnSignal === 1) {
+                dotTurn.style.background = '#22c55e';
+                dotTurn.style.boxShadow = '0 0 10px #22c55e';
+                dotTurn.style.animation = 'pulse-warn 0.6s infinite';
+            } else if (vehicleState.turnSignal === 2) {
+                dotTurn.style.background = '#22c55e';
+                dotTurn.style.boxShadow = '0 0 10px #22c55e';
+                dotTurn.style.animation = 'pulse-warn 0.6s infinite';
+            } else if (vehicleState.turnSignal === 3) {
+                dotTurn.style.background = '#f59e0b';
+                dotTurn.style.boxShadow = '0 0 14px #f59e0b';
+                dotTurn.style.animation = 'pulse-warn 0.4s infinite';
+            } else {
+                dotTurn.style.background = '#334155';
+                dotTurn.style.boxShadow = 'none';
+                dotTurn.style.animation = 'none';
+            }
+        }
+
+        function updateDoorDot(dotId, unlocked) {
+            const dot = document.getElementById(dotId);
+            if (unlocked) {
+                dot.classList.add('unlocked');
+            } else {
+                dot.classList.remove('unlocked');
+            }
+        }
+
+        // ============ CAN MESSAGE PROCESSING ============
+        function processCanMessage(id, dataBytes) {
+            const idLower = id & 0xFFFF;
+            const handlerInfo = CAN_IDS[idLower];
+
+            if (!handlerInfo) {
+                return { success: false, msg: `未知CAN ID: 0x${id.toString(16).toUpperCase()} — 仪表盘无可见反应`, type: 'warn' };
+            }
+
+            let effectMsg = '';
+            switch (handlerInfo.handler) {
+                case 'speed':
+                    const speedVal = Math.min(255, Math.max(0, dataBytes[0] || 0));
+                    const scaledSpeed = Math.round((speedVal / 255) * 240);
+                    targetState.speed = scaledSpeed;
+                    effectMsg = `车速设置为 ${scaledSpeed} km/h (原始字节: 0x${speedVal.toString(16).toUpperCase().padStart(2,'0')})`;
+                    if (!speedIdDiscovered) {
+                        speedIdDiscovered = true;
+                        document.getElementById('hiddenBadge').textContent = '已确认';
+                        document.getElementById('hiddenBadge').className = 'known-badge';
+                        document.getElementById('hiddenIdCell').classList.add('revealed');
+                        document.getElementById('hiddenIdCell').textContent = '⚡ 车速控制 (Speedometer) — 已发现！';
+                        document.getElementById('hiddenRow').style.background = '#1a2d1a';
+                        document.getElementById('step2').classList.remove('active');
+                        document.getElementById('step2').classList.add('done');
+                        document.getElementById('step3').classList.add('active');
+                        effectMsg += ' 🔍 **车速控制ID (0x1E5) 已被发现！**';
+                    }
+                    // Check flag condition
+                    if (scaledSpeed >= 200 && !flagRevealed && speedIdDiscovered) {
+                        revealFlag();
+                    }
+                    break;
+                case 'rpm':
+                    const rpmVal = (dataBytes[0] || 0) | ((dataBytes[1] || 0) << 8);
+                    const scaledRpm = Math.min(8000, Math.max(0, rpmVal));
+                    targetState.rpm = scaledRpm;
+                    effectMsg = `转速设置为 ${scaledRpm} RPM`;
+                    break;
+                case 'fuel':
+                    const fuelVal = Math.min(100, Math.max(0, dataBytes[0] || 0));
+                    targetState.fuel = fuelVal;
+                    effectMsg = `燃油油位设置为 ${fuelVal}%`;
+                    break;
+                case 'doors':
+                    const doorByte = dataBytes[0] || 0;
+                    targetState.doors.driver = !!(doorByte & 0x01);
+                    targetState.doors.passenger = !!(doorByte & 0x02);
+                    targetState.doors.rearL = !!(doorByte & 0x04);
+                    targetState.doors.rearR = !!(doorByte & 0x08);
+                    const unlockedDoors = [];
+                    if (targetState.doors.driver) unlockedDoors.push('驾驶门');
+                    if (targetState.doors.passenger) unlockedDoors.push('副驾门');
+                    if (targetState.doors.rearL) unlockedDoors.push('左后门');
+                    if (targetState.doors.rearR) unlockedDoors.push('右后门');
+                    effectMsg = unlockedDoors.length > 0 ?
+                        `🔓 已解锁: ${unlockedDoors.join(', ')}` :
+                        '🔒 所有车门已锁定';
+                    break;
+                case 'turnSignal':
+                    const sigVal = dataBytes[0] || 0;
+                    targetState.turnSignal = Math.min(3, Math.max(0, sigVal));
+                    const sigNames = ['关闭', '左转', '右转', '双闪'];
+                    effectMsg = `转向灯: ${sigNames[targetState.turnSignal] || '未知'}`;
+                    break;
+                case 'warningLights':
+                    targetState.warningLights = !!(dataBytes[0] & 0x01);
+                    effectMsg = targetState.warningLights ? '⚠️ 警告灯已激活' : '警告灯已关闭';
+                    break;
+                default:
+                    return { success: false, msg: '处理器未实现', type: 'error' };
+            }
+
+            return { success: true, msg: effectMsg, type: 'success', idInfo: handlerInfo.name };
+        }
+
+        function applyTargetState() {
+            // Smoothly interpolate vehicleState toward targetState
+            const lerp = (a, b, t) => a + (b - a) * t;
+            const speed = 0.35; // interpolation speed
+            vehicleState.speed = lerp(vehicleState.speed, targetState.speed, speed);
+            vehicleState.rpm = lerp(vehicleState.rpm, targetState.rpm, speed);
+            vehicleState.fuel = lerp(vehicleState.fuel, targetState.fuel, speed);
+            vehicleState.doors = { ...targetState.doors };
+            vehicleState.turnSignal = targetState.turnSignal;
+            vehicleState.warningLights = targetState.warningLights;
+            drawAllGauges();
+            updateStatusIndicators();
+        }
+
+        // ============ FLAG SYSTEM ============
+        function revealFlag() {
+            flagRevealed = true;
+            const toast = document.getElementById('flagToast');
+            toast.classList.add('show');
+            document.getElementById('step3').classList.remove('active');
+            document.getElementById('step3').classList.add('done');
+            document.getElementById('step4').classList.add('active');
+            document.getElementById('step4').classList.add('done');
+
+            // Flash dashboard
+            const dashCard = document.getElementById('dashboardCard');
+            dashCard.style.boxShadow = '0 0 40px rgba(245,158,11,0.6)';
+            setTimeout(() => {
+                dashCard.style.boxShadow = '';
+                dashCard.style.transition = 'box-shadow 1.5s ease-out';
+                dashCard.style.boxShadow = '0 0 0px rgba(245,158,11,0)';
+                setTimeout(() => {
+                    dashCard.style.transition = '';
+                    dashCard.style.boxShadow = '';
+                }, 1500);
+            }, 200);
+
+            addTerminalLine('', '');
+            addTerminalLine('🏴‍☠️ FLAG{CAN_SPEED_INJECTION_200KMH}', 'flag-line');
+            addTerminalLine('   ↳ 车速控制ID (0x1E5) 已被成功利用！速度表显示 ≥200 km/h', 'flag-line');
+            addTerminalLine('   ↳ 这演示了CAN总线缺乏认证的严重安全风险', 'info');
+            addTerminalLine('', '');
+
+            // Auto-hide toast after 8 seconds
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 8000);
+        }
+
+        // ============ TERMINAL ============
+        function addTerminalLine(text, className) {
+            const output = document.getElementById('terminalOutput');
+            const line = document.createElement('div');
+            line.className = 'line ' + (className || '');
+            line.textContent = text;
+            output.appendChild(line);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function sendCanMessage() {
+            const input = document.getElementById('terminalInput');
+            const raw = input.value.trim();
+            if (!raw) return;
+
+            // Add to history
+            if (commandHistory.length === 0 || commandHistory[commandHistory.length - 1] !== raw) {
+                commandHistory.push(raw);
+            }
+            historyIndex = commandHistory.length;
+
+            // Echo command
+            addTerminalLine('can0> ' + raw, 'sent');
+
+            // Handle special commands
+            if (raw.toLowerCase() === 'help') {
+                showHelp();
+                input.value = '';
+                return;
+            }
+            if (raw.toLowerCase() === 'clear') {
+                document.getElementById('terminalOutput').innerHTML = '';
+                addTerminalLine('// 终端已清屏', 'info');
+                input.value = '';
+                return;
+            }
+            if (raw.toLowerCase() === 'reset') {
+                resetAll();
+                addTerminalLine('✓ 所有仪表已重置为默认值', 'success');
+                input.value = '';
+                return;
+            }
+            if (raw.toLowerCase() === 'status') {
+                showStatus();
+                input.value = '';
+                return;
+            }
+
+            // Parse CAN message
+            const parsed = parseCanMessage(raw);
+            if (!parsed) {
+                addTerminalLine('❌ 格式错误。请使用: ID:0x____ Data:__ __ __ __', 'error');
+                addTerminalLine('   示例: ID:0x1E5 Data:C8 00 00 00', 'info');
+                input.value = '';
+                return;
+            }
+
+            // Process
+            const result = processCanMessage(parsed.id, parsed.data);
+            addTerminalLine(
+                `  发送 → ID:0x${parsed.id.toString(16).toUpperCase()} Data:${parsed.data.map(b=>b.toString(16).toUpperCase().padStart(2,'0')).join(' ')}`,
+                'info');
+            addTerminalLine(`  ${result.msg}`, result.type);
+
+            if (result.idInfo) {
+                addTerminalLine(`  📡 功能模块: ${result.idInfo}`, 'info');
+            }
+
+            input.value = '';
+            input.focus();
+
+            // Update step tracking
+            if (speedIdDiscovered && document.getElementById('step2').classList.contains('active')) {
+                document.getElementById('step2').classList.remove('active');
+                document.getElementById('step2').classList.add('done');
+                document.getElementById('step3').classList.add('active');
+            }
+        }
+
+        function parseCanMessage(raw) {
+            // Support formats:
+            // ID:0x1E5 Data:C8 00 00 00
+            // ID:1E5 Data:C8 00 00 00
+            // 0x1E5 C8 00 00 00
+            // id:0x1e5 data:c8
+            let idStr = null;
+            let dataStr = null;
+
+            const upperRaw = raw.toUpperCase();
+
+            // Try ID:... Data:... format
+            const idDataMatch = upperRaw.match(/ID\s*:\s*(0x[0-9A-F]+)\s*DATA\s*:\s*(.+)/i);
+            if (idDataMatch) {
+                idStr = idDataMatch[1];
+                dataStr = idDataMatch[2];
+            } else {
+                // Try bare format: 0x1E5 C8 00 00 00
+                const bareMatch = upperRaw.match(/^(0x[0-9A-F]+)\s+(.+)$/i);
+                if (bareMatch) {
+                    idStr = bareMatch[1];
+                    dataStr = bareMatch[2];
+                }
+            }
+
+            if (!idStr || !dataStr) return null;
+
+            const id = parseInt(idStr, 16);
+            if (isNaN(id) || id < 0 || id > 0x1FFFFFFF) return null;
+
+            const dataBytes = [];
+            const hexBytes = dataStr.match(/[0-9A-F]{1,2}/gi);
+            if (hexBytes) {
+                for (const hb of hexBytes) {
+                    const b = parseInt(hb, 16);
+                    if (!isNaN(b)) dataBytes.push(b);
+                }
+            }
+
+            if (dataBytes.length === 0) {
+                dataBytes.push(0);
+            }
+            // Pad to at least 4 bytes
+            while (dataBytes.length < 4) dataBytes.push(0);
+
+            return { id, data: dataBytes.slice(0, 8) };
+        }
+
+        function showHelp() {
+            addTerminalLine('', '');
+            addTerminalLine('═══ CAN 注入终端帮助 ═══', 'info');
+            addTerminalLine('命令格式:', 'info');
+            addTerminalLine('  ID:0x< Arbitration ID> Data:<hex bytes>', 'info');
+            addTerminalLine('  示例: ID:0x2A0 Data:1F 40 00 00', 'info');
+            addTerminalLine('  简化: 0x2A0 1F 40 00 00', 'info');
+            addTerminalLine('', '');
+            addTerminalLine('已知CAN ID参考:', 'info');
+            for (const [idStr, info] of Object.entries(CAN_IDS)) {
+                const idHex = '0x' + parseInt(idStr).toString(16).toUpperCase();
+                const marker = (parseInt(idStr) === 0x1e5 && !hiddenIdRevealed) ? ' [未确认]' : '';
+                addTerminalLine(`  ${idHex} — ${info.name}${marker}`, 'info');
+            }
+            addTerminalLine('', '');
+            addTerminalLine('特殊命令: help | clear | reset | status', 'info');
+            addTerminalLine('任务: 找到车速控制ID，使速度表显示 200 km/h', 'warn');
+            addTerminalLine('', '');
+        }
+
+        function showStatus() {
+            addTerminalLine('', '');
+            addTerminalLine('═══ 当前车辆状态 ═══', 'info');
+            addTerminalLine(`  车速: ${Math.round(vehicleState.speed)} km/h`, 'info');
+            addTerminalLine(`  转速: ${Math.round(vehicleState.rpm)} RPM`, 'info');
+            addTerminalLine(`  燃油: ${Math.round(vehicleState.fuel)}%`, 'info');
+            addTerminalLine(`  驾驶门: ${vehicleState.doors.driver ? '🔓解锁' : '🔒锁定'}`, 'info');
+            addTerminalLine(`  副驾门: ${vehicleState.doors.passenger ? '🔓解锁' : '🔒锁定'}`, 'info');
+            addTerminalLine(`  警告灯: ${vehicleState.warningLights ? '⚠️激活' : '关闭'}`, 'info');
+            addTerminalLine(`  Flag状态: ${flagRevealed ? '🏴已捕获' : '未捕获'}`, flagRevealed ? 'flag-line' : 'info');
+            addTerminalLine('', '');
+        }
+
+        function revealHint() {
+            if (!hiddenIdRevealed) {
+                hiddenIdRevealed = true;
+                const cell = document.getElementById('hiddenIdCell');
+                cell.textContent = '⚡ 车速控制 (Speedometer) — OEM私有协议';
+                cell.classList.add('revealed');
+                cell.style.cursor = 'default';
+                cell.onclick = null;
+                document.getElementById('hiddenBadge').textContent = '可疑';
+                document.getElementById('hiddenBadge').className = 'unknown-badge';
+                document.getElementById('hiddenRow').style.background = '#1a1f2a';
+                addTerminalLine('💡 参考表已更新 — 0x1E5 被标注为可疑的车速控制ID', 'warn');
+                addTerminalLine('   尝试: ID:0x1E5 Data:C8 00 00 00 (0xC8=200)', 'info');
+                document.getElementById('step1').classList.remove('active');
+                document.getElementById('step1').classList.add('done');
+                document.getElementById('step2').classList.add('active');
+            }
+        }
+
+        function resetAll() {
+            targetState.speed = 0;
+            targetState.rpm = 800;
+            targetState.fuel = 65;
+            targetState.doors = { driver: false, passenger: false, rearL: false, rearR: false };
+            targetState.turnSignal = 0;
+            targetState.warningLights = false;
+            vehicleState.speed = 0;
+            vehicleState.rpm = 800;
+            vehicleState.fuel = 65;
+            vehicleState.doors = { driver: false, passenger: false, rearL: false, rearR: false };
+            vehicleState.turnSignal = 0;
+            vehicleState.warningLights = false;
+            drawAllGauges();
+            updateStatusIndicators();
+            document.getElementById('speedValueText').textContent = '0';
+            document.getElementById('tachoValueText').textContent = '800';
+            document.getElementById('fuelValueText').textContent = '65';
+            addTerminalLine('🔄 仪表已重置 — 所有值恢复默认', 'info');
+        }
+
+        // ============ EVENT LISTENERS ============
+        document.getElementById('terminalInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                sendCanMessage();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (commandHistory.length > 0) {
+                    if (historyIndex > 0) historyIndex--;
+                    this.value = commandHistory[Math.max(0, historyIndex)] || '';
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (historyIndex < commandHistory.length - 1) {
+                    historyIndex++;
+                    this.value = commandHistory[historyIndex] || '';
+                } else {
+                    historyIndex = commandHistory.length;
+                    this.value = '';
+                }
+            }
+        });
+
+        // Click on dashboard to focus terminal
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('.terminal-card') || e.target.closest('input')) return;
+            if (e.target.closest('button') || e.target.closest('summary') || e.target.closest('details')) return;
+            // Don't steal focus from everything
+        });
+
+        // ============ ANIMATION LOOP ============
+        function animationLoop() {
+            applyTargetState();
+
+            // Check flag condition continuously
+            if (vehicleState.speed >= 199.5 && speedIdDiscovered && !flagRevealed) {
+                // Snap to 200 for flag
+                if (Math.abs(vehicleState.speed - targetState.speed) < 1) {
+                    vehicleState.speed = Math.max(vehicleState.speed, 200);
+                    if (vehicleState.speed >= 200) {
+                        revealFlag();
+                    }
+                }
+            }
+
+            requestAnimationFrame(animationLoop);
+        }
+
+        // ============ INITIALIZATION ============
+        function init() {
+            drawAllGauges();
+            updateStatusIndicators();
+            document.getElementById('speedValueText').textContent = '0';
+            document.getElementById('tachoValueText').textContent = '800';
+            document.getElementById('fuelValueText').textContent = '65';
+
+            // Initial terminal messages
+            addTerminalLine('🚗 CAN总线仪表盘模拟器已启动', 'success');
+            addTerminalLine('📡 接口: /dev/can0 @ 500kbps', 'info');
+            addTerminalLine('📋 输入 help 查看可用命令和CAN ID参考', 'info');
+            addTerminalLine('🎯 任务: 找到车速控制 Arbitration ID，使速度表显示 200 km/h', 'warn');
+            addTerminalLine('💡 提示: 检查右侧参考表中未完全公开的ID条目', 'info');
+            addTerminalLine('', '');
+
+            // Start animation loop
+            animationLoop();
+
+            // Auto-focus terminal
+            setTimeout(() => {
+                document.getElementById('terminalInput').focus();
+            }, 300);
+        }
+
+        // Handle window resize for canvas redraw
+        window.addEventListener('resize', () => {
+            drawAllGauges();
+        });
+
+        // Initialize
+        init();
+
+        // Log educational notice
+        console.log(
+            '%c// EDUCATIONAL PURPOSE ONLY — authorized classroom use%c\n%c本模拟器为纯前端概念验证，演示CAN总线注入原理。\n配套防御措施见教育面板。仅用于授权教学环境。',
+            'color:#f59e0b;font-weight:bold;', '', 'color:#94a3b8;');
+    </script>
+</body>
+</html>

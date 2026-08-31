@@ -1,0 +1,1456 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLE 智能锁中间人攻击 - 安全分析实验</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1a2332;
+            --surface2: #1e293b;
+            --border: #2d3a4a;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --info: #06b6d4;
+            --purple: #a855f7;
+            --font-mono: 'Courier New', 'Source Code Pro', 'Fira Code', monospace;
+            --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            --radius: 8px;
+            --transition: 0.2s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        header .logo {
+            font-size: 1.4em;
+            font-weight: 700;
+            color: var(--info);
+            white-space: nowrap;
+        }
+        header .logo span {
+            color: var(--warning);
+        }
+        .progress-wrap {
+            flex: 1;
+            min-width: 200px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .progress-bar {
+            flex: 1;
+            height: 8px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--info), var(--success));
+            transition: width 0.5s ease;
+            border-radius: 4px;
+        }
+        .progress-label {
+            font-size: 0.85em;
+            color: var(--text2);
+            white-space: nowrap;
+        }
+        .briefing-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px 24px;
+            margin: 16px 24px;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+        .briefing-card .icon {
+            font-size: 2em;
+            flex-shrink: 0;
+        }
+        .briefing-card .content {
+            flex: 1;
+            min-width: 250px;
+        }
+        .briefing-card h3 {
+            color: var(--warning);
+            margin-bottom: 6px;
+        }
+        .briefing-card p {
+            color: var(--text2);
+            font-size: 0.95em;
+        }
+        .briefing-card button {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95em;
+            font-weight: 600;
+            transition: background var(--transition);
+            white-space: nowrap;
+        }
+        .briefing-card button:hover {
+            background: #2563eb;
+        }
+
+        .main-layout {
+            display: flex;
+            flex: 1;
+            gap: 0;
+            margin: 0 24px 16px;
+            height: calc(100vh - 220px);
+            min-height: 550px;
+            overflow: hidden;
+        }
+        .packet-list-panel {
+            width: 38%;
+            min-width: 340px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius) 0 0 var(--radius);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .packet-list-panel .panel-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 700;
+            font-size: 0.9em;
+            color: var(--info);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .packet-table-wrap {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .packet-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.78em;
+        }
+        .packet-table th {
+            background: var(--surface2);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            padding: 8px 6px;
+            text-align: left;
+            border-bottom: 2px solid var(--border);
+            color: var(--text2);
+            font-weight: 600;
+        }
+        .packet-table td {
+            padding: 7px 6px;
+            border-bottom: 1px solid rgba(45, 58, 74, 0.5);
+            cursor: pointer;
+            transition: background var(--transition);
+            white-space: nowrap;
+        }
+        .packet-table tr:hover td {
+            background: rgba(59, 130, 246, 0.08);
+        }
+        .packet-table tr.selected td {
+            background: rgba(59, 130, 246, 0.2);
+            color: #fff;
+        }
+        .packet-table tr.tagged td {
+            background: rgba(245, 158, 11, 0.15);
+            box-shadow: inset 3px 0 0 var(--warning);
+        }
+        .packet-table tr.tagged.selected td {
+            background: rgba(245, 158, 11, 0.3);
+        }
+        .packet-table .tag-btn {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 2px solid var(--warning);
+            cursor: pointer;
+            text-align: center;
+            line-height: 14px;
+            font-size: 11px;
+            color: transparent;
+            transition: all var(--transition);
+            flex-shrink: 0;
+        }
+        .packet-table .tag-btn.active {
+            background: var(--warning);
+            color: #000;
+            font-weight: bold;
+        }
+        .packet-table .proto-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.7em;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .proto-adv {
+            background: #1e40af33;
+            color: #60a5fa;
+        }
+        .proto-conn {
+            background: #16653433;
+            color: #4ade80;
+        }
+        .proto-smp {
+            background: #7c2d1233;
+            color: #fb923c;
+        }
+        .proto-gatt {
+            background: #581c8733;
+            color: #c084fc;
+        }
+
+        .detail-panel {
+            flex: 1;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-left: none;
+            border-radius: 0 var(--radius) var(--radius) 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .detail-panel .panel-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 700;
+            font-size: 0.9em;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .detail-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .field-tree {
+            font-family: var(--font-mono);
+            font-size: 0.8em;
+            background: var(--surface2);
+            border-radius: var(--radius);
+            padding: 12px;
+            overflow-x: auto;
+        }
+        .field-tree .node {
+            padding: 3px 0;
+            cursor: default;
+            border-radius: 2px;
+            transition: background var(--transition);
+        }
+        .field-tree .node:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+        .field-tree .node.highlight {
+            background: rgba(245, 158, 11, 0.2);
+            outline: 1px solid var(--warning);
+        }
+        .field-tree .indent {
+            margin-left: 18px;
+        }
+        .field-key {
+            color: #60a5fa;
+        }
+        .field-val {
+            color: #fbbf24;
+        }
+        .field-comment {
+            color: #6b7280;
+            font-style: italic;
+        }
+        .hex-dump {
+            font-family: var(--font-mono);
+            font-size: 0.78em;
+            background: #0a0f19;
+            border-radius: var(--radius);
+            padding: 12px;
+            overflow-x: auto;
+            line-height: 1.7;
+            white-space: pre;
+            color: #c9d1d9;
+        }
+        .hex-dump .offset {
+            color: #6b7280;
+            margin-right: 12px;
+        }
+        .hex-dump .byte {
+            display: inline-block;
+            width: 20px;
+            text-align: center;
+            transition: background var(--transition);
+            border-radius: 2px;
+            cursor: default;
+        }
+        .hex-dump .byte.highlight {
+            background: rgba(245, 158, 11, 0.35);
+            color: #fff;
+            font-weight: bold;
+        }
+        .hex-dump .ascii {
+            color: #8b949e;
+            margin-left: 8px;
+        }
+
+        .action-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 8px 0;
+            align-items: center;
+        }
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.85em;
+            transition: all var(--transition);
+            font-family: var(--font-sans);
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+        .btn-warning {
+            background: var(--warning);
+            color: #000;
+        }
+        .btn-warning:hover {
+            background: #d97706;
+        }
+        .btn-success {
+            background: var(--success);
+            color: #000;
+        }
+        .btn-success:hover {
+            background: #16a34a;
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+        .btn-outline:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .flag-reveal {
+            background: #1a1a0a;
+            border: 2px dashed var(--warning);
+            border-radius: var(--radius);
+            padding: 16px;
+            text-align: center;
+            font-family: var(--font-mono);
+            font-size: 1.1em;
+            color: var(--warning);
+            animation: pulse-flag 1.5s infinite;
+            display: none;
+        }
+        .flag-reveal.visible {
+            display: block;
+        }
+        @keyframes pulse-flag {
+            0%,
+            100% {
+                box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 24px rgba(245, 158, 11, 0.7);
+            }
+        }
+
+        .timeline-builder {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin: 8px 0;
+        }
+        .timeline-slot {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border-radius: var(--radius);
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: all var(--transition);
+            user-select: none;
+        }
+        .timeline-slot:hover {
+            border-color: var(--accent);
+            background: rgba(59, 130, 246, 0.08);
+        }
+        .timeline-slot.placed {
+            border-color: var(--success);
+            background: rgba(34, 197, 94, 0.1);
+            cursor: default;
+            order: 1;
+        }
+        .timeline-slot.available {
+            order: 2;
+        }
+        .timeline-slot .step-num {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.8em;
+            flex-shrink: 0;
+        }
+        .timeline-slot.placed .step-num {
+            background: var(--success);
+            color: #000;
+        }
+        .timeline-slot.wrong-flash {
+            animation: shake 0.5s;
+            border-color: var(--danger) !important;
+        }
+        @keyframes shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            25% {
+                transform: translateX(-6px);
+            }
+            75% {
+                transform: translateX(6px);
+            }
+        }
+
+        .device-topo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            padding: 16px;
+            flex-wrap: wrap;
+            font-size: 0.85em;
+        }
+        .device-node {
+            text-align: center;
+            padding: 10px 14px;
+            border-radius: var(--radius);
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            min-width: 100px;
+        }
+        .device-node.rogue {
+            border-color: var(--danger);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+        }
+        .device-node .dev-icon {
+            font-size: 1.6em;
+        }
+        .device-node .dev-addr {
+            font-family: var(--font-mono);
+            font-size: 0.75em;
+            color: var(--text2);
+        }
+        .device-node .dev-label {
+            font-weight: 700;
+            font-size: 0.85em;
+        }
+        .conn-line {
+            width: 40px;
+            height: 2px;
+            background: var(--border);
+            position: relative;
+            flex-shrink: 0;
+        }
+        .conn-line.mitm {
+            background: repeating-linear-gradient(90deg, var(--danger) 0px, var(--danger) 4px, transparent 4px, transparent 8px);
+        }
+
+        .compare-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85em;
+            margin: 8px 0;
+        }
+        .compare-table th,
+        .compare-table td {
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            text-align: left;
+        }
+        .compare-table th {
+            background: var(--surface2);
+            color: var(--info);
+        }
+        .compare-table .bad {
+            color: var(--danger);
+        }
+        .compare-table .good {
+            color: var(--success);
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: var(--radius);
+            font-weight: 600;
+            z-index: 999;
+            animation: slideIn 0.3s ease;
+            pointer-events: none;
+        }
+        .toast.success {
+            background: var(--success);
+            color: #000;
+        }
+        .toast.warning {
+            background: var(--warning);
+            color: #000;
+        }
+        .toast.info {
+            background: var(--accent);
+            color: #fff;
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .analysis-report {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            margin: 16px 24px;
+        }
+        .analysis-report summary {
+            cursor: pointer;
+            font-weight: 700;
+            color: var(--info);
+            font-size: 1em;
+        }
+        .analysis-report .report-content {
+            margin-top: 12px;
+            font-size: 0.9em;
+            color: var(--text2);
+            line-height: 1.8;
+        }
+        .analysis-report .report-content h4 {
+            color: var(--text);
+            margin: 10px 0 4px;
+        }
+        .analysis-report code {
+            background: #0a0f19;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+            color: var(--warning);
+        }
+
+        @media (max-width: 900px) {
+            .main-layout {
+                flex-direction: column;
+                height: auto;
+                min-height: auto;
+            }
+            .packet-list-panel {
+                width: 100%;
+                min-width: auto;
+                border-radius: var(--radius) var(--radius) 0 0;
+                max-height: 300px;
+            }
+            .detail-panel {
+                border-left: 1px solid var(--border);
+                border-radius: 0 0 var(--radius) var(--radius);
+                min-height: 400px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">🔐 BLE<span>SecLab</span></div>
+        <div class="progress-wrap">
+            <span class="progress-label" id="progressLabel">步骤 0/4 — 任务简报</span>
+            <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+        </div>
+    </header>
+
+    <!-- 任务简报 -->
+    <div class="briefing-card" id="briefingCard">
+        <div class="icon">📋</div>
+        <div class="content">
+            <h3>任务简报：BLE 智能锁中间人攻击调查</h3>
+            <p>某公司部署的 <strong>SmartLock Pro</strong> BLE 智能锁疑似遭到未授权开锁。安全团队在锁附近捕获了 12 个 BLE 数据包。你的任务是：<strong>分析数据包、识别攻击手法、提取被窃取的密钥、重建攻击时间线。</strong> 已知该锁使用 <em>Just Works</em> 配对模式（无认证环节）。</p>
+        </div>
+        <button onclick="startLab()" id="btnStart">🔍 开始调查</button>
+    </div>
+
+    <!-- 主布局 -->
+    <div class="main-layout" id="mainLayout" style="display:none;">
+        <!-- 左侧：数据包列表 -->
+        <div class="packet-list-panel">
+            <div class="panel-header">
+                📡 捕获的 BLE 数据包
+                <span style="font-size:0.75em;color:var(--text2);">共 12 帧</span>
+            </div>
+            <div class="packet-table-wrap">
+                <table class="packet-table" id="packetTable">
+                    <thead>
+                        <tr>
+                            <th style="width:28px;">🏷</th>
+                            <th style="width:32px;">#</th>
+                            <th style="width:60px;">时间</th>
+                            <th style="width:130px;">源地址</th>
+                            <th style="width:130px;">目标地址</th>
+                            <th>协议</th>
+                            <th>信息</th>
+                        </tr>
+                    </thead>
+                    <tbody id="packetTbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 右侧：详情面板 -->
+        <div class="detail-panel">
+            <div class="panel-header" id="detailHeader">
+                📋 选择一个数据包以查看详情
+            </div>
+            <div class="detail-content" id="detailContent">
+                <div class="device-topo" id="deviceTopo">
+                    <div class="device-node">
+                        <div class="dev-icon">📱</div>
+                        <div class="dev-label">受害者手机</div>
+                        <div class="dev-addr">A4:C1:38:DE:2F:09</div>
+                    </div>
+                    <div class="conn-line mitm"></div>
+                    <div class="device-node rogue" id="rogueNode">
+                        <div class="dev-icon">💻</div>
+                        <div class="dev-label">⚠ 攻击者设备</div>
+                        <div class="dev-addr">28:FF:3C:B2:91:55</div>
+                    </div>
+                    <div class="conn-line"></div>
+                    <div class="device-node">
+                        <div class="dev-icon">🔒</div>
+                        <div class="dev-label">SmartLock Pro</div>
+                        <div class="dev-addr">00:1A:7D:DA:71:13</div>
+                    </div>
+                </div>
+                <p style="color:var(--text2);font-size:0.85em;text-align:center;">▲ 网络拓扑：攻击者处于中间人位置</p>
+                <div id="fieldTreeContainer" style="display:none;">
+                    <h4 style="color:var(--info);margin-bottom:4px;">📂 字段解析</h4>
+                    <div class="field-tree" id="fieldTree"></div>
+                </div>
+                <div id="hexDumpContainer" style="display:none;">
+                    <h4 style="color:var(--info);margin-bottom:4px;">📐 十六进制转储</h4>
+                    <div class="hex-dump" id="hexDump"></div>
+                </div>
+                <div id="stepInstructions" style="padding:8px;background:var(--surface2);border-radius:var(--radius);font-size:0.85em;color:var(--text2);">
+                    <strong>📌 当前步骤：</strong><span id="stepDesc">等待开始...</span>
+                </div>
+                <div class="action-row" id="actionRow">
+                    <button class="btn btn-warning" id="btnVerifyTags" onclick="verifyTags()" disabled>✅ 验证标记</button>
+                    <button class="btn btn-primary" id="btnExtractKey" onclick="extractKey()" disabled>🔑 提取密钥</button>
+                    <button class="btn btn-success" id="btnBuildTimeline" onclick="startTimeline()" disabled>⏱ 重建攻击时间线</button>
+                </div>
+                <div class="flag-reveal" id="flagReveal">
+                    🏆 FLAG{<span id="flagText">BLE_MITM_JUST_WORKS_BYPASS</span>}
+                </div>
+                <div id="timelineContainer" style="display:none;">
+                    <h4 style="color:var(--warning);margin-bottom:6px;">⏱ 攻击时间线重建（点击事件按正确顺序排列）</h4>
+                    <div class="timeline-builder" id="timelineBuilder"></div>
+                    <button class="btn btn-success" id="btnCheckTimeline" onclick="checkTimeline()" style="margin-top:8px;">✅ 检查时间线</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 分析报告 -->
+    <details class="analysis-report" id="analysisReport" style="display:none;">
+        <summary>📄 查看完整分析报告（完成实验后展开）</summary>
+        <div class="report-content">
+            <h4>🔍 攻击概述</h4>
+            <p>这是一次典型的 <strong>BLE Just Works 配对中间人攻击</strong>。攻击者利用 BLE 广告包的开放性，伪造了一个与目标智能锁同名的设备，并通过更强的信号诱导受害者手机连接到伪装设备。由于 SmartLock Pro 使用 <strong>Just Works</strong> 配对模式（无 MITM 保护），攻击者可以中继所有配对数据，获取短期密钥（STK）和长期密钥（LTK）。</p>
+            <h4>⚡ 攻击链</h4>
+            <ol>
+                <li><strong>侦察：</strong>攻击者扫描 BLE 广告，发现 <code>00:1A:7D:DA:71:13</code> 广播 "SmartLock Pro"</li>
+                <li><strong>伪装：</strong>攻击者使用 <code>28:FF:3C:B2:91:55</code> 广播相同名称，信号更强（-42 dBm vs -45 dBm）</li>
+                <li><strong>诱导连接：</strong>受害者手机连接到信号更强的伪装设备</li>
+                <li><strong>中继配对：</strong>攻击者同时与真实锁建立连接，中继 SMP 配对数据包</li>
+                <li><strong>密钥获取：</strong>Just Works 无 MITM 保护 → 攻击者获取 STK → 解密 LTK</li>
+                <li><strong>未授权开锁：</strong>攻击者使用 LTK 加密发送 GATT 开锁指令</li>
+            </ol>
+            <h4>🛡️ 防御措施</h4>
+            <ul>
+                <li>使用 <strong>Passkey Entry</strong> 或 <strong>Numeric Comparison</strong> 替代 Just Works</li>
+                <li>启用 <strong>LE Secure Connections</strong>（使用 ECDH 密钥交换）</li>
+                <li>在锁端实施 <strong>连接信号强度异常检测</strong></li>
+                <li>使用 <strong>OOB（带外）认证</strong>（如 NFC 触碰配对）</li>
+            </ul>
+            <h4>📚 参考</h4>
+            <p>Bluetooth SIG 安全最佳实践 | CVE 相关 BLE MITM 漏洞 | NIST SP 800-121 Rev.2</p>
+            <p style="color:var(--danger);margin-top:8px;">// EDUCATIONAL PURPOSE ONLY — authorized classroom use. 仅用于授权教学环境。</p>
+        </div>
+    </details>
+
+    <!-- Toast 容器 -->
+    <div id="toastContainer"></div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use. 仅用于授权教学环境。
+        // 本实验模拟 BLE MITM 攻击用于教学，所有数据均为模拟数据。
+
+        // ============ 数据包数据 ============
+        const packets = [{
+            id: 1,
+            time: '0.000000',
+            src: '00:1A:7D:DA:71:13',
+            dst: '广播',
+            proto: 'BLE ADV',
+            protoClass: 'proto-adv',
+            info: 'ADV_IND: SmartLock Pro, RSSI -45 dBm',
+            anomalous: false,
+            fields: [
+                { key: 'Access Address', val: '0x8E89BED6', indent: 0, comment: '广播通道固定地址' },
+                { key: 'PDU Type', val: 'ADV_IND (0x00)', indent: 0, comment: '可连接通用广播' },
+                { key: 'AdvA (广告地址)', val: '00:1A:7D:DA:71:13', indent: 0, comment: '广播者 MAC 地址' },
+                { key: 'AdvData', val: '', indent: 0, comment: '' },
+                { key: '→ Flags', val: '0x06', indent: 1, comment: 'LE 通用发现模式, BR/EDR 不支持' },
+                { key: '→ Complete Local Name', val: '"SmartLock Pro"', indent: 1, comment: '设备名称：智能锁' },
+                { key: '→ TX Power Level', val: '0 dBm', indent: 1, comment: '发射功率' },
+                { key: 'RSSI (信号强度)', val: '-45 dBm', indent: 0, comment: '接收信号强度指示' },
+            ],
+            hex: '8E 89 BE D6 00 13 71 DA 7D 1A 00 02 01 06 0E 09  53 6D 61 72 74 4C 6F 63 6B 20 50 72 6F 02 0A 00',
+            hexOffsets: [
+                { start: 0, end: 3, field: 'Access Address' },
+                { start: 4, end: 4, field: 'PDU Type' },
+                { start: 5, end: 10, field: 'AdvA' },
+                { start: 11, end: 30, field: 'AdvData' },
+            ]
+        }, {
+            id: 2,
+            time: '0.125000',
+            src: '28:FF:3C:B2:91:55',
+            dst: '00:1A:7D:DA:71:13',
+            proto: 'BLE SCAN',
+            protoClass: 'proto-adv',
+            info: 'SCAN_REQ: 攻击者扫描请求',
+            anomalous: false,
+            fields: [
+                { key: 'Access Address', val: '0x8E89BED6', indent: 0, comment: '' },
+                { key: 'PDU Type', val: 'SCAN_REQ (0x03)', indent: 0, comment: '扫描请求' },
+                { key: 'ScanA', val: '28:FF:3C:B2:91:55', indent: 0, comment: '扫描者地址（攻击者）' },
+                { key: 'AdvA', val: '00:1A:7D:DA:71:13', indent: 0, comment: '目标广播者' },
+            ],
+            hex: '8E 89 BE D6 03 55 91 B2 3C FF 28 13 71 DA 7D 1A  00',
+            hexOffsets: [
+                { start: 0, end: 3, field: 'Access Address' },
+                { start: 4, end: 4, field: 'PDU Type' },
+                { start: 5, end: 10, field: 'ScanA' },
+                { start: 11, end: 16, field: 'AdvA' },
+            ]
+        }, {
+            id: 3,
+            time: '0.250000',
+            src: '00:1A:7D:DA:71:13',
+            dst: '28:FF:3C:B2:91:55',
+            proto: 'BLE SCAN',
+            protoClass: 'proto-adv',
+            info: 'SCAN_RSP: 服务UUID 0x1800, 0x180A, 自定义锁服务',
+            anomalous: false,
+            fields: [
+                { key: 'Access Address', val: '0x8E89BED6', indent: 0, comment: '' },
+                { key: 'PDU Type', val: 'SCAN_RSP (0x04)', indent: 0, comment: '扫描响应' },
+                { key: 'AdvA', val: '00:1A:7D:DA:71:13', indent: 0, comment: '' },
+                { key: 'ScanRspData', val: '', indent: 0, comment: '' },
+                { key: '→ 16-bit UUID', val: '0x1800 (Generic Access)', indent: 1, comment: '' },
+                { key: '→ 16-bit UUID', val: '0x180A (Device Info)', indent: 1, comment: '' },
+                { key: '→ 128-bit UUID', val: '0000A001-0000-1000-8000-00805F9B34FB', indent: 1, comment: '自定义锁服务' },
+            ],
+            hex: '8E 89 BE D6 04 13 71 DA 7D 1A 00 55 91 B2 3C FF  28 03 03 00 18 0A 18 11 07 FB 34 9B 5F 80 00 80  00 10 00 00 01 A0 00 00',
+            hexOffsets: [
+                { start: 0, end: 3, field: 'Access Address' },
+                { start: 4, end: 4, field: 'PDU Type' },
+                { start: 5, end: 10, field: 'AdvA' },
+                { start: 17, end: 39, field: 'ScanRspData' },
+            ]
+        }, {
+            id: 4,
+            time: '0.500000',
+            src: '28:FF:3C:B2:91:55',
+            dst: '广播',
+            proto: 'BLE ADV',
+            protoClass: 'proto-adv',
+            info: '⚠ ADV_IND: "SmartLock Pro" (伪装), RSSI -42 dBm',
+            anomalous: true,
+            fields: [
+                { key: 'Access Address', val: '0x8E89BED6', indent: 0, comment: '' },
+                { key: 'PDU Type', val: 'ADV_IND (0x00)', indent: 0, comment: '⚠ 攻击者发送伪装广播' },
+                { key: 'AdvA', val: '28:FF:3C:B2:91:55', indent: 0, comment: '⚠ 与真实锁不同的 MAC 地址！' },
+                { key: 'AdvData', val: '', indent: 0, comment: '' },
+                { key: '→ Complete Local Name', val: '"SmartLock Pro"', indent: 1, comment: '⚠ 名称完全相同 — 伪装！' },
+                { key: '→ TX Power Level', val: '+4 dBm', indent: 1, comment: '⚠ 更高的发射功率' },
+                { key: 'RSSI', val: '-42 dBm', indent: 0, comment: '⚠ 比真实锁信号更强（-42 > -45）' },
+            ],
+            hex: '8E 89 BE D6 00 55 91 B2 3C FF 28 0E 09 53 6D 61  72 74 4C 6F 63 6B 20 50 72 6F 02 0A 04',
+            hexOffsets: [
+                { start: 0, end: 3, field: 'Access Address' },
+                { start: 4, end: 4, field: 'PDU Type' },
+                { start: 5, end: 10, field: 'AdvA' },
+                { start: 11, end: 28, field: 'AdvData' },
+            ]
+        }, {
+            id: 5,
+            time: '1.200000',
+            src: 'A4:C1:38:DE:2F:09',
+            dst: '28:FF:3C:B2:91:55',
+            proto: 'BLE CONN',
+            protoClass: 'proto-conn',
+            info: 'CONNECT_REQ: 受害者连接到伪装设备',
+            anomalous: true,
+            fields: [
+                { key: 'Access Address', val: '0x8E89BED6', indent: 0, comment: '' },
+                { key: 'PDU Type', val: 'CONNECT_REQ (0x05)', indent: 0, comment: '连接请求' },
+                { key: 'InitA', val: 'A4:C1:38:DE:2F:09', indent: 0, comment: '发起者（受害者手机）' },
+                { key: 'AdvA', val: '28:FF:3C:B2:91:55', indent: 0, comment: '⚠ 连接到了伪装设备！' },
+                { key: 'Access Address (数据通道)', val: '0x5061A72C', indent: 0, comment: '后续数据通道地址' },
+                { key: 'CRC Init', val: '0xABCDEF', indent: 0, comment: '' },
+            ],
+            hex: '8E 89 BE D6 05 09 2F DE 38 C1 A4 55 91 B2 3C FF  28 2C A7 61 50 EF CD AB',
+            hexOffsets: [
+                { start: 0, end: 3, field: 'Access Address' },
+                { start: 4, end: 4, field: 'PDU Type' },
+                { start: 5, end: 10, field: 'InitA' },
+                { start: 11, end: 16, field: 'AdvA' },
+                { start: 17, end: 20, field: 'Data Access Address' },
+            ]
+        }, {
+            id: 6,
+            time: '1.450000',
+            src: 'A4:C1:38:DE:2F:09',
+            dst: '28:FF:3C:B2:91:55',
+            proto: 'SMP',
+            protoClass: 'proto-smp',
+            info: 'Pairing Request: IO=NoInputNoOutput, MITM=No, Bonding=Yes',
+            anomalous: true,
+            fields: [
+                { key: 'L2CAP CID', val: '0x0006 (SMP)', indent: 0, comment: '安全管理协议通道' },
+                { key: 'SMP Command', val: 'Pairing Request (0x01)', indent: 0, comment: '配对请求' },
+                { key: 'IO Capability', val: 'NoInputNoOutput (0x03)', indent: 0, comment: '⚠ Just Works 模式！无输入无输出' },
+                { key: 'OOB Data Flag', val: 'No (0x00)', indent: 0, comment: '无带外数据' },
+                { key: 'AuthReq', val: '', indent: 0, comment: '' },
+                { key: '→ Bonding', val: 'Yes (1)', indent: 1, comment: '请求绑定' },
+                { key: '→ MITM', val: 'No (0)', indent: 1, comment: '⚠ 不要求 MITM 保护！' },
+                { key: '→ Secure Connections', val: 'No (0)', indent: 1, comment: '⚠ 不使用 LE Secure Connections' },
+                { key: 'Max Key Size', val: '16 bytes', indent: 0, comment: '' },
+            ],
+            hex: '06 00 01 03 00 01 00 00 10',
+            hexOffsets: [
+                { start: 0, end: 1, field: 'L2CAP CID' },
+                { start: 2, end: 2, field: 'SMP Command' },
+                { start: 3, end: 3, field: 'IO Capability' },
+                { start: 4, end: 4, field: 'OOB Data' },
+                { start: 5, end: 5, field: 'AuthReq' },
+                { start: 7, end: 7, field: 'Max Key Size' },
+            ]
+        }, {
+            id: 7,
+            time: '1.520000',
+            src: '28:FF:3C:B2:91:55',
+            dst: 'A4:C1:38:DE:2F:09',
+            proto: 'SMP',
+            protoClass: 'proto-smp',
+            info: 'Pairing Response: IO=NoInputNoOutput, MITM=No (中继自真实锁)',
+            anomalous: true,
+            fields: [
+                { key: 'L2CAP CID', val: '0x0006 (SMP)', indent: 0, comment: '' },
+                { key: 'SMP Command', val: 'Pairing Response (0x02)', indent: 0, comment: '配对响应' },
+                { key: 'IO Capability', val: 'NoInputNoOutput (0x03)', indent: 0, comment: '⚠ 确认 Just Works — 无认证' },
+                { key: 'OOB Data Flag', val: 'No (0x00)', indent: 0, comment: '' },
+                { key: 'AuthReq: MITM', val: 'No (0)', indent: 0, comment: '⚠ 攻击者可中继所有数据' },
+            ],
+            hex: '06 00 02 03 00 01 00 00 10',
+            hexOffsets: [
+                { start: 0, end: 1, field: 'L2CAP CID' },
+                { start: 2, end: 2, field: 'SMP Command' },
+                { start: 3, end: 3, field: 'IO Capability' },
+                { start: 4, end: 4, field: 'OOB Data' },
+                { start: 5, end: 5, field: 'AuthReq' },
+            ]
+        }, {
+            id: 8,
+            time: '1.680000',
+            src: 'A4:C1:38:DE:2F:09',
+            dst: '28:FF:3C:B2:91:55',
+            proto: 'SMP',
+            protoClass: 'proto-smp',
+            info: 'Pairing Confirm: STK 确认（无 MITM 保护）',
+            anomalous: false,
+            fields: [
+                { key: 'SMP Command', val: 'Pairing Confirm (0x03)', indent: 0, comment: 'STK 确认值' },
+                { key: 'Confirm Value', val: 'A3F2...B10E (16 bytes)', indent: 0, comment: '基于 STK 计算的确认值' },
+                { key: '注意', val: 'Just Works 下 STK 可被中间人计算', indent: 0, comment: '⚠ 攻击者同时与两端完成配对' },
+            ],
+            hex: '06 00 03 A3 F2 91 7C D4 8E 2B 55 10 66 EF 39 B1  0E 4A 7D',
+            hexOffsets: [
+                { start: 0, end: 1, field: 'L2CAP CID' },
+                { start: 2, end: 2, field: 'SMP Command' },
+                { start: 3, end: 18, field: 'Confirm Value' },
+            ]
+        }, {
+            id: 9,
+            time: '1.820000',
+            src: '28:FF:3C:B2:91:55',
+            dst: 'A4:C1:38:DE:2F:09',
+            proto: 'SMP',
+            protoClass: 'proto-smp',
+            info: 'Pairing Random: 随机数交换',
+            anomalous: false,
+            fields: [
+                { key: 'SMP Command', val: 'Pairing Random (0x04)', indent: 0, comment: '配对随机数' },
+                { key: 'Random Value', val: '7F2E...C84D (16 bytes)', indent: 0, comment: '用于 STK 生成的随机数（可被中继）' },
+            ],
+            hex: '06 00 04 7F 2E A1 99 3B D6 5C 81 47 F2 0A 8E 6D  C8 4D',
+            hexOffsets: [
+                { start: 0, end: 1, field: 'L2CAP CID' },
+                { start: 2, end: 2, field: 'SMP Command' },
+                { start: 3, end: 18, field: 'Random Value' },
+            ]
+        }, {
+            id: 10,
+            time: '2.100000',
+            src: '28:FF:3C:B2:91:55',
+            dst: 'A4:C1:38:DE:2F:09',
+            proto: 'SMP',
+            protoClass: 'proto-smp',
+            info: 'Encryption Info: LTK 分发 ⚠ 密钥泄露！',
+            anomalous: true,
+            fields: [
+                { key: 'SMP Command', val: 'Encryption Information (0x06)', indent: 0, comment: '长期密钥分发' },
+                { key: 'LTK (Long Term Key)', val: '4B8E9F2A1D3C5E7F6A0B8C9D2E4F1A3B', indent: 0,
+                    comment: '⚠ 128位长期密钥 — 攻击者已获取！' },
+                { key: 'E DIV', val: '0x7A3B', indent: 0, comment: '加密分集值' },
+                { key: 'Rand', val: '9F4E2C1A8D6B3075', indent: 0, comment: '随机数' },
+                { key: '⚠ 关键发现', val: 'LTK 现可被攻击者用于加密任意 GATT 操作', indent: 0,
+                comment: '包括开锁指令！' },
+            ],
+            hex: '06 00 06 4B 8E 9F 2A 1D 3C 5E 7F 6A 0B 8C 9D 2E  4F 1A 3B 3B 7A 9F 4E 2C 1A 8D 6B 30 75',
+            hexOffsets: [
+                { start: 0, end: 1, field: 'L2CAP CID' },
+                { start: 2, end: 2, field: 'SMP Command' },
+                { start: 3, end: 18, field: 'LTK' },
+                { start: 19, end: 20, field: 'EDIV' },
+                { start: 21, end: 28, field: 'Rand' },
+            ]
+        }, {
+            id: 11,
+            time: '3.500000',
+            src: '28:FF:3C:B2:91:55',
+            dst: '00:1A:7D:DA:71:13',
+            proto: 'GATT',
+            protoClass: 'proto-gatt',
+            info: '⚠ GATT Write: 开锁指令 (Handle 0x0027) → UNLOCK',
+            anomalous: true,
+            fields: [
+                { key: 'L2CAP CID', val: '0x0004 (ATT)', indent: 0, comment: '属性协议' },
+                { key: 'ATT Opcode', val: 'Write Request (0x12)', indent: 0, comment: '写请求' },
+                { key: 'Handle', val: '0x0027', indent: 0, comment: '锁控制特征句柄' },
+                { key: 'Data', val: '01 55 4E 4C 4F 43 4B', indent: 0,
+                    comment: '⚠ "UNLOCK" 指令 — 开锁命令！' },
+                { key: '加密状态', val: '已加密 (使用窃取的LTK)', indent: 0, comment: '⚠ 攻击者使用泄露的 LTK 加密' },
+            ],
+            hex: '04 00 12 27 00 01 55 4E 4C 4F 43 4B',
+            hexOffsets: [
+                { start: 0, end: 1, field: 'L2CAP CID' },
+                { start: 2, end: 2, field: 'ATT Opcode' },
+                { start: 3, end: 4, field: 'Handle' },
+                { start: 5, end: 11, field: 'Data (UNLOCK)' },
+            ]
+        }, {
+            id: 12,
+            time: '3.650000',
+            src: '00:1A:7D:DA:71:13',
+            dst: '28:FF:3C:B2:91:55',
+            proto: 'GATT',
+            protoClass: 'proto-gatt',
+            info: 'GATT Notification: Lock Status = UNLOCKED 🔓',
+            anomalous: false,
+            fields: [
+                { key: 'ATT Opcode', val: 'Handle Value Notification (0x1B)', indent: 0, comment: '通知' },
+                { key: 'Handle', val: '0x0028', indent: 0, comment: '锁状态特征句柄' },
+                { key: 'Data', val: '01', indent: 0, comment: '0x01 = UNLOCKED 🔓' },
+            ],
+            hex: '04 00 1B 28 00 01',
+            hexOffsets: [
+                { start: 0, end: 1, field: 'L2CAP CID' },
+                { start: 2, end: 2, field: 'ATT Opcode' },
+                { start: 3, end: 4, field: 'Handle' },
+                { start: 5, end: 5, field: 'Data' },
+            ]
+        }];
+
+        // 正确的时间线顺序
+        const correctTimeline = [
+            '攻击者扫描BLE设备，发现SmartLock Pro',
+            '攻击者创建伪装设备，广播相同名称"SmartLock Pro"',
+            '受害者手机连接到信号更强的伪装设备',
+            '攻击者中继配对数据（Just Works无MITM保护）',
+            '攻击者捕获LTK长期密钥',
+            '攻击者使用LTK加密发送开锁指令',
+            '智能锁执行开锁操作 🔓',
+        ];
+
+        // ============ 状态管理 ============
+        const state = {
+            currentStep: 0,
+            selectedPacket: null,
+            taggedPackets: new Set(),
+            timelineBuilt: [],
+            keyExtracted: false,
+            timelineCorrect: false,
+            allTagsVerified: false,
+            labStarted: false,
+        };
+
+        // ============ DOM 引用 ============
+        const $ = (s) => document.querySelector(s);
+        const $$ = (s) => document.querySelectorAll(s);
+
+        // ============ Toast ============
+        function showToast(msg, type = 'info') {
+            const container = $('#toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = msg;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.3s';
+                setTimeout(() => toast.remove(), 300);
+            }, 2500);
+        }
+
+        // ============ 进度更新 ============
+        function updateProgress() {
+            let step = state.currentStep;
+            let total = 4;
+            if (state.allTagsVerified && step < 2) step = 2;
+            if (state.keyExtracted && step < 3) step = 3;
+            if (state.timelineCorrect && step < 4) step = 4;
+            state.currentStep = Math.max(state.currentStep, step);
+
+            const pct = Math.round((state.currentStep / total) * 100);
+            $('#progressFill').style.width = pct + '%';
+            $('#progressLabel').textContent = `步骤 ${state.currentStep}/${total}`;
+            const descs = ['任务简报', '广告包分析与异常标记', '密钥提取', '攻击时间线重建', '✅ 完成'];
+            $('#stepDesc').textContent = descs[Math.min(state.currentStep, 4)];
+
+            // 更新按钮状态
+            $('#btnVerifyTags').disabled = state.taggedPackets.size < 3;
+            $('#btnExtractKey').disabled = !state.allTagsVerified;
+            $('#btnBuildTimeline').disabled = !state.keyExtracted;
+        }
+
+        // ============ 开始实验 ============
+        function startLab() {
+            state.labStarted = true;
+            state.currentStep = 1;
+            $('#briefingCard').style.display = 'none';
+            $('#mainLayout').style.display = 'flex';
+            $('#analysisReport').style.display = 'block';
+            renderPacketTable();
+            updateProgress();
+            showToast('🔍 调查开始！请浏览数据包，标记可疑帧。', 'info');
+        }
+
+        // ============ 渲染数据包表格 ============
+        function renderPacketTable() {
+            const tbody = $('#packetTbody');
+            tbody.innerHTML = '';
+            packets.forEach(p => {
+                const tr = document.createElement('tr');
+                tr.dataset.packetId = p.id;
+                if (state.selectedPacket === p.id) tr.classList.add('selected');
+                if (state.taggedPackets.has(p.id)) tr.classList.add('tagged');
+                tr.innerHTML = `
+                    <td><span class="tag-btn ${state.taggedPackets.has(p.id)?'active':''}" data-pid="${p.id}">✓</span></td>
+                    <td>${p.id}</td>
+                    <td>${p.time}</td>
+                    <td title="${p.src}">${p.src.length>14?p.src.slice(0,11)+'…':p.src}</td>
+                    <td title="${p.dst}">${p.dst.length>14?p.dst.slice(0,11)+'…':p.dst}</td>
+                    <td><span class="proto-badge ${p.protoClass}">${p.proto}</span></td>
+                    <td style="color:${p.anomalous?'var(--warning)':'var(--text2)'}">${p.info}</td>
+                `;
+                tr.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('tag-btn') || e.target.closest('.tag-btn')) {
+                        toggleTag(p.id);
+                        return;
+                    }
+                    selectPacket(p.id);
+                });
+                tbody.appendChild(tr);
+            });
+            // 为 tag-btn 添加独立事件
+            tbody.querySelectorAll('.tag-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const pid = parseInt(btn.dataset.pid);
+                    toggleTag(pid);
+                });
+            });
+        }
+
+        function refreshPacketRow(pid) {
+            const tr = document.querySelector(`tr[data-packet-id="${pid}"]`);
+            if (!tr) return;
+            const p = packets.find(x => x.id === pid);
+            if (!p) return;
+            if (state.selectedPacket === pid) tr.classList.add('selected');
+            else tr.classList.remove('selected');
+            if (state.taggedPackets.has(pid)) tr.classList.add('tagged');
+            else tr.classList.remove('tagged');
+            const btn = tr.querySelector('.tag-btn');
+            if (btn) {
+                if (state.taggedPackets.has(pid)) btn.classList.add('active');
+                else btn.classList.remove('active');
+            }
+        }
+
+        // ============ 选择数据包 ============
+        function selectPacket(pid) {
+            state.selectedPacket = pid;
+            // 更新所有行
+            packets.forEach(p => refreshPacketRow(p.id));
+            // 渲染详情
+            renderPacketDetail(pid);
+            // 如果在时间线构建模式，尝试放置
+            if (state.keyExtracted && !state.timelineCorrect && $('#timelineContainer').style.display !== 'none') {
+                // 不在这里处理时间线
+            }
+        }
+
+        function toggleTag(pid) {
+            if (state.taggedPackets.has(pid)) {
+                state.taggedPackets.delete(pid);
+                showToast(`取消标记数据包 #${pid}`, 'info');
+            } else {
+                state.taggedPackets.add(pid);
+                showToast(`已标记数据包 #${pid} 为可疑`, 'warning');
+            }
+            refreshPacketRow(pid);
+            updateProgress();
+        }
+
+        // ============ 渲染数据包详情 ============
+        function renderPacketDetail(pid) {
+            const p = packets.find(x => x.id === pid);
+            if (!p) return;
+            $('#detailHeader').textContent = `📋 数据包 #${pid} — ${p.proto} — ${p.info}`;
+            $('#fieldTreeContainer').style.display = 'block';
+            $('#hexDumpContainer').style.display = 'block';
+
+            // 字段解析
+            let fieldHTML = '';
+            p.fields.forEach(f => {
+                const cls = f.comment.includes('⚠') ? 'node highlight' : 'node';
+                fieldHTML +=
+                    `<div class="${cls}" style="padding-left:${f.indent*18}px;"><span class="field-key">${f.key}:</span> <span class="field-val">${f.val}</span> <span class="field-comment">${f.comment?'// '+f.comment:''}</span></div>`;
+            });
+            $('#fieldTree').innerHTML = fieldHTML;
+
+            // Hex dump
+            const hexBytes = p.hex.split(/\s+/).filter(b => b.length > 0);
+            let hexHTML = '<span class="offset">0000</span>  ';
+            let asciiAccum = '';
+            const highlightSet = new Set();
+            p.hexOffsets.forEach(ho => {
+                for (let i = ho.start; i <= ho.end; i++) highlightSet.add(i);
+            });
+            hexBytes.forEach((byte, i) => {
+                const cls = highlightSet.has(i) ? 'byte highlight' : 'byte';
+                hexHTML += `<span class="${cls}" data-byteidx="${i}">${byte}</span> `;
+                const val = parseInt(byte, 16);
+                asciiAccum += (val >= 32 && val < 127) ? String.fromCharCode(val) : '.';
+                if ((i + 1) % 16 === 0 && i < hexBytes.length - 1) {
+                    hexHTML += ` <span class="ascii">${asciiAccum}</span>\n<span class="offset">${String(i+1).padStart(4,'0')}</span>  `;
+                    asciiAccum = '';
+                }
+            });
+            if (asciiAccum.length > 0) {
+                const remaining = hexBytes.length % 16;
+                if (remaining > 0) {
+                    hexHTML += '   '.repeat(16 - remaining);
+                }
+                hexHTML += ` <span class="ascii">${asciiAccum}</span>`;
+            }
+            $('#hexDump').innerHTML = hexHTML;
+
+            // 鼠标悬停高亮
+            $('#hexDump').querySelectorAll('.byte.highlight').forEach(el => {
+                el.addEventListener('mouseenter', () => {
+                    el.style.background = 'rgba(245,158,11,0.6)';
+                });
+                el.addEventListener('mouseleave', () => {
+                    el.style.background = 'rgba(245,158,11,0.35)';
+                });
+            });
+        }
+
+        // ============ 验证标记 ============
+        function verifyTags() {
+            const expectedAnomalous = new Set([4, 5, 6, 7, 10, 11]);
+            const tagged = state.taggedPackets;
+            const found = new Set([...tagged].filter(x => expectedAnomalous.has(x)));
+            const missed = new Set([...expectedAnomalous].filter(x => !tagged.has(x)));
+            const falsePositives = new Set([...tagged].filter(x => !expectedAnomalous.has(x)));
+
+            let msg = '';
+            if (found.size >= 4) {
+                state.allTagsVerified = true;
+                msg = `✅ 优秀！你标记了 ${found.size}/${expectedAnomalous.size} 个关键可疑包。`;
+                if (missed.size > 0) msg += ` 遗漏了 #${[...missed].join(',#')}。`;
+                if (falsePositives.size > 0) msg += ` 误标记了 #${[...falsePositives].join(',#')}（这些是正常包）。`;
+                showToast(msg, 'success');
+                if (state.currentStep < 2) state.currentStep = 2;
+            } else if (found.size >= 2) {
+                msg = `⚠ 你只找到 ${found.size}/${expectedAnomalous.size} 个关键可疑包。继续寻找！`;
+                if (missed.size > 0) msg += ` 提示：检查广告包和 SMP 配对包。`;
+                showToast(msg, 'warning');
+            } else {
+                msg = `❌ 标记不足。提示：寻找名称重复的广告包、Just Works 配对包、LTK 分发包和 GATT 开锁指令。`;
+                showToast(msg, 'warning');
+            }
+            updateProgress();
+            // 高亮遗漏的包
+            if (missed.size > 0 && !state.allTagsVerified) {
+                showToast(`💡 提示：仔细查看数据包 #${[...missed].join(',#')}`, 'info');
+            }
+        }
+
+        // ============ 提取密钥 ============
+        function extractKey() {
+            if (!state.allTagsVerified) {
+                showToast('请先完成异常标记验证！', 'warning');
+                return;
+            }
+            if (state.selectedPacket !== 10) {
+                showToast('💡 提示：请先选择数据包 #10（Encryption Info）查看 LTK 详情', 'info');
+                selectPacket(10);
+                return;
+            }
+            state.keyExtracted = true;
+            state.currentStep = 3;
+            $('#flagReveal').classList.add('visible');
+            showToast('🔑 LTK 已提取！FLAG 已解锁！', 'success');
+            updateProgress();
+            // 滚动到 flag
+            $('#flagReveal').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // ============ 时间线重建 ============
+        function startTimeline() {
+            if (!state.keyExtracted) {
+                showToast('请先提取密钥！', 'warning');
+                return;
+            }
+            $('#timelineContainer').style.display = 'block';
+            state.timelineBuilt = [];
+            renderTimelineSlots();
+            showToast('⏱ 请按正确顺序点击攻击事件（从上到下构建时间线）', 'info');
+            $('#timelineContainer').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function renderTimelineSlots() {
+            const container = $('#timelineBuilder');
+            // 随机打乱可用事件
+            const shuffled = [...correctTimeline].sort(() => Math.random() - 0.5);
+            const placedSet = new Set(state.timelineBuilt);
+            const available = shuffled.filter(e => !placedSet.has(e));
+
+            let html = '';
+            // 已放置的
+            state.timelineBuilt.forEach((ev, i) => {
+                html += `
+                <div class="timeline-slot placed" data-event="${ev}" style="order:${i}">
+                    <div class="step-num">${i+1}</div>
+                    <div>${ev}</div>
+                </div>`;
+            });
+            // 可用的
+            available.forEach(ev => {
+                html += `
+                <div class="timeline-slot available" data-event="${ev}" onclick="placeTimelineEvent('${ev.replace(/'/g,"\\'")}', this)">
+                    <div class="step-num">?</div>
+                    <div>${ev}</div>
+                </div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function placeTimelineEvent(ev, el) {
+            if (state.timelineBuilt.includes(ev)) return;
+            state.timelineBuilt.push(ev);
+            el.classList.add('placed');
+            el.querySelector('.step-num').textContent = state.timelineBuilt.length;
+            el.style.order = state.timelineBuilt.length;
+            el.onclick = null;
+            el.style.cursor = 'default';
+            el.style.borderColor = 'var(--success)';
+            el.style.background = 'rgba(34,197,94,0.1)';
+            renderTimelineSlots();
+            if (state.timelineBuilt.length === correctTimeline.length) {
+                $('#btnCheckTimeline').style.display = 'inline-block';
+                showToast('所有事件已排列，请点击"检查时间线"', 'info');
+            }
+        }
+
+        function checkTimeline() {
+            const isCorrect = state.timelineBuilt.length === correctTimeline.length &&
+                state.timelineBuilt.every((ev, i) => ev === correctTimeline[i]);
+
+            if (isCorrect) {
+                state.timelineCorrect = true;
+                state.currentStep = 4;
+                showToast('🎉 攻击时间线重建成功！实验完成！', 'success');
+                updateProgress();
+                $('#btnCheckTimeline').disabled = true;
+                $('#btnCheckTimeline').textContent = '✅ 时间线正确！';
+                $('#flagReveal').classList.add('visible');
+                // 动画展示完整时间线
+                const slots = $('#timelineBuilder').querySelectorAll('.timeline-slot');
+                slots.forEach((s, i) => {
+                    s.style.borderColor = 'var(--success)';
+                    s.style.background = 'rgba(34,197,94,0.15)';
+                    s.querySelector('.step-num').textContent = i + 1;
+                });
+                $('#analysisReport').open = true;
+                $('#analysisReport').scrollIntoView({ behavior: 'smooth' });
+            } else {
+                showToast('❌ 时间线顺序不正确，请重新排列。提示：攻击者先侦察再伪装，然后中继配对获取密钥，最后发送开锁指令。',
+                    'warning');
+                // 闪烁错误
+                const availSlots = $('#timelineBuilder').querySelectorAll('.timeline-slot.available');
+                availSlots.forEach(s => {
+                    s.classList.add('wrong-flash');
+                    setTimeout(() => s.classList.remove('wrong-flash'), 500);
+                });
+                // 重置
+                state.timelineBuilt = [];
+                renderTimelineSlots();
+                $('#btnCheckTimeline').style.display = 'none';
+            }
+        }
+
+        // ============ 初始化 ============
+        function init() {
+            $('#btnStart').addEventListener('click', startLab);
+            updateProgress();
+            // 初始状态下隐藏时间线检查按钮
+            $('#btnCheckTimeline').style.display = 'none';
+            $('#timelineContainer').style.display = 'none';
+            $('#flagReveal').classList.remove('visible');
+            $('#fieldTreeContainer').style.display = 'none';
+            $('#hexDumpContainer').style.display = 'none';
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', init);
+
+        // 键盘导航
+        document.addEventListener('keydown', (e) => {
+            if (!state.labStarted) return;
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                const dir = e.key === 'ArrowUp' ? -1 : 1;
+                const currentIdx = state.selectedPacket ? packets.findIndex(p => p.id === state
+                    .selectedPacket) : -1;
+                const newIdx = Math.max(0, Math.min(packets.length - 1, currentIdx + dir));
+                if (newIdx >= 0 && packets[newIdx]) {
+                    selectPacket(packets[newIdx].id);
+                    packets[newIdx].id && $('#packetTable').querySelector(`tr[data-packet-id="${packets[newIdx].id}"]`)
+                        ?.scrollIntoView({ block: 'nearest' });
+                }
+            }
+            if (e.key === 't' && state.selectedPacket && !e.ctrlKey && !e.metaKey) {
+                e.preventDefault();
+                toggleTag(state.selectedPacket);
+            }
+        });
+
+        console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+        console.log('🔐 BLE 智能锁 MITM 安全分析实验已就绪');
+        console.log('📋 数据包总数:', packets.length);
+        console.log('⚠ 可疑数据包:', packets.filter(p => p.anomalous).map(p => '#' + p.id).join(', '));
+        console.log('🏆 FLAG: BLE_MITM_JUST_WORKS_BYPASS');
+    </script>
+</body>
+</html>

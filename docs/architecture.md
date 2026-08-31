@@ -1,6 +1,6 @@
-# AISecEdu 学生题目平台架构
+# 玄甲学生题目平台架构
 
-AISecEdu 是一套面向网络安全实践教学的课程与题目平台。学生在同一个入口中加入课程、按教学单元学习、完成教师发布的题目，并查看自己的作答结果和学习证据；教师在同一个身份体系下完成课程管理、题目发布、学习分析与申诉复核。浏览器工作区和 SSH 为题目提供预配置、相互隔离且可持续保存个人目录的实验环境。
+玄甲是一套面向网络安全实践教学的课程与题目平台。学生在同一个入口中加入课程、按教学单元学习、完成教师发布的题目，并查看自己的作答结果和学习证据；教师在同一个身份体系下完成课程管理、题目发布、学习分析与申诉复核。浏览器工作区和 SSH 为题目提供预配置、相互隔离且可持续保存个人目录的实验环境。
 
 系统直接沿用 pwn.college 的运行时、CTFd 数据层和 `dojo_theme` Web 界面。`Dojos` 等类名和 `pwncollege_api` API 前缀保持上游兼容；新增学习功能在同一课程、教学单元、题目和作答结果上扩展。平台只有一套 CTFd 身份与权限、一个 Flask/Jinja Web 应用、一套 API 和一个 PostgreSQL 数据库。
 
@@ -29,7 +29,7 @@ Their home directory is persisted across workspace instances, allowing students 
 The workspace may also situationally start a virtual machine, if the challenge requires it (e.g., for kernel exploitation), or configure custom networking (e.g., for network exploitation).
 Additionally, the workspace comes with a suite of tools pre-installed, including debuggers, disassemblers, and exploit development tools.
 
-AISecEdu's learning capabilities are implemented inside this same boundary. The Flask plugin owns identity, server-rendered pages, authoring, attempts, evidence, Tutor policy, assessment, skills, recommendations, appeals, and analytics; the existing workspace emits authenticated evidence. The original `dojo_theme` remains the only canonical learner and authentication UI, including the grouped dojo catalog, dojo stats/modules/scoreboard, module challenge accordion, and workspace surfaces. Learning overview, analysis, teacher, and Tutor views extend those same templates and components. The historical `future` host redirects to the main origin, and its optional upstream frontend service is not part of the normal deployment. There is no parallel API service, web application, authentication system, terminal gateway, or learning database. See [Intelligent Learning and Evidence Assessment](./learning.md) for the domain design.
+玄甲's learning capabilities are implemented inside this same boundary. The Flask plugin owns identity, server-rendered pages, authoring, attempts, evidence, Tutor policy, assessment, skills, recommendations, appeals, and analytics; the existing workspace emits authenticated evidence. The original `dojo_theme` remains the only canonical learner and authentication UI, including the grouped dojo catalog, dojo stats/modules/scoreboard, module challenge accordion, and workspace surfaces. Learning overview, analysis, teacher, and Tutor views extend those same templates and components. The historical `future` host redirects to the main origin, and its optional upstream frontend service is not part of the normal deployment. There is no parallel API service, web application, authentication system, terminal gateway, or learning database. See [Intelligent Learning and Evidence Assessment](./learning.md) for the domain design.
 
 The challenge objective is always to *capture the flag*.
 More specifically, the learner runs as the `hacker` user (UID 1000), and there is a flag file located at `/flag`, which is only readable by the `root` user (UID 0).

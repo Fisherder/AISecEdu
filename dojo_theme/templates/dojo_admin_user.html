@@ -1,57 +1,55 @@
 {% extends "base.html" %}
 
+{% block body_class %}course-system-page content-management-page course-student-detail-page{% endblock %}
 
 {% block stylesheets %}
-<style>
-  .setup-complete::before, .setup-incomplete::before, .setup-unknown::before {
-      position: absolute;
-      left: 10px;
-      font-size: 24px;
-      line-height: 1;
-  }
-
-  .setup-incomplete::before {
-    content: '✗';
-    color: rgb(244, 67, 54);
-  }
-
-  .setup-complete::before {
-    content: '✓';
-    color: rgb(76, 175, 80);
-  }
-
-  .setup-unknown::before {
-    content: '?';
-    color: rgb(255, 193, 7);
-  }
-</style>
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='aisecedu-course-hub-v12-readability-v1') }}">
 {% endblock %}
 
-
 {% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1>{{ dojo.name }} · 学生信息</h1>
-  </div>
-</div>
-<div class="container">
-  <div class="row">
-    <div class="col-md-8 offset-md-1">
-      <ul>
-        <li>
-          AISecEdu 用户名：{{ user.name }}
-        </li>
-        <li>
-          {{ identity_name }} : {{ identity_value }}
-        </li>
-        <li>
-          {% if discord_member %}
-            已授权并关联的 Discord 用户名：{{ discord_member.user.username }} <br>
-            Discord ID（唯一）：{{ discord_member.user.id }}
-          {% endif %}
-        </li>
-      </ul>
+<div class="content-management-shell course-student-detail-shell">
+  <nav class="content-breadcrumbs" aria-label="面包屑">
+    <a href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}">课程中心</a>
+    <i class="fas fa-chevron-right" aria-hidden="true"></i>
+    <a href="{{ url_for('course.view_all_grades', dojo=dojo.reference_id) }}">课程成绩</a>
+    <i class="fas fa-chevron-right" aria-hidden="true"></i>
+    <span>学生信息</span>
+  </nav>
+
+  <header class="content-management-header">
+    <div class="content-management-heading">
+      <span class="hub-kicker"><i class="fas fa-user-graduate" aria-hidden="true"></i>学生档案</span>
+      <h1>{{ user.name }}</h1>
+      <p>{{ dojo.name }} · 查看与课程学习相关的账号绑定状态。</p>
     </div>
+    <div class="content-management-actions">
+      <a class="hub-button" href="{{ url_for('course.view_all_grades', dojo=dojo.reference_id) }}"><i class="fas fa-arrow-left" aria-hidden="true"></i>返回成绩</a>
+      <a class="hub-button is-primary" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}&amp;tab=students"><i class="fas fa-chart-line" aria-hidden="true"></i>查看学情</a>
+    </div>
+  </header>
+
+  <div class="student-profile-grid">
+    <section class="content-surface student-profile-card">
+      <span class="student-profile-avatar"><i class="fas fa-user" aria-hidden="true"></i></span>
+      <div><span class="hub-kicker">玄甲账号</span><h2>{{ user.name }}</h2><p>该账号在当前课程中的基础身份信息。</p></div>
+    </section>
+
+    <section class="content-surface">
+      <header class="content-section-heading"><div><span class="hub-kicker">课程绑定</span><h2>身份状态</h2><p>用于匹配课程名单和学习记录。</p></div></header>
+      <dl class="content-detail-list student-detail-list">
+        <div><dt>{{ identity_name }}</dt><dd>{{ identity_value or "尚未绑定" }}</dd></div>
+        <div><dt>课程账号</dt><dd><span class="content-status is-success">已关联</span></dd></div>
+      </dl>
+    </section>
+
+    <section class="content-surface">
+      <header class="content-section-heading"><div><span class="hub-kicker">协作账号</span><h2>Discord</h2><p>显示课程协作账号是否完成授权关联。</p></div></header>
+      {% if discord_member %}
+      <div class="student-connection-state is-connected"><span><i class="fab fa-discord" aria-hidden="true"></i></span><div><strong>{{ discord_member.user.username }}</strong><small>已授权并关联</small></div><i class="fas fa-check-circle" aria-hidden="true"></i></div>
+      {% else %}
+      <div class="student-connection-state"><span><i class="fab fa-discord" aria-hidden="true"></i></span><div><strong>尚未关联</strong><small>学生尚未完成 Discord 授权。</small></div></div>
+      {% endif %}
+    </section>
   </div>
 </div>
 {% endblock %}

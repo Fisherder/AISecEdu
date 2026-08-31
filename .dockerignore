@@ -1,2 +1,37 @@
+# Version-control and local tooling metadata
+.git/
+.github/
+.claude/
+.devcontainer/
+.idea/
+.vscode/
+
+# Runtime state, credentials and verification output
 data/
 cache/
+output/
+opt/
+sensai/
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Language caches and local builds
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/node_modules/
+**/.next/
+**/.next-*/
+**/coverage/
+**/playwright-report/
+**/test-results/
+**/*.tsbuildinfo
+
+# Upstream documentation media is not used by the integrated runtime image
+services/agent-runtime/assets/

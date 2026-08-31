@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block body_class %}course-system-page self-learning-center-page{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/course-system.css', v='aisecedu-student-agent-v3-readability-v1') }}">
+{% endblock %}
+
+{% block content %}
+<div id="self-learning-extend" class="sx-shell">
+  <header class="sx-header">
+    <div>
+      <span class="cs-eyebrow">个人学习成果</span>
+      <h1>我的创作</h1>
+      <p>个人课件、练习、学习计划和演示按创建目标合并显示；同一次生成的修改不会重复占据列表。</p>
+    </div>
+    <div class="sx-header-actions">
+      <a href="/guide?intent=create" class="cs-btn cs-btn-primary"><i class="fas fa-sparkles"></i>在 AI 学习助手中创建</a>
+      <a href="/student" class="cs-btn cs-btn-secondary"><i class="fas fa-arrow-left"></i>返回今天</a>
+    </div>
+  </header>
+
+  <div id="self-learning-notice" class="cs-notice" role="status" hidden></div>
+
+  <section id="self-learning-stage" class="sx-stage" hidden>
+    <iframe id="self-learning-frame" title="个人自主学习工作区" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals" referrerpolicy="no-referrer"></iframe>
+  </section>
+
+  <div id="self-learning-hub" class="sx-library">
+    <section class="sx-library-toolbar" aria-label="筛选个人创作">
+      <label><i class="fas fa-search" aria-hidden="true"></i><span class="sr-only">搜索创作</span><input id="self-learning-search" type="search" placeholder="搜索名称或学习目标" autocomplete="off"></label>
+      <label><span class="sr-only">成果类型</span><select id="self-learning-type"><option value="">全部类型</option><option value="slides">个人课件</option><option value="quiz">练习与测验</option><option value="attack-defense-scene">攻防演示</option><option value="learning-path">学习计划</option><option value="debate">辩论练习</option></select></label>
+      <label><span class="sr-only">提交状态</span><select id="self-learning-visibility"><option value="">全部状态</option><option value="仅自己可见">仅自己可见</option><option value="已提交教师">已提交教师</option></select></label>
+      <span id="self-learning-count" class="cs-status">正在加载</span>
+    </section>
+
+    <section id="self-learning-workspaces" class="cs-surface sx-live">
+      <div class="cs-section-heading"><div><span class="cs-eyebrow">按创建目标整理</span><h2>个人成果</h2></div><span>个人成果不会自动发布到课程</span></div>
+      <div id="self-learning-workspace-list" class="sx-creation-grid"></div>
+      <div id="self-learning-workspace-empty" class="sx-creation-empty" hidden><i class="fas fa-cubes" aria-hidden="true"></i><h3>还没有个人创作</h3><p>只有明确要求“创建练习、课件或演示”时才会在这里产生结果。</p><a class="cs-btn cs-btn-primary" href="/guide?intent=create">在 AI 学习助手中创建</a></div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/self-learning-extend.js', v='aisecedu-my-creations-v4') }}"></script>
+{% endblock %}

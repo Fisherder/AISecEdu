@@ -1,0 +1,193 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "short"}},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"expr": "sum by (status) (aisecedu_teaching_jobs)", "legendFormat": "{{status}}", "refId": "A"}],
+      "title": "Durable jobs by status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "aisecedu_teaching_oldest_queued_seconds", "refId": "A"}],
+      "title": "Oldest queued job",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "targets": [{"expr": "sum by (status) (aisecedu_model_invocations)", "legendFormat": "{{status}}", "refId": "A"}],
+      "title": "Model invocations",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 4,
+      "targets": [{"expr": "aisecedu_teaching_outbox_unpublished", "refId": "A"}],
+      "title": "Unpublished outbox records",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 5,
+      "targets": [{"expr": "sum by (status) (aisecedu_teaching_artifacts)", "legendFormat": "{{status}}", "refId": "A"}],
+      "title": "Artifacts by status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"color": "red", "text": "DOWN"}, "1": {"color": "green", "text": "UP"}}, "type": "value"}]}},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16},
+      "id": 6,
+      "targets": [{"expr": "aisecedu_agent_runtime_up", "refId": "A"}],
+      "title": "Global agent runtime availability",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16},
+      "id": 7,
+      "targets": [{"expr": "aisecedu_teaching_sessions_live", "refId": "A"}],
+      "title": "Live classrooms",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16},
+      "id": 8,
+      "targets": [{"expr": "sum by (status, degraded) (aisecedu_model_invocations{route=\"deepseek-v4-pro\"})", "legendFormat": "{{status}} / degraded={{degraded}}", "refId": "A"}],
+      "title": "deepseek-v4-pro route audit",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "ms"}},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 24},
+      "id": 9,
+      "targets": [{"expr": "sum by (route) (aisecedu_model_invocation_latency_milliseconds_sum) / clamp_min(sum by (route) (aisecedu_model_invocation_latency_milliseconds_count), 1)", "legendFormat": "{{route}}", "refId": "A"}],
+      "title": "Average model latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 24},
+      "id": 10,
+      "targets": [
+        {"expr": "sum by (route) (aisecedu_model_tokens_recorded)", "legendFormat": "tokens {{route}}", "refId": "A"},
+        {"expr": "sum by (route) (aisecedu_model_cost_recorded)", "legendFormat": "cost {{route}}", "refId": "B"}
+      ],
+      "title": "Model tokens and reported cost",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 24},
+      "id": 11,
+      "targets": [{"expr": "sum by (risk, status) (aisecedu_teaching_action_events)", "legendFormat": "{{risk}} / {{status}}", "refId": "A"}],
+      "title": "Agent actions and approvals",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 32},
+      "id": 12,
+      "targets": [
+        {"expr": "sum by (status) (aisecedu_teaching_materials)", "legendFormat": "materials {{status}}", "refId": "A"},
+        {"expr": "sum by (status) (aisecedu_teaching_candidate_sets)", "legendFormat": "candidates {{status}}", "refId": "B"}
+      ],
+      "title": "Material and candidate pipeline",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 32},
+      "id": 13,
+      "targets": [
+        {"expr": "sum by (status) (aisecedu_self_learning_workspaces)", "legendFormat": "workspace {{status}}", "refId": "A"},
+        {"expr": "sum by (status) (aisecedu_teaching_sessions)", "legendFormat": "classroom {{status}}", "refId": "B"}
+      ],
+      "title": "Self-learning and classroom lifecycle",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 32},
+      "id": 14,
+      "targets": [{"expr": "sum by (kind) (aisecedu_teaching_job_duration_seconds_sum) / clamp_min(sum by (kind) (aisecedu_teaching_job_duration_seconds_count), 1)", "legendFormat": "{{kind}}", "refId": "A"}],
+      "title": "Average durable job duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+      "id": 15,
+      "targets": [{"expr": "sum by (operation, result) (rate(aisecedu_agent_runtime_requests_total[5m]))", "legendFormat": "{{operation}} / {{result}}", "refId": "A"}],
+      "title": "Global agent runtime request rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40},
+      "id": 16,
+      "targets": [{"expr": "sum by (operation) (rate(aisecedu_agent_runtime_request_duration_seconds_sum[5m])) / clamp_min(sum by (operation) (rate(aisecedu_agent_runtime_request_duration_seconds_count[5m])), 0.000001)", "legendFormat": "{{operation}}", "refId": "A"}],
+      "title": "Global agent runtime latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 48},
+      "id": 17,
+      "targets": [{"expr": "sum by (status) (rate(aisecedu_teaching_api_requests_total[5m]))", "legendFormat": "HTTP {{status}}", "refId": "A"}],
+      "title": "Teaching API response rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 48},
+      "id": 18,
+      "targets": [{"expr": "topk(10, sum by (route) (rate(aisecedu_teaching_api_request_duration_seconds_sum[5m])) / clamp_min(sum by (route) (rate(aisecedu_teaching_api_request_duration_seconds_count[5m])), 0.000001))", "legendFormat": "{{route}}", "refId": "A"}],
+      "title": "Teaching API average latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 48},
+      "id": 19,
+      "targets": [{"expr": "sum(rate(aisecedu_teaching_api_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(aisecedu_teaching_api_requests_total[5m])), 0.001)", "refId": "A"}],
+      "title": "Teaching API 5xx ratio",
+      "type": "stat"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["aisecedu", "global-agent", "teaching"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 2,
+        "label": "Prometheus",
+        "name": "DS_PROMETHEUS",
+        "query": "prometheus",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "title": "玄甲 Global Agent",
+  "uid": "aisecedu-global-agent",
+  "version": 6
+}

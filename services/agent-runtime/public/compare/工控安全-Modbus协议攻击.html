@@ -1,0 +1,1493 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工控安全 - Modbus协议攻击实验 | SCADA水塔溢出</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1a1a2e;
+            --border: #1e3a5f;
+            --text: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --info: #3b82f6;
+            --warning: #f59e0b;
+            --amber: #f59e0b;
+            --code-bg: #0d1117;
+            --highlight: #1e40af;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #header {
+            background: var(--panel);
+            border-bottom: 2px solid var(--border);
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 10;
+            flex-shrink: 0;
+        }
+        #header h1 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        #header .badge {
+            background: #1e3a5f;
+            color: #60a5fa;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        #main-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        #viewer-panel {
+            flex: 1;
+            position: relative;
+            background: radial-gradient(ellipse at center, #1a2540 0%, #0a0f1a 100%);
+            cursor: grab;
+            min-width: 0;
+        }
+        #viewer-panel:active {
+            cursor: grabbing;
+        }
+        #viewer-panel canvas {
+            display: block;
+        }
+        .overlay-label {
+            position: absolute;
+            pointer-events: none;
+            font-family: 'Courier New', monospace;
+            font-size: 0.7rem;
+            color: #94a3b8;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 3px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+        #alarm-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            border: 3px solid transparent;
+            transition: border-color 0.3s, box-shadow 0.3s;
+            border-radius: 0;
+            z-index: 5;
+        }
+        #alarm-overlay.active {
+            border-color: rgba(239, 68, 68, 0.6);
+            box-shadow: inset 0 0 60px rgba(239, 68, 68, 0.25);
+            animation: alarmPulse 0.8s infinite;
+        }
+        @keyframes alarmPulse {
+            0%,
+            100% {
+                border-color: rgba(239, 68, 68, 0.3);
+                box-shadow: inset 0 0 40px rgba(239, 68, 68, 0.1);
+            }
+            50% {
+                border-color: rgba(239, 68, 68, 0.9);
+                box-shadow: inset 0 0 100px rgba(239, 68, 68, 0.4);
+            }
+        }
+        #water-stat {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            z-index: 6;
+            pointer-events: none;
+            line-height: 1.6;
+        }
+        #water-stat .val {
+            color: #60a5fa;
+            font-weight: 700;
+        }
+        #water-stat .warn {
+            color: #f59e0b;
+            font-weight: 700;
+        }
+        #water-stat .crit {
+            color: #ef4444;
+            font-weight: 700;
+            animation: blink 0.5s infinite;
+        }
+        @keyframes blink {
+            50% {
+                opacity: 0.3;
+            }
+        }
+        #side-panel {
+            width: 460px;
+            background: var(--panel);
+            border-left: 2px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            overflow-x: hidden;
+            flex-shrink: 0;
+            z-index: 8;
+        }
+        #step-progress {
+            display: flex;
+            gap: 0;
+            padding: 12px 16px;
+            background: #111827;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+        .step-dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #1e293b;
+            border: 2px solid #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: #64748b;
+            transition: all 0.4s;
+            position: relative;
+        }
+        .step-dot.active {
+            background: #1e40af;
+            border-color: #3b82f6;
+            color: #fff;
+            box-shadow: 0 0 14px rgba(59, 130, 246, 0.5);
+        }
+        .step-dot.done {
+            background: #15803d;
+            border-color: #22c55e;
+            color: #fff;
+        }
+        .step-connector {
+            width: 18px;
+            height: 2px;
+            background: #334155;
+            align-self: center;
+            margin: 0 2px;
+        }
+        .step-connector.done {
+            background: #22c55e;
+        }
+        #cards-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .card {
+            background: #111827;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px 16px;
+            transition: all 0.3s;
+        }
+        .card h3 {
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+            color: #cbd5e1;
+            letter-spacing: 0.3px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card h3 .icon {
+            width: 22px;
+            height: 22px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+        }
+        .icon-blue {
+            background: #1e3a5f;
+            color: #60a5fa;
+        }
+        .icon-red {
+            background: #3b1a1a;
+            color: #ef4444;
+        }
+        .icon-green {
+            background: #1a3b1a;
+            color: #22c55e;
+        }
+        .icon-amber {
+            background: #3b2e1a;
+            color: #f59e0b;
+        }
+        .hex-display {
+            background: var(--code-bg);
+            border: 1px solid #1e3a5f;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-family: 'Courier New', 'Consolas', monospace;
+            font-size: 0.78rem;
+            line-height: 1.7;
+            color: #c9d1d9;
+            overflow-x: auto;
+            white-space: pre;
+            letter-spacing: 1px;
+        }
+        .hex-display .field-editable {
+            background: #1e3a5f;
+            color: #facc15;
+            padding: 2px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-block;
+            min-width: 28px;
+            text-align: center;
+            border: 1px dashed #facc15;
+            position: relative;
+        }
+        .hex-display .field-editable:hover {
+            background: #2d5a8f;
+            border-color: #fff;
+            color: #fff;
+        }
+        .hex-display .field-editable.editing {
+            background: #3b1a1a;
+            border-color: #ef4444;
+            color: #fca5a5;
+            animation: pulse-edit 1s infinite;
+        }
+        @keyframes pulse-edit {
+            50% {
+                box-shadow: 0 0 12px rgba(239, 68, 68, 0.5);
+            }
+        }
+        .hex-display .highlight-danger {
+            background: rgba(239, 68, 68, 0.3);
+            border-radius: 2px;
+            padding: 0 2px;
+        }
+        .hex-display .highlight-ok {
+            background: rgba(34, 197, 94, 0.2);
+            border-radius: 2px;
+            padding: 0 2px;
+        }
+        button {
+            background: #1e40af;
+            color: #fff;
+            border: none;
+            padding: 8px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.82rem;
+            letter-spacing: 0.3px;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        button:hover {
+            background: #2563eb;
+            box-shadow: 0 0 16px rgba(59, 130, 246, 0.35);
+            transform: translateY(-1px);
+        }
+        button:active {
+            transform: scale(0.97);
+        }
+        button.danger {
+            background: #991b1b;
+        }
+        button.danger:hover {
+            background: #b91c1c;
+            box-shadow: 0 0 16px rgba(239, 68, 68, 0.4);
+        }
+        button.success {
+            background: #15803d;
+        }
+        button.success:hover {
+            background: #16a34a;
+            box-shadow: 0 0 16px rgba(34, 197, 94, 0.4);
+        }
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        input[type="text"],
+        textarea {
+            background: var(--code-bg);
+            border: 1px solid #1e3a5f;
+            color: #c9d1d9;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            width: 100%;
+            transition: border-color 0.3s;
+            resize: vertical;
+        }
+        input[type="text"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+        }
+        .log-entry {
+            font-family: 'Courier New', monospace;
+            font-size: 0.72rem;
+            padding: 5px 8px;
+            border-left: 3px solid #334155;
+            margin: 3px 0;
+            background: #0d1117;
+            border-radius: 0 4px 4px 0;
+            line-height: 1.5;
+        }
+        .log-entry.warn {
+            border-left-color: #f59e0b;
+            background: #1a1500;
+        }
+        .log-entry.crit {
+            border-left-color: #ef4444;
+            background: #1a0000;
+            animation: logPulse 1.5s infinite;
+        }
+        @keyframes logPulse {
+            50% {
+                background: #2a0505;
+            }
+        }
+        .log-entry.flag {
+            border-left-color: #f59e0b;
+            background: #1a1000;
+            font-weight: 700;
+            color: #fbbf24;
+            font-size: 0.78rem;
+        }
+        .flag-reveal {
+            animation: flagBurst 0.6s ease-out;
+        }
+        @keyframes flagBurst {
+            0% {
+                transform: scale(0.5);
+                opacity: 0;
+                background: #fff;
+            }
+            60% {
+                transform: scale(1.15);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+        .packet-row {
+            display: flex;
+            gap: 8px;
+            padding: 6px 10px;
+            background: #0d1117;
+            border-radius: 4px;
+            margin: 2px 0;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+            font-family: 'Courier New', monospace;
+            font-size: 0.7rem;
+            align-items: center;
+        }
+        .packet-row:hover {
+            border-color: #3b82f6;
+            background: #111d2e;
+        }
+        .packet-row.selected {
+            border-color: #60a5fa;
+            background: #1a2d4a;
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.25);
+        }
+        .packet-row.tagged-suspicious {
+            border-color: #f59e0b;
+            background: #1a1500;
+        }
+        .packet-row.tagged-malicious {
+            border-color: #ef4444;
+            background: #1a0000;
+        }
+        .packet-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .rules-editor {
+            background: var(--code-bg);
+            border: 1px solid #1e3a5f;
+            border-radius: 6px;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.75rem;
+            color: #c9d1d9;
+            min-height: 100px;
+            resize: vertical;
+            width: 100%;
+            line-height: 1.6;
+        }
+        .diff-correct {
+            background: rgba(34, 197, 94, 0.25);
+            border-radius: 2px;
+            padding: 1px 3px;
+        }
+        .diff-wrong {
+            background: rgba(239, 68, 68, 0.3);
+            border-radius: 2px;
+            padding: 1px 3px;
+            text-decoration: line-through;
+        }
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e293b;
+            border: 1px solid #f59e0b;
+            color: #fbbf24;
+            padding: 12px 24px;
+            border-radius: 8px;
+            z-index: 100;
+            font-weight: 700;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            animation: slideDown 0.4s ease-out, fadeOut 0.5s 2.5s forwards;
+            pointer-events: none;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+            text-align: center;
+        }
+        @keyframes slideDown {
+            from {
+                transform: translateX(-50%) translateY(-60px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(-50%) translateY(0);
+                opacity: 1;
+            }
+        }
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: translateX(-50%) translateY(-20px);
+            }
+        }
+        .btn-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        .tooltip {
+            position: relative;
+            cursor: help;
+            border-bottom: 1px dotted #94a3b8;
+        }
+        @media (max-width: 900px) {
+            #main-layout {
+                flex-direction: column;
+            }
+            #side-panel {
+                width: 100%;
+                max-height: 45vh;
+                border-left: none;
+                border-top: 2px solid var(--border);
+            }
+            #viewer-panel {
+                height: 55vh;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>🛡️ 工控安全实验 — SCADA Modbus TCP 水塔攻击与防御</h1>
+        <span class="badge">ICS/SCADA Security Lab</span>
+    </div>
+    <div id="main-layout">
+        <!-- 3D Viewer -->
+        <div id="viewer-panel">
+            <div id="alarm-overlay"></div>
+            <div id="water-stat">
+                <div>💧 水位: <span class="val" id="stat-level">50.0%</span></div>
+                <div>⚙️ 泵速: <span class="val" id="stat-pump">50</span> RPM</div>
+                <div>📥 进水: <span class="val" id="stat-inflow">40.0</span> L/s</div>
+                <div>📤 排水: <span class="val">40.0</span> L/s</div>
+                <div>🚨 状态: <span class="val" id="stat-alarm">正常</span></div>
+            </div>
+        </div>
+        <!-- Side Panel -->
+        <div id="side-panel">
+            <div id="step-progress">
+                <span style="font-size:0.7rem;color:#94a3b8;margin-right:6px;">步骤:</span>
+                <span class="step-dot active" id="sd1">1</span><span class="step-connector" id="sc1"></span>
+                <span class="step-dot" id="sd2">2</span><span class="step-connector" id="sc2"></span>
+                <span class="step-dot" id="sd3">3</span><span class="step-connector" id="sc3"></span>
+                <span class="step-dot" id="sd4">4</span><span class="step-connector" id="sc4"></span>
+                <span class="step-dot" id="sd5">5</span>
+            </div>
+            <div id="cards-container">
+                <!-- Step 1: Briefing -->
+                <div class="card" id="card-step1">
+                    <h3><span class="icon icon-blue">📋</span> 步骤1 — 任务简报</h3>
+                    <p style="font-size:0.82rem;color:#94a3b8;line-height:1.5;">
+                        你是一名工控安全研究员。前方是一个<strong>SCADA水塔系统</strong>，通过<strong>Modbus TCP</strong>协议控制水泵速度。
+                        水塔正常水位维持在50%左右，水泵速度设定为<strong>50 RPM</strong>。你的任务是：
+                    </p>
+                    <ul style="font-size:0.78rem;color:#cbd5e1;padding-left:18px;line-height:1.7;margin-top:6px;">
+                        <li>理解Modbus TCP数据包结构</li>
+                        <li>构造恶意写数据包，将泵速篡改为危险值</li>
+                        <li>观察水塔溢出的物理后果</li>
+                        <li>在检测面板中识别攻击流量</li>
+                        <li>编写Modbus网关防御规则阻止攻击</li>
+                    </ul>
+                    <button onclick="advanceStep(1)" style="margin-top:8px;">开始实验 →</button>
+                </div>
+                <!-- Step 2: Normal Modbus packet observation -->
+                <div class="card" id="card-step2" style="display:none;">
+                    <h3><span class="icon icon-blue">🔍</span> 步骤2 — 观察正常Modbus通信</h3>
+                    <p style="font-size:0.78rem;color:#94a3b8;">以下是PLC与水泵之间的正常Modbus TCP数据包（读/写寄存器）。请仔细查看各字段含义。</p>
+                    <div class="hex-display" style="margin-top:6px;">
+                        <span style="color:#6b7280;">// 正常读取泵速寄存器 (功能码03)</span>
+                        事务ID: <span style="color:#60a5fa;">00 01</span> | 协议: <span style="color:#60a5fa;">00 00</span> | 长度: <span style="color:#60a5fa;">00 06</span>
+                        单元: <span style="color:#60a5fa;">01</span> | 功能码: <span style="color:#22c55e;">03</span> | 寄存器: <span style="color:#60a5fa;">00 01</span> | 数量: <span style="color:#60a5fa;">00 01</span>
+                        <span style="color:#6b7280;">// 响应: 泵速 = 0x0064 (100 → 50 RPM 映射)</span>
+
+                        <span style="color:#6b7280;">// 正常写入泵速寄存器 (功能码06)</span>
+                        事务ID: <span style="color:#60a5fa;">00 02</span> | 协议: <span style="color:#60a5fa;">00 00</span> | 长度: <span style="color:#60a5fa;">00 06</span>
+                        单元: <span style="color:#60a5fa;">01</span> | 功能码: <span style="color:#f59e0b;">06</span> | 寄存器: <span style="color:#60a5fa;">00 01</span> | 写入值: <span class="highlight-ok">00 64</span> <span style="color:#6b7280;">(100, 安全范围)</span>
+                    </div>
+                    <p style="font-size:0.75rem;color:#94a3b8;margin-top:8px;">
+                        📌 <strong>关键寄存器映射：</strong><br>
+                        寄存器<code>0x0001</code> = 水泵速度设定值（0-200，正常范围0-100，<span style="color:#ef4444;">&gt;100为危险</span>）<br>
+                        寄存器<code>0x0002</code> = 当前水位（只读，0-100%）<br>
+                        寄存器<code>0x0003</code> = 警报状态（只读）
+                    </p>
+                    <button onclick="advanceStep(2)" style="margin-top:6px;">已理解，进入下一步 →</button>
+                </div>
+                <!-- Step 3: Construct malicious packet -->
+                <div class="card" id="card-step3" style="display:none;">
+                    <h3><span class="icon icon-red">⚠️</span> 步骤3 — 构造恶意Modbus写数据包</h3>
+                    <p style="font-size:0.78rem;color:#94a3b8;">
+                        修改下方数据包中的<strong style="color:#facc15;">写入值</strong>，将泵速篡改为<strong>500（0x01F4）</strong>，使进水速率远超排水能力，导致水塔溢出。
+                    </p>
+                    <p style="font-size:0.7rem;color:#64748b;">点击黄色高亮字段进行编辑，然后点击"发送攻击包"。</p>
+                    <div class="hex-display" id="malicious-packet" style="margin-top:6px;cursor:default;">
+                        事务ID: 00 03 | 协议: 00 00 | 长度: 00 06
+                        单元: 01 | 功能码: 06 | 寄存器: 00 01 | 写入值: <span class="field-editable" id="editable-value" onclick="startEditValue()" title="点击修改写入值">00 64</span>
+                        <span id="value-hint" style="color:#64748b;font-size:0.65rem;"></span>
+                    </div>
+                    <div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <input type="text" id="value-input" placeholder="输入新值如 01F4" maxlength="4" style="width:110px;display:none;font-size:0.8rem;" onkeydown="if(event.key==='Enter')confirmEditValue()">
+                        <button id="btn-confirm-edit" style="display:none;" onclick="confirmEditValue()">确认修改</button>
+                        <button id="btn-reset-value" style="display:none;background:#334155;" onclick="resetEditValue()">取消</button>
+                    </div>
+                    <div class="btn-row">
+                        <button class="danger" id="btn-send-attack" onclick="sendAttackPacket()" disabled>🚀 发送攻击包</button>
+                        <span id="attack-status" style="font-size:0.7rem;color:#94a3b8;"></span>
+                    </div>
+                </div>
+                <!-- Step 4: Detection Panel -->
+                <div class="card" id="card-step4" style="display:none;">
+                    <h3><span class="icon icon-amber">📊</span> 步骤4 — 检测面板：识别异常流量</h3>
+                    <p style="font-size:0.78rem;color:#94a3b8;">以下为Modbus网关记录的最近数据包。请<strong>点击</strong>可疑数据包并标记。</p>
+                    <div id="packet-list" style="max-height:180px;overflow-y:auto;margin-top:4px;">
+                        <!-- dynamically filled -->
+                    </div>
+                    <div class="btn-row" style="margin-top:6px;">
+                        <button id="btn-tag-suspicious" onclick="tagSelectedPacket()" disabled>🏷️ 标记为可疑</button>
+                        <button id="btn-verify-detection" onclick="verifyDetection()" disabled>✅ 验证分析</button>
+                    </div>
+                    <span id="detection-feedback" style="font-size:0.7rem;color:#94a3b8;"></span>
+                    <div id="detection-logs" style="margin-top:6px;font-size:0.68rem;"></div>
+                </div>
+                <!-- Step 5: Defense Rules -->
+                <div class="card" id="card-step5" style="display:none;">
+                    <h3><span class="icon icon-green">🛡️</span> 步骤5 — Modbus网关防御规则</h3>
+                    <p style="font-size:0.78rem;color:#94a3b8;">
+                        编写防御规则来阻止恶意Modbus写入。修改下方JSON规则，使<strong>写入值限制在安全范围（0-100）</strong>，或<strong>阻止功能码06</strong>对关键寄存器的访问。
+                    </p>
+                    <textarea class="rules-editor" id="defense-rules" spellcheck="false">{
+                        "allowed_write_range": [0, 200],
+                        "blocked_function_codes": [],
+                        "protected_registers": [],
+                        "rate_limit_per_sec": 100
+                    }</textarea>
+                    <div class="btn-row">
+                        <button class="success" onclick="applyDefenseRules()">🔒 应用防御规则</button>
+                        <button onclick="testDefenseWithAttack()" style="background:#7c3aed;">🧪 测试防御（重放攻击）</button>
+                    </div>
+                    <span id="defense-feedback" style="font-size:0.7rem;color:#94a3b8;"></span>
+                    <div id="defense-logs" style="margin-top:4px;font-size:0.68rem;"></div>
+                </div>
+                <!-- Analysis Report -->
+                <div class="card" id="card-analysis" style="display:none;">
+                    <h3><span class="icon icon-amber">📝</span> 完整分析报告</h3>
+                    <button onclick="toggleAnalysis()" style="margin-bottom:8px;">📖 查看完整分析</button>
+                    <div id="analysis-content" style="display:none;font-size:0.75rem;color:#cbd5e1;line-height:1.6;">
+                        <p><strong>攻击根因：</strong>Modbus TCP缺乏认证和授权机制，任何能访问502端口的设备均可发送读写命令。攻击者利用功能码06（写单个寄存器）将水泵速度寄存器从安全值100篡改为500。</p>
+                        <p><strong>物理影响：</strong>进水速率升至400 L/s（排水仅40 L/s），水塔在约15秒内溢出，可能造成设备损坏和水资源浪费。</p>
+                        <p><strong>防御措施：</strong></p>
+                        <ul>
+                            <li>深度包检测（DPI）：验证Modbus写入值是否在允许范围</li>
+                            <li>功能码白名单：限制关键寄存器仅允许功能码03（读）</li>
+                            <li>速率限制：防止快速连续写入</li>
+                            <li>网络分段：将SCADA网络与IT网络隔离</li>
+                            <li>启用Modbus Security（TLS封装）</li>
+                        </ul>
+                        <p><strong>真实案例参考：</strong>VPNFilter恶意软件（2018）曾针对Modbus协议感染工业设备；乌克兰电网攻击（2015）利用SCADA协议漏洞进行破坏。</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Toast container -->
+    <div id="toast-area"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ============ GLOBAL STATE ============
+        const state = {
+            currentStep: 1,
+            pumpSpeed: 50, // RPM (display value)
+            pumpRegisterValue: 100, // raw register value (0-200 maps to 0-100%)
+            waterLevel: 50.0, // percentage 0-100+
+            inflowRate: 40.0,
+            outflowRate: 40.0,
+            alarmState: 0, // 0=normal, 1=warning, 2=critical/overflow
+            maliciousValueSet: false,
+            attackSent: false,
+            overflowTriggered: false,
+            flagOverflowRevealed: false,
+            flagDefenseRevealed: false,
+            selectedPacketIndex: -1,
+            taggedPackets: new Set(),
+            defenseActive: false,
+            defenseRulesApplied: null,
+            overflowStartTime: null,
+            particles: [],
+            alarmLightIntensity: 0,
+        };
+
+        // ============ THREE.JS SCENE SETUP ============
+        const viewerPanel = document.getElementById('viewer-panel');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0f1a);
+        scene.fog = new THREE.Fog(0x0a0f1a, 8, 30);
+
+        const camera = new THREE.PerspectiveCamera(50, viewerPanel.clientWidth / viewerPanel.clientHeight, 0.5, 40);
+        camera.position.set(6, 3.5, 9);
+        camera.lookAt(0, 1.8, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(viewerPanel.clientWidth, viewerPanel.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        viewerPanel.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 1.8, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 4;
+        controls.maxDistance = 18;
+        controls.maxPolarAngle = Math.PI * 0.7;
+        controls.update();
+
+        // ============ LIGHTS ============
+        const ambientLight = new THREE.AmbientLight(0x334466, 2.5);
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight(0xffeedd, 6);
+        sunLight.position.set(8, 12, 3);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 1024;
+        sunLight.shadow.mapSize.height = 1024;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 40;
+        sunLight.shadow.camera.left = -10;
+        sunLight.shadow.camera.right = 10;
+        sunLight.shadow.camera.top = 10;
+        sunLight.shadow.camera.bottom = -10;
+        sunLight.shadow.bias = -0.0001;
+        scene.add(sunLight);
+
+        const alarmLight = new THREE.PointLight(0xff0000, 0, 15);
+        alarmLight.position.set(0, 4.5, 1.2);
+        scene.add(alarmLight);
+
+        const rimLight = new THREE.PointLight(0x4488cc, 3, 10);
+        rimLight.position.set(-4, 3, -2);
+        scene.add(rimLight);
+
+        // ============ GROUND ============
+        const groundGeo = new THREE.PlaneGeometry(25, 25);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.8, metalness: 0.3 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.6;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Grid helper
+        const gridHelper = new THREE.PolarGridHelper(10, 32, 20, 128, 0x1e3a5f, 0x1e3a5f);
+        gridHelper.position.y = -0.59;
+        scene.add(gridHelper);
+
+        // ============ WATER TOWER MODEL ============
+        const towerGroup = new THREE.Group();
+        scene.add(towerGroup);
+
+        // Tank body (translucent)
+        const tankRadius = 1.5;
+        const tankHeight = 4;
+        const tankGeo = new THREE.CylinderGeometry(tankRadius, tankRadius, tankHeight, 48);
+        const tankMat = new THREE.MeshPhysicalMaterial({
+            color: 0x8899aa,
+            roughness: 0.15,
+            metalness: 0.05,
+            transparent: true,
+            opacity: 0.28,
+            envMapIntensity: 0.3,
+            clearcoat: 0.1,
+        });
+        const tankMesh = new THREE.Mesh(tankGeo, tankMat);
+        tankMesh.position.y = tankHeight / 2;
+        tankMesh.castShadow = true;
+        tankMesh.receiveShadow = true;
+        towerGroup.add(tankMesh);
+
+        // Tank top rim
+        const rimGeo = new THREE.TorusGeometry(tankRadius, 0.06, 16, 48);
+        const rimMat = new THREE.MeshStandardMaterial({ color: 0x667788, roughness: 0.4, metalness: 0.7 });
+        const rimTop = new THREE.Mesh(rimGeo, rimMat);
+        rimTop.position.y = tankHeight;
+        rimTop.rotation.x = Math.PI / 2;
+        towerGroup.add(rimTop);
+
+        // Tank bottom rim
+        const rimBottom = new THREE.Mesh(rimGeo.clone(), rimMat);
+        rimBottom.position.y = 0;
+        rimBottom.rotation.x = Math.PI / 2;
+        towerGroup.add(rimBottom);
+
+        // Water level cylinder (inside tank)
+        const waterGeo = new THREE.CylinderGeometry(tankRadius - 0.15, tankRadius - 0.15, 2, 48);
+        const waterMat = new THREE.MeshStandardMaterial({
+            color: 0x3388cc,
+            roughness: 0.2,
+            metalness: 0.1,
+            transparent: true,
+            opacity: 0.65,
+        });
+        const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+        waterMesh.position.y = 1;
+        waterMesh.renderOrder = 1;
+        waterMesh.material.depthWrite = false;
+        towerGroup.add(waterMesh);
+
+        // 80% warning line ring
+        const warnRingGeo = new THREE.TorusGeometry(tankRadius - 0.05, 0.04, 8, 48);
+        const warnRingMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.3, emissive: 0xf59e0b,
+            emissiveIntensity: 0.6 });
+        const warnRing = new THREE.Mesh(warnRingGeo, warnRingMat);
+        warnRing.position.y = tankHeight * 0.8;
+        warnRing.rotation.x = Math.PI / 2;
+        warnRing.visible = true;
+        towerGroup.add(warnRing);
+
+        // Support legs (4 legs)
+        const legGeo = new THREE.CylinderGeometry(0.12, 0.15, 2.5, 16);
+        const legMat = new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.5, metalness: 0.8 });
+        const legPositions = [
+            [tankRadius * 0.75, -1.25, tankRadius * 0.75],
+            [-tankRadius * 0.75, -1.25, tankRadius * 0.75],
+            [tankRadius * 0.75, -1.25, -tankRadius * 0.75],
+            [-tankRadius * 0.75, -1.25, -tankRadius * 0.75],
+        ];
+        legPositions.forEach(([lx, ly, lz]) => {
+            const leg = new THREE.Mesh(legGeo, legMat);
+            leg.position.set(lx, ly, lz);
+            leg.castShadow = true;
+            leg.receiveShadow = true;
+            towerGroup.add(leg);
+        });
+
+        // Cross braces
+        const braceGeo = new THREE.CylinderGeometry(0.05, 0.05, tankRadius * 1.5, 8);
+        const braceMat = new THREE.MeshStandardMaterial({ color: 0x445566, roughness: 0.5, metalness: 0.7 });
+        for (let i = 0; i < 4; i++) {
+            const angle = (i * Math.PI) / 2 + Math.PI / 4;
+            const bx = Math.cos(angle) * tankRadius * 0.75;
+            const bz = Math.sin(angle) * tankRadius * 0.75;
+            const brace = new THREE.Mesh(braceGeo, braceMat);
+            brace.position.set(bx, -0.6, bz);
+            brace.rotation.z = Math.PI / 2;
+            brace.rotation.y = angle;
+            brace.castShadow = true;
+            towerGroup.add(brace);
+        }
+
+        // Inlet pipe
+        const inletGeo = new THREE.CylinderGeometry(0.2, 0.2, 2.5, 16);
+        const pipeMat = new THREE.MeshStandardMaterial({ color: 0x667788, roughness: 0.4, metalness: 0.6 });
+        const inletPipe = new THREE.Mesh(inletGeo, pipeMat);
+        inletPipe.position.set(tankRadius + 0.8, 0.8, 0);
+        inletPipe.rotation.z = Math.PI / 2;
+        inletPipe.castShadow = true;
+        towerGroup.add(inletPipe);
+
+        // Outlet pipe
+        const outletGeo = new THREE.CylinderGeometry(0.22, 0.22, 2, 16);
+        const outletPipe = new THREE.Mesh(outletGeo, pipeMat);
+        outletPipe.position.set(0, -1.2, tankRadius + 0.5);
+        outletPipe.rotation.x = Math.PI / 2;
+        outletPipe.castShadow = true;
+        towerGroup.add(outletPipe);
+
+        // Small platform on top
+        const platformGeo = new THREE.CylinderGeometry(tankRadius + 0.1, tankRadius + 0.1, 0.08, 48);
+        const platformMat = new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.3, metalness: 0.8 });
+        const platform = new THREE.Mesh(platformGeo, platformMat);
+        platform.position.y = tankHeight + 0.04;
+        platform.castShadow = true;
+        towerGroup.add(platform);
+
+        // Alarm beacon on top
+        const beaconGeo = new THREE.SphereGeometry(0.2, 16, 16);
+        const beaconMat = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.3, emissive: 0xff0000,
+            emissiveIntensity: 0.3 });
+        const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+        beacon.position.y = tankHeight + 0.5;
+        beacon.name = 'beacon';
+        towerGroup.add(beacon);
+
+        // ============ PARTICLE SYSTEM FOR OVERFLOW ============
+        const particleGroup = new THREE.Group();
+        particleGroup.visible = false;
+        scene.add(particleGroup);
+        const particlePool = [];
+        const MAX_PARTICLES = 120;
+
+        function spawnOverflowParticle() {
+            const geo = new THREE.SphereGeometry(0.06 + Math.random() * 0.08, 6, 6);
+            const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(0.55 + Math.random() * 0.1, 0.8, 0.5 +
+                    Math.random() * 0.4), transparent: true, opacity: 0.9 });
+            const particle = new THREE.Mesh(geo, mat);
+            const angle = Math.random() * Math.PI * 2;
+            const radius = tankRadius * (0.7 + Math.random() * 0.5);
+            particle.position.set(Math.cos(angle) * radius, tankHeight + 0.1 + Math.random() * 0.3, Math.sin(angle) *
+            radius);
+            particle.userData = {
+                velocity: new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.6,
+                    -1.5 - Math.random() * 3.5,
+                    (Math.random() - 0.5) * 0.6
+                ),
+                life: 0.8 + Math.random() * 1.5,
+                age: 0,
+            };
+            particleGroup.add(particle);
+            particlePool.push(particle);
+            if (particlePool.length > MAX_PARTICLES) {
+                const old = particlePool.shift();
+                particleGroup.remove(old);
+                old.geometry.dispose();
+                old.material.dispose();
+            }
+        }
+
+        function updateParticles(delta) {
+            for (let i = particlePool.length - 1; i >= 0; i--) {
+                const p = particlePool[i];
+                p.userData.age += delta;
+                if (p.userData.age > p.userData.life) {
+                    particleGroup.remove(p);
+                    p.geometry.dispose();
+                    p.material.dispose();
+                    particlePool.splice(i, 1);
+                } else {
+                    p.userData.velocity.y -= 2.5 * delta;
+                    p.position.x += p.userData.velocity.x * delta;
+                    p.position.y += p.userData.velocity.y * delta;
+                    p.position.z += p.userData.velocity.z * delta;
+                    p.material.opacity = Math.max(0, 0.9 * (1 - p.userData.age / p.userData.life));
+                    if (p.position.y < -0.5) {
+                        p.position.y = -0.5;
+                        p.userData.velocity.y *= -0.3;
+                        p.userData.velocity.x *= 0.5;
+                        p.userData.velocity.z *= 0.5;
+                    }
+                }
+            }
+        }
+
+        // ============ UPDATE WATER LEVEL VISUAL ============
+        function updateWaterVisual() {
+            const level = state.waterLevel;
+            const clampedLevel = Math.max(0, level);
+            const displayHeight = (clampedLevel / 100) * tankHeight;
+            const actualHeight = Math.min(displayHeight, tankHeight + 1.5);
+
+            waterMesh.scale.y = actualHeight / 2;
+            waterMesh.position.y = actualHeight / 2;
+
+            // Color based on level
+            if (level < 80) {
+                waterMat.color.set(0x3388cc);
+                waterMat.emissive = new THREE.Color(0x001122);
+                waterMat.emissiveIntensity = 0.2;
+            } else if (level < 100) {
+                const t = (level - 80) / 20;
+                waterMat.color.set(new THREE.Color().lerpColors(new THREE.Color(0x3388cc), new THREE.Color(0xf59e0b), t));
+                waterMat.emissive = new THREE.Color(0xf59e0b);
+                waterMat.emissiveIntensity = 0.3 + t * 0.5;
+            } else {
+                waterMat.color.set(0xef4444);
+                waterMat.emissive = new THREE.Color(0xff0000);
+                waterMat.emissiveIntensity = 0.7 + Math.sin(Date.now() * 0.01) * 0.3;
+            }
+
+            // Alarm overlay
+            const alarmOverlay = document.getElementById('alarm-overlay');
+            if (level >= 100) {
+                alarmOverlay.classList.add('active');
+            } else if (level < 85) {
+                alarmOverlay.classList.remove('active');
+            }
+
+            // Beacon
+            if (level >= 80) {
+                const beaconIntensity = level >= 100 ? 2.5 + Math.sin(Date.now() * 0.015) * 1.5 : 0.8 + Math.sin(Date
+                    .now() * 0.01) * 0.4;
+                beaconMat.emissiveIntensity = beaconIntensity;
+                beaconMat.color.set(level >= 100 ? 0xff0000 : 0xff6600);
+                alarmLight.intensity = level >= 100 ? 8 + Math.sin(Date.now() * 0.015) * 4 : 3;
+                alarmLight.color.set(level >= 100 ? 0xff0000 : 0xff6600);
+            } else {
+                beaconMat.emissiveIntensity = 0.3;
+                beaconMat.color.set(0xff0000);
+                alarmLight.intensity = 0;
+            }
+
+            // Update stat display
+            document.getElementById('stat-level').textContent = level.toFixed(1) + '%';
+            document.getElementById('stat-pump').textContent = state.pumpSpeed;
+            document.getElementById('stat-inflow').textContent = state.inflowRate.toFixed(1);
+            const levelSpan = document.getElementById('stat-level');
+            const alarmSpan = document.getElementById('stat-alarm');
+            levelSpan.className = level < 80 ? 'val' : level < 100 ? 'warn' : 'crit';
+            alarmSpan.textContent = level < 80 ? '正常' : level < 100 ? '⚠ 高水位警告' : '🚨 溢出警报!';
+            alarmSpan.className = level < 80 ? 'val' : level < 100 ? 'warn' : 'crit';
+        }
+
+        // ============ SIMULATION LOGIC ============
+        function updateSimulation(delta) {
+            if (state.attackSent && state.maliciousValueSet) {
+                // Malicious pump speed active
+                const registerVal = state.pumpRegisterValue;
+                state.pumpSpeed = Math.round(registerVal / 2);
+                state.inflowRate = state.pumpSpeed * 0.8;
+            } else if (!state.attackSent) {
+                // Normal operation
+                state.pumpSpeed = 50;
+                state.pumpRegisterValue = 100;
+                state.inflowRate = 40.0;
+            }
+            state.outflowRate = 40.0;
+            const netRate = state.inflowRate - state.outflowRate;
+            state.waterLevel += netRate * delta * 0.35;
+
+            if (state.waterLevel < 20 && netRate < 0) state.waterLevel = 20;
+            if (state.waterLevel > 130) state.waterLevel = 130;
+
+            // Check overflow
+            if (state.waterLevel >= 100 && !state.overflowTriggered) {
+                state.overflowTriggered = true;
+                state.overflowStartTime = performance.now() / 1000;
+                particleGroup.visible = true;
+                if (!state.flagOverflowRevealed) {
+                    state.flagOverflowRevealed = true;
+                    setTimeout(() => {
+                        showToast('🏆 FLAG{modbus_overflow_pump_500}');
+                        addDetectionLog('flag', '🏆 FLAG捕获: FLAG{modbus_overflow_pump_500} — 水塔溢出攻击成功');
+                    }, 1500);
+                }
+            }
+            if (state.waterLevel < 95 && state.overflowTriggered) {
+                state.overflowTriggered = false;
+                particleGroup.visible = false;
+                state.overflowStartTime = null;
+            }
+
+            // Spawn particles during overflow
+            if (state.overflowTriggered && state.waterLevel >= 100) {
+                const spawnRate = 25 + (state.waterLevel - 100) * 8;
+                if (Math.random() < spawnRate * delta) {
+                    spawnOverflowParticle();
+                }
+            }
+
+            updateParticles(delta);
+            updateWaterVisual();
+
+            // If defense active and would block, force water level back toward safe
+            if (state.defenseActive && state.defenseRulesApplied) {
+                const rules = state.defenseRulesApplied;
+                const writeVal = state.pumpRegisterValue;
+                const fnCode = 6;
+                let blocked = false;
+                if (rules.blocked_function_codes && rules.blocked_function_codes.includes(fnCode)) blocked = true;
+                if (rules.allowed_write_range && (writeVal < rules.allowed_write_range[0] || writeVal > rules
+                        .allowed_write_range[1])) blocked = true;
+                if (rules.protected_registers && rules.protected_registers.includes(1) && fnCode === 6) blocked = true;
+                if (blocked && state.attackSent) {
+                    // Defense blocks the attack - revert
+                    state.pumpRegisterValue = 100;
+                    state.pumpSpeed = 50;
+                    state.inflowRate = 40.0;
+                    state.attackSent = false;
+                    state.maliciousValueSet = false;
+                    if (state.waterLevel > 90) {
+                        // gradually return to safe level
+                    }
+                }
+            }
+        }
+
+        // ============ RENDER LOOP ============
+        let lastTime = performance.now() / 1000;
+        function animate() {
+            requestAnimationFrame(animate);
+            const now = performance.now() / 1000;
+            let delta = now - lastTime;
+            lastTime = now;
+            if (delta > 0.1) delta = 0.1;
+            if (delta <= 0) delta = 0.016;
+            updateSimulation(delta);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // ============ RESIZE HANDLER ============
+        window.addEventListener('resize', () => {
+            camera.aspect = viewerPanel.clientWidth / viewerPanel.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(viewerPanel.clientWidth, viewerPanel.clientHeight);
+        });
+
+        // ============ UI FUNCTIONS ============
+        function showToast(msg) {
+            const area = document.getElementById('toast-area');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = msg;
+            area.appendChild(toast);
+            setTimeout(() => toast.remove(), 3200);
+        }
+
+        function addDetectionLog(type, msg) {
+            const container = document.getElementById('detection-logs');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function addDefenseLog(type, msg) {
+            const container = document.getElementById('defense-logs');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function advanceStep(fromStep) {
+            if (fromStep === 1) {
+                state.currentStep = 2;
+                document.getElementById('card-step1').style.display = 'none';
+                document.getElementById('card-step2').style.display = 'block';
+                updateStepDots();
+            } else if (fromStep === 2) {
+                state.currentStep = 3;
+                document.getElementById('card-step2').style.display = 'none';
+                document.getElementById('card-step3').style.display = 'block';
+                document.getElementById('btn-send-attack').disabled = false;
+                document.getElementById('attack-status').textContent = '准备就绪 — 请先修改写入值';
+                updateStepDots();
+            }
+        }
+
+        function updateStepDots() {
+            for (let i = 1; i <= 5; i++) {
+                const dot = document.getElementById('sd' + i);
+                const conn = document.getElementById('sc' + i);
+                dot.classList.remove('active', 'done');
+                if (conn) conn.classList.remove('done');
+                if (i < state.currentStep) {
+                    dot.classList.add('done');
+                    if (conn) conn.classList.add('done');
+                } else if (i === state.currentStep) {
+                    dot.classList.add('active');
+                }
+            }
+        }
+
+        // ============ STEP 3: MALICIOUS PACKET EDITING ============
+        window.startEditValue = function() {
+            const editable = document.getElementById('editable-value');
+            const input = document.getElementById('value-input');
+            const btnConfirm = document.getElementById('btn-confirm-edit');
+            const btnReset = document.getElementById('btn-reset-value');
+            editable.classList.add('editing');
+            input.style.display = 'inline-block';
+            input.value = '01F4';
+            input.focus();
+            input.select();
+            btnConfirm.style.display = 'inline-block';
+            btnReset.style.display = 'inline-block';
+            document.getElementById('value-hint').textContent = ' 💡 输入 01F4 (=500) 触发溢出';
+        };
+
+        window.confirmEditValue = function() {
+            const input = document.getElementById('value-input');
+            const editable = document.getElementById('editable-value');
+            const btnConfirm = document.getElementById('btn-confirm-edit');
+            const btnReset = document.getElementById('btn-reset-value');
+            const rawVal = input.value.trim().replace(/\s/g, '').toUpperCase();
+            const hexRegex = /^[0-9A-F]{1,4}$/;
+            if (!hexRegex.test(rawVal)) {
+                showToast('⚠️ 请输入有效的十六进制值（1-4位，如 01F4）');
+                return;
+            }
+            const numVal = parseInt(rawVal, 16);
+            const displayHex = rawVal.padStart(4, '0');
+            const formatted = displayHex.slice(0, 2) + ' ' + displayHex.slice(2, 4);
+            editable.textContent = formatted;
+            editable.classList.remove('editing');
+            if (numVal > 100) {
+                editable.classList.add('highlight-danger');
+                document.getElementById('value-hint').textContent =
+                    ` ⚠️ 危险值! 十进制=${numVal}，远超安全范围(0-100)`;
+                state.maliciousValueSet = true;
+                state.pumpRegisterValue = numVal;
+                document.getElementById('btn-send-attack').disabled = false;
+                document.getElementById('attack-status').textContent = '⚠️ 恶意数据包已就绪，点击发送';
+                document.getElementById('btn-send-attack').classList.add('danger');
+            } else {
+                editable.classList.add('highlight-ok');
+                document.getElementById('value-hint').textContent = ` 安全值 (十进制=${numVal})，不会触发溢出`;
+                state.maliciousValueSet = false;
+                document.getElementById('attack-status').textContent = '当前为安全值，请修改为危险值';
+            }
+            input.style.display = 'none';
+            btnConfirm.style.display = 'none';
+            btnReset.style.display = 'none';
+        };
+
+        window.resetEditValue = function() {
+            const editable = document.getElementById('editable-value');
+            const input = document.getElementById('value-input');
+            const btnConfirm = document.getElementById('btn-confirm-edit');
+            const btnReset = document.getElementById('btn-reset-value');
+            editable.textContent = '00 64';
+            editable.classList.remove('editing', 'highlight-danger', 'highlight-ok');
+            input.style.display = 'none';
+            btnConfirm.style.display = 'none';
+            btnReset.style.display = 'none';
+            document.getElementById('value-hint').textContent = '';
+            state.maliciousValueSet = false;
+            state.pumpRegisterValue = 100;
+            document.getElementById('attack-status').textContent = '已重置为安全值';
+            document.getElementById('btn-send-attack').disabled = true;
+            document.getElementById('btn-send-attack').classList.remove('danger');
+        };
+
+        window.sendAttackPacket = function() {
+            if (!state.maliciousValueSet || state.pumpRegisterValue <= 100) {
+                showToast('⚠️ 请先将写入值修改为大于100的危险值（如01F4=500）');
+                return;
+            }
+            if (state.defenseActive && state.defenseRulesApplied) {
+                const rules = state.defenseRulesApplied;
+                const writeVal = state.pumpRegisterValue;
+                const fnCode = 6;
+                let blocked = false;
+                if (rules.blocked_function_codes && rules.blocked_function_codes.includes(fnCode)) blocked = true;
+                if (rules.allowed_write_range && (writeVal < rules.allowed_write_range[0] || writeVal > rules
+                        .allowed_write_range[1])) blocked = true;
+                if (rules.protected_registers && rules.protected_registers.includes(1) && fnCode === 6) blocked = true;
+                if (blocked) {
+                    showToast('🛡️ 防御规则已阻止此攻击！数据包被网关丢弃。');
+                    addDefenseLog('warn', '🚫 Modbus网关拦截: 功能码06写入值' + writeVal + '超出允许范围，数据包已丢弃');
+                    document.getElementById('attack-status').textContent = '攻击被防御规则阻止';
+                    return;
+                }
+            }
+            state.attackSent = true;
+            state.pumpRegisterValue = state.pumpRegisterValue;
+            state.pumpSpeed = Math.round(state.pumpRegisterValue / 2);
+            state.inflowRate = state.pumpSpeed * 0.8;
+            document.getElementById('attack-status').textContent = '🚨 攻击已发送! 泵速被篡改! 观察3D水塔...';
+            document.getElementById('btn-send-attack').disabled = true;
+            document.getElementById('btn-send-attack').classList.remove('danger');
+            document.getElementById('btn-send-attack').style.opacity = '0.5';
+            addDetectionLog('crit', '⚠️ 检测到异常Modbus写操作: 寄存器0x0001写入值=' + state.pumpRegisterValue +
+                ' (超出安全范围)');
+            showToast('⚠️ 恶意Modbus数据包已发送！泵速=' + state.pumpSpeed + ' RPM');
+            // Auto-advance to step 4 after a moment
+            setTimeout(() => {
+                if (state.currentStep === 3) {
+                    state.currentStep = 4;
+                    document.getElementById('card-step3').style.display = 'none';
+                    document.getElementById('card-step4').style.display = 'block';
+                    populatePacketList();
+                    updateStepDots();
+                }
+            }, 3000);
+        };
+
+        // ============ STEP 4: DETECTION PANEL ============
+        function populatePacketList() {
+            const container = document.getElementById('packet-list');
+            const packets = [
+                { time: '14:32:01.112', fnCode: '03', reg: '00 01', val: '—', info: '读泵速 (正常)', safe: true,
+                    id: 'pkt0' },
+                { time: '14:32:02.445', fnCode: '06', reg: '00 01', val: '00 64', info: '写泵速=100 (正常)', safe: true,
+                    id: 'pkt1' },
+                { time: '14:32:05.887', fnCode: '03', reg: '00 02', val: '—', info: '读水位 (正常)', safe: true,
+                id: 'pkt2' },
+                { time: '14:32:08.331', fnCode: '06', reg: '00 01', val: '01 F4', info: '写泵速=500 (⚠异常!)', safe: false,
+                    id: 'pkt3' },
+                { time: '14:32:10.002', fnCode: '03', reg: '00 03', val: '—', info: '读警报状态', safe: true,
+                id: 'pkt4' },
+            ];
+            container.innerHTML = '';
+            packets.forEach((pkt, idx) => {
+                const row = document.createElement('div');
+                row.className = 'packet-row';
+                row.dataset.index = idx;
+                row.dataset.pktId = pkt.id;
+                row.innerHTML = `
+                    <span class="packet-dot" style="background:${pkt.safe?'#22c55e':'#ef4444'};"></span>
+                    <span style="color:#94a3b8;">${pkt.time}</span>
+                    <span>FC=${pkt.fnCode}</span>
+                    <span>寄存器:${pkt.reg}</span>
+                    <span style="color:${pkt.safe?'#94a3b8':'#fca5a5'};">${pkt.val}</span>
+                    <span style="font-size:0.65rem;color:#64748b;">${pkt.info}</span>
+                `;
+                row.addEventListener('click', () => selectPacket(idx, row, pkt));
+                container.appendChild(row);
+            });
+        }
+
+        function selectPacket(idx, row, pkt) {
+            document.querySelectorAll('.packet-row').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            state.selectedPacketIndex = idx;
+            document.getElementById('btn-tag-suspicious').disabled = false;
+            document.getElementById('btn-verify-detection').disabled = false;
+            document.getElementById('detection-feedback').textContent =
+                `已选中数据包 #${idx} — ${pkt.info}。如果认为可疑，请点击"标记为可疑"。`;
+        }
+
+        window.tagSelectedPacket = function() {
+            if (state.selectedPacketIndex < 0) return;
+            const rows = document.querySelectorAll('.packet-row');
+            const row = rows[state.selectedPacketIndex];
+            if (state.taggedPackets.has(state.selectedPacketIndex)) {
+                state.taggedPackets.delete(state.selectedPacketIndex);
+                row.classList.remove('tagged-suspicious', 'tagged-malicious');
+                document.getElementById('detection-feedback').textContent = '已取消标记。';
+            } else {
+                state.taggedPackets.add(state.selectedPacketIndex);
+                row.classList.add('tagged-suspicious');
+                document.getElementById('detection-feedback').textContent =
+                    `已标记数据包 #${state.selectedPacketIndex} 为可疑。`;
+            }
+            document.getElementById('btn-verify-detection').disabled = state.taggedPackets.size === 0;
+        };
+
+        window.verifyDetection = function() {
+            const maliciousPktIdx = 3;
+            if (state.taggedPackets.has(maliciousPktIdx)) {
+                document.getElementById('detection-feedback').textContent = '✅ 正确！你成功识别了恶意Modbus写数据包（泵速=500）。';
+                document.getElementById('detection-feedback').style.color = '#22c55e';
+                const rows = document.querySelectorAll('.packet-row');
+                if (rows[maliciousPktIdx]) rows[maliciousPktIdx].classList.add('tagged-malicious');
+                addDetectionLog('warn', '✅ 分析正确: 数据包#3 (功能码06, 写入值0x01F4) 为恶意攻击流量');
+                document.getElementById('btn-verify-detection').disabled = true;
+                document.getElementById('btn-tag-suspicious').disabled = true;
+                // Advance to step 5
+                setTimeout(() => {
+                    state.currentStep = 5;
+                    document.getElementById('card-step4').style.display = 'none';
+                    document.getElementById('card-step5').style.display = 'block';
+                    document.getElementById('card-analysis').style.display = 'block';
+                    updateStepDots();
+                }, 2000);
+            } else {
+                document.getElementById('detection-feedback').textContent =
+                    '❌ 未正确识别。请仔细查看写入值列，找出异常的高数值数据包。';
+                document.getElementById('detection-feedback').style.color = '#ef4444';
+                if (state.taggedPackets.size > 0) {
+                    addDetectionLog('warn', '❌ 标记的数据包中未包含真正的恶意数据包，请重新分析');
+                }
+            }
+        };
+
+        // ============ STEP 5: DEFENSE RULES ============
+        window.applyDefenseRules = function() {
+            const rulesText = document.getElementById('defense-rules').value;
+            try {
+                const rules = JSON.parse(rulesText);
+                state.defenseRulesApplied = rules;
+                state.defenseActive = true;
+                document.getElementById('defense-feedback').textContent = '✅ 防御规则已应用！网关将根据规则过滤Modbus流量。';
+                document.getElementById('defense-feedback').style.color = '#22c55e';
+                addDefenseLog('warn', '🔒 Modbus网关防御已激活: ' + JSON.stringify(rules));
+                // Check if rules would block the attack
+                const writeVal = 500;
+                const fnCode = 6;
+                let wouldBlock = false;
+                if (rules.blocked_function_codes && rules.blocked_function_codes.includes(fnCode)) wouldBlock = true;
+                if (rules.allowed_write_range && (writeVal < rules.allowed_write_range[0] || writeVal > rules
+                        .allowed_write_range[1])) wouldBlock = true;
+                if (rules.protected_registers && rules.protected_registers.includes(1) && fnCode === 6) wouldBlock = true;
+                if (wouldBlock) {
+                    addDefenseLog('warn', '✅ 规则验证通过: 当前规则可阻止泵速=500的恶意写入');
+                    document.getElementById('defense-feedback').textContent += ' 规则可有效阻止攻击！';
+                } else {
+                    addDefenseLog('crit', '⚠️ 规则不足: 当前规则无法阻止泵速=500的写入，请调整allowed_write_range或添加功能码限制');
+                    document.getElementById('defense-feedback').textContent += ' 但当前规则可能不足以阻止攻击，请测试。';
+                }
+            } catch (e) {
+                document.getElementById('defense-feedback').textContent = '❌ JSON格式错误: ' + e.message;
+                document.getElementById('defense-feedback').style.color = '#ef4444';
+            }
+        };
+
+        window.testDefenseWithAttack = function() {
+            if (!state.defenseRulesApplied) {
+                showToast('⚠️ 请先应用防御规则');
+                return;
+            }
+            const rules = state.defenseRulesApplied;
+            const writeVal = 500;
+            const fnCode = 6;
+            let blocked = false;
+            if (rules.blocked_function_codes && rules.blocked_function_codes.includes(fnCode)) blocked = true;
+            if (rules.allowed_write_range && (writeVal < rules.allowed_write_range[0] || writeVal > rules
+                    .allowed_write_range[1])) blocked = true;
+            if (rules.protected_registers && rules.protected_registers.includes(1) && fnCode === 6) blocked = true;
+            if (blocked) {
+                showToast('🛡️ 防御成功！恶意数据包被网关拦截。');
+                addDefenseLog('warn', '🧪 测试: 重放攻击包(写入值=500) → 被防御规则拦截 ✓');
+                if (!state.flagDefenseRevealed) {
+                    state.flagDefenseRevealed = true;
+                    setTimeout(() => {
+                        showToast('🏆 FLAG{modbus_gateway_defense_blocked}');
+                        addDefenseLog('flag', '🏆 FLAG捕获: FLAG{modbus_gateway_defense_blocked} — 网关防御成功');
+                    }, 800);
+                }
+                // Reset attack state since defense blocked it
+                state.attackSent = false;
+                state.maliciousValueSet = false;
+                state.pumpRegisterValue = 100;
+                state.pumpSpeed = 50;
+                state.inflowRate = 40.0;
+                document.getElementById('attack-status').textContent = '攻击已被防御规则阻止，系统恢复正常';
+            } else {
+                showToast('❌ 防御失败！攻击数据包通过了网关。请调整规则。');
+                addDefenseLog('crit',
+                    '🧪 测试: 重放攻击包(写入值=500) → 未被拦截 ✗ 请修改allowed_write_range上限≤100或添加功能码06到blocked列表');
+                document.getElementById('defense-feedback').textContent =
+                    '⚠️ 防御测试失败。建议: 设置allowed_write_range为[0,100]或将功能码06加入blocked_function_codes。';
+                document.getElementById('defense-feedback').style.color = '#ef4444';
+            }
+        };
+
+        window.toggleAnalysis = function() {
+            const content = document.getElementById('analysis-content');
+            content.style.display = content.style.display === 'none' ? 'block' : 'none';
+        };
+
+        // ============ INITIAL SETUP ============
+        updateWaterVisual();
+        updateStepDots();
+
+        // Expose functions to global scope for onclick handlers
+        window.advanceStep = advanceStep;
+        window.sendAttackPacket = sendAttackPacket;
+        window.tagSelectedPacket = tagSelectedPacket;
+        window.verifyDetection = verifyDetection;
+        window.applyDefenseRules = applyDefenseRules;
+        window.testDefenseWithAttack = testDefenseWithAttack;
+        window.toggleAnalysis = toggleAnalysis;
+
+        console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+        console.log('🛡️ SCADA Modbus TCP 水塔攻击与防御实验已就绪');
+        console.log('📋 步骤1: 阅读任务简报');
+        console.log('🔍 步骤2: 观察正常Modbus通信');
+        console.log('⚠️ 步骤3: 构造恶意数据包 (修改写入值为01F4)');
+        console.log('📊 步骤4: 在检测面板识别攻击流量');
+        console.log('🛡️ 步骤5: 编写Modbus网关防御规则');
+        console.log('🏆 FLAG1: 触发水塔溢出 → FLAG{modbus_overflow_pump_500}');
+        console.log('🏆 FLAG2: 成功防御攻击 → FLAG{modbus_gateway_defense_blocked}');
+    </script>
+</body>
+</html>

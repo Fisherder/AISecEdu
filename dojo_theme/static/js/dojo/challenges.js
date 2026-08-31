@@ -1,8 +1,8 @@
 function submitChallenge(event) {
     event.preventDefault();
     const item = $(event.currentTarget).closest(".accordion-item");
-    const challenge_id = parseInt(item.find('#challenge-id').val())
-    const answer_input = item.find("#challenge-input");
+    const challenge_id = parseInt(item.find('.challenge-numeric-id').val())
+    const answer_input = item.find(".challenge-answer");
     const submission = answer_input.val()
 
     const flag_regex = /pwn.college{.*}/;
@@ -24,9 +24,9 @@ function submitChallenge(event) {
 function renderSubmissionResponse(response, item) {
     const result = response.data;
 
-    const result_message = item.find("#result-message");
-    const result_notification = item.find("#result-notification");
-    const answer_input = item.find("#challenge-input");
+    const result_message = item.find(".result-message");
+    const result_notification = item.find(".result-notification");
+    const answer_input = item.find(".challenge-answer");
     const unsolved_flag = item.find(".challenge-unsolved");
     const total_solves = item.find(".total-solves");
 
@@ -38,7 +38,7 @@ function renderSubmissionResponse(response, item) {
     result_message.text(result.message);
 
     function appendScoreAction() {
-        const challengeId = Number(item.find("#challenge-id").val());
+        const challengeId = Number(item.find(".challenge-numeric-id").val());
         if (!Number.isInteger(challengeId) || challengeId < 1) return;
         $("<a>")
             .addClass("btn btn-sm btn-outline-success challenge-score-action")
@@ -95,11 +95,11 @@ function renderSubmissionResponse(response, item) {
         answer_input.removeClass("wrong");
         answer_input.addClass("correct");
         appendScoreAction();
-        const challenge_name = item.find('#challenge').val()
-        const module_name = item.find('#module').val()
+        const challenge_name = item.find('.challenge-reference').val()
+        const module_name = item.find('.challenge-module').val()
         const dojo_name = init.dojo
 
-        const survey_notification = item.find("#survey-notification")
+        const survey_notification = item.find(".survey-notification")
 
         CTFd.fetch(`/pwncollege_api/v1/dojos/${dojo_name}/${module_name}/${challenge_name}/surveys`, {
             method: 'GET',
@@ -159,8 +159,8 @@ function unlockChallenge(challenge_button) {
         icon.addClass('fa-flag');
 
         const item = challenge_button.closest(".accordion-item");
-        const module_id = item.find("#module").val();
-        const challenge_id = item.find("#challenge").val();
+        const module_id = item.find(".challenge-module").val();
+        const challenge_id = item.find(".challenge-reference").val();
         const description = item.find(".challenge-description");
 
         CTFd.fetch(`/pwncollege_api/v1/dojos/${init.dojo}/${module_id}/${challenge_id}/description`)
@@ -173,9 +173,9 @@ function unlockChallenge(challenge_button) {
 async function startChallenge(event) {
     event.preventDefault();
     const item = $(event.currentTarget).closest(".accordion-item");
-    const module = item.find("#module").val()
-    const challenge = item.find("#challenge").val()
-    const practice = event.currentTarget.id == "challenge-priv";
+    const module = item.find(".challenge-module").val()
+    const challenge = item.find(".challenge-reference").val()
+    const practice = event.currentTarget.dataset.practice === "true";
     const activeChallenge = $(".challenge-name.challenge-active").first();
     const selectedChallenge = item.find(".challenge-name").first();
     if (activeChallenge.length && !activeChallenge.is(selectedChallenge)) {
@@ -194,6 +194,45 @@ async function startChallenge(event) {
         .addClass("disabled-button")
         .prop("disabled", true);
 
+    const workspace = item.find(".challenge-workspace");
+    let content = workspace.find("#workspace-iframe")[0];
+    if (!content) {
+        item.find(".iframe-wrapper").html('<iframe id="workspace-iframe" class="challenge-iframe" src="about:blank" allow="clipboard-read *; clipboard-write *; fullscreen *" allowfullscreen></iframe>');
+        content = workspace.find("#workspace-iframe")[0];
+    }
+    if (item[0].workspaceStartController) item[0].workspaceStartController.abort();
+    const startController = new AbortController();
+    item[0].workspaceStartController = startController;
+    if (content) {
+        content.workspaceStartTrigger = event.currentTarget;
+        content.dataset.workspaceService = "";
+        workspace.removeClass("challenge-hidden");
+        item.find(".challenge-init").addClass("challenge-hidden");
+    }
+    const startLoadId = content && typeof beginWorkspaceLoad === "function"
+        ? beginWorkspaceLoad(content, "")
+        : null;
+
+    const showStartFailure = function (message) {
+        result_message.text(message);
+        result_notification
+            .removeClass()
+            .addClass('alert alert-warning alert-dismissable text-center')
+            .slideDown();
+        workspace.removeClass("challenge-hidden");
+        item.find(".challenge-init")
+            .addClass("challenge-hidden")
+            .removeClass("disabled-button")
+            .prop("disabled", false);
+        if (content && startLoadId && typeof showWorkspaceLoadError === "function") {
+            showWorkspaceLoadError(content, {error: message}, startLoadId);
+            const panel = workspaceLoadingPanel(content);
+            panel.find("[data-workspace-loading-title]").text("环境启动失败");
+            panel.find("[data-workspace-loading-retry]").html('<i class="fas fa-redo" aria-hidden="true"></i>重新启动');
+            panel.find("[data-workspace-loading-cancel]").prop("hidden", false).html('<i class="fas fa-arrow-left" aria-hidden="true"></i>返回题目说明');
+        }
+    };
+
     var params = {
         "dojo": init.dojo,
         "module": module,
@@ -207,8 +246,8 @@ async function startChallenge(event) {
         params["as_user"] = as_user;
     }
 
-    var result_notification = item.find('#result-notification');
-    var result_message = item.find('#result-message');
+    var result_notification = item.find('.result-notification');
+    var result_message = item.find('.result-message');
     result_notification.removeClass('alert-danger');
     result_notification.addClass('alert alert-warning alert-dismissable text-center');
     result_message.html("正在加载。");
@@ -232,6 +271,7 @@ async function startChallenge(event) {
     CTFd.fetch('/pwncollege_api/v1/docker', {
         method: 'POST',
         credentials: 'same-origin',
+        signal: startController.signal,
         headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json'
@@ -249,44 +289,28 @@ async function startChallenge(event) {
         }
         return response.json();
     }).then(function (result) {
-        var result_notification = item.find('#result-notification');
-        var result_message = item.find('#result-message');
+        var result_notification = item.find('.result-notification');
+        var result_message = item.find('.result-message');
 
         result_notification.removeClass();
 
         if (result.success) {
-            var message = result.exerciseMode === "SIMULATION"
-                ? "模拟题已成功启动！"
-                : result.exerciseMode === "HYBRID"
-                ? "混合实践题已成功启动！"
-                : "题目已成功启动！";
+            var message = "题目已成功启动！";
             result_message.html(message);
             result_notification.addClass('alert alert-info alert-dismissable text-center');
 
             $(".challenge-active").removeClass("challenge-active");
             item.find(".challenge-name").addClass("challenge-active");
-        }
-        else {
-            var message = "无法启动题目：" + result.error;
-            result_message.text(message);
-            result_notification.addClass('alert alert-warning alert-dismissable text-center');
-        }
-
-        result_notification.slideDown();
-        item.find(".challenge-init")
-            .removeClass("disabled-button")
-            .prop("disabled", false);
-
-        $(".challenge-init").removeClass("challenge-hidden");
-        $(".challenge-workspace").addClass("challenge-hidden");
-        $(".iframe-wrapper").html("");
-        if (result.success) {
-            if (result.exerciseMode === "SIMULATION") {
-                window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
-                window.location.assign("/workspace?service=simulation");
-                return;
-            }
+            result_notification.slideDown();
+            item.find(".challenge-init")
+                .removeClass("disabled-button")
+                .prop("disabled", false);
+            $(".challenge-init").removeClass("challenge-hidden");
+            $(".challenge-workspace").addClass("challenge-hidden");
+            $(".iframe-wrapper").html("");
             item.find(".iframe-wrapper").html("<iframe id=\"workspace-iframe\" class=\"challenge-iframe\" src=\"about:blank\" allow=\"clipboard-read *; clipboard-write *; fullscreen *\" allowfullscreen></iframe>");
+            const startedContent = item.find("#workspace-iframe")[0];
+            if (startedContent) delete startedContent.workspaceStartTrigger;
             loadWorkspace();
             item.find(".challenge-init").addClass("challenge-hidden");
             item.find(".challenge-workspace").removeClass("challenge-hidden");
@@ -298,29 +322,28 @@ async function startChallenge(event) {
             moduleStartChallenge(event, channel);
             window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
         }
+        else {
+            showStartFailure("环境暂时无法启动。请重新启动；已有学习记录不会丢失。");
+        }
 
         setTimeout(function() {
             item.find(".alert").slideUp();
         }, 60000);
     }).catch(function (error) {
+        if (error && error.name === "AbortError") return;
         console.error(error);
-        var result_message = item.find('#result-message');
-        const message = "题目启动请求失败：" + ((error || {}).message || error);
-        result_message.text(message);
-        result_notification.addClass('alert alert-warning alert-dismissable text-center');
-        result_notification.slideDown();
-        item.find(".challenge-init")
-            .removeClass("disabled-button")
-            .prop("disabled", false);
+        showStartFailure("环境启动请求未完成，请检查网络后重新启动。");
+    }).finally(function () {
+        if (item[0].workspaceStartController === startController) delete item[0].workspaceStartController;
     })
 }
 
 async function buildSurvey(item) {
-    const form = item.find("form#survey-notification")
+    const form = item.find("form.survey-notification")
     if(form.html() === "") return
 
     // fix styles
-    const challenge_id = item.find('#challenge-id').val()
+    const challenge_id = item.find('.challenge-numeric-id').val()
     for(const style of form.find("style")) {
         let cssText = ""
         for(const rule of style.sheet.cssRules) {
@@ -351,8 +374,8 @@ async function buildSurvey(item) {
 }
 
 function surveySubmit(data, item) {
-    const challenge_name = item.find('#challenge').val()
-    const module_name = item.find('#module').val()
+    const challenge_name = item.find('.challenge-reference').val()
+    const module_name = item.find('.challenge-module').val()
     const dojo_name = init.dojo
     return CTFd.fetch(`/pwncollege_api/v1/dojos/${dojo_name}/${module_name}/${challenge_name}/surveys`, {
         method: 'POST',
@@ -379,7 +402,7 @@ function markChallengeAsSolved(item) {
         (parseInt(total_solves.text().trim().split(" ")[0]) + 1) + " completions"
     );
 
-    const answer_input = item.find("#challenge-input");
+    const answer_input = item.find(".challenge-answer");
     answer_input.val("");
     answer_input.removeClass("wrong");
     answer_input.addClass("correct");
@@ -407,7 +430,7 @@ $(() => {
     channel.addEventListener("message", (event) => {
         var challenge_id = event.data["challenge-id"];
         $(".workspace-controls").each((index, item) => {
-            item_chal_id = $(item).find("#current-challenge-id").prop("value");
+            item_chal_id = $(item).find(".current-challenge-id").prop("value");
             if (item_chal_id == challenge_id) {
                 var priv = $(item).find("#workspace-change-privilege");
                 if (priv.length > 0) {
@@ -434,14 +457,14 @@ $(() => {
     broadcast.onmessage = (event) => {
         if (event.data.msg === 'challengeSolved') {
             const challenge_id = event.data.challenge_id;
-            const item = $(`input#challenge-id[value='${challenge_id}']`).closest(".accordion-item");
+            const item = $(`input.challenge-numeric-id[value='${challenge_id}']`).closest(".accordion-item");
             if (item.length) {
                 markChallengeAsSolved(item);
             }
         }
     };
 
-    var submits = $(".accordion-item").find("#challenge-input");
+    var submits = $(".accordion-item").find(".challenge-answer");
     for (var i = 0; i < submits.length; i++) {
         submits[i].oninput = submitChallenge;
         submits[i].onkeyup = function (event) {
@@ -450,8 +473,37 @@ $(() => {
             }
         };
     }
-    $(".accordion-item").find("#challenge-start").click(startChallenge);
-    $(".challenge-init").find("#challenge-priv").click(startChallenge);
+    $(".accordion-item").find(".challenge-start").click(startChallenge);
+    $(".challenge-init").find(".challenge-priv").click(startChallenge);
+    $(document).on("click", "[data-workspace-loading-retry]", function (event) {
+        const workspace = $(this).closest(".challenge-workspace");
+        const content = workspace.find("#workspace-iframe")[0];
+        const trigger = content && content.workspaceStartTrigger;
+        if (!trigger) return;
+        event.preventDefault();
+        startChallenge({
+            preventDefault: function () {},
+            currentTarget: trigger,
+            target: trigger,
+        });
+    });
+    $(document).on("click", "[data-workspace-loading-cancel]", function (event) {
+        const workspace = $(this).closest(".challenge-workspace");
+        const item = workspace.closest(".accordion-item");
+        const content = workspace.find("#workspace-iframe")[0];
+        const trigger = content && content.workspaceStartTrigger;
+        if (!trigger) return;
+        event.preventDefault();
+        if (item[0].workspaceStartController) item[0].workspaceStartController.abort();
+        if (typeof cancelWorkspaceLoad === "function") cancelWorkspaceLoad(content, {visible: false});
+        delete content.workspaceStartTrigger;
+        item.find(".challenge-init")
+            .removeClass("challenge-hidden disabled-button")
+            .prop("disabled", false);
+        workspace.addClass("challenge-hidden");
+        item.find(".iframe-wrapper").html("");
+        trigger.focus();
+    });
 
     window.addEventListener("resize", windowResizeCallback, true);
     windowResizeCallback("");

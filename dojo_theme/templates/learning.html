@@ -1,76 +1,91 @@
 {% extends "base.html" %}
 
+{% block body_class %}course-system-page student-learning-page{% endblock %}
+
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/course-system.css', v='aisecedu-student-portal-v5-readability-v1') }}">
+{% endblock %}
+
 {% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1 class="brand-mono-bold wordmark-large"><span class="brand-white">AISecEdu</span><span class="brand-dot brand-blink">.</span><span class="brand-green">学习中心</span></h1>
-    <br>
-    <h2 class="brand-white">课程进度与学习证据</h2>
-  </div>
-</div>
+<div id="learning-overview" class="sl-today" aria-busy="true" data-variant="{{ (experience | default({})).get('variant', 'v2') }}">
+  <div class="sl-today-main">
+    <h1 class="sr-only">学习中心 · 今天</h1>
+    <div id="learning-overview-notice" class="cs-notice sl-page-notice" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 
-<div id="learning-overview" class="container">
-  <p>在这里统一查看已加入课程、当前练习、已完成题目、提交记录和基于证据的评估。</p>
+    <section id="learning-overview-loading" class="sl-today-loading" aria-label="正在加载今天的学习安排">
+      <span class="sl-skeleton sl-skeleton-title"></span>
+      <span class="sl-skeleton sl-skeleton-card"></span>
+      <span class="sl-skeleton sl-skeleton-row"></span>
+    </section>
 
-  <div id="learning-overview-notice" role="status" hidden></div>
-
-  <h2 class="row">学习数据</h2>
-  <div class="stats-dashboard">
-    <div class="stat-card">
-      <div class="stat-card-header">已加入课程</div>
-      <div class="stat-container">
-        <div class="stat-box">
-          <div class="stat-label">课程</div>
-          <div id="learning-stat-courses" class="stat-value">0</div>
+    <section id="learning-onboarding" class="sl-onboarding" hidden>
+      <div class="sl-onboarding-copy">
+        <span class="cs-eyebrow">欢迎来到玄甲</span>
+        <h2>从第一门课程开始</h2>
+        <p>加入教师的课程后，“今天”会根据截止时间、课程路径和保存状态，只给你一个最值得先做的下一步。</p>
+        <div class="sl-onboarding-actions" id="join-course">
+          <button id="learning-join-course-code" class="cs-btn cs-btn-primary" type="button"><i class="fas fa-key" aria-hidden="true"></i>使用课程码加入</button>
+          <a class="cs-btn cs-btn-secondary" href="/dojos?tab=discover"><i class="fas fa-compass" aria-hidden="true"></i>浏览课程</a>
         </div>
+        <a class="sl-onboarding-help" href="/guide?intent=choose-course">还不确定？让 AI 学习助手帮我选择</a>
       </div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-card-header">课程单元</div>
-      <div class="stat-container">
-        <div class="stat-box">
-          <div class="stat-label">单元</div>
-          <div id="learning-stat-modules" class="stat-value">0</div>
-        </div>
-      </div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-card-header">已完成题目</div>
-      <div class="stat-container">
-        <div class="stat-box">
-          <div class="stat-label">完成数</div>
-          <div id="learning-stat-completed" class="stat-value">0</div>
-        </div>
-      </div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-card-header">提交次数</div>
-      <div class="stat-container">
-        <div class="stat-box">
-          <div class="stat-label">尝试</div>
-          <div id="learning-stat-submissions" class="stat-value">0</div>
-        </div>
-      </div>
-    </div>
-  </div>
+      <ol class="sl-onboarding-steps" aria-label="开始学习的三个步骤">
+        <li class="is-current"><span>01</span><div><strong>加入课程</strong><small>输入教师提供的 8 位课程码</small></div></li>
+        <li><span>02</span><div><strong>选择第一项</strong><small>系统按课程安排生成唯一下一步</small></div></li>
+        <li><span>03</span><div><strong>启动实践</strong><small>作答、实验和学习证据自动保存</small></div></li>
+      </ol>
+    </section>
 
-  <br>
-  <section id="learning-active-section" hidden>
-    <h2 class="row">当前练习</h2>
-    <div id="learning-active-attempt"></div>
-    <br>
-  </section>
+    <div id="learning-ready" hidden>
+      <header class="sl-today-heading">
+        <div><span id="learning-today-date" class="cs-eyebrow">今天</span><h2>今天先做这一件事</h2><p>系统依据课程权限、截止时间和已保存状态为你排序。</p></div>
+        <a class="cs-btn cs-btn-secondary" href="/dojos?tab=mine"><i class="fas fa-book-open" aria-hidden="true"></i>我的课程</a>
+      </header>
 
-  <h2 class="row">我的课程</h2>
-  <br>
-  <ul id="learning-course-list" class="card-list"></ul>
-  <div id="learning-course-empty" class="alert alert-info" hidden>
-    你还没有加入课程。请浏览<a href="/dojos">课程目录</a>开始学习。
+      <section class="sl-primary-section" aria-labelledby="learning-next-heading">
+        <div class="sl-section-heading"><div><span class="cs-eyebrow">权威推荐</span><h2 id="learning-next-heading">下一步</h2></div></div>
+        <div id="learning-next-action"></div>
+      </section>
+
+      <div class="sl-today-grid">
+        <section class="cs-surface" aria-labelledby="learning-week-heading">
+          <div class="cs-section-heading"><div><span class="cs-eyebrow">接下来</span><h2 id="learning-week-heading">近期任务</h2></div><span id="learning-assignment-count" class="cs-status">暂无待办</span></div>
+          <div id="learning-assignment-list" class="sl-task-list"></div>
+          <div id="learning-assignment-empty" class="sl-compact-empty" hidden><i class="fas fa-check-circle" aria-hidden="true"></i><span><strong>近期没有待办</strong><small>可以继续当前课程，或复盘已有学习证据。</small></span></div>
+        </section>
+
+        <section class="cs-surface" aria-labelledby="learning-courses-heading">
+          <div class="cs-section-heading"><div><span class="cs-eyebrow">进行中</span><h2 id="learning-courses-heading">我的课程</h2></div><a href="/dojos?tab=mine">查看全部</a></div>
+          <div id="learning-course-list" class="sl-course-list"></div>
+          <div id="learning-course-empty" class="sl-compact-empty" hidden><i class="fas fa-book" aria-hidden="true"></i><span><strong>课程内容尚未开放</strong><small>课程已加入，教师发布内容后会自动出现在这里。</small></span></div>
+        </section>
+      </div>
+
+      <section class="cs-surface sl-evidence-section" aria-labelledby="learning-evidence-heading">
+        <div class="cs-section-heading"><div><span class="cs-eyebrow">学习证据</span><h2 id="learning-evidence-heading">进展摘要</h2></div><a id="learning-progress-link" href="/dojos?tab=mine">查看学习进展</a></div>
+        <div id="learning-mastery-summary" class="sl-mastery-summary"></div>
+        <div id="learning-skill-list" class="sl-skill-list"></div>
+        <div id="learning-skill-empty" class="sl-compact-empty" hidden><i class="fas fa-seedling" aria-hidden="true"></i><span><strong>尚无足够证据</strong><small>完成一次相关实训或评测后，这里才会形成能力判断。</small></span></div>
+      </section>
+
+      <details id="learning-secondary" class="sl-secondary">
+        <summary>更多学习内容与个人成果</summary>
+        <div class="sl-secondary-links">
+          <a href="/learning/extend"><i class="fas fa-cubes" aria-hidden="true"></i><span><strong>我的创作</strong><small id="learning-creation-summary">查看个人课件、练习与演示</small></span><i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+          <a href="/guide"><i class="fas fa-comment-dots" aria-hidden="true"></i><span><strong>AI 学习助手</strong><small>讲解卡点、规划目标或复盘证据</small></span><i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+        </div>
+      </details>
+    </div>
   </div>
 </div>
 {% endblock %}
 
+{% block footer %}{% endblock %}
+
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-20260726-pwn-notices') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-overview.js', v='aisecedu-20260725-ui3') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-overview.js', v='aisecedu-student-today-v7') }}"></script>
 {% endblock %}

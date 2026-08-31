@@ -1,0 +1,1167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>无线安全 — Evil Twin 伪造AP攻击实验</title>
+    <style>:root {
+            --bg: #0f172a;
+            --panel: #1a1a2e;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --info: #3b82f6;
+            --amber: #f59e0b;
+            --purple: #a855f7;
+            --cyan: #06b6d4;
+            --ap-legit: #22c55e;
+            --ap-evil: #ef4444;
+            --client-color: #3b82f6;
+            --attacker: #f59e0b;
+            --font-mono: 'Courier New', 'Consolas', 'Monaco', monospace;
+            --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 16px 20px;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 14px 20px;
+            background: var(--panel);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+        header .logo {
+            font-weight: 700;
+            font-size: 1.2rem;
+            color: var(--cyan);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .progress-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .progress-step {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: #1e293b;
+            color: #64748b;
+            border: 2px solid transparent;
+            transition: all .3s;
+            cursor: default;
+            white-space: nowrap;
+        }
+        .progress-step.active {
+            background: #1e3a5f;
+            color: var(--info);
+            border-color: var(--info);
+            animation: pulse-step 2s infinite;
+        }
+        .progress-step.done {
+            background: #1a3d2e;
+            color: var(--success);
+            border-color: var(--success);
+        }
+        @keyframes pulse-step {
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+            }
+        }
+        .briefing {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px 22px;
+            margin-bottom: 16px;
+            border-left: 4px solid var(--cyan);
+        }
+        .briefing h3 {
+            color: var(--cyan);
+            margin-bottom: 6px;
+            font-size: 1rem;
+        }
+        .briefing p {
+            color: #cbd5e1;
+            font-size: 0.9rem;
+        }
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto auto;
+            gap: 14px;
+        }
+        @media(max-width:1100px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            position: relative;
+            overflow: hidden;
+        }
+        .panel h3 {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+            color: var(--text2);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel h3 .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot.green {
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+        .dot.red {
+            background: var(--danger);
+            box-shadow: 0 0 8px var(--danger);
+            animation: blink 0.8s infinite;
+        }
+        .dot.amber {
+            background: var(--amber);
+            box-shadow: 0 0 8px var(--amber);
+        }
+        @keyframes blink {
+            50% {
+                opacity: 0.3;
+            }
+        }
+        /* Network Topology SVG */
+        .topo-svg {
+            width: 100%;
+            height: 380px;
+            background: #0d1117;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            cursor: default;
+            user-select: none;
+        }
+        .topo-svg text {
+            font-family: var(--font-sans);
+            font-size: 11px;
+            fill: #cbd5e1;
+            pointer-events: none;
+        }
+        .topo-svg .ap-label {
+            font-weight: 700;
+            font-size: 12px;
+        }
+        .topo-svg .conn-line {
+            stroke-dasharray: 6 3;
+            stroke-width: 2;
+            transition: all 0.6s;
+        }
+        .topo-svg .conn-line.evil {
+            stroke: var(--danger);
+            stroke-dasharray: 4 2;
+            animation: dash-move 0.5s linear infinite;
+        }
+        @keyframes dash-move {
+            to {
+                stroke-dashoffset: -12;
+            }
+        }
+        .topo-svg .packet-anim {
+            animation: fly-packet 1.2s ease-in-out forwards;
+        }
+        @keyframes fly-packet {
+            0% {
+                opacity: 1;
+                r: 3;
+            }
+            70% {
+                opacity: 0.8;
+                r: 5;
+            }
+            100% {
+                opacity: 0;
+                r: 2;
+                transform: translate(var(--dx), var(--dy));
+            }
+        }
+        /* Packet Table */
+        .pkt-table-wrap {
+            max-height: 320px;
+            overflow-y: auto;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .pkt-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+        }
+        .pkt-table th {
+            background: #1e293b;
+            padding: 8px 10px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            color: var(--text2);
+            font-weight: 600;
+            font-size: 0.7rem;
+        }
+        .pkt-table td {
+            padding: 7px 10px;
+            border-bottom: 1px solid #1e293b;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .pkt-table tr:hover td {
+            background: #1e3a3a;
+        }
+        .pkt-table tr.selected td {
+            background: #1a3d5e;
+            outline: 1px solid var(--info);
+        }
+        .pkt-table tr.tagged td {
+            background: #3d1a1a;
+            outline: 1px solid var(--danger);
+        }
+        .pkt-table .pkt-deauth {
+            color: var(--danger);
+            font-weight: 700;
+        }
+        .pkt-table .pkt-beacon {
+            color: var(--success);
+        }
+        .pkt-table .pkt-eapol {
+            color: var(--purple);
+        }
+        /* Hex dump */
+        .hex-dump {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            background: #0d1117;
+            padding: 10px;
+            border-radius: 6px;
+            color: #8b949e;
+            white-space: pre;
+            overflow-x: auto;
+            max-height: 140px;
+            border: 1px solid var(--border);
+            line-height: 1.5;
+        }
+        .hex-dump .hl {
+            color: var(--danger);
+            background: #3d1a1a;
+            padding: 1px 3px;
+            border-radius: 2px;
+        }
+        .hex-dump .hl-green {
+            color: var(--success);
+            background: #1a3d2e;
+            padding: 1px 3px;
+            border-radius: 2px;
+        }
+        /* Buttons */
+        button {
+            font-family: var(--font-sans);
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 18px;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+        button:active {
+            transform: scale(0.96);
+        }
+        .btn-primary {
+            background: var(--info);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+        }
+        .btn-danger {
+            background: var(--danger);
+            color: #fff;
+        }
+        .btn-danger:hover {
+            background: #dc2626;
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+        }
+        .btn-success {
+            background: var(--success);
+            color: #000;
+        }
+        .btn-outline {
+            background: transparent;
+            border: 2px solid var(--border);
+            color: var(--text);
+        }
+        .btn-outline:hover {
+            border-color: var(--info);
+            color: var(--info);
+        }
+        .btn-sm {
+            padding: 5px 12px;
+            font-size: 0.75rem;
+            border-radius: 6px;
+        }
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        /* Flag toast */
+        .flag-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #1a1a2e;
+            border: 2px solid var(--amber);
+            border-radius: 12px;
+            padding: 14px 20px;
+            z-index: 999;
+            animation: slide-in 0.4s ease-out;
+            box-shadow: 0 0 30px rgba(245, 158, 11, 0.5);
+            display: none;
+            font-family: var(--font-mono);
+        }
+        .flag-toast .flag-code {
+            font-size: 1.1rem;
+            color: var(--amber);
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+        @keyframes slide-in {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        /* Input */
+        input[type="text"],
+        textarea {
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            padding: 10px 14px;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            width: 100%;
+            transition: border 0.2s;
+        }
+        input[type="text"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--info);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.2);
+        }
+        /* Tag badge */
+        .tag-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .tag-danger {
+            background: #3d1a1a;
+            color: var(--danger);
+        }
+        .tag-success {
+            background: #1a3d2e;
+            color: var(--success);
+        }
+        /* Analysis Report */
+        .analysis-report {
+            background: #1a1a2e;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 16px;
+            display: none;
+        }
+        .analysis-report.show {
+            display: block;
+            animation: fade-in 0.5s;
+        }
+        @keyframes fade-in {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        /* Roam animation */
+        .roam-highlight {
+            animation: roam-glow 0.6s ease-out;
+        }
+        @keyframes roam-glow {
+            0% {
+                filter: drop-shadow(0 0 15px #ef4444);
+            }
+            100% {
+                filter: drop-shadow(0 0 0px transparent);
+            }
+        }
+        /* Collapsible */
+        details summary {
+            cursor: pointer;
+            color: var(--info);
+            font-weight: 600;
+            padding: 4px 0;
+        }
+        details summary:hover {
+            color: #60a5fa;
+        }
+        .mt-8 {
+            margin-top: 8px;
+        }
+        .mt-12 {
+            margin-top: 12px;
+        }
+        .mb-8 {
+            margin-bottom: 8px;
+        }
+        .flex-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .gap-12 {
+            gap: 12px;
+        }
+        .full-width {
+            grid-column: 1/-1;
+        }
+        @media(max-width:1100px) {
+            .full-width {
+                grid-column: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- FLAG TOAST -->
+        <div class="flag-toast" id="flagToast">
+            <div style="color:#f59e0b;font-weight:700;">🏴 FLAG CAPTURED!</div>
+            <div class="flag-code" id="flagCode"></div>
+        </div>
+
+        <!-- HEADER -->
+        <header>
+            <div class="logo">📡 无线安全实验室 — Evil Twin Attack</div>
+            <div class="progress-bar-wrap" id="progressBar">
+                <span class="progress-step active" data-step="1">① 侦察扫描</span>
+                <span class="progress-step" data-step="2">② 部署Evil Twin</span>
+                <span class="progress-step" data-step="3">③ Deauth攻击</span>
+                <span class="progress-step" data-step="4">④ 客户端漫游</span>
+                <span class="progress-step" data-step="5">⑤ 防御配置</span>
+            </div>
+        </header>
+
+        <!-- BRIEFING -->
+        <div class="briefing">
+            <h3>📋 任务简报</h3>
+            <p>你是一名安全研究员，正在评估某咖啡店的WiFi安全性。网络中存在一个合法AP <b>"CoffeeShop_WiFi"</b> (BSSID: <code>AA:BB:CC:11:22:33</code>) 和若干客户端。你的任务：<b>①</b> 侦察网络；<b>②</b> 部署同名Evil Twin伪造AP；<b>③</b> 发动Deauth攻击迫使客户端漫游；<b>④</b> 观察凭证泄露风险；<b>⑤</b> 配置802.1X EAP-TLS防御。每个阶段成功完成将解锁Flag片段。</p>
+            <p style="font-size:0.75rem;color:#64748b;margin-top:4px;">// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境。所有模拟均在浏览器沙箱内运行，不产生真实网络流量。</p>
+        </div>
+
+        <!-- MAIN GRID -->
+        <div class="main-grid">
+            <!-- PANEL: Network Topology -->
+            <div class="panel" id="topoPanel">
+                <h3><span class="dot green"></span> 网络拓扑 — 实时可视化</h3>
+                <svg class="topo-svg" id="topoSvg" viewBox="0 0 600 380">
+                    <!-- Background grid -->
+                    <defs>
+                        <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+                            <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+                        </pattern>
+                        <radialGradient id="apGlow" cx="50%" cy="50%">
+                            <stop offset="0%" stop-color="#22c55e" stop-opacity="0.35"/>
+                            <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+                        </radialGradient>
+                        <radialGradient id="evilGlow" cx="50%" cy="50%">
+                            <stop offset="0%" stop-color="#ef4444" stop-opacity="0.4"/>
+                            <stop offset="100%" stop-color="#ef4444" stop-opacity="0"/>
+                        </radialGradient>
+                        <radialGradient id="attackerGlow" cx="50%" cy="50%">
+                            <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.3"/>
+                            <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+                        </radialGradient>
+                        <filter id="shadow">
+                            <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.5"/>
+                        </filter>
+                    </defs>
+                    <rect width="600" height="380" fill="url(#grid)"/>
+                    <!-- Legitimate AP -->
+                    <circle cx="300" cy="100" r="40" fill="url(#apGlow)" id="apGlowCircle"/>
+                    <circle cx="300" cy="100" r="22" fill="#1a3d2e" stroke="#22c55e" stroke-width="3" id="apLegitCircle" filter="url(#shadow)"/>
+                    <text x="300" y="97" text-anchor="middle" class="ap-label" fill="#22c55e" font-size="10">📶 AP</text>
+                    <text x="300" y="112" text-anchor="middle" fill="#94a3b8" font-size="9" id="apLegitLabel">CoffeeShop_WiFi</text>
+                    <text x="300" y="124" text-anchor="middle" fill="#64748b" font-size="8" id="apLegitBSSID">AA:BB:CC:11:22:33</text>
+                    <!-- Evil Twin AP (hidden initially) -->
+                    <circle cx="480" cy="180" r="35" fill="url(#evilGlow)" id="evilGlowCircle" opacity="0"/>
+                    <circle cx="480" cy="180" r="20" fill="#3d1a1a" stroke="#ef4444" stroke-width="3" id="evilApCircle" opacity="0" filter="url(#shadow)"/>
+                    <text x="480" y="177" text-anchor="middle" class="ap-label" fill="#ef4444" font-size="10" id="evilApLabel" opacity="0">💀 Evil AP</text>
+                    <text x="480" y="192" text-anchor="middle" fill="#f87171" font-size="9" id="evilSSIDLabel" opacity="0">CoffeeShop_WiFi</text>
+                    <text x="480" y="204" text-anchor="middle" fill="#64748b" font-size="8" id="evilBSSIDLabel" opacity="0">DE:AD:BE:EF:00:01</text>
+                    <!-- Attacker -->
+                    <circle cx="500" cy="60" r="28" fill="url(#attackerGlow)" id="attackerGlow"/>
+                    <circle cx="500" cy="60" r="16" fill="#3d2e1a" stroke="#f59e0b" stroke-width="2.5" id="attackerCircle" filter="url(#shadow)"/>
+                    <text x="500" y="57" text-anchor="middle" fill="#f59e0b" font-size="9" font-weight="700">🖥️ 攻击者</text>
+                    <text x="500" y="70" text-anchor="middle" fill="#94a3b8" font-size="8">You</text>
+                    <!-- Client 1 - Laptop -->
+                    <rect x="100" y="200" width="36" height="28" rx="4" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2" id="client1" filter="url(#shadow)"/>
+                    <text x="118" y="218" text-anchor="middle" fill="#93c5fd" font-size="8">💻</text>
+                    <text x="118" y="242" text-anchor="middle" fill="#94a3b8" font-size="8" id="client1Label">Client-A</text>
+                    <text x="118" y="254" text-anchor="middle" fill="#64748b" font-size="7">11:22:33:44:55:01</text>
+                    <!-- Client 2 - Phone -->
+                    <rect x="200" y="270" width="28" height="40" rx="5" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2" id="client2" filter="url(#shadow)"/>
+                    <text x="214" y="294" text-anchor="middle" fill="#93c5fd" font-size="10">📱</text>
+                    <text x="214" y="322" text-anchor="middle" fill="#94a3b8" font-size="8" id="client2Label">Client-B</text>
+                    <text x="214" y="334" text-anchor="middle" fill="#64748b" font-size="7">22:33:44:55:66:02</text>
+                    <!-- Client 3 - IoT -->
+                    <rect x="350" y="250" width="30" height="24" rx="3" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2" id="client3" filter="url(#shadow)"/>
+                    <text x="365" y="266" text-anchor="middle" fill="#93c5fd" font-size="8">📡</text>
+                    <text x="365" y="286" text-anchor="middle" fill="#94a3b8" font-size="8" id="client3Label">Client-C</text>
+                    <text x="365" y="298" text-anchor="middle" fill="#64748b" font-size="7">33:44:55:66:77:03</text>
+                    <!-- Connection lines -->
+                    <line x1="300" y1="122" x2="136" y2="200" class="conn-line" stroke="#22c55e" id="conn1"/>
+                    <line x1="300" y1="122" x2="228" y2="270" class="conn-line" stroke="#22c55e" id="conn2"/>
+                    <line x1="300" y1="122" x2="365" y2="250" class="conn-line" stroke="#22c55e" id="conn3"/>
+                    <!-- Deauth animation packet -->
+                    <circle cx="0" cy="0" r="0" fill="#ef4444" id="deauthPacket" opacity="0"/>
+                </svg>
+                <div class="flex-row mt-8 gap-12">
+                    <span class="tag-badge tag-success">● 合法AP</span>
+                    <span class="tag-badge tag-danger">● Evil Twin</span>
+                    <span class="tag-badge" style="background:#3d2e1a;color:#f59e0b;">● 攻击者</span>
+                    <span style="font-size:0.7rem;color:#64748b;">点击客户端可查看详情</span>
+                </div>
+            </div>
+
+            <!-- PANEL: Packet Log -->
+            <div class="panel" id="pktPanel">
+                <h3><span class="dot amber"></span> 数据包日志 (Wireshark 风格)</h3>
+                <div class="pkt-table-wrap" id="pktTableWrap">
+                    <table class="pkt-table" id="pktTable">
+                        <thead><tr><th>#</th><th>时间</th><th>源MAC</th><th>目的MAC</th><th>类型</th><th>信息</th></tr></thead>
+                        <tbody id="pktBody"></tbody>
+                    </table>
+                </div>
+                <div class="hex-dump mt-8" id="hexDump">点击上方数据包查看Hex Dump详情...</div>
+                <div class="flex-row mt-8 gap-12">
+                    <button class="btn-outline btn-sm" id="btnTagSuspicious">🏷️ 标记可疑包</button>
+                    <button class="btn-outline btn-sm" id="btnVerifyTags">✅ 验证分析</button>
+                    <span style="font-size:0.7rem;color:#64748b;" id="tagFeedback"></span>
+                </div>
+            </div>
+
+            <!-- PANEL: Attack Controls -->
+            <div class="panel full-width" id="attackPanel">
+                <h3><span class="dot red"></span> 攻击控制台</h3>
+                <div class="flex-row gap-12" style="align-items:stretch;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:200px;">
+                        <label style="font-size:0.75rem;color:#94a3b8;">步骤1: 网络扫描</label>
+                        <button class="btn-primary" id="btnScan" style="width:100%;margin-top:4px;">🔍 扫描WiFi网络</button>
+                    </div>
+                    <div style="flex:1;min-width:200px;">
+                        <label style="font-size:0.75rem;color:#94a3b8;">步骤2: 部署Evil Twin</label>
+                        <button class="btn-danger" id="btnDeployEvil" disabled style="width:100%;margin-top:4px;">💀 部署伪造AP (同SSID)</button>
+                    </div>
+                    <div style="flex:1;min-width:200px;">
+                        <label style="font-size:0.75rem;color:#94a3b8;">步骤3: Deauth攻击</label>
+                        <div class="flex-row" style="gap:4px;margin-top:4px;">
+                            <select id="deauthTarget" style="flex:1;background:#0d1117;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:8px;font-size:0.8rem;" disabled>
+                                <option value="">--选择目标客户端--</option>
+                                <option value="client1">Client-A (11:22:33:44:55:01)</option>
+                                <option value="client2">Client-B (22:33:44:55:66:02)</option>
+                                <option value="client3">Client-C (33:44:55:66:77:03)</option>
+                            </select>
+                            <button class="btn-danger btn-sm" id="btnDeauth" disabled>⚡发送Deauth</button>
+                        </div>
+                    </div>
+                    <div style="flex:1;min-width:200px;">
+                        <label style="font-size:0.75rem;color:#94a3b8;">步骤4: 观察漫游</label>
+                        <button class="btn-outline btn-sm" id="btnObserveRoam" disabled style="width:100%;margin-top:4px;">👁️ 观察客户端漫游</button>
+                    </div>
+                </div>
+                <div id="attackFeedback" style="margin-top:10px;font-size:0.8rem;min-height:22px;color:#f87171;"></div>
+            </div>
+
+            <!-- PANEL: Defense Configuration -->
+            <div class="panel full-width" id="defensePanel">
+                <h3><span class="dot green"></span> 🛡️ 防御配置 — 802.1X EAP-TLS</h3>
+                <p style="font-size:0.8rem;color:#94a3b8;margin-bottom:10px;">Evil Twin攻击利用了802.11管理帧缺乏认证的缺陷。有效的防御方案是部署<b>802.1X EAP-TLS</b>，要求AP与客户端进行双向证书认证。请在下方配置EAP-TLS参数：</p>
+                <div class="flex-row gap-12" style="flex-wrap:wrap;align-items:flex-end;">
+                    <div style="flex:1;min-width:180px;">
+                        <label style="font-size:0.7rem;color:#94a3b8;">认证协议</label>
+                        <input type="text" id="defAuthProto" placeholder="输入认证协议...">
+                    </div>
+                    <div style="flex:1;min-width:180px;">
+                        <label style="font-size:0.7rem;color:#94a3b8;">服务器证书要求</label>
+                        <input type="text" id="defServerCert" placeholder="输入证书类型...">
+                    </div>
+                    <div style="flex:1;min-width:180px;">
+                        <label style="font-size:0.7rem;color:#94a3b8;">客户端证书要求</label>
+                        <input type="text" id="defClientCert" placeholder="输入证书类型...">
+                    </div>
+                    <div style="flex:1;min-width:180px;">
+                        <label style="font-size:0.7rem;color:#94a3b8;">RADIUS服务器</label>
+                        <input type="text" id="defRadius" placeholder="输入RADIUS配置...">
+                    </div>
+                    <button class="btn-success" id="btnVerifyDefense">🔒 验证防御配置</button>
+                </div>
+                <div id="defenseFeedback" style="margin-top:10px;font-size:0.8rem;min-height:22px;"></div>
+                <div id="defenseDiff" style="margin-top:8px;display:none;"></div>
+            </div>
+        </div>
+
+        <!-- ANALYSIS REPORT -->
+        <div class="analysis-report" id="analysisReport">
+            <h3 style="color:var(--cyan);">📄 完整攻击分析报告</h3>
+            <details open>
+                <summary>🔍 攻击根因</summary>
+                <p style="font-size:0.85rem;color:#cbd5e1;">802.11管理帧（包括Beacon、Probe Response、Deauthentication）<b>在设计上缺乏认证机制</b>。任何设备都可以伪造AP的MAC地址发送Deauth帧，因为接收方无法验证该帧是否真的来自声称的发送方。这使得Evil Twin + Deauth攻击成为可能。</p>
+            </details>
+            <details>
+                <summary>⛓️ 攻击链 (Kill Chain)</summary>
+                <ol style="font-size:0.85rem;color:#cbd5e1;padding-left:20px;">
+                    <li><b>侦察</b>：扫描目标区域WiFi，获取合法AP的SSID、BSSID、信道、信号强度及已连接客户端MAC。</li>
+                    <li><b>部署伪造AP</b>：在相同或邻近信道启动与合法AP相同SSID的Evil Twin AP（不同BSSID）。</li>
+                    <li><b>Deauth攻击</b>：向客户端发送伪造的Deauthentication帧（源MAC伪造成合法AP），迫使客户端断开。</li>
+                    <li><b>客户端漫游</b>：客户端自动扫描并连接到信号更强（或唯一可用）的同名SSID — 即Evil Twin。</li>
+                    <li><b>凭证捕获</b>：Evil Twin提供Captive Portal或中间人拦截，捕获用户输入的WiFi密码或其他凭证。</li>
+                </ol>
+            </details>
+            <details>
+                <summary>🛡️ 防御方案：802.1X EAP-TLS</summary>
+                <p style="font-size:0.85rem;color:#cbd5e1;">
+                    <b>EAP-TLS (Extensible Authentication Protocol - Transport Layer Security)</b> 提供双向证书认证：<br>
+                    • AP必须向客户端出示有效的服务器证书（由受信任CA签发）<br>
+                    • 客户端必须向AP出示有效的客户端证书<br>
+                    • 双方通过TLS握手建立加密隧道交换认证信息<br>
+                    • 攻击者即使伪造SSID也无法提供合法证书，客户端不会连接<br>
+                    • 需要部署RADIUS服务器（如FreeRADIUS）进行证书验证<br>
+                    • 结合WPA3-Enterprise可提供更强的保护
+                </p>
+            </details>
+            <details>
+                <summary>🌐 现实世界参考</summary>
+                <p style="font-size:0.85rem;color:#cbd5e1;">
+                    CWE-287: Improper Authentication — 802.11管理帧缺乏认证属于此类别。<br>
+                    OWASP A07: Identification & Authentication Failures — 弱认证导致身份伪造。<br>
+                    工具：aircrack-ng套件(airmon-ng, airodump-ng, aireplay-ng), hostapd-wpe, FreeRADIUS。<br>
+                    企业最佳实践：使用WPA3-Enterprise + 802.1X EAP-TLS + 证书固定 + MFA。
+                </p>
+            </details>
+        </div>
+    </div>
+
+    <script>
+        // ============ EDUCATIONAL PURPOSE ONLY ============
+        // This is a simulated lab environment for authorized classroom use.
+        // All attacks are simulated in-browser with no real network traffic.
+
+        (function() {
+            // ---- STATE ----
+            const state = {
+                step: 1,
+                scanned: false,
+                evilDeployed: false,
+                deauthSent: new Set(),
+                clientsRoamed: new Set(),
+                taggedPackets: new Set(),
+                flagsCollected: [],
+                defenseConfigured: false,
+            };
+
+            // ---- PACKET DATA ----
+            const allPackets = [
+                { id: 1, time: '0.000', src: 'AA:BB:CC:11:22:33', dst: 'FF:FF:FF:FF:FF:FF', type: 'Beacon',
+                    info: 'SSID=CoffeeShop_WiFi, Ch=6, Rates=54Mbps', class: 'pkt-beacon', hex: '80 00 00 00 FF FF FF FF FF FF AA BB CC 11 22 33\n00 0E 43 6F 66 66 65 65 53 68 6F 70 5F 57 69 46 69\n01 08 82 84 8B 96 0C 12 18 24 03 01 06' },
+                { id: 2, time: '0.015', src: '11:22:33:44:55:01', dst: 'AA:BB:CC:11:22:33', type: 'ProbeReq',
+                    info: 'SSID=CoffeeShop_WiFi', class: '', hex: '40 00 00 00 AA BB CC 11 22 33 11 22 33 44 55 01\n00 0E 43 6F 66 66 65 65 53 68 6F 70 5F 57 69 46 69' },
+                { id: 3, time: '0.018', src: 'AA:BB:CC:11:22:33', dst: '11:22:33:44:55:01', type: 'ProbeResp',
+                    info: 'SSID=CoffeeShop_WiFi, Rates=54Mbps', class: '', hex: '50 00 00 00 11 22 33 44 55 01 AA BB CC 11 22 33\n00 0E 43 6F 66 66 65 65 53 68 6F 70 5F 57 69 46 69' },
+                { id: 4, time: '0.022', src: '11:22:33:44:55:01', dst: 'AA:BB:CC:11:22:33', type: 'Auth',
+                    info: 'Authentication (Open)', class: '', hex: 'B0 00 00 00 AA BB CC 11 22 33 11 22 33 44 55 01\n00 00 01 00 00 00' },
+                { id: 5, time: '0.025', src: 'AA:BB:CC:11:22:33', dst: '11:22:33:44:55:01', type: 'Auth',
+                    info: 'Authentication Response (Success)', class: '', hex: 'B0 00 00 00 11 22 33 44 55 01 AA BB CC 11 22 33\n00 00 02 00 00 00' },
+                { id: 6, time: '0.030', src: '11:22:33:44:55:01', dst: 'AA:BB:CC:11:22:33', type: 'AssocReq',
+                    info: 'Association Request', class: '', hex: '00 00 00 00 AA BB CC 11 22 33 11 22 33 44 55 01\n21 04 00 00' },
+                { id: 7, time: '0.033', src: 'AA:BB:CC:11:22:33', dst: '11:22:33:44:55:01', type: 'AssocResp',
+                    info: 'Association Response (AID=1)', class: '', hex: '10 00 00 00 11 22 33 44 55 01 AA BB CC 11 22 33\n21 04 01 00' },
+                { id: 8, time: '2.100', src: '22:33:44:55:66:02', dst: 'AA:BB:CC:11:22:33', type: 'ProbeReq',
+                    info: 'SSID=CoffeeShop_WiFi', class: '', hex: '40 00 00 00 AA BB CC 11 22 33 22 33 44 55 66 02\n00 0E 43 6F 66 66 65 65 53 68 6F 70 5F 57 69 46 69' },
+                { id: 9, time: '2.105', src: 'AA:BB:CC:11:22:33', dst: '22:33:44:55:66:02', type: 'ProbeResp',
+                    info: 'SSID=CoffeeShop_WiFi', class: '', hex: '50 00 00 00 22 33 44 55 66 02 AA BB CC 11 22 33\n00 0E 43 6F 66 66 65 65 53 68 6F 70 5F 57 69 46 69' },
+                { id: 10, time: '4.500', src: '33:44:55:66:77:03', dst: 'AA:BB:CC:11:22:33', type: 'ProbeReq',
+                    info: 'SSID=CoffeeShop_WiFi', class: '', hex: '40 00 00 00 AA BB CC 11 22 33 33 44 55 66 77 03\n00 0E 43 6F 66 66 65 65 53 68 6F 70 5F 57 69 46 69' },
+            ];
+
+            let currentPackets = [...allPackets];
+            let packetIdCounter = 11;
+            let selectedPacketId = null;
+
+            // ---- DOM REFS ----
+            const $ = (s) => document.querySelector(s);
+            const $$ = (s) => document.querySelectorAll(s);
+
+            const pktBody = $('#pktBody');
+            const hexDump = $('#hexDump');
+            const tagFeedback = $('#tagFeedback');
+            const attackFeedback = $('#attackFeedback');
+            const defenseFeedback = $('#defenseFeedback');
+            const defenseDiff = $('#defenseDiff');
+            const flagToast = $('#flagToast');
+            const flagCode = $('#flagCode');
+            const analysisReport = $('#analysisReport');
+            const topoSvg = $('#topoSvg');
+
+            // ---- FLAG SYSTEM ----
+            function showFlag(code) {
+                if (state.flagsCollected.includes(code)) return;
+                state.flagsCollected.push(code);
+                flagCode.textContent = code;
+                flagToast.style.display = 'block';
+                setTimeout(() => { flagToast.style.display = 'none'; }, 4500);
+            }
+
+            // ---- PROGRESS ----
+            function updateProgress(step) {
+                state.step = step;
+                $$('.progress-step').forEach(el => {
+                    const s = parseInt(el.dataset.step);
+                    el.classList.remove('active', 'done');
+                    if (s < step) el.classList.add('done');
+                    if (s === step) el.classList.add('active');
+                });
+            }
+
+            // ---- PACKET TABLE ----
+            function renderPackets() {
+                pktBody.innerHTML = currentPackets.map(p => {
+                    let rowClass = '';
+                    if (p.id === selectedPacketId) rowClass = 'selected';
+                    if (state.taggedPackets.has(p.id)) rowClass += ' tagged';
+                    let infoClass = p.class || '';
+                    return `<tr class="${rowClass}" data-pkt-id="${p.id}" onclick="window._selectPacket(${p.id})">
+                <td>${p.id}</td><td>${p.time}</td><td style="font-size:0.7rem;">${p.src}</td><td style="font-size:0.7rem;">${p.dst}</td>
+                <td>${p.type}</td><td class="${infoClass}">${p.info}</td></tr>`;
+                }).join('');
+            }
+
+            window._selectPacket = function(id) {
+                selectedPacketId = id;
+                renderPackets();
+                const pkt = currentPackets.find(p => p.id === id);
+                if (pkt) {
+                    let hexDisplay = pkt.hex;
+                    // Highlight deauth-related bytes
+                    if (pkt.type === 'Deauth' || pkt.info.includes('Deauth')) {
+                        hexDisplay = hexDisplay.replace(/(C0 00)/g,
+                            '<span class="hl">$1</span>');
+                        hexDisplay = hexDisplay.replace(/(07 00)/g,
+                            '<span class="hl">$1</span>');
+                    }
+                    if (pkt.type === 'Beacon' && pkt.src === 'DE:AD:BE:EF:00:01') {
+                        hexDisplay = hexDisplay.replace(/(DE AD BE EF)/g,
+                            '<span class="hl">$1</span>');
+                    }
+                    hexDump.innerHTML = hexDisplay;
+                }
+            };
+
+            // ---- ADD PACKET ----
+            function addPacket(pktData) {
+                const pkt = {
+                    id: packetIdCounter++,
+                    time: (parseFloat(currentPackets[currentPackets.length - 1]?.time || '0') + 0.05 + Math
+                        .random() * 0.04).toFixed(3),
+                    ...pktData,
+                };
+                currentPackets.push(pkt);
+                renderPackets();
+                // Auto-scroll
+                const wrap = $('#pktTableWrap');
+                wrap.scrollTop = wrap.scrollHeight;
+            }
+
+            // ---- SVG TOPOLOGY UPDATES ----
+            function updateTopoEvilTwin(visible) {
+                const els = ['evilGlowCircle', 'evilApCircle', 'evilApLabel', 'evilSSIDLabel', 'evilBSSIDLabel'];
+                els.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.setAttribute('opacity', visible ? '1' : '0');
+                });
+                if (visible) {
+                    document.getElementById('evilApCircle')?.classList.add('roam-highlight');
+                    setTimeout(() => document.getElementById('evilApCircle')?.classList.remove('roam-highlight'),
+                        700);
+                }
+            }
+
+            function updateClientConnection(clientId, toEvil) {
+                const connEl = document.getElementById('conn' + clientId.replace('client', ''));
+                if (connEl) {
+                    if (toEvil) {
+                        connEl.setAttribute('stroke', '#ef4444');
+                        connEl.classList.add('evil');
+                        // Update endpoint
+                        const clientEl = document.getElementById(clientId);
+                        if (clientEl) {
+                            const bbox = clientEl.getBBox();
+                            connEl.setAttribute('x2', '480');
+                            connEl.setAttribute('y2', '180');
+                        }
+                    } else {
+                        connEl.setAttribute('stroke', '#22c55e');
+                        connEl.classList.remove('evil');
+                        connEl.setAttribute('x2', '300');
+                        connEl.setAttribute('y2', '100');
+                    }
+                }
+            }
+
+            function animateDeauthPacket(fromX, fromY, toX, toY) {
+                const packet = document.getElementById('deauthPacket');
+                packet.setAttribute('cx', fromX);
+                packet.setAttribute('cy', fromY);
+                packet.setAttribute('r', '5');
+                packet.setAttribute('opacity', '1');
+                packet.setAttribute('fill', '#ef4444');
+                const dx = toX - fromX;
+                const dy = toY - fromY;
+                packet.style.setProperty('--dx', dx + 'px');
+                packet.style.setProperty('--dy', dy + 'px');
+                packet.classList.add('packet-anim');
+                setTimeout(() => {
+                    packet.setAttribute('opacity', '0');
+                    packet.setAttribute('r', '2');
+                    packet.classList.remove('packet-anim');
+                }, 1200);
+            }
+
+            // ---- ATTACK SIMULATION ----
+            function doScan() {
+                if (state.scanned) return;
+                state.scanned = true;
+                attackFeedback.textContent = '🔍 扫描中...发现AP: CoffeeShop_WiFi (Ch6, -42dBm), 客户端: 3个已连接';
+                attackFeedback.style.color = '#22c55e';
+                updateProgress(1);
+                // Populate initial packets already rendered
+                renderPackets();
+                setTimeout(() => {
+                    attackFeedback.textContent =
+                        '✅ 扫描完成。识别到合法AP (AA:BB:CC:11:22:33) 及3个客户端。现在可部署Evil Twin。';
+                    $('#btnDeployEvil').disabled = false;
+                    updateProgress(1);
+                }, 800);
+            }
+
+            function doDeployEvil() {
+                if (state.evilDeployed) return;
+                state.evilDeployed = true;
+                attackFeedback.textContent = '💀 正在部署Evil Twin AP... SSID=CoffeeShop_WiFi, BSSID=DE:AD:BE:EF:00:01';
+                attackFeedback.style.color = '#f87171';
+                updateTopoEvilTwin(true);
+                // Add beacon packets from evil AP
+                addPacket({ src: 'DE:AD:BE:EF:00:01', dst: 'FF:FF:FF:FF:FF:FF', type: 'Beacon',
+                    info: 'SSID=CoffeeShop_WiFi, Ch=6, Rates=54Mbps [⚠️ 伪造AP]', class: 'pkt-beacon',
+                    hex: '80 00 00 00 FF FF FF FF FF FF <span class="hl">DE AD BE EF 00 01</span>\n00 0E 43 6F 66 66 65 65 53 68 6F 70 5F 57 69 46 69\n01 08 82 84 8B 96 0C 12 18 24 03 01 06' });
+                addPacket({ src: 'DE:AD:BE:EF:00:01', dst: 'FF:FF:FF:FF:FF:FF', type: 'Beacon',
+                    info: 'SSID=CoffeeShop_WiFi, Ch=6 [Evil Twin Beacon]', class: 'pkt-beacon',
+                    hex: '80 00 00 00 FF FF FF FF FF FF DE AD BE EF 00 01\n00 0E 43 6F 66 66 65 65 53 68 6F 70 5F 57 69 46 69' });
+                setTimeout(() => {
+                    attackFeedback.textContent =
+                        '✅ Evil Twin已部署！伪造AP与合法AP使用相同SSID，客户端无法从SSID区分。现在可以发动Deauth攻击。';
+                    attackFeedback.style.color = '#f87171';
+                    $('#deauthTarget').disabled = false;
+                    $('#btnDeauth').disabled = false;
+                    updateProgress(2);
+                    showFlag('FLAG{ev1l_tw1n_d3pl0yed}');
+                }, 600);
+            }
+
+            function doDeauth() {
+                const targetVal = $('#deauthTarget').value;
+                if (!targetVal || state.deauthSent.has(targetVal)) return;
+                state.deauthSent.add(targetVal);
+                const clientMacMap = { client1: '11:22:33:44:55:01', client2: '22:33:44:55:66:02',
+                    client3: '33:44:55:66:77:03' };
+                const clientMac = clientMacMap[targetVal];
+                // Add deauth packets
+                addPacket({ src: 'AA:BB:CC:11:22:33', dst: clientMac, type: 'Deauth',
+                    info: `Deauthentication (Reason=Class 3 frame from nonassociated STA) [⚠️ 伪造源MAC!]`,
+                    class: 'pkt-deauth',
+                    hex: '<span class="hl">C0 00</span> 00 00 ' + clientMac.replace(/:/g, ' ') +
+                        ' AA BB CC 11 22 33\n<span class="hl">07 00</span> 00 00' });
+                addPacket({ src: 'AA:BB:CC:11:22:33', dst: clientMac, type: 'Deauth',
+                    info: 'Deauthentication (Reason=7) [伪造帧]', class: 'pkt-deauth',
+                    hex: 'C0 00 00 00 ' + clientMac.replace(/:/g, ' ') +
+                    ' AA BB CC 11 22 33\n07 00 00 00' });
+                // Animate
+                const attackerX = 500,
+                    attackerY = 60;
+                const clientPositions = { client1: [136, 200], client2: [228, 270], client3: [365, 250] };
+                const [cx, cy] = clientPositions[targetVal];
+                animateDeauthPacket(attackerX, attackerY, cx, cy);
+                attackFeedback.textContent =
+                    `⚡ Deauth帧已发送至 ${targetVal.replace('client','Client-')}！源MAC伪造成合法AP (AA:BB:CC:11:22:33)。客户端将断开连接...`;
+                attackFeedback.style.color = '#f87171';
+                $('#btnObserveRoam').disabled = false;
+                updateProgress(3);
+                if (state.deauthSent.size >= 2 && !state.flagsCollected.includes('FLAG{d3auth_fl00d_succ3ss}')) {
+                    showFlag('FLAG{d3auth_fl00d_succ3ss}');
+                }
+            }
+
+            function doObserveRoam() {
+                if (state.clientsRoamed.size >= 3) return;
+                const targets = ['client1', 'client2', 'client3'];
+                const notRoamed = targets.find(t => state.deauthSent.has(t) && !state.clientsRoamed.has(t));
+                if (!notRoamed) {
+                    // Roam all that were deauth'd
+                    for (const t of targets) {
+                        if (state.deauthSent.has(t) && !state.clientsRoamed.has(t)) {
+                            state.clientsRoamed.add(t);
+                            updateClientConnection(t, true);
+                            const clientMacMap = { client1: '11:22:33:44:55:01', client2: '22:33:44:55:66:02',
+                                client3: '33:44:55:66:77:03' };
+                            addPacket({ src: clientMacMap[t], dst: 'DE:AD:BE:EF:00:01', type: 'ProbeReq',
+                                info: 'SSID=CoffeeShop_WiFi [客户端寻找同名AP]', class: '',
+                                hex: '40 00 00 00 DE AD BE EF 00 01 ' + clientMacMap[t].replace(/:/g, ' ') +
+                                '\n00 0E 43 6F 66 66 65 65 53 68 6F 70 5F 57 69 46 69' });
+                            addPacket({ src: 'DE:AD:BE:EF:00:01', dst: clientMacMap[t], type: 'ProbeResp',
+                                info: 'SSID=CoffeeShop_WiFi [Evil Twin响应] ⚠️', class: '',
+                                hex: '50 00 00 00 ' + clientMacMap[t].replace(/:/g, ' ') +
+                                ' DE AD BE EF 00 01\n00 0E 43 6F 66 66 65 65 53 68 6F 70 5F 57 69 46 69' });
+                        }
+                    }
+                    attackFeedback.textContent =
+                        '⚠️ 已断开连接的客户端自动漫游到Evil Twin AP！攻击者现在可以拦截所有流量，甚至弹出Captive Portal捕获WiFi密码。';
+                    attackFeedback.style.color = '#ef4444';
+                    updateProgress(4);
+                    if (!state.flagsCollected.includes('FLAG{cli3nt_r0amed_t0_3vil}')) {
+                        showFlag('FLAG{cli3nt_r0amed_t0_3vil}');
+                    }
+                    $('#defensePanel').scrollIntoView({ behavior: 'smooth' });
+                } else if (!state.clientsRoamed.has(notRoamed)) {
+                    state.clientsRoamed.add(notRoamed);
+                    updateClientConnection(notRoamed, true);
+                    attackFeedback.textContent =
+                        `⚠️ ${notRoamed.replace('client','Client-')} 已漫游到Evil Twin AP！其他已断开客户端也将自动漫游。`;
+                    attackFeedback.style.color = '#ef4444';
+                    updateProgress(4);
+                }
+            }
+
+            // ---- TAG VERIFICATION ----
+            function verifyTags() {
+                // Expected suspicious: deauth packets (C0 00 type), evil beacon (DE:AD:BE:EF)
+                const suspiciousIds = currentPackets.filter(p =>
+                    p.type === 'Deauth' || (p.type === 'Beacon' && p.src === 'DE:AD:BE:EF:00:01')
+                ).map(p => p.id);
+                const tagged = Array.from(state.taggedPackets);
+                const correct = tagged.filter(id => suspiciousIds.includes(id));
+                const missed = suspiciousIds.filter(id => !tagged.includes(id));
+                const wrong = tagged.filter(id => !suspiciousIds.includes(id));
+
+                if (correct.length >= suspiciousIds.length && wrong.length === 0) {
+                    tagFeedback.textContent = '✅ 完美！你正确标记了所有可疑数据包（Deauth帧 + Evil Twin Beacon）。';
+                    tagFeedback.style.color = '#22c55e';
+                    if (!state.flagsCollected.includes('FLAG{p4cket_an4lysis_m4ster}')) {
+                        showFlag('FLAG{p4cket_an4lysis_m4ster}');
+                    }
+                } else if (correct.length >= 1) {
+                    tagFeedback.textContent =
+                        `⚠️ 标记了${correct.length}个正确包，但遗漏了${missed.length}个（Deauth帧和Evil Twin Beacon）。请检查数据包日志中的红色标记行。`;
+                    tagFeedback.style.color = '#f59e0b';
+                } else {
+                    tagFeedback.textContent = '❌ 未发现可疑包。提示：关注类型为"Deauth"的帧以及来自陌生BSSID的Beacon帧。';
+                    tagFeedback.style.color = '#ef4444';
+                }
+            }
+
+            function tagSuspicious() {
+                if (!selectedPacketId) {
+                    tagFeedback.textContent = '请先在数据包日志中点击选择一个数据包。';
+                    tagFeedback.style.color = '#f59e0b';
+                    return;
+                }
+                if (state.taggedPackets.has(selectedPacketId)) {
+                    state.taggedPackets.delete(selectedPacketId);
+                    tagFeedback.textContent = `已取消标记数据包 #${selectedPacketId}`;
+                    tagFeedback.style.color = '#94a3b8';
+                } else {
+                    state.taggedPackets.add(selectedPacketId);
+                    tagFeedback.textContent = `已标记数据包 #${selectedPacketId} 为可疑`;
+                    tagFeedback.style.color = '#f59e0b';
+                }
+                renderPackets();
+            }
+
+            // ---- DEFENSE VERIFICATION ----
+            function verifyDefense() {
+                const authProto = $('#defAuthProto').value.trim().toLowerCase();
+                const serverCert = $('#defServerCert').value.trim().toLowerCase();
+                const clientCert = $('#defClientCert').value.trim().toLowerCase();
+                const radius = $('#defRadius').value.trim().toLowerCase();
+
+                const checks = {
+                    authProto: authProto.includes('eap-tls') || authProto.includes('eap') && authProto.includes('tls'),
+                    serverCert: serverCert.includes('x.509') || serverCert.includes('服务器证书') || serverCert.includes(
+                        'ca签发') || serverCert.includes('server cert'),
+                    clientCert: clientCert.includes('客户端证书') || clientCert.includes('client cert') || clientCert.includes(
+                        'x.509') || clientCert.includes('双向'),
+                    radius: radius.includes('radius') || radius.includes('freeradius') || radius.includes('认证服务器'),
+                };
+
+                let score = Object.values(checks).filter(Boolean).length;
+                let feedbackHtml = '';
+
+                if (score >= 4) {
+                    feedbackHtml =
+                        '<span style="color:#22c55e;">✅ 防御配置正确！802.1X EAP-TLS提供双向证书认证，有效防御Evil Twin攻击。</span>';
+                    defenseDiff.style.display = 'block';
+                    defenseDiff.innerHTML = `
+              <div style="background:#1a3d2e;padding:12px;border-radius:8px;border:1px solid #22c55e;margin-top:8px;">
+                <strong style="color:#22c55e;">🔒 正确配置摘要：</strong><br>
+                • 认证协议：<code>EAP-TLS (802.1X)</code> — 提供双向证书认证<br>
+                • 服务器证书：<code>X.509证书，由受信任CA签发</code> — AP向客户端证明身份<br>
+                • 客户端证书：<code>X.509客户端证书</code> — 客户端向AP证明身份<br>
+                • RADIUS服务器：<code>FreeRADIUS / 企业RADIUS</code> — 集中认证与证书验证<br>
+                <span style="color:#94a3b8;font-size:0.75rem;">攻击者无法伪造合法证书 → Evil Twin无法完成EAP-TLS握手 → 客户端不会连接</span>
+              </div>`;
+                    if (!state.flagsCollected.includes('FLAG{8021x_eap_tls_d3f3nd3r}')) {
+                        showFlag('FLAG{8021x_eap_tls_d3f3nd3r}');
+                    }
+                    state.defenseConfigured = true;
+                    updateProgress(5);
+                    analysisReport.classList.add('show');
+                    analysisReport.scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    feedbackHtml = '<span style="color:#f59e0b;">⚠️ 部分配置需要调整：</span><br>';
+                    if (!checks.authProto) feedbackHtml +=
+                        '• 认证协议应使用 <b>EAP-TLS</b> (不是PEAP或EAP-MD5)<br>';
+                    if (!checks.serverCert) feedbackHtml += '• 服务器需要 <b>X.509证书（CA签发）</b> 来证明AP身份<br>';
+                    if (!checks.clientCert) feedbackHtml += '• 客户端也需要 <b>X.509证书</b> 实现双向认证<br>';
+                    if (!checks.radius) feedbackHtml += '• 需要部署 <b>RADIUS服务器</b> 进行证书验证<br>';
+                    defenseDiff.style.display = 'none';
+                }
+                defenseFeedback.innerHTML = feedbackHtml;
+            }
+
+            // ---- EVENT BINDINGS ----
+            $('#btnScan').addEventListener('click', doScan);
+            $('#btnDeployEvil').addEventListener('click', doDeployEvil);
+            $('#btnDeauth').addEventListener('click', doDeauth);
+            $('#btnObserveRoam').addEventListener('click', doObserveRoam);
+            $('#btnTagSuspicious').addEventListener('click', tagSuspicious);
+            $('#btnVerifyTags').addEventListener('click', verifyTags);
+            $('#btnVerifyDefense').addEventListener('click', verifyDefense);
+
+            // Client click on topology
+            ['client1', 'client2', 'client3'].forEach(cid => {
+                const el = document.getElementById(cid);
+                if (el) {
+                    el.style.cursor = 'pointer';
+                    el.addEventListener('click', () => {
+                        if (state.evilDeployed && state.deauthSent.has(cid) && !state.clientsRoamed.has(
+                                cid)) {
+                            doObserveRoam();
+                        } else if (state.clientsRoamed.has(cid)) {
+                            attackFeedback.textContent =
+                                `${cid.replace('client','Client-')} 已漫游到Evil Twin AP。流量可能被拦截！`;
+                            attackFeedback.style.color = '#ef4444';
+                        } else if (state.evilDeployed && !state.deauthSent.has(cid)) {
+                            attackFeedback.textContent =
+                                `点击 ${cid.replace('client','Client-')}：该客户端仍连接合法AP。需先发送Deauth帧。`;
+                            attackFeedback.style.color = '#f59e0b';
+                        } else {
+                            attackFeedback.textContent =
+                                `${cid.replace('client','Client-')}：已连接到合法AP CoffeeShop_WiFi。`;
+                            attackFeedback.style.color = '#94a3b8';
+                        }
+                    });
+                }
+            });
+
+            // Initial render
+            renderPackets();
+            updateProgress(1);
+
+            // Keyboard shortcut for deauth
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'd' && e.ctrlKey && !$('#btnDeauth').disabled) {
+                    e.preventDefault();
+                    doDeauth();
+                }
+            });
+
+            console.log(
+                '// EDUCATIONAL PURPOSE ONLY — authorized classroom use\n// Evil Twin Attack Lab ready.\n// Steps: Scan → Deploy Evil Twin → Deauth → Observe Roam → Configure 802.1X EAP-TLS\n// Ctrl+D = quick Deauth when target selected'
+                );
+        })();
+    </script>
+</body>
+</html>

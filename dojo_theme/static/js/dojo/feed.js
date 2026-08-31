@@ -163,7 +163,7 @@
         const fragment = document.createDocumentFragment();
         
         if (data.dojo_name || data.dojo_id) {
-            const dojoLink = createLink(`/dojos/${data.dojo_id}`, data.dojo_name || data.dojo_id);
+            const dojoLink = createLink(`/${data.dojo_id}`, data.dojo_name || data.dojo_id);
             fragment.appendChild(dojoLink);
             fragment.appendChild(document.createTextNode(' / '));
         }
@@ -258,7 +258,7 @@
                 const small = document.createElement('small');
                 small.className = 'text-muted';
                 small.appendChild(document.createTextNode('已完成 '));
-                small.appendChild(createLink(`/dojos/${event.data.dojo_id}`, event.data.dojo_name || event.data.dojo_id));
+                small.appendChild(createLink(`/${event.data.dojo_id}`, event.data.dojo_name || event.data.dojo_id));
                 
                 detailElem.appendChild(br);
                 detailElem.appendChild(small);
@@ -288,7 +288,7 @@
                 const small = document.createElement('small');
                 small.className = 'text-muted';
                 small.appendChild(document.createTextNode('已完成 '));
-                small.appendChild(createLink(`/dojos/${event.data.dojo_id}`, event.data.dojo_name || event.data.dojo_id));
+                small.appendChild(createLink(`/${event.data.dojo_id}`, event.data.dojo_name || event.data.dojo_id));
                 
                 detailElem.appendChild(br);
                 detailElem.appendChild(small);
@@ -303,7 +303,7 @@
             const card = createEventFromTemplate(EVENT_TEMPLATES.dojo_update, event);
             
             const dojoLink = card.querySelector('.event-dojo-link');
-            dojoLink.href = `/dojos/${event.data.dojo_id}`;
+            dojoLink.href = `/${event.data.dojo_id}`;
             dojoLink.textContent = event.data.dojo_name || event.data.dojo_id;
             
             const detailElem = card.querySelector('.event-update-detail');
@@ -337,6 +337,7 @@
     
     function addEvent(event) {
         const eventsList = document.getElementById('events-list');
+        if (!eventsList) return;
         if (document.querySelector(`[data-event-id="${event.id}"]`)) return;
         
         const emptyMessage = eventsList.parentElement.querySelector('.text-center.text-muted');
@@ -363,6 +364,7 @@
     function updateConnectionStatus(status, message) {
         const statusDiv = document.getElementById('connection-status');
         const messageSpan = document.getElementById('connection-message');
+        if (!statusDiv || !messageSpan) return;
 
         if (status === 'connected') {
             statusDiv.style.display = 'none';
@@ -440,6 +442,7 @@
         }
         updateTimestamps();
         setInterval(updateTimestamps, 60000);
+        if (!Number(window.init && window.init.userId)) return;
         connectSSE(allowedUserIds);
         
         document.addEventListener('visibilitychange', () => {

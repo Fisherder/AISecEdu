@@ -1,0 +1,931 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crackme 许可证分析 — 逆向工程实验</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --surface-alt: #21262d;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent: #58a6ff;
+            --success: #3fb950;
+            --danger: #f85149;
+            --warning: #d2991d;
+            --code-bg: #0d1117;
+            --code-highlight: #1c2128;
+            --glow-success: 0 0 24px rgba(63, 185, 80, 0.5);
+            --glow-accent: 0 0 16px rgba(88, 166, 255, 0.3);
+            --radius: 8px;
+            --font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+            --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 960px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        /* Header */
+        .header {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px 28px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 16px;
+        }
+        .header .icon-col {
+            flex-shrink: 0;
+            width: 52px;
+            height: 52px;
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+        }
+        .header .info-col {
+            flex: 1;
+            min-width: 200px;
+        }
+        .header h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #f0f6fc;
+            margin: 0;
+            letter-spacing: -0.02em;
+        }
+        .header .subtitle {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        .header .badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            border: 1px solid;
+        }
+        .badge-re {
+            background: rgba(210, 153, 29, 0.12);
+            color: #d2991d;
+            border-color: rgba(210, 153, 29, 0.35);
+        }
+        .badge-crackme {
+            background: rgba(248, 81, 73, 0.12);
+            color: #f85149;
+            border-color: rgba(248, 81, 73, 0.35);
+        }
+        .badge-edu {
+            background: rgba(88, 166, 255, 0.12);
+            color: #58a6ff;
+            border-color: rgba(88, 166, 255, 0.35);
+        }
+
+        /* Panels */
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        .panel-header {
+            background: var(--surface-alt);
+            padding: 12px 18px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+        .panel-header .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot-red {
+            background: #f85149;
+        }
+        .dot-yellow {
+            background: #d2991d;
+        }
+        .dot-green {
+            background: #3fb950;
+        }
+        .panel-body {
+            padding: 18px;
+        }
+
+        /* Code viewer */
+        .code-viewer {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            position: relative;
+        }
+        .code-viewer .code-header {
+            background: var(--surface-alt);
+            padding: 10px 16px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .code-viewer .code-header .lang-tag {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            background: var(--surface);
+            padding: 3px 10px;
+            border-radius: 4px;
+            color: #d2991d;
+        }
+        .copy-btn {
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 5px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.78rem;
+            font-family: var(--font-sans);
+            transition: all 0.15s;
+        }
+        .copy-btn:hover {
+            background: var(--border);
+            color: #f0f6fc;
+        }
+        .copy-btn.copied {
+            background: rgba(63, 185, 80, 0.2);
+            border-color: #3fb950;
+            color: #3fb950;
+        }
+        .code-viewer pre {
+            margin: 0;
+            padding: 20px 16px;
+            overflow-x: auto;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            line-height: 1.7;
+            color: #c9d1d9;
+            counter-reset: line;
+            white-space: pre;
+            tab-size: 4;
+            -moz-tab-size: 4;
+        }
+        .code-viewer pre .line {
+            display: block;
+            counter-increment: line;
+            padding: 1px 0;
+            min-height: 1.4em;
+        }
+        .code-viewer pre .line::before {
+            content: counter(line);
+            display: inline-block;
+            width: 36px;
+            text-align: right;
+            margin-right: 16px;
+            color: #484f58;
+            font-size: 0.75rem;
+            user-select: none;
+            flex-shrink: 0;
+        }
+        .code-viewer pre .line.highlight {
+            background: rgba(88, 166, 255, 0.06);
+        }
+        .code-viewer pre .line.highlight::before {
+            color: #58a6ff;
+        }
+        /* Keyword-like styling */
+        .kw {
+            color: #ff7b72;
+        }
+        .num {
+            color: #79c0ff;
+        }
+        .str-lit {
+            color: #a5d6ff;
+        }
+        .cmt {
+            color: #484f58;
+            font-style: italic;
+        }
+        .fn-name {
+            color: #d2a8ff;
+        }
+        .op {
+            color: #ff7b72;
+        }
+
+        /* Interactive area */
+        .interactive-area {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            align-items: flex-end;
+        }
+        .input-group {
+            flex: 1;
+            min-width: 240px;
+        }
+        .input-group label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #f0f6fc;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--code-bg);
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            color: #f0f6fc;
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            letter-spacing: 0.04em;
+            transition: border-color 0.2s;
+            outline: none;
+        }
+        .input-group input:focus {
+            border-color: var(--accent);
+            box-shadow: var(--glow-accent);
+        }
+        .input-group input.success-glow {
+            border-color: var(--success);
+            box-shadow: var(--glow-success);
+        }
+        .input-group input.error-shake {
+            border-color: var(--danger);
+            animation: shake 0.4s ease;
+        }
+        @keyframes shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            20% {
+                transform: translateX(-6px);
+            }
+            40% {
+                transform: translateX(6px);
+            }
+            60% {
+                transform: translateX(-4px);
+            }
+            80% {
+                transform: translateX(4px);
+            }
+        }
+        .btn-validate {
+            padding: 12px 28px;
+            font-size: 1rem;
+            font-weight: 700;
+            border: 2px solid var(--accent);
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--accent);
+            border-radius: var(--radius);
+            cursor: pointer;
+            letter-spacing: 0.03em;
+            transition: all 0.2s;
+            white-space: nowrap;
+            font-family: var(--font-sans);
+        }
+        .btn-validate:hover {
+            background: rgba(88, 166, 255, 0.2);
+            box-shadow: var(--glow-accent);
+        }
+        .btn-validate:active {
+            transform: scale(0.97);
+        }
+
+        /* Result box */
+        .result-box {
+            padding: 16px 20px;
+            border-radius: var(--radius);
+            font-weight: 600;
+            font-size: 0.95rem;
+            display: none;
+            margin-top: 12px;
+            border: 1px solid;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-6px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .result-box.success {
+            display: block;
+            background: rgba(63, 185, 80, 0.1);
+            border-color: rgba(63, 185, 80, 0.4);
+            color: #3fb950;
+            box-shadow: var(--glow-success);
+        }
+        .result-box.failure {
+            display: block;
+            background: rgba(248, 81, 73, 0.08);
+            border-color: rgba(248, 81, 73, 0.35);
+            color: #f85149;
+        }
+        .result-box.hint-mode {
+            display: block;
+            background: rgba(210, 153, 29, 0.08);
+            border-color: rgba(210, 153, 29, 0.35);
+            color: #d2991d;
+        }
+
+        /* Hints */
+        .hints-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .hint-btn {
+            padding: 8px 16px;
+            font-size: 0.82rem;
+            border: 1px solid var(--border);
+            background: var(--surface-alt);
+            color: var(--text-secondary);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: var(--font-sans);
+        }
+        .hint-btn:hover {
+            background: var(--border);
+            color: #f0f6fc;
+        }
+        .hint-btn.revealed {
+            background: rgba(210, 153, 29, 0.15);
+            border-color: #d2991d;
+            color: #d2991d;
+            cursor: default;
+        }
+
+        /* Defense section */
+        .defense-toggle {
+            width: 100%;
+            padding: 14px 20px;
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: var(--text);
+            text-align: left;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: var(--font-sans);
+            transition: background 0.2s;
+        }
+        .defense-toggle:hover {
+            background: var(--border);
+        }
+        .defense-toggle .arrow {
+            transition: transform 0.3s;
+            font-size: 1.1rem;
+        }
+        .defense-toggle.open .arrow {
+            transform: rotate(180deg);
+        }
+        .defense-content {
+            display: none;
+            padding: 20px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-top: none;
+            border-radius: 0 0 var(--radius) var(--radius);
+            animation: fadeIn 0.3s ease;
+        }
+        .defense-content.open {
+            display: block;
+        }
+        .defense-content h4 {
+            color: #f0f6fc;
+            margin: 16px 0 8px;
+            font-size: 0.95rem;
+        }
+        .defense-content h4:first-child {
+            margin-top: 0;
+        }
+        .defense-content p,
+        .defense-content li {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+        .defense-content ul {
+            padding-left: 20px;
+        }
+        .defense-content .code-snippet {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 12px 16px;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            overflow-x: auto;
+            margin: 8px 0;
+            white-space: pre;
+            color: #c9d1d9;
+        }
+        .defense-content .code-snippet.good {
+            border-color: rgba(63, 185, 80, 0.4);
+        }
+        .defense-content .code-snippet.bad {
+            border-color: rgba(248, 81, 73, 0.35);
+        }
+
+        /* Educational notice */
+        .edu-notice {
+            background: rgba(210, 153, 29, 0.06);
+            border: 1px dashed rgba(210, 153, 29, 0.3);
+            border-radius: var(--radius);
+            padding: 12px 16px;
+            font-size: 0.78rem;
+            color: #b0881a;
+            text-align: center;
+            letter-spacing: 0.02em;
+        }
+        .edu-notice strong {
+            color: #d2991d;
+        }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            body {
+                padding: 10px;
+            }
+            .header {
+                padding: 16px;
+            }
+            .header h1 {
+                font-size: 1.15rem;
+            }
+            .code-viewer pre {
+                font-size: 0.7rem;
+                padding: 12px 8px;
+            }
+            .code-viewer pre .line::before {
+                width: 24px;
+                margin-right: 8px;
+                font-size: 0.65rem;
+            }
+            .btn-validate {
+                width: 100%;
+                text-align: center;
+            }
+            .interactive-area {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="icon-col">🔍</div>
+            <div class="info-col">
+                <h1>软件逆向：Crackme 许可证分析</h1>
+                <p class="subtitle">分析混淆代码，逆向许可证校验算法，找到正确的 License Key</p>
+                <div class="badge-row">
+                    <span class="badge badge-re">逆向工程</span>
+                    <span class="badge badge-crackme">Crackme</span>
+                    <span class="badge badge-edu">仅限教学使用</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Educational notice -->
+        <div class="edu-notice">
+            <strong>// EDUCATIONAL PURPOSE ONLY — authorized classroom use</strong><br>
+            本实验模拟软件逆向分析场景，所有代码运行在浏览器沙箱中。目标：理解代码混淆技术及逆向分析方法。
+            仅用于授权教学环境。实际商业软件受法律保护，未经授权不得逆向。
+        </div>
+
+        <!-- Obfuscated Code Viewer -->
+        <div class="code-viewer" id="codeViewer">
+            <div class="code-header">
+                <span class="lang-tag">JavaScript (混淆后)</span>
+                <span style="color:#8b949e;font-size:0.78rem;">📄 license_validator_obfuscated.js</span>
+                <button class="copy-btn" id="copyBtn" title="复制混淆代码">📋 复制代码</button>
+            </div>
+            <pre id="codeBlock"></pre>
+        </div>
+
+        <!-- Interactive Area -->
+        <div class="panel">
+            <div class="panel-header">
+                <span class="dot dot-yellow"></span> 交互区：输入License Key进行验证
+            </div>
+            <div class="panel-body">
+                <div class="interactive-area">
+                    <div class="input-group">
+                        <label for="licenseInput">🔑 License Key</label>
+                        <input type="text" id="licenseInput" placeholder="输入许可证密钥..." autocomplete="off" spellcheck="false">
+                    </div>
+                    <button class="btn-validate" id="validateBtn">⚡ 验证密钥</button>
+                </div>
+                <div class="result-box" id="resultBox"></div>
+                <div style="margin-top:14px;">
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">💡 需要提示？选择级别：</p>
+                    <div class="hints-grid" id="hintsGrid">
+                        <button class="hint-btn" data-hint="1">提示 1</button>
+                        <button class="hint-btn" data-hint="2">提示 2</button>
+                        <button class="hint-btn" data-hint="3">提示 3</button>
+                        <button class="hint-btn" data-hint="4">提示 4</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Defense Toggle -->
+        <button class="defense-toggle" id="defenseToggle">
+            🛡️ 查看防御方案 & 代码保护技术说明
+            <span class="arrow">▼</span>
+        </button>
+        <div class="defense-content" id="defenseContent">
+            <h4>🔴 混淆后的校验代码（学生看到的版本）</h4>
+            <p>以下代码使用了多种混淆技术：变量重命名、常量编码、死代码注入、间接引用等。</p>
+            <div class="code-snippet bad" id="defenseBadCode"></div>
+
+            <h4>🟢 去混淆后的清晰代码（逆向分析结果）</h4>
+            <p>经过手动分析或使用去混淆工具后，还原出的原始逻辑：</p>
+            <div class="code-snippet good" id="defenseGoodCode"></div>
+
+            <h4>📚 本实验使用的代码保护技术</h4>
+            <ul>
+                <li><strong>变量重命名</strong>：使用 <code>_0x1a2b</code>、<code>_0x3c4d</code> 等无意义名称替代语义化变量名。</li>
+                <li><strong>常量编码</strong>：数值常量通过表达式计算（如 <code>(0x19 ^ 0x1a) + (0x0c >> 0x01) - 0x03</code> 实际等于 <code>3</code>）。</li>
+                <li><strong>字符串拆解</strong>：目标字符串的字符编码存储在数组中，运行时动态还原。</li>
+                <li><strong>死代码注入</strong>：插入永不执行的分支（如 <code>if (![])</code>），干扰静态分析。</li>
+                <li><strong>布尔混淆</strong>：使用 <code>!![]</code> 表示 <code>true</code>，<code>![]</code> 表示 <code>false</code>。</li>
+            </ul>
+
+            <h4>🛡️ 更强大的防护策略（商业软件）</h4>
+            <ul>
+                <li><strong>服务端校验</strong>：将核心验证逻辑放在服务器端，客户端仅传递凭证。</li>
+                <li><strong>非对称加密签名</strong>：使用 RSA/ECDSA 对许可证进行数字签名，客户端用公钥验证。</li>
+                <li><strong>硬件绑定</strong>：将许可证与设备指纹（MAC地址、硬盘序列号等）绑定。</li>
+                <li><strong>代码虚拟化</strong>：将关键逻辑编译为自定义字节码，在虚拟机中执行（如 VMProtect）。</li>
+                <li><strong>反调试检测</strong>：检测调试器附着、检测代码完整性、计时检查等。</li>
+            </ul>
+            <p style="margin-top:12px;font-style:italic;color:#d2991d;">
+                ⚠️ 注意：任何纯客户端保护最终都可被逆向。安全不应依赖混淆，但混淆可提高逆向成本。
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        // 本代码用于教学演示软件逆向与代码混淆技术
+        // 目标密钥：REVERSE-42
+        // ============================================================
+
+        // --- 混淆后的许可证校验函数体（作为字符串存储并展示） ---
+        const OBFUSCATED_SOURCE = `    // 混淆层1：所有常量通过表达式计算
+        var _0x1a2b = [85, 72, 89, 72, 85, 86, 72];
+        var _0x3c4d = (0x19 ^ 0x1a) + (0x0c >> 0x01) - 0x03;
+        var _0x5e6f = 0x2d;
+        var _0x7g8h = 0x66;
+        var _0x9i0j = 0xa28;
+        var _0xklmn = 0x08;
+        var _0xopqr = 0x61;
+        var _0xstuv = 0x0a;
+
+        // 混淆层2：长度检查（使用编码常量）
+        if (key.length !== _0xstuv) {
+            var _0xdead = 0xdeadbeef;
+            return ![];
+        }
+
+        // 混淆层3：逐字符比对（使用编码数组+偏移量）
+        for (var _0xwxyz = 0x00; _0xwxyz < 0x07; _0xwxyz++) {
+            if (key.charCodeAt(_0xwxyz) - _0x3c4d !== _0x1a2b[_0xwxyz]) {
+                return ![];
+            }
+        }
+
+        // 混淆层4：分隔符检查
+        if (key.charCodeAt(0x07) !== _0x5e6f) {
+            return ![];
+        }
+
+        // 混淆层5：数字段约束（通过和与积双重验证）
+        var _0x_ab = key.charCodeAt(0x08);
+        var _0x_cd = key.charCodeAt(0x09);
+        if (_0x_ab + _0x_cd !== _0x7g8h) {
+            return ![];
+        }
+        if (_0x_ab * _0x_cd !== _0x9i0j) {
+            return ![];
+        }
+
+        // 混淆层6：全局校验和
+        var _0x_ef = 0x00;
+        for (var _0x_gh = 0x00; _0x_gh < _0xstuv; _0x_gh++) {
+            _0x_ef += key.charCodeAt(_0x_gh);
+        }
+        if (_0x_ef % _0xopqr !== _0xklmn) {
+            return ![];
+        }
+
+        // 混淆层7：死代码（永不执行的分支）
+        if (![]) {
+            var _0x_fake1 = 'this_is_dead_code';
+            var _0x_fake2 = _0x_fake1 + '_' + String.fromCharCode(0x41);
+            var _0x_fake3 = _0x_fake2.split('').reverse().join('');
+        }
+
+        return !![];`;
+
+        // --- 清晰的原始校验逻辑（用于防御展示） ---
+        const CLEAN_SOURCE = `function validateLicense(key) {
+        // 1. 长度必须为10
+        if (key.length !== 10) return false;
+
+        // 2. 前7个字符必须为 "REVERSE"
+        //    （混淆版本将字符编码+偏移量3存储在数组中）
+        const expectedChars = [82, 69, 86, 69, 82, 83, 69]; // R,E,V,E,R,S,E
+        for (let i = 0; i < 7; i++) {
+            if (key.charCodeAt(i) !== expectedChars[i]) return false;
+        }
+
+        // 3. 第8个字符必须是 '-'
+        if (key.charCodeAt(7) !== 45) return false; // 45 = '-'
+
+        // 4. 最后2个字符: 和为102(即'4'+'2'=52+50), 积为2600(52*50)
+        const d1 = key.charCodeAt(8);
+        const d2 = key.charCodeAt(9);
+        if (d1 + d2 !== 102) return false;
+        if (d1 * d2 !== 2600) return false;
+
+        // 5. 全局校验和: 所有字符ASCII码之和 % 97 === 8
+        let sum = 0;
+        for (let i = 0; i < 10; i++) {
+            sum += key.charCodeAt(i);
+        }
+        if (sum % 97 !== 8) return false;
+
+        return true;
+    }
+    // 正确密钥: "REVERSE-42"
+    // 验证: R(82)+E(69)+V(86)+E(69)+R(82)+S(83)+E(69)+-(45)+4(52)+2(50)=687
+    // 687 % 97 = 8 ✓`;
+
+        // --- 构建可执行的混淆函数 ---
+        const validatorFn = new Function('key', OBFUSCATED_SOURCE);
+
+        // --- 渲染代码到查看器 ---
+        function renderCode() {
+            const codeBlock = document.getElementById('codeBlock');
+            const fullDisplay = 'function validateLicense(key) {\n' + OBFUSCATED_SOURCE + '\n}';
+            const lines = fullDisplay.split('\n');
+            codeBlock.innerHTML = '';
+            lines.forEach((line, idx) => {
+                const lineDiv = document.createElement('span');
+                lineDiv.className = 'line';
+                // 高亮关键行（包含关键比较逻辑的行）
+                const trimmed = line.trim();
+                if (
+                    trimmed.includes('key.length') ||
+                    trimmed.includes('charCodeAt') ||
+                    trimmed.includes('!==') ||
+                    trimmed.includes('return !![]') ||
+                    trimmed.includes('return ![]') ||
+                    trimmed.includes('_0x1a2b') ||
+                    trimmed.includes('_0x_ef %')
+                ) {
+                    lineDiv.classList.add('highlight');
+                }
+                // 简单的语法着色
+                let colored = line
+                    .replace(/(\/\/.*$)/g, '<span class="cmt">$1</span>')
+                    .replace(/\b(var|if|for|return|function)\b/g, '<span class="kw">$1</span>')
+                    .replace(/\b(0x[0-9a-fA-F]+)\b/g, '<span class="num">$1</span>')
+                    .replace(/\b(_0x[a-zA-Z0-9_]+)\b/g, '<span class="fn-name">$1</span>')
+                    .replace(/(!==|===|!\[\]|!!\[\])/g, '<span class="op">$1</span>')
+                    .replace(/('([^']*)')/g, '<span class="str-lit">$1</span>');
+                lineDiv.innerHTML = colored || '&nbsp;';
+                codeBlock.appendChild(lineDiv);
+            });
+            // 也更新防御区域的代码
+            document.getElementById('defenseBadCode').textContent = fullDisplay;
+            document.getElementById('defenseGoodCode').textContent = CLEAN_SOURCE;
+        }
+
+        // --- 复制按钮 ---
+        document.getElementById('copyBtn').addEventListener('click', function() {
+            const fullDisplay = 'function validateLicense(key) {\n' + OBFUSCATED_SOURCE + '\n}';
+            navigator.clipboard.writeText(fullDisplay).then(() => {
+                this.textContent = '✅ 已复制！';
+                this.classList.add('copied');
+                setTimeout(() => {
+                    this.textContent = '📋 复制代码';
+                    this.classList.remove('copied');
+                }, 2000);
+            }).catch(() => {
+                this.textContent = '❌ 复制失败';
+                setTimeout(() => {
+                    this.textContent = '📋 复制代码';
+                }, 1500);
+            });
+        });
+
+        // --- 提示系统 ---
+        const hints = {
+            1: '🔍 提示1：从入口点开始分析 —— 找到检查 key.length 的地方。目标密钥长度是多少？注意变量 _0xstuv 的值。',
+            2: '🔍 提示2：找到一个包含 7 个数字的数组 _0x1a2b = [85, 72, 89, 72, 85, 86, 72]。这些是编码后的字符。偏移量 _0x3c4d 通过表达式计算得出（结果是 3）。用每个数组元素减去偏移量得到原始 ASCII 码，然后转换为字符。',
+            3: '🔍 提示3：位置7（第8个字符，索引0x07）与 _0x5e6f (即 0x2D = 45) 比较。ASCII 45 对应字符 "-"。位置8-9的两个字符需要满足：和等于 _0x7g8h (0x66=102)，积等于 _0x9i0j (0xA28=2600)。解这个方程组：两个数字的ASCII码之和为102，之积为2600。',
+            4: '🔍 提示4：最后有一个全局校验和 —— 所有10个字符的ASCII码之和 % 97 必须等于 _0xklmn (0x08=8)。综合所有约束，密钥格式为：7个大写字母 + 1个连字符 + 2个数字。前7个字母解码后是 "REVERSE"，数字部分满足和=102、积=2600 的是ASCII 52和50，即字符"4"和"2"。完整密钥：REVERSE-42'
+        };
+        const revealedHints = new Set();
+
+        document.getElementById('hintsGrid').addEventListener('click', function(e) {
+            const btn = e.target.closest('.hint-btn');
+            if (!btn) return;
+            const hintLevel = parseInt(btn.dataset.hint);
+            if (revealedHints.has(hintLevel)) return; // already revealed
+
+            revealedHints.add(hintLevel);
+            btn.classList.add('revealed');
+            btn.textContent = '提示 ' + hintLevel + ' ✓';
+
+            const resultBox = document.getElementById('resultBox');
+            resultBox.className = 'result-box hint-mode';
+            resultBox.innerHTML = hints[hintLevel];
+            resultBox.style.display = 'block';
+
+            // Auto-scroll to result
+            resultBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+
+        // --- 验证按钮 ---
+        document.getElementById('validateBtn').addEventListener('click', function() {
+            const input = document.getElementById('licenseInput');
+            const resultBox = document.getElementById('resultBox');
+            const key = input.value.trim();
+
+            // 清除之前的动画
+            input.classList.remove('success-glow', 'error-shake');
+
+            if (!key) {
+                resultBox.className = 'result-box failure';
+                resultBox.innerHTML = '⚠️ 请输入 License Key 后再验证。';
+                resultBox.style.display = 'block';
+                input.classList.add('error-shake');
+                setTimeout(() => input.classList.remove('error-shake'), 500);
+                return;
+            }
+
+            // 调用混淆后的验证函数
+            let isValid = false;
+            try {
+                isValid = validatorFn(key);
+            } catch (err) {
+                resultBox.className = 'result-box failure';
+                resultBox.innerHTML = '❌ 验证过程发生异常：' + err.message;
+                resultBox.style.display = 'block';
+                input.classList.add('error-shake');
+                setTimeout(() => input.classList.remove('error-shake'), 500);
+                return;
+            }
+
+            if (isValid) {
+                resultBox.className = 'result-box success';
+                resultBox.innerHTML = `
+                    🎯 <strong>攻击成功！许可证密钥正确！</strong><br><br>
+                    ✅ 你成功逆向分析了混淆代码，找到了正确的 License Key：<code style="background:#0d1117;padding:3px 8px;border-radius:4px;font-family:monospace;letter-spacing:0.05em;">REVERSE-42</code><br><br>
+                    📝 <strong>分析要点回顾：</strong><br>
+                    • 从 <code>_0xstuv = 0x0A</code> 得知密钥长度为 <strong>10</strong><br>
+                    • 数组 <code>_0x1a2b</code> 存储了编码字符，偏移量为 <code>3</code>（由表达式计算得出）<br>
+                    • 解码后得到前7个字符：<strong>REVERSE</strong><br>
+                    • 位置7需要 ASCII <code>45</code>，即字符 <strong>-</strong><br>
+                    • 最后两位满足和=<code>102</code>、积=<code>2600</code> → ASCII 52 & 50 → <strong>42</strong><br>
+                    • 校验和：687 % 97 = 8 ✓<br><br>
+                    🔓 你展现了扎实的逆向分析能力！请查看下方"防御方案"了解更多代码保护技术。
+                `;
+                resultBox.style.display = 'block';
+                input.classList.add('success-glow');
+                // 3秒后移除光晕
+                setTimeout(() => input.classList.remove('success-glow'), 3000);
+            } else {
+                resultBox.className = 'result-box failure';
+                // 给出部分反馈帮助定位问题
+                let hintMsg = '❌ 密钥无效。';
+                if (key.length !== 10) {
+                    hintMsg += '<br>💡 长度不对 —— 混淆代码中 <code>_0xstuv = 0x0A</code>（即10），你的密钥长度是 <strong>' + key.length + '</strong>。';
+                } else {
+                    hintMsg += '<br>💡 长度正确（10个字符），但内容不匹配。检查：前7个字符解码后是否正确？位置7是否为连字符？最后两位是否满足数学约束？校验和是否通过？<br>尝试使用上方的"提示"按钮获取更多帮助。';
+                }
+                resultBox.innerHTML = hintMsg;
+                resultBox.style.display = 'block';
+                input.classList.add('error-shake');
+                setTimeout(() => input.classList.remove('error-shake'), 500);
+            }
+
+            resultBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+
+        // --- 回车键触发验证 ---
+        document.getElementById('licenseInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('validateBtn').click();
+            }
+        });
+
+        // --- 防御方案折叠面板 ---
+        const defenseToggle = document.getElementById('defenseToggle');
+        const defenseContent = document.getElementById('defenseContent');
+        defenseToggle.addEventListener('click', function() {
+            const isOpen = defenseContent.classList.contains('open');
+            if (isOpen) {
+                defenseContent.classList.remove('open');
+                defenseToggle.classList.remove('open');
+            } else {
+                defenseContent.classList.add('open');
+                defenseToggle.classList.add('open');
+                defenseContent.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        });
+
+        // --- 初始化 ---
+        renderCode();
+
+        // --- 键盘快捷键 Ctrl+Enter 也可触发验证 ---
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                document.getElementById('validateBtn').click();
+            }
+        });
+
+        console.log(
+            '%c🔍 Crackme 许可证分析实验已就绪 %c| %cEDUCATIONAL PURPOSE ONLY',
+            'color:#d2991d;font-size:16px;',
+            '',
+            'color:#58a6ff;'
+        );
+        console.log('%c💡 提示：你可以在控制台中检查 validatorFn 或直接调用它来测试密钥。', 'color:#8b949e;');
+        console.log('%c   例如: validatorFn("REVERSE-42") 应返回 true', 'color:#8b949e;');
+        console.log('%c⚠️ 本实验仅用于授权教学环境。', 'color:#f85149;');
+    </script>
+</body>
+</html>

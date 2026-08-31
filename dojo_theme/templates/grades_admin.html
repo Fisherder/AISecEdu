@@ -1,126 +1,79 @@
 {% extends "base.html" %}
 
+{% block body_class %}course-system-page content-management-page course-grades-page{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='aisecedu-course-hub-v12-readability-v1') }}">
+{% endblock %}
+
 {% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1>全部成绩</h1>
-  </div>
-</div>
-<div class="container">
-  <div id="grades" class="row">
-    {% if grades %}
-      <div class="col-md-12">
-        <table class="table table-striped">
-          <thead>
-            <tr>
-              <td scope="col"><b>学生</b></td>
-              <td scope="col" style="width: 80%;"><b>成绩</b></td>
-            </tr>
-          </thead>
-          <tbody>
-            {% for user_grades in grades %}
-            <tr>
-              <td>
-                <a href="{{ url_for('course.view_user_info', dojo=dojo.reference_id, user_id=user_grades.user_id) }}">
-                  {{ students[user_grades.user_id] }}
-                </a>
-              </td>
-              <td>
-                <details>
-                  <summary>{{ user_grades.letter_grade }} ({{ "%.2f"|format(100 * user_grades.overall_grade) }}%)</summary>
-                  <table>
-                    <thead>
-                      <tr>
-                        <td>名称</td>
-                        <td>日期</td>
-                        {% if user_grades.show_extra_late_date %}
-                        <td>额外迟交截止</td>
-                        {% endif %}
-                        <td>权重</td>
-                        <td>进度</td>
-                        <td>计分</td>
-                      </tr>
-                    </thead>
+<div class="content-management-shell course-grades-shell">
+  <nav class="content-breadcrumbs" aria-label="面包屑">
+    <a href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}">课程中心</a>
+    <i class="fas fa-chevron-right" aria-hidden="true"></i>
+    <a href="/dojo/{{ dojo.reference_id }}/admin/">成员与设置</a>
+    <i class="fas fa-chevron-right" aria-hidden="true"></i>
+    <span>成绩</span>
+  </nav>
+
+  <header class="content-management-header">
+    <div class="content-management-heading">
+      <span class="hub-kicker"><i class="fas fa-chart-bar" aria-hidden="true"></i>学习结果</span>
+      <h1>课程成绩</h1>
+      <p>{{ dojo.name }} · 查看学生总评与各项学习任务的计分明细。</p>
+    </div>
+    <div class="content-management-actions">
+      <a class="hub-button" href="/dojo/{{ dojo.reference_id }}/admin/"><i class="fas fa-users-cog" aria-hidden="true"></i>成员与设置</a>
+      <a class="hub-button is-primary" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}&amp;tab=students"><i class="fas fa-chart-line" aria-hidden="true"></i>查看学情</a>
+    </div>
+  </header>
+
+  <section class="content-surface course-grades-surface">
+    <header class="content-section-heading"><div><span class="hub-kicker">成绩明细</span><h2>全部学生</h2><p>展开学生成绩可查看任务、截止日期、权重与计分结果。</p></div></header>
+    <div id="grades" class="content-data-table-wrap">
+      {% if grades %}
+      <table class="content-data-table course-grades-table">
+        <thead><tr><th scope="col">学生</th><th scope="col">成绩</th></tr></thead>
+        <tbody>
+          {% for user_grades in grades %}
+          <tr>
+            <td><a href="{{ url_for('course.view_user_info', dojo=dojo.reference_id, user_id=user_grades.user_id) }}">{{ students[user_grades.user_id] }}</a></td>
+            <td>
+              <details class="content-table-details">
+                <summary><strong>{{ user_grades.letter_grade }}</strong><span>{{ "%.2f"|format(100 * user_grades.overall_grade) }}%</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+                <div class="content-data-table-wrap is-nested">
+                  <table class="content-data-table is-nested">
+                    <thead><tr><th>名称</th><th>日期</th>{% if user_grades.show_extra_late_date %}<th>额外迟交截止</th>{% endif %}<th>权重</th><th>进度</th><th>计分</th></tr></thead>
                     <tbody>
                       {% for assessment_grade in user_grades.assessment_grades %}
-                      <tr>
-                        <td>{{ assessment_grade.name }}</td>
-                        <td>{{ assessment_grade.date }}</td>
-                        {% if user_grades.show_extra_late_date %}
-                        <td>{{ assessment_grade.extra_late_date }} </td>
-                        {% endif %}
-                        <td>{{ assessment_grade.weight }}</td>
-                        <td>{{ assessment_grade.progress }}</td>
-                        <td>
-                          {% if assessment_grade.credit is boolean %}
-                            {{ "✓" if assessment_grade.credit else "✕" }}
-                          {% elif assessment_grade.credit is number %}
-                            {{ "%.2f%%" | format(100 * assessment_grade.credit) }}
-                          {% endif %}
-                        </td>
-                      </tr>
+                      <tr><td>{{ assessment_grade.name }}</td><td>{{ assessment_grade.date }}</td>{% if user_grades.show_extra_late_date %}<td>{{ assessment_grade.extra_late_date }}</td>{% endif %}<td>{{ assessment_grade.weight }}</td><td>{{ assessment_grade.progress }}</td><td>{% if assessment_grade.credit is boolean %}{{ "✓" if assessment_grade.credit else "✕" }}{% elif assessment_grade.credit is number %}{{ "%.2f%%" | format(100 * assessment_grade.credit) }}{% endif %}</td></tr>
                       {% endfor %}
                     </tbody>
                   </table>
-                </details>
-              </td>
-            </tr>
-            {% endfor %}
-            {% for missing_student in missing_students %}
-            <tr>
-              <td>
-                {{ missing_student }}
-              </td>
-              <td>
-                缺失
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-          <tfoot>
-            {% for statistic, (summary, details) in grade_statistics.items() %}
-            <tr>
-              <td>{{ statistic }}</td>
-              <td>
-                <details>
-                  <summary>{{ summary }}</summary>
-                  <table>
-                    <thead>
-                      <tr>
-                        {% for column in details[0] %}
-                        <td>{{ column }}</td>
-                        {% endfor %}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {% for row in details %}
-                      <tr>
-                        {% for value in row.values() %}
-                        <td>{{ value }}</td>
-                        {% endfor %}
-                      </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
-                </details>
-              </td>
-            </tr>
-            {% endfor %}
-          </tfoot>
-        </table>
-      </div>
-    {% else %}
-      <p>正在加载…</p>
-    {% endif %}
-  </div>
+                </div>
+              </details>
+            </td>
+          </tr>
+          {% endfor %}
+          {% for missing_student in missing_students %}<tr><td>{{ missing_student }}</td><td><span class="content-status is-warning">缺失</span></td></tr>{% endfor %}
+        </tbody>
+        <tfoot>
+          {% for statistic, (summary, details) in grade_statistics.items() %}
+          <tr><td>{{ statistic }}</td><td><details class="content-table-details"><summary><span>{{ summary }}</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary><div class="content-data-table-wrap is-nested"><table class="content-data-table is-nested"><thead><tr>{% for column in details[0] %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in details %}<tr>{% for value in row.values() %}<td>{{ value }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div></details></td></tr>
+          {% endfor %}
+        </tfoot>
+      </table>
+      {% else %}
+      <div class="content-loading-state"><span></span><div><strong>正在计算课程成绩</strong><small>首次计算需要载入课程评分规则与学习记录。</small></div></div>
+      {% endif %}
+    </div>
+  </section>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/grades.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/grades.js', v='aisecedu-content-management-v2') }}"></script>
 {% if not grades %}
-<script>
-  document.addEventListener("DOMContentLoaded", () => loadAllGrades("#grades"));
-</script>
+<script>document.addEventListener("DOMContentLoaded", () => loadAllGrades("#grades"));</script>
 {% endif %}
 {% endblock %}

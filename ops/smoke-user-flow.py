@@ -280,8 +280,27 @@ def signed_service(session, service, workspace):
 
 
 def verify_ssh(private_key):
+    ssh_binary = os.getenv("DOJO_SSH_BINARY") or next(
+        (
+            candidate
+            for candidate in ("/usr/bin/ssh", "/bin/ssh", shutil.which("ssh"))
+            if candidate and pathlib.Path(candidate).is_file()
+        ),
+        None,
+    )
+    if not ssh_binary:
+        raise AssertionError("OpenSSH client is not installed")
     command = [
-        "ssh",
+        ssh_binary,
+        # A developer workstation may define a wildcard ProxyCommand in
+        # ~/.ssh/config. The deployment smoke must exercise the platform's
+        # LAN listener directly, not an unrelated local SOCKS proxy.
+        "-F",
+        "/dev/null",
+        "-o",
+        "ProxyCommand=none",
+        "-o",
+        "ProxyJump=none",
         "-o",
         "StrictHostKeyChecking=no",
         "-o",
@@ -297,12 +316,19 @@ def verify_ssh(private_key):
         f"hacker@{LISTEN_ADDRESS}",
         "printf '%s:%s' \"$(id -un)\" \"$PWD\"",
     ]
+    last_result = None
     for _ in range(15):
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        last_result = result
         if result.returncode == 0 and result.stdout.strip() == "hacker:/challenge":
             return
         time.sleep(2)
-    raise AssertionError("key-authenticated SSH command did not succeed")
+    raise AssertionError(
+        "key-authenticated SSH command did not succeed: "
+        f"rc={last_result.returncode if last_result else 'none'} "
+        f"stdout={last_result.stdout.strip()[:500] if last_result else ''!r} "
+        f"stderr={last_result.stderr.strip()[:1000] if last_result else ''!r}"
+    )
 
 
 def verify_browser_workspace(session, workspace, dojo):
@@ -543,7 +569,7 @@ def verify_browser_workspace(session, workspace, dojo):
         tutor_status = tutor.find_element(By.CSS_SELECTOR, "[data-tutor-status]")
         wait.until(
             lambda driver: tutor_status.is_displayed()
-            and "Tutor 已就绪" in tutor_status.text
+            and "AI 学习助手已就绪" in tutor_status.text
         )
         tutor_layout = browser.execute_script(
             """
@@ -557,7 +583,8 @@ def verify_browser_workspace(session, workspace, dojo):
                 togglePosition: getComputedStyle(toggle).position,
                 oldNotices: panel.querySelectorAll('[data-tutor-notice], [data-tutor-context-badges]').length,
                 headerLinks: panel.querySelectorAll('.learning-tutor-header a').length,
-                analysisText: panel.querySelector('.learning-tutor-analysis-link').textContent.trim(),
+                analysisTexts: Array.from(panel.querySelectorAll('.learning-tutor-analysis-link'))
+                    .map(link => link.textContent.trim()),
             };
             """
         )
@@ -568,7 +595,7 @@ def verify_browser_workspace(session, workspace, dojo):
             or tutor_layout["togglePosition"] != "absolute"
             or tutor_layout["oldNotices"]
             or tutor_layout["headerLinks"]
-            or tutor_layout["analysisText"] != "查看学习分析"
+            or tutor_layout["analysisTexts"] != ["在完整助手中继续", "查看学习分析"]
         ):
             raise AssertionError(
                 "Tutor toggle shifts or layout still wastes space: "
@@ -580,14 +607,14 @@ def verify_browser_workspace(session, workspace, dojo):
         banner_state = browser.execute_script(
             """
             const controls = document.querySelector('.workspace-controls');
-            const target = controls.querySelector('#flag-input');
+            const target = controls.querySelector('.flag-input');
             animateBanner(
                 {target},
                 '非阻塞提示回归检查',
                 'success',
                 {label: '查看评分', href: '/learning/scores/latest/123'},
             );
-            const banner = controls.querySelector('#workspace-notification-banner');
+            const banner = controls.querySelector('.workspace-notification-banner');
             const action = banner.querySelector('.workspace-banner-action');
             return {
                 text: banner.textContent,
@@ -615,8 +642,8 @@ def verify_browser_workspace(session, workspace, dojo):
             """
             const done = arguments[arguments.length - 1];
             const controls = document.querySelector('.workspace-controls');
-            const input = controls.querySelector('#flag-input');
-            const banner = controls.querySelector('#workspace-notification-banner');
+            const input = controls.querySelector('.flag-input');
+            const banner = controls.querySelector('.workspace-notification-banner');
             const original = CTFd.api.post_challenge_attempt;
             CTFd.api.post_challenge_attempt = () => Promise.reject(new Error('模拟网络失败'));
             input.value = 'pwn.college{smoke-ui-failure}';
@@ -651,7 +678,7 @@ def verify_browser_workspace(session, workspace, dojo):
                             message: banner.textContent,
                             actionText: action && action.textContent,
                             actionHref: action && action.getAttribute('href'),
-                            challengeId: controls.querySelector('#current-challenge-id').value,
+                            challengeId: controls.querySelector('.current-challenge-id').value,
                         };
                         CTFd.api.post_challenge_attempt = original;
                         done({failed, incorrect, correct});
@@ -679,11 +706,11 @@ def verify_browser_workspace(session, workspace, dojo):
         lifecycle_buttons = browser.execute_script(
             """
             const controls = document.querySelector('.workspace-controls');
-            const challenge = controls.querySelector('#current-challenge-id');
+            const challenge = controls.querySelector('.current-challenge-id');
             return {
-                restart: controls.querySelector('#challenge-restart').textContent.trim(),
-                stop: controls.querySelector('#challenge-stop').textContent.trim(),
-                reset: controls.querySelector('#challenge-reset').textContent.trim(),
+                restart: controls.querySelector('.challenge-restart').textContent.trim(),
+                stop: controls.querySelector('.challenge-stop').textContent.trim(),
+                reset: controls.querySelector('.challenge-reset').textContent.trim(),
                 dojo: challenge.dataset.dojoId,
                 module: challenge.dataset.moduleId,
                 challenge: challenge.dataset.challengeReferenceId,
@@ -713,7 +740,7 @@ def verify_browser_workspace(session, workspace, dojo):
                 }
                 return window.__workspaceLifecycleFetch(input, init);
             };
-            document.querySelector('.workspace-controls #challenge-stop').click();
+            document.querySelector('.workspace-controls .challenge-stop').click();
             """
         )
         lifecycle_dialog = wait.until(
@@ -722,7 +749,7 @@ def verify_browser_workspace(session, workspace, dojo):
             )
         )
         if (
-            "停止题目容器"
+            "停止题目运行环境"
             not in lifecycle_dialog.find_element(
                 By.CSS_SELECTOR, ".aisecedu-dialog-header"
             ).text
@@ -739,7 +766,7 @@ def verify_browser_workspace(session, workspace, dojo):
         controls = browser.find_element(By.CSS_SELECTOR, ".workspace-controls")
         wait.until(
             lambda driver: controls.get_attribute("data-workspace-running") == "false"
-            and controls.find_element(By.ID, "challenge-restart").is_enabled()
+            and controls.find_element(By.CSS_SELECTOR, ".challenge-restart").is_enabled()
         )
         stopped_state = browser.execute_script(
             """
@@ -747,20 +774,20 @@ def verify_browser_workspace(session, workspace, dojo):
             const loading = document.querySelector('[data-workspace-loading]');
             return {
                 title: loading.querySelector('[data-workspace-loading-title]').textContent,
-                stopDisabled: controls.querySelector('#challenge-stop').disabled,
-                resetDisabled: controls.querySelector('#challenge-reset').disabled,
-                restartDisabled: controls.querySelector('#challenge-restart').disabled,
+                stopDisabled: controls.querySelector('.challenge-stop').disabled,
+                resetDisabled: controls.querySelector('.challenge-reset').disabled,
+                restartDisabled: controls.querySelector('.challenge-restart').disabled,
             };
             """
         )
         if (
-            stopped_state["title"] != "题目容器已停止"
+            stopped_state["title"] != "题目运行环境已停止"
             or not stopped_state["stopDisabled"]
             or not stopped_state["resetDisabled"]
             or stopped_state["restartDisabled"]
         ):
             raise AssertionError(f"stopped workspace state is inconsistent: {stopped_state}")
-        controls.find_element(By.ID, "challenge-restart").click()
+        controls.find_element(By.CSS_SELECTOR, ".challenge-restart").click()
         restart_dialog = wait.until(
             lambda driver: next(
                 (
@@ -779,19 +806,27 @@ def verify_browser_workspace(session, workspace, dojo):
             By.CSS_SELECTOR, ".aisecedu-dialog-header"
         ).get_attribute("textContent").strip()
         if (
-            "重新启动题目容器"
+            "重新启动题目环境"
             not in restart_title
         ):
             raise AssertionError(
                 "workspace restart did not use the unified confirmation dialog: "
                 f"{restart_title!r}"
             )
-        restart_dialog.find_element(
+        restart_confirm = restart_dialog.find_element(
             By.CSS_SELECTOR, "[data-dialog-action='confirm']"
-        ).click()
+        )
+        wait.until(
+            lambda driver: restart_confirm.is_displayed()
+            and restart_confirm.is_enabled()
+        )
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center'}); arguments[0].click();",
+            restart_confirm,
+        )
         wait.until(
             lambda driver: controls.get_attribute("data-workspace-running") == "true"
-            and controls.find_element(By.ID, "challenge-stop").is_enabled()
+            and controls.find_element(By.CSS_SELECTOR, ".challenge-stop").is_enabled()
         )
         browser.execute_script(
             """
@@ -839,7 +874,7 @@ def verify_browser_workspace(session, workspace, dojo):
         wait.until(lambda driver: not loading.is_displayed())
         browser.switch_to.frame(iframe)
         wait.until(
-            lambda driver: "AISecEdu web smoke"
+            lambda driver: "玄甲 web smoke"
             in driver.find_element(By.TAG_NAME, "body").text
         )
         browser.switch_to.default_content()
@@ -852,7 +887,7 @@ def verify_browser_workspace(session, workspace, dojo):
             next(handle for handle in browser.window_handles if handle != original_window)
         )
         wait.until(
-            lambda driver: "AISecEdu web smoke"
+            lambda driver: "玄甲 web smoke"
             in driver.find_element(By.TAG_NAME, "body").text
         )
         if not browser.current_url.endswith("/8081/index.html"):
@@ -866,8 +901,26 @@ def verify_browser_workspace(session, workspace, dojo):
         )
         code.click()
         wait.until(lambda driver: loading.is_displayed())
-        if "正在加载VS Code" not in loading.text:
-            raise AssertionError("VS Code loading state was not visible")
+        code_loading = browser.execute_script(
+            """
+            const panel = document.querySelector('[data-workspace-loading]');
+            return {
+                stage: panel.dataset.stage,
+                title: panel.querySelector('[data-workspace-loading-title]').textContent.trim(),
+                detail: panel.querySelector('[data-workspace-loading-detail]').textContent.trim(),
+                error: panel.classList.contains('is-error'),
+            };
+            """
+        )
+        if (
+            code_loading["stage"] not in {"queued", "container", "service"}
+            or code_loading["error"]
+            or not code_loading["title"]
+            or not code_loading["detail"]
+        ):
+            raise AssertionError(
+                f"VS Code staged loading state was not visible: {code_loading}"
+            )
         wait.until(lambda driver: "/8080/" in (iframe.get_attribute("src") or ""))
         code_url = iframe.get_attribute("src")
         if "folder=%2Fchallenge" not in code_url and "folder=/challenge" not in code_url:
@@ -965,8 +1018,26 @@ def verify_browser_workspace(session, workspace, dojo):
         )
         desktop.click()
         wait.until(lambda driver: loading.is_displayed())
-        if "正在加载远程桌面" not in loading.text:
-            raise AssertionError("Desktop loading state was not visible")
+        desktop_loading = browser.execute_script(
+            """
+            const panel = document.querySelector('[data-workspace-loading]');
+            return {
+                stage: panel.dataset.stage,
+                title: panel.querySelector('[data-workspace-loading-title]').textContent.trim(),
+                detail: panel.querySelector('[data-workspace-loading-detail]').textContent.trim(),
+                error: panel.classList.contains('is-error'),
+            };
+            """
+        )
+        if (
+            desktop_loading["stage"] not in {"queued", "container", "service"}
+            or desktop_loading["error"]
+            or not desktop_loading["title"]
+            or not desktop_loading["detail"]
+        ):
+            raise AssertionError(
+                f"Desktop staged loading state was not visible: {desktop_loading}"
+            )
         wait.until(lambda driver: "/6080/" in (iframe.get_attribute("src") or ""))
         wait.until(lambda driver: not loading.is_displayed())
         browser.switch_to.frame(iframe)
@@ -1036,7 +1107,7 @@ def verify_browser_workspace(session, workspace, dojo):
             raise AssertionError("Remote desktop keys propagated to a browser-level shortcut handler")
         browser.switch_to.default_content()
 
-        clipboard_in = "AISecEdu browser-to-desktop clipboard"
+        clipboard_in = "玄甲 browser-to-desktop clipboard"
         if not browser.execute_script(
             "return sendDesktopClipboard($('.workspace-controls'), arguments[0]);",
             clipboard_in,
@@ -1054,7 +1125,7 @@ def verify_browser_workspace(session, workspace, dojo):
         if copied != clipboard_in:
             raise AssertionError("Browser clipboard text did not reach the remote desktop")
 
-        clipboard_out = "AISecEdu desktop-to-browser clipboard"
+        clipboard_out = "玄甲 desktop-to-browser clipboard"
         inner(
             "exec", "--user=1000", workspace, "/run/current-system/sw/bin/bash", "-lc",
             f"printf %s {shlex.quote(clipboard_out)} | DISPLAY=:0 xclip -selection clipboard",
@@ -1069,7 +1140,7 @@ def verify_browser_workspace(session, workspace, dojo):
                 (
                     element
                     for element in driver.find_elements(
-                        By.CSS_SELECTOR, "#workspace-notification-banner"
+                        By.CSS_SELECTOR, ".workspace-notification-banner"
                     )
                     if element.is_displayed() and element.text.strip()
                 ),
@@ -1160,34 +1231,47 @@ def verify_browser_workspace(session, workspace, dojo):
         browser.set_window_size(760, 1000)
         browser.get(f"{origin}/guide")
         guide_root = wait.until(
-            lambda driver: driver.find_element(By.ID, "learning-guide")
+            lambda driver: driver.find_element(By.ID, "teacher-agent")
         )
         wait.until(
-            lambda driver: guide_root.get_attribute("data-guide-ready") == "true"
+            lambda driver: guide_root.get_attribute("data-agent-ready") == "true"
+            and guide_root.get_attribute("aria-busy") != "true"
         )
-        guide_toggle = browser.find_element(By.ID, "guide-sidebar-toggle")
+        if guide_root.get_attribute("data-role") != "student":
+            raise AssertionError("Guide did not load the student agent policy adapter")
+        guide_toggle = browser.find_element(By.ID, "teaching-sidebar-toggle")
         wait.until(lambda driver: guide_toggle.is_displayed())
         guide_toggle.click()
         wait.until(
-            lambda driver: "is-open"
-            in driver.find_element(By.CSS_SELECTOR, ".guide-sidebar").get_attribute("class")
-        )
-        browser.find_element(By.ID, "guide-new").click()
-        wait.until(lambda driver: "thread=" in driver.current_url)
-        wait.until(
-            lambda driver: driver.find_element(By.ID, "learning-guide").get_attribute("aria-busy")
+            lambda driver: "is-sidebar-open" in guide_root.get_attribute("class")
+            and driver.find_element(By.ID, "teaching-sidebar").get_attribute("aria-hidden")
             != "true"
         )
-        if not browser.find_elements(By.CSS_SELECTOR, ".guide-thread-open"):
+        browser.find_element(By.ID, "teaching-new-thread").click()
+        wait.until(lambda driver: "thread=" in driver.current_url)
+        wait.until(
+            lambda driver: driver.find_element(By.ID, "teacher-agent").get_attribute("aria-busy")
+            != "true"
+        )
+        if not browser.find_elements(By.CSS_SELECTOR, ".teaching-thread-open"):
             raise AssertionError("Guide new-conversation button did not create a usable thread")
-        if browser.find_element(By.CSS_SELECTOR, ".guide-header h1").text != "Guide":
-            raise AssertionError("Guide still uses the redundant 学习 prefix")
-        reference_toggle = browser.find_element(By.ID, "guide-reference-toggle")
+        if (
+            browser.find_element(By.CSS_SELECTOR, ".teaching-wordmark small")
+            .get_attribute("textContent")
+            .strip()
+            != "AI 学习助手"
+            or browser.find_elements(By.ID, "teaching-upload-trigger")
+        ):
+            raise AssertionError("Guide exposed the wrong role-specific agent chrome")
+        reference_toggle = browser.find_element(By.ID, "student-reference-trigger")
         reference_toggle.click()
         reference_picker = wait.until(
-            lambda driver: driver.find_element(By.ID, "guide-reference-picker")
+            lambda driver: driver.find_element(By.ID, "student-reference-dialog")
         )
-        wait.until(lambda driver: reference_picker.is_displayed())
+        wait.until(
+            lambda driver: reference_picker.is_displayed()
+            and reference_picker.get_attribute("open") is not None
+        )
         reference_option = wait.until(
             lambda driver: next(
                 (
@@ -1204,28 +1288,32 @@ def verify_browser_workspace(session, workspace, dojo):
         wait.until(
             lambda driver: "Service Startup"
             in driver.find_element(
-                By.ID, "guide-selected-references"
+                By.ID, "student-reference-summary"
             ).text
         )
-        guide_scope = browser.find_element(By.ID, "guide-profile-strip").text
+        guide_scope = reference_picker.text
         if (
-            "本对话题目：Service Startup" not in guide_scope
-            or "仅使用所选题目的证据" not in guide_scope
-            or "回答范围：整体学习记录" in guide_scope
+            "智能体只读取你自己的学习记录" not in guide_scope
+            or browser.find_element(By.ID, "student-reference-count").text != "1"
+            or "已选择 1 / 6 道题目"
+            not in browser.find_element(By.ID, "student-reference-selection").text
         ):
             raise AssertionError(
                 f"Guide did not make the explicit reference scope authoritative: {guide_scope}"
             )
-        guide_question = browser.find_element(By.ID, "guide-question")
+        browser.find_element(By.ID, "student-reference-done").click()
+        wait.until(lambda driver: not reference_picker.is_displayed())
+        guide_question = browser.find_element(By.ID, "teaching-input")
         guide_question.send_keys("@")
         wait.until(lambda driver: reference_picker.is_displayed())
         if "@" in guide_question.get_attribute("value"):
             raise AssertionError("Guide @ reference trigger leaked into the question text")
+        browser.find_element(By.ID, "student-reference-close").click()
         guide_layout = browser.execute_script(
             """
-            const root = document.getElementById('learning-guide').getBoundingClientRect();
-            const header = document.querySelector('.guide-header').getBoundingClientRect();
-            const composer = document.querySelector('.guide-composer-wrap').getBoundingClientRect();
+            const root = document.getElementById('teacher-agent').getBoundingClientRect();
+            const header = document.querySelector('.teaching-conversation-header').getBoundingClientRect();
+            const composer = document.querySelector('.teaching-composer').getBoundingClientRect();
             const pageMain = document.querySelector('body > main');
             return {
                 rootBottom: root.bottom,
@@ -1240,9 +1328,8 @@ def verify_browser_workspace(session, workspace, dojo):
         )
         if (
             abs(guide_layout["rootBottom"] - guide_layout["viewportBottom"]) > 2
-            or guide_layout["headerHeight"] > 64
+            or guide_layout["headerHeight"] > 72
             or abs(guide_layout["composerGap"]) > 2
-            or guide_layout["pageMainMarginBottom"] != "0px"
             or guide_layout["bodyOverflow"] != "hidden"
             or guide_layout["footerCount"]
         ):
@@ -1282,10 +1369,10 @@ def verify_browser_workspace(session, workspace, dojo):
             const cards = Array.from(wrapper.querySelectorAll('.card'));
             window.AISecEduUI.applyTheme('dark', false);
             const dark = cards.map(card => getComputedStyle(card).backgroundColor);
-            document.querySelector('[data-theme-toggle]').click();
+            window.AISecEduUI.applyTheme('light', false);
             const lightTheme = document.documentElement.dataset.aiseceduTheme;
             const light = cards.map(card => getComputedStyle(card).backgroundColor);
-            document.querySelector('[data-theme-toggle]').click();
+            window.AISecEduUI.applyTheme('dark', false);
             wrapper.remove();
             return {dark, light, lightTheme, restored: document.documentElement.dataset.aiseceduTheme};
             """
@@ -1325,7 +1412,7 @@ def verify_browser_workspace(session, workspace, dojo):
                 }
                 return window.__inlineStopFetch(input, init);
             };
-            arguments[0].querySelector('#challenge-stop').click();
+            arguments[0].querySelector('.challenge-stop').click();
             """,
             inline_controls,
         )
@@ -1509,7 +1596,7 @@ def main():
                     {
                         "type": "text",
                         "path": "smoke/service/index.html",
-                        "content": "<h1>AISecEdu web smoke</h1>\n",
+                        "content": "<h1>玄甲 web smoke</h1>\n",
                     }
                 ],
             }

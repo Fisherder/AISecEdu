@@ -90,11 +90,19 @@ function initializeWorkspaceNavigation() {
 
     function setCollapsed(collapsed) {
         navigation.classList.toggle("is-collapsed", collapsed);
+        if (window.matchMedia("(max-width: 700px)").matches) {
+            navigation.classList.toggle("is-mobile-open", !collapsed);
+            const backdrop = document.querySelector("[data-workspace-mobile-backdrop]");
+            if (backdrop) backdrop.hidden = collapsed;
+        }
         toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
         toggle.setAttribute("title", collapsed ? "展开课程导航" : "收起课程导航");
         toggle.setAttribute("aria-label", collapsed ? "展开课程导航" : "收起课程导航");
         toggleIcon.className = collapsed ? "fas fa-sitemap" : "fas fa-chevron-left";
-        localStorage.setItem("workspace_navigation_collapsed", collapsed ? "true" : "false");
+        if (!window.matchMedia("(max-width: 700px)").matches) {
+            localStorage.setItem("workspace_navigation_collapsed", collapsed ? "true" : "false");
+        }
+        window.dispatchEvent(new CustomEvent("dojo:workspace-panel", {detail: {panel: collapsed ? "workspace" : "navigation"}}));
     }
 
     function setStatus(message, error) {
@@ -140,6 +148,7 @@ function initializeWorkspaceNavigation() {
         );
         if (!confirmed) return;
 
+        if (window.matchMedia("(max-width: 700px)").matches) setCollapsed(true);
         setNavigationBusy(true);
         setStatus(`正在启动 ${challenge.name || challenge.id}…`);
         try {
@@ -218,7 +227,7 @@ function initializeWorkspaceNavigation() {
 
     async function loadCourses() {
         try {
-            const response = await window.DojoLearning.request("/learning/overview");
+            const response = await window.DojoLearning.request("/learning/overview?view=navigation");
             courses = response.courses || [];
             courseSelect.replaceChildren();
             courses.forEach(course => {
@@ -241,8 +250,60 @@ function initializeWorkspaceNavigation() {
         renderModules(null);
     });
     moduleSelect.addEventListener("change", renderChallenges);
-    setCollapsed(localStorage.getItem("workspace_navigation_collapsed") === "true");
+    setCollapsed(window.matchMedia("(max-width: 700px)").matches || localStorage.getItem("workspace_navigation_collapsed") === "true");
     loadCourses();
+}
+
+function initializeWorkspaceMobilePanels() {
+    const controls = Array.from(document.querySelectorAll("[data-workspace-mobile-panel]"));
+    if (!controls.length) return;
+    const navigation = document.querySelector("[data-workspace-navigation]");
+    const backdrop = document.querySelector("[data-workspace-mobile-backdrop]");
+    const tutor = document.querySelector("[data-learning-tutor]");
+
+    function mark(panel) {
+        controls.forEach(button => {
+            const active = button.dataset.workspaceMobilePanel === panel;
+            button.classList.toggle("is-active", active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+    }
+
+    function closeTutor() {
+        const toggle = tutor && tutor.querySelector(".learning-tutor-toggle");
+        if (tutor && !tutor.classList.contains("is-collapsed")) toggle?.click();
+    }
+
+    function select(panel) {
+        if (panel === "navigation") {
+            closeTutor();
+            navigation?.classList.remove("is-collapsed");
+            navigation?.classList.add("is-mobile-open");
+            navigation?.querySelector(".workspace-navigation-toggle")?.setAttribute("aria-expanded", "true");
+            if (backdrop) backdrop.hidden = false;
+        } else {
+            navigation?.classList.add("is-collapsed");
+            navigation?.classList.remove("is-mobile-open");
+            navigation?.querySelector(".workspace-navigation-toggle")?.setAttribute("aria-expanded", "false");
+            if (backdrop) backdrop.hidden = true;
+            if (panel === "tutor" && tutor?.classList.contains("is-collapsed")) {
+                tutor.querySelector(".learning-tutor-toggle")?.click();
+            } else if (panel !== "tutor") {
+                closeTutor();
+            }
+        }
+        mark(panel);
+    }
+
+    controls.forEach(button => button.addEventListener("click", () => select(button.dataset.workspaceMobilePanel)));
+    backdrop?.addEventListener("click", () => select("workspace"));
+    window.addEventListener("dojo:workspace-panel", event => {
+        if (!window.matchMedia("(max-width: 700px)").matches) return;
+        mark(event.detail && event.detail.panel || "workspace");
+    });
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape" && window.matchMedia("(max-width: 700px)").matches) select("workspace");
+    });
 }
 
 $(() => {
@@ -252,6 +313,7 @@ $(() => {
     $(".close-link").hide();
     $("footer").hide();
     initializeWorkspaceNavigation();
+    initializeWorkspaceMobilePanels();
 
     channel.addEventListener("message", (event) => {
         window.location.reload();

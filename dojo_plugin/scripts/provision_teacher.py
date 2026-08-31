@@ -7,7 +7,7 @@ from CTFd.plugins.dojo_plugin.models import DojoAdmins, DojoUsers, Dojos
 
 username = os.environ.get("AISECEDU_TEACHER_USERNAME", "teacher").strip()
 email = os.environ.get(
-    "AISECEDU_TEACHER_EMAIL", "teacher@aisecedu.local"
+    "AISECEDU_TEACHER_EMAIL", "teacher@xuanjia.local"
 ).strip()
 password = os.environ.get("AISECEDU_TEACHER_PASSWORD", "")
 course_reference = os.environ.get(

@@ -1,0 +1,1797 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>勒索软件加密模拟 — 安全分析实验</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --surface: #1a1a2e;
+        --surface2: #16213e;
+        --text: #e2e8f0;
+        --text2: #cbd5e1;
+        --danger: #ef4444;
+        --danger-glow: #ff444488;
+        --success: #22c55e;
+        --info: #3b82f6;
+        --amber: #f59e0b;
+        --border: #334155;
+        --desktop-bg-start: #1a73e8;
+        --desktop-bg-end: #0d47a1;
+        --taskbar: #1e1e2e;
+        --icon-bg: transparent;
+        --font-mono: 'Courier New', 'Consolas', 'Monaco', monospace;
+        --font-sans: 'Segoe UI', 'Inter', 'Helvetica Neue', sans-serif;
+        --radius: 8px;
+        --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+        --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font-sans);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        overflow-x: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      /* ── Header ─────────────────────── */
+      .lab-header {
+        background: var(--surface);
+        border-bottom: 2px solid var(--border);
+        padding: 10px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+        z-index: 100;
+        position: relative;
+      }
+      .lab-title {
+        font-size: 1.2rem;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .lab-title .icon {
+        font-size: 1.5rem;
+      }
+      .progress-tracker {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .progress-step {
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        background: var(--surface2);
+        color: #64748b;
+        border: 1px solid transparent;
+        transition: var(--transition);
+        white-space: nowrap;
+        cursor: default;
+      }
+      .progress-step.active {
+        background: #1e3a5f;
+        color: var(--info);
+        border-color: var(--info);
+        box-shadow: 0 0 12px rgba(59, 130, 246, 0.3);
+        animation: pulse-step 2s infinite;
+      }
+      .progress-step.done {
+        background: #1a3d2a;
+        color: var(--success);
+        border-color: var(--success);
+      }
+      @keyframes pulse-step {
+        0%,
+        100% {
+          box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+        }
+        50% {
+          box-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
+        }
+      }
+
+      /* ── Main Layout ────────────────── */
+      .main-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+      }
+
+      /* ── Desktop Area ──────────────── */
+      .desktop-wrapper {
+        flex: 1;
+        position: relative;
+        min-height: 500px;
+        overflow: hidden;
+        border-bottom: 2px solid var(--border);
+      }
+      .desktop {
+        width: 100%;
+        height: 100%;
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(160deg, #1a6dd4 0%, #0b3d7a 30%, #0a2a55 60%, #16213e 100%);
+        background-size: 400% 400%;
+        transition:
+          background 1.5s ease-in-out,
+          filter 1.5s ease-in-out;
+        display: flex;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        padding: 28px 20px;
+        gap: 16px 20px;
+      }
+      .desktop.infected {
+        background: #0a0a0a !important;
+        filter: brightness(0.6) saturate(0.1);
+      }
+      .desktop.infected::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse at center, transparent 40%, #000000aa 100%);
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      /* ── File Icons ────────────────── */
+      .file-icon-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 90px;
+        cursor: pointer;
+        padding: 10px 6px;
+        border-radius: 8px;
+        transition: var(--transition);
+        position: relative;
+        z-index: 3;
+        text-align: center;
+        border: 2px solid transparent;
+      }
+      .file-icon-wrapper:hover {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.25);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+      }
+      .file-icon-wrapper.suspicious {
+        animation: subtle-pulse 3s infinite;
+        border: 2px dashed rgba(255, 180, 50, 0.6);
+      }
+      .file-icon-wrapper.suspicious:hover {
+        border-color: #f59e0b;
+        background: rgba(245, 158, 11, 0.15);
+        box-shadow: 0 0 24px rgba(245, 158, 11, 0.35);
+      }
+      @keyframes subtle-pulse {
+        0%,
+        100% {
+          border-color: rgba(255, 180, 50, 0.45);
+        }
+        50% {
+          border-color: rgba(255, 180, 50, 0.85);
+        }
+      }
+      .file-icon {
+        font-size: 44px;
+        line-height: 1;
+        transition: var(--transition);
+        position: relative;
+        filter: none;
+      }
+      .file-label {
+        font-size: 0.75rem;
+        color: #e8e8e8;
+        margin-top: 6px;
+        word-break: break-all;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+        transition: var(--transition);
+        max-width: 85px;
+        line-height: 1.2;
+      }
+      /* Encrypted state */
+      .file-icon-wrapper.encrypted {
+        pointer-events: none;
+        opacity: 0.8;
+      }
+      .file-icon-wrapper.encrypted .file-icon {
+        filter: grayscale(100%) brightness(0.7);
+      }
+      .file-icon-wrapper.encrypted .file-label {
+        color: #999;
+        text-decoration: line-through;
+        text-decoration-color: #ef4444;
+      }
+      .lock-overlay {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0);
+        font-size: 32px;
+        z-index: 5;
+        pointer-events: none;
+        transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        filter: drop-shadow(0 0 8px #ef4444);
+      }
+      .file-icon-wrapper.encrypted .lock-overlay {
+        transform: translate(-50%, -50%) scale(1);
+      }
+
+      /* ── CMD Flash ─────────────────── */
+      .cmd-flash {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0);
+        width: 420px;
+        max-width: 90vw;
+        background: #0c0c0c;
+        border: 2px solid #333;
+        border-radius: 6px;
+        z-index: 20;
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        color: #0f0;
+        padding: 14px;
+        box-shadow: 0 0 40px rgba(0, 0, 0, 0.7);
+        transition: transform 0.15s ease-out;
+        pointer-events: none;
+      }
+      .cmd-flash.visible {
+        transform: translate(-50%, -50%) scale(1);
+      }
+      .cmd-line {
+        margin: 2px 0;
+        opacity: 0;
+        animation: type-in 0.08s forwards;
+      }
+      @keyframes type-in {
+        to {
+          opacity: 1;
+        }
+      }
+
+      /* ── Ransom Note ───────────────── */
+      .ransom-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 30;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.6s ease;
+      }
+      .ransom-overlay.active {
+        opacity: 1;
+        pointer-events: all;
+      }
+      .ransom-note {
+        background: linear-gradient(135deg, #1a0000 0%, #2d0000 40%, #1a0000 100%);
+        border: 3px solid #ef4444;
+        border-radius: 12px;
+        padding: 28px 24px;
+        max-width: 500px;
+        width: 90%;
+        text-align: center;
+        box-shadow:
+          0 0 60px rgba(239, 68, 68, 0.5),
+          0 0 120px rgba(239, 68, 68, 0.2),
+          inset 0 0 40px rgba(255, 0, 0, 0.08);
+        animation: ransom-enter 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        color: #fff;
+      }
+      @keyframes ransom-enter {
+        0% {
+          transform: scale(0.3);
+          opacity: 0;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+      .ransom-icon {
+        font-size: 64px;
+        animation: skull-bob 1.5s infinite;
+      }
+      @keyframes skull-bob {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-12px);
+        }
+      }
+      .ransom-title {
+        font-size: 1.8rem;
+        font-weight: 900;
+        color: #ef4444;
+        margin: 8px 0;
+        text-shadow: 0 0 20px #ef444488;
+        letter-spacing: 1px;
+      }
+      .ransom-btc {
+        background: #111;
+        border: 1px solid #555;
+        border-radius: 6px;
+        padding: 8px 14px;
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        color: #f59e0b;
+        word-break: break-all;
+        margin: 10px 0;
+        display: inline-block;
+        max-width: 100%;
+        cursor: text;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .ransom-timer {
+        font-family: var(--font-mono);
+        font-size: 2.5rem;
+        font-weight: 900;
+        color: #ef4444;
+        margin: 12px 0;
+        text-shadow: 0 0 16px #ef444488;
+        animation: timer-pulse 1s infinite;
+      }
+      @keyframes timer-pulse {
+        0%,
+        100% {
+          text-shadow: 0 0 16px #ef444488;
+        }
+        50% {
+          text-shadow:
+            0 0 32px #ef4444cc,
+            0 0 48px #ef444466;
+        }
+      }
+      .ransom-warning {
+        font-size: 0.85rem;
+        color: #ffaaaa;
+        margin-top: 8px;
+        line-height: 1.5;
+      }
+
+      /* ── Taskbar ───────────────────── */
+      .taskbar {
+        height: 44px;
+        background: var(--taskbar);
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        gap: 10px;
+        border-top: 1px solid #333;
+        z-index: 50;
+        position: relative;
+        flex-shrink: 0;
+      }
+      .taskbar-btn {
+        padding: 6px 14px;
+        border-radius: 4px;
+        background: #2a2a3a;
+        color: #ccc;
+        font-size: 0.8rem;
+        cursor: pointer;
+        border: none;
+        transition: var(--transition);
+        font-family: var(--font-sans);
+      }
+      .taskbar-btn:hover {
+        background: #3a3a4a;
+        color: #fff;
+      }
+      .taskbar-clock {
+        margin-left: auto;
+        font-size: 0.8rem;
+        color: #bbb;
+        font-family: var(--font-mono);
+      }
+      .taskbar-alert {
+        background: #ef4444;
+        color: #fff;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.7rem;
+        font-weight: 700;
+        animation: blink-red 0.8s infinite;
+        margin-left: 6px;
+      }
+      @keyframes blink-red {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+
+      /* ── Analysis Panel ────────────── */
+      .analysis-section {
+        padding: 20px 24px;
+        background: var(--surface);
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        border-top: 2px solid var(--border);
+      }
+      .card {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 18px 20px;
+        box-shadow: var(--shadow);
+        transition: var(--transition);
+      }
+      .card h3 {
+        font-size: 1rem;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text);
+      }
+      .card h3 .badge {
+        font-size: 0.7rem;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .badge-danger {
+        background: #ef444422;
+        color: #ef4444;
+        border: 1px solid #ef444466;
+      }
+      .badge-info {
+        background: #3b82f622;
+        color: #3b82f6;
+        border: 1px solid #3b82f666;
+      }
+      .badge-success {
+        background: #22c55e22;
+        color: #22c55e;
+        border: 1px solid #22c55e66;
+      }
+      .badge-amber {
+        background: #f59e0b22;
+        color: #f59e0b;
+        border: 1px solid #f59e0b66;
+      }
+
+      /* IOC Input */
+      .ioc-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 8px 0;
+      }
+      .ioc-row label {
+        font-weight: 600;
+        min-width: 100px;
+        font-size: 0.85rem;
+        color: var(--text2);
+      }
+      .ioc-row input {
+        flex: 1;
+        min-width: 180px;
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 2px solid var(--border);
+        background: #1a1a2e;
+        color: #e2e8f0;
+        font-family: var(--font-mono);
+        font-size: 0.85rem;
+        transition: var(--transition);
+      }
+      .ioc-row input:focus {
+        outline: none;
+        border-color: var(--info);
+        box-shadow: 0 0 12px rgba(59, 130, 246, 0.25);
+      }
+      .ioc-row input.correct {
+        border-color: var(--success) !important;
+        background: #1a3d2a !important;
+        box-shadow: 0 0 12px rgba(34, 197, 94, 0.3) !important;
+      }
+      .ioc-row input.wrong {
+        border-color: #ef4444 !important;
+        animation: shake 0.4s;
+      }
+      @keyframes shake {
+        0%,
+        100% {
+          transform: translateX(0);
+        }
+        25% {
+          transform: translateX(-6px);
+        }
+        75% {
+          transform: translateX(6px);
+        }
+      }
+      .ioc-check {
+        font-size: 1.2rem;
+        visibility: hidden;
+        width: 28px;
+        text-align: center;
+      }
+      .ioc-check.visible {
+        visibility: visible;
+      }
+
+      /* Buttons */
+      .btn {
+        padding: 10px 20px;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 0.9rem;
+        cursor: pointer;
+        border: none;
+        transition: var(--transition);
+        font-family: var(--font-sans);
+        letter-spacing: 0.3px;
+      }
+      .btn-primary {
+        background: var(--info);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: #2563eb;
+        box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+      }
+      .btn-danger {
+        background: #ef4444;
+        color: #fff;
+      }
+      .btn-danger:hover {
+        background: #dc2626;
+        box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+      }
+      .btn-outline {
+        background: transparent;
+        border: 2px solid var(--border);
+        color: var(--text2);
+      }
+      .btn-outline:hover {
+        border-color: #fff;
+        color: #fff;
+      }
+      .btn-sm {
+        padding: 6px 12px;
+        font-size: 0.78rem;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+
+      /* Flag */
+      .flag-reveal {
+        background: #1a1a0a;
+        border: 2px solid #f59e0b;
+        border-radius: var(--radius);
+        padding: 16px 20px;
+        text-align: center;
+        font-family: var(--font-mono);
+        font-size: 1.1rem;
+        color: #f59e0b;
+        animation: glow-flag 1.5s infinite;
+        opacity: 0;
+        transform: translateY(20px);
+        transition: all 0.5s ease;
+        pointer-events: none;
+      }
+      .flag-reveal.visible {
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: all;
+      }
+      @keyframes glow-flag {
+        0%,
+        100% {
+          box-shadow: 0 0 20px #f59e0b44;
+        }
+        50% {
+          box-shadow:
+            0 0 40px #f59e0b88,
+            0 0 60px #f59e0b44;
+        }
+      }
+
+      /* Accordion */
+      .accordion-item {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        margin: 6px 0;
+        overflow: hidden;
+        background: #1a1a2e;
+      }
+      .accordion-header {
+        padding: 12px 16px;
+        cursor: pointer;
+        font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: var(--transition);
+        color: var(--text2);
+        font-size: 0.9rem;
+      }
+      .accordion-header:hover {
+        background: #1e1e3a;
+        color: #fff;
+      }
+      .accordion-body {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.4s ease;
+        background: #111827;
+        padding: 0 16px;
+        font-size: 0.85rem;
+        color: #bbb;
+        line-height: 1.6;
+      }
+      .accordion-item.open .accordion-body {
+        max-height: 300px;
+        padding: 12px 16px;
+      }
+      .accordion-item.open .accordion-header {
+        color: #fff;
+        background: #1e1e3a;
+      }
+      .accordion-arrow {
+        transition: transform 0.3s;
+      }
+      .accordion-item.open .accordion-arrow {
+        transform: rotate(180deg);
+      }
+
+      /* Defense sort */
+      .defense-list {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .defense-item {
+        padding: 10px 14px;
+        background: #1a1a2e;
+        border: 2px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: var(--transition);
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .defense-item:hover {
+        border-color: #888;
+        background: #1e1e3a;
+      }
+      .defense-item.selected {
+        border-color: var(--success) !important;
+        background: #1a3d2a !important;
+        color: #fff !important;
+        order: -1;
+        animation: select-pop 0.3s ease;
+      }
+      @keyframes select-pop {
+        0% {
+          transform: scale(0.97);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
+      .defense-rank {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: var(--success);
+        color: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 900;
+        font-size: 0.8rem;
+        flex-shrink: 0;
+      }
+      .defense-item:not(.selected) .defense-rank {
+        background: #333;
+        color: #888;
+      }
+
+      /* Report textarea */
+      .report-area {
+        width: 100%;
+        min-height: 100px;
+        padding: 12px;
+        border-radius: 6px;
+        border: 2px solid var(--border);
+        background: #1a1a2e;
+        color: #e2e8f0;
+        font-family: var(--font-sans);
+        font-size: 0.9rem;
+        resize: vertical;
+        transition: var(--transition);
+      }
+      .report-area:focus {
+        outline: none;
+        border-color: var(--info);
+        box-shadow: 0 0 12px rgba(59, 130, 246, 0.25);
+      }
+
+      /* Desktop watermark */
+      .watermark {
+        position: absolute;
+        bottom: 60px;
+        right: 20px;
+        font-size: 0.7rem;
+        color: rgba(255, 255, 255, 0.25);
+        z-index: 1;
+        pointer-events: none;
+        font-family: var(--font-mono);
+      }
+
+      /* Toast */
+      .toast {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%) translateY(-120px);
+        background: #1a1a2e;
+        border: 2px solid var(--info);
+        border-radius: 8px;
+        padding: 10px 20px;
+        z-index: 200;
+        font-weight: 600;
+        transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        pointer-events: none;
+        font-size: 0.9rem;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+      }
+      .toast.show {
+        transform: translateX(-50%) translateY(0);
+      }
+
+      @media (max-width: 768px) {
+        .desktop {
+          padding: 16px 10px;
+          gap: 10px 12px;
+        }
+        .file-icon-wrapper {
+          width: 70px;
+          padding: 6px 4px;
+        }
+        .file-icon {
+          font-size: 32px;
+        }
+        .file-label {
+          font-size: 0.65rem;
+          max-width: 65px;
+        }
+        .ransom-note {
+          padding: 18px 14px;
+        }
+        .ransom-title {
+          font-size: 1.3rem;
+        }
+        .ransom-timer {
+          font-size: 1.8rem;
+        }
+        .cmd-flash {
+          width: 280px;
+          font-size: 0.7rem;
+          padding: 10px;
+        }
+        .lab-header {
+          padding: 8px 12px;
+          gap: 6px;
+        }
+        .progress-step {
+          font-size: 0.7rem;
+          padding: 4px 10px;
+        }
+        .ioc-row {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .ioc-row label {
+          min-width: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <!-- 此模拟仅用于授权教学环境，演示勒索软件的行为模式与防御策略 -->
+
+    <!-- ── Header ─────────────────────── -->
+    <header class="lab-header">
+      <div class="lab-title"><span class="icon">🔬</span> 勒索软件加密模拟 — 安全分析实验</div>
+      <div class="progress-tracker" id="progressTracker">
+        <span class="progress-step active" data-step="1">步骤 1: 识别威胁</span>
+        <span class="progress-step" data-step="2">步骤 2: 触发模拟</span>
+        <span class="progress-step" data-step="3">步骤 3: 影响分析</span>
+        <span class="progress-step" data-step="4">步骤 4: IOC 提取</span>
+        <span class="progress-step" data-step="5">步骤 5: 防御报告</span>
+      </div>
+    </header>
+
+    <!-- ── Toast ──────────────────────── -->
+    <div class="toast" id="toast"></div>
+
+    <!-- ── Main ──────────────────────── -->
+    <div class="main-container">
+      <!-- Desktop -->
+      <div class="desktop-wrapper">
+        <div class="desktop" id="desktop">
+          <!-- File icons generated by JS -->
+          <div class="watermark">Windows 10 模拟桌面 · 教学环境</div>
+          <!-- CMD Flash -->
+          <div class="cmd-flash" id="cmdFlash">
+            <div class="cmd-line">C:\Users\victim\Downloads> salary.exe</div>
+            <div class="cmd-line" style="animation-delay: 0.15s">[+] 初始化加密模块...</div>
+            <div class="cmd-line" style="animation-delay: 0.35s">[+] 生成 AES-256 密钥...</div>
+            <div class="cmd-line" style="animation-delay: 0.55s">
+              [+] 扫描目标文件扩展名: .docx .xlsx .jpg .pdf
+            </div>
+            <div class="cmd-line" style="animation-delay: 0.75s">[+] 正在加密: 季度报告.docx ✓</div>
+            <div class="cmd-line" style="animation-delay: 0.95s">[+] 正在加密: 客户名单.xlsx ✓</div>
+            <div class="cmd-line" style="animation-delay: 1.15s">[+] 正在加密: 合同模板.docx ✓</div>
+            <div class="cmd-line" style="animation-delay: 1.35s">[+] 正在加密: 工资明细.xlsx ✓</div>
+            <div class="cmd-line" style="animation-delay: 1.55s">[+] 正在加密: 项目计划.docx ✓</div>
+            <div class="cmd-line" style="animation-delay: 1.75s">[+] 正在加密: 团队合影.jpg ✓</div>
+            <div class="cmd-line" style="animation-delay: 2s; color: #ef4444">
+              [!] 加密完成。删除卷影副本...
+            </div>
+            <div class="cmd-line" style="animation-delay: 2.2s; color: #ef4444">
+              [!] vssadmin delete shadows /all /quiet
+            </div>
+          </div>
+          <!-- Ransom Overlay -->
+          <div class="ransom-overlay" id="ransomOverlay">
+            <div class="ransom-note">
+              <div class="ransom-icon">☠️</div>
+              <div class="ransom-title">你的文件已被加密！</div>
+              <p style="color: #ccc; margin: 6px 0">
+                所有文档、电子表格、照片和数据库已使用 <strong>AES-256 + RSA-2048</strong> 加密。
+              </p>
+              <p style="color: #ff9999; font-size: 0.85rem">
+                没有解密密钥，你的文件将<strong>永久无法恢复</strong>。
+              </p>
+              <div style="margin: 10px 0">
+                <span style="color: #f59e0b; font-weight: 700"
+                  >💰 赎金金额: <strong>0.5 BTC</strong></span
+                >
+              </div>
+              <div>比特币地址:</div>
+              <div class="ransom-btc" id="btcAddress">1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa</div>
+              <div class="ransom-timer" id="ransomTimer">00:05:00</div>
+              <div class="ransom-warning">
+                ⚠️ 计时结束后，解密密钥将被永久销毁。<br />不要尝试关闭计算机或使用第三方解密工具。
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Taskbar -->
+      <div class="taskbar">
+        <span class="taskbar-btn">⊞ 开始</span>
+        <span class="taskbar-btn">📁 文件资源管理器</span>
+        <span class="taskbar-btn" style="opacity: 0.6">🌐 浏览器</span>
+        <span class="taskbar-clock" id="taskbarClock">--:--</span>
+        <span class="taskbar-alert" id="taskbarAlert" style="display: none">!</span>
+      </div>
+
+      <!-- Analysis Section -->
+      <div class="analysis-section" id="analysisSection">
+        <!-- Card: What Happened -->
+        <div class="card" id="whatHappenedCard">
+          <h3>
+            <span class="badge badge-danger">事件分析</span> 发生了什么？— 勒索软件加密过程逐步解析
+          </h3>
+          <div class="accordion-item">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+              <span>🔓 步骤 1: 初始执行 — 用户运行恶意文件</span>
+              <span class="accordion-arrow">▼</span>
+            </div>
+            <div class="accordion-body">
+              用户双击
+              <code>salary.exe</code
+              >（伪装成工资明细的可执行文件）。该文件来自未知来源（可能是钓鱼邮件附件）。
+              恶意软件首先检查是否在沙箱或虚拟机环境中运行，若检测到分析环境则可能延迟执行以逃避检测。
+              <div
+                id="salaryHashEvidence"
+                style="
+                  margin-top: 10px;
+                  padding: 10px 12px;
+                  border: 1px solid #3b82f655;
+                  border-radius: 6px;
+                  background: #0f172a;
+                "
+              >
+                <strong style="color: #93c5fd">EDR 样本属性</strong><br />
+                文件：<code>salary.exe</code><br />
+                SHA-256：<code style="user-select: all; word-break: break-all; color: #67e8f9"
+                  >2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881</code
+                >
+              </div>
+            </div>
+          </div>
+          <div class="accordion-item">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+              <span>🔑 步骤 2: 密钥生成 — 混合加密体系</span>
+              <span class="accordion-arrow">▼</span>
+            </div>
+            <div class="accordion-body">
+              勒索软件在本地生成 <strong>AES-256 对称密钥</strong>用于快速加密文件。
+              然后使用攻击者的 <strong>RSA-2048 公钥</strong>（硬编码在恶意软件中）加密该 AES 密钥。
+              只有攻击者持有对应的 RSA 私钥，因此<strong>只有攻击者能解密</strong>。
+            </div>
+          </div>
+          <div class="accordion-item">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+              <span>📂 步骤 3: 文件扫描 — 定位目标文件</span>
+              <span class="accordion-arrow">▼</span>
+            </div>
+            <div class="accordion-body">
+              恶意软件遍历用户目录（桌面、文档、图片等），搜索常见文件扩展名：
+              <code>.docx</code>、<code>.xlsx</code>、<code>.jpg</code>、<code>.pdf</code>、<code
+                >.pptx</code
+              >
+              等。 它会跳过系统文件以避免破坏操作系统功能（确保勒索信息能正常显示）。
+            </div>
+          </div>
+          <div class="accordion-item">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+              <span>🔒 步骤 4: 文件加密 — AES-256 批量加密</span>
+              <span class="accordion-arrow">▼</span>
+            </div>
+            <div class="accordion-body">
+              每个目标文件被读取、使用 AES-256
+              加密，然后写回磁盘（覆盖原文件或创建加密副本后删除原文件）。
+              加密后的文件通常被添加新扩展名（如 <code>.locked</code> 或 <code>.encrypted</code>）。
+              原始文件内容被密文替代，<strong>没有密钥无法恢复</strong>。
+            </div>
+          </div>
+          <div class="accordion-item">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+              <span>🗑️ 步骤 5: 销毁恢复途径</span>
+              <span class="accordion-arrow">▼</span>
+            </div>
+            <div class="accordion-body">
+              执行 <code>vssadmin delete shadows /all /quiet</code> 删除 Windows
+              卷影副本（系统还原点），
+              防止用户通过"以前的版本"功能恢复文件。同时清空回收站，删除文件历史记录。
+            </div>
+          </div>
+          <div class="accordion-item">
+            <div class="accordion-header" onclick="toggleAccordion(this)">
+              <span>💀 步骤 6: 勒索通知 — 显示赎金信息</span>
+              <span class="accordion-arrow">▼</span>
+            </div>
+            <div class="accordion-body">
+              加密完成后，恶意软件修改桌面壁纸（替换为黑色背景）、显示勒索信息弹窗，
+              包含比特币地址、赎金金额和倒计时。制造紧迫感，迫使受害者付款。
+              但<strong>即使付款，也不能保证文件会被恢复</strong>——攻击者可能根本不提供解密工具。
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: IOC Extraction -->
+        <div class="card" id="iocCard">
+          <h3>
+            <span class="badge badge-amber">IOC 提取</span> 从模拟攻击中提取威胁指标 (Indicators of
+            Compromise)
+          </h3>
+          <p style="font-size: 0.85rem; color: #bbb; margin-bottom: 10px">
+            根据你在模拟中观察到的信息，填写以下 IOC 字段。每个正确提取的 IOC 会显示 ✅。
+          </p>
+          <div class="ioc-row">
+            <label>可疑文件名:</label>
+            <input
+              type="text"
+              id="iocFilename"
+              data-graded-input
+              data-answer-source="salaryHashEvidence"
+              placeholder="例如: malware.exe"
+              autocomplete="off"
+            />
+            <span class="ioc-check" id="checkFilename">✅</span>
+          </div>
+          <div class="ioc-row">
+            <label>样本 SHA-256:</label>
+            <input
+              type="text"
+              id="iocHash"
+              data-graded-input
+              data-answer-source="salaryHashEvidence"
+              placeholder="从 EDR 样本属性中复制完整 Hash"
+              autocomplete="off"
+            />
+            <span class="ioc-check" id="checkHash">✅</span>
+          </div>
+          <div class="ioc-row">
+            <label>比特币地址:</label>
+            <input
+              type="text"
+              id="iocBtc"
+              placeholder="从勒索信息中复制比特币地址"
+              autocomplete="off"
+            />
+            <span class="ioc-check" id="checkBtc">✅</span>
+          </div>
+          <div class="ioc-row">
+            <label>文件扩展名变化:</label>
+            <input
+              type="text"
+              id="iocExtension"
+              placeholder="加密后添加的扩展名"
+              autocomplete="off"
+            />
+            <span class="ioc-check" id="checkExtension">✅</span>
+          </div>
+          <div class="ioc-row">
+            <label>攻击类型:</label>
+            <input
+              type="text"
+              id="iocType"
+              placeholder="例如: 勒索软件 / ransomware"
+              autocomplete="off"
+            />
+            <span class="ioc-check" id="checkType">✅</span>
+          </div>
+          <button class="btn btn-primary btn-sm" id="btnValidateIOC" onclick="validateAllIOCs()">
+            🔍 验证所有 IOC
+          </button>
+          <span id="iocScore" style="margin-left: 12px; font-weight: 600; font-size: 0.9rem"></span>
+        </div>
+
+        <!-- Card: Defense Strategy -->
+        <div class="card" id="defenseCard">
+          <h3>
+            <span class="badge badge-info">防御策略</span>
+            按优先级排列防御措施（点击选择，从最重要开始）
+          </h3>
+          <p style="font-size: 0.85rem; color: #bbb; margin-bottom: 10px">
+            依次点击你认为最重要的防御措施。正确的优先级排序有助于构建纵深防御体系。
+          </p>
+          <div class="defense-list" id="defenseList">
+            <div class="defense-item" data-defense="backup" onclick="selectDefense(this)">
+              <span class="defense-rank">?</span> 离线备份 (3-2-1 备份策略)
+            </div>
+            <div class="defense-item" data-defense="edr" onclick="selectDefense(this)">
+              <span class="defense-rank">?</span> 端点检测与响应 (EDR)
+            </div>
+            <div class="defense-item" data-defense="email" onclick="selectDefense(this)">
+              <span class="defense-rank">?</span> 邮件安全网关与附件扫描
+            </div>
+            <div class="defense-item" data-defense="training" onclick="selectDefense(this)">
+              <span class="defense-rank">?</span> 用户安全意识培训
+            </div>
+            <div class="defense-item" data-defense="leastpriv" onclick="selectDefense(this)">
+              <span class="defense-rank">?</span> 最小权限原则 (Least Privilege)
+            </div>
+            <div class="defense-item" data-defense="segment" onclick="selectDefense(this)">
+              <span class="defense-rank">?</span> 网络分段与隔离
+            </div>
+          </div>
+          <button
+            class="btn btn-outline btn-sm"
+            id="btnResetDefense"
+            onclick="resetDefenses()"
+            style="margin-top: 8px"
+          >
+            🔄 重新排序
+          </button>
+          <button
+            class="btn btn-primary btn-sm"
+            id="btnCheckDefense"
+            onclick="checkDefenseOrder()"
+            style="margin-top: 8px; margin-left: 8px"
+          >
+            ✅ 检查优先级
+          </button>
+          <span
+            id="defenseFeedback"
+            style="margin-left: 12px; font-weight: 600; font-size: 0.85rem"
+          ></span>
+        </div>
+
+        <!-- Card: Write Report -->
+        <div class="card" id="reportCard">
+          <h3><span class="badge badge-success">事件报告</span> 撰写简要的事件分析摘要</h3>
+          <p style="font-size: 0.85rem; color: #bbb; margin-bottom: 8px">
+            请用 2-4 句话描述本次模拟攻击的<strong>攻击向量、影响范围和推荐防御措施</strong>。
+          </p>
+          <textarea
+            class="report-area"
+            id="reportText"
+            placeholder="在此输入事件分析摘要...&#10;例如：攻击者通过钓鱼邮件分发伪装成工资明细的可执行文件，用户执行后触发勒索软件加密本地文件..."
+          ></textarea>
+          <button
+            class="btn btn-primary btn-sm"
+            id="btnSubmitReport"
+            onclick="submitReport()"
+            style="margin-top: 8px"
+          >
+            📝 提交报告
+          </button>
+          <span
+            id="reportFeedback"
+            style="margin-left: 12px; font-weight: 600; font-size: 0.85rem"
+          ></span>
+        </div>
+
+        <!-- Flag -->
+        <div class="flag-reveal" id="flagReveal">
+          🏆 <strong>FLAG 已捕获!</strong><br />
+          <code style="font-size: 1rem">FLAG{r4ns0mw4r3_4n4lys1s_c0mpl3t3_d3f3nd}</code><br />
+          <span style="font-size: 0.75rem; color: #ccc"
+            >所有分析步骤已完成 — 你已掌握勒索软件攻击链与防御策略</span
+          >
+        </div>
+
+        <!-- Reset -->
+        <div style="text-align: center; padding: 10px">
+          <button class="btn btn-outline" onclick="resetSimulation()">
+            🔄 重置模拟 (重新开始)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+      // 此代码仅用于授权教学环境中的安全分析实验
+
+      (function () {
+        // ── State ──────────────────────
+        const state = {
+          phase: 1, // 1=identify, 2=triggered, 3=impact, 4=ioc, 5=report
+          infected: false,
+          encryptedFiles: [],
+          timerSeconds: 300, // 5 minutes countdown
+          timerInterval: null,
+          timerExpired: false,
+          iocsFound: { filename: false, hash: false, btc: false, extension: false, type: false },
+          defenseSelections: [],
+          reportSubmitted: false,
+          flagRevealed: false,
+        };
+
+        // ── File definitions ──────────
+        const files = [
+          { id: 'file1', name: '季度报告.docx', icon: '📄', type: 'document' },
+          { id: 'file2', name: '客户名单.xlsx', icon: '📊', type: 'spreadsheet' },
+          { id: 'file3', name: '产品照片', icon: '📁', type: 'folder' },
+          { id: 'file4', name: '合同模板.docx', icon: '📄', type: 'document' },
+          { id: 'file5', name: '工资明细.xlsx', icon: '📊', type: 'spreadsheet' },
+          { id: 'file6', name: '项目计划.docx', icon: '📄', type: 'document' },
+          { id: 'file7', name: '团队合影.jpg', icon: '🖼️', type: 'image' },
+          { id: 'salary', name: 'salary.exe', icon: '⚙️', type: 'executable', suspicious: true },
+        ];
+
+        // ── DOM refs ──────────────────
+        const desktop = document.getElementById('desktop');
+        const cmdFlash = document.getElementById('cmdFlash');
+        const ransomOverlay = document.getElementById('ransomOverlay');
+        const ransomTimer = document.getElementById('ransomTimer');
+        const taskbarAlert = document.getElementById('taskbarAlert');
+        const taskbarClock = document.getElementById('taskbarClock');
+        const toast = document.getElementById('toast');
+        const flagReveal = document.getElementById('flagReveal');
+        const progressSteps = document.querySelectorAll('.progress-step');
+
+        // ── Build desktop icons ───────
+        function buildDesktopIcons() {
+          // Clear existing icons (keep watermark, cmdFlash, ransomOverlay)
+          const existingIcons = desktop.querySelectorAll('.file-icon-wrapper');
+          existingIcons.forEach((el) => el.remove());
+
+          files.forEach((file, index) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'file-icon-wrapper';
+            if (file.suspicious) wrapper.classList.add('suspicious');
+            wrapper.setAttribute('data-file-id', file.id);
+            wrapper.setAttribute('data-index', index);
+            wrapper.style.animationDelay = index * 0.05 + 's';
+
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'file-icon';
+            iconSpan.textContent = file.icon;
+
+            const lockOverlay = document.createElement('span');
+            lockOverlay.className = 'lock-overlay';
+            lockOverlay.textContent = '🔒';
+
+            const label = document.createElement('span');
+            label.className = 'file-label';
+            label.textContent = file.name;
+
+            wrapper.appendChild(iconSpan);
+            wrapper.appendChild(lockOverlay);
+            wrapper.appendChild(label);
+
+            wrapper.addEventListener('click', () => handleFileClick(file, wrapper));
+
+            desktop.appendChild(wrapper);
+          });
+        }
+
+        // ── Handle file click ─────────
+        function handleFileClick(file, wrapper) {
+          if (state.infected && !file.suspicious) {
+            // Already infected, normal files are locked
+            showToast('🔒 文件已加密 — 无法访问');
+            return;
+          }
+          if (state.infected && file.suspicious) {
+            showToast('⚠️ salary.exe 已完成其破坏性操作');
+            return;
+          }
+          if (file.suspicious && !state.infected) {
+            // Trigger the simulation
+            triggerRansomware(wrapper);
+          } else if (!state.infected) {
+            showToast('📄 这是正常文件 — 看起来没有问题');
+          }
+        }
+
+        // ── Trigger ransomware ────────
+        function triggerRansomware(salaryWrapper) {
+          if (state.infected) return;
+          state.infected = true;
+          state.phase = 2;
+          updateProgress(2);
+
+          // Highlight salary.exe click
+          salaryWrapper.style.borderColor = '#ef4444';
+          salaryWrapper.style.boxShadow = '0 0 30px rgba(239,68,68,0.7)';
+          setTimeout(() => {
+            salaryWrapper.style.borderColor = 'transparent';
+            salaryWrapper.style.boxShadow = '';
+          }, 800);
+
+          // Show CMD flash
+          showCmdFlash();
+
+          // Start encrypting files one by one
+          const normalFiles = files.filter((f) => !f.suspicious);
+          const allWrappers = desktop.querySelectorAll('.file-icon-wrapper');
+
+          normalFiles.forEach((file, i) => {
+            setTimeout(
+              () => {
+                const wrapper = desktop.querySelector(`[data-file-id="${file.id}"]`);
+                if (wrapper) {
+                  encryptFileIcon(wrapper, file);
+                  state.encryptedFiles.push(file.id);
+                }
+                // After last file is encrypted
+                if (i === normalFiles.length - 1) {
+                  setTimeout(() => {
+                    finalizeInfection();
+                  }, 500);
+                }
+              },
+              1200 + i * 350,
+            );
+          });
+
+          // Also encrypt the salary.exe icon after a delay
+          setTimeout(
+            () => {
+              if (salaryWrapper) {
+                encryptFileIcon(salaryWrapper, { id: 'salary', name: 'salary.exe', icon: '⚙️' });
+              }
+            },
+            1200 + normalFiles.length * 350 + 200,
+          );
+        }
+
+        function encryptFileIcon(wrapper, file) {
+          wrapper.classList.add('encrypted');
+          const label = wrapper.querySelector('.file-label');
+          if (label && !file.suspicious) {
+            label.textContent = file.name + '.locked';
+          }
+          if (label && file.suspicious) {
+            label.textContent = 'salary.exe.locked';
+          }
+          // Pulse red briefly
+          wrapper.style.boxShadow = '0 0 20px rgba(239,68,68,0.6)';
+          setTimeout(() => {
+            wrapper.style.boxShadow = '';
+          }, 600);
+        }
+
+        function showCmdFlash() {
+          cmdFlash.classList.add('visible');
+          setTimeout(() => {
+            cmdFlash.classList.remove('visible');
+          }, 2600);
+        }
+
+        function finalizeInfection() {
+          // Darken desktop
+          desktop.classList.add('infected');
+          // Show ransom overlay
+          ransomOverlay.classList.add('active');
+          // Show taskbar alert
+          taskbarAlert.style.display = 'flex';
+          // Start timer
+          startCountdown();
+          // Update phase
+          state.phase = 3;
+          updateProgress(3);
+          // Scroll to analysis
+          document
+            .getElementById('analysisSection')
+            .scrollIntoView({ behavior: 'smooth', block: 'start' });
+          showToast('💀 勒索软件已激活！请观察影响并开始分析。');
+        }
+
+        // ── Countdown timer ───────────
+        function startCountdown() {
+          if (state.timerInterval) clearInterval(state.timerInterval);
+          state.timerSeconds = 300; // 5 minutes
+          updateTimerDisplay();
+          state.timerInterval = setInterval(() => {
+            state.timerSeconds--;
+            updateTimerDisplay();
+            if (state.timerSeconds <= 0) {
+              clearInterval(state.timerInterval);
+              state.timerInterval = null;
+              state.timerExpired = true;
+              ransomTimer.textContent = '00:00:00';
+              ransomTimer.style.color = '#ff0000';
+              ransomTimer.style.animation = 'timer-pulse 0.4s infinite';
+              showToast('⏰ 倒计时结束！在真实攻击中，解密密钥可能已被销毁。');
+              taskbarAlert.style.animation = 'blink-red 0.3s infinite';
+            }
+            // Flash timer when low
+            if (state.timerSeconds <= 60 && state.timerSeconds > 0) {
+              ransomTimer.style.animation = 'timer-pulse 0.5s infinite';
+            }
+          }, 1000);
+        }
+
+        function updateTimerDisplay() {
+          const mins = Math.floor(state.timerSeconds / 60);
+          const secs = state.timerSeconds % 60;
+          ransomTimer.textContent =
+            String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0') + ':00';
+        }
+
+        // ── Toast ─────────────────────
+        function showToast(msg) {
+          toast.textContent = msg;
+          toast.classList.add('show');
+          clearTimeout(toast._timeout);
+          toast._timeout = setTimeout(() => {
+            toast.classList.remove('show');
+          }, 2500);
+        }
+
+        // ── Progress tracker ──────────
+        function updateProgress(step) {
+          progressSteps.forEach((s) => {
+            const sNum = parseInt(s.getAttribute('data-step'));
+            s.classList.remove('active', 'done');
+            if (sNum < step) s.classList.add('done');
+            if (sNum === step) s.classList.add('active');
+          });
+        }
+
+        function markAllProgressDone() {
+          progressSteps.forEach((s) => {
+            s.classList.remove('active');
+            s.classList.add('done');
+          });
+        }
+
+        // ── Accordion ─────────────────
+        function toggleAccordion(header) {
+          const item = header.parentElement;
+          item.classList.toggle('open');
+        }
+
+        // ── IOC Validation ────────────
+        function validateAllIOCs() {
+          if (!state.infected) {
+            showToast('⚠️ 请先触发勒索软件模拟（点击 salary.exe）');
+            return;
+          }
+          const filenameInput = document.getElementById('iocFilename');
+          const hashInput = document.getElementById('iocHash');
+          const btcInput = document.getElementById('iocBtc');
+          const extInput = document.getElementById('iocExtension');
+          const typeInput = document.getElementById('iocType');
+
+          const checks = [
+            {
+              input: filenameInput,
+              checkId: 'checkFilename',
+              key: 'filename',
+              validValues: ['salary.exe', 'salary.exe', 'SALARY.EXE', 'Salary.exe'],
+            },
+            {
+              input: hashInput,
+              checkId: 'checkHash',
+              key: 'hash',
+              validValues: ['2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881'],
+            },
+            {
+              input: btcInput,
+              checkId: 'checkBtc',
+              key: 'btc',
+              validValues: ['1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa'],
+            },
+            {
+              input: extInput,
+              checkId: 'checkExtension',
+              key: 'extension',
+              validValues: ['.locked', 'locked', '.locked extension', 'locked extension'],
+            },
+            {
+              input: typeInput,
+              checkId: 'checkType',
+              key: 'type',
+              validValues: [
+                'ransomware',
+                '勒索软件',
+                '勒索病毒',
+                'ransomware attack',
+                '勒索软件攻击',
+              ],
+            },
+          ];
+
+          let correctCount = 0;
+          checks.forEach((check) => {
+            const val = check.input.value.trim().toLowerCase();
+            const isValid = check.validValues.some((v) => v.toLowerCase() === val);
+            const checkSpan = document.getElementById(check.checkId);
+            if (isValid && val.length > 0) {
+              check.input.classList.add('correct');
+              check.input.classList.remove('wrong');
+              checkSpan.classList.add('visible');
+              state.iocsFound[check.key] = true;
+              correctCount++;
+            } else if (val.length > 0) {
+              check.input.classList.add('wrong');
+              check.input.classList.remove('correct');
+              checkSpan.classList.remove('visible');
+              state.iocsFound[check.key] = false;
+              setTimeout(() => check.input.classList.remove('wrong'), 500);
+            } else {
+              check.input.classList.remove('correct', 'wrong');
+              checkSpan.classList.remove('visible');
+              state.iocsFound[check.key] = false;
+            }
+          });
+
+          const scoreSpan = document.getElementById('iocScore');
+          if (correctCount >= 5) {
+            scoreSpan.textContent = '🎯 全部 IOC 正确提取！';
+            scoreSpan.style.color = '#22c55e';
+            state.phase = Math.max(state.phase, 4);
+            updateProgress(4);
+          } else if (correctCount >= 2) {
+            scoreSpan.textContent = `📋 已正确提取 ${correctCount}/5 个 IOC，继续加油！`;
+            scoreSpan.style.color = '#f59e0b';
+          } else if (correctCount >= 1) {
+            scoreSpan.textContent = `🔍 已正确提取 ${correctCount}/5 个 IOC，请仔细检查勒索信息与 EDR 样本属性。`;
+            scoreSpan.style.color = '#f59e0b';
+          } else {
+            scoreSpan.textContent = '❌ 请至少填写一个 IOC 字段进行验证。';
+            scoreSpan.style.color = '#ef4444';
+          }
+
+          checkAllComplete();
+        }
+
+        // Add real-time validation on input
+        ['iocFilename', 'iocHash', 'iocBtc', 'iocExtension', 'iocType'].forEach((inputId) => {
+          const input = document.getElementById(inputId);
+          if (input) {
+            input.addEventListener('input', () => {
+              // Clear previous validation on change
+              input.classList.remove('correct', 'wrong');
+              const checkMap = {
+                iocFilename: 'checkFilename',
+                iocHash: 'checkHash',
+                iocBtc: 'checkBtc',
+                iocExtension: 'checkExtension',
+                iocType: 'checkType',
+              };
+              const checkSpan = document.getElementById(checkMap[inputId]);
+              if (checkSpan) checkSpan.classList.remove('visible');
+            });
+            input.addEventListener('blur', () => {
+              // Optional: validate on blur
+              if (input.value.trim().length > 0 && state.infected) {
+                validateAllIOCs();
+              }
+            });
+          }
+        });
+
+        // ── Defense selection ─────────
+        function selectDefense(item) {
+          if (item.classList.contains('selected')) return; // Already selected
+          const rank = state.defenseSelections.length + 1;
+          state.defenseSelections.push(item.getAttribute('data-defense'));
+          item.classList.add('selected');
+          const rankSpan = item.querySelector('.defense-rank');
+          if (rankSpan) rankSpan.textContent = rank;
+          // Move to top of list visually via order
+          item.style.order = -rank;
+          showToast(`📌 已选择第 ${rank} 优先级: ${item.textContent.trim().substring(2)}`);
+        }
+
+        function resetDefenses() {
+          state.defenseSelections = [];
+          const items = document.querySelectorAll('.defense-item');
+          items.forEach((item) => {
+            item.classList.remove('selected');
+            item.style.order = '';
+            const rankSpan = item.querySelector('.defense-rank');
+            if (rankSpan) rankSpan.textContent = '?';
+          });
+          document.getElementById('defenseFeedback').textContent = '';
+        }
+
+        function checkDefenseOrder() {
+          // Recommended order: backup > email > edr > training > leastpriv > segment
+          const recommended = ['backup', 'email', 'edr', 'training', 'leastpriv', 'segment'];
+          const feedback = document.getElementById('defenseFeedback');
+          if (state.defenseSelections.length < 6) {
+            feedback.textContent = '⚠️ 请选择全部 6 项防御措施（按优先级依次点击）。';
+            feedback.style.color = '#f59e0b';
+            return;
+          }
+          // Check if matches recommended
+          let matches = 0;
+          for (let i = 0; i < 6; i++) {
+            if (state.defenseSelections[i] === recommended[i]) matches++;
+          }
+          if (matches >= 5) {
+            feedback.textContent = '✅ 防御优先级排序优秀！你理解了纵深防御的核心原则。';
+            feedback.style.color = '#22c55e';
+          } else if (matches >= 3) {
+            feedback.textContent = '📋 部分正确。建议将"离线备份"放在首位，"网络分段"放在最后。';
+            feedback.style.color = '#f59e0b';
+          } else {
+            feedback.textContent = '🔍 建议重新考虑：备份是第一道防线，网络分段是最后的安全网。';
+            feedback.style.color = '#ef4444';
+          }
+          checkAllComplete();
+        }
+
+        // ── Report submission ──────────
+        function submitReport() {
+          const reportText = document.getElementById('reportText').value.trim();
+          const feedback = document.getElementById('reportFeedback');
+          if (reportText.length < 30) {
+            feedback.textContent = '⚠️ 报告内容过短，请提供更详细的分析（至少30个字符）。';
+            feedback.style.color = '#f59e0b';
+            return;
+          }
+          // Check for key terms
+          const keywords = [
+            '钓鱼',
+            '可执行文件',
+            '加密',
+            '备份',
+            '勒索',
+            'salary',
+            '防御',
+            'AES',
+            '比特币',
+            'phishing',
+            'ransomware',
+            'encrypt',
+            'backup',
+            'defense',
+          ];
+          const lowerReport = reportText.toLowerCase();
+          const matchedKeywords = keywords.filter((kw) => lowerReport.includes(kw.toLowerCase()));
+          if (matchedKeywords.length >= 3) {
+            feedback.textContent = `✅ 报告提交成功！覆盖了 ${matchedKeywords.length} 个关键概念。分析质量良好。`;
+            feedback.style.color = '#22c55e';
+            state.reportSubmitted = true;
+            state.phase = 5;
+            updateProgress(5);
+            markAllProgressDone();
+          } else if (matchedKeywords.length >= 1) {
+            feedback.textContent =
+              '📋 报告已接收，但建议涵盖更多关键概念（攻击向量、加密机制、防御措施）。';
+            feedback.style.color = '#f59e0b';
+            state.reportSubmitted = true;
+            state.phase = Math.max(state.phase, 5);
+            updateProgress(5);
+          } else {
+            feedback.textContent =
+              '🔍 报告已接收。建议提及：攻击向量（钓鱼邮件）、加密方法（AES-256）、防御措施（离线备份）等关键要素。';
+            feedback.style.color = '#f59e0b';
+            state.reportSubmitted = true;
+            state.phase = Math.max(state.phase, 5);
+            updateProgress(5);
+          }
+          checkAllComplete();
+        }
+
+        // ── Check all complete & flag ──
+        function checkAllComplete() {
+          const allIOCsFound = Object.values(state.iocsFound).every((v) => v === true);
+          const defenseDone = state.defenseSelections.length >= 6;
+          const reportDone = state.reportSubmitted;
+
+          if (allIOCsFound && defenseDone && reportDone && !state.flagRevealed) {
+            revealFlag();
+          }
+        }
+
+        function revealFlag() {
+          state.flagRevealed = true;
+          flagReveal.classList.add('visible');
+          flagReveal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          markAllProgressDone();
+          showToast('🏆 恭喜！你已完成完整的勒索软件安全分析！FLAG 已解锁！');
+          // Stop timer
+          if (state.timerInterval) {
+            clearInterval(state.timerInterval);
+            state.timerInterval = null;
+          }
+          taskbarAlert.style.display = 'none';
+        }
+
+        // ── Clock ─────────────────────
+        function updateClock() {
+          const now = new Date();
+          taskbarClock.textContent = now.toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // ── Reset simulation ──────────
+        function resetSimulation() {
+          // Clear timer
+          if (state.timerInterval) {
+            clearInterval(state.timerInterval);
+            state.timerInterval = null;
+          }
+          // Reset state
+          state.infected = false;
+          state.encryptedFiles = [];
+          state.timerSeconds = 300;
+          state.timerExpired = false;
+          state.phase = 1;
+          state.iocsFound = {
+            filename: false,
+            hash: false,
+            btc: false,
+            extension: false,
+            type: false,
+          };
+          state.defenseSelections = [];
+          state.reportSubmitted = false;
+          state.flagRevealed = false;
+
+          // Reset DOM
+          desktop.classList.remove('infected');
+          ransomOverlay.classList.remove('active');
+          ransomTimer.textContent = '00:05:00';
+          ransomTimer.style.color = '#ef4444';
+          ransomTimer.style.animation = 'timer-pulse 1s infinite';
+          cmdFlash.classList.remove('visible');
+          taskbarAlert.style.display = 'none';
+          taskbarAlert.style.animation = 'blink-red 0.8s infinite';
+          flagReveal.classList.remove('visible');
+          document.getElementById('iocScore').textContent = '';
+          document.getElementById('defenseFeedback').textContent = '';
+          document.getElementById('reportFeedback').textContent = '';
+          document.getElementById('reportText').value = '';
+          ['iocFilename', 'iocHash', 'iocBtc', 'iocExtension', 'iocType'].forEach((id) => {
+            const inp = document.getElementById(id);
+            if (inp) {
+              inp.value = '';
+              inp.classList.remove('correct', 'wrong');
+            }
+          });
+          ['checkFilename', 'checkHash', 'checkBtc', 'checkExtension', 'checkType'].forEach(
+            (id) => {
+              const span = document.getElementById(id);
+              if (span) span.classList.remove('visible');
+            },
+          );
+          resetDefenses();
+          // Reset accordions
+          document
+            .querySelectorAll('.accordion-item.open')
+            .forEach((item) => item.classList.remove('open'));
+          // Rebuild icons
+          buildDesktopIcons();
+          // Reset progress
+          updateProgress(1);
+          // Scroll to top
+          desktop.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          showToast('🔄 模拟已重置。请重新开始分析。');
+        }
+
+        // ── Init ──────────────────────
+        function init() {
+          buildDesktopIcons();
+          updateProgress(1);
+          // Auto-open first accordion for hint
+          const firstAccordion = document.querySelector('.accordion-item');
+          if (firstAccordion) firstAccordion.classList.add('open');
+          // Show initial hint after a moment
+          setTimeout(() => {
+            if (!state.infected) {
+              showToast('👀 仔细观察桌面，找出可疑文件并点击它以触发模拟。');
+            }
+          }, 1500);
+        }
+
+        // Expose functions to global scope
+        window.toggleAccordion = toggleAccordion;
+        window.validateAllIOCs = validateAllIOCs;
+        window.selectDefense = selectDefense;
+        window.resetDefenses = resetDefenses;
+        window.checkDefenseOrder = checkDefenseOrder;
+        window.submitReport = submitReport;
+        window.resetSimulation = resetSimulation;
+
+        init();
+        console.log(
+          '// EDUCATIONAL PURPOSE ONLY — authorized classroom use\n// 勒索软件加密模拟实验室已就绪\n// 请在桌面找到 salary.exe 并点击以开始模拟',
+        );
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block body_class %}course-system-page learning-assignment-page{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/course-system.css', v='aisecedu-learning-themes-v2-readability-v1') }}">
+{% endblock %}
+
+{% block content %}
+<div id="learning-assignment" class="la-shell" data-assignment-id="{{ assignment_id | e }}">
+  <div id="learning-assignment-notice" class="cs-notice" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+  <div id="learning-assignment-loading" class="cs-loading" aria-busy="true"><span></span><p id="la-loading-copy">正在载入任务与上次作答…</p></div>
+  <div id="learning-assignment-content" hidden>
+    <header class="la-header">
+      <div><a href="/student" class="cs-eyebrow"><i class="fas fa-arrow-left"></i> 返回今天</a><h1 id="la-title">任务</h1><p id="la-meta"></p></div>
+      <span id="la-status" class="cs-status">待开始</span>
+    </header>
+    <div class="la-layout">
+      <div>
+        <section id="la-instructions" class="cs-surface cs-notice"></section>
+        <nav id="la-question-nav" class="la-question-nav" aria-label="题目导航"></nav>
+        <form id="la-form" class="la-questions"></form>
+      </div>
+      <aside class="la-summary">
+        <span class="cs-eyebrow">任务进度</span>
+        <h2>完成情况</h2>
+        <div id="la-score" class="la-score" hidden></div>
+        <div class="la-summary-row"><span>已作答</span><strong id="la-answered">正在读取</strong></div>
+        <div class="la-summary-row"><span>总分</span><strong id="la-points">正在读取</strong></div>
+        <div class="la-summary-row"><span>截止时间</span><strong id="la-due">正在读取</strong></div>
+        <div class="la-summary-row"><span>保存状态</span><strong id="la-save-status" role="status" aria-live="polite" aria-atomic="true">正在读取</strong></div>
+        <div class="la-summary-row"><span>答案反馈</span><strong id="la-answer-policy">提交后公布</strong></div>
+        <div id="la-feedback" class="la-result" hidden></div>
+        <div class="la-summary-actions"><button id="la-save" type="button" class="cs-btn">保存草稿</button><button id="la-submit" type="button" class="cs-btn cs-btn-primary">提交并智能批改</button></div>
+        <p class="la-policy">实验题读取真实 Dojo 判题；客观题确定性评分；主观题依据教师量规智能批改，教师可以复核。</p>
+      </aside>
+    </div>
+    <div class="la-mobile-actions" aria-label="移动端题目操作">
+      <button id="la-mobile-previous" type="button" class="cs-btn"><i class="fas fa-arrow-left" aria-hidden="true"></i>上一题</button>
+      <span id="la-mobile-position">1 / 1</span>
+      <button id="la-mobile-next" type="button" class="cs-btn cs-btn-primary">下一题<i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-assignment.js', v='aisecedu-student-assignment-v3') }}"></script>
+{% endblock %}

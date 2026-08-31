@@ -1,5 +1,5 @@
 {
-  description = "AISecEdu Workspace Flake";
+  description = "玄甲 Workspace Flake";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";

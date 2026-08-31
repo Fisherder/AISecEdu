@@ -1,0 +1,17 @@
+[
+  {
+    "courseId": "现代密码学",
+    "topic": "分组密码与工作模式",
+    "expectedKeywords": ["工作模式", "CBC", "CTR", "GCM", "分组密码"]
+  },
+  {
+    "courseId": "网络安全",
+    "topic": "DDoS 攻击原理与防护",
+    "expectedKeywords": ["DDoS", "防护", "检测", "拒绝服务"]
+  },
+  {
+    "courseId": "软件安全",
+    "topic": "栈溢出与控制流劫持",
+    "expectedKeywords": ["溢出", "ROP", "缓解", "ASLR"]
+  }
+]

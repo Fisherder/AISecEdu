@@ -39,6 +39,13 @@ def enqueue_dojo_image_pulls(dojo) -> None:
     images = set()
     for module in dojo.modules or []:
         for challenge in module.challenges or []:
+            if not challenge.supported():
+                continue
+            # Pure simulations have no learner container image. HYBRID tasks
+            # still need their container image prepared alongside the native
+            # scenario runtime.
+            if str(challenge.exercise_mode or "CONTAINER").upper() == "SIMULATION":
+                continue
             image = (challenge.data or {}).get("image")
             if image:
                 images.add(image)

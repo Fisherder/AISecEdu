@@ -23,7 +23,7 @@ def calculate_dojo_stats(dojo):
     now = datetime.now()
     solves_query = dojo.solves()
 
-    total_challenges = len(dojo.challenges)
+    total_challenges = sum(1 for challenge in dojo.challenges if challenge.supported())
     visible_challenges = sum(1 for c in dojo.challenges if c.visible())
 
     total_stats = solves_query.with_entities(

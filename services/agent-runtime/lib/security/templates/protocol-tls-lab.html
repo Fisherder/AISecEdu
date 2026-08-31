@@ -1,0 +1,1409 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TLS 中间人攻击流量分析实验室</title>
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1a1a2e;
+            --bg-card: #162032;
+            --bg-panel: #1c2a3a;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-amber: #f59e0b;
+            --accent-orange: #f97316;
+            --accent-purple: #8b5cf6;
+            --border: #2a3a50;
+            --border-active: #3b82f6;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+            --font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+            --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            --radius: 8px;
+            --radius-sm: 4px;
+            --transition: 0.2s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            min-height: 100vh;
+            letter-spacing: 0.01em;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3a4f66;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4a5f76;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+        }
+        .header .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .header .shield-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+        }
+        .header h1 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .header .subtitle {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+        .header .badge {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            letter-spacing: 0.03em;
+        }
+        .edu-notice {
+            background: #1a1a0a;
+            border: 1px solid #3a3a10;
+            color: #c4a60a;
+            padding: 8px 20px;
+            font-size: 0.72rem;
+            font-family: var(--font-mono);
+            text-align: center;
+            letter-spacing: 0.02em;
+        }
+
+        /* Main layout */
+        .main-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto auto auto;
+            gap: 16px;
+            padding: 20px 24px;
+            max-width: 1500px;
+            margin: 0 auto;
+        }
+        @media (max-width: 1100px) {
+            .main-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Card base */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            transition: border-color var(--transition);
+        }
+        .card.active-card {
+            border-color: var(--border-active);
+            box-shadow: 0 4px 24px rgba(59, 130, 246, 0.2);
+        }
+        .card-header {
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 600;
+            font-size: 0.85rem;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+        .card-header .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .dot-green {
+            background: var(--accent-green);
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+        }
+        .dot-amber {
+            background: var(--accent-amber);
+            box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+        }
+        .dot-red {
+            background: var(--accent-red);
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+        }
+        .card-body {
+            padding: 14px 16px;
+            max-height: 420px;
+            overflow-y: auto;
+        }
+
+        /* Packet list table */
+        .packet-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+        }
+        .packet-table th {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 10px 8px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            border-bottom: 2px solid var(--border);
+            position: sticky;
+            top: 0;
+        }
+        .packet-table td {
+            padding: 9px 8px;
+            border-bottom: 1px solid rgba(42, 58, 80, 0.5);
+            cursor: pointer;
+            transition: background var(--transition);
+            white-space: nowrap;
+        }
+        .packet-table tr:hover td {
+            background: rgba(59, 130, 246, 0.08);
+        }
+        .packet-table tr.selected td {
+            background: rgba(59, 130, 246, 0.18);
+            border-bottom-color: var(--accent-blue);
+        }
+        .packet-table tr.flagged td {
+            background: rgba(239, 68, 68, 0.12);
+            border-left: 3px solid var(--accent-red);
+        }
+        .packet-table tr.flagged-correct td {
+            background: rgba(16, 185, 129, 0.12);
+            border-left: 3px solid var(--accent-green);
+        }
+        .proto-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+        }
+        .proto-tls {
+            background: rgba(139, 92, 246, 0.2);
+            color: #a78bfa;
+        }
+        .proto-tcp {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+        }
+        .proto-http {
+            background: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+        }
+
+        /* Detail panel */
+        .detail-section {
+            margin-bottom: 12px;
+        }
+        .detail-section summary {
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.82rem;
+            padding: 8px 10px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: var(--radius-sm);
+            color: var(--accent-cyan);
+            user-select: none;
+            transition: background var(--transition);
+        }
+        .detail-section summary:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .detail-section .field-row {
+            display: flex;
+            padding: 4px 8px 4px 20px;
+            font-family: var(--font-mono);
+            font-size: 0.74rem;
+            gap: 8px;
+        }
+        .field-row .fname {
+            color: var(--text-muted);
+            min-width: 140px;
+            flex-shrink: 0;
+        }
+        .field-row .fval {
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+        .field-row .fval.anomaly {
+            color: var(--accent-red);
+            font-weight: 700;
+            background: rgba(239, 68, 68, 0.1);
+            padding: 1px 6px;
+            border-radius: 3px;
+            animation: pulse-warn 2s infinite;
+        }
+        @keyframes pulse-warn {
+            0%,
+            100% {
+                background: rgba(239, 68, 68, 0.1);
+            }
+            50% {
+                background: rgba(239, 68, 68, 0.25);
+            }
+        }
+        .hex-dump {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            line-height: 1.7;
+            background: #0a0f18;
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            color: #a0b8d0;
+            overflow-x: auto;
+            white-space: pre;
+            border: 1px solid var(--border);
+            letter-spacing: 0.03em;
+        }
+        .hex-dump .offset {
+            color: var(--text-muted);
+            margin-right: 12px;
+        }
+        .hex-dump .hl {
+            background: rgba(239, 68, 68, 0.3);
+            padding: 1px 3px;
+            border-radius: 2px;
+            color: #fca5a5;
+        }
+        .hex-dump .hl-green {
+            background: rgba(16, 185, 129, 0.25);
+            padding: 1px 3px;
+            border-radius: 2px;
+            color: #6ee7b7;
+        }
+
+        /* Flagging area */
+        .flag-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            padding: 8px 0;
+        }
+        .btn {
+            padding: 8px 18px;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all var(--transition);
+            letter-spacing: 0.03em;
+            font-family: var(--font-sans);
+        }
+        .btn-flag {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+            border-color: rgba(239, 68, 68, 0.4);
+        }
+        .btn-flag:hover {
+            background: rgba(239, 68, 68, 0.25);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+        }
+        .btn-flag.active {
+            background: var(--accent-red);
+            color: #fff;
+            border-color: var(--accent-red);
+        }
+        .btn-clear {
+            background: rgba(148, 163, 184, 0.1);
+            color: var(--text-secondary);
+            border-color: var(--border);
+        }
+        .btn-clear:hover {
+            background: rgba(148, 163, 184, 0.2);
+        }
+        .btn-submit {
+            background: var(--accent-blue);
+            color: #fff;
+            border-color: var(--accent-blue);
+            font-weight: 700;
+        }
+        .btn-submit:hover {
+            background: #2563eb;
+            box-shadow: 0 0 16px rgba(59, 130, 246, 0.4);
+        }
+        .btn-report {
+            background: rgba(139, 92, 246, 0.15);
+            color: var(--accent-purple);
+            border-color: rgba(139, 92, 246, 0.4);
+        }
+        .btn-report:hover {
+            background: rgba(139, 92, 246, 0.25);
+            box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
+        }
+
+        /* Timeline */
+        .timeline-container {
+            position: relative;
+            padding: 20px 10px;
+        }
+        .timeline-line {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--border);
+            transform: translateX(-50%);
+            z-index: 0;
+        }
+        .timeline-event {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+            gap: 12px;
+        }
+        .timeline-event.left {
+            flex-direction: row;
+        }
+        .timeline-event.right {
+            flex-direction: row-reverse;
+        }
+        .timeline-event .arrow-box {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 10px 14px;
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            max-width: 200px;
+            position: relative;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        .timeline-event .arrow-box.anomaly-box {
+            border-color: var(--accent-red);
+            background: rgba(239, 68, 68, 0.08);
+            box-shadow: 0 0 16px rgba(239, 68, 68, 0.2);
+        }
+        .timeline-event .connector {
+            width: 40px;
+            height: 2px;
+            background: var(--border);
+            flex-shrink: 0;
+        }
+        .timeline-event .connector.danger {
+            background: var(--accent-red);
+            animation: pulse-line 1.5s infinite;
+        }
+        @keyframes pulse-line {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.3;
+            }
+        }
+        .timeline-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            z-index: 2;
+            border: 2px solid var(--border);
+            background: var(--bg-card);
+        }
+        .timeline-dot.mitm {
+            background: var(--accent-red);
+            border-color: var(--accent-red);
+            box-shadow: 0 0 14px rgba(239, 68, 68, 0.6);
+            width: 18px;
+            height: 18px;
+        }
+
+        /* Progress bar */
+        .progress-container {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .progress-step {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: 700;
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            color: var(--text-muted);
+            transition: all var(--transition);
+        }
+        .progress-step.completed {
+            background: var(--accent-green);
+            border-color: var(--accent-green);
+            color: #fff;
+        }
+        .progress-step.active {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+            animation: pulse-step 2s infinite;
+        }
+        @keyframes pulse-step {
+            0%,
+            100% {
+                box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 20px rgba(59, 130, 246, 0.7);
+            }
+        }
+        .progress-connector {
+            width: 16px;
+            height: 2px;
+            background: var(--border);
+        }
+        .progress-connector.done {
+            background: var(--accent-green);
+        }
+
+        /* Report overlay */
+        .report-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+        }
+        .report-overlay.show {
+            display: flex;
+        }
+        .report-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 28px 24px;
+            max-width: 750px;
+            width: 90%;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+        }
+        .report-panel h2 {
+            color: var(--accent-purple);
+            margin-bottom: 16px;
+            font-size: 1.3rem;
+        }
+        .report-panel h3 {
+            color: var(--accent-cyan);
+            margin: 16px 0 8px;
+            font-size: 1rem;
+        }
+        .report-panel p,
+        .report-panel li {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+        .report-panel ul {
+            padding-left: 20px;
+        }
+        .report-panel .close-btn {
+            float: right;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: color var(--transition);
+        }
+        .report-panel .close-btn:hover {
+            color: #fff;
+        }
+        .defense-box {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: var(--radius);
+            padding: 14px;
+            margin: 12px 0;
+        }
+        .defense-box h4 {
+            color: var(--accent-green);
+            margin-bottom: 6px;
+        }
+
+        /* Feedback toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 14px 22px;
+            border-radius: var(--radius);
+            font-weight: 600;
+            font-size: 0.85rem;
+            z-index: 300;
+            animation: slideIn 0.4s ease;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+            letter-spacing: 0.02em;
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateY(60px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        .toast.success {
+            background: #065f46;
+            color: #d1fae5;
+            border: 1px solid var(--accent-green);
+        }
+        .toast.error {
+            background: #7f1d1d;
+            color: #fecaca;
+            border: 1px solid var(--accent-red);
+        }
+        .toast.info {
+            background: #1e3a5f;
+            color: #dbeafe;
+            border: 1px solid var(--accent-blue);
+        }
+
+        /* Mitigation toggle */
+        .mitigation-toggle {
+            display: flex;
+            gap: 0;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .mitigation-toggle button {
+            padding: 8px 16px;
+            border: none;
+            cursor: pointer;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            transition: all var(--transition);
+            font-family: var(--font-sans);
+            font-weight: 600;
+        }
+        .mitigation-toggle button.active-toggle {
+            background: var(--accent-blue);
+            color: #fff;
+        }
+        .code-compare {
+            display: flex;
+            gap: 10px;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+        }
+        .code-compare pre {
+            flex: 1;
+            padding: 10px;
+            border-radius: var(--radius-sm);
+            overflow-x: auto;
+            margin: 0;
+            line-height: 1.6;
+        }
+        .code-vuln {
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .code-fix {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- EDUCATIONAL PURPOSE ONLY — authorized classroom use -->
+    <div class="edu-notice">
+        // EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境。本模拟器中的所有流量数据均为虚构，用于协议分析与安全教学。
+    </div>
+
+    <!-- Header -->
+    <div class="header">
+        <div class="logo-area">
+            <div class="shield-icon">🔍</div>
+            <div>
+                <h1>TLS 中间人攻击流量分析</h1>
+                <div class="subtitle">Protocol Analysis Lab · 模拟Wireshark抓包分析</div>
+            </div>
+        </div>
+        <div class="badge">⚠ 安全教学实验</div>
+        <div class="progress-container" id="progressBar">
+            <span style="font-size:0.7rem;color:var(--text-muted);">步骤</span>
+            <div class="progress-step active" id="step1">1</div>
+            <div class="progress-connector"></div>
+            <div class="progress-step" id="step2">2</div>
+            <div class="progress-connector"></div>
+            <div class="progress-step" id="step3">3</div>
+            <div class="progress-connector"></div>
+            <div class="progress-step" id="step4">4</div>
+            <div class="progress-connector"></div>
+            <div class="progress-step" id="step5">5</div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-container">
+        <!-- Panel 1: Scenario Briefing -->
+        <div class="card" style="grid-column: 1 / -1;">
+            <div class="card-header">
+                <span><span class="dot dot-amber"></span>案件背景 / 任务简报</span>
+            </div>
+            <div class="card-body" style="max-height:120px;">
+                <p style="margin:0;font-size:0.88rem;color:var(--text-secondary);">
+                    🏢 <strong>某金融科技公司</strong>的安全运维团队在日常网络监控中发现，内部一台客户端与外部API服务器之间的TLS握手行为异常。
+                    抓包数据显示<strong>客户端明确支持TLS 1.3</strong>，但最终协商的会话却使用的是<strong>TLS 1.0和弱加密套件</strong>。
+                    你的任务是分析捕获的10个数据包，<strong>识别出异常数据包</strong>，判断是否存在TLS降级攻击（Downgrade Attack），并重建完整的攻击链。
+                </p>
+            </div>
+        </div>
+
+        <!-- Panel 2: Packet List (like Wireshark) -->
+        <div class="card" id="packetListCard">
+            <div class="card-header">
+                <span><span class="dot dot-green"></span>捕获数据包列表 (Capture — 10 packets)</span>
+                <span style="font-size:0.7rem;color:var(--text-muted);">点击数据包查看详情</span>
+            </div>
+            <div class="card-body" style="padding:0;max-height:380px;overflow-y:auto;">
+                <table class="packet-table" id="packetTable">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>时间</th>
+                            <th>源地址</th>
+                            <th>目标地址</th>
+                            <th>协议</th>
+                            <th>信息</th>
+                            <th>标记</th>
+                        </tr>
+                    </thead>
+                    <tbody id="packetTbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Panel 3: Packet Detail -->
+        <div class="card" id="detailCard">
+            <div class="card-header">
+                <span><span class="dot dot-cyan"></span>数据包详情 — 解析字段 & Hex Dump</span>
+                <span id="detailPacketLabel" style="font-size:0.7rem;color:var(--text-muted);">未选择数据包</span>
+            </div>
+            <div class="card-body" id="detailBody" style="max-height:380px;overflow-y:auto;">
+                <p style="color:var(--text-muted);font-style:italic;text-align:center;padding:30px;">
+                    👆 请从左侧数据包列表中选择一个数据包以查看详情
+                </p>
+            </div>
+        </div>
+
+        <!-- Panel 4: Anomaly Detection -->
+        <div class="card" id="anomalyCard">
+            <div class="card-header">
+                <span><span class="dot dot-red"></span>异常检测 — 标记可疑数据包</span>
+            </div>
+            <div class="card-body" style="max-height:200px;">
+                <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:10px;">
+                    🔎 选择你认为<strong>异常</strong>的数据包（提示：关注TLS版本协商和加密套件变化）。可以标记多个。
+                </p>
+                <div class="flag-controls">
+                    <button class="btn btn-flag" id="btnToggleFlag" onclick="toggleFlagCurrent()">🚩 标记/取消标记当前包</button>
+                    <button class="btn btn-clear" onclick="clearAllFlags()">清除所有标记</button>
+                    <button class="btn btn-submit" id="btnSubmitFlags" onclick="submitFlags()">✅ 提交检测结果</button>
+                    <span id="flagFeedback" style="font-size:0.78rem;color:var(--text-muted);"></span>
+                </div>
+                <div id="flaggedList" style="font-size:0.75rem;color:var(--accent-amber);margin-top:6px;"></div>
+            </div>
+        </div>
+
+        <!-- Panel 5: Timeline -->
+        <div class="card" id="timelineCard" style="grid-column: 1 / -1;">
+            <div class="card-header">
+                <span><span class="dot dot-purple"></span>攻击时间线可视化</span>
+                <span style="font-size:0.7rem;color:var(--text-muted);">Client ↔ MITM ↔ Server</span>
+            </div>
+            <div class="card-body timeline-container" id="timelineBody" style="max-height:350px;overflow-y:auto;">
+                <p style="color:var(--text-muted);font-style:italic;text-align:center;padding:20px;">
+                    完成异常检测后将展示完整攻击时间线
+                </p>
+            </div>
+        </div>
+
+        <!-- Panel 6: Actions -->
+        <div class="card" style="grid-column: 1 / -1;">
+            <div class="card-header">
+                <span>📋 操作面板</span>
+            </div>
+            <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;max-height:80px;">
+                <button class="btn btn-report" onclick="toggleReport()">📄 查看完整分析报告</button>
+                <button class="btn btn-clear" onclick="resetLab()">🔄 重置实验</button>
+                <span id="scoreDisplay" style="font-size:0.85rem;color:var(--text-secondary);margin-left:auto;"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Report Overlay -->
+    <div class="report-overlay" id="reportOverlay">
+        <div class="report-panel" id="reportPanel">
+            <button class="close-btn" onclick="toggleReport()">✕</button>
+            <h2>📄 完整分析报告：TLS降级攻击</h2>
+            <h3>🔍 攻击概述</h3>
+            <p>这是一次典型的<strong>TLS降级攻击（Downgrade Attack）</strong>。攻击者作为中间人（MITM），拦截了客户端与服务器之间的TLS握手流量，并篡改了ClientHello中的版本信息，迫使双方使用过时且不安全的TLS 1.0协议进行通信。</p>
+            <h3>🎯 攻击链</h3>
+            <ul>
+                <li><strong>阶段1 — 拦截</strong>：客户端发送支持TLS 1.3的ClientHello（数据包#3），MITM截获该包。</li>
+                <li><strong>阶段2 — 篡改</strong>：MITM移除ClientHello中的<code>supported_versions</code>扩展（或将其改为仅支持TLS 1.0），然后将修改后的请求转发给服务器。</li>
+                <li><strong>阶段3 — 降级响应</strong>：服务器看到仅支持TLS 1.0的请求，返回TLS 1.0的ServerHello（数据包#4），使用弱加密套件<code>TLS_RSA_WITH_AES_128_CBC_SHA</code>。</li>
+                <li><strong>阶段4 — 弱加密通信</strong>：后续通信使用RSA密钥交换和AES-128-CBC，攻击者可利用已知弱点进行解密或中间人攻击。</li>
+            </ul>
+            <h3>🚩 关键异常数据包</h3>
+            <p><strong>数据包#4 (ServerHello)</strong> 是最关键的异常：客户端明确支持TLS 1.3（supported_versions=0x0304），但服务器返回的却是TLS 1.0 (0x0301)。这表明中间有人篡改了握手参数。</p>
+            <p><strong>数据包#7 (ClientKeyExchange)</strong> 也值得注意：使用了RSA密钥交换而非TLS 1.3的ECDHE，不支持前向安全性。</p>
+            <div class="defense-box">
+                <h4>🛡️ 防御措施</h4>
+                <ul>
+                    <li><strong>启用TLS 1.3-only模式</strong>：在服务器和客户端配置中禁用TLS 1.0/1.1，仅允许TLS 1.2+。</li>
+                    <li><strong>证书固定（Certificate Pinning）</strong>：防止MITM使用伪造证书。</li>
+                    <li><strong>严格传输安全（HSTS）</strong>：强制浏览器使用HTTPS并阻止降级。</li>
+                    <li><strong>监控告警</strong>：对TLS版本不匹配、弱加密套件的使用设置SIEM告警规则。</li>
+                    <li><strong>加密套件白名单</strong>：仅允许AEAD加密套件（如AES-GCM、ChaCha20-Poly1305），禁用CBC模式。</li>
+                </ul>
+            </div>
+            <p style="font-size:0.7rem;color:var(--text-muted);margin-top:12px;">
+                // EDUCATIONAL PURPOSE ONLY — 本报告仅供教学参考，所有数据均为模拟。
+            </p>
+        </div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toastContainer"></div>
+
+    <script>
+        // ==================== DATA: Simulated Packets ====================
+        const packets = [{
+            id: 1,
+            time: '0.000000',
+            src: '192.168.1.105',
+            dst: '203.0.113.45',
+            proto: 'TCP',
+            info: 'SYN → 443 (HTTPS)',
+            protoClass: 'proto-tcp',
+            normal: true,
+            layers: {
+                Frame: { '帧长度': '66 bytes', '捕获时间': '2024-11-15 14:32:01.001' },
+                Ethernet: { '源MAC': 'aa:bb:cc:11:22:33', '目标MAC': '00:1a:2b:3c:4d:5e', '类型': 'IPv4' },
+                IP: { '源IP': '192.168.1.105', '目标IP': '203.0.113.45', '协议': 'TCP (6)' },
+                TCP: { '源端口': '52134', '目标端口': '443', '标志': 'SYN', '序列号': '0x3a4b2c01' }
+            },
+            hex: `0000  45 00 00 42 3a 4b 40 00  40 06 8c 9a c0 a8 01 69   E..B:K@.@......i
+0010  cb 00 71 2d cb a6 01 bb  3a 4b 2c 01 00 00 00 00   ..q-....:K,.....
+0020  b0 02 ff ff 2e 3c 00 00  02 04 05 b4 01 03 03 08   .....<..........`
+        }, {
+            id: 2,
+            time: '0.032145',
+            src: '203.0.113.45',
+            dst: '192.168.1.105',
+            proto: 'TCP',
+            info: 'SYN-ACK ← 443',
+            protoClass: 'proto-tcp',
+            normal: true,
+            layers: {
+                Frame: { '帧长度': '66 bytes', '捕获时间': '2024-11-15 14:32:01.033' },
+                Ethernet: { '源MAC': '00:1a:2b:3c:4d:5e', '目标MAC': 'aa:bb:cc:11:22:33', '类型': 'IPv4' },
+                IP: { '源IP': '203.0.113.45', '目标IP': '192.168.1.105', '协议': 'TCP (6)' },
+                TCP: { '源端口': '443', '目标端口': '52134', '标志': 'SYN-ACK', '序列号': '0x7f2e9d01' }
+            },
+            hex: `0000  45 00 00 42 7f 2e 40 00  38 06 55 b7 cb 00 71 2d   E..B..@.8.U...q-
+0010  c0 a8 01 69 01 bb cb a6  7f 2e 9d 01 3a 4b 2c 02   ...i........:K,.
+0020  b0 12 ff ff 91 2a 00 00  02 04 05 b4 01 03 03 08   .....*..........`
+        }, {
+            id: 3,
+            time: '0.045201',
+            src: '192.168.1.105',
+            dst: '203.0.113.45',
+            proto: 'TLS',
+            info: 'ClientHello — 支持TLS 1.3 (supported_versions: 0x0304)',
+            protoClass: 'proto-tls',
+            normal: true,
+            isClientHello: true,
+            layers: {
+                Frame: { '帧长度': '312 bytes', '捕获时间': '2024-11-15 14:32:01.046' },
+                Ethernet: { '源MAC': 'aa:bb:cc:11:22:33', '目标MAC': '00:1a:2b:3c:4d:5e', '类型': 'IPv4' },
+                IP: { '源IP': '192.168.1.105', '目标IP': '203.0.113.45', '协议': 'TCP (6)' },
+                TCP: { '源端口': '52134', '目标端口': '443', '标志': 'PSH-ACK', '序列号': '0x3a4b2c02' },
+                'TLS Record': { '内容类型': 'Handshake (22)', '记录层版本': 'TLS 1.0 (0x0301) [兼容]',
+                '长度': '256 bytes' },
+                'Handshake': { '类型': 'ClientHello (1)', '客户端版本': 'TLS 1.2 (0x0303)',
+                    '随机数': 'b4a2c3d4e5f6...（32字节）', '会话ID': '(空)',
+                    '加密套件': 'TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_AES_128_GCM_SHA256...',
+                    '扩展-supported_versions': '✅ TLS 1.3 (0x0304) [关键字段]',
+                    '扩展-key_share': 'x25519 公钥', '扩展-server_name': 'api.example.com' }
+            },
+            hex: `0000  16 03 01 01 00 01 01 fc  01 00 01 f8 03 03 b4 a2   ................
+0010  c3 d4 e5 f6 11 22 33 44  55 66 77 88 99 aa bb cc   ....."3DUfw.....
+0020  dd ee ff 00 00 00 00 00  00 00 00 00 00 00 00 00   ................
+0030  00 00 00 00 00 02 00 0a  13 02 13 03 13 01 00 ff   ................
+0040  01 00 01 c0 00 2b 00 03  02 03 04 00 0d 00 14 00   .....+..........  
+0050  12 04 03 08 04 04 01 05  03 08 05 05 01 08 06 06   ................
+0060  01 02 00 33 00 26 00 24  00 1d 00 20 a1 b2 c3 d4   ...3.&.$.. .....
+0070  e5 f6 07 08 09 0a 0b 0c  0d 0e 0f 10 11 12 13 14   ................
+0080  15 16 17 18 19 1a 1b 1c  1d 1e 1f 20 00 00 00 00   ........... ....`,
+            hexHighlights: [
+                { offset: 0, len: 1, label: 'TLS记录类型=Handshake(22)', cls: 'hl-green' },
+                { offset: 1, len: 2, label: '记录层版本=0x0301(兼容)', cls: '' },
+                { offset: 0x44, len: 2, label: 'supported_versions扩展=0x0304(TLS 1.3)', cls: 'hl-green' },
+            ]
+        }, {
+            id: 4,
+            time: '0.089733',
+            src: '203.0.113.45',
+            dst: '192.168.1.105',
+            proto: 'TLS',
+            info: '⚠ ServerHello — 协商版本 TLS 1.0 (0x0301) · 弱加密套件',
+            protoClass: 'proto-tls',
+            normal: false,
+            isServerHello: true,
+            isAnomaly: true,
+            anomalyReason: '客户端支持TLS 1.3，但服务器返回TLS 1.0。这强烈表明中间人篡改了ClientHello，移除了supported_versions扩展，导致降级攻击成功。加密套件也被降级为TLS_RSA_WITH_AES_128_CBC_SHA（无前向安全性）。',
+            layers: {
+                Frame: { '帧长度': '148 bytes', '捕获时间': '2024-11-15 14:32:01.090' },
+                Ethernet: { '源MAC': '00:1a:2b:3c:4d:5e', '目标MAC': 'aa:bb:cc:11:22:33', '类型': 'IPv4' },
+                IP: { '源IP': '203.0.113.45', '目标IP': '192.168.1.105', '协议': 'TCP (6)' },
+                TCP: { '源端口': '443', '目标端口': '52134', '标志': 'PSH-ACK', '序列号': '0x7f2e9d02' },
+                'TLS Record': { '内容类型': 'Handshake (22)', '记录层版本': '⚠ TLS 1.0 (0x0301) [异常!]',
+                    '长度': '92 bytes' },
+                'Handshake': { '类型': 'ServerHello (2)', '服务器版本': '⚠ TLS 1.0 (0x0301) [应为TLS 1.3]',
+                    '随机数': '7a8b9c0d1e2f...（32字节）',
+                    '加密套件': '⚠ TLS_RSA_WITH_AES_128_CBC_SHA (0x002F) [弱加密套件]',
+                    '压缩方法': 'null (0x00)',
+                    '扩展': '❌ 缺少supported_versions扩展 [关键异常]' }
+            },
+            hex: `0000  16 03 01 00 5c 02 00 00  58 03 01 7a 8b 9c 0d 1e   ....\...X..z....
+0010  2f 30 41 52 63 74 85 96  a7 b8 c9 da eb fc 0d 1e   /0ARct..........
+0020  2f 3f 4f 5f 6f 7f 8f 9f  af bf cf df ef ff 00 00   /?O_o...........
+0030  00 2f 00 00 14 ff 01 00  01 00 00 0b 00 04 03 00   ./..............
+0040  01 02 00 23 00 00 00 17  00 00 00 0a 00 08 00 06   ...#............
+0050  00 17 00 18 00 19 00 0b  00 02 01 00 00 00 00 00   ................`,
+            hexHighlights: [
+                { offset: 1, len: 2, label: '⚠ 版本=0x0301(TLS 1.0) 应为0x0304', cls: 'hl' },
+                { offset: 0x30, len: 2, label: '⚠ 加密套件=0x002F(弱RSA CBC)', cls: 'hl' },
+            ]
+        }, {
+            id: 5,
+            time: '0.093401',
+            src: '203.0.113.45',
+            dst: '192.168.1.105',
+            proto: 'TLS',
+            info: 'Certificate — 服务器证书（RSA 2048位）',
+            protoClass: 'proto-tls',
+            normal: true,
+            layers: {
+                Frame: { '帧长度': '1240 bytes', '捕获时间': '2024-11-15 14:32:01.094' },
+                'TLS Record': { '内容类型': 'Handshake (22)', '记录层版本': 'TLS 1.0 (0x0301)',
+                '长度': '1184 bytes' },
+                'Handshake': { '类型': 'Certificate (11)', '证书链长度': '1',
+                '证书': 'CN=api.example.com, RSA 2048-bit, SHA256指纹: a1b2c3d4...' }
+            },
+            hex: `0000  16 03 01 04 a0 0b 00 04  9c 00 04 99 00 04 96 30   ...............0
+0010  82 04 92 30 82 03 7a a0  03 02 01 02 02 09 00 a1   ...0..z.........
+0020  b2 c3 d4 e5 f6 07 08 30  0d 06 09 2a 86 48 86 f7   .......0...*.H..`
+        }, {
+            id: 6,
+            time: '0.095122',
+            src: '203.0.113.45',
+            dst: '192.168.1.105',
+            proto: 'TLS',
+            info: 'ServerHelloDone',
+            protoClass: 'proto-tls',
+            normal: true,
+            layers: {
+                'TLS Record': { '内容类型': 'Handshake (22)', '记录层版本': 'TLS 1.0 (0x0301)',
+            '长度': '4 bytes' },
+                'Handshake': { '类型': 'ServerHelloDone (14)' }
+            },
+            hex: `0000  16 03 01 00 04 0e 00 00  00                        .........`
+        }, {
+            id: 7,
+            time: '0.112840',
+            src: '192.168.1.105',
+            dst: '203.0.113.45',
+            proto: 'TLS',
+            info: '⚠ ClientKeyExchange — RSA密钥交换（无前向安全性）',
+            protoClass: 'proto-tls',
+            normal: false,
+            isAnomaly: true,
+            anomalyReason: '使用RSA密钥交换而非TLS 1.3的ECDHE。这意味着如果服务器私钥泄露，所有历史会话都可被解密。TLS 1.3已完全移除RSA密钥交换，这进一步证实了降级攻击。',
+            layers: {
+                Frame: { '帧长度': '390 bytes', '捕获时间': '2024-11-15 14:32:01.113' },
+                'TLS Record': { '内容类型': 'Handshake (22)', '记录层版本': 'TLS 1.0 (0x0301)',
+                '长度': '334 bytes' },
+                'Handshake': { '类型': 'ClientKeyExchange (16)',
+                '密钥交换': '⚠ RSA加密的预主密钥（256字节）[TLS 1.3已弃用]',
+                    '说明': '使用服务器RSA公钥加密预主密钥，不支持前向安全性' }
+            },
+            hex: `0000  16 03 01 01 4e 10 00 01  4a 01 00 01 46 00 01 42   ....N...J...F..B
+0010  30 41 02 1d a7 8b 3c 9d  1e 2f 40 51 62 73 84 95   0A....<../@Qbs..
+0020  a6 b7 c8 d9 ea fb 0c 1d  2e 3f 4f 5f 6f 7f 8f 9f   .........?O_o...
+0030  af bf cf df ef ff 00 11  22 33 44 55 66 77 88 99   ........"3DUfw..`,
+            hexHighlights: [
+                { offset: 0x10, len: 1, label: '⚠ RSA加密的预主密钥（非ECDHE）', cls: 'hl' },
+            ]
+        }, {
+            id: 8,
+            time: '0.118502',
+            src: '192.168.1.105',
+            dst: '203.0.113.45',
+            proto: 'TLS',
+            info: 'ChangeCipherSpec',
+            protoClass: 'proto-tls',
+            normal: true,
+            layers: {
+                'TLS Record': { '内容类型': 'ChangeCipherSpec (20)', '记录层版本': 'TLS 1.0 (0x0301)',
+            '长度': '1 byte' }
+            },
+            hex: `0000  14 03 01 00 01 01                              ......`
+        }, {
+            id: 9,
+            time: '0.119001',
+            src: '192.168.1.105',
+            dst: '203.0.113.45',
+            proto: 'TLS',
+            info: 'Finished（加密）',
+            protoClass: 'proto-tls',
+            normal: true,
+            layers: {
+                'TLS Record': { '内容类型': 'Handshake (22)', '记录层版本': 'TLS 1.0 (0x0301)',
+                '长度': '40 bytes', '说明': '已加密，无法解析内容' }
+            },
+            hex: `0000  16 03 01 00 28 [已加密载荷—40字节]               ...(...`
+        }, {
+            id: 10,
+            time: '0.124668',
+            src: '203.0.113.45',
+            dst: '192.168.1.105',
+            proto: 'TLS',
+            info: 'ChangeCipherSpec + Finished（加密）',
+            protoClass: 'proto-tls',
+            normal: true,
+            layers: {
+                'TLS Record 1': { '内容类型': 'ChangeCipherSpec (20)', '记录层版本': 'TLS 1.0 (0x0301)',
+                '长度': '1 byte' },
+                'TLS Record 2': { '内容类型': 'Handshake (22)', '记录层版本': 'TLS 1.0 (0x0301)',
+                '长度': '40 bytes', '说明': '已加密Finished消息' }
+            },
+            hex: `0000  14 03 01 00 01 01 16 03  01 00 28 [已加密载荷]    .........(...`
+        }];
+
+        // ==================== STATE ====================
+        let selectedPacketId = null;
+        let flaggedPacketIds = new Set();
+        let anomalySubmitted = false;
+        let scoreCorrect = 0;
+        let scoreTotal = 2; // packets #4 and #7 are true anomalies
+
+        // ==================== RENDER PACKET TABLE ====================
+        function renderPacketTable() {
+            const tbody = document.getElementById('packetTbody');
+            tbody.innerHTML = '';
+            packets.forEach(p => {
+                const tr = document.createElement('tr');
+                if (selectedPacketId === p.id) tr.classList.add('selected');
+                if (flaggedPacketIds.has(p.id) && anomalySubmitted && p.isAnomaly) tr.classList.add(
+                    'flagged-correct');
+                else if (flaggedPacketIds.has(p.id) && anomalySubmitted && !p.isAnomaly) tr.classList.add(
+                    'flagged');
+                else if (flaggedPacketIds.has(p.id) && !anomalySubmitted) tr.classList.add('flagged');
+
+                tr.innerHTML = `
+                    <td>${p.id}</td>
+                    <td>${p.time}</td>
+                    <td>${p.src}</td>
+                    <td>${p.dst}</td>
+                    <td><span class="proto-tag ${p.protoClass}">${p.proto}</span></td>
+                    <td>${p.info}</td>
+                    <td>${flaggedPacketIds.has(p.id) ? '🚩' : ''}${anomalySubmitted && p.isAnomaly && flaggedPacketIds.has(p.id) ? ' ✅' : ''}</td>
+                `;
+                tr.addEventListener('click', () => selectPacket(p.id));
+                tbody.appendChild(tr);
+            });
+        }
+
+        function selectPacket(id) {
+            selectedPacketId = id;
+            renderPacketTable();
+            renderDetailPanel(id);
+            document.getElementById('detailPacketLabel').textContent = `数据包 #${id}`;
+            document.getElementById('detailCard').classList.add('active-card');
+            // Update progress step
+            updateProgress(2);
+        }
+
+        function renderDetailPanel(id) {
+            const p = packets.find(pk => pk.id === id);
+            if (!p) return;
+            const body = document.getElementById('detailBody');
+            let html = '';
+            // Layer sections
+            for (const [layerName, fields] of Object.entries(p.layers)) {
+                html += `<details class="detail-section" open>
+                    <summary>📦 ${layerName}</summary>`;
+                for (const [fname, fval] of Object.entries(fields)) {
+                    const isAnomaly = (typeof fval === 'string') && (fval.includes('⚠') || fval.includes('异常') ||
+                        fval.includes('应为'));
+                    html +=
+                        `<div class="field-row"><span class="fname">${fname}:</span><span class="fval${isAnomaly ? ' anomaly' : ''}">${fval}</span></div>`;
+                }
+                html += `</details>`;
+            }
+            // Hex dump
+            html += `<details class="detail-section" open>
+                <summary>🔢 Hex Dump (16进制)</summary>
+                <div class="hex-dump">`;
+            // Process hex with highlights
+            if (p.hexHighlights && p.hexHighlights.length > 0) {
+                const hexLines = p.hex.split('\n');
+                hexLines.forEach(line => {
+                    html += `<span class="offset">${line.substring(0, 4)}</span>`;
+                    const rest = line.substring(4);
+                    html += escapeHTML(rest) + '\n';
+                });
+            } else {
+                html += escapeHTML(p.hex);
+            }
+            html += `</div>`;
+            // Highlight annotations
+            if (p.hexHighlights && p.hexHighlights.length > 0) {
+                html += `<div style="margin-top:8px;font-size:0.7rem;">`;
+                p.hexHighlights.forEach(h => {
+                    html +=
+                        `<span style="display:inline-block;margin-right:12px;padding:2px 8px;border-radius:3px;background:rgba(239,68,68,0.12);color:#fca5a5;font-family:var(--font-mono);font-size:0.68rem;">🔍 ${h.label}</span>`;
+                });
+                html += `</div>`;
+            }
+            html += `</details>`;
+            body.innerHTML = html;
+        }
+
+        function escapeHTML(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // ==================== FLAGGING ====================
+        function toggleFlagCurrent() {
+            if (!selectedPacketId) {
+                showToast('请先从数据包列表中选择一个数据包', 'info');
+                return;
+            }
+            if (flaggedPacketIds.has(selectedPacketId)) {
+                flaggedPacketIds.delete(selectedPacketId);
+            } else {
+                flaggedPacketIds.add(selectedPacketId);
+            }
+            renderPacketTable();
+            updateFlaggedList();
+            const btn = document.getElementById('btnToggleFlag');
+            if (flaggedPacketIds.has(selectedPacketId)) {
+                btn.classList.add('active');
+                btn.textContent = '🚩 取消标记当前包';
+            } else {
+                btn.classList.remove('active');
+                btn.textContent = '🚩 标记/取消标记当前包';
+            }
+            updateProgress(3);
+            if (flaggedPacketIds.size >= 2) updateProgress(4);
+        }
+
+        function clearAllFlags() {
+            flaggedPacketIds.clear();
+            renderPacketTable();
+            updateFlaggedList();
+            document.getElementById('btnToggleFlag').classList.remove('active');
+            document.getElementById('btnToggleFlag').textContent = '🚩 标记/取消标记当前包';
+            document.getElementById('flagFeedback').textContent = '';
+            document.getElementById('scoreDisplay').textContent = '';
+            anomalySubmitted = false;
+            updateTimeline(false);
+            updateProgress(1);
+        }
+
+        function updateFlaggedList() {
+            const div = document.getElementById('flaggedList');
+            if (flaggedPacketIds.size === 0) {
+                div.textContent = '尚未标记任何数据包';
+                return;
+            }
+            const ids = Array.from(flaggedPacketIds).sort((a, b) => a - b);
+            div.textContent = '已标记数据包: #' + ids.join(', #');
+        }
+
+        function submitFlags() {
+            if (flaggedPacketIds.size === 0) {
+                showToast('请先标记至少一个可疑数据包', 'info');
+                return;
+            }
+            anomalySubmitted = true;
+            // Calculate score
+            let correctFlags = 0;
+            let falseFlags = 0;
+            const trueAnomalies = packets.filter(p => p.isAnomaly).map(p => p.id);
+            flaggedPacketIds.forEach(fid => {
+                if (trueAnomalies.includes(fid)) correctFlags++;
+                else falseFlags++;
+            });
+            const missedAnomalies = trueAnomalies.filter(a => !flaggedPacketIds.has(a));
+            scoreCorrect = correctFlags;
+
+            const fb = document.getElementById('flagFeedback');
+            if (correctFlags >= 2 && falseFlags === 0 && missedAnomalies.length === 0) {
+                fb.innerHTML =
+                    '🎉 <strong>完美！</strong>你准确识别了所有异常数据包（#4 ServerHello降级 + #7 RSA密钥交换）。攻击链已揭示！';
+                fb.style.color = 'var(--accent-green)';
+                showToast('✅ 检测正确！降级攻击已被确认', 'success');
+                updateProgress(5);
+            } else if (correctFlags >= 1 && missedAnomalies.length <= 1) {
+                fb.innerHTML =
+                    `👍 <strong>不错！</strong>你发现了${correctFlags}个异常包。但还有${missedAnomalies.length}个异常未被标记（数据包#${missedAnomalies.join(', #')}）。请继续分析。`;
+                fb.style.color = 'var(--accent-amber)';
+                showToast('⚠ 部分正确，请检查遗漏的异常包', 'info');
+                updateProgress(4);
+            } else {
+                fb.innerHTML = '🤔 标记结果与预期有较大差异。建议仔细对比数据包#3（ClientHello）和数据包#4（ServerHello）的TLS版本字段。';
+                fb.style.color = 'var(--accent-red)';
+                showToast('❌ 检测结果不准确，请重新分析', 'error');
+                updateProgress(3);
+            }
+            document.getElementById('scoreDisplay').textContent =
+                `得分: ${correctFlags}/${scoreTotal} 正确异常包 + ${falseFlags > 0 ? ' ' + falseFlags + ' 误报' : ''}`;
+            renderPacketTable();
+            updateTimeline(correctFlags >= 2);
+        }
+
+        // ==================== TIMELINE ====================
+        function updateTimeline(revealAttack) {
+            const body = document.getElementById('timelineBody');
+            if (!revealAttack) {
+                body.innerHTML =
+                    '<p style="color:var(--text-muted);font-style:italic;text-align:center;padding:20px;">完成异常检测后将展示完整攻击时间线</p>';
+                return;
+            }
+            body.innerHTML = `
+                <div style="position:relative;padding:10px 0;">
+                    <div style="position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--border);transform:translateX(-50%);z-index:0;"></div>
+                    <div style="display:flex;align-items:center;margin-bottom:14px;gap:10px;">
+                        <div style="flex:1;text-align:right;padding-right:20px;">
+                            <div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-family:var(--font-mono);font-size:0.7rem;display:inline-block;text-align:left;">
+                                📤 <strong>ClientHello</strong><br>TLS 1.3 (0x0304)<br>数据包 #3
+                            </div>
+                        </div>
+                        <div style="width:14px;height:14px;border-radius:50%;background:var(--accent-blue);border:2px solid var(--accent-blue);flex-shrink:0;z-index:2;box-shadow:0 0 10px rgba(59,130,246,0.5);"></div>
+                        <div style="flex:1;padding-left:20px;"></div>
+                    </div>
+                    <div style="display:flex;align-items:center;margin-bottom:14px;gap:10px;">
+                        <div style="flex:1;text-align:right;padding-right:20px;"></div>
+                        <div style="width:18px;height:18px;border-radius:50%;background:var(--accent-red);border:3px solid var(--accent-red);flex-shrink:0;z-index:3;box-shadow:0 0 18px rgba(239,68,68,0.7);animation:pulse-step 1.5s infinite;"></div>
+                        <div style="flex:1;padding-left:20px;">
+                            <div style="background:rgba(239,68,68,0.1);border:2px solid var(--accent-red);border-radius:8px;padding:10px 14px;font-family:var(--font-mono);font-size:0.7rem;display:inline-block;box-shadow:0 0 16px rgba(239,68,68,0.25);">
+                                ⚠ <strong>MITM 拦截 & 篡改</strong><br>移除supported_versions<br>降级为TLS 1.0
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex;align-items:center;margin-bottom:14px;gap:10px;">
+                        <div style="flex:1;text-align:right;padding-right:20px;">
+                            <div style="background:var(--bg-panel);border:1px solid var(--accent-red);border-radius:8px;padding:10px 14px;font-family:var(--font-mono);font-size:0.7rem;display:inline-block;text-align:left;box-shadow:0 0 12px rgba(239,68,68,0.2);">
+                                📥 <strong>ServerHello (降级)</strong><br>⚠ TLS 1.0 (0x0301)<br>弱加密套件 0x002F<br>数据包 #4
+                            </div>
+                        </div>
+                        <div style="width:14px;height:14px;border-radius:50%;background:var(--accent-amber);border:2px solid var(--accent-amber);flex-shrink:0;z-index:2;box-shadow:0 0 10px rgba(245,158,11,0.5);"></div>
+                        <div style="flex:1;padding-left:20px;"></div>
+                    </div>
+                    <div style="display:flex;align-items:center;margin-bottom:14px;gap:10px;">
+                        <div style="flex:1;text-align:right;padding-right:20px;"></div>
+                        <div style="width:14px;height:14px;border-radius:50%;background:var(--accent-amber);border:2px solid var(--accent-amber);flex-shrink:0;z-index:2;"></div>
+                        <div style="flex:1;padding-left:20px;">
+                            <div style="background:var(--bg-panel);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-family:var(--font-mono);font-size:0.7rem;display:inline-block;">
+                                📤 <strong>RSA ClientKeyExchange</strong><br>⚠ 无前向安全性<br>数据包 #7
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <div style="flex:1;text-align:right;padding-right:20px;">
+                            <div style="background:rgba(239,68,68,0.05);border:1px dashed var(--accent-red);border-radius:8px;padding:10px 14px;font-family:var(--font-mono);font-size:0.7rem;display:inline-block;text-align:center;">
+                                🔓 <strong>弱加密通信建立</strong><br>可被解密/中间人攻击
+                            </div>
+                        </div>
+                        <div style="width:14px;height:14px;border-radius:50%;background:var(--accent-red);border:2px solid var(--accent-red);flex-shrink:0;z-index:2;box-shadow:0 0 14px rgba(239,68,68,0.6);"></div>
+                        <div style="flex:1;padding-left:20px;"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ==================== PROGRESS ====================
+        function updateProgress(step) {
+            for (let i = 1; i <= 5; i++) {
+                const el = document.getElementById('step' + i);
+                el.classList.remove('completed', 'active');
+                if (i < step) el.classList.add('completed');
+                if (i === step) el.classList.add('active');
+            }
+            // Update connectors
+            const connectors = document.querySelectorAll('.progress-connector');
+            connectors.forEach((c, i) => {
+                if (i + 1 < step) c.classList.add('done');
+                else c.classList.remove('done');
+            });
+        }
+
+        // ==================== REPORT ====================
+        function toggleReport() {
+            const overlay = document.getElementById('reportOverlay');
+            overlay.classList.toggle('show');
+        }
+        document.getElementById('reportOverlay').addEventListener('click', function(e) {
+            if (e.target === this) toggleReport();
+        });
+
+        // ==================== TOAST ====================
+        function showToast(msg, type) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = msg;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(30px)';
+                toast.style.transition = '0.4s ease';
+                setTimeout(() => toast.remove(), 400);
+            }, 2800);
+        }
+
+        // ==================== RESET ====================
+        function resetLab() {
+            selectedPacketId = null;
+            flaggedPacketIds.clear();
+            anomalySubmitted = false;
+            scoreCorrect = 0;
+            document.getElementById('detailBody').innerHTML =
+                '<p style="color:var(--text-muted);font-style:italic;text-align:center;padding:30px;">👆 请从左侧数据包列表中选择一个数据包以查看详情</p>';
+            document.getElementById('detailPacketLabel').textContent = '未选择数据包';
+            document.getElementById('flagFeedback').textContent = '';
+            document.getElementById('scoreDisplay').textContent = '';
+            document.getElementById('flaggedList').textContent = '';
+            document.getElementById('btnToggleFlag').classList.remove('active');
+            document.getElementById('btnToggleFlag').textContent = '🚩 标记/取消标记当前包';
+            document.getElementById('detailCard').classList.remove('active-card');
+            updateTimeline(false);
+            updateProgress(1);
+            renderPacketTable();
+            showToast('🔄 实验已重置', 'info');
+        }
+
+        // ==================== KEYBOARD NAVIGATION ====================
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                const ids = packets.map(p => p.id);
+                let idx = selectedPacketId ? ids.indexOf(selectedPacketId) : -1;
+                if (e.key === 'ArrowDown') idx = Math.min(idx + 1, ids.length - 1);
+                else idx = Math.max(idx - 1, 0);
+                if (idx >= 0) selectPacket(ids[idx]);
+            }
+            if (e.key === 'f' && !e.ctrlKey && !e.metaKey && selectedPacketId) {
+                e.preventDefault();
+                toggleFlagCurrent();
+            }
+        });
+
+        // ==================== INIT ====================
+        function init() {
+            renderPacketTable();
+            updateProgress(1);
+            // Default select packet #3 (ClientHello) for immediate insight
+            selectPacket(3);
+            updateProgress(2);
+        }
+        init();
+
+        console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+        console.log('TLS MITM Downgrade Attack Analysis Lab initialized.');
+        console.log('Total packets:', packets.length, '| True anomalies: #4 (ServerHello downgrade), #7 (RSA key exchange)');
+        console.log('Hint: Compare TLS versions between ClientHello (#3) and ServerHello (#4).');
+    </script>
+</body>
+</html>

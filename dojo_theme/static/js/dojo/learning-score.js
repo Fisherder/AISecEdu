@@ -19,12 +19,20 @@
 
     function statusLabel(status) {
       return ({
-        ACTIVE: "进行中",
-        SOLVED: "已完成",
-        STOPPED: "已停止",
-        INTERRUPTED: "已切换",
+        NOT_STARTED: "未开始",
+        IN_PROGRESS: "进行中",
+        SUBMITTED: "已提交",
         COMPLETED: "已完成",
-      })[status] || status || "未知";
+      })[status] || "状态待更新";
+    }
+
+    function evidenceStateLabel(state) {
+      return ({
+        NONE: "暂无过程证据",
+        PARTIAL: "已有部分记录",
+        COMPLETE: "过程记录完整",
+        INVALID: "过程记录待复核",
+      })[state] || "证据状态待更新";
     }
 
     function evidenceLabel(type) {
@@ -33,8 +41,8 @@
         "lab.stopped": "题目环境已停止",
         "lab.interrupted": "题目环境已切换",
         "terminal.command.completed": "终端命令已完成",
-        "tutor.chat.user": "向 Tutor 提问",
-        "tutor.chat.assistant": "Tutor 提供引导",
+        "tutor.chat.user": "向 AI 学习助手提问",
+        "tutor.chat.assistant": "AI 学习助手提供引导",
         "flag.compared": "Flag 已校验",
         "oracle.observed": "客观目标已验证",
         "assessment.created": "评分已生成",
@@ -55,10 +63,8 @@
         const maximum = Number(criterion.maxScore) || 0;
         const percent = maximum ? Math.max(0, Math.min(100, score / maximum * 100)) : 0;
         const evidence = criterion.evidence || {};
-        const citations = [
-          ...(evidence.evidenceSequences || []).map(sequence => `事件 #${sequence}`),
-          ...(evidence.containerEvidence || []),
-        ].slice(0, 8);
+        const citationCount = (evidence.evidenceSequences || []).length
+          + (evidence.containerEvidence || []).length;
         return `
           <section class="learning-score-criterion">
             <div class="learning-score-criterion-heading">
@@ -71,7 +77,7 @@
             <div class="learning-score-progress" role="progressbar" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100">
               <span style="width:${percent}%"></span>
             </div>
-            ${citations.length ? `<div class="learning-score-citations">${citations.map(item => `<span>${learning.escapeHtml(item)}</span>`).join("")}</div>` : ""}
+            ${citationCount ? `<div class="learning-score-citations"><span>已关联 ${learning.escapeHtml(citationCount)} 项可核验证据</span></div>` : ""}
           </section>`;
       }).join("");
     }
@@ -93,16 +99,16 @@
     function renderEvidence(attempt) {
       const events = attempt.evidence || [];
       document.getElementById("learning-score-chain").textContent = attempt.evidenceChain && attempt.evidenceChain.valid
-        ? `证据链已验证 · ${events.length} 条`
-        : `证据链待复核 · ${events.length} 条`;
+        ? `过程记录完整，可复核 · ${events.length} 条`
+        : `过程记录待复核 · ${events.length} 条`;
       document.getElementById("learning-score-evidence").innerHTML = events.length
-        ? events.map(event => `
+        ? events.map((event, index) => `
           <article class="learning-score-evidence-item">
-            <span class="learning-score-evidence-sequence">#${learning.escapeHtml(event.sequence)}</span>
-            <span class="learning-score-evidence-dot is-s${learning.escapeHtml(event.trustLevel)}"></span>
+            <span class="learning-score-evidence-sequence">${index + 1}</span>
+            <span class="learning-score-evidence-dot ${Number(event.trustLevel) >= 3 ? "is-verifiable" : "is-learner"}"></span>
             <div>
               <h3>${learning.escapeHtml(evidenceLabel(event.type))}</h3>
-              <p>S${learning.escapeHtml(event.trustLevel)} · ${learning.escapeHtml(event.source)} · ${learning.escapeHtml(learning.formatDate(event.occurred))}</p>
+              <p>${Number(event.trustLevel) >= 3 ? "可核验记录" : "学习者记录"} · ${learning.escapeHtml(learning.formatDate(event.occurred))}</p>
             </div>
           </article>`).join("")
         : '<p class="learning-score-empty-copy">本次作答暂时没有可展示的过程事件。</p>';
@@ -110,28 +116,39 @@
 
     function render(attempt) {
       const assessment = attempt.assessment;
-      const total = Number(attempt.totalScore) || 0;
+      const assessmentReady = attempt.assessmentState === "READY" && Boolean(assessment);
+      const total = assessmentReady ? Number(assessment.totalScore) || 0 : null;
       document.getElementById("learning-score-title").textContent = attempt.challengeName;
       document.getElementById("learning-score-meta").textContent =
-        `${attempt.dojoName} · ${attempt.moduleName} · 第 ${attempt.epoch} 次作答 · ${statusLabel(attempt.status)}`;
+        `${attempt.dojoName} · ${attempt.moduleName} · 第 ${attempt.epoch} 次学习 · ${statusLabel(attempt.activityState)}`;
       document.getElementById("learning-score-challenge-link").href = attempt.challengeUrl;
       document.getElementById("learning-score-course-link").href = attempt.courseLearningUrl;
-      document.getElementById("learning-score-total").textContent = total;
-      document.getElementById("learning-score-objective").textContent = Number(attempt.objectiveScore) || 0;
-      document.getElementById("learning-score-process").textContent = Number(attempt.processScore) || 0;
-      document.getElementById("learning-score-trust").textContent = `${Math.round((Number(attempt.trustScore) || 0) * 100)}%`;
-      document.getElementById("learning-score-level").textContent = levelLabel(total);
-      document.getElementById("learning-score-ring").style.setProperty("--score-progress", `${Math.max(0, Math.min(100, total)) * 3.6}deg`);
-      document.getElementById("learning-score-feedback").textContent = assessment
-        ? assessment.feedback || "本次评分已根据可信学习证据生成。"
-        : "客观结果已记录，过程评分将在形成评估后显示。";
+      document.getElementById("learning-score-total").textContent = assessmentReady ? total : "—";
+      document.getElementById("learning-score-total-unit").hidden = !assessmentReady;
+      document.getElementById("learning-score-objective").textContent = assessmentReady ? Number(assessment.objectiveScore) || 0 : "—";
+      document.querySelector("#learning-score-objective-value > span:last-child").hidden = !assessmentReady;
+      document.getElementById("learning-score-process").textContent = assessmentReady ? Number(assessment.processScore) || 0 : "—";
+      document.querySelector("#learning-score-process-value > span:last-child").hidden = !assessmentReady;
+      document.getElementById("learning-score-trust").textContent = evidenceStateLabel(attempt.evidenceState);
+      document.getElementById("learning-score-level").textContent = assessmentReady
+        ? levelLabel(total)
+        : attempt.assessmentState === "PENDING"
+          ? "等待评分"
+          : "尚未形成评分";
+      document.getElementById("learning-score-ring").classList.toggle("is-pending", !assessmentReady);
+      document.getElementById("learning-score-ring").style.setProperty("--score-progress", `${assessmentReady ? Math.max(0, Math.min(100, total)) * 3.6 : 0}deg`);
+      document.getElementById("learning-score-feedback").textContent = assessmentReady
+        ? assessment.feedback || "本次评分已根据客观结果与可核验过程生成。"
+        : attempt.assessmentState === "PENDING"
+          ? `已提交于 ${learning.formatDate(attempt.submitted)}；评分完成前不会显示 0 分占位。`
+          : "完成并提交本次学习后，这里会显示单次评分结果。";
       document.getElementById("learning-score-revision").textContent = assessment
-        ? `修订 ${assessment.revision} · ${assessment.source}`
-        : "尚无评估修订";
+        ? `第 ${assessment.revision} 次评估`
+        : "等待评估";
       document.getElementById("learning-score-reflection").textContent =
         attempt.reflection || "本次作答尚未填写复盘。可前往课程学习分析中的尝试记录补充复盘并重新评估。";
-      renderCriteria(assessment ? assessment.criteria : []);
-      renderAbilities(assessment ? assessment.abilities : {});
+      renderCriteria(assessmentReady ? assessment.criteria : []);
+      renderAbilities(assessmentReady ? assessment.abilities : {});
       renderEvidence(attempt);
     }
 

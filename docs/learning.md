@@ -1,13 +1,13 @@
-# AISecEdu 智能学习与证据评测
+# 玄甲智能学习与证据评测
 
-AISecEdu 把智能教学能力直接实现于现有课程、题目与工作区边界内，而不是在旁边部署另一套服务。本页描述设计边界、角色流程、数据、API、安全约束和运维方法。
+玄甲把智能教学能力直接实现于现有课程、题目与工作区边界内，而不是在旁边部署另一套服务。本页描述设计边界、角色流程、数据、API、安全约束和运维方法。
 
 ## 一体化原则
 
 系统中的用户、教师权限、课程、模块、题目、工作区、flag、学习证据与评分共享同一个事务和权限边界：
 
 ```text
-AISecEdu dojo_theme（Jinja / Bootstrap）
+玄甲 dojo_theme（Jinja / Bootstrap）
     │ 原生 CTFd session / CSRF
     ▼
 CTFd + dojo_plugin (Flask)
@@ -22,7 +22,7 @@ CTFd + dojo_plugin (Flask)
 单一 PostgreSQL
 ```
 
-没有单独的 FastAPI、自研 Next.js 学生站、Go terminal gateway、第二身份系统或第二数据库。LAN IP 是唯一规范 Web 入口，直接由 CTFd 与 AISecEdu `dojo_theme` 提供学生、课程、Workspace、认证和管理页面；开发和部署均不再引入域名兼容层。`/dojos`、`/<course>`、`/<course>/<unit>` 与题目手风琴采用课程 → 单元 → 题目的信息架构；学习中心、课程分析、教师工作台和 Tutor 复用同一 `base.html`、导航、卡片、学习状态、表格、Tab 和侧栏。模型服务是可选的出站增强依赖，不拥有业务状态，也不参与 flag 判定。
+没有单独的 FastAPI、自研 Next.js 学生站、Go terminal gateway、第二身份系统或第二数据库。LAN IP 是唯一规范 Web 入口，直接由 CTFd 与玄甲 `dojo_theme` 提供学生、课程、Workspace、认证和管理页面；开发和部署均不再引入域名兼容层。`/dojos`、`/<course>`、`/<course>/<unit>` 与题目手风琴采用课程 → 单元 → 题目的信息架构；学习中心、课程分析、教师工作台和 Tutor 复用同一 `base.html`、导航、卡片、学习状态、表格、Tab 和侧栏。模型服务是可选的出站增强依赖，不拥有业务状态，也不参与 flag 判定。
 
 ## 功能映射
 
@@ -43,6 +43,30 @@ CTFd + dojo_plugin (Flask)
 | 评分与复核 | `LearningAssessments` / `LearningAppeals`、Pro 评分 Agent | Oracle 锁定客观 60 分；Pro 结合全上下文评过程 40 分，支持修订、申诉与教师复评 |
 | 自适应学习 | `LearningSkillStates` / `LearningRecommendations` | 六维能力状态、置信度和下一题推荐 |
 | 教师分析 | 课程教师 API 与教师工作台 | 汇总参与者、attempt、得分、进度、能力与申诉 |
+
+## 完整学生端
+
+`/student` 是学生登录后的规范起点，不创建独立账号、课程副本或第二套学习数据库。它把已有课程、教师任务、活动实验、个人工作区、学习证据、能力状态、推荐和公开资源组织为一个“计划 → 行动 → 监控 → 复盘”的自主学习闭环，并始终给出一项可直接执行的下一步，而不是要求学生先理解平台内部模式。
+
+| 学习环节 | 入口 | 学生可完成的工作 |
+| --- | --- | --- |
+| 规划与继续学习 | `/student` | 查看真实课程与待办，优先继续活动实验、教师任务或基于证据的推荐；没有待办时进入下一课程内容或用自然语言制定计划 |
+| 长期学习对话 | `/guide` | 创建持久线程，用自然语言分析、提问、制定计划和复盘；学生可显式引用课程题目、管理自己的记忆与对话范围 |
+| 教师任务 | `/learning/assignments/<id>` | 阅读要求、关联课程与题目，提交成果并查看教师反馈 |
+| 个人自主实践 | `/learning/extend` | 从已加入课程选择目标，创建学生自己的学习工作区，并进入受限 `/security-learn` 运行环境 |
+| 课程与材料 | `/<course>`、`/<course>/<unit>` | 阅读教师发布的内容、课件、演示和资源，按课程顺序进入题目 |
+| 真实实验 | `/<course>/<unit>/<challenge>`、`/workspace` | 使用 Terminal、Code、Desktop、SSH、模拟视图和 Tutor 完成容器、模拟或混合题 |
+| 证据与复盘 | `/dojo/<course>/learning` | 查看 attempt、客观完成、过程证据、评分、六维能力、推荐与申诉，并填写反思 |
+
+学生端遵循以下产品约束：
+
+- 身份、选课、课程内容、任务、attempt、Flag、评分和学习证据全部使用 CTFd/Dojo 的唯一事实源；学生门户不维护影子账号或虚假课程数据。
+- 学生智能体可以自动读取当前学生自己的记忆、对话、工作区、成果、已加入课程和已发布内容；不得读取其他学生数据、教师私有答案或课程管理信息。
+- 修改个人记忆、提交成果等有外部影响的动作必须来自明确指令；提交评测等高影响动作保留确认或教师复核。客观 Flag、模拟目标与评分边界由确定性服务端规则判定，不交给模型猜测。
+- 辅导优先采用“提示 → 线索 → 示例”的最小帮助原则，先让学生解释计划和证据，再逐步增加支持；不把标准答案、私有验证条件或完整利用链直接泄露给学生。
+- 首页推荐只依据可追溯的真实证据，展示薄弱能力、理由和可执行目标；学生可以控制对话引用、长期记忆和个人工作区，而不是被系统自动绑定到某个章节。
+
+这一交互取舍参考了 [OpenAI Study Mode](https://openai.com/index/chatgpt-study-mode/) 的分步引导与主动参与、[Claude for Education](https://www.anthropic.com/news/introducing-claude-for-education?subjects=announcements&type=product) 的苏格拉底式提问，以及 [EEF 元认知与自我调节指南](https://educationendowmentfoundation.org.uk/education-evidence/guidance-reports/metacognition) 中的计划、监控和评价循环；具体能力边界同时吸收项目内保留的 OpenMAIC 自主学习实现，但统一落在玄甲的真实身份、课程、工作区和安全策略之内。
 
 ## 统一题目模式与模拟引擎
 
@@ -105,7 +129,26 @@ challenges:
       description: 分析无线拓扑和频谱状态，形成假设、实施调整并复测。
 ```
 
-`WIRELESS` 与 `SECURITY`/`GENERAL` 预设会在课程导入时展开为完整、版本化场景。教师出题 Agent 发布的题目则保存完整规范，核心字段为：
+`WIRELESS`、`MOBILE`、`SIDE_CHANNEL`、`ICS`、`GNSS` 与
+`SECURITY`/`GENERAL` 预设会在课程导入时展开为完整、版本化场景。其中后四类
+分别提供移动终端权限滥用、功耗侧信道、工控 PLC 非授权写入和 GNSS 欺骗的
+探索式调查实验。它们不会在初始状态公开完整证据，也没有固定的“检查 → 收集
+→ 处置”按钮顺序：学习者可并行选择不同证据源，关键实验要求配置采集点、
+样本量、触发方式、签名基线或独立时间参考。错误配置会消耗回合并返回可解释
+的测量反馈，但不会直接结束题目；错误假设、处置和验收范围同样可以根据可见
+后果修正。
+
+每个领域预设同时提供：
+
+- 明确的角色、任务、完成要求、现场约束和推荐调查方法；
+- 3–4 个安全域、至少 8 个带地址/角色/状态的实体，以及带方向、协议和状态的动态关系；
+- 只显示症状的初始告警、逐步形成的证据矩阵和可点击的实体详情；
+- 当前阶段、当前任务、证据数量、风险与业务状态，以及可回放的分类时间线；
+- 要求学习者写出证据依据的根因假设、写出安全检查点的最小处置和覆盖威胁、业务、安全边界的独立验收。
+
+场景升级会创建新的 package 版本，并将旧场景保留在 `history` 中；已有 attempt
+继续按原版本和 digest 回放，新作答才进入新版。教师出题 Agent 发布的题目则
+保存完整规范，核心字段为：
 
 ```json
 {
@@ -157,7 +200,7 @@ Tutor 同时接收当前容器快照和/或模拟公开状态、可用动作、�
 
 ### 教师
 
-1. 以课程教师身份进入 `/dojo/<course>/studio`，无需第二套身份系统。兼容实现中该身份存储为 `DojoAdmins`。
+1. 以课程教师身份从课程管理进入 `/teacher/courses?dojo=<course>&tab=questions` 统一课程工作台的题目管理区，无需第二套身份系统。兼容实现中该身份存储为 `DojoAdmins`；旧 `/dojo/<course>/studio` 与 `/teacher/courses/<course>/questions` 链接会重定向到统一入口。
 2. 选择教学单元并输入教学目标、难度、类别和运行约束；界面不再要求教师预先选择复用、改编或新建。
 3. 策略 Agent 先检索可导入题库，再综合教师要求、候选匹配度、运行约束和验证合约自动选择：
    - **L1**：目标与已有挑战高度一致，原样复用其运行与教学内容；
@@ -165,12 +208,13 @@ Tutor 同时接收当前容器快照和/或模拟公开状态、可用动作、�
    - **L3**：候选不足或要求新的运行/验证产物，创建自包含新题。
    教师只有在题目需求中明确写出“直接复用”“基于现有题改编”“从零新建”或 L1/L2/L3 时才覆盖 Agent 决策；客户端提交的隐藏 `level` 字段不参与选策。选策来源、理由、候选数和源题身份随任务持久化并显示在进度中。
 4. `deepseek-v4-flash` 方案 Agent 理解教师输入和后续修改，冻结公开题目信息并形成教学、实现、产物、验证和风险控制方案。
-5. `deepseek-v4-pro` 构建实现规格。L1/L2 的构建只允许调整公开教学元数据并审阅真实源题参考文件；平台在发布时复制源题目录，并原样保留其 `.init`、checker/flag、运行镜像、权限和接口，不生成 `verificationAnswer`、starter files、私有 `REPORT_JSON_V1` 或第二套运行合约。L3 才由 Pro 单独生成最小自包含的 starter files、私有标准解法、声明式 Oracle 合约和受限运行合约。自定义服务不得依赖联网安装或题目自定义环境变量注入，平台只允许 Python/Bash/Node 的受限启动方式。Web 题的 Oracle 必须通过 `liveBindings` 独立请求运行合约中已有的本地服务，并把学生报告中的状态码、完整响应哈希或 JSON 字段与实时响应逐值比对；仅验证学生自报的布尔值或状态码不足以发布。
-6. 独立的 Pro 红队 Agent 逐项检查题面、全部文件、运行假设、Oracle 和标准解法；平台同时把依赖、语法、常见标准库属性错误、未支持的环境输入、路径、端口、缺失 Web 服务、无语义 Oracle 等确定性诊断注入同一 finding 流，直接驱动后续修复。finding 带稳定 ID 及 `OPEN/RESOLVED` 状态；模型声称 PASS 但仍有开放中高风险项时，服务端会强制纠正为 BLOCK。
-7. 确定性检查若发现自定义题缺少 starter file 或运行合约，先交给有严格大小、路径、依赖和端口边界的 Pro 最小闭环恢复 Agent；Oracle、运行合约或私有解法不一致时，交给不允许改动公开文件的 Pro 验证闭环 Agent。平台会强制同步 starter file 完整性清单，并阻止 status-only Web Oracle、未绑定的决定性字段、过期文件路径，以及私有解法重新启动平台已经托管的服务。其余问题由 Pro 修复 Agent 应用可审计的精确文件差异并同步修复标准解法与合约。若局部补丁仍无法闭环，再整体重建四类耦合产物并重新红队复审。遗漏的旧 finding 会保守地继续保持 OPEN。
-8. 草稿建立后不再等待教师点击“校验”。后台编排器立即运行独立 Pro 最终验证和全部确定性 Schema、运行时、语义 Oracle、评分、路径、权限与供应链门禁；若出现 BLOCK，服务端把模型 finding 与确定性失败统一转换为修复输入，自动执行“修复—独立复验—完整发布门重跑”。每一轮验证、阻断数、修复周期、剩余 finding 和题包是否变化都会动态追加到任务进度。
+5. `deepseek-v4-pro` 构建实现规格。L1/L2 的构建只允许调整公开教学元数据并审阅真实源题参考文件；平台在发布时复制源题目录，并原样保留其 `.init`、checker/flag、运行镜像、权限和接口，不生成 `verificationAnswer`、starter files、私有 Flag Gate 或第二套运行合约。L3 才由 Pro 单独生成最小自包含的 starter files、私有标准解法、声明式 `FLAG_GATE_V1` 和受限运行合约。自定义服务不得依赖联网安装或题目自定义环境变量注入，平台只允许 Python/Bash/Node 的受限启动方式。Flag Gate 的每个判定字段都必须通过 `liveBindings` 由私有检查器直接读取运行合约中已有服务的状态码、完整响应哈希或 JSON 字段，并具有非 `exists` 的具体目标值断言；学生自报的布尔值、结论或报告文件不参与客观判题。
+6. 独立的 Pro 红队 Agent 逐项检查题面、全部文件、运行假设、Flag Gate 和标准解法；平台同时把依赖、语法、常见标准库属性错误、未支持的环境输入、路径、端口、缺失服务、未绑定状态字段等确定性诊断注入同一 finding 流，直接驱动后续修复。finding 带稳定 ID 及 `OPEN/RESOLVED` 状态；模型声称 PASS 但仍有开放中高风险项时，服务端会强制纠正为 BLOCK。
+7. 确定性检查若发现自定义题缺少 starter file 或运行合约，先交给有严格大小、路径、依赖和端口边界的 Pro 最小闭环恢复 Agent；Flag Gate、运行合约或私有解法不一致时，交给不允许改动公开文件的 Pro 验证闭环 Agent。平台会强制同步 starter file 完整性清单，并阻止 status-only 弱判据、没有同名实时绑定的判定字段、过期文件路径，以及私有解法重新启动平台已经托管的服务。其余问题由 Pro 修复 Agent 应用可审计的精确文件差异并同步修复标准解法与合约。若局部补丁仍无法闭环，再整体重建四类耦合产物并重新红队复审。遗漏的旧 finding 会保守地继续保持 OPEN。
+8. 草稿建立后不再等待教师点击“校验”。后台编排器立即运行独立 Pro 最终验证和全部确定性 Schema、运行时、Flag 条件、评分、路径、权限与供应链门禁；若出现 BLOCK，服务端把模型 finding 与确定性失败统一转换为修复输入，自动执行“修复—独立复验—完整发布门重跑”。每一轮验证、阻断数、修复周期、剩余 finding 和题包是否变化都会动态追加到任务进度。
 9. 闭环最多执行五轮，防止模型或外部服务异常造成无限任务。通过时草稿直接进入 `VALIDATED`；安全上限内仍未收敛时保持不可发布，并保留草稿、全部轮次和最后阻断原因，而不是要求教师手工组织验证意见。教师主动提出内容修订时也创建同类后台任务，并重新自动选策和闭环验证。
 10. 发布到所选教学单元后，学生从课程题目页启动它。再次修订并发布会保留题库发布项 ID、递增版本并生成新的不可变运行包；教师工作台同时提供题库、班级分析和申诉处理。
+11. “已发布题目”中的删除操作只允许本课程教师执行，并使用页面内确认框明确影响范围。删除会在同一事务中移除本课程关联的 attempt、评分、模拟回放、推荐和解题 Agent 记录，保留原草稿供重新发布，并重建受影响学生的派生能力状态。若底层题目仍被其他课程引用，只解除当前课程关联；仅在没有任何课程引用时删除底层 CTFd challenge 及平台生成的版本目录。
 
 教师也可将外部 JSON package 规范化为 L3 草稿，但 package 必须经过完全相同的安全验证和发布过程，不能直接写入运行目录。
 
@@ -184,7 +228,7 @@ Tutor 同时接收当前容器快照和/或模拟公开状态、可用动作、�
 
 Desktop 的 noVNC 页面将物理键盘聚焦到其原生隐藏输入控件，使 Vimium 等扩展进入输入态；iframe 同时允许 noVNC 全屏，在支持的浏览器中全屏会请求 [Keyboard Lock](https://developer.chrome.com/articles/keyboard-lock)，以接收浏览器允许交给远程桌面的全部按键。Chrome 130 及以上版本首次使用 Keyboard Lock 时会显示浏览器权限请求，拒绝权限不会影响普通字母和文本输入。默认 workspace profile 为 `full`，包含 GCC/Clang、Vim/Neovim、GDB/GEF、Python/pwntools、Nmap/Wireshark、Burp Suite、IDA Free、Ghidra、Cutter/radare2 等编译、调试、Web、网络和逆向工具。显式设置 `DOJO_WORKSPACE=core` 仍可用于受限或最小化部署。
 
-操作栏的“重启”不是重新连接 iframe：它会删除当前题目容器、结束其中的进程和临时修改，再以同一道题和相同权限模式创建新容器与 attempt epoch；只有持久的 `/home/hacker` 会保留。“停止”会删除当前题目容器并结束 attempt，同样保留 `/home/hacker`，停止后可直接点击“重启”再次创建。“重置”会在二次确认后删除整个持久 Home、销毁当前容器，并从题目初始状态创建全新容器与 attempt epoch；该操作不可撤销。重启、停止、重置和切换运行中题目均使用与 AISecEdu 深色/浅色主题一致的页面内确认框，不调用浏览器原生对话框。三个操作均使用可见文字标识，服务端记录对应生命周期证据。
+操作栏的“重启”不是重新连接 iframe：它会删除当前题目容器、结束其中的进程和临时修改，再以同一道题和相同权限模式创建新容器与 attempt epoch；只有持久的 `/home/hacker` 会保留。“停止”会删除当前题目容器并结束 attempt，同样保留 `/home/hacker`，停止后可直接点击“重启”再次创建。“重置”会在二次确认后删除整个持久 Home、销毁当前容器，并从题目初始状态创建全新容器与 attempt epoch；该操作不可撤销。重启、停止、重置和切换运行中题目均使用与玄甲深色/浅色主题一致的页面内确认框，不调用浏览器原生对话框。三个操作均使用可见文字标识，服务端记录对应生命周期证据。
 
 ## 发布门与生成包
 
@@ -194,14 +238,16 @@ Desktop 的 noVNC 页面将物理键盘聚焦到其原生隐藏输入控件，�
 - 运行镜像语法、源题可导入性与自定义脚手架完整性；
 - 客观 60 / 过程 40 的 rubric 和 Tutor 防泄露策略；
 - 起始文件的相对路径、保留文件名、大小与目录穿越；
-- `REPORT_JSON_V1` 固定提交路径、字段和受限运算符；自定义 Web 服务必须声明绑定到运行合约服务的只读 `liveBindings`，且至少包含一个 `body_sha256` 或 `json_field` 强响应证据；
+- `FLAG_GATE_V1` 只接受私有检查器读取的实时状态字段和受限运算符；每个必需字段必须有同名只读 `liveBindings` 和非 `exists` 的具体目标值断言，且至少包含一个 `body_sha256` 或 `json_field` 强响应证据；
 - `integrityFiles` 由平台按当前全部 starter files 强制同步，运行时再以发布时 SHA-256 校验，防止通过替换服务入口或实验材料伪造结果；
 - 运行合约只能引用实际 starter file、受限解释器和非特权端口；
 - 私有标准解法必须包含步骤和成功证据，供 Tutor 与 Grader 在服务端内部比对；对平台自动启动的服务只能观察和使用，不得建议再次手动启动；
 - 镜像可变标签和特权模式风险提示；
-- 对公开规范、运行/Oracle 合约、实现与私有标准解法共同计算内容摘要；旧式验证值只以 SHA-256 子摘要参与，package digest 不泄露私密值。
+- 对公开规范、运行/Flag Gate 合约、实现与私有标准解法共同计算内容摘要；旧式验证值只以 SHA-256 子摘要参与，package digest 不泄露私密值。
 
-每次发布的运行物位于 `/var/dojos/.learning/<dojo>/<module>/<challenge-db-id>/v<version>/`，并作为标准 DOJO challenge 路径交给现有 workspace 编排器。L1/L2 会把被复用题目的运行目录复制成该版本自己的快照，并继续使用源题原生启动与完成机制；它们不会获得模型生成的 `solution.json`、Oracle 或运行合约。旧题需要 Tutor/Grader 私有参考时，Pro 会在学生启动该固定版本后，根据实际快照、原生验证器和实时容器生成并缓存。L3 生成只读实验材料、平台拥有的 `.init` / `runtime-launcher.py` 和私有 Oracle 服务；只有这类自定义题要求学生把实验报告写到 `/home/hacker/solution.json` 并运行公共 `/challenge/check`。受限解释器只执行声明式断言，不执行模型生成的 Checker 代码。包含期望条件、实时探测和动态 flag 访问能力的 `check-server.py` 在发布包中为 `0700`，启动时再次强制归属 `root:root` 和 `0700`，学生不可读取。私有检查器会向运行合约声明的原始本地服务重新发起受限 GET 请求，核对实时响应、全部 starter file 的发布时哈希，以及 root 所持有的服务进程记录中的 PID、启动时间、UID 和入口文件。运行启动器只向降权后的 `hacker` 子进程传递固定最小环境，在 `/run/dojo-learning-service-pids.json` 以 `0600` 保存可信进程记录，不继承平台密钥。定性解释、推理质量和工具选择属于过程 40 分 Grader，不用可猜测的 `exists` 字段冒充客观 Oracle。删除或更新源课程不会破坏已发布版本，私有验证条件也不会进入公开题面或 starter files。数据库中的挑战身份保持稳定，profile 按版本保存运行包路径、私有解法、实现、Oracle 和运行合约；attempt 在启动时固定 `challengeVersion`，Tutor/Grader 后续始终读取该版本而不是教师后来发布的版本。删除课程会同时删除该课程精确对应的全部版本目录。
+每次发布的运行物位于 `/var/dojos/.learning/<dojo>/<module>/<challenge-db-id>/v<version>/`，并作为标准 DOJO challenge 路径交给现有 workspace 编排器。L1/L2 会把被复用题目的运行目录复制成该版本自己的快照，并继续使用源题原生启动与 Flag 完成机制；它们不会获得模型生成的第二套 Flag Gate 或运行合约。旧题需要 Tutor/Grader 私有参考时，Pro 会在学生启动该固定版本后，根据实际快照、原生验证器和实时容器生成并缓存。L3 生成只读实验材料、平台拥有的 `.init` / `runtime-launcher.py` 和私有 Flag Gate 服务。学生完成题目目标后运行公共 `/challenge/check` 获取当前环境的动态 Flag，再把 Flag 提交到平台；不创建 `solution.json`，也不提交 JSON 报告。教师手工题若使用确定性答案，则由私有哈希门禁校验 `/challenge/check <答案>`，成功后同样只返回动态 Flag。受限解释器只执行声明式状态断言，不执行模型生成的 Checker 代码。包含期望条件、实时探测和动态 Flag 访问能力的 `check-server.py` 在发布包中为 `0700`，启动时再次强制归属 `root:root` 和 `0700`，学生不可读取。私有检查器会向运行合约声明的原始本地服务重新发起受限 GET 请求，核对实时响应、全部 starter file 的发布时哈希，以及 root 所持有的服务进程记录中的 PID、启动时间、UID 和入口文件。运行启动器只向降权后的 `hacker` 子进程传递固定最小环境，在 `/run/dojo-learning-service-pids.json` 以 `0600` 保存可信进程记录，不继承平台密钥。定性解释、推理质量和工具选择属于过程 40 分 Grader，不用可猜测的 `exists` 字段冒充客观完成条件。删除或更新源课程不会破坏已发布版本，私有验证条件也不会进入公开题面或 starter files。数据库中的挑战身份保持稳定，profile 按版本保存运行包路径、私有解法、实现、Flag Gate 和运行合约；attempt 在启动时固定 `challengeVersion`，Tutor/Grader 后续始终读取该版本而不是教师后来发布的版本。删除课程会同时删除该课程精确对应的全部版本目录。
+
+历史 `GENERATED_REPORT_JSON_V1` 题包不会进入 L1/L2 复用候选，也不能通过新的发布门；需要重新生成并发布为动态 Flag 版本。已经开始的旧 attempt 仍固定在其不可变历史版本，避免运行中途改变判题协议。
 
 ## Attempt、证据与可信度
 
@@ -241,9 +287,9 @@ Tutor 不再暴露或执行 L1/L2/L3 引导等级。侧栏只用一个紧凑状�
 
 ## 消息提示交互约定
 
-学生及普通管理流程沿用 pwn.college 的非阻塞提示方式：Workspace 状态、重启/停止/重置结果和 Flag 提交结果使用操作栏横幅或题目卡片内的 Bootstrap alert；Tutor、Guide、学习分析、课程及设置结果在当前页面内显示。操作栏横幅设置 `pointer-events: none`，显示期间不得拦截后续点击。只有停止、删除、彻底重置、切换运行中题目等确实需要用户决策的操作才显示统一的 AISecEdu 页面内确认框；普通用户脚本不得调用浏览器原生 `window.confirm`、`window.prompt` 或 `window.alert`。Flag 输入在成功、错误、异常和 30 秒超时后都必须恢复，且同一输入不得并发重复提交。
+学生及普通管理流程沿用 pwn.college 的非阻塞提示方式：Workspace 状态、重启/停止/重置结果和 Flag 提交结果使用操作栏横幅或题目卡片内的 Bootstrap alert；Tutor、Guide、学习分析、课程及设置结果在当前页面内显示。操作栏横幅设置 `pointer-events: none`，显示期间不得拦截后续点击。只有停止、删除、彻底重置、切换运行中题目等确实需要用户决策的操作才显示统一的玄甲页面内确认框；普通用户脚本不得调用浏览器原生 `window.confirm`、`window.prompt` 或 `window.alert`。Flag 输入在成功、错误、异常和 30 秒超时后都必须恢复，且同一输入不得并发重复提交。
 
-`AISecEduUI.dialog/notify` 只允许用于教师出题工作台的生成、验证、修复和发布任务。不得全局监听或隐藏 `.alert`，也不得把普通用户消息自动提升成模态窗口。部署验证会检查该调用边界，真实浏览器 smoke 会检查 Tutor 内联提示、Workspace 横幅以及提示显示期间的可交互性。
+`AISecEduUI.notify` 用于无需打断当前操作的短暂状态反馈，并按成功、警告和失败使用一致的语义颜色；不得把通知自动提升成模态窗口。`AISecEduUI.dialog` 仅用于教师题目管理中的明确结果复核，其他决策继续使用统一的确认接口。不得全局监听或隐藏 `.alert`。部署验证会检查原生阻塞弹窗和模态框边界，真实浏览器 smoke 会检查 Tutor 内联提示、Workspace 横幅以及提示显示期间的可交互性。
 
 ## 60/40 评测和六维能力
 
@@ -323,8 +369,11 @@ docker exec pwncollege-dojo dojo compose restart ctfd stats-worker image-pull-wo
 | --- | --- |
 | `GET /overview` | 当前用户的已加入/可加入课程、教学单元、题库发布项、Submission/Solve 汇总、下一题和活动 attempt |
 | `POST /pwncollege_api/v1/dojos/<course>/enrollment` | 当前用户加入一门可见课程；幂等创建 `DojoMembers` 关系 |
+| `POST /pwncollege_api/v1/dojos/enrollment/code` | 学生使用 8 位课程码加入对应课程；输入不区分大小写并允许连字符，重复加入保持幂等 |
+| `POST /pwncollege_api/v1/teaching/courses/<course>/join-code` | 授课教师读取或生成课程码，也可显式更换课程码使旧码立即失效 |
 | `GET /dojos/<dojo>/dashboard` | 学生进度、能力、推荐和历史 |
 | `GET /dojos/<dojo>/catalog` | 可见题库与学习档案 |
+| `DELETE /dojos/<dojo>/catalog/<module>/<challenge>` | 课程教师删除本课程题目及其关联学习记录 |
 | `POST /dojos/<dojo>/authoring` | 兼容接口：自动选策、创建并自主验证草稿 |
 | `GET/POST /dojos/<dojo>/authoring/jobs` | 列出或启动可观察的后台出题闭环任务 |
 | `GET /authoring/jobs/<job-id>` | 查看选策、验证、修复和复验的实时轮次进度 |

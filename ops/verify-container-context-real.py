@@ -43,7 +43,7 @@ def main():
         workspace = f"user_{user_id}"
         spec = {
             "id": dojo_id,
-            "name": "AISecEdu Live Context Verification",
+            "name": "玄甲 Live Context Verification",
             "type": "public",
             "modules": [
                 {

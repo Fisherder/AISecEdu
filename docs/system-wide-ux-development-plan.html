@@ -1,0 +1,1165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="玄甲全系统 UI、交互、信息架构与前后端契约重构的可执行开发方案">
+  <meta name="color-scheme" content="dark">
+  <title>玄甲全系统体验重构 · 开发执行方案</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070b12;
+      --bg-2: #0a101b;
+      --panel: #0e1623;
+      --panel-2: #121d2d;
+      --panel-3: #172438;
+      --line: #26354a;
+      --line-2: #38506e;
+      --text: #edf4ff;
+      --muted: #a8b7ca;
+      --subtle: #71839b;
+      --blue: #78a4ff;
+      --cyan: #5fd5dc;
+      --green: #64d6a4;
+      --amber: #ffc56f;
+      --red: #ff858f;
+      --purple: #bd9cff;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .32);
+      --radius: 18px;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; }
+    html { max-width: 100%; overflow-x: clip; scroll-behavior: smooth; scroll-padding-top: 22px; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 88% -4%, rgba(77, 120, 255, .18), transparent 34rem),
+        radial-gradient(circle at -8% 22%, rgba(62, 213, 205, .09), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font: 15px/1.66 var(--sans);
+      max-width: 100%;
+      overflow-x: clip;
+    }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    a:hover { color: #a8c2ff; }
+    :focus-visible { outline: 3px solid rgba(120, 164, 255, .55); outline-offset: 3px; }
+    h1, h2, h3, h4, p { margin-top: 0; }
+    h1 { margin-bottom: 1rem; font-size: clamp(2.55rem, 6.1vw, 6.4rem); line-height: .94; letter-spacing: -.065em; }
+    h2 { margin-bottom: .8rem; font-size: clamp(1.85rem, 3.2vw, 3.4rem); line-height: 1.05; letter-spacing: -.045em; }
+    h3 { margin-bottom: .52rem; font-size: 1.18rem; line-height: 1.34; }
+    h4 { margin-bottom: .35rem; font-size: .95rem; }
+    p:last-child { margin-bottom: 0; }
+    ul, ol { margin-top: .55rem; padding-left: 1.25rem; }
+    li + li { margin-top: .36rem; }
+    strong { color: var(--text); }
+    code {
+      padding: .1rem .34rem;
+      border: 1px solid rgba(120, 164, 255, .2);
+      border-radius: 6px;
+      background: rgba(3, 8, 15, .58);
+      color: #c9d8ff;
+      font: .88em var(--mono);
+      overflow-wrap: anywhere;
+    }
+    pre {
+      margin: 0;
+      padding: 1rem;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #060b13;
+      color: #c8d5e8;
+      font: .78rem/1.62 var(--mono);
+      white-space: pre-wrap;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: .78rem .75rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: #cbd8e9; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; }
+    td { color: var(--muted); font-size: .84rem; }
+    tbody tr:hover { background: rgba(255, 255, 255, .015); }
+
+    .layout { display: grid; grid-template-columns: 286px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar {
+      position: sticky; top: 0; z-index: 30;
+      height: 100vh; padding: 1.1rem .9rem 1.8rem; overflow: auto;
+      border-right: 1px solid var(--line); background: rgba(7, 11, 18, .93); backdrop-filter: blur(18px);
+    }
+    .brand { display: flex; gap: .72rem; align-items: center; padding: .5rem .55rem 1rem; border-bottom: 1px solid var(--line); }
+    .brand-mark { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 11px; background: linear-gradient(135deg, var(--blue), var(--cyan)); color: #07101c; font-weight: 900; }
+    .brand strong, .brand small { display: block; }
+    .brand strong { font-size: .88rem; }
+    .brand small { color: var(--subtle); font-size: .69rem; }
+    .nav-label { display: block; margin: .95rem .6rem .32rem; color: var(--subtle); font-size: .62rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    .sidebar nav a { display: flex; gap: .65rem; align-items: center; padding: .48rem .6rem; border-radius: 8px; color: var(--muted); font-size: .79rem; text-decoration: none; }
+    .sidebar nav a:hover { background: var(--panel); color: var(--text); }
+    .nav-index { min-width: 1.6rem; color: var(--blue); font: .68rem var(--mono); }
+    .sidebar-note { margin: 1.25rem .55rem 0; padding: .75rem; border: 1px solid var(--line); border-radius: 10px; color: var(--subtle); font-size: .7rem; }
+    main { min-width: 0; max-width: 100%; overflow-x: clip; }
+    .wrap { width: min(1240px, calc(100% - 64px)); margin: 0 auto; }
+    .hero { padding: clamp(4.8rem, 10vw, 9rem) 0 4.4rem; border-bottom: 1px solid var(--line); }
+    .kicker { margin-bottom: 1rem; color: var(--cyan); font: 700 .72rem var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+    .lede { max-width: 940px; color: var(--muted); font-size: clamp(1.02rem, 1.6vw, 1.28rem); }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.6rem; }
+    .chip { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .62rem; border: 1px solid var(--line-2); border-radius: 999px; color: #c4d2e6; background: rgba(17, 29, 47, .8); font-size: .72rem; }
+    .section { padding: 4.6rem 0; border-bottom: 1px solid var(--line); }
+    .section-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .55fr); gap: 3rem; align-items: end; margin-bottom: 2rem; }
+    .section-copy { color: var(--muted); }
+    .eyebrow { margin-bottom: .65rem; color: var(--blue); font: 700 .68rem var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    .callout { padding: 1.1rem 1.2rem; border: 1px solid var(--line-2); border-left: 4px solid var(--blue); border-radius: 12px; background: rgba(18, 29, 45, .82); color: var(--muted); }
+    .callout.critical { border-left-color: var(--red); }
+    .callout.success { border-left-color: var(--green); }
+    .callout.warning { border-left-color: var(--amber); }
+    .grid { display: grid; gap: 1rem; min-width: 0; }
+    .grid > *, .card, .spec, .package { min-width: 0; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .card { padding: 1.08rem; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(155deg, rgba(20, 31, 48, .86), rgba(10, 16, 27, .88)); color: var(--muted); }
+    .card-number { display: block; margin-bottom: .75rem; color: var(--cyan); font: 700 .66rem var(--mono); letter-spacing: .11em; }
+    .metric { padding: 1rem; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); }
+    .metric strong { display: block; margin-bottom: .28rem; font-size: 1.8rem; line-height: 1; letter-spacing: -.04em; }
+    .metric span { color: var(--subtle); font-size: .76rem; }
+    .tag { display: inline-block; padding: .15rem .42rem; border-radius: 999px; font: 700 .62rem var(--mono); letter-spacing: .04em; }
+    .p0 { color: #ffd1d5; background: rgba(255, 93, 106, .18); }
+    .p1 { color: #ffe2ad; background: rgba(255, 183, 76, .17); }
+    .p2 { color: #c8d8ff; background: rgba(105, 149, 255, .18); }
+    .good { color: #bbf2d7; background: rgba(77, 205, 144, .16); }
+    .table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: rgba(10, 16, 27, .65); }
+    .table-wrap table { min-width: 850px; }
+    .diagram { max-width: 100%; padding: 1.2rem; border: 1px solid var(--line); border-radius: 16px; background: #090f19; overflow: auto; }
+    .flow { display: flex; min-width: 760px; gap: .58rem; align-items: stretch; }
+    .flow-node { flex: 1; min-width: 120px; padding: .78rem; border: 1px solid var(--line-2); border-radius: 11px; background: var(--panel); }
+    .flow-node small { display: block; color: var(--subtle); }
+    .flow-arrow { display: grid; place-items: center; color: var(--blue); font-size: 1.1rem; }
+    .lane { display: grid; grid-template-columns: 140px repeat(4, minmax(130px, 1fr)); min-width: 850px; border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+    .lane > div { min-height: 74px; padding: .72rem; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); }
+    .lane .lane-head { background: var(--panel-2); color: var(--text); font-weight: 750; }
+    .wireframe { border: 1px solid var(--line-2); border-radius: 16px; background: #080e17; overflow: hidden; }
+    .wf-global { display: flex; justify-content: space-between; gap: 1rem; padding: .75rem 1rem; border-bottom: 1px solid var(--line); color: var(--muted); }
+    .wf-context { padding: .55rem 1rem; border-bottom: 1px solid var(--line); color: var(--subtle); font-size: .75rem; }
+    .wf-heading { display: grid; grid-template-columns: 1fr auto; gap: 1rem; padding: 1.1rem 1rem; border-bottom: 1px solid var(--line); }
+    .wf-heading strong { display: block; font-size: 1.22rem; }
+    .wf-heading small { color: var(--muted); }
+    .wf-action { align-self: center; padding: .45rem .7rem; border-radius: 8px; background: var(--blue); color: #06101f; font-weight: 800; }
+    .wf-body { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: .75rem; padding: 1rem; }
+    .wf-block { min-height: 110px; padding: .8rem; border: 1px dashed var(--line-2); border-radius: 10px; color: var(--subtle); }
+    .spec { padding: 1.15rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(14, 22, 35, .74); }
+    .spec > .spec-label { display: block; margin-bottom: .45rem; color: var(--cyan); font: 700 .64rem var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .spec ul { color: var(--muted); }
+    .route { color: #c9d8ff; font-family: var(--mono); font-size: .77rem; overflow-wrap: anywhere; }
+    .issue { display: grid; grid-template-columns: 58px minmax(180px, .75fr) 1.1fr 1.2fr; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--line); }
+    .issue:last-child { border-bottom: 0; }
+    .issue-id { color: var(--cyan); font: 700 .72rem var(--mono); }
+    .issue p { margin: 0; color: var(--muted); font-size: .84rem; }
+    .package { border: 1px solid var(--line); border-radius: 15px; background: rgba(12, 19, 31, .76); overflow: hidden; }
+    .package summary { display: grid; grid-template-columns: 90px 1fr auto; gap: 1rem; align-items: center; padding: 1rem 1.1rem; cursor: pointer; list-style: none; }
+    .package summary::-webkit-details-marker { display: none; }
+    .package summary:hover { background: rgba(255, 255, 255, .025); }
+    .package summary span:first-child { color: var(--cyan); font: 800 .72rem var(--mono); }
+    .package summary em { color: var(--subtle); font-style: normal; font-size: .72rem; }
+    .package-body { padding: 0 1.1rem 1.15rem; border-top: 1px solid var(--line); }
+    .package-body h4 { margin-top: 1rem; color: #cfdbeb; }
+    .file-list { color: #aebdd1; font: .75rem/1.75 var(--mono); overflow-wrap: anywhere; }
+    .checklist { padding-left: 0; list-style: none; }
+    .checklist li { position: relative; padding-left: 1.5rem; }
+    .checklist li::before { position: absolute; left: 0; content: "□"; color: var(--cyan); }
+    .source-list a { font-weight: 700; }
+    .footer { padding: 3rem 0 5rem; color: var(--subtle); font-size: .78rem; }
+    .mobile-menu { display: none; }
+    @media (max-width: 1040px) {
+      .layout { display: block; }
+      .sidebar { position: static; width: 100%; height: auto; padding: .8rem 1rem; border-right: 0; border-bottom: 1px solid var(--line); }
+      .sidebar nav, .sidebar-note { display: none; }
+      .brand { padding: 0; border: 0; }
+      .wrap { width: min(100% - 36px, 920px); }
+      .section-head { grid-template-columns: 1fr; gap: .8rem; }
+      .grid-4 { grid-template-columns: repeat(2, 1fr); }
+      .issue { grid-template-columns: 54px 1fr; }
+      .issue > :nth-child(3), .issue > :nth-child(4) { grid-column: 2; }
+    }
+    @media (max-width: 680px) {
+      body { font-size: 14px; }
+      .wrap { width: min(100% - 24px, 620px); }
+      .hero { padding: 4rem 0 3rem; }
+      .section { padding: 3.3rem 0; }
+      .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+      .wf-heading, .wf-body { grid-template-columns: 1fr; }
+      .wf-action { text-align: center; }
+      .package summary { grid-template-columns: 72px 1fr; }
+      .package summary em { grid-column: 2; }
+      th, td { padding: .65rem; }
+      .table-wrap::before, .diagram::before {
+        content: "左右滑动查看完整内容 →";
+        position: sticky;
+        left: 0;
+        display: block;
+        width: max-content;
+        padding: .45rem .65rem;
+        color: var(--subtle);
+        font-size: .68rem;
+      }
+    }
+    @media print {
+      .layout { display: block; }
+      .sidebar { display: none; }
+      .wrap { width: 100%; }
+      .section { break-inside: avoid; }
+      body { background: white; color: #111; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" aria-label="方案目录">
+      <div class="brand"><span class="brand-mark">AE</span><span><strong>玄甲系统重构</strong><small>Agent-ready delivery plan · 2026-08-28</small></span></div>
+      <nav>
+        <span class="nav-label">Context</span>
+        <a href="#brief"><span class="nav-index">00</span>目标与执行协议</a>
+        <a href="#evidence"><span class="nav-index">01</span>真实系统证据</a>
+        <a href="#diagnosis"><span class="nav-index">02</span>深层诊断</a>
+        <a href="#benchmarks"><span class="nav-index">03</span>成熟机制参考</a>
+        <span class="nav-label">Product model</span>
+        <a href="#principles"><span class="nav-index">04</span>产品原则</a>
+        <a href="#ia"><span class="nav-index">05</span>目标信息架构</a>
+        <a href="#anatomy"><span class="nav-index">06</span>页面层级模型</a>
+        <a href="#issues"><span class="nav-index">07</span>问题登记表</a>
+        <a href="#pages"><span class="nav-index">08</span>逐页开发规格</a>
+        <span class="nav-label">Engineering</span>
+        <a href="#contracts"><span class="nav-index">09</span>状态与接口契约</a>
+        <a href="#batch"><span class="nav-index">10</span>AI 五题批次</a>
+        <a href="#architecture"><span class="nav-index">11</span>前后端架构</a>
+        <a href="#packages"><span class="nav-index">12</span>工作包</a>
+        <a href="#quality"><span class="nav-index">13</span>多端与无障碍</a>
+        <a href="#metrics"><span class="nav-index">14</span>度量与可观测性</a>
+        <a href="#acceptance"><span class="nav-index">15</span>验收矩阵</a>
+        <a href="#rollout"><span class="nav-index">16</span>发布与完成定义</a>
+      </nav>
+      <p class="sidebar-note">这不是视觉提案，也不是一段提示词。开发 Agent 应按依赖顺序实施、运行验收，并以可回滚代码和自动化证据交付。</p>
+    </aside>
+
+    <main>
+      <header class="hero" id="brief">
+        <div class="wrap">
+          <p class="kicker">System-wide UX / Product / Frontend / Backend contract</p>
+          <h1>把多套页面，收敛成一个可信的教学系统</h1>
+          <p class="lede">本文件是可直接交给开发智能体执行的系统级改造规格。目标不是“统一换皮”，而是修复页面、路由、权限、状态和数据之间的断裂，让公共访客、学生、教师、课程管理员和平台管理员始终知道：我在哪、现在是什么状态、下一步是什么、失败后如何继续。</p>
+          <div class="hero-meta">
+            <span class="chip">范围：公共端 + 学生端 + 教师端 + 课程管理 + 系统管理</span>
+            <span class="chip">证据：70 个桌面/移动角色页面 + 关键交互 + 源码/API</span>
+            <span class="chip">优先级：P0 正确性 → P1 结构 → P2 效率 → P3 优化</span>
+            <span class="chip">交付：代码、迁移、自动化、截图、指标与回滚</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="section" id="protocol">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Execution protocol</p><h2>开发 Agent 必须遵守的执行协议</h2></div><p class="section-copy">先把事实和恢复路径修对，再调整层级与视觉。不得以静态稿、CSS 换色或“看起来更简洁”作为完成。</p></div>
+          <div class="grid grid-3">
+            <article class="card"><span class="card-number">MUST · 01</span><h3>以服务端事实为准</h3><p>角色、能力、资源生命周期、运行环境、批次数量和发布状态必须由服务端契约提供。前端不得通过 URL、所有权、是否出现某字段来猜权限或状态。</p></article>
+            <article class="card"><span class="card-number">MUST · 02</span><h3>兼容现有资产和深链</h3><p>保留已发布课程、作业、成果、历史链接与当前验证脚本。变更路由时添加解析器或显式 301/302/410；不得用永久 404 掩盖未迁移对象。</p></article>
+            <article class="card"><span class="card-number">MUST · 03</span><h3>每包可独立验收与回滚</h3><p>每个工作包都要包含迁移、feature flag、单测/E2E、失败恢复和截图证据。避免横跨全站的一次性模板重写。</p></article>
+            <article class="card"><span class="card-number">MUST · 04</span><h3>保留任务差异</h3><p>学生端可沉浸、教师端可高密度、管理端可表格化；统一的是壳层、语义、状态、键盘行为和错误契约，不是把所有页面做成同一种卡片。</p></article>
+            <article class="card"><span class="card-number">MUST · 05</span><h3>先覆盖全状态再接真实数据</h3><p>组件至少覆盖 initial/loading/ready/empty/degraded/error/stale/forbidden。创建 fixture 时包含零数据、部分成功、失效资源、无权限、长内容和并发冲突。</p></article>
+            <article class="card"><span class="card-number">DO NOT</span><h3>禁止表面交付</h3><p>不得新增另一套孤立导航、重复状态枚举、页面内 fetch 封装或 CSS token；不得把原始异常、数据库 ID、任务 ID、枚举名直接显示给最终用户。</p></article>
+          </div>
+          <div class="callout warning" style="margin-top:1rem"><strong>范围保护：</strong>现有 <code>student-logged-in-ux-improvement-plan.html</code> 与 <code>teacher-logged-in-ux-improvement-plan.html</code> 是子域详细规格。本方案吸收其结论，并增加公共端、系统管理、跨角色能力、通用资源/错误契约和迁移顺序；实现时若细节冲突，以本文件中的系统级契约为准，以子方案中的页面细节补充。</div>
+        </div>
+      </section>
+
+      <section class="section" id="evidence">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Observed evidence</p><h2>当前问题已经跨过“审美”边界</h2></div><p class="section-copy">2026-08-28 在真实部署上用匿名、学生、教师、管理员状态进行桌面与移动审计，并回查 Flask 路由、Jinja 模板、前端脚本、API 和模型。</p></div>
+          <div class="grid grid-4">
+            <div class="metric"><strong>70</strong><span>页面 × 角色 × 视口组合</span></div>
+            <div class="metric"><strong>5</strong><span>确认的硬路由/菜单失败</span></div>
+            <div class="metric"><strong>10,552px</strong><span>移动课程目录文档高度</span></div>
+            <div class="metric"><strong>15,188px</strong><span>管理端挑战列表文档高度</span></div>
+          </div>
+          <div class="table-wrap" style="margin-top:1rem">
+            <table>
+              <thead><tr><th>证据</th><th>真实表现</th><th>源码/契约原因</th><th>产品影响</th><th>级别</th></tr></thead>
+              <tbody>
+                <tr><td>模拟题深链</td><td>目录生成可点击链接，打开后 404。</td><td><code>dojo_plugin/pages/dojo.py</code> 对 <code>SIMULATION/HYBRID</code> 显式 <code>abort(404)</code>，搜索/目录仍生成相同路径。</td><td>系统主动推荐不可达资源，直接破坏信任。</td><td><span class="tag p0">P0</span></td></tr>
+                <tr><td>管理课程页</td><td><code>/admin/dojos</code> 返回 500。</td><td><code>admin_dojos.html</code> 对可能为空的 <code>dojo.hash</code> 直接切片；需以日志/测试确认后修复。</td><td>管理员无法治理课程，且错误无恢复动作。</td><td><span class="tag p0">P0</span></td></tr>
+                <tr><td>管理工作区</td><td>菜单存在“Workspaces”，目标 <code>/admin/desktops</code> 404。</td><td>模板和菜单已存在，但页面路由未注册。</td><td>导航承诺了不存在的能力。</td><td><span class="tag p0">P0</span></td></tr>
+                <tr><td>成绩管理</td><td>普通数据库课程的管理成绩页 404。</td><td>路由只支持带脚本的 repository-backed course，UI 未按 capability 隐藏。</td><td>课程能力模型被路由异常替代。</td><td><span class="tag p0">P0</span></td></tr>
+                <tr><td>匿名全局搜索</td><td>输入后显示 <code>Unexpected token '&lt;'</code> 等解析错误。</td><td>导航在匿名状态展示搜索，但 API 为 <code>@authed_only</code>；前端仍按 JSON 解析 HTML 登录响应。</td><td>最显眼的公共操作不可用且暴露实现细节。</td><td><span class="tag p0">P0</span></td></tr>
+                <tr><td>匿名事件流</td><td>每个公共页面都请求 <code>/events</code> 并得到 403。</td><td>公共壳层未按认证状态延迟事件订阅。</td><td>制造无意义网络/日志噪声，掩盖真实故障。</td><td><span class="tag p1">P1</span></td></tr>
+                <tr><td>活动 Feed</td><td>控制台空引用；课程链接形如 <code>/dojos/&lt;id&gt;</code>。</td><td><code>feed.js</code> 查询不存在节点，并使用非规范 URL；真实课程路径为 <code>/&lt;id&gt;</code>。</td><td>社会证明页产生死链，且隐私价值不清。</td><td><span class="tag p0">P0</span></td></tr>
+                <tr><td>工作区状态</td><td>首页说“已保存，可继续实验”，工作区却说“没有实验运行”。</td><td>学习尝试状态与容器 runtime 状态被混用；不同 API/模板各自推断。</td><td>用户无法判断是恢复学习、重启环境还是等待启动。</td><td><span class="tag p0">P0</span></td></tr>
+                <tr><td>平台管理</td><td>默认 CTFd 英文/旧版本横幅/积分指标，与 297 个挑战和教学目标无关。</td><td>平台管理仍以通用 CTF 竞赛后台作为首页，缺少教育运营 presenter。</td><td>管理员看不到运行环境、失败队列、课程质量和权限风险。</td><td><span class="tag p1">P1</span></td></tr>
+                <tr><td>页面语义</td><td>产品页标题统一为“玄甲”；无 skip link；部分 tab/search ARIA 不完整。</td><td>基础模板未提供页面级 title、主内容跳转和统一交互组件。</td><td>浏览器历史、读屏、键盘导航和支持排查效率下降。</td><td><span class="tag p1">P1</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout success" style="margin-top:1rem"><strong>应保留的基础：</strong>学生“今天”的单一下一步、课程五页签、作业移动端单题模式、<code>student_experience.py</code> 对活动/掌握/评测/证据的拆分、教师生成批次/逐项模型、动态加载 KaTeX，以及现有学生/教师/自然语言五题验证脚本。这次重构应建立在这些能力上，不重做已正确的领域模型。</div>
+        </div>
+      </section>
+
+      <section class="section" id="diagnosis">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Root diagnosis</p><h2>深层问题是五种“系统真相”没有合拢</h2></div><p class="section-copy">页面长、卡片多、风格不一只是表象。根因是导航真相、对象真相、状态真相、权限真相和操作真相分别由不同页面临时解释。</p></div>
+          <div class="grid grid-3">
+            <article class="card"><span class="card-number">01 · NAVIGATION</span><h3>入口按历史模块堆积</h3><p>“今天、学习、导学、课程、工作区、AI、Self Learning、教师 Agent、课程管理、CTFd Admin”并存。用户为了完成一个意图穿过多个壳层，返回动作常跳到固定页而非来源上下文。</p></article>
+            <article class="card"><span class="card-number">02 · RESOURCE</span><h3>同一教学对象被多套表表达</h3><p><code>Dojos/Modules/Challenges</code>、学习草稿、教学成果、资料、作业、自学工作区都有自己的 URL、状态和序列化；搜索、目录和查看器无法复用同一解析规则。</p></article>
+            <article class="card"><span class="card-number">03 · STATE</span><h3>进行中、可用、完成、发布混为一谈</h3><p>容器是否运行不等于学习是否可继续；交过作业不等于掌握；AI 任务完成不等于内容可发布；有一个生成结果不等于“五题生成成功”。</p></article>
+            <article class="card"><span class="card-number">04 · CAPABILITY</span><h3>角色和所有权替代能力契约</h3><p>注册时的“教师意图”、是否拥有课程、是否为 admin 被页面各自推断。多能力用户在学生/教师/平台管理之间缺少显式模式切换，普通学生甚至可直接打开 Git 导入页。</p></article>
+            <article class="card"><span class="card-number">05 · ACTION</span><h3>每页都在争夺“主操作”</h3><p>教师首页的对话、任务、提醒和历史同时抢首屏；课程概览把所有指标和快捷操作一次展开；管理页把同步、导出和删除放在同一层级。没有“此刻唯一下一步”。</p></article>
+            <article class="card"><span class="card-number">06 · DELIVERY</span><h3>前端巨型脚本固化耦合</h3><p><code>teaching-agent.js</code> 超过 7,000 行，<code>teacher-courses.js</code> 约 3,900 行，<code>teaching.py</code> 超过 12,000 行；页面 fetch/unwrap/status mapping 重复，使小改动难测试、难回滚。</p></article>
+          </div>
+          <div class="callout" style="margin-top:1rem"><strong>核心判断：</strong>先建立“一个资源解析器 + 一个能力上下文 + 一套页面/异步状态 + 一套错误恢复 + 按角色配置的壳层”，再做页面减法。否则删掉一批卡片后，矛盾会以另一种形式返回。</div>
+        </div>
+      </section>
+
+      <section class="section" id="benchmarks">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Benchmark mechanisms</p><h2>借成熟机制，不复制成熟产品的皮肤</h2></div><p class="section-copy">选择官方产品文档和设计规范作为机制证据。每项只提取能解决本项目具体问题的行为，并明确不照搬之处。</p></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>参考</th><th>成熟机制</th><th>玄甲采用</th><th>明确不复制</th></tr></thead>
+              <tbody>
+                <tr><td><a href="https://community.canvaslms.com/t5/Student-Guide/How-do-I-use-the-to-do-list-for-all-my-courses-in-the-List-View/ta-p/345">Canvas Student To Do</a></td><td>跨课程日程、截止日期与状态在一个行动列表中。</td><td>“今天”只呈现一个权威下一步 + 有日期/原因的短待办。</td><td>不复制完整 LMS 日历，也不把没有时限的挑战伪装成截止任务。</td></tr>
+                <tr><td><a href="https://docs.moodle.org/502/en/Dashboard_and_My_courses">Moodle Dashboard / My courses</a></td><td>个人行动面与课程浏览面职责分开。</td><td>学生“今天”负责继续行动，“课程”负责我的/发现/归档。</td><td>不复制可任意堆块的仪表盘，避免失去产品优先级。</td></tr>
+                <tr><td><a href="https://support.google.com/edu/classroom/answer/9093530?hl=en">Google Classroom feedback</a> / <a href="https://support.google.com/edu/classroom/answer/17074065?hl=en">Learning Goals</a></td><td>提交、反馈、学习目标之间的关系清晰。</td><td>作业结果把“提交事实、教师反馈、目标掌握、证据”分开。</td><td>不复制 Classroom 的课程流首页；玄甲仍以实验/挑战路径为主。</td></tr>
+                <tr><td><a href="https://docs.openedx.org/en/latest/educators/quickstarts/build_a_course.html">Open edX build/publish</a> / <a href="https://docs.openedx.org/en/latest/educators/references/course_development/unit_workflow_and_status.html">unit workflow</a> / <a href="https://docs.openedx.org/en/latest/educators/references/roles_for_viewing.html">role preview</a></td><td>草稿、预览、发布、学生可见性和角色预览是显式流程。</td><td>教师内容统一经过 draft → validate → review → preview → publish。</td><td>不把简单章节创建做成重型 Studio 步骤器。</td></tr>
+                <tr><td><a href="https://docs.github.com/en/codespaces/about-codespaces/understanding-the-codespace-lifecycle">GitHub Codespaces lifecycle</a></td><td>创建、运行、停止、重建、删除是不同环境状态。</td><td>工作区区分学习尝试、runtime、snapshot、恢复动作和过期原因。</td><td>不暴露基础设施术语、容器 ID 或配额实现。</td></tr>
+                <tr><td><a href="https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/manage-and-track-agents">GitHub Copilot agent sessions</a></td><td>长任务可离开、可追踪、可恢复，状态与产物分开。</td><td>教师批量生成用 batch 摘要 + 5 个独立 item + 逐项重试。</td><td>不把开发代理的 PR/分支隐喻直接移植给教师。</td></tr>
+                <tr><td><a href="https://carbondesignsystem.com/components/data-table/usage/">Carbon Data Table</a> / <a href="https://carbondesignsystem.com/components/pagination/usage/">Pagination</a></td><td>高密度表格有批量操作、筛选、分页、空/加载状态。</td><td>系统管理表格采用服务端分页、列优先级和选择后操作。</td><td>不把学生课程/挑战卡强行表格化。</td></tr>
+                <tr><td><a href="https://design-system.service.gov.uk/patterns/complete-multiple-tasks/">GOV.UK task list</a> / <a href="https://design-system.service.gov.uk/components/error-summary/">error summary</a></td><td>多步任务状态清楚；错误摘要把用户带到具体字段。</td><td>长表单采用分区任务状态、顶部错误摘要和字段错误锚点。</td><td>不复制政府服务视觉语气。</td></tr>
+                <tr><td><a href="https://www.w3.org/TR/WCAG22/">WCAG 2.2</a> / <a href="https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/">WAI Dialog</a> / <a href="https://www.w3.org/WAI/ARIA/apg/patterns/combobox/">Combobox</a> / <a href="https://www.w3.org/WAI/ARIA/apg/patterns/tabs/">Tabs</a></td><td>键盘、焦点、名称、状态和目标尺寸有可验证规则。</td><td>共享组件实现一次并自动审计，页面不再手写行为。</td><td>不以“ARIA 属性存在”代替真实键盘和读屏测试。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="principles">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Non-negotiable principles</p><h2>实现时不可被牺牲的八条原则</h2></div><p class="section-copy">代码审查与产品验收都应逐条检查。若局部设计与这些原则冲突，局部设计必须调整。</p></div>
+          <div class="grid grid-4">
+            <article class="card"><span class="card-number">01</span><h3>一个上下文，一个主操作</h3><p>每页只突出一个主要动作；危险操作与低频工具退居更多菜单或 Danger Zone。</p></article>
+            <article class="card"><span class="card-number">02</span><h3>能力决定可见性</h3><p>服务端返回 capability，壳层按能力渲染。多能力用户显式切换“学习 / 教学 / 平台管理”。</p></article>
+            <article class="card"><span class="card-number">03</span><h3>状态必须说真话</h3><p>异步、资源、发布、学习、评测、环境分别建模；任何成功文案都必须对应可验证完成条件。</p></article>
+            <article class="card"><span class="card-number">04</span><h3>失败也有下一步</h3><p>403/404/410/409/422/5xx 都要翻译为可理解状态、保留上下文并给出恢复动作与 request ID。</p></article>
+            <article class="card"><span class="card-number">05</span><h3>来源与返回不丢失</h3><p>深链、侧栏和成果查看器携带安全的 returnTo/context；返回恢复筛选、页码、标签和滚动位置。</p></article>
+            <article class="card"><span class="card-number">06</span><h3>移动端按任务重排</h3><p>不是缩小桌面：一次完成一项、主操作粘底、列表和详情分步、环境/内容用清晰模式切换。</p></article>
+            <article class="card"><span class="card-number">07</span><h3>AI 产出先审后发</h3><p>自然语言是输入方式，不是绕过结构和验证的捷径；批次数量、独立性、质量门槛由服务端硬约束。</p></article>
+            <article class="card"><span class="card-number">08</span><h3>渐进替换，不双轨漂移</h3><p>新增共享契约后迁移旧页面并删除旧实现；禁止长期保留两套导航、状态映射或 API envelope。</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="ia">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Target information architecture</p><h2>按用户意图组织，而不是按历史模块组织</h2></div><p class="section-copy">公共端完成认知与选择；学生端完成学习；教师端完成教学编排；平台端完成治理。模式切换负责跨身份，不把所有入口塞进同一导航。</p></div>
+          <div class="diagram" aria-label="目标信息架构">
+            <div class="lane">
+              <div class="lane-head">模式</div><div class="lane-head">一级导航</div><div class="lane-head">上下文入口</div><div class="lane-head">核心对象</div><div class="lane-head">退出 / 切换</div>
+              <div><strong>公共</strong><br>未登录</div><div>首页 · 课程 · 学习方式 · 关于</div><div>目录内搜索<br>登录 / 注册</div><div>公开课程 · 方法说明 · 研究/社区（若有价值）</div><div>登录后回原目标</div>
+              <div><strong>学习</strong><br>student</div><div>今天 · 课程 · AI 学习</div><div>当前课程/题目<br>工作区状态</div><div>课程 · 模块 · 挑战 · 作业 · 个人成果</div><div>账户菜单切换教学/管理</div>
+              <div><strong>教学</strong><br>teacher</div><div>工作台 · 课程 · AI 共创</div><div>当前课程 + 五页签</div><div>章节 · 课件 · 题目 · 演示 · 学情 · 批次</div><div>学生预览 / 平台管理</div>
+              <div><strong>平台管理</strong><br>admin</div><div>平台概览 · 用户与权限 · 课程治理 · 运行环境 · 内容与评测 · 设置 · 审计</div><div>全局筛选与告警</div><div>账户 · 能力 · 课程 · runtime · 任务 · 配置 · 审计事件</div><div>返回教学平台</div>
+            </div>
+          </div>
+          <div class="grid grid-2" style="margin-top:1rem">
+            <article class="spec"><span class="spec-label">Public shell</span><h3>匿名状态不展示“今天 / AI 学习助手”</h3><ul><li>公共导航固定为首页、课程、学习方式、关于；研究、排行榜、活动等仅在产品战略确认后进入二级。</li><li>只在课程目录展示公开搜索；若保留全局搜索，必须提供匿名 API 与明确结果范围。</li><li>登录/注册成功后验证并恢复 <code>next</code>，禁止开放重定向。</li></ul></article>
+            <article class="spec"><span class="spec-label">Capability switcher</span><h3>多能力用户显式切换工作模式</h3><ul><li>服务端返回 <code>availableModes</code>、默认模式与各模式首页；前端不通过角色字符串拼 URL。</li><li>模式切换保存在账户偏好中；跨模式时显示上下文变化，进行中草稿先保存。</li><li>新教师在首门课程建立前使用明确 onboarding shell，不伪装为普通学生或已有教师。</li></ul></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="anatomy">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Canonical page anatomy</p><h2>所有页面共享层级，不共享同一种密度</h2></div><p class="section-copy">壳层回答身份和位置，页面头回答对象和状态，内容区完成任务。让“返回、刷新、失败、切换角色”在每种页面上都可预测。</p></div>
+          <div class="wireframe" aria-label="规范页面层级示意">
+            <div class="wf-global"><span>品牌　当前模式导航　全局搜索（按能力）</span><span>运行任务/通知　模式切换　账户</span></div>
+            <div class="wf-context">安全面包屑 / 当前课程或治理范围 / 可选上下文切换</div>
+            <div class="wf-heading"><div><strong>页面标题　<span class="tag good">真实状态</span></strong><small>一句话说明范围、时间窗或完成条件；必要时显示数据质量。</small></div><span class="wf-action">唯一主操作</span></div>
+            <div class="wf-body"><div class="wf-block">主要任务区：列表、编辑器、学习内容或平台表格。先展示行动，再展示解释。</div><div class="wf-block">上下文辅助区：状态、恢复、相关信息。移动端转为抽屉/独立页，不固定挤压主任务。</div></div>
+          </div>
+          <div class="grid grid-4" style="margin-top:1rem">
+            <article class="card"><span class="card-number">LAYER 1</span><h3>Global shell</h3><p>模式、一级导航、全局运行状态、账户与 skip link。匿名、学生、教师、管理员分别配置。</p></article>
+            <article class="card"><span class="card-number">LAYER 2</span><h3>Context bar</h3><p>课程/章节/对象或平台治理范围。只在存在真实父子关系时出现，支持安全返回。</p></article>
+            <article class="card"><span class="card-number">LAYER 3</span><h3>Page header</h3><p>标题、生命周期/可见性、范围说明、一项主操作；次要操作进入可达菜单。</p></article>
+            <article class="card"><span class="card-number">LAYER 4</span><h3>Async content</h3><p>由统一 AsyncBoundary 承担 loading/empty/degraded/error/stale/forbidden，不让空白卡片冒充功能。</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="issues">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">System issue register</p><h2>按根因登记，而不是按截图修补</h2></div><p class="section-copy">以下问题均需落到代码、接口和验收。ID 在工作包和验收矩阵中复用，开发 Agent 不得只处理其中的视觉症状。</p></div>
+          <div class="card">
+            <div class="issue"><div class="issue-id">UX-01<br><span class="tag p0">P0</span></div><div><strong>路由生成与路由能力不一致</strong><p>模拟/混合练习、feed、管理菜单、成绩页。</p></div><p><strong>根因：</strong>每个页面自行拼接 href；目标路由再依据另一套对象条件判断。</p><p><strong>实现：</strong>新增服务端 <code>ResourceResolver</code>，所有 API 输出 canonical href + availability + reason；模板禁用字符串拼路由。<br><strong>验收：</strong>全站内部可见链接无意外 4xx/5xx。</p></div>
+            <div class="issue"><div class="issue-id">UX-02<br><span class="tag p0">P0</span></div><div><strong>数量型 AI 指令被当作软提示</strong><p>“生成 5 题”曾只得到一个结果。</p></div><p><strong>根因：</strong>自然语言解析、任务数量、产物数量与 UI 成功态没有同一批次约束。</p><p><strong>实现：</strong>requestedCount 进入持久 batch contract，建立 5 个独立 item job；聚合状态不吞并逐项事实。<br><strong>验收：</strong>现有五题生命周期脚本 + 部分失败/幂等重试。</p></div>
+            <div class="issue"><div class="issue-id">UX-03<br><span class="tag p0">P0</span></div><div><strong>学习状态与 runtime 状态冲突</strong><p>“可继续实验”与“没有运行环境”同时成立。</p></div><p><strong>根因：</strong>attempt/snapshot/container/session 被压成一个布尔值。</p><p><strong>实现：</strong>返回 <code>learningAttempt</code>、<code>runtime</code>、<code>snapshot</code> 与 <code>recommendedAction</code>；文案按组合映射。<br><strong>验收：</strong>运行中、停止可重建、已过期、启动中、失败五种路径一致。</p></div>
+            <div class="issue"><div class="issue-id">UX-04<br><span class="tag p0">P0</span></div><div><strong>权限靠页面猜测</strong><p>注册意图、课程所有权、平台管理员相互混用。</p></div><p><strong>根因：</strong>没有全局 capability context；模板按 user/admin/owner 分支。</p><p><strong>实现：</strong>认证 bootstrap 返回 modes/capabilities/scopes；所有写操作仍在服务端校验。<br><strong>验收：</strong>直接 URL、隐藏按钮、API 调用三层权限结果一致。</p></div>
+            <div class="issue"><div class="issue-id">UX-05<br><span class="tag p1">P1</span></div><div><strong>导航和身份模式不可预测</strong><p>教师、学习、CTFd 管理三套壳来回切换。</p></div><p><strong>根因：</strong>全局导航按模板来源定义，不按能力模式定义。</p><p><strong>实现：</strong>统一 AppShell 接口和显式模式切换；各模式保留自己的一级 IA。<br><strong>验收：</strong>刷新/深链后仍显示正确模式和 aria-current。</p></div>
+            <div class="issue"><div class="issue-id">UX-06<br><span class="tag p1">P1</span></div><div><strong>同一对象多套身份和状态</strong><p>草稿、成果、资料、课程内容在搜索/列表/查看器中不一致。</p></div><p><strong>根因：</strong>缺少跨表 presenter/envelope。</p><p><strong>实现：</strong>不急于合并数据库表，先建立 canonical <code>ResourceSummary</code> 和状态映射层。<br><strong>验收：</strong>同一对象在列表、详情、搜索、任务中心标题/状态/href 一致。</p></div>
+            <div class="issue"><div class="issue-id">UX-07<br><span class="tag p1">P1</span></div><div><strong>首页职责膨胀</strong><p>教师工作台、课程概览、管理首页都把所有模块首屏展开。</p></div><p><strong>根因：</strong>把“有数据可展示”误当“用户此刻需要”。</p><p><strong>实现：</strong>首屏固定：异常/待处理 → 一项主行动 → 关键摘要；解释和历史渐进展开。<br><strong>验收：</strong>首个决策不需要跨过超过两个同权模块。</p></div>
+            <div class="issue"><div class="issue-id">UX-08<br><span class="tag p1">P1</span></div><div><strong>错误是技术响应，不是产品状态</strong><p>JSON parse、裸 404、空白区、内部枚举。</p></div><p><strong>根因：</strong>接口 envelope 和前端请求层不统一；页面各自 catch。</p><p><strong>实现：</strong>统一 error contract、RequestClient、AsyncBoundary 和角色相关 recovery action。<br><strong>验收：</strong>故障注入下没有未处理 Promise、原始 HTML/堆栈或死按钮。</p></div>
+            <div class="issue"><div class="issue-id">UX-09<br><span class="tag p1">P1</span></div><div><strong>搜索不是可信导航</strong><p>匿名不可用，教师仍得到学生目标，模拟题命中死链。</p></div><p><strong>根因：</strong>单一搜索接口未理解模式、capability、资源生命周期。</p><p><strong>实现：</strong>按模式分组索引并通过 resolver 返回动作；匿名只搜公开目录。<br><strong>验收：</strong>每种模式结果范围、权限、空状态和键盘行为通过测试。</p></div>
+            <div class="issue"><div class="issue-id">UX-10<br><span class="tag p1">P1</span></div><div><strong>管理端仍是竞赛后台</strong><p>指标、语言、密度与教育运营不匹配。</p></div><p><strong>根因：</strong>直接暴露通用 CTFd 管理 IA 和数据表。</p><p><strong>实现：</strong>新增平台运营 shell/presenter，逐步包裹底层 CTFd 能力；保留高级兼容入口。<br><strong>验收：</strong>管理员能在 3 次点击内定位失败任务、异常 runtime、权限和课程问题。</p></div>
+            <div class="issue"><div class="issue-id">UX-11<br><span class="tag p2">P2</span></div><div><strong>移动端只做宽度压缩</strong><p>首屏动作过多、表格缩小、上下文栏挤压。</p></div><p><strong>根因：</strong>没有 task mode 和组件级响应策略。</p><p><strong>实现：</strong>学生底部主导航、列表/详情分步、管理表格行摘要、粘底操作和安全区。<br><strong>验收：</strong>360/390/768px 真机尺寸无横向溢出，关键任务单手可达。</p></div>
+            <div class="issue"><div class="issue-id">UX-12<br><span class="tag p2">P2</span></div><div><strong>设计 token 和组件所有权分散</strong><p><code>--product/--ui/--theme/--cs/--agent</code> 并行。</p></div><p><strong>根因：</strong>按页面追加 CSS，缺少 primitive → semantic → component 层。</p><p><strong>实现：</strong>建立 token 映射和共享组件；主题只覆盖 semantic token。<br><strong>验收：</strong>新页面无需复制按钮/状态/抽屉样式，主题切换无语义错色。</p></div>
+            <div class="issue"><div class="issue-id">UX-13<br><span class="tag p2">P2</span></div><div><strong>巨型脚本降低迭代可靠性</strong><p>教师脚本和 API 文件过大。</p></div><p><strong>根因：</strong>状态、网络、DOM、工作流、格式化和 telemetry 混在一起。</p><p><strong>实现：</strong>按 feature/service/state/component 拆分，建立公开模块边界和 contract tests。<br><strong>验收：</strong>主页面只做组合；业务流可无 DOM 单测；无循环依赖。</p></div>
+            <div class="issue"><div class="issue-id">UX-14<br><span class="tag p2">P2</span></div><div><strong>可访问性无法系统复用</strong><p>缺 skip link、重复 ID、复杂控件名称不足。</p></div><p><strong>根因：</strong>dialog/tab/combobox/table 由各页面手写。</p><p><strong>实现：</strong>共享可访问组件 + axe + 键盘 E2E + 读屏抽查。<br><strong>验收：</strong>WCAG 2.2 AA 基线，关键流无 serious/critical 自动违规。</p></div>
+            <div class="issue"><div class="issue-id">UX-15<br><span class="tag p2">P2</span></div><div><strong>无法判断改造是否改善任务</strong><p>缺少旅程级指标和统一错误事件。</p></div><p><strong>根因：</strong>埋点按点击，不按用户意图和状态转移。</p><p><strong>实现：</strong>定义 journey ID、resource context、state transition 和隐私最小化事件。<br><strong>验收：</strong>可度量首次有效行动、批次达成、恢复成功和不可恢复错误率。</p></div>
+            <div class="issue"><div class="issue-id">UX-16<br><span class="tag p0">P0</span></div><div><strong>辅助路由绕开安全产品边界</strong><p>加入密码可进入 URL；教学 metrics 无显式访问保护；Discord 失败返回裸 JSON/501。</p></div><p><strong>根因：</strong>历史/API/集成路由没有纳入页面、错误和 capability 审计。</p><p><strong>实现：</strong>加入码改 POST；metrics 用独立运维认证/网络策略；集成回调进入统一恢复页。<br><strong>验收：</strong>浏览器历史/日志无加入秘密，metrics 非授权不可读，集成失败可恢复。</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="pages">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Page-by-page specification</p><h2>逐页开发规格：目标、层级、逻辑与边界</h2></div><p class="section-copy">实现时保留业务能力，但调整入口、顺序、状态和恢复。每个页面都必须使用规范 AppShell、PageHeader、AsyncBoundary 和服务端 capability。</p></div>
+
+          <h3>8.1 公共端与认证：先建立信任，再要求注册</h3>
+          <div class="grid grid-2">
+            <article class="spec"><span class="spec-label">PUBLIC · HOME <span class="route">/</span></span><h3>首页：解释价值与学习方式</h3><ul><li>首屏只回答：这是面向谁的安全教育平台、能学到什么、如何开始；主要 CTA“浏览课程”，次要“登录”。</li><li>导航移除匿名状态的“今天 / AI 学习助手”；不在首页加载认证事件流。</li><li>下方按“真实环境练习 → 结构化课程 → AI 辅导 → 教师编排”解释模型，并以真实课程样例支撑。</li><li>研究、社区、排行榜若保留，必须说明价值、数据范围与隐私；否则降至 footer。</li></ul></article>
+            <article class="spec"><span class="spec-label">PUBLIC · CATALOG <span class="route">/dojos</span></span><h3>课程目录：把 143 张重复卡变成可决策目录</h3><ul><li>首屏提供搜索、主题、难度、形式、预计时长、可加入性过滤；“全部课程”与结果数量同步。</li><li>服务端分页/游标加载；移动端不得一次渲染造成 10,000px 长页。</li><li>卡片必须有可验证元数据；缺失时显示“暂无信息”并纳入数据质量，不展示“时长待确认”等占位噪声。</li><li>主动作按权限为“查看课程 / 加入 / 继续”；所有 href 由 resolver 返回。</li></ul></article>
+            <article class="spec"><span class="spec-label">PUBLIC · COURSE PREVIEW <span class="route">/&lt;course&gt;</span></span><h3>公开课程预览：明确可见范围与加入条件</h3><ul><li>公开信息只含目标、先修、模块、难度、形式、作者、更新时间；不泄露答案、内部成果或教师备注。</li><li>已登录且已加入显示“继续学习”；未加入显示“加入课程”；需要码/审批时先解释条件。</li><li>模拟/容器/阅读类型使用统一图标与短说明，不生成不可达挑战链接。</li></ul></article>
+            <article class="spec"><span class="spec-label">PUBLIC · FEED / BELTS / RESEARCH</span><h3>辅助公共页：每页必须有明确产品职责</h3><ul><li><code>/feed</code> 仅保留经过隐私审核、链接可靠且能帮助发现课程的活动；默认匿名化，提供退出展示策略。</li><li><code>/belts</code> 解释获得规则、证据和更新时间，避免只呈现竞赛身份符号。</li><li><code>/research</code> 明确研究目的、数据使用、参与同意和联系人；与产品营销分开。</li><li>若无法回答“用户下一步做什么”，从主导航移除而不是继续占位。</li></ul></article>
+            <article class="spec"><span class="spec-label">AUTH · LOGIN / REGISTER</span><h3>认证：保留目标上下文，解释身份结果</h3><ul><li>登录/注册页保留当前视觉优点；错误摘要聚焦字段，提交后保留非敏感输入。</li><li><code>next</code> 仅接受站内 allowlist；登录后回原资源，并由 capability 决定打开模式。</li><li>注册“教师”是 onboarding intent，不直接赋权；文案明确“创建首门课程后进入教学工作台”。</li><li>第三方/密码失败都使用统一错误契约，不显示提供商原始响应。</li></ul></article>
+            <article class="spec"><span class="spec-label">AUTH · RESET / LEGAL / ERROR</span><h3>不可用能力必须诚实降级</h3><ul><li>邮件未配置时，重置页替换为“联系管理员/返回登录”，隐藏不可工作的表单按钮。</li><li><code>/terms</code>、<code>/privacy</code> 不得指向 404：配置缺失时发布最小占位条款并标明版本/联系人，或从 UI 移除链接。</li><li>错误页按 403/404/410/429/5xx 提供角色和来源相关返回动作；“返回今天”只对已登录学生出现。</li><li>显示可复制 request ID，不显示堆栈；报告事件不得包含题目答案/对话正文。</li></ul></article>
+          </div>
+
+          <h3 style="margin-top:2.6rem">8.2 学生端：把页面集合收敛成连续学习旅程</h3>
+          <div class="grid grid-2">
+            <article class="spec"><span class="spec-label">STUDENT · TODAY <span class="route">/student</span></span><h3>今天：一个权威下一步，少量可信待办</h3><ul><li>首屏顺序固定：恢复/开始一项主要学习 → 为什么推荐 → 最多 3 项待办 → 课程摘要。</li><li>同一排序服务驱动首页、课程内和 AI 解释；页面不得各自计算推荐。</li><li>0/0、无加入课程、API degraded、资源删除、作业待批等均有独立状态。</li><li>移除重复“当前课程/进度”卡；已有成果和数据解释进入可折叠详情。</li></ul></article>
+            <article class="spec"><span class="spec-label">STUDENT · COURSES <span class="route">/dojos</span></span><h3>课程：我的、发现、已归档三种任务</h3><ul><li>登录后默认“我的课程”，其次“发现”；搜索/筛选写入 URL，可返回恢复。</li><li>课程卡优先：当前模块、下一项、活动状态、最后访问；掌握度只在有证据时显示。</li><li>已删除/归档资源使用 lifecycle 状态和替代路径，不让历史活动变成死链。</li><li>移动端使用分段标签和增量加载，不堆叠全部课程。</li></ul></article>
+            <article class="spec"><span class="spec-label">STUDENT · COURSE / MODULE <span class="route">/&lt;course&gt;/...</span></span><h3>课程与章节：共享学习上下文壳</h3><ul><li>课程页显示目标、进度定义、一项下一步和章节路径；章节页只展开当前项和前后关系。</li><li>目录项直接显示完成条件、类型、预计时长、环境需求、锁定/失效原因。</li><li>面包屑和返回恢复课程内位置；避免 mini path 与正文重复相同信息。</li><li>所有练习类型通过 <code>exerciseMode</code> 路由到 container/simulation/hybrid/reading 对应 shell。</li></ul></article>
+            <article class="spec"><span class="spec-label">STUDENT · CHALLENGE</span><h3>挑战：内容、环境、证据在同一上下文</h3><ul><li>页首显示题目、学习目标、活动状态和唯一主动作；提示、AI、答案策略为次级。</li><li>容器型：环境状态与终端/目标同屏；模拟型：加载 simulation runner；混合型明确两阶段依赖。</li><li>提交后先确认记录，再显示评测/证据状态；失败不清空输入和运行上下文。</li><li>手机用“内容 / 环境 / 证据”全屏切换，并保留运行状态条。</li></ul></article>
+            <article class="spec"><span class="spec-label">STUDENT · ASSIGNMENT</span><h3>作业：状态先于表单，结果先于下一次作答</h3><ul><li>桌面长作业增加题号导航、完成状态和粘底保存/提交；移动端保留一次一题的优秀模式。</li><li>自动保存显示 saving/saved/offline/conflict；409 提供比较/保留本地/使用服务器选择。</li><li>截止、关闭、次数、答案可见策略在开始前明确；提交后显示收据和可复核时间。</li><li>“已提交”“已批改”“已掌握”分开，不把得分等同能力。</li></ul></article>
+            <article class="spec"><span class="spec-label">STUDENT · DASHBOARD / SCORE</span><h3>学习证据：保留四状态分离，减少重复入口</h3><ul><li>以 <code>student_experience.py</code> 为事实基础：Activity、Mastery、Assessment、Evidence 独立。</li><li>课程 dashboard 是证据详情；“今天”和 profile 仅引用摘要，不复制整套图表。</li><li>所有百分比显示分母、时间窗和证据覆盖；0/0 显示“暂无证据”。</li><li>修复重复 DOM ID；图表提供表格/文本等价内容。</li></ul></article>
+            <article class="spec"><span class="spec-label">STUDENT · AI GUIDE <span class="route">/guide</span></span><h3>AI 学习：对话空间与上下文辅助共用一套会话</h3><ul><li>完整页用于计划、跨题复盘和个人创作；题目内以侧栏携带 resource context 进入同一线程。</li><li>默认辅导，不代替作答；可引用课程材料并显示来源、适用范围和过期提示。</li><li>移动首屏只显示会话内容、输入和必要上下文，历史/资料/工具进入抽屉，减少当前 38 个动作。</li><li>网络中断保留草稿；生成中可离开，回到页面恢复状态。</li></ul></article>
+            <article class="spec"><span class="spec-label">STUDENT · SELF LEARNING / ARTIFACTS</span><h3>我的创作：版本、可见性与课程提交关系清楚</h3><ul><li>合并散落入口为“AI 学习 → 我的创作”；按进行中、待处理、已完成、已归档分组。</li><li>个人成果默认“仅自己可见”；可复制、重命名、删除、继续改进或提交教师查看，不能直接发布到课程。</li><li>成果查看器按 capability 隐藏标准解、生成 prompt、内部任务和教师备注。</li><li>returnTo 经过 allowlist，返回原列表筛选/课程，而非固定跳 <code>/guide</code>。</li></ul></article>
+            <article class="spec"><span class="spec-label">STUDENT · WORKSPACE <span class="route">/workspace</span></span><h3>工作区：解释“继续学习”和“运行环境”的差异</h3><ul><li>页首展示上下文题目、runtime 状态、最后 snapshot、过期时间和 recommendedAction。</li><li>文案映射：运行中“打开环境”；停止但有尝试“重启环境并继续”；无尝试“从题目启动”。</li><li>启动/停止/重建/失败均可重试且不丢学习尝试；高风险重建先说明丢失范围。</li><li>教师访问时进入“内容预览/测试环境”，不显示“查看今天的学习”。</li></ul></article>
+            <article class="spec"><span class="spec-label">STUDENT · PROFILE / SETTINGS</span><h3>账户：公开身份、私有学习证据和偏好分开</h3><ul><li>Profile 只放身份、公开成就和个人可见摘要；详细学习证据回课程 dashboard。</li><li>明确每项数据的可见范围；公开昵称/头像和私有进度分区。</li><li>设置按外观、学习偏好、AI 与隐私、安全分组；主题是账户偏好，不是页面局部开关。</li><li>危险操作说明影响、可恢复性与二次确认；术语按当前模式本地化。</li></ul></article>
+          </div>
+
+          <h3 style="margin-top:2.6rem">8.3 教师端：从“聊天工具”升级为可治理教学工作台</h3>
+          <div class="grid grid-2">
+            <article class="spec"><span class="spec-label">TEACHER · WORKBENCH <span class="route">/teacher</span></span><h3>工作台：先处理，再发起 AI</h3><ul><li>首屏顺序：需处理事项 → 运行/失败批次 → 最近课程 → 自然语言 composer；没有紧急事项时 composer 可提升。</li><li>任务中心与提醒合为一个可过滤任务层；历史会话不和任务争夺首屏。</li><li>每个任务必须有对象、课程、状态、更新时间、下一动作和失败恢复。</li><li>手机首屏动作显著少于当前 27 个，保留“处理待办 / 发起共创”两条主路径。</li></ul></article>
+            <article class="spec"><span class="spec-label">TEACHER · AI CO-CREATION</span><h3>AI 共创：自然语言先形成可确认计划</h3><ul><li>解析课程、章节、对象类型、数量、主题、难度、材料和发布意图；缺失但高风险字段才追问。</li><li>确认卡展示将创建的对象和硬约束；“生成五题”必须明确为 5 个独立草稿。</li><li>长任务可离开；全局运行状态显示 batch 聚合，不把聊天消息当唯一任务记录。</li><li>产出默认 needs_review；教师逐项修订/验证/预览后批量发布。</li></ul></article>
+            <article class="spec"><span class="spec-label">TEACHER · COURSES <span class="route">/teacher/courses</span></span><h3>课程列表：发现异常与继续编辑</h3><ul><li>按进行中、需处理、已发布、已归档分组/筛选；卡片显示准备度、待审核、学生数和最后编辑。</li><li>一个“新建课程”菜单统一手工创建、Git 导入和从模板复用；不保留孤立创建页入口。</li><li>新教师的首门课程 onboarding 在此完成；创建后服务端刷新教学 capability。</li><li>列表 API 使用正式 GET collection，不再借用 <code>context?view=teacher-summary</code>。</li></ul></article>
+            <article class="spec"><span class="spec-label">TEACHER · COURSE OVERVIEW</span><h3>课程概览：从 3,305px 移动长页变成准备度与行动摘要</h3><ul><li>首屏固定：待处理 → 发布准备度 → 一项主行动；学生进度和最近活动只显示摘要与下钻。</li><li>章节摘要展示课件/题目/演示的 draft/published/needsAttention 计数。</li><li>课程码、导出、同步和设置移到课程菜单；删除只在独立 Danger Zone。</li><li>指标带定义、分母、时间窗、数据质量，不展示永久空图。</li></ul></article>
+            <article class="spec"><span class="spec-label">TEACHER · COURSEWARE / QUESTIONS / DEMOS</span><h3>五页签中的内容工作区共享同一对象语法</h3><ul><li>保留概览、课件、题目、演示、学情五页签；隐藏页签不提前加载重数据。</li><li>统一列表头：计数、搜索、状态/章节/来源筛选、一项新建；URL 持久化筛选。</li><li>统一对象摘要：type/title/chapter/lifecycle/visibility/source/version/updatedBy/nextAction。</li><li>详情用侧栏或深链，返回恢复位置；删除进更多菜单并说明影响。</li></ul></article>
+            <article class="spec"><span class="spec-label">TEACHER · LEARNING ANALYTICS</span><h3>学情：先行动队列，后图表解释</h3><ul><li>首屏是需干预学生、停滞任务和低质量题目；每项给出证据与建议，不自动触发处分/评分。</li><li>按学生、章节、题目、时间过滤，URL 可分享；敏感学生数据按 course scope 授权。</li><li>低样本显示置信度/覆盖率，禁止虚假精确百分比。</li><li>题目质量是学情下钻，不再建立第二套分析首页。</li></ul></article>
+            <article class="spec"><span class="spec-label">TEACHER · CREATE / EDIT</span><h3>手工创建与 Git 导入共用课程创建框架</h3><ul><li>简单对象用紧凑表单；只有跨步依赖才用步骤器。长表单有分区导航、自动保存、粘底操作、错误摘要。</li><li>Git 导入先解释访问、同步与冲突策略，不向无能力用户直接展示部署密钥。</li><li>保存草稿、验证、学生预览、发布为不同动作；未保存离开提示。</li><li>AI 是字段级协助和批量入口，不以浮动按钮遮挡编辑/预览。</li></ul></article>
+            <article class="spec"><span class="spec-label">TEACHER · ARTIFACT / PREVIEW</span><h3>成果：来源、版本、验证和学生可见性同屏</h3><ul><li>页首同时显示课程/章节、对象类型、版本、lifecycle、学生可见性与唯一下一步。</li><li>来源链可追溯：资料 → 生成任务/批次 → 草稿 → 验证 → 发布版本。</li><li>学生预览必须使用真实学生序列化边界，隐藏答案/flag/教师指令；不是 CSS 隐藏。</li><li>版本差异、回滚和发布拥有审计事件。</li></ul></article>
+            <article class="spec"><span class="spec-label">TEACHER · COURSE ADMIN</span><h3>课程管理：把日常设置和危险治理分开</h3><ul><li>身份/加入方式/课程码/集成是普通设置；同步/导出是运维；删除和所有权转移在 Danger Zone。</li><li>成绩页只在 <code>supportsScriptedGrades</code> capability 为真时出现，否则提供学情/作业入口。</li><li>删除要求输入课程短名、展示受影响学生/内容/链接，并明确可恢复期限。</li><li>活动日志可按 actor/action/object/time 筛选并导出。</li></ul></article>
+            <article class="spec"><span class="spec-label">TEACHER · SEARCH / WORKSPACE</span><h3>教师工具必须理解教师任务</h3><ul><li>教师搜索优先课程、章节、材料、草稿、批次、学生（有权限）和设置；不返回仅学生可用的“继续挑战”。</li><li>工作区只用于预览/测试课程运行环境，显示测试对象和学生安全边界。</li><li>从结果打开对象后，返回恢复查询；命令面板支持 keyboard combobox 模式。</li></ul></article>
+          </div>
+
+          <h3 style="margin-top:2.6rem">8.4 平台管理端：从通用 CTFd 后台转为教育平台治理</h3>
+          <div class="grid grid-2">
+            <article class="spec"><span class="spec-label">ADMIN · OVERVIEW <span class="route">/admin</span></span><h3>平台概览：健康、风险和待处理</h3><ul><li>替换“总积分”等竞赛指标：活跃学习者/教师、课程可用性、失败任务、runtime 异常、队列延迟、权限异常、数据质量。</li><li>先显示 P0/P1 告警与恢复动作；图表显示时间窗、定义和最后更新。</li><li>旧版本横幅进入系统维护区，不占持续首屏。</li><li>提供“返回教学平台”与显式平台管理模式标识。</li></ul></article>
+            <article class="spec"><span class="spec-label">ADMIN · USERS &amp; ACCESS</span><h3>用户与权限：围绕能力而非裸字段</h3><ul><li>服务端分页，搜索/角色/capability/status/lastActive 过滤；移动端用行摘要 + 详情页。</li><li>关键动作有可访问名称、范围和确认；批量操作只在选择后出现。</li><li>角色变更展示新增/移除 capability 和受影响课程，不使用模糊“管理员”开关。</li><li>重置密码、禁用、删除分别显示可恢复性并写审计日志。</li></ul></article>
+            <article class="spec"><span class="spec-label">ADMIN · COURSE GOVERNANCE</span><h3>课程治理：先修复 500 与能力缺口</h3><ul><li>修复 nullable hash；列表字段为来源类型、负责人、发布状态、学生数、健康、最后同步。</li><li>DB-backed 与 repository-backed 课程用 type/capability 明示，不让缺少某字段导致模板崩溃。</li><li>可按 orphaned/broken-link/failed-sync/archived 过滤；操作进入详情。</li><li>全局删除与课程所有者删除采用同一影响分析服务。</li></ul></article>
+            <article class="spec"><span class="spec-label">ADMIN · RUNTIME / WORKSPACES</span><h3>运行环境：补齐真实路由与运维闭环</h3><ul><li>注册 <code>/admin/desktops</code> 或移除菜单；目标页展示运行/启动中/失败/过期、用户、题目、节点、持续时间。</li><li>支持按异常/课程/用户过滤；停止/回收是高风险动作并写审计。</li><li>显示聚合健康与下钻，不把底层容器 ID 作为主标签。</li><li>队列不可用时显示 degraded 与检查路径，不显示空表。</li></ul></article>
+            <article class="spec"><span class="spec-label">ADMIN · CONTENT / ASSESSMENT</span><h3>挑战、提交和评分：从超长表格变成可筛选治理</h3><ul><li>297 个挑战与提交必须服务端分页；列按任务优先级，次要字段进详情。</li><li>挑战显示课程/章节、模式、可用性、验证状态、发布状态；错误链接可批量检查。</li><li>提交显示用户、对象、结果、证据/评测、时间、异常标记；敏感答案默认隐藏。</li><li>重复 DOM ID、无标签控件、横向溢出作为阻断发布问题。</li></ul></article>
+            <article class="spec"><span class="spec-label">ADMIN · SETTINGS / AUDIT</span><h3>配置与审计：变更可解释、可回滚</h3><ul><li>设置按认证、邮件、AI、运行环境、内容、隐私、安全分组；每项显示来源、默认值、验证和重启影响。</li><li>保存前展示 diff；敏感值不可回显；失败保留用户输入并定位字段。</li><li>审计事件包含 actor、capability、action、object、before/after 摘要、request ID、time。</li><li>生产危险配置使用双人确认/外部审批时，仅展示状态，不伪造已完成。</li></ul></article>
+          </div>
+
+          <h3 style="margin-top:2.6rem">8.5 跨角色能力：只实现一套事实，按模式呈现</h3>
+          <div class="grid grid-3">
+            <article class="spec"><span class="spec-label">GLOBAL SEARCH</span><h3>模式感知命令面板</h3><p>公开端只搜公开课程；学生搜课程/章节/题目/作业/成果；教师搜教学对象/批次/材料；管理员搜治理对象。结果返回 capability-filtered action，而非前端拼接 URL。</p></article>
+            <article class="spec"><span class="spec-label">NOTIFICATIONS &amp; JOBS</span><h3>通知不等于任务</h3><p>通知是已发生的信息；任务是需要用户行动；后台 job 是系统过程。壳层只显示需处理数和运行数，分别进入过滤后的列表。</p></article>
+            <article class="spec"><span class="spec-label">ERROR &amp; RECOVERY</span><h3>统一恢复面板</h3><p>错误携带 code、message、recovery、retryability、requestId；页面保存上下文与草稿。重试必须幂等或提示影响。</p></article>
+            <article class="spec"><span class="spec-label">THEMES</span><h3>主题是偏好，不是产品分裂</h3><p>学生可使用沉浸主题，教师/管理保持高可读工作主题；所有主题覆盖相同 semantic token、对比度和组件状态。</p></article>
+            <article class="spec"><span class="spec-label">RETURN CONTEXT</span><h3>安全返回协议</h3><p><code>returnTo</code> 必须是站内已授权路径；同时保存 tab/filter/page/scroll。无有效来源时回到当前模式的对象集合，不写死首页。</p></article>
+            <article class="spec"><span class="spec-label">PAGE METADATA</span><h3>每页都是可识别的产品页面</h3><p>设置唯一 <code>&lt;title&gt;</code>、H1、canonical 路径、主内容 ID、aria-current、request context；浏览器标题格式为“页面 · 上下文 · 玄甲”。</p></article>
+          </div>
+
+          <h3 style="margin-top:2.6rem">8.6 次级、集成与历史路由处置</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>路由/页面</th><th>目标职责</th><th>开发处置</th><th>验收重点</th></tr></thead>
+              <tbody>
+                <tr><td><code>/hacker[/&lt;user&gt;]</code></td><td>本人账户档案或经同意的公开档案</td><td>本人入口并入 Profile；他人页只序列化公开字段，hidden 用户保持不可枚举；成绩/活动默认私有。</td><td>匿名、本人、他人、hidden 四种响应无隐私泄露。</td></tr>
+                <tr><td><code>/sensei</code></td><td>团队/关于</td><td>并入公共“关于”，保留 canonical/redirect；团队数据有来源和更新时间。</td><td>公共导航不出现 Sensei/Sensai 拼写歧义。</td></tr>
+                <tr><td><code>/sensai/*</code></td><td>历史 AI Guide 链接</td><td>保留 308 到 <code>/guide</code>，转发安全查询；记录兼容使用后再决定删除。</td><td>无循环、无开放重定向、对话上下文不丢。</td></tr>
+                <tr><td><code>/community</code> / <code>/leaderboard</code></td><td>历史发现/排名入口</td><td>保持显式 308 到目录/对应片段；若社区/排名无独立职责，不重新创建重复页面。</td><td>锚点存在、返回正确、无“重定向到看似无关页”。</td></tr>
+                <tr><td><code>/learning</code></td><td>学生首页兼容</td><td>选择一个 canonical（建议 <code>/student</code>），另一条 308；feature rollout 不让两个 URL 呈现不同事实。</td><td>深链、缓存、标题、analytics 只计一个 canonical。</td></tr>
+                <tr><td><code>/active-module</code></td><td>旧活动题目摘要 API</td><td>逐步委托 workspace/resource presenter；模拟/混合不再简单返回空对象。</td><td>四种 exerciseMode 和无活动题状态 schema-valid。</td></tr>
+                <tr><td><code>/dojo/&lt;course&gt;/join/&lt;password&gt;</code></td><td>加入受保护课程</td><td>新增 POST join-code 表单，秘密仅在请求体；旧含密码路径停止生成并短期兼容时禁止日志/Referer 泄露。</td><td>URL、历史、analytics、server access log 不出现加入码。</td></tr>
+                <tr><td><code>/discord/connect</code> / <code>/discord/redirect</code></td><td>账户集成</td><td>放入设置“集成”；未配置、state 过期、重复关联使用统一错误/恢复页，回到 <code>/settings#integrations</code>。</td><td>CSRF/state、回跳、重复关联、provider 超时与撤销。</td></tr>
+                <tr><td><code>/metrics/teaching</code></td><td>Prometheus 运维端点，不是产品页面</td><td>置于独立 blueprint/端口或 metrics token + 网络 allowlist；禁止暴露给普通匿名产品流量。</td><td>未授权拒绝、监控授权成功、响应不含用户级标签。</td></tr>
+                <tr><td><code>/dojo/&lt;course&gt;/solves/*</code></td><td>课程数据导出</td><td>只在 course export capability 下显示；异步生成、时效下载、范围确认和审计。</td><td>越权、超大导出、失效链接、敏感字段 allowlist。</td></tr>
+                <tr><td><code>/test_page_error</code></td><td>测试故障注入</td><td>生产禁用或仅管理员+测试配置；不得被 route manifest 作为产品页展示。</td><td>生产 404/不可达；测试环境可验证错误契约。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="contracts">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Canonical contracts</p><h2>先统一页面所依据的事实，再统一组件</h2></div><p class="section-copy">数据库表可以渐进迁移，但 API 边界必须先提供稳定的资源、能力、状态、链接和错误语义。以下契约是所有新页面和迁移页面的共同入口。</p></div>
+
+          <h3>9.1 四类状态严禁压成一个 <code>status</code></h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>状态域</th><th>规范枚举</th><th>回答的问题</th><th>禁止混用</th></tr></thead>
+              <tbody>
+                <tr><td><strong>View / async</strong></td><td><code>initial · loading · ready · empty · degraded · error · stale · forbidden</code></td><td>当前页面数据是否可呈现/操作？</td><td>不得用资源“未发布”表示接口加载失败。</td></tr>
+                <tr><td><strong>Resource availability</strong></td><td><code>available · moved · archived · deleted · forbidden</code></td><td>对象是否存在、当前用户能否到达？</td><td>不得把无权限和不存在都显示为 404。</td></tr>
+                <tr><td><strong>Content workflow</strong></td><td><code>draft · queued · running · validating · needs_review · partial_success · published · failed · canceled</code></td><td>内容/批次处在什么生产阶段？</td><td>job 完成不等于内容发布。</td></tr>
+                <tr><td><strong>Learning activity</strong></td><td><code>not_started · in_progress · submitted · completed</code></td><td>学生做到了哪一步？</td><td>完成不等于掌握。</td></tr>
+                <tr><td><strong>Mastery</strong></td><td><code>unknown · emerging · developing · proficient · mastered</code></td><td>证据支持怎样的能力判断？</td><td>不得由一次提交直接推断。</td></tr>
+                <tr><td><strong>Assessment</strong></td><td><code>not_applicable · pending · ready · failed</code></td><td>评测结果是否可用？</td><td>pending 不显示 0 分。</td></tr>
+                <tr><td><strong>Evidence</strong></td><td><code>none · partial · complete · invalid</code></td><td>结论的证据是否完整？</td><td>invalid 不等于学生失败。</td></tr>
+                <tr><td><strong>Runtime</strong></td><td><code>none · provisioning · running · stopping · stopped · expired · failed</code></td><td>实验环境能否打开？</td><td>stopped 不等于学习尝试丢失。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="callout warning" style="margin-top:1rem"><strong>迁移规则：</strong>数据库中的历史 raw status 暂不强制一次改名。先在 presenter 层建立唯一映射表并记录 unknown 状态 telemetry；前端只消费规范枚举。映射覆盖率达到 100% 后再决定持久层迁移。</p>
+
+          <h3 style="margin-top:2rem">9.2 规范资源摘要 <code>ResourceSummary</code></h3>
+          <div class="grid grid-2">
+            <pre aria-label="ResourceSummary JSON 示例">{
+  "id": "opaque-resource-id",
+  "type": "challenge | simulation | assignment | artifact | ...",
+  "title": "SQL 登录绕过",
+  "context": {
+    "course": { "id": "...", "title": "Web 安全" },
+    "module": { "id": "...", "title": "认证缺陷" }
+  },
+  "availability": {
+    "state": "available",
+    "reasonCode": null,
+    "replacement": null
+  },
+  "workflow": { "state": "published", "version": 4 },
+  "capabilities": ["view", "attempt", "ask_tutor"],
+  "hrefs": {
+    "canonical": "/course/module/challenge",
+    "primaryAction": "/course/module/challenge",
+    "returnTo": "/student?focus=next"
+  },
+  "timestamps": { "updatedAt": "ISO-8601", "publishedAt": "ISO-8601" },
+  "evidence": { "coverage": null, "quality": "unknown" }
+}</pre>
+            <article class="spec"><span class="spec-label">PRESENTER RULES</span><h3>同一对象在所有界面说同一件事</h3><ul><li><code>id</code> 是不暴露数据库结构的稳定 opaque ID；type 使用小而稳定的规范集合。</li><li><code>context</code> 提供显示和授权范围，但页面不得据此自行判权。</li><li><code>availability</code> 决定可见/替代/恢复；<code>workflow</code> 决定生产阶段；两者不得合并。</li><li><code>capabilities</code> 决定可渲染动作；服务端写接口仍重复校验。</li><li><code>hrefs</code> 由 resolver 生成并通过 authorization，搜索/Feed/通知/任务直接复用。</li></ul></article>
+          </div>
+
+          <h3 style="margin-top:2rem">9.3 认证与页面 bootstrap</h3>
+          <pre aria-label="页面 bootstrap JSON 示例">GET /pwncollege_api/v1/ui/bootstrap?mode=learning&amp;path=/student
+
+{
+  "success": true,
+  "data": {
+    "viewer": { "id": "...", "displayName": "..." },
+    "mode": "learning",
+    "availableModes": [
+      { "id": "learning", "label": "学习", "homeHref": "/student" },
+      { "id": "teaching", "label": "教学", "homeHref": "/teacher" }
+    ],
+    "capabilities": ["course.discover", "learning.attempt", "artifact.personal.create"],
+    "scopes": { "courseIds": ["..."] },
+    "navigation": [ /* server-approved destinations */ ],
+    "running": { "jobs": 1, "tasksRequiringAction": 0, "runtime": "stopped" },
+    "preferences": { "theme": "system", "locale": "zh-CN" },
+    "request": { "id": "req_...", "serverTime": "ISO-8601" }
+  },
+  "meta": { "contractVersion": "2026-08-28" }
+}</pre>
+          <div class="grid grid-3" style="margin-top:1rem">
+            <article class="card"><span class="card-number">SSR</span><h3>首屏稳定</h3><p>服务端渲染页面时可内嵌最小 bootstrap，避免先显示错误导航再跳变；敏感 capability 不进入共享缓存。</p></article>
+            <article class="card"><span class="card-number">REFRESH</span><h3>能力可刷新</h3><p>创建首门课程、角色变更或权限撤销后刷新 bootstrap；收到 403 时不得无限重试旧 capability。</p></article>
+            <article class="card"><span class="card-number">CACHE</span><h3>有版本、有失效</h3><p>按 user + mode 缓存短时间，响应含 contractVersion；切换账户/模式立即清空。</p></article>
+          </div>
+
+          <h3 style="margin-top:2rem">9.4 统一成功与错误 envelope</h3>
+          <div class="grid grid-2">
+            <pre aria-label="API 成功响应">{
+  "success": true,
+  "data": { "items": [], "pageInfo": {} },
+  "meta": {
+    "requestId": "req_...",
+    "contractVersion": "2026-08-28",
+    "serverTime": "ISO-8601"
+  }
+}</pre>
+            <pre aria-label="API 错误响应">{
+  "success": false,
+  "error": {
+    "code": "RESOURCE_MOVED",
+    "message": "此练习已移动到新的章节。",
+    "fieldErrors": [],
+    "retryable": false,
+    "recovery": {
+      "label": "打开新位置",
+      "href": "/resolved/path"
+    }
+  },
+  "meta": { "requestId": "req_..." }
+}</pre>
+          </div>
+          <ul><li>服务端始终返回与状态码匹配的 JSON（页面导航请求除外）；401 提供登录恢复，403 不伪装 404，确需隐藏对象存在性时使用文档化策略。</li><li>前端 <code>RequestClient</code> 先检查 content-type/HTTP 状态，再解析 envelope；禁止每页复制 <code>unwrap</code>。</li><li>409 用于版本/幂等冲突，422 用于可修正输入，429 附 retryAfter，5xx 附 request ID；默认错误文案可以安全显示。</li></ul>
+
+          <h3 style="margin-top:2rem">9.5 页面集合接口与分页</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>目标接口</th><th>用途</th><th>关键要求</th><th>迁移来源</th></tr></thead>
+              <tbody>
+                <tr><td><code>GET /ui/bootstrap</code></td><td>壳层、模式、能力、运行摘要</td><td>按用户/模式授权；SSR 可复用</td><td>散落模板 user/admin 判断</td></tr>
+                <tr><td><code>GET /resources/:type/:id/resolve</code></td><td>canonical href、lifecycle、替代对象</td><td>支持旧 ID/路径，记录 redirect reason</td><td>各模板/JS 拼 URL</td></tr>
+                <tr><td><code>GET /learning/today</code></td><td>学生权威下一步与待办</td><td>排序理由、数据质量、资源摘要</td><td><code>/learning/overview?view=today</code></td></tr>
+                <tr><td><code>GET /teaching/courses</code></td><td>教师课程 collection</td><td>cursor、filters、counts、capabilities</td><td><code>/teaching/context?view=teacher-summary</code></td></tr>
+                <tr><td><code>GET /teaching/courses/:id/content</code></td><td>五页签内容</td><td>type/status/chapter/source 分页；规范摘要</td><td>当前 content endpoint 渐进适配</td></tr>
+                <tr><td><code>GET /admin/overview</code></td><td>教育平台运营摘要</td><td>健康、失败队列、runtime、数据质量、时间窗</td><td>CTFd 默认 dashboard presenter</td></tr>
+                <tr><td><code>GET /search?mode=...</code></td><td>模式感知搜索</td><td>权限过滤、分组、resolved actions、cursor</td><td>当前 generic search</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="batch">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Natural-language batch authoring</p><h2>“生成五题”必须成为可证明的系统事实</h2></div><p class="section-copy">数量不是提示词修辞。解析结果、持久批次、独立任务、聚合状态、审核 UI 和自动化验收共同保证数量与质量。</p></div>
+
+          <div class="diagram" aria-label="自然语言五题生成流程">
+            <div class="flow">
+              <div class="flow-node"><strong>1. 解析指令</strong><small>课程、章节、5、主题、难度、材料</small></div><div class="flow-arrow">→</div>
+              <div class="flow-node"><strong>2. 计划确认</strong><small>5 个独立草稿 · 不自动发布</small></div><div class="flow-arrow">→</div>
+              <div class="flow-node"><strong>3. 建立 Batch</strong><small>requestedCount=5 · idempotency key</small></div><div class="flow-arrow">→</div>
+              <div class="flow-node"><strong>4. 生成 5 Items</strong><small>每题独立 job / draft / validation</small></div><div class="flow-arrow">→</div>
+              <div class="flow-node"><strong>5. 审核与发布</strong><small>逐题修复/重试 · 学生预览 · 批量发布</small></div>
+            </div>
+          </div>
+
+          <div class="grid grid-3" style="margin-top:1rem">
+            <article class="spec"><span class="spec-label">STEP 1 · PARSE</span><h3>结构化意图，不直接执行聊天文本</h3><ul><li>解析输出 <code>objectType=ctf_challenge</code>、<code>requestedCount=5</code>、course/module、五个 topic/difficulty 计划、source material 与 constraints。</li><li>数量、课程、对象类型为硬字段；缺失才追问。教师可在确认卡直接修正。</li><li>防止 prompt 中的例子/引用被误解析为额外指令；记录 parser version。</li></ul></article>
+            <article class="spec"><span class="spec-label">STEP 2 · CONFIRM</span><h3>确认的是执行计划，不是空泛“好的”</h3><ul><li>显示“将创建 5 个独立题目草稿”，列出每题主题/难度；说明验证、预计时间、发布策略。</li><li>主动作“开始生成 5 题”；次要“调整计划”。禁止按钮只写“生成”。</li><li>确认请求带 idempotency key，双击/刷新不得建立两批。</li></ul></article>
+            <article class="spec"><span class="spec-label">STEP 3 · PERSIST</span><h3>先建 5 个 item，再调度</h3><ul><li>事务内创建 batch + 5 item records，item index 唯一；成功后入队，不让并发回调决定题目数。</li><li>batch 保存 requested/created/validated/published/failed/canceled 计数，但计数从 items 投影。</li><li>同一 idempotency key + user + scope 返回原 batch。</li></ul></article>
+            <article class="spec"><span class="spec-label">STEP 4 · EXECUTE</span><h3>逐题隔离、验证与恢复</h3><ul><li>每个 item 有独立 job、draft、topic、difficulty、attempt、errorCode；失败不取消已成功项。</li><li>生成后进入结构校验、题解/flag/运行验证和安全检查；验证失败为 needs_review/failed，不计 validated。</li><li>批量并发受课程/模型/运行资源限流；重试只针对选中 item。</li></ul></article>
+            <article class="spec"><span class="spec-label">STEP 5 · PRESENT</span><h3>聚合摘要永远不吞掉逐项事实</h3><ul><li>顶部始终显示“已请求 5 · 已创建 N · 已验证 N · 失败 N · 已发布 N”。</li><li>只有 <code>created=5</code> 才能写“5 题已生成”；3/5 显示“部分完成”，并提供“重试 2 项”。</li><li>逐项卡显示状态、最后更新、问题、重试/编辑/预览；列表更新支持轮询退避或事件流降级。</li></ul></article>
+            <article class="spec"><span class="spec-label">STEP 6 · REVIEW</span><h3>发布是教师行为</h3><ul><li>默认不自动发布；教师可单题修改，也可对全部已验证项执行批量学生预览。</li><li>批量发布只包含勾选且 validated 的项；未通过项不得被静默忽略，确认中明确列出。</li><li>修订指令“把这 5 题都调难”建立 batch revision，并保持五个 item 对应关系。</li></ul></article>
+          </div>
+
+          <h3 style="margin-top:2rem">建议持久批次契约</h3>
+          <pre aria-label="生成批次 JSON 示例">{
+  "id": "batch_opaque",
+  "kind": "ctf_question_generation",
+  "scope": { "courseId": "...", "moduleId": "..." },
+  "request": {
+    "requestedCount": 5,
+    "sourceInstruction": "一次生成五个 Web 安全题目……",
+    "parserVersion": "v2",
+    "constraints": { "publish": false }
+  },
+  "aggregate": {
+    "state": "partial_success",
+    "requested": 5,
+    "created": 5,
+    "validated": 4,
+    "needsReview": 1,
+    "failed": 0,
+    "published": 0
+  },
+  "items": [
+    { "index": 1, "topic": "...", "difficulty": "...", "jobId": "...",
+      "draftId": "...", "state": "needs_review", "validation": { "state": "ready" } }
+    /* exactly five stable item identities */
+  ],
+  "capabilities": ["view", "retry_item", "revise_batch", "publish_validated"],
+  "idempotency": { "key": "...", "replayed": false }
+}</pre>
+
+          <div class="callout critical" style="margin-top:1rem"><strong>不可接受：</strong>只改 system prompt、让模型返回一个包含五道题的长字符串、在 UI 上把一个 artifact 标成“五题”、失败后整批无差别重跑、或者 created&lt;requested 时仍显示成功。必须运行 <code>ops/verify-natural-language-teaching-lifecycle.py</code>，并增加双击幂等、2/5 失败、单项重试、刷新恢复、批次修订和并发隔离场景。</div>
+        </div>
+      </section>
+
+      <section class="section" id="architecture">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Engineering architecture</p><h2>把巨型页面脚本拆成可验证的产品能力</h2></div><p class="section-copy">目标不是追求框架迁移，而是形成清晰模块边界。可继续使用 Jinja + 原生 JS；共享契约与可测试状态机优先于技术栈更换。</p></div>
+
+          <h3>11.1 目标分层</h3>
+          <div class="diagram">
+            <div class="lane">
+              <div class="lane-head">层</div><div class="lane-head">职责</div><div class="lane-head">不得包含</div><div class="lane-head">主要测试</div><div class="lane-head">建议所有者</div>
+              <div><strong>Domain / service</strong></div><div>capability、resource resolver、status mapping、next action、batch lifecycle</div><div>HTML、DOM selector、展示文案</div><div>Python unit + contract</div><div><code>dojo_plugin/*</code></div>
+              <div><strong>API presenter</strong></div><div>canonical envelope、pagination、error、ResourceSummary</div><div>页面专属临时字段、拼接 HTML</div><div>schema + route integration</div><div><code>dojo_plugin/api/v1/*</code></div>
+              <div><strong>Frontend services/state</strong></div><div>RequestClient、stores、状态机、URL state、telemetry</div><div>散落 fetch/unwrap、直接改大量 DOM</div><div>JS unit + mocked contract</div><div><code>static/js/dojo/core|features</code></div>
+              <div><strong>Components</strong></div><div>shell、header、async、dialog、table、status、batch、workspace</div><div>业务权限推断、数据库状态映射</div><div>component + a11y</div><div><code>templates/components</code> + JS</div>
+              <div><strong>Pages</strong></div><div>组合组件、注入上下文、定义页面主任务</div><div>重复网络层/状态字典/路由规则</div><div>Playwright E2E + visual</div><div><code>templates/*.html</code></div>
+            </div>
+          </div>
+
+          <h3 style="margin-top:2rem">11.2 前端目标目录（渐进新增）</h3>
+          <pre aria-label="建议前端目录结构">dojo_theme/static/js/dojo/
+  core/
+    request-client.js        # envelope/content-type/retry/request-id
+    bootstrap.js             # viewer/modes/capabilities/navigation
+    resource-resolver.js     # only consumes server-resolved links
+    url-state.js             # safe returnTo/filter/page/scroll
+    telemetry.js             # privacy-safe journey events
+  components/
+    app-shell.js             # nav/mode/task/runtime summaries
+    async-boundary.js        # loading/empty/degraded/error/stale/forbidden
+    dialog.js                # focus trap/restore/inert/escape
+    combobox.js              # search semantics + keyboard
+    tabs.js                  # roving tabindex + lazy panel loading
+    data-table.js            # server pagination/selection/mobile rows
+    status-badge.js          # canonical display mapping
+    recovery-panel.js
+    batch-progress.js
+    workspace-state.js
+  features/
+    learning-today/
+    learning-course/
+    assignment/
+    teacher-workbench/
+    course-center/
+    batch-authoring/
+    platform-admin/
+  pages/
+    student.js teacher.js course-center.js admin.js
+
+dojo_theme/static/css/
+  tokens.css                 # primitive → semantic → component
+  components.css
+  modes/learning.css
+  modes/teaching.css
+  modes/admin.css</pre>
+          <p>现有 <code>teaching-agent.js</code>、<code>teacher-courses.js</code>、<code>learning-*.js</code> 逐 feature 抽取；原入口暂作 composition adapter。每完成一个功能迁移就删除对应旧分支，禁止新旧状态管理长期并存。<code>.dev/.min</code> symlink 保持现有构建约束，或在独立工作包中一次性切换正式 bundling。</p>
+
+          <h3 style="margin-top:2rem">11.3 共享组件责任</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>组件</th><th>必须处理</th><th>不负责</th><th>关键验收</th></tr></thead>
+              <tbody>
+                <tr><td><code>AppShell</code></td><td>模式导航、aria-current、skip link、任务/runtime 摘要、账户</td><td>页面业务 fetch</td><td>深链/刷新/模式切换一致</td></tr>
+                <tr><td><code>PageHeader</code></td><td>breadcrumb、title、status、scope、primary/secondary action</td><td>自行判断 capability</td><td>每页一个 H1、一个视觉主操作</td></tr>
+                <tr><td><code>AsyncBoundary</code></td><td>八种 view state、retry、request ID、stale 标记</td><td>把错误吞成空数组</td><td>故障注入与 live region</td></tr>
+                <tr><td><code>TaskList</code></td><td>状态、due/why、对象、next action、分页</td><td>复制 job 历史</td><td>空/超期/失效对象</td></tr>
+                <tr><td><code>DataTable</code></td><td>服务端排序/分页/选择、批量操作、移动行摘要</td><td>一次渲染全部数据</td><td>键盘名称、300+ rows 性能</td></tr>
+                <tr><td><code>Dialog/Drawer</code></td><td>focus trap/restore、inert、Esc、label、scroll lock</td><td>页面手写焦点</td><td>APG 键盘路径</td></tr>
+                <tr><td><code>ResourceCard</code></td><td>规范资源摘要、生命周期、primary action</td><td>拼接 href/推断 owner</td><td>moved/deleted/forbidden</td></tr>
+                <tr><td><code>BatchProgress</code></td><td>请求/创建/验证/失败/发布计数与逐项状态</td><td>从聊天文本解析完成度</td><td>5/5、3/5、重试、刷新</td></tr>
+                <tr><td><code>WorkspaceState</code></td><td>attempt/runtime/snapshot/recovery 组合</td><td>隐藏 runtime 失败</td><td>5 种 runtime 组合</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 style="margin-top:2rem">11.4 后端目标模块</h3>
+          <div class="grid grid-2">
+            <article class="spec"><span class="spec-label">DOMAIN SERVICES</span><h3>从页面/API 文件中抽离规则</h3><ul><li><code>dojo_plugin/product/capabilities.py</code>：模式、scope、动作授权。</li><li><code>dojo_plugin/product/resources.py</code>：对象注册、resolver、lifecycle、canonical link。</li><li><code>dojo_plugin/product/presenters.py</code>：ResourceSummary、计数和数据质量。</li><li><code>dojo_plugin/product/errors.py</code>：规范错误、request ID、恢复动作。</li><li><code>dojo_plugin/teaching/batches.py</code>：批次状态机、投影、幂等与重试。</li><li><code>dojo_plugin/learning/workspace_state.py</code>：attempt/runtime/snapshot 组合。</li></ul></article>
+            <article class="spec"><span class="spec-label">ROUTES / API</span><h3>页面薄路由，API 统一输出</h3><ul><li><code>pages/*.py</code> 只解析目标、鉴权、选择模板和 bootstrap；不复制领域条件。</li><li><code>api/v1/teaching.py</code> 按 courses/batches/artifacts/materials/progress 拆 blueprint/namespace。</li><li><code>api/v1/learning.py</code> 按 today/courses/attempts/evidence/guide 拆分。</li><li>为 admin desktops 注册真实路由；对不支持 grades 的课程通过 capability 隐藏/解释。</li><li>兼容 endpoint 委托新 service 并标记 deprecation telemetry。</li></ul></article>
+          </div>
+
+          <h3 style="margin-top:2rem">11.5 性能与加载策略</h3>
+          <ul><li>首屏只加载 bootstrap + 当前任务数据；课程隐藏页签不 fetch，打开后缓存并可失效。保持现有 KaTeX 内容检测后动态加载策略。</li><li>目录、挑战、用户、提交全部服务端 cursor/page；虚拟化只用于仍需展示的超长可视列表，不代替分页与信息减法。</li><li>为公共/学生/教师/管理四种入口设资源预算：首屏 JS gzip ≤ 180KB（应用自有，迁移期记录基线）、CSS gzip ≤ 80KB、关键 API p75 ≤ 500ms（本地业务，不含模型/容器）。</li><li>AI/容器长等待使用立即确认 + 进度阶段 + 可离开；轮询指数退避并在页面隐藏时降频，有事件流时可优先但必须回退。</li><li>页面不得在匿名状态建立无权事件连接；请求 dedupe、AbortController、stale response 保护进入 RequestClient/feature store。</li></ul>
+        </div>
+      </section>
+
+      <section class="section" id="packages">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Executable work packages</p><h2>按依赖实施的 13 个开发工作包</h2></div><p class="section-copy">编号既是实施顺序，也是 PR/变更集边界。一个工作包未满足完成证据时，不应宣称下一阶段完成；可并行的页面工作也必须建立在 SYS-00～03 契约之上。</p></div>
+          <div class="grid">
+            <details class="package" open>
+              <summary><span>SYS-00</span><strong>冻结基线、fixture 与契约版本</strong><em>P0 · 无依赖</em></summary>
+              <div class="package-body">
+                <h4>目的</h4><p>在重构前把现有正确行为、已知失败、角色能力和关键页面变成可重复证据，防止“修 UI”误删教学能力。</p>
+                <h4>实现任务</h4><ul><li>建立匿名/学生/教师/课程管理员/平台管理员固定 fixture；覆盖容器题、模拟题、作业、三种成果、五题 batch、DB/repository 两类课程。</li><li>将本次 70 页面审计转为机器可读 route manifest：route、mode、capability、expected status、canonical route、mobile critical。</li><li>为 API envelope、ResourceSummary、状态枚举发布 JSON Schema 或 Pydantic/Marshmallow 等等价 schema，版本 <code>2026-08-28</code>。</li><li>记录现有首屏资源、API 数量、页面高度、错误和可访问性基线；已知 P0 失败先标 expected-fail，不静默忽略。</li></ul>
+                <h4>文件边界</h4><p class="file-list">ops/verify-system-ux.py（新增） · ops/fixtures/system-ux/*（新增） · dojo_plugin/product/contracts.py（新增） · docs/system-wide-ux-development-plan.html</p>
+                <h4>完成证据</h4><p>同一命令可重建 fixture 并输出 JSON/JUnit/截图；route manifest 覆盖所有模板入口和管理菜单；contract schema 有正反例测试。</p>
+              </div>
+            </details>
+
+            <details class="package" open>
+              <summary><span>SYS-01</span><strong>修复路由、链接与公共端 P0 正确性</strong><em>P0 · 依赖 SYS-00</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>实现最小 <code>ResourceResolver</code>；修复 simulation/hybrid 路由、feed canonical link、admin desktops 注册、nullable course hash、成绩 capability gate。</li><li>匿名导航移除无权搜索/Today/AI，或为公共课程搜索提供明确匿名 endpoint；停止匿名 <code>/events</code> 连接。</li><li>修复 <code>feed.js</code> null DOM 访问；补齐/隐藏 Terms 与 Privacy；重置邮件未配置时进入明确 degraded 状态。</li><li>课程加入码改为 POST 且不进入 URL/日志；保护 <code>/metrics/teaching</code>；把 Discord 未配置/回调错误接入产品恢复页。</li><li>为历史学习/课程链接建立兼容解析；明确 redirect、410 与 forbidden 的使用。</li></ul>
+                <h4>主要文件</h4><p class="file-list">dojo_plugin/pages/dojo.py · pages/dojos.py · pages/course.py · pages/feed.py · pages/workspace.py · pages/learning.py · pages/discord.py · dojo_plugin/__init__.py · api/v1/search.py · api/v1/feed.py · dojo_theme/templates/base.html · admin_dojos.html · admin_desktops.html · feed.html · legal.html · reset_password.html · error.html · settings.html · static/js/dojo/navbar.js · feed.js · product-error.js</p>
+                <h4>完成证据</h4><p>route crawler 对所有可见链接返回 2xx/明确 redirect/产品化 403/410；浏览器 console 无上述异常；模拟题可进入正确 runner；<code>/admin/dojos</code> 与管理工作区可用。</p>
+              </div>
+            </details>
+
+            <details class="package" open>
+              <summary><span>SYS-02</span><strong>能力上下文、模式切换与全局壳层</strong><em>P0/P1 · 依赖 SYS-00，建议在 SYS-01 后合并</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>新增 capability service 和 <code>/ui/bootstrap</code>；定义 learning/teaching/admin 三种模式及 onboarding 状态。</li><li>重构基础导航：公共、学生、教师、平台管理员配置化；添加 skip link、aria-current、唯一 title/H1 约束。</li><li>账户菜单增加模式切换；深链根据资源 + capability 选模式，不依赖前端猜测。</li><li>所有模板动作接收服务端 capabilities；敏感写接口继续后端授权并添加越权 contract tests。</li></ul>
+                <h4>主要文件</h4><p class="file-list">dojo_plugin/product/capabilities.py（新增） · api/v1/user.py · api/v1/auth.py · pages/settings.py · dojo_theme/templates/base.html · components/navbar.html · settings.html · static/js/dojo/navbar.js · settings.js · static/css/product-shell.css · learning-themes.css</p>
+                <h4>完成证据</h4><p>单能力/多能力/新教师/撤权/管理员五类账户的按钮、深链和 API 结果一致；刷新和新标签页保持正确模式；无 capability 泄露。</p>
+              </div>
+            </details>
+
+            <details class="package">
+              <summary><span>SYS-03</span><strong>资源 presenter、状态映射与统一 API 客户端</strong><em>P1 · 依赖 SYS-00～02</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>建立 ResourceSummary、availability/workflow/runtime mapping、统一 envelope/error 和 request ID。</li><li>为 search、feed、today、teacher context、course content、artifact、assignment、workspace 渐进接入 presenter。</li><li>前端新增 RequestClient、AsyncBoundary、StatusBadge、RecoveryPanel；把重复 <code>unwrap</code> 和每页 error parsing 迁出。</li><li>unknown raw status 在服务端记录 telemetry 并显示安全 fallback；不得静默映射为成功。</li></ul>
+                <h4>主要文件</h4><p class="file-list">dojo_plugin/product/resources.py · presenters.py · errors.py（新增） · api/v1/__init__.py · learning.py · teaching.py · coursework.py · workspace.py · search.py · feed.py · dojo_theme/static/js/dojo/learning-common.js · core/request-client.js（新增） · components/async-boundary.js（新增）</p>
+                <h4>完成证据</h4><p>schema contract 覆盖成功/错误/分页；同一资源跨搜索/列表/详情/任务字段一致；故障注入不再出现 raw HTML/JSON parse/未处理 Promise。</p>
+              </div>
+            </details>
+
+            <details class="package">
+              <summary><span>SYS-04</span><strong>设计 token、共享交互组件与无障碍基线</strong><em>P1/P2 · 依赖 SYS-02～03</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>审计 <code>--product/--ui/--theme/--cs/--agent</code>，建立 primitive → semantic → component 映射；先兼容 alias，再逐页删除旧 token。</li><li>实现 AppShell、PageHeader、Dialog/Drawer、Combobox、Tabs、DataTable、TaskList、ResourceCard、BatchProgress、WorkspaceState。</li><li>组件覆盖 keyboard、focus restore、inert、live region、reduced motion、contrast、44×44 推荐触控目标。</li><li>建立 component fixture 页面和自动 axe 检查；禁止业务页面重新实现同名交互。</li></ul>
+                <h4>主要文件</h4><p class="file-list">dojo_theme/static/css/tokens.css（新增） · components.css（新增） · product-shell.css · learning-themes.css · teaching-agent.css · course-system.css · dojo_theme/templates/components/* · static/js/dojo/components/*（新增）</p>
+                <h4>完成证据</h4><p>三种模式和所有主题的组件状态快照；keyboard E2E；关键 fixture 无 axe serious/critical；对比度/缩放/减少动画通过。</p>
+              </div>
+            </details>
+
+            <details class="package">
+              <summary><span>SYS-05</span><strong>公共端、认证、法律与错误恢复</strong><em>P1 · 依赖 SYS-01～04</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>按 8.1 重排首页、目录、公开课程、Feed/Belts/Research；目录服务端分页和有效元数据过滤。</li><li>认证保留安全 next、字段错误、onboarding intent；重置/法律按配置显示。</li><li>错误页接统一 contract，按认证模式给 recovery；页面标题唯一。</li><li>完成公共内容/活动隐私审核；无法证明价值的主导航入口降级。</li></ul>
+                <h4>主要文件</h4><p class="file-list">pages/index.py · dojos.py · research.py · belts.py · feed.py · users.py · dojo_theme/templates/index.html · dojos.html · dojo.html · login.html · register.html · reset_password.html · legal.html · error.html · research.html · belts.html · feed.html · static/js/dojo/account-auth.js · feed.js</p>
+                <h4>完成证据</h4><p>匿名关键旅程、登录回跳、邮件未配置、法律配置缺失、公开搜索、活动死链/隐私和 403/404/410/5xx 自动验收。</p>
+              </div>
+            </details>
+
+            <details class="package">
+              <summary><span>SYS-06</span><strong>学生主旅程：今天、课程、挑战、作业与证据</strong><em>P1 · 依赖 SYS-01～04</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>建立唯一 next-action service，重排 Today；目录分我的/发现；课程/模块/挑战共享上下文壳。</li><li>按 exerciseMode 载入 container/simulation/hybrid；作业建立 autosave/offline/conflict/submit/result 状态机。</li><li>保持 Activity/Mastery/Assessment/Evidence 分离；删除 profile/today 的重复完整图表，修复重复 ID。</li><li>把 AI Guide、自学、个人成果、return context 按 8.2 收敛；学生预览使用 capability serializer。</li></ul>
+                <h4>主要文件</h4><p class="file-list">dojo_plugin/learning/student_experience.py · exercise_modes.py · context.py · assessment.py · evidence.py · pages/learning.py · pages/dojo.py · api/v1/learning.py · coursework.py · templates/learning.html · dojos.html · course.html · module.html · learning_assignment.html · learning_dashboard.html · learning_score.html · guide.html · self_learning_extend.html · teaching_artifact.html · static/js/dojo/learning-*.js · learning-guide.js · self-learning-extend.js</p>
+                <h4>完成证据</h4><p>保留并扩展 <code>ops/verify-student-ux.py</code> A01～A32；四种 exercise mode、零数据/失效/无权限、作业冲突与学生安全预览通过。</p>
+              </div>
+            </details>
+
+            <details class="package" open>
+              <summary><span>SYS-07</span><strong>教师工作台、课程中心与自然语言批量出题</strong><em>P0/P1 · 依赖 SYS-00～04</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>工作台按需处理/运行批次/课程/composer 重排；任务、通知、job 分层。</li><li>补正式 <code>GET /teaching/courses</code>；保留课程五页签并统一内容摘要/计数/URL state。</li><li>按第 10 节硬化 generation batch：requestedCount、5 items、幂等、单项 retry、partial success、batch revision、review/publish。</li><li>手工/Git/AI 创建统一入口；长表单复用 autosave、error summary、sticky actions；学生预览使用安全边界。</li><li>拆分巨型 <code>teaching-agent.js</code> / <code>teacher-courses.js</code> 与 <code>teaching.py</code>，每次迁移保留 adapter。</li></ul>
+                <h4>主要文件</h4><p class="file-list">dojo_plugin/models/global_agent.py · dojo_plugin/api/v1/teaching.py · worker/teaching_main.py · pages/learning.py · pages/course.py · templates/teacher_agent.html · teacher_courses.html · teacher_manual_create.html · teaching_artifact.html · dojo_admin.html · dojo_activity.html · grades_admin.html · static/js/dojo/teaching-agent.js · teacher-courses.js · teacher-manual-create.js · teaching-artifact.js · course-admin.js</p>
+                <h4>完成证据</h4><p><code>verify-natural-language-teaching-lifecycle.py</code>、<code>verify-teacher-agent-ui.py</code>、<code>verify-course-center-ui.py</code>、<code>verify-teacher-manual-create-ui.py</code> 全绿；新增 5/5、3/5、单项重试、双击幂等、刷新恢复、批量修订。</p>
+              </div>
+            </details>
+
+            <details class="package">
+              <summary><span>SYS-08</span><strong>统一工作区、成果查看器与返回上下文</strong><em>P1 · 依赖 SYS-03～07</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>新增 workspace composite state；学习尝试、runtime、snapshot、失败/过期原因分别输出。</li><li>工作区模板按 learning/teaching preview capability 呈现；教师不出现学生空状态。</li><li>成果 viewer 由 ResourceSummary/capabilities 驱动，学生/教师/管理员 serializer 分离。</li><li>实现安全 return context 和列表状态恢复；所有深链/通知/搜索复用。</li></ul>
+                <h4>主要文件</h4><p class="file-list">dojo_plugin/pages/workspace.py · api/v1/workspace.py · docker.py · workspace_tokens.py · utils/workspace.py · learning/context.py · pages/learning.py · templates/workspace.html · workspace_empty.html · teaching_artifact.html · static/js/dojo/workspace.js · teaching-artifact.js · core/url-state.js（新增）</p>
+                <h4>完成证据</h4><p>none/provisioning/running/stopped+snapshot/expired/failed 六组合；角色化文案；重建影响确认；returnTo 安全/恢复测试；无答案泄露。</p>
+              </div>
+            </details>
+
+            <details class="package">
+              <summary><span>SYS-09</span><strong>平台管理壳与教育运营页面</strong><em>P1/P2 · 依赖 SYS-01～04</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>在不破坏 CTFd 高级功能的前提下增加 admin product shell 和 overview presenter。</li><li>重做用户/权限、课程治理、runtime/workspace、内容/挑战、提交/评测、设置、审计 IA。</li><li>所有大集合服务端分页/过滤；移动表格转摘要/详情；动作命名、确认和 audit 完整。</li><li>将通用 CTFd 页保留为“高级管理（兼容）”，并逐项迁移，不双写数据。</li></ul>
+                <h4>主要文件</h4><p class="file-list">dojo_plugin/__init__.py · pages/dojos.py · pages/workspace.py · api/v1/dojos.py · docker.py · workspace.py · user.py · activity.py · templates/admin_dojos.html · admin_desktops.html · admin/base 扩展/新产品管理模板 · static/js/dojo/admin/*（新增） · static/css/modes/admin.css（新增）</p>
+                <h4>完成证据</h4><p>管理员首页显示教育平台健康；300+ challenge/50+ user 场景无超长一次渲染；移动 390px 可完成查找/查看/安全操作；审计记录可追踪。</p>
+              </div>
+            </details>
+
+            <details class="package">
+              <summary><span>SYS-10</span><strong>模式感知搜索、设置、通知与错误中心</strong><em>P1 · 依赖 SYS-02～09</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>搜索 API 接收 mode，按 capability 分组并返回 resolved actions；实现 APG combobox。</li><li>通知、需处理任务、后台 job 分开建模；壳层显示聚合，入口带过滤条件。</li><li>设置使用同一 schema/分组但按模式本地化；错误与恢复组件全站替换。</li><li>为所有页面生成唯一 title，补主内容 skip link 和 active nav。</li></ul>
+                <h4>主要文件</h4><p class="file-list">api/v1/search.py · activity.py · user.py · teaching.py · pages/settings.py · templates/base.html · settings.html · components/navbar.html · static/js/dojo/navbar.js · settings.js · product-error.js · components/combobox.js · recovery-panel.js</p>
+                <h4>完成证据</h4><p>四模式搜索范围/键盘/空/无权/移动通过；通知不重复任务；设置保存/失败/冲突；标题和导航语义自动扫描通过。</p>
+              </div>
+            </details>
+
+            <details class="package">
+              <summary><span>SYS-11</span><strong>响应式任务模式、性能与可访问性硬化</strong><em>P2 · 依赖 SYS-04～10</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>按第 13 节实现 360/390/768/1024/1440 任务布局；学生底部导航，列表/详情分步，管理行摘要。</li><li>治理首屏资源、延迟隐藏 tab、分页/虚拟化、事件流连接和长任务轮询。</li><li>修复重复 ID、控件名称、焦点泄漏、对比度、缩放、reduced motion、live region。</li><li>真机/浏览器矩阵测试中文长文、200% zoom、键盘、触屏和慢网。</li></ul>
+                <h4>主要文件</h4><p class="file-list">dojo_theme/static/css/product-shell.css · learning-themes.css · teaching-agent.css · course-system.css · components.css · 所有迁移模板与页面入口 JS · ops/verify-system-ux.py</p>
+                <h4>完成证据</h4><p>关键页面无意外横向滚动；触控目标/焦点/读屏基线；性能预算 CI；公共目录和管理列表文档高度显著下降且功能可达。</p>
+              </div>
+            </details>
+
+            <details class="package">
+              <summary><span>SYS-12</span><strong>观测、灰度、兼容迁移与旧实现清理</strong><em>P2/P3 · 依赖所有工作包</em></summary>
+              <div class="package-body">
+                <h4>实现任务</h4><ul><li>部署第 14 节旅程指标、状态转移与错误监控；设置隐私字段 allowlist 和保留期。</li><li>按模式/课程/租户（如适用）feature flag 灰度；新旧 API adapter 记录使用，不双写 UI 状态。</li><li>建立 redirect/deprecation dashboard；使用率归零后删除旧路由、旧 fetch/unwrap、旧 status mapping 和重复 CSS。</li><li>完整回归、数据迁移演练、回滚演练、支持手册和变更日志。</li></ul>
+                <h4>主要文件</h4><p class="file-list">dojo_plugin/product/telemetry.py（新增） · static/js/dojo/core/telemetry.js（新增） · ops/verify-*.py · 配置/迁移文件 · docs/product-experience.md · 运维 Runbook</p>
+                <h4>完成证据</h4><p>灰度指标无护栏退化；回滚不丢草稿/批次/提交；旧调用可量化并完成删除；完整验收矩阵全绿。</p>
+              </div>
+            </details>
+          </div>
+
+          <div class="callout" style="margin-top:1rem"><strong>并行建议：</strong>SYS-00 后可由不同开发者准备公共/学生/教师/admin fixture，但生产代码先合并 SYS-01～04。SYS-05～10 可在共享契约稳定后并行；SYS-11～12 贯穿实施，但最终门禁在所有页面迁移后统一执行。</div>
+        </div>
+      </section>
+
+      <section class="section" id="quality">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Responsive &amp; accessibility</p><h2>响应式的单位是“任务”，不是像素</h2></div><p class="section-copy">断点用于触发布局策略，但验收围绕用户是否能完成学习、编排和治理。移动端不能只是把桌面卡片和表格压窄。</p></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>视口/模式</th><th>学生</th><th>教师</th><th>平台管理</th><th>共同规则</th></tr></thead>
+              <tbody>
+                <tr><td><strong>360–479px</strong><br>手机单任务</td><td>底部导航：今天/课程/AI/工作区；账户进更多。挑战用内容/环境/证据全屏切换；作业一次一题。</td><td>工作台只显示待处理与发起共创；课程 tab 可滚动；列表→详情分步；表单操作粘底。</td><td>概览卡 + 筛选抽屉；表格变“关键字段行摘要→详情”；高风险动作不在滑动列表裸露。</td><td>无意外横向滚动；安全区；触控目标建议 ≥44×44；软键盘不遮当前字段/操作。</td></tr>
+                <tr><td><strong>480–767px</strong><br>大手机/小平板</td><td>保持底部导航；允许双列轻量卡，但主要任务仍单列。</td><td>页头与主操作同屏；辅助摘要可双列；详情仍独立/抽屉。</td><td>允许两列概览；表格保持摘要视图。</td><td>抽屉宽度不超过视口；关闭后恢复触发点焦点。</td></tr>
+                <tr><td><strong>768–1023px</strong><br>平板</td><td>顶部或侧导航按空间选择；课程内容 + 可折叠上下文。</td><td>课程列表与详情可 master-detail；长编辑器主区优先。</td><td>有限列数据表 + 详情侧栏；批量操作明确。</td><td>键盘与触屏都可用；不可依赖 hover。</td></tr>
+                <tr><td><strong>≥1024px</strong><br>桌面深任务</td><td>主内容 + 辅助区；环境可分屏，但内容主次明确。</td><td>高密度课程工作区；详情侧栏/深链；五页签保持。</td><td>服务端分页表格、可配置列、批量治理；全局告警可下钻。</td><td>内容最大宽度按任务；不要把数据表限制在阅读宽度，也不要让正文无限宽。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="grid grid-2" style="margin-top:1rem">
+            <article class="spec"><span class="spec-label">MOBILE STUDENT WIREFRAME</span><h3>频繁行动始终在拇指区</h3><pre>┌────────────────────────┐&#10;│ 课程 / 当前题      状态 │&#10;├────────────────────────┤&#10;│ 标题 + 一项主操作       │&#10;│ [内容] [环境] [证据]    │&#10;│                        │&#10;│ 当前任务内容            │&#10;│                        │&#10;├────────────────────────┤&#10;│ 今天  课程  AI  工作区  │&#10;└────────────────────────┘</pre></article>
+            <article class="spec"><span class="spec-label">MOBILE ADMIN WIREFRAME</span><h3>表格信息转成行动摘要</h3><pre>┌────────────────────────┐&#10;│ 平台管理  3 个告警  筛选│&#10;├────────────────────────┤&#10;│ 运行环境异常        12  │&#10;│ 课程 · 用户 · 8 分钟    │&#10;│ 原因摘要          [查看]│&#10;├────────────────────────┤&#10;│ 失败生成批次         3  │&#10;│ 最近更新 · 可重试       │&#10;│                  [查看]│&#10;└────────────────────────┘</pre></article>
+          </div>
+          <h3 style="margin-top:2rem">13.1 WCAG 2.2 AA 与 WAI-ARIA 实施门槛</h3>
+          <div class="grid grid-3">
+            <article class="card"><span class="card-number">STRUCTURE</span><h3>结构与名称</h3><ul><li>每页唯一 title/H1/main，首个可聚焦元素为 skip link。</li><li>地标、标题层级、列表/表格语义真实；图标按钮有可访问名称。</li><li>状态不能只靠颜色；时间/计数包含文本含义。</li></ul></article>
+            <article class="card"><span class="card-number">KEYBOARD</span><h3>键盘与焦点</h3><ul><li>Dialog/Drawer trap + restore；关闭区域 <code>inert</code>。</li><li>Tabs 使用 roving tabindex；Combobox 支持方向键/Enter/Esc。</li><li>排序、分页、批量选择、拖拽都有键盘等价动作。</li></ul></article>
+            <article class="card"><span class="card-number">FORMS</span><h3>表单与错误</h3><ul><li>可见 label、说明和错误正确关联；错误摘要链接到字段。</li><li>required/格式/范围不只用 placeholder 表达。</li><li>自动保存和冲突用 live region，且不反复打断读屏。</li></ul></article>
+            <article class="card"><span class="card-number">VISUAL</span><h3>视觉与缩放</h3><ul><li>文字/控件对比达到 AA；focus indicator 不被遮挡。</li><li>200% 缩放可完成关键任务；正文可放大到 400% reflow。</li><li>目标尺寸至少满足 WCAG 2.2 24px 最低要求，产品目标 44px。</li></ul></article>
+            <article class="card"><span class="card-number">MOTION / MEDIA</span><h3>动效与内容</h3><ul><li><code>prefers-reduced-motion</code> 下取消非必要移动/闪烁。</li><li>进度动画有文本状态；图表有数据表或摘要。</li><li>终端/模拟器提供可读状态与非颜色提示。</li></ul></article>
+            <article class="card"><span class="card-number">TESTING</span><h3>自动 + 人工</h3><ul><li>axe 只作基线；每个核心流必须全键盘运行。</li><li>NVDA/VoiceOver 至少抽查登录、作业、AI、批次、管理表格。</li><li>中文长文、英文 ID、长课程名、空值和错误组合测试。</li></ul></article>
+          </div>
+          <h3 style="margin-top:2rem">13.2 性能、稳定性与感知等待</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>门槛</th><th>目标</th><th>实现方式</th><th>失败处理</th></tr></thead>
+              <tbody>
+                <tr><td>首屏关键内容</td><td>常规内网环境 p75 LCP ≤ 2.5s；不以 skeleton 永久占位</td><td>SSR/bootstrap、当前 tab 数据、CSS 分层</td><td>显示可重试 degraded，不把超时渲染成空数据</td></tr>
+                <tr><td>交互响应</td><td>本地 UI INP p75 ≤ 200ms；搜索输入无明显阻塞</td><td>事件委托、分页、拆分巨型渲染、debounce + abort</td><td>长操作立即确认并转后台 job</td></tr>
+                <tr><td>布局稳定</td><td>CLS ≤ .1；状态条/错误不推走主操作</td><td>预留尺寸、稳定 page header、非覆盖提示</td><td>内容变化保留焦点与滚动锚点</td></tr>
+                <tr><td>集合规模</td><td>143 课程、297 挑战、50+ 用户不一次渲染</td><td>服务端 cursor/page、按需详情、必要时虚拟化</td><td>分页失败保留已有结果和“重试加载更多”</td></tr>
+                <tr><td>AI / runtime 等待</td><td>≤1s 确认接收；阶段可见；可离开/恢复</td><td>持久 job/batch、全局运行摘要、退避轮询/事件流</td><td>失败归因、逐项重试、request ID；不丢草稿</td></tr>
+                <tr><td>网络连接</td><td>匿名无无权事件流；隐藏 tab 降频</td><td>按 capability 连接、visibility API、AbortController</td><td>事件断开回退有限轮询并提示 stale</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="metrics">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Measurement &amp; observability</p><h2>衡量任务是否更顺，而不是点击是否更多</h2></div><p class="section-copy">指标按角色旅程定义，并设正确性、隐私和性能护栏。埋点不采集题目答案、Flag、私密对话正文、密码、Token 或完整生成 prompt。</p></div>
+          <div class="grid grid-4">
+            <article class="card"><span class="card-number">STUDENT NORTH STAR</span><h3>首次有效学习行动时间</h3><p>登录/打开 Today 到进入可用学习项、作业或环境的中位时长；排除无权限/失效资源。</p></article>
+            <article class="card"><span class="card-number">TEACHER NORTH STAR</span><h3>教学意图到可审核产物</h3><p>发起创建到出现经过结构验证、可预览草稿的时间；批量按 requestedCount 达成率分层。</p></article>
+            <article class="card"><span class="card-number">ADMIN NORTH STAR</span><h3>异常发现到恢复时间</h3><p>平台异常进入可见告警，到完成修复/确认降级的中位时长。</p></article>
+            <article class="card"><span class="card-number">SYSTEM GUARDRAIL</span><h3>不可恢复体验率</h3><p>可见死链、原始错误、无动作空态、状态矛盾、越权动作和未保存丢失的会话比例。</p></article>
+          </div>
+          <div class="table-wrap" style="margin-top:1rem">
+            <table>
+              <thead><tr><th>指标</th><th>定义</th><th>分层</th><th>护栏/解释</th></tr></thead>
+              <tbody>
+                <tr><td>Next action 启动率</td><td>曝光后 10 分钟内打开有效目标</td><td>原因、类型、课程、是否新用户</td><td>不以点击代替完成；失效目标单独计错误</td></tr>
+                <tr><td>上下文连续率</td><td>完成/提交后直接进入反馈或下一项</td><td>challenge/assignment/simulation</td><td>排除用户主动退出</td></tr>
+                <tr><td>工作区恢复成功率</td><td>stopped/expired 状态发起恢复后进入 running</td><td>失败原因、模式、设备</td><td>同时监测丢 snapshot/尝试</td></tr>
+                <tr><td>批次数量达成率</td><td><code>created == requested</code> 的 batch 比例</td><td>requestedCount、对象类型、模型、课程</td><td>validated 达成率单独报告</td></tr>
+                <tr><td>批次审核通过率</td><td>首轮 validated/created</td><td>题型、难度、来源材料</td><td>不鼓励教师无审查快速发布</td></tr>
+                <tr><td>单项恢复率</td><td>失败 item 重试后 validated</td><td>errorCode、attempt</td><td>监控无限重试和重复产物</td></tr>
+                <tr><td>课程发布准备时间</td><td>创建到满足发布 gate</td><td>手工/Git/AI、课程规模</td><td>质量护栏不因提速下降</td></tr>
+                <tr><td>管理任务完成时间</td><td>告警/搜索到安全操作完成</td><td>用户/课程/runtime/配置</td><td>误操作和回滚率并列</td></tr>
+                <tr><td>搜索有效到达率</td><td>结果点击后到达 ready resource</td><td>模式、资源类型、查询长度</td><td>404/forbidden/立即返回作为失败</td></tr>
+                <tr><td>可访问性回归</td><td>关键流 serious/critical + 键盘失败</td><td>页面、组件、模式</td><td>阻断发布，不作装饰性 KPI</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3 style="margin-top:2rem">14.1 规范事件（示例）</h3>
+          <pre aria-label="隐私安全事件示例">{
+  "name": "resource_action_completed",
+  "eventVersion": 1,
+  "journeyId": "ephemeral-session-id",
+  "mode": "learning | teaching | admin | public",
+  "surface": "today | course_questions | admin_runtime | ...",
+  "resource": { "type": "challenge", "idHash": "non-reversible-scope-hash" },
+  "action": "open | submit | retry | validate | publish | recover",
+  "fromState": "stopped",
+  "toState": "provisioning",
+  "result": "accepted | completed | failed",
+  "reasonCode": null,
+  "durationMs": 842,
+  "requestId": "req_...",
+  "client": { "viewportClass": "mobile", "offline": false }
+}
+
+NEVER INCLUDE: password, token, flag, answer, submission body,
+private chat text, full prompt, student free text, raw IP.</pre>
+          <ul><li>服务端状态转移是任务完成的首选事实；客户端事件只描述可见/意图/感知结果，二者通过 request ID 或 batch ID 关联。</li><li>建立错误看板：route 4xx/5xx、unknown status、resource resolver miss、batch count mismatch、workspace contradictory state、frontend unhandled error。</li><li>每个关键页面输出数据新鲜度；后台 job 延迟、队列深度和 runtime 失败进入管理概览。</li><li>上线前由产品/安全确定事件保留期、访问权限和 opt-out；分析用聚合数据，不构建学生行为监控画像。</li></ul>
+        </div>
+      </section>
+
+      <section class="section" id="acceptance">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Executable acceptance matrix</p><h2>以下场景未自动通过，不得宣布重构完成</h2></div><p class="section-copy">保留现有 verifier，并新增 <code>ops/verify-system-ux.py</code> 作为编排入口。每个场景输出角色、URL、状态、断言、截图、console/network 错误与 request ID。</p></div>
+          <h3>15.1 公共端与认证（PUB/AUTH）</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>场景</th><th>通过条件</th><th>层</th></tr></thead>
+              <tbody>
+                <tr><td>PUB-01</td><td>匿名首页导航</td><td>只出现公共 IA；无 Today/AI 私有入口；无 <code>/events</code> 403。</td><td>E2E/network</td></tr>
+                <tr><td>PUB-02</td><td>公共课程搜索</td><td>返回公开结果或明确不可用状态；无 JSON parse 错误。</td><td>contract/E2E</td></tr>
+                <tr><td>PUB-03</td><td>143 课程目录</td><td>分页/增量加载；筛选写 URL；移动无超长一次渲染。</td><td>E2E/perf</td></tr>
+                <tr><td>PUB-04</td><td>课程元数据缺失</td><td>安全空值与数据质量，不崩溃、不伪造时长/难度。</td><td>fixture/E2E</td></tr>
+                <tr><td>PUB-05</td><td>公开课程到练习</td><td>未登录先解释加入/登录；登录后回到目标；无开放跳转。</td><td>E2E/security</td></tr>
+                <tr><td>PUB-06</td><td>Feed 活动链接</td><td>全部 canonical/authorized；DOM 无 null 异常；隐私策略生效。</td><td>crawler/E2E</td></tr>
+                <tr><td>PUB-07</td><td>Terms/Privacy 未配置</td><td>不产生导航 404；显示最小可理解状态或隐藏入口。</td><td>E2E</td></tr>
+                <tr><td>PUB-08</td><td>公开错误页</td><td>404/410/5xx 不出现“返回今天”；有首页/目录恢复与 request ID。</td><td>E2E</td></tr>
+                <tr><td>PUB-09</td><td>公共键盘路径</td><td>skip link、导航、搜索、目录卡可完成；焦点可见。</td><td>keyboard/a11y</td></tr>
+                <tr><td>PUB-10</td><td>公共首屏资源</td><td>无无权连接/第三方意外加载；达到设定资源预算。</td><td>performance</td></tr>
+                <tr><td>AUTH-01</td><td>登录安全回跳</td><td>站内 next 恢复；站外 next 被拒绝并回模式首页。</td><td>security/E2E</td></tr>
+                <tr><td>AUTH-02</td><td>注册学生</td><td>获得学习模式，零数据 Today 有清晰开始动作。</td><td>E2E</td></tr>
+                <tr><td>AUTH-03</td><td>注册教师意图</td><td>进入首门课程 onboarding；未错误授予平台权限。</td><td>E2E/contract</td></tr>
+                <tr><td>AUTH-04</td><td>首门课程后 capability</td><td>服务端刷新教学模式，壳层无整页错误闪烁。</td><td>integration</td></tr>
+                <tr><td>AUTH-05</td><td>密码错误/锁定</td><td>错误摘要定位，不清空用户名，不显示 provider 原文。</td><td>E2E</td></tr>
+                <tr><td>AUTH-06</td><td>邮件未配置重置</td><td>隐藏不可工作提交；提供有效联系/返回路径。</td><td>fixture/E2E</td></tr>
+                <tr><td>AUTH-07</td><td>Discord 集成失败</td><td>未配置/state 过期/重复关联均进入产品化恢复页，不返回裸 JSON/501。</td><td>security/E2E</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 style="margin-top:2rem">15.2 学生端（STU）</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>场景</th><th>通过条件</th><th>层</th></tr></thead>
+              <tbody>
+                <tr><td>STU-01</td><td>Today 有数据</td><td>只有一个权威主行动；why/课程/状态一致。</td><td>E2E</td></tr>
+                <tr><td>STU-02</td><td>Today 零数据/0÷0</td><td>不显示 NaN/0%；引导发现课程。</td><td>fixture/E2E</td></tr>
+                <tr><td>STU-03</td><td>Today degraded</td><td>保留可用摘要、标记 stale、可重试；不假装空。</td><td>fault injection</td></tr>
+                <tr><td>STU-04</td><td>课程我的/发现/归档</td><td>分组、筛选、返回状态和分页正确。</td><td>E2E</td></tr>
+                <tr><td>STU-05</td><td>课程资源 moved</td><td>旧链接解析到新位置并解释。</td><td>contract/E2E</td></tr>
+                <tr><td>STU-06</td><td>课程资源 deleted/forbidden</td><td>分别显示下线/无权，不泄露、不死循环。</td><td>security/E2E</td></tr>
+                <tr><td>STU-07</td><td>容器题</td><td>内容、runtime、提交、证据连续；停止后可恢复。</td><td>E2E/runtime</td></tr>
+                <tr><td>STU-08</td><td>模拟题</td><td>原 404 路径进入 simulation runner，完成状态回课程。</td><td>E2E</td></tr>
+                <tr><td>STU-09</td><td>混合题</td><td>阶段依赖明确；两种环境/证据不冲突。</td><td>E2E</td></tr>
+                <tr><td>STU-10</td><td>工作区无尝试</td><td>从题目启动，不出现虚假“继续”。</td><td>E2E</td></tr>
+                <tr><td>STU-11</td><td>工作区 stopped+snapshot</td><td>显示“重启环境并继续”，不说环境仍运行。</td><td>fixture/E2E</td></tr>
+                <tr><td>STU-12</td><td>工作区 provisioning/failed</td><td>进度可见、可离开；失败可重试且保留尝试。</td><td>fault/runtime</td></tr>
+                <tr><td>STU-13</td><td>作业自动保存</td><td>saving/saved/offline 清晰；刷新不丢答案。</td><td>E2E</td></tr>
+                <tr><td>STU-14</td><td>作业并发冲突</td><td>409 比较本地/服务端版本，不静默覆盖。</td><td>integration</td></tr>
+                <tr><td>STU-15</td><td>作业提交/批改/掌握</td><td>三种状态和答案可见策略独立。</td><td>contract/E2E</td></tr>
+                <tr><td>STU-16</td><td>活动/掌握/评测/证据</td><td>独立枚举、分母和数据质量；无重复 ID。</td><td>contract/a11y</td></tr>
+                <tr><td>STU-17</td><td>AI 题目上下文</td><td>引用来源正确、默认辅导、断网保留输入。</td><td>E2E</td></tr>
+                <tr><td>STU-18</td><td>AI 移动端</td><td>首屏无多层工具竞争；输入可见；抽屉焦点正确。</td><td>mobile/a11y</td></tr>
+                <tr><td>STU-19</td><td>个人成果</td><td>默认仅自己；无发布课程动作；可提交教师查看。</td><td>security/E2E</td></tr>
+                <tr><td>STU-20</td><td>学生成果查看器</td><td>标准解/Flag/prompt/教师备注在响应中不存在。</td><td>API security</td></tr>
+                <tr><td>STU-21</td><td>安全 returnTo</td><td>恢复 tab/filter/scroll；拒绝站外/无权目标。</td><td>security/E2E</td></tr>
+                <tr><td>STU-22</td><td>学生模式搜索</td><td>只返回可见学习对象，模拟题 action 可达。</td><td>contract/E2E</td></tr>
+                <tr><td>STU-23</td><td>移动底部导航</td><td>Today/课程/AI/工作区可达，当前项语义正确。</td><td>mobile/a11y</td></tr>
+                <tr><td>STU-24</td><td>200% 缩放/键盘</td><td>核心学习、作业、AI、环境路径完成，无焦点遮挡。</td><td>a11y</td></tr>
+                <tr><td>STU-25</td><td>加入受保护课程</td><td>加入码使用 POST，请求后 URL/历史/analytics 不含秘密；失败保留课程上下文。</td><td>security/E2E</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 style="margin-top:2rem">15.3 教师端与五题批次（TEA）</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>场景</th><th>通过条件</th><th>层</th></tr></thead>
+              <tbody>
+                <tr><td>TEA-01</td><td>教师工作台优先级</td><td>需处理/失败在先；无事项时 composer 提升；任务与通知不重复。</td><td>E2E</td></tr>
+                <tr><td>TEA-02</td><td>教师课程 GET</td><td>正式 collection 支持分页/筛选/计数/capabilities。</td><td>contract</td></tr>
+                <tr><td>TEA-03</td><td>课程五页签</td><td>URL state、lazy load、返回恢复、每 tab 一主动作。</td><td>E2E/network</td></tr>
+                <tr><td>TEA-04</td><td>课程概览准备度</td><td>待处理/发布 gate/下一步先于图表；指标有口径。</td><td>E2E</td></tr>
+                <tr><td>TEA-05</td><td>课件/题目/演示摘要</td><td>状态、来源、版本、章节、可见性跨列表/详情一致。</td><td>contract/E2E</td></tr>
+                <tr><td>TEA-06</td><td>手工长表单</td><td>自动保存、错误摘要、粘底操作、离开保护。</td><td>E2E/a11y</td></tr>
+                <tr><td>TEA-07</td><td>Git 导入 capability</td><td>无权用户不可看到/调用；密钥只在必要时安全显示。</td><td>security</td></tr>
+                <tr><td>TEA-08</td><td>学生预览</td><td>与真实学生 serializer 相同，无敏感内容。</td><td>API security</td></tr>
+                <tr><td>TEA-09</td><td>自然语言解析五题</td><td>确认卡明确 5 个 item 计划、主题/难度/课程正确。</td><td>integration</td></tr>
+                <tr><td>TEA-10</td><td>五题创建 5/5</td><td>事务创建 batch + exactly 5 stable items；每项独立 job/draft。</td><td>DB/contract</td></tr>
+                <tr><td>TEA-11</td><td>双击/刷新幂等</td><td>同 idempotency key 只有一个 batch/五个 items。</td><td>integration</td></tr>
+                <tr><td>TEA-12</td><td>部分失败 3/5</td><td>显示 partial success 和准确计数，不显示“5题成功”。</td><td>E2E</td></tr>
+                <tr><td>TEA-13</td><td>单项重试</td><td>只更新失败 item，成功四项 identity/content 不变。</td><td>integration</td></tr>
+                <tr><td>TEA-14</td><td>刷新/离开恢复</td><td>回到同 batch，聚合与逐项状态由服务端重建。</td><td>E2E</td></tr>
+                <tr><td>TEA-15</td><td>批次修订五题</td><td>“全部调难”保持 5 个对应关系、版本和审计。</td><td>integration</td></tr>
+                <tr><td>TEA-16</td><td>验证和发布 gate</td><td>未 validated 项不能批量发布；确认明确排除项。</td><td>contract/E2E</td></tr>
+                <tr><td>TEA-17</td><td>学情低样本</td><td>覆盖率/置信度可见，不显示虚假精确结论。</td><td>fixture/E2E</td></tr>
+                <tr><td>TEA-18</td><td>成绩 capability</td><td>普通 DB 课程无死链；支持脚本课程可达。</td><td>E2E</td></tr>
+                <tr><td>TEA-19</td><td>课程删除 Danger Zone</td><td>影响分析、输入确认、审计、可恢复说明完整。</td><td>E2E/security</td></tr>
+                <tr><td>TEA-20</td><td>教师搜索/工作区</td><td>返回教师对象；工作区是测试/预览语义。</td><td>E2E</td></tr>
+                <tr><td>TEA-21</td><td>教师移动端</td><td>首屏动作减量；tab/抽屉/长表单/详情键盘触控可用。</td><td>mobile/a11y</td></tr>
+                <tr><td>TEA-22</td><td>并发批次隔离</td><td>两个课程/教师批次 item、事件、结果不串联。</td><td>integration</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 style="margin-top:2rem">15.4 平台管理与全局系统（ADM/SYS）</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>场景</th><th>通过条件</th><th>层</th></tr></thead>
+              <tbody>
+                <tr><td>ADM-01</td><td>平台管理模式</td><td>明确 admin shell/导航/返回教学平台；刷新不回 CTF 竞赛语境。</td><td>E2E</td></tr>
+                <tr><td>ADM-02</td><td>管理概览健康</td><td>真实任务/runtime/课程/权限指标、时间窗和 stale 状态。</td><td>contract/E2E</td></tr>
+                <tr><td>ADM-03</td><td>课程治理 nullable hash</td><td>DB/repository 课程都渲染；无 500。</td><td>fixture/E2E</td></tr>
+                <tr><td>ADM-04</td><td>管理工作区路由</td><td>菜单目标存在；运行/失败/过期可筛选。</td><td>E2E</td></tr>
+                <tr><td>ADM-05</td><td>50+ 用户</td><td>服务端分页；控件有名称；移动用摘要。</td><td>perf/a11y</td></tr>
+                <tr><td>ADM-06</td><td>297+ 挑战</td><td>分页/筛选，无 15,000px 一次渲染；详情可达。</td><td>perf/E2E</td></tr>
+                <tr><td>ADM-07</td><td>提交与敏感数据</td><td>答案默认隐藏；重复 ID 修复；权限与审计正确。</td><td>security/a11y</td></tr>
+                <tr><td>ADM-08</td><td>角色/capability 变更</td><td>显示 diff/影响；撤权立即生效；有审计。</td><td>integration</td></tr>
+                <tr><td>ADM-09</td><td>配置保存失败</td><td>字段定位、保留输入、敏感值不回显、无部分静默保存。</td><td>E2E/security</td></tr>
+                <tr><td>ADM-10</td><td>高风险 runtime 操作</td><td>确认范围、结果、审计；失败有 request ID 和安全重试。</td><td>E2E</td></tr>
+                <tr><td>SYS-01</td><td>全站 route crawl</td><td>所有可见站内 href 为 2xx/显式 redirect/产品化 403/410，无意外 5xx。</td><td>crawler</td></tr>
+                <tr><td>SYS-02</td><td>全站页面 metadata</td><td>唯一 title/H1/main/skip link/aria-current；无重复 DOM ID。</td><td>static/E2E</td></tr>
+                <tr><td>SYS-03</td><td>统一 envelope</td><td>迁移 API 全部 schema-valid；非 JSON 响应被 RequestClient 安全处理。</td><td>contract</td></tr>
+                <tr><td>SYS-04</td><td>unknown status</td><td>安全 fallback + telemetry；不映射成功、不白屏。</td><td>unit/E2E</td></tr>
+                <tr><td>SYS-05</td><td>多能力模式切换</td><td>学习/教学/管理导航、首页、偏好与授权一致。</td><td>E2E/security</td></tr>
+                <tr><td>SYS-06</td><td>全局搜索四模式</td><td>分组、权限、href、键盘与 return context 正确。</td><td>contract/E2E</td></tr>
+                <tr><td>SYS-07</td><td>网络慢/离线/中断</td><td>草稿保留、stale 明示、可重试；无重复写。</td><td>fault/E2E</td></tr>
+                <tr><td>SYS-08</td><td>401/403/404/410/409/422/429/5xx</td><td>正确文案、恢复动作、request ID 和上下文保留。</td><td>fault matrix</td></tr>
+                <tr><td>SYS-09</td><td>关键页 axe</td><td>无 serious/critical；人工 keyboard/screen-reader 抽查通过。</td><td>a11y</td></tr>
+                <tr><td>SYS-10</td><td>视口矩阵</td><td>360/390/768/1024/1440 无意外溢出、遮挡或不可达动作。</td><td>visual/E2E</td></tr>
+                <tr><td>SYS-11</td><td>主题/高对比/减少动画</td><td>语义色、焦点、状态、图表和动效符合质量门槛。</td><td>visual/a11y</td></tr>
+                <tr><td>SYS-12</td><td>性能预算</td><td>首屏资源、LCP/INP/CLS、分页规模和隐藏请求符合预算。</td><td>performance</td></tr>
+                <tr><td>SYS-13</td><td>隐私事件 allowlist</td><td>无答案/Flag/token/chat/prompt/学生自由文本。</td><td>security/unit</td></tr>
+                <tr><td>SYS-14</td><td>旧路由兼容</td><td>深链解析、redirect telemetry、无循环；计划内 410 清楚。</td><td>crawler/E2E</td></tr>
+                <tr><td>SYS-15</td><td>灰度与回滚</td><td>flag 关闭恢复旧读路径，不丢新草稿/批次/提交；迁移可重放。</td><td>release drill</td></tr>
+                <tr><td>SYS-16</td><td>运维与测试端点</td><td>metrics 需独立授权且无用户标签；故障注入路由在生产不可达。</td><td>security/integration</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout success" style="margin-top:1rem"><strong>复用现有自动化：</strong><code>ops/verify-student-ux.py</code>、<code>ops/verify-teacher-agent-ui.py</code>、<code>ops/verify-course-center-ui.py</code>、<code>ops/verify-teacher-manual-create-ui.py</code>、<code>ops/verify-natural-language-teaching-lifecycle.py</code>、<code>ops/verify-complete-teaching-learning-lifecycle.py</code>。不得另建一套忽略现有断言的“绿灯测试”。</div>
+        </div>
+      </section>
+
+      <section class="section" id="rollout">
+        <div class="wrap">
+          <div class="section-head"><div><p class="eyebrow">Rollout, risk &amp; definition of done</p><h2>渐进替换，拒绝长期双轨</h2></div><p class="section-copy">先正确性，再结构，再效率，最后清理。每阶段都可独立发布/回滚，同时用 telemetry 证明旧路径何时可以删除。</p></div>
+          <div class="grid grid-4">
+            <article class="card"><span class="card-number">PHASE 0 · P0</span><h3>事实正确</h3><p>SYS-00～03：fixture、死链/500/搜索、capability、resolver、envelope、状态真相、五题硬约束基础。</p></article>
+            <article class="card"><span class="card-number">PHASE 1 · P1</span><h3>壳层与主旅程</h3><p>SYS-04～08：共享组件、公共/学生/教师主路径、批次审核、工作区和成果返回。</p></article>
+            <article class="card"><span class="card-number">PHASE 2 · P1/P2</span><h3>平台治理与横向能力</h3><p>SYS-09～10：管理端产品壳、搜索、设置、通知、错误与审计。</p></article>
+            <article class="card"><span class="card-number">PHASE 3 · P2/P3</span><h3>硬化与清理</h3><p>SYS-11～12：多端、无障碍、性能、指标、灰度、兼容使用归零与旧实现删除。</p></article>
+          </div>
+          <h3 style="margin-top:2rem">16.1 数据与路由迁移规则</h3>
+          <ol><li><strong>先加后切：</strong>新增 presenter 字段、batch/item 约束、capability 和 canonical href；旧 consumer 暂可忽略新字段。</li><li><strong>双读不双写：</strong>迁移期 adapter 可从旧模型读取并映射；写操作只进入一个权威 service，避免批次/状态分叉。</li><li><strong>校验回填：</strong>为历史资源计算 availability/workflow/source/version；无法映射的进入 data-quality 队列，不默认 published。</li><li><strong>按 surface 灰度：</strong>先内部管理员/测试课程，再教师，再学生，最后匿名公共；不得随机把同一用户的关联页面分到不同契约。</li><li><strong>记录兼容调用：</strong>旧 endpoint/route 响应带 deprecation header 并记录匿名计数；使用归零一个发布周期后删除。</li><li><strong>回滚保持新数据：</strong>旧 UI 至少能只读显示新批次/成果，或提供安全 adapter；回滚不得删除新 item、草稿或提交。</li></ol>
+
+          <h3 style="margin-top:2rem">16.2 关键风险与决策</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>风险/待决策</th><th>默认决策</th><th>触发升级</th><th>缓解</th></tr></thead>
+              <tbody>
+                <tr><td>是否重写前端框架</td><td>否；先在 Jinja/原生 JS 中建立模块与契约。</td><td>组件/状态测试仍无法隔离，或构建性能无解。</td><td>框架迁移单独 RFC，不与 UX 修复绑成一包。</td></tr>
+                <tr><td>公共 Feed 是否保留</td><td>从主导航降级，先完成隐私与链接价值验证。</td><td>有明确发现课程提升且用户同意策略。</td><td>匿名化、可退出、只链接公开可达资源。</td></tr>
+                <tr><td>学生能否创建 Git 课程</td><td>只对 course.create capability 展示；作为教学 onboarding 选项。</td><td>产品决定开放个人课程空间。</td><td>新增独立 personal-authoring capability，不借用学生角色。</td></tr>
+                <tr><td>管理端是否完全替换 CTFd</td><td>新增教育运营壳，CTFd 高级页暂保兼容入口。</td><td>所有底层操作已有新 presenter/审计/验收。</td><td>逐项迁移并度量旧入口使用。</td></tr>
+                <tr><td>状态持久层重命名</td><td>先 presenter mapping，不做大爆炸 DB rewrite。</td><td>unknown=0 且全部 consumer 已迁移。</td><td>additive migration、回填报告、可回滚。</td></tr>
+                <tr><td>AI 自动发布</td><td>禁止；默认 needs_review。</td><td>未来有分级信任策略、充分验证与明确教师授权。</td><td>按内容类型/风险设 gate，保留审计。</td></tr>
+                <tr><td>移动终端完整能力</td><td>支持查看/轻量交互，复杂实验明确推荐桌面但不死路。</td><td>真实移动使用量和技术能力证明需要全功能。</td><td>全屏模式、状态保留、跨设备继续。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="grid grid-2" style="margin-top:1rem">
+            <article class="spec"><span class="spec-label">DEFINITION OF DONE</span><h3>系统级完成定义</h3><ul class="checklist"><li>所有 P0 问题有复现测试并修复。</li><li>所有可见路由通过全站 crawler，无意外 4xx/5xx。</li><li>四模式 IA、capability 和 mode switch 在深链/刷新下正确。</li><li>资源、状态、错误、分页和页面 bootstrap schema 有 contract tests。</li><li>“五题”生成 exactly 5 items，并覆盖部分失败/单项重试/幂等/刷新/修订。</li><li>学生、教师、管理员关键旅程不泄露越权数据。</li><li>360/390/768/1024/1440 视口关键流通过。</li><li>键盘、焦点、读屏抽查和 axe 门禁通过。</li><li>性能预算、故障注入和长任务恢复通过。</li><li>事件不包含禁止字段；监控可发现数量不符和状态矛盾。</li><li>迁移/回滚演练成功，无草稿、批次、提交或成果丢失。</li><li>旧实现有明确删除清单，不留下永久 adapter。</li></ul></article>
+            <article class="spec"><span class="spec-label">AGENT HANDOFF OUTPUT</span><h3>开发 Agent 最终必须提交</h3><ul class="checklist"><li>按 SYS 编号组织的代码变更与简短决策记录。</li><li>数据库迁移、回填/检查脚本和回滚说明。</li><li>API schema/示例与 compatibility notes。</li><li>更新后的自动化测试及一条统一运行命令。</li><li>每种模式桌面/移动关键页面的 before/after 截图。</li><li>测试报告：通过、失败、跳过及理由；不得只给口头结论。</li><li>性能与可访问性报告、已知限制与后续债务。</li><li>feature flag、灰度步骤、监控查询和回滚 Runbook。</li><li>删除/弃用列表，含删除条件与预计版本。</li><li>变更后更新相关产品/开发文档。</li></ul></article>
+          </div>
+          <div class="callout critical" style="margin-top:1rem"><strong>最终禁止项：</strong>只提交新的 HTML/CSS 外观；只修教师首页而忽略死链/权限/状态；只改模型提示词而不加批次约束；用“测试环境没数据”跳过空/错/部分成功；用隐藏按钮代替服务端授权；为快速上线长期保留两套真相。</div>
+
+          <h3 style="margin-top:2rem">16.3 参考资料与现有项目依据</h3>
+          <div class="grid grid-2 source-list">
+            <article class="card"><span class="card-number">EXTERNAL · OFFICIAL</span><h3>产品与交互机制</h3><ul><li><a href="https://community.canvaslms.com/t5/Student-Guide/How-do-I-use-the-to-do-list-for-all-my-courses-in-the-List-View/ta-p/345">Canvas Student To Do / List View</a></li><li><a href="https://docs.moodle.org/502/en/Dashboard_and_My_courses">Moodle Dashboard and My courses</a></li><li><a href="https://support.google.com/edu/classroom/answer/9093530?hl=en">Google Classroom feedback</a> / <a href="https://support.google.com/edu/classroom/answer/17074065?hl=en">Learning Goals</a></li><li><a href="https://docs.openedx.org/en/latest/educators/quickstarts/build_a_course.html">Open edX Build a course</a>, <a href="https://docs.openedx.org/en/latest/educators/references/course_development/unit_workflow_and_status.html">Unit workflow</a>, <a href="https://docs.openedx.org/en/latest/educators/how-tos/course_development/publish_library_content.html">Publish library content</a>, <a href="https://docs.openedx.org/en/latest/educators/references/roles_for_viewing.html">Roles for viewing</a></li><li><a href="https://docs.github.com/en/codespaces/about-codespaces/understanding-the-codespace-lifecycle">GitHub Codespaces lifecycle</a></li><li><a href="https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/manage-and-track-agents">GitHub Copilot agent sessions</a></li></ul></article>
+            <article class="card"><span class="card-number">EXTERNAL · DESIGN STANDARDS</span><h3>组件、复杂系统与无障碍</h3><ul><li><a href="https://carbondesignsystem.com/components/data-table/usage/">Carbon Data table</a> / <a href="https://carbondesignsystem.com/components/pagination/usage/">Pagination</a></li><li><a href="https://design-system.service.gov.uk/patterns/complete-multiple-tasks/">GOV.UK Complete multiple tasks</a> / <a href="https://design-system.service.gov.uk/components/error-summary/">Error summary</a></li><li><a href="https://www.w3.org/TR/WCAG22/">WCAG 2.2</a> / <a href="https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html">Target Size</a></li><li><a href="https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/">WAI Dialog</a> / <a href="https://www.w3.org/WAI/ARIA/apg/patterns/combobox/">Combobox</a> / <a href="https://www.w3.org/WAI/ARIA/apg/patterns/tabs/">Tabs</a></li><li><a href="https://www.nngroup.com/articles/usability-heuristics-complex-applications/">NN/g heuristics for complex applications</a> / <a href="https://www.nngroup.com/articles/visibility-system-status/">Visibility of system status</a> / <a href="https://www.nngroup.com/articles/designing-for-waits-and-interruptions/">Waits and interruptions</a></li></ul></article>
+            <article class="card"><span class="card-number">INTERNAL · DETAILED PLANS</span><h3>项目内页面级规格</h3><ul><li><code>docs/student-logged-in-ux-improvement-plan.html</code></li><li><code>docs/teacher-logged-in-ux-improvement-plan.html</code></li><li><code>docs/product-experience.md</code></li><li><code>docs/course-theme-system.md</code></li><li><code>docs/removed-course-system.md</code></li></ul></article>
+            <article class="card"><span class="card-number">INTERNAL · SOURCE OF TRUTH</span><h3>源码与自动验收</h3><ul><li><code>dojo_plugin/pages/*</code>、<code>api/v1/*</code>、<code>models/*</code>、<code>learning/student_experience.py</code></li><li><code>dojo_theme/templates/*</code>、<code>static/js/dojo/*</code>、<code>static/css/*</code></li><li><code>ops/verify-student-ux.py</code>、<code>verify-teacher-agent-ui.py</code>、<code>verify-course-center-ui.py</code></li><li><code>ops/verify-natural-language-teaching-lifecycle.py</code>、<code>verify-complete-teaching-learning-lifecycle.py</code></li></ul></article>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div class="wrap"><strong>玄甲全系统体验重构开发方案</strong><br>版本 1.0 · 2026-08-28 · 基于真实部署、源码/API、桌面/移动角色审计与官方成熟机制。实施过程中若系统事实变化，先更新契约、问题登记和验收，再修改页面。</div>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

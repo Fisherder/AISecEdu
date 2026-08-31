@@ -1,0 +1,415 @@
+{% extends "base.html" %}
+
+{% block body_class %}course-system-page teacher-course-center-page{% endblock %}
+
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='aisecedu-course-hub-v34-material-preview') }}">
+{% endblock %}
+
+{% block content %}
+<div id="teacher-course-center" class="course-hub" data-role="teacher">
+  <h1 class="sr-only">教师课程中心</h1>
+  <div id="cs-notice" class="hub-notice" role="status" hidden></div>
+
+  <section id="cs-course-list-view" class="course-list-view" aria-labelledby="cs-course-list-title">
+    <header class="course-list-header">
+      <div>
+        <span class="hub-kicker"><i class="fas fa-book" aria-hidden="true"></i>课程中心</span>
+        <h2 id="cs-course-list-title">我的课程</h2>
+        <p>先选择一门课程，再进入课件、题目、演示和学情工作台。</p>
+      </div>
+      <a class="hub-button is-primary" href="/teacher/courses/new"><i class="fas fa-plus"></i><span>新建课程</span></a>
+    </header>
+    <div class="course-list-summary">
+      <span><strong id="cs-course-list-count">0</strong> 门可管理课程</span>
+      <span id="cs-course-list-result">按最近工作排序</span>
+    </div>
+    <div class="course-list-toolbar" aria-label="筛选课程">
+      <label><i class="fas fa-search" aria-hidden="true"></i><input id="cs-course-search" type="search" placeholder="搜索课程名称或简介" aria-label="搜索课程"></label>
+      <select id="cs-course-filter" aria-label="按课程状态筛选"><option value="all">全部课程</option><option value="recent">最近工作</option><option value="attention">需要处理</option><option value="drafts">含草稿</option><option value="published">已有发布内容</option></select>
+      <select id="cs-course-sort" aria-label="课程排序"><option value="recent">最近工作优先</option><option value="attention">待处理优先</option><option value="name">名称排序</option></select>
+    </div>
+    <div id="cs-course-list-loading" class="hub-loading"><span></span><p>正在读取教师课程…</p></div>
+    <div id="cs-course-grid" class="teacher-course-grid" hidden></div>
+  </section>
+
+  <section id="cs-course-detail-view" class="course-detail-view" aria-label="课程工作台" hidden>
+  <header class="course-hub-header">
+    <div class="course-hub-heading">
+      <a class="hub-back-link" href="/teacher/courses"><i class="fas fa-arrow-left" aria-hidden="true"></i>全部课程</a>
+      <div class="course-hub-title-row">
+        <h2 id="cs-course-title">正在载入课程…</h2>
+        <button id="cs-course-code-trigger" class="hub-course-code-trigger" type="button" aria-haspopup="dialog" aria-controls="cs-course-code-dialog" aria-expanded="false" disabled>
+          <i class="fas fa-key" aria-hidden="true"></i><span>课程码</span>
+        </button>
+      </div>
+    </div>
+    <div class="course-hub-actions">
+      <a id="cs-switch-course" class="hub-button is-secondary" href="/teacher/courses"><i class="fas fa-exchange-alt" aria-hidden="true"></i><span>切换课程</span></a>
+      <a id="cs-open-course" class="hub-button is-secondary" href="/dojos"><i class="fas fa-eye"></i><span>学员视图</span></a>
+    </div>
+  </header>
+
+  <nav class="course-hub-tabs" role="tablist" aria-label="课程工作空间">
+    <button type="button" role="tab" class="is-active" data-cs-tab="overview" aria-selected="true"><i class="fas fa-home"></i><span>概览</span></button>
+    <button type="button" role="tab" data-cs-tab="courseware" aria-selected="false"><i class="fas fa-file-powerpoint"></i><span>课件</span></button>
+    <button type="button" role="tab" data-cs-tab="questions" aria-selected="false"><i class="fas fa-flag"></i><span>题目</span></button>
+    <button type="button" role="tab" data-cs-tab="demos" aria-selected="false"><i class="fas fa-project-diagram"></i><span>演示</span></button>
+    <button type="button" role="tab" data-cs-tab="students" aria-selected="false"><i class="fas fa-chart-line"></i><span>学情</span></button>
+  </nav>
+
+  <div id="cs-loading" class="hub-loading"><span></span><p>正在汇总课程题目、演示与学习证据…</p></div>
+
+  <div class="course-hub-main">
+    <section class="hub-panel is-active" data-cs-panel="overview" role="tabpanel">
+      <div class="hub-overview-priority">
+        <section class="hub-surface hub-attention-surface" aria-labelledby="cs-attention-title">
+          <header class="hub-section-heading">
+            <div><span class="hub-kicker">先处理这些</span><h2 id="cs-attention-title">待处理事项</h2><p>只显示失败、部分成功和等待教师审核的真实记录。</p></div>
+            <span id="cs-attention-count" class="hub-status">0 项</span>
+          </header>
+          <div id="cs-overview-attention" class="hub-attention-list" aria-live="polite"></div>
+        </section>
+        <section class="hub-surface hub-readiness-surface" aria-labelledby="cs-readiness-title">
+          <header class="hub-section-heading">
+            <div><span class="hub-kicker">发布状态</span><h2 id="cs-readiness-title">发布就绪度</h2><p id="cs-readiness-as-of">正在核对课程内容事实…</p></div>
+          </header>
+          <div id="cs-overview-readiness" class="hub-readiness-card" aria-live="polite"></div>
+        </section>
+      </div>
+
+      <section class="hub-overview-progress" aria-labelledby="cs-progress-title">
+        <header class="hub-section-heading"><div><span class="hub-kicker">课程进度</span><h2 id="cs-progress-title">可核验进展</h2><p>学习完成率只采用判题与有效证据；内容数量来自同一课程快照。</p></div><button type="button" data-cs-tab-target="students">查看学情</button></header>
+        <div class="hub-metric-grid" aria-label="课程关键指标">
+          <article class="hub-metric"><span class="is-green"><i class="fas fa-users"></i></span><div><small>课程学生</small><strong id="cs-stat-students">0</strong><em>已加入课程</em></div></article>
+          <article class="hub-metric"><span class="is-blue"><i class="fas fa-check-circle"></i></span><div><small>真实完成率</small><strong id="cs-stat-completion">—</strong><em>基于可核验判题结果</em></div></article>
+          <article class="hub-metric"><span class="is-amber"><i class="fas fa-flag"></i></span><div><small>课程题目</small><strong id="cs-stat-questions">0</strong><em>已发布与尚未发布的去重总数</em></div></article>
+          <article class="hub-metric"><span class="is-blue"><i class="fas fa-project-diagram"></i></span><div><small>课程演示</small><strong id="cs-stat-demos">0</strong><em>未归档演示总数</em></div></article>
+          <span id="cs-stat-artifacts" hidden>0</span>
+        </div>
+      </section>
+
+      <div class="hub-overview-grid">
+        <section class="hub-surface">
+          <header class="hub-section-heading"><div><span class="hub-kicker">最近更新</span><h2>课程动态</h2><p>按服务端记录时间展示最近变化。</p></div><span class="hub-section-actions"><button type="button" data-cs-tab-target="questions">查看题目</button><button type="button" data-cs-tab-target="demos">查看演示</button></span></header>
+          <div id="cs-recent-activity" class="hub-activity-list"></div>
+        </section>
+        <section class="hub-surface hub-structure">
+          <header class="hub-section-heading"><div><span class="hub-kicker">课程结构</span><h2>章节与题目</h2><p>日常浏览不显示重命名和删除操作。</p></div><span class="hub-section-actions"><a id="cs-overview-studio" href="#">题目管理 <i class="fas fa-arrow-right"></i></a></span></header>
+          <div id="cs-module-list" class="hub-module-list"></div>
+        </section>
+      </div>
+
+      <details class="hub-management" aria-label="课程设置与成员">
+        <summary><span><strong>课程设置与成员</strong><small>结构、权限等低频操作</small></span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+        <div class="hub-management-links">
+          <a id="cs-manage-course" href="#"><i class="fas fa-book-open"></i><span><strong>打开课程</strong><small>课程内容与学员视图</small></span></a>
+          <a id="cs-manage-studio" href="#"><i class="fas fa-flag"></i><span><strong>题目管理</strong><small>逐题审阅、修订、验证与发布</small></span></a>
+          <a id="cs-manage-members" href="#"><i class="fas fa-users-cog"></i><span><strong>成员与权限</strong><small>教师、学生和可见性</small></span></a>
+          <a id="cs-manage-agent" href="/teacher"><i class="fas fa-magic"></i><span><strong>AI 管理</strong><small>用自然语言修改课程</small></span></a>
+          <button type="button" data-manage-action="rename" data-manage-kind="course"><i class="fas fa-pen"></i><span><strong>修改课程名称</strong><small>更新教师端与学员端显示名称</small></span></button>
+          <button type="button" class="is-danger" data-manage-action="delete" data-manage-kind="course"><i class="fas fa-trash-alt"></i><span><strong>删除课程</strong><small>永久移除课程及其关联内容</small></span></button>
+        </div>
+      </details>
+    </section>
+
+    <section class="hub-panel" data-cs-panel="courseware" role="tabpanel" hidden>
+      <header class="hub-panel-header">
+        <div><span class="hub-kicker">课程内容</span><h2>从原始资料到可授课课件</h2><p>上传资料后提取知识结构，或让 AI 结合当前课程直接生成课件；所有版本和来源保留在同一处。</p></div>
+        <div class="hub-inline-actions">
+          <input id="cs-courseware-upload" type="file" accept=".pdf,.ppt,.pptx,.doc,.docx,.txt,.md,image/*" hidden>
+          <button id="cs-courseware-create" class="hub-button is-primary" type="button" data-create-kind="courseware" aria-haspopup="dialog" aria-controls="cs-create-dialog"><i class="fas fa-plus" aria-hidden="true"></i>新建课件</button>
+          <button id="cs-courseware-manage-toggle" class="hub-button is-secondary cs-question-manage-toggle" type="button" data-courseware-management-toggle aria-pressed="false"><i class="fas fa-sliders-h" aria-hidden="true"></i><span>管理课件</span></button>
+        </div>
+      </header>
+
+      <div class="hub-content-grid">
+        <section class="hub-surface">
+          <header class="hub-section-heading"><div><span class="hub-kicker">输入</span><h2>课程资料</h2></div><span class="hub-section-actions"><span id="cs-material-count" class="hub-status">0 份</span><button class="hub-mobile-filter-trigger" type="button" data-filter-trigger="materials" aria-controls="cs-material-filters" aria-expanded="false"><i class="fas fa-filter" aria-hidden="true"></i>筛选</button></span></header>
+          <p class="hub-section-copy">原文件、分析状态、功能点与章节候选。</p>
+          <div id="cs-material-filters" class="hub-library-toolbar" data-content-toolbar="materials" data-filter-drawer="materials">
+            <header class="hub-filter-mobile-header"><div><span class="hub-kicker">课程资料</span><h3>筛选与排序</h3></div><button type="button" data-filter-close aria-label="关闭课程资料筛选"><i class="fas fa-times" aria-hidden="true"></i></button></header>
+            <label><i class="fas fa-search" aria-hidden="true"></i><input id="cs-material-search" type="search" placeholder="搜索资料" aria-label="搜索课程资料"></label>
+            <select id="cs-material-status" aria-label="按资料状态筛选"><option value="">全部状态</option><option value="UPLOADED">已上传</option><option value="PROCESSING">分析中</option><option value="ANALYZED">已分析</option><option value="READY">可使用</option><option value="FAILED">需要修复</option></select>
+            <select id="cs-material-sort" aria-label="资料排序"><option value="updated_desc">最近更新</option><option value="updated_asc">最早更新</option><option value="title_asc">名称排序</option></select>
+            <footer class="hub-filter-mobile-actions"><button class="hub-button is-secondary" type="button" data-filter-reset="materials">重置</button><button class="hub-button is-primary" type="button" data-filter-close>查看结果</button></footer>
+          </div>
+          <div id="cs-material-list" class="hub-library-list"></div>
+          <nav id="cs-material-pagination" class="hub-pagination" aria-label="课程资料分页"></nav>
+        </section>
+        <section class="hub-surface">
+          <header class="hub-section-heading"><div><span class="hub-kicker">输出</span><h2>课件与教案</h2></div><span class="hub-section-actions"><span id="cs-artifact-count" class="hub-status">0 份</span><button class="hub-mobile-filter-trigger" type="button" data-filter-trigger="courseware" aria-controls="cs-artifact-filters" aria-expanded="false"><i class="fas fa-filter" aria-hidden="true"></i>筛选</button></span></header>
+          <p class="hub-section-copy">可预览、可追溯，也可继续用自然语言修改。</p>
+          <div id="cs-artifact-filters" class="hub-library-toolbar" data-content-toolbar="courseware" data-filter-drawer="courseware">
+            <header class="hub-filter-mobile-header"><div><span class="hub-kicker">课件与教案</span><h3>筛选与排序</h3></div><button type="button" data-filter-close aria-label="关闭课件筛选"><i class="fas fa-times" aria-hidden="true"></i></button></header>
+            <label><i class="fas fa-search" aria-hidden="true"></i><input id="cs-artifact-search" type="search" placeholder="搜索课件" aria-label="搜索课件与教案"></label>
+            <select id="cs-artifact-module" aria-label="按课件章节筛选"><option value="">全部章节</option></select>
+            <select id="cs-artifact-type" aria-label="按课件类型筛选"><option value="">全部类型</option><option value="slide-deck">课件</option><option value="lesson-plan">教案</option></select>
+            <select id="cs-artifact-source" aria-label="按课件来源筛选"><option value="">全部来源</option><option value="material">基于课程资料</option><option value="direct">直接创建</option><option value="artifact">基于已有内容</option></select>
+            <select id="cs-artifact-status" aria-label="按课件状态筛选"><option value="">全部状态</option><option value="UNPUBLISHED">未发布</option><option value="DRAFT">草稿</option><option value="GENERATING">生成中</option><option value="VALIDATING">检查中</option><option value="NEEDS_REVIEW">等待审核</option><option value="PUBLISHED">已发布</option><option value="FAILED">需要修复</option></select>
+            <select id="cs-artifact-sort" aria-label="课件排序"><option value="updated_desc">最近更新</option><option value="updated_asc">最早更新</option><option value="title_asc">名称排序</option></select>
+            <footer class="hub-filter-mobile-actions"><button class="hub-button is-secondary" type="button" data-filter-reset="courseware">重置</button><button class="hub-button is-primary" type="button" data-filter-close>查看结果</button></footer>
+          </div>
+          <div id="cs-courseware-management-bar" class="cs-question-management-bar cs-courseware-management-bar" hidden>
+            <span><i class="fas fa-layer-group" aria-hidden="true"></i><span><strong>管理未发布课件</strong><small>勾选当前页课件后可批量删除；生成或检查中的课件需等待任务结束。</small></span></span>
+            <div class="cs-question-management-controls">
+              <span id="cs-courseware-selection-status" class="cs-question-selection-status" role="status" aria-live="polite">已选 0 份未发布课件</span>
+              <button id="cs-courseware-select-all" class="hub-button is-secondary" type="button" data-courseware-batch-action="select-all">全选可删除</button>
+              <button id="cs-courseware-batch-delete" class="hub-button is-danger" type="button" data-courseware-batch-action="delete" disabled><i class="fas fa-trash-alt" aria-hidden="true"></i>批量删除</button>
+              <em id="cs-courseware-management-status" role="status" aria-live="polite">等待选择</em>
+            </div>
+          </div>
+          <div id="cs-artifact-list" class="hub-library-list"></div>
+          <nav id="cs-artifact-pagination" class="hub-pagination" aria-label="课件分页"></nav>
+        </section>
+      </div>
+    </section>
+
+    <section class="hub-panel" data-cs-panel="questions" role="tabpanel" hidden>
+      <header class="hub-panel-header">
+        <div><span class="hub-kicker">课程题目</span><h2>CTF 题目</h2><p>按章节创建和组织题目，为学员提供隔离运行环境、确定性 Flag 判题与可核验过程证据。</p></div>
+        <div class="hub-inline-actions"><button id="cs-question-create" class="hub-button is-primary" type="button" data-create-kind="question" aria-haspopup="dialog" aria-controls="cs-create-dialog"><i class="fas fa-plus" aria-hidden="true"></i>新建题目</button><button id="cs-question-manage-toggle" class="hub-button is-secondary cs-question-manage-toggle" type="button" data-question-management-toggle aria-pressed="false"><i class="fas fa-sliders-h" aria-hidden="true"></i><span>管理题目</span></button></div>
+      </header>
+
+      <section id="cs-question-batch-review" class="hub-surface cs-question-batch-review" aria-labelledby="cs-question-batch-title" hidden>
+        <header>
+          <div><span class="hub-kicker">独立题目批次</span><h2 id="cs-question-batch-title">批次审核</h2><p id="cs-question-batch-scope">正在读取课程与章节…</p></div>
+          <div class="cs-question-batch-header-actions"><a id="cs-question-batch-thread" class="hub-button is-secondary" href="/teacher"><i class="far fa-comments" aria-hidden="true"></i><span>打开原任务</span></a><button class="hub-button is-secondary" type="button" data-question-batch-dismiss aria-label="关闭批次审核摘要"><i class="fas fa-times" aria-hidden="true"></i><span>关闭摘要</span></button></div>
+        </header>
+        <div id="cs-question-batch-counts" class="cs-question-batch-counts" aria-label="批次真实数量" aria-live="polite"></div>
+        <div id="cs-question-batch-items" class="cs-question-batch-items"></div>
+        <footer id="cs-question-batch-actions" class="cs-question-batch-actions"></footer>
+      </section>
+
+      <section class="hub-surface hub-lab-section" id="ctf-library">
+        <header class="hub-section-heading"><div><span class="hub-kicker">按章节组织</span><h2>课程题目</h2><p>默认专注浏览；进入管理模式后，可拖拽排序、跨章节移动、重命名或删除题目。</p></div><span class="hub-section-actions"><span id="cs-question-result-count" class="hub-status">0 道</span><button class="hub-mobile-filter-trigger" type="button" data-filter-trigger="questions" aria-controls="cs-question-filters" aria-expanded="false"><i class="fas fa-filter" aria-hidden="true"></i>筛选</button></span></header>
+        <div id="cs-question-count-summary" class="cs-content-count-summary" aria-label="题目状态汇总" aria-live="polite">
+          <button type="button" data-question-count-filter=""><small>全部题目</small><strong data-question-count="total">0</strong></button>
+          <button type="button" data-question-count-filter="unpublished"><small>未发布</small><strong data-question-count="draft">0</strong></button>
+          <button type="button" data-question-count-filter="published"><small>已发布</small><strong data-question-count="published">0</strong></button>
+          <button type="button" data-question-count-filter="needs_attention"><small>需要处理</small><strong data-question-count="needsAttention">0</strong></button>
+        </div>
+        <div id="cs-question-filters" class="hub-library-toolbar hub-question-toolbar" data-content-toolbar="questions" data-filter-drawer="questions">
+          <header class="hub-filter-mobile-header"><div><span class="hub-kicker">课程题目</span><h3>筛选与排序</h3></div><button type="button" data-filter-close aria-label="关闭题目筛选"><i class="fas fa-times" aria-hidden="true"></i></button></header>
+          <label><i class="fas fa-search" aria-hidden="true"></i><input id="cs-question-search" type="search" placeholder="搜索题目" aria-label="搜索课程题目"></label>
+          <select id="cs-question-status" aria-label="按题目状态筛选"><option value="">全部状态</option><option value="unpublished">未发布</option><option value="draft">草稿</option><option value="generating">生成中</option><option value="validating">检查中</option><option value="needs_review">等待审核</option><option value="failed">需要修复</option><option value="published">已发布</option><option value="needs_attention">全部待处理</option></select>
+          <select id="cs-question-module" aria-label="按章节筛选"><option value="">全部章节</option></select>
+          <select id="cs-question-required" aria-label="按必修属性筛选"><option value="">全部要求</option><option value="required">必修题</option><option value="optional">选修题</option></select>
+          <select id="cs-question-mode" aria-label="按练习方式筛选"><option value="">全部方式</option><option value="CONTAINER">在线实操</option><option value="STATIC">答题练习</option></select>
+          <select id="cs-question-sort" aria-label="题目排序"><option value="course_order">课程顺序</option><option value="updated_desc">最近更新</option><option value="updated_asc">最早更新</option><option value="title_asc">名称排序</option></select>
+          <footer class="hub-filter-mobile-actions"><button class="hub-button is-secondary" type="button" data-filter-reset="questions">重置</button><button class="hub-button is-primary" type="button" data-filter-close>查看结果</button></footer>
+        </div>
+        <div id="cs-question-management-bar" class="cs-question-management-bar" hidden>
+          <span><i class="fas fa-grip-vertical" aria-hidden="true"></i><span><strong>管理模式</strong><small>拖动题目前的手柄调整顺序，也可以直接拖入其他章节；放下后自动保存。</small></span></span>
+          <div class="cs-question-management-controls">
+            <span id="cs-question-selection-status" class="cs-question-selection-status" role="status" aria-live="polite">已选 0 道未发布题目</span>
+            <button id="cs-question-select-all" class="hub-button is-secondary" type="button" data-question-batch-action="select-all">全选草稿</button>
+            <button id="cs-question-batch-revise" class="hub-button is-secondary" type="button" data-question-batch-action="revise" disabled><i class="fas fa-magic" aria-hidden="true"></i>批量修订</button>
+            <button id="cs-question-batch-publish" class="hub-button is-primary" type="button" data-question-batch-action="publish" disabled><i class="fas fa-paper-plane" aria-hidden="true"></i>批量发布</button>
+            <em id="cs-question-management-status" role="status" aria-live="polite">等待调整</em>
+          </div>
+        </div>
+        <div id="cs-challenge-list" class="hub-challenge-groups"></div>
+        <nav id="cs-question-pagination" class="hub-pagination" aria-label="课程题目分页"></nav>
+      </section>
+    </section>
+
+    <section class="hub-panel" data-cs-panel="demos" role="tabpanel" hidden>
+      <header class="hub-panel-header">
+        <div><span class="hub-kicker">课程演示</span><h2>交互演示</h2><p>按章节创建和组织演示，用可交互的状态、操作与反馈讲清教学过程。</p></div>
+        <div class="hub-inline-actions">
+          <button id="cs-demo-create" class="hub-button is-primary" type="button" data-create-kind="demo" aria-haspopup="dialog" aria-controls="cs-create-dialog"><i class="fas fa-plus" aria-hidden="true"></i>新建演示</button>
+          <button id="cs-demo-manage-toggle" class="hub-button is-secondary cs-question-manage-toggle" type="button" data-demo-management-toggle aria-pressed="false"><i class="fas fa-sliders-h" aria-hidden="true"></i><span>管理演示</span></button>
+        </div>
+      </header>
+
+      <section class="hub-surface hub-lab-section" id="demo-library">
+        <header class="hub-section-heading"><div><span class="hub-kicker">按章节组织</span><h2>课程演示</h2><p>默认专注浏览；进入管理模式后，可拖拽排序、跨章节移动、重命名或删除演示。</p></div><button class="hub-mobile-filter-trigger" type="button" data-filter-trigger="demos" aria-controls="cs-demo-filters" aria-expanded="false"><i class="fas fa-filter" aria-hidden="true"></i>筛选</button></header>
+        <div id="cs-demo-filters" class="hub-library-toolbar hub-demo-toolbar" data-content-toolbar="demos" data-filter-drawer="demos">
+          <header class="hub-filter-mobile-header"><div><span class="hub-kicker">课程演示</span><h3>筛选与排序</h3></div><button type="button" data-filter-close aria-label="关闭演示筛选"><i class="fas fa-times" aria-hidden="true"></i></button></header>
+          <label><i class="fas fa-search" aria-hidden="true"></i><input id="cs-demo-search" type="search" placeholder="搜索演示" aria-label="搜索课程演示"></label>
+          <select id="cs-demo-module" aria-label="按演示章节筛选"><option value="">全部章节</option></select>
+          <select id="cs-demo-type" aria-label="按演示类型筛选"><option value="">全部类型</option><option value="simulation">交互模拟</option><option value="attack-defense-scene">授权攻防</option><option value="classroom-scenario">课堂场景</option></select>
+          <select id="cs-demo-status" aria-label="按演示状态筛选"><option value="">全部状态</option><option value="DRAFT">草稿</option><option value="NEEDS_REVIEW">等待审核</option><option value="PUBLISHED">已发布</option><option value="FAILED">需要修复</option></select>
+          <select id="cs-demo-sort" aria-label="演示排序"><option value="course_order">课程顺序</option><option value="updated_desc">最近更新</option><option value="title_asc">名称排序</option></select>
+          <footer class="hub-filter-mobile-actions"><button class="hub-button is-secondary" type="button" data-filter-reset="demos">重置</button><button class="hub-button is-primary" type="button" data-filter-close>查看结果</button></footer>
+        </div>
+        <div id="cs-demo-management-bar" class="cs-question-management-bar" hidden>
+          <span><i class="fas fa-grip-vertical" aria-hidden="true"></i><span><strong>管理模式</strong><small>拖动演示前的手柄调整顺序，也可以直接拖入其他章节；放下后自动保存。</small></span></span>
+          <em id="cs-demo-management-status" role="status" aria-live="polite">等待调整</em>
+        </div>
+        <div id="cs-simulation-list" class="hub-challenge-groups"></div>
+        <nav id="cs-demo-pagination" class="hub-pagination" aria-label="课程演示分页"></nav>
+      </section>
+    </section>
+
+    <section class="hub-panel cs-learning-panel" data-cs-panel="students" role="tabpanel" hidden>
+      <header class="hub-panel-header cs-learning-header">
+        <div>
+          <span class="hub-kicker">证据驱动学情</span>
+          <h2>学习诊断与教学干预</h2>
+          <p>从判题结果下钻到能力掌握、学习过程、具体误区与停滞原因；没有证据时明确标为“未观测”，不把浏览量或低活跃度误当成低能力。</p>
+        </div>
+        <div class="cs-learning-refresh">
+          <small id="cs-progress-freshness">正在汇总最新证据…</small>
+          <button id="cs-refresh-progress" class="hub-button is-secondary" type="button"><i class="fas fa-sync-alt" aria-hidden="true"></i><span>刷新证据</span></button>
+        </div>
+      </header>
+
+      <section class="hub-surface cs-learning-scope" aria-labelledby="cs-learning-scope-title">
+        <header>
+          <div><span class="hub-kicker">统一分析范围</span><h3 id="cs-learning-scope-title">筛选学生、章节、题目与时间</h3><p>所有指标、名单、干预队列和图表使用同一服务端口径；筛选状态会写入网址，便于分享与复查。</p></div>
+          <strong id="cs-learning-scope-summary" role="status" aria-live="polite">全班 · 全部章节 · 全部题目 · 过去 12 周</strong>
+        </header>
+        <div class="cs-learning-filter-grid">
+          <label><span>学生</span><select id="cs-learning-student" aria-label="选择学情分析学生"><option value="">全班学生</option></select></label>
+          <label><span>章节</span><select id="cs-learning-module" aria-label="选择学情分析章节"><option value="">全部章节</option></select></label>
+          <label><span>题目</span><select id="cs-learning-question" aria-label="选择学情分析题目"><option value="">全部题目</option></select></label>
+          <label><span>时间</span><select id="cs-learning-range" aria-label="选择学情分析时间范围"><option value="7d">过去 7 天</option><option value="30d">过去 30 天</option><option value="90d">过去 90 天</option><option value="12w" selected>过去 12 周</option><option value="lifetime">课程全部时间</option></select></label>
+          <button id="cs-reset-learning-scope" class="hub-button is-secondary" type="button"><i class="fas fa-undo-alt" aria-hidden="true"></i><span>重置范围</span></button>
+          <button id="cs-export-learning" class="hub-button is-secondary" type="button"><i class="fas fa-download" aria-hidden="true"></i><span>导出当前范围</span></button>
+        </div>
+      </section>
+
+      <section class="hub-surface cs-analytics-card cs-learning-action-card" aria-labelledby="cs-intervention-title">
+        <header><div><span class="hub-kicker">先行动，再看图表</span><h3 id="cs-intervention-title">教学干预队列</h3><p>每条建议都列出触发依据、建议动作和对应学生；选择队列后可直接下钻并记录干预基线。</p></div></header>
+        <div id="cs-intervention-effect-summary" class="cs-intervention-effect-summary" aria-label="教学干预跟踪摘要"></div>
+        <div id="cs-intervention-list" class="cs-intervention-list"></div>
+      </section>
+
+      <div class="cs-learning-kpis" aria-label="班级学情关键指标">
+        <article class="is-evidence"><span><i class="fas fa-shield-alt" aria-hidden="true"></i></span><div><small>证据覆盖</small><strong id="cs-insight-coverage">0%</strong><em id="cs-insight-coverage-note">0 / 0 名学生达到基础证据量</em></div></article>
+        <article class="is-mastery"><span><i class="fas fa-brain" aria-hidden="true"></i></span><div><small>平均掌握度</small><strong id="cs-insight-mastery">—</strong><em id="cs-insight-mastery-note">仅统计已有能力评估的学生</em></div></article>
+        <article class="is-risk"><span><i class="fas fa-exclamation-triangle" aria-hidden="true"></i></span><div><small>优先干预</small><strong id="cs-insight-risk">0</strong><em id="cs-insight-risk-note">基于多项可回溯风险信号</em></div></article>
+        <article class="is-stalled"><span><i class="fas fa-pause-circle" aria-hidden="true"></i></span><div><small>学习停滞</small><strong id="cs-insight-stalled">0</strong><em id="cs-insight-stalled-note">仍有未完成尝试且近期无进展</em></div></article>
+      </div>
+
+      <section class="hub-surface hub-table-surface cs-learning-roster" aria-labelledby="cs-student-roster-title">
+        <header class="cs-roster-heading">
+          <div><span class="hub-kicker">学生下钻</span><h3 id="cs-student-roster-title">学生诊断名单</h3><p>按干预优先级排序，打开学生可查看能力、过程、题目卡点、目标与证据时间线。</p></div>
+          <strong id="cs-student-result-count">0 名学生</strong>
+        </header>
+        <div class="hub-table-tools cs-student-tools">
+          <label><i class="fas fa-search" aria-hidden="true"></i><input id="cs-student-search" type="search" placeholder="搜索学生" aria-label="搜索学生"></label>
+          <select id="cs-student-risk-filter" aria-label="按关注状态筛选"><option value="all">全部关注状态</option><option value="high">优先干预</option><option value="medium">持续关注</option><option value="low">进展稳定</option><option value="unknown">证据不足</option></select>
+          <select id="cs-student-evidence-filter" aria-label="按证据充分度筛选"><option value="all">全部证据水平</option><option value="充分">证据充分</option><option value="基础">基础证据</option><option value="不足">证据不足</option></select>
+          <button id="cs-clear-cohort-filter" class="cs-cohort-filter" type="button" hidden><i class="fas fa-times" aria-hidden="true"></i><span>清除干预队列筛选</span></button>
+          <span id="cs-progress-source">只使用可核验判题、尝试、过程证据、评估与已发布任务</span>
+        </div>
+        <div class="hub-table-scroll"><table class="hub-table cs-learning-table"><thead><tr><th>学生与状态</th><th>能力掌握</th><th>真实完成</th><th>主要薄弱点</th><th>学习过程</th><th>证据充分度</th><th>最后活动</th><th><span class="sr-only">操作</span></th></tr></thead><tbody id="cs-student-table"></tbody></table></div>
+      </section>
+
+      <div class="cs-learning-analysis-grid">
+        <section class="hub-surface cs-analytics-card cs-learning-timeline-card" aria-labelledby="cs-timeline-title">
+          <header><div><span id="cs-timeline-range" class="hub-kicker">过去 12 周</span><h3 id="cs-timeline-title">学习活动与成果轨迹</h3><p id="cs-timeline-subtitle">按周展示活跃学生、尝试、通过与形成性评估，零活动周也如实保留。</p></div><span class="cs-chart-legend"><i class="is-activity"></i>过程证据<i class="is-solve"></i>通过题目</span></header>
+          <div id="cs-learning-timeline" class="cs-learning-timeline" role="img" aria-label="所选时间范围的学习活动趋势"></div>
+        </section>
+        <section class="hub-surface cs-analytics-card" aria-labelledby="cs-ability-title">
+          <header><div><span class="hub-kicker">六维能力模型</span><h3 id="cs-ability-title">能力掌握与证据人数</h3><p>同一量尺展示掌握度、证据人数与低掌握人数；未形成评估的学生不按零分计算。</p></div></header>
+          <div id="cs-ability-overview" class="cs-ability-overview"></div>
+        </section>
+      </div>
+
+      <section class="hub-surface cs-analytics-card cs-learning-bottleneck-card" aria-labelledby="cs-bottleneck-title">
+        <header><div><span class="hub-kicker">题目诊断</span><h3 id="cs-bottleneck-title">课程瓶颈与过程缺口</h3><p>成功率以“已尝试学生”为分母，同时显示参与人数、反复试错与主要过程缺口；小样本会明确标为证据不足。</p></div></header>
+        <div id="cs-bottleneck-list" class="cs-bottleneck-list"></div>
+      </section>
+
+      <details class="hub-surface cs-learning-methodology">
+        <summary><span><i class="fas fa-database" aria-hidden="true"></i><strong>数据口径与可信边界</strong><small id="cs-data-quality-summary">查看指标定义、数据来源与限制</small></span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+        <div id="cs-data-quality" class="cs-data-quality"></div>
+      </details>
+    </section>
+  </div>
+
+  <button id="cs-filter-backdrop" class="hub-filter-backdrop" type="button" aria-label="关闭筛选" hidden></button>
+
+  <div id="cs-create-dialog" class="hub-modal hub-create-dialog" aria-hidden="true" hidden>
+    <button class="hub-modal-backdrop" type="button" data-create-close aria-label="关闭新建窗口"></button>
+    <section class="hub-modal-card hub-create-card" role="dialog" aria-modal="true" aria-labelledby="cs-create-title" aria-describedby="cs-create-description" tabindex="-1">
+      <header>
+        <div><span class="hub-kicker" id="cs-create-kicker">创建内容</span><h2 id="cs-create-title">选择创建方式</h2><p id="cs-create-description">选择一种方式开始；后续始终在同一个工作区继续。</p></div>
+        <button type="button" data-create-close aria-label="关闭新建窗口"><i class="fas fa-times" aria-hidden="true"></i></button>
+      </header>
+      <div id="cs-create-options" class="hub-create-options"></div>
+      <footer><button class="hub-button is-secondary" type="button" data-create-close>取消</button></footer>
+    </section>
+  </div>
+
+  <div id="cs-course-code-dialog" class="hub-modal hub-course-code-dialog" aria-hidden="true" hidden>
+    <button class="hub-modal-backdrop" type="button" data-course-code-close aria-label="关闭课程码窗口"></button>
+    <section class="hub-modal-card hub-course-code-card" role="dialog" aria-modal="true" aria-labelledby="cs-course-code-title" aria-describedby="cs-course-code-description" tabindex="-1">
+      <header>
+        <div>
+          <span class="hub-kicker"><i class="fas fa-user-plus" aria-hidden="true"></i>邀请学生</span>
+          <h2 id="cs-course-code-title">课程码</h2>
+          <p id="cs-course-code-description"><span id="cs-course-code-course-name">当前课程</span> · 学生在学习中心输入此码即可加入</p>
+        </div>
+        <button type="button" data-course-code-close aria-label="关闭课程码窗口"><i class="fas fa-times" aria-hidden="true"></i></button>
+      </header>
+      <div class="hub-course-code-dialog-body">
+        <span class="hub-course-code-key" aria-hidden="true"><i class="fas fa-key"></i></span>
+        <span class="hub-course-code-label">完整课程码</span>
+        <code id="cs-course-code" tabindex="0" aria-label="当前课程码" aria-live="polite">正在准备…</code>
+        <small id="cs-course-code-status" role="status" aria-live="polite">正在建立安全的课程加入入口。</small>
+      </div>
+      <footer>
+        <button id="cs-regenerate-course-code" class="hub-button is-secondary" type="button" disabled><i class="fas fa-sync-alt" aria-hidden="true"></i><span>更换课程码</span></button>
+        <button id="cs-copy-course-code" class="hub-button is-primary hub-copy-course-code" type="button" disabled><i class="fas fa-copy" aria-hidden="true"></i><span id="cs-copy-course-code-label">复制课程码</span></button>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cs-material-preview-dialog" class="hub-modal hub-material-preview-dialog" aria-hidden="true" hidden>
+    <button class="hub-modal-backdrop" type="button" data-material-preview-close aria-label="关闭资料预览"></button>
+    <section class="hub-modal-card hub-material-preview-card" role="dialog" aria-modal="true" aria-labelledby="cs-material-preview-title" aria-describedby="cs-material-preview-meta" tabindex="-1">
+      <header>
+        <div>
+          <span class="hub-kicker"><i class="far fa-eye" aria-hidden="true"></i>实时预览</span>
+          <h2 id="cs-material-preview-title">课程资料</h2>
+          <p id="cs-material-preview-meta">正在读取原文件…</p>
+        </div>
+        <button type="button" data-material-preview-close aria-label="关闭资料预览"><i class="fas fa-times" aria-hidden="true"></i></button>
+      </header>
+      <div id="cs-material-preview-body" class="hub-material-preview-body" aria-live="polite">
+        <div class="hub-material-preview-loading"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span>正在载入最新文件…</span></div>
+      </div>
+      <footer>
+        <span id="cs-material-preview-status" role="status" aria-live="polite">预览内容来自当前保存的原文件。</span>
+        <a id="cs-material-preview-download" class="hub-button is-primary" href="#" download><i class="fas fa-download" aria-hidden="true"></i><span>下载原文件</span></a>
+      </footer>
+    </section>
+  </div>
+
+  <div id="cs-question-detail-drawer" class="hub-drawer cs-question-detail-drawer" hidden>
+    <button class="hub-modal-backdrop" type="button" data-question-drawer-close aria-label="关闭题目详情"></button>
+    <aside role="dialog" aria-modal="true" aria-labelledby="cs-question-drawer-title" aria-describedby="cs-question-drawer-subtitle" tabindex="-1">
+      <header>
+        <div><span class="hub-kicker">题目管理</span><h2 id="cs-question-drawer-title">题目详情</h2><p id="cs-question-drawer-subtitle">正在读取题目草稿…</p></div>
+        <button type="button" data-question-drawer-close aria-label="关闭题目详情"><i class="fas fa-times" aria-hidden="true"></i></button>
+      </header>
+      <div id="cs-question-drawer-body" class="hub-drawer-body cs-question-detail-body" aria-live="polite"><div class="cs-empty">正在读取题目草稿…</div></div>
+    </aside>
+  </div>
+
+  <div id="cs-student-insight-drawer" class="hub-drawer cs-learning-drawer" aria-hidden="true" hidden>
+    <button class="hub-modal-backdrop" type="button" data-student-drawer-close aria-label="关闭学生学情详情"></button>
+    <aside role="dialog" aria-modal="true" aria-labelledby="cs-student-drawer-title" aria-describedby="cs-student-drawer-subtitle" tabindex="-1">
+      <header><div><span class="hub-kicker">学生学习画像</span><h2 id="cs-student-drawer-title">学生详情</h2><p id="cs-student-drawer-subtitle">正在读取学习证据…</p></div><button type="button" data-student-drawer-close aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button></header>
+      <div id="cs-student-drawer-body" class="hub-drawer-body cs-student-drawer-body"></div>
+    </aside>
+  </div>
+  </section>
+</div>
+
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-upload-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/teacher-courses.js', v='aisecedu-course-hub-v36') }}"></script>
+{% endblock %}

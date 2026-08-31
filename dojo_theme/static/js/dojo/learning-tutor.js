@@ -11,6 +11,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const thinking = panel.querySelector("[data-tutor-thinking]");
     const question = panel.querySelector("[data-tutor-question]");
     const sendButton = panel.querySelector("[data-tutor-send]");
+    const fullLink = panel.querySelector("[data-tutor-full-link]");
     const promptButtons = Array.from(panel.querySelectorAll("[data-tutor-prompt]"));
     let attempt = null;
 
@@ -34,8 +35,8 @@ document.addEventListener("DOMContentLoaded", function () {
       messages.innerHTML = items.length ? items.map(message => `
         <div class="learning-tutor-message ${message.role === "user" ? "is-user" : "is-tutor"}">
           <div>${learning.escapeHtml(message.content).replace(/\n/g, "<br>")}</div>
-          <small>${message.role === "user" ? "学习者" : `Tutor${message.metadata && message.metadata.model ? ` · ${learning.escapeHtml(message.metadata.model)}` : ""}`}</small>
-        </div>`).join("") : '<div class="text-muted">说说下一步想检查或推理什么。Tutor 只会使用当前题目和已脱敏证据。</div>';
+          <small>${message.role === "user" ? "学习者" : "AI 学习助手"}</small>
+        </div>`).join("") : '<div class="text-muted">说说下一步想检查或推理什么。AI 学习助手只会使用当前题目和已授权的学习证据。</div>';
       messages.scrollTop = messages.scrollHeight;
     }
 
@@ -48,7 +49,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     async function loadAttempt() {
-      setStatus("checking", "正在检查 Tutor");
+      setStatus("checking", "正在检查 AI 学习助手");
       try {
         const response = await learning.request("/learning/attempts/current");
         attempt = response.attempt || null;
@@ -56,25 +57,33 @@ document.addEventListener("DOMContentLoaded", function () {
           context.textContent = "先启动一个题目以创建与证据绑定的练习记录。";
           setAvailable(false);
           renderMessages([]);
-          setStatus("unavailable", "Tutor 未就绪", "当前没有正在运行的题目会话。");
+          setStatus("unavailable", "AI 学习助手未就绪", "当前没有正在运行的题目会话。");
           return;
         }
         context.textContent = `${attempt.challengeName} · ${attempt.moduleName} · 第 ${attempt.epoch} 次会话`;
+        if (fullLink) {
+          const query = new URLSearchParams({
+            course: attempt.dojoId,
+            module: attempt.moduleId,
+            challenge: attempt.challengeId,
+          });
+          fullLink.href = `/guide?${query.toString()}`;
+        }
         setAvailable(true);
         renderMessages(attempt.tutorMessages || []);
         const invalid = attempt.evidenceChain && attempt.evidenceChain.valid === false;
         setStatus(
           invalid ? "warning" : "ready",
-          invalid ? "Tutor 已就绪 · 证据待复核" : "Tutor 已就绪",
+          invalid ? "AI 学习助手已就绪 · 证据待复核" : "AI 学习助手已就绪",
           invalid
-            ? "Tutor 可以使用，但当前证据链需要复核。"
-            : "Tutor 可使用当前题目、练习会话和已脱敏的实时工作区证据。"
+            ? "AI 学习助手可以使用，但当前过程记录需要复核。"
+            : "AI 学习助手可使用当前题目、练习会话和已授权的实时工作区证据。"
         );
       } catch (error) {
         attempt = null;
         setAvailable(false);
         renderMessages([]);
-        setStatus("unavailable", "Tutor 暂不可用", error.message || "无法加载当前练习记录。");
+        setStatus("unavailable", "AI 学习助手暂不可用", error.message || "无法加载当前练习记录。");
       }
     }
 
@@ -84,17 +93,17 @@ document.addEventListener("DOMContentLoaded", function () {
       const existing = attempt.tutorMessages || [];
       renderMessages([...existing, {role: "user", content, metadata: {}}]);
       setAvailable(false);
-      setStatus("checking", "Tutor 正在思考");
+      setStatus("checking", "AI 学习助手正在思考");
       thinking.hidden = false;
       try {
         const response = await learning.json("POST", "/learning/tutor", {
           question: content,
         });
-        if (!response.success) throw new Error(learning.errorMessage(response, "Tutor 暂时不可用。"));
+        if (!response.success) throw new Error(learning.errorMessage(response, "AI 学习助手暂时不可用。"));
         question.value = "";
         await loadAttempt();
       } catch (error) {
-        setStatus("warning", "Tutor 请求失败，可重试", error.message || "Tutor 暂时不可用。");
+        setStatus("warning", "AI 学习助手请求失败，可重试", error.message || "AI 学习助手暂时不可用。");
       } finally {
         thinking.hidden = true;
         setAvailable(Boolean(attempt));
@@ -104,8 +113,8 @@ document.addEventListener("DOMContentLoaded", function () {
     function setExpanded(expanded) {
       panel.classList.toggle("is-collapsed", !expanded);
       toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-      toggle.setAttribute("title", expanded ? "收起 Tutor" : "打开 Tutor");
-      toggle.setAttribute("aria-label", expanded ? "收起 Tutor" : "打开 Tutor");
+      toggle.setAttribute("title", expanded ? "收起 AI 学习助手" : "打开 AI 学习助手");
+      toggle.setAttribute("aria-label", expanded ? "收起 AI 学习助手" : "打开 AI 学习助手");
       toggleIcon.className = expanded ? "fas fa-chevron-right" : "fas fa-user-ninja";
       if (expanded) loadAttempt();
     }
@@ -136,6 +145,6 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     setAvailable(false);
     renderMessages([]);
-    setStatus("checking", "正在检查 Tutor");
+    setStatus("checking", "正在检查 AI 学习助手");
   });
 });

@@ -2,6 +2,8 @@
 {% from "macros/widgets.html" import accordion_item %}
 {% set is_dojo_admin = dojo.is_admin() %}
 
+{% block body_class %}unit-detail-page{% endblock %}
+
 {% block stylesheets %}
 {{ super() }}
 
@@ -38,24 +40,35 @@
 {% endblock %}
 
 {% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1 class="brand-white brand-mono-bold">{{ module.name or module.id }}</h1>
-    <br>
-    <h2 class="module-dojo"><a class="brand-white brand-mono-bold" href="{{ url_for('pwncollege_dojo.view_dojo', dojo=dojo.reference_id) }}">{{ dojo.name or dojo.id }}<span class="brand-dot">.</span></a></h2>
+<div class="unit-detail-shell">
+  <nav class="course-breadcrumbs" aria-label="面包屑"><a href="/dojos">课程</a><i class="fas fa-chevron-right"></i><a href="{{ url_for('pwncollege_dojo.view_dojo', dojo=dojo.reference_id) }}">{{ dojo.name or dojo.id }}</a><i class="fas fa-chevron-right"></i><span>{{ module.name or module.id }}</span></nav>
 
+  <header class="unit-detail-header">
+    <div class="unit-header-row">
+      <div>
+        <span class="product-kicker">第 {{ course_outline.position }} / {{ course_outline.total }} 章 · {{ (visible_challenges | length) ~ ' 项实训' if visible_challenges else '阅读章节 · 无必修实践' }}</span>
+        <h1>{{ module.name or module.id }}</h1>
+        <p>{{ (module.description | striptags | truncate(180)) if module.description else '阅读课程内容，在同一页面启动 CTF 实践题或模拟实训，并随时使用题目内 AI 助手。' }}</p>
+      </div>
+      <div class="product-header-actions">
+        {% if is_dojo_admin %}
+        <a class="product-button" href="/teacher?prompt={{ ('请为课程“' ~ (dojo.name or dojo.id) ~ '”的章节“' ~ (module.name or module.id) ~ '”继续准备课件或实训，请先总结当前内容') | urlencode }}"><i class="fas fa-magic"></i>AI 共创</a>
+        <a class="product-button is-primary" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}&amp;tab=questions&amp;module={{ module.index }}"><i class="fas fa-layer-group"></i>管理本章</a>
+        {% elif user %}
+        <a class="product-button" href="/dojo/{{ dojo.reference_id }}/learning"><i class="fas fa-chart-line"></i>学习进展</a>
+        <a class="product-button is-primary" href="/guide?course={{ dojo.reference_id | urlencode }}&amp;module={{ module.id | urlencode }}"><i class="fas fa-comment-dots"></i>打开 AI 学习助手</a>
+        {% endif %}
+      </div>
+    </div>
     {% if assessments %}
-    <br>
-    {% for assessment in assessments %}
-    <h3 class="module-due-date" title="{{ assessment.date }}">{{ assessment.name }}：{{ assessment.until }} 后截止</h3>
-    {% endfor %}
+    <div class="unit-deadlines">
+      {% for assessment in assessments %}<span title="{{ assessment.date }}"><i class="far fa-clock"></i>{{ assessment.name }} · {{ assessment.until }} 后截止</span>{% endfor %}
+    </div>
     {% endif %}
-  </div>
-</div>
-<div class="container">
+  </header>
 
-  {% if module.description %}
-  <div>
+  {% if module.description and (module.description | striptags | length > 180) %}
+  <section class="product-surface unit-content-intro">
     {% if module_description_edit_url %}
       <a href="{{ module_description_edit_url }}"
          target="_blank"
@@ -65,8 +78,7 @@
       </a>
     {% endif %}
     {{ module.description | markdown }}
-  </div>
-  <br>
+  </section>
   {% endif %}
 
   {% if module.resources or module.challenges %}
@@ -76,18 +88,41 @@
 
   {% set previous_challenge = None %}
 
-  <div class="accordion" id="module-content">
+  <button id="unit-outline-toggle" class="unit-outline-toggle" type="button" aria-controls="unit-outline" aria-expanded="false"><i class="fas fa-list" aria-hidden="true"></i>打开本章目录</button>
+  <div class="unit-learning-layout">
+    <aside id="unit-outline" class="unit-outline" aria-label="本章学习路径">
+      <div><span class="product-kicker">课程路径</span><h2>本章内容</h2><small>{{ module.unified_items | length }} 项混合内容</small></div>
+      <nav>
+        {% set outline = namespace(previous_challenge=none, first=true) %}
+        {% for item in module.unified_items %}
+          {% if item.item_type == 'resource' and item.type != 'header' %}
+            <a class="unit-outline-item{{ ' is-current' if outline.first else '' }}" href="#module-content-item-{{ loop.index }}" data-outline-target="module-content-header-button-{{ loop.index }}"><span><i class="fas {{ 'fa-video' if item.type == 'lecture' else 'fa-file-alt' }}" aria-hidden="true"></i></span><span><strong>{{ item.name or '课程资料' }}</strong><small>资料 · 预计 8 分钟</small></span><em>{{ '当前' if outline.first else '阅读' }}</em></a>
+            {% set outline.first = false %}
+          {% elif item.item_type == 'challenge' and (module.show_challenges or is_dojo_admin) and (item in visible_challenges or is_dojo_admin) %}
+            {% set outline_locked = item.progression_locked and outline.previous_challenge and outline.previous_challenge.challenge_id not in user_solves and item.challenge_id not in user_solves and not is_dojo_admin %}
+            {% set outline_current = item.id == scroll_to_challenge or item.challenge_id == current_challenge_id or outline.first %}
+            <a class="unit-outline-item{{ ' is-current' if outline_current else '' }}{{ ' is-complete' if item.challenge_id in user_solves else '' }}{{ ' is-locked' if outline_locked else '' }}" href="#module-content-item-{{ loop.index }}" data-challenge-outline="{{ item.id }}"><span><i class="fas {{ 'fa-lock' if outline_locked else ('fa-check' if item.challenge_id in user_solves else 'fa-flag') }}" aria-hidden="true"></i></span><span><strong>{{ item.name or item.id }}</strong><small>{{ '选修实践' if not item.required else '必修实践' }} · 预计 20 分钟</small></span><em>{{ '当前' if outline_current else ('完成' if item.challenge_id in user_solves else ('锁定' if outline_locked else '未开始')) }}</em></a>
+            {% set outline.first = false %}
+            {% set outline.previous_challenge = item %}
+          {% endif %}
+        {% endfor %}
+      </nav>
+      <a class="unit-outline-progress" href="/dojo/{{ dojo.reference_id }}/learning"><i class="fas fa-chart-line" aria-hidden="true"></i>查看本课程学习进展</a>
+    </aside>
+    <section class="unit-learning-content">
+      <div class="product-section-heading unit-content-heading"><div><span class="product-kicker">当前章节</span><h2>课程资料与实训</h2><p>按顺序学习；题目说明、实验环境、提交和反馈会保留同一课程上下文。</p></div></div>
+      <div class="accordion" id="module-content">
     {% set ns = namespace(challenge_count=0) %}
     {% for item in module.unified_items %}
       {% if item.item_type == 'resource' %}
         {% set resource = item %}
         {% if resource.type == 'markdown' and resource.expandable == False %}
-          <div class="description-content my-3">
+          <div class="description-content my-3 unit-inline-resource" id="module-content-item-{{ loop.index }}">
             {{ resource.content | markdown }}
           </div>
         {% elif resource.type == 'header' %}
           <br>
-          <h2>{{ resource.content }}</h2>
+          <h2>{{ '实训题目' if (resource.content | trim | lower) == 'challenges' else resource.content }}</h2>
         {% else %}
         {% call(header) accordion_item("module-content", loop.index) %}
           {% if header %}
@@ -200,32 +235,24 @@
                 {{ challenge.description | markdown }}
               {% endif %}
             </div>
-            {% set challenge_mode = challenge.exercise_mode or "CONTAINER" %}
             <div class="challenge-init row{% if active %} challenge-hidden{% endif %}">
               <div class="col-md-3 form-group text-center">
-                <button id="challenge-start" type="submit" class="btn btn-md btn-outline-secondary challenge-init">
+                <button type="submit" class="btn btn-md btn-outline-secondary challenge-init challenge-start" data-practice="false">
                   <i class="fas fa-play fa-lg"></i>启动题目
                 </button>
               </div>
-              {% if challenge_mode != "SIMULATION" and challenge.allow_privileged %}
+              {% if challenge.allow_privileged %}
               <div class="col-md-3 form-group text-center">
-                <button id="challenge-priv" type="submit" class="btn btn-md btn-outline-secondary challenge-init">
+                <button type="submit" class="btn btn-md btn-outline-secondary challenge-init challenge-priv" data-practice="true">
                   <i class="fas fa-unlock fa-lg"></i>特权模式
                 </button>
               </div>
               {% endif %}
-              <div class="col-md-{% if challenge_mode != 'SIMULATION' and challenge.allow_privileged %}6{% else %}9{% endif %}">
-                <input id="module" type="hidden" value="{{ module.id }}">
-                <input id="challenge" type="hidden" value="{{ challenge.id }}">
-                <input id="challenge-id" type="hidden" value="{{ challenge.challenge_id }}">
-                {% if challenge_mode == "SIMULATION" %}
-                <div class="challenge-input form-control text-muted">
-                  <i class="fas fa-project-diagram"></i>
-                  通过场景目标完成本题
-                </div>
-                {% else %}
-                <input id="challenge-input" class="challenge-input form-control" type="text" name="answer" placeholder="输入 Flag">
-                {% endif %}
+              <div class="col-md-{{ 6 if challenge.allow_privileged else 9 }}">
+                <input class="challenge-module" type="hidden" value="{{ module.id }}">
+                <input class="challenge-reference" type="hidden" value="{{ challenge.id }}">
+                <input class="challenge-numeric-id" type="hidden" value="{{ challenge.challenge_id }}">
+                <input class="challenge-input challenge-answer form-control" type="text" name="answer" placeholder="输入 Flag">
               </div>
             </div>
             <div class="challenge-workspace {{ "challenge-hidden" if not active }}">
@@ -250,14 +277,14 @@
             </div>
             <div class="row notification-row">
               <div class="col-md-12">
-                <div id="result-notification" class="alert alert-dismissable text-center w-100" role="alert" style="display: none;">
-                  <strong id="result-message"></strong>
+                <div class="result-notification alert alert-dismissable text-center w-100" role="alert" style="display: none;">
+                  <strong class="result-message"></strong>
                 </div>
               </div>
             </div>
             <div class="row survey-row">
               <div class="col-md-12">
-                <form target="survey-target" method="post" action="/pwncollege_api/v1/dojos/{{dojo.reference_id}}/surveys/{{module.id}}/{{challenge.id}}" id="survey-notification" class="survey alert-dismissable w-100 survey-id-{{challenge.challenge_id}}" role="alert" style="display: none;">
+                <form target="survey-target" method="post" action="/pwncollege_api/v1/dojos/{{dojo.reference_id}}/surveys/{{module.id}}/{{challenge.id}}" class="survey survey-notification alert-dismissable w-100 survey-id-{{challenge.challenge_id}}" role="alert" style="display: none;">
                   {{ challenge.survey.data | safe }}
                 </form>
               </div>
@@ -268,13 +295,20 @@
         {% set previous_challenge = challenge %}
       {% endif %}
     {% endfor %}
+      </div>
+    </section>
   </div>
+
+  <nav class="unit-mobile-sequence" aria-label="章节前后导航">
+    {% if course_outline.previous %}<a href="/{{ dojo.reference_id }}/{{ course_outline.previous.id }}?returnTo={{ request.full_path | urlencode }}" data-learning-transition="module"><i class="fas fa-arrow-left" aria-hidden="true"></i><span><small>上一章</small><strong>{{ course_outline.previous.name or course_outline.previous.id }}</strong></span></a>{% else %}<span></span>{% endif %}
+    {% if course_outline.next %}<a class="is-next" href="/{{ dojo.reference_id }}/{{ course_outline.next.id }}?returnTo={{ request.full_path | urlencode }}" data-learning-transition="module"><span><small>下一章</small><strong>{{ course_outline.next.name or course_outline.next.id }}</strong></span><i class="fas fa-arrow-right" aria-hidden="true"></i></a>{% else %}<a class="is-next" href="/dojo/{{ dojo.reference_id }}/learning" data-learning-transition="progress"><span><small>课程完成</small><strong>查看学习进展</strong></span><i class="fas fa-chart-line" aria-hidden="true"></i></a>{% endif %}
+  </nav>
 
   <br>
   {% endif %}
 
   {% if is_dojo_admin %}
-  <a class="teacher-add-exercise" href="/dojo/{{ dojo.reference_id }}/studio?module={{ module.id | urlencode }}&amp;author=1">
+  <a class="teacher-add-exercise" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}&amp;tab=author&amp;module={{ module.id | urlencode }}">
     <i class="fas fa-plus-circle" aria-hidden="true"></i>
     <span><strong>添加题目</strong><small>直接在此单元中创建并发布新题目。</small></span>
   </a>
@@ -283,24 +317,15 @@
   <p class="text-muted">此单元尚未发布题目。</p>
   {% endif %}
 
-  {% if visible_challenges and module.show_scoreboard %}
-
-  <h2 class="row" id="scoreboard-heading">近 30 天学生排行榜</h2>
-  <p>此排行榜反映该单元中的题目完成情况。</p>
-  {% from "macros/scoreboard.html" import scoreboard %}
-  {{ scoreboard() }}
-
-  {% endif %}
-
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/actionbar.js', v='aisecedu-20260726-score-short-web') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/challenges.js', v='aisecedu-20260726-score-short-web') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-20260726-pwn-notices') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js', v='aisecedu-20260726-guided-workspace') }}"></script>
-<script defer onload="loadScoreboard(30, 1);" src="{{ url_for('views.themes', path='js/dojo/scoreboard.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js', v='aisecedu-student-context-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-module.js', v='aisecedu-course-shell-v1') }}"></script>
 {% if scroll_to_challenge %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {

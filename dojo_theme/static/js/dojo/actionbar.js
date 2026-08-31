@@ -31,14 +31,6 @@ function servicePort(service) {
     return separator < 0 ? "" : value.slice(separator + 1).trim();
 }
 
-function isSimulationService(service) {
-    return serviceName(service) === "simulation";
-}
-
-function exerciseMode(root) {
-    return String(root.attr("data-exercise-mode") || "CONTAINER").toUpperCase();
-}
-
 function isSpecialService(service) {
     const specialServices = ["terminal", "code", "desktop"];
     const specialPorts = ["7681", "8080", "6080"];
@@ -89,14 +81,84 @@ function workspaceLoadingPanel(content) {
     return $(content).closest(".challenge-workspace-surface").find("[data-workspace-loading]").first();
 }
 
+function emitWorkspaceTelemetry(content, stage, result) {
+    if (!content || !window.DojoLearning) return;
+    const key = `${content.dataset.workspaceLoadId || "none"}:${stage}:${result}`;
+    if (content.dataset.workspaceTelemetryKey === key) return;
+    content.dataset.workspaceTelemetryKey = key;
+    const started = Number(content.dataset.workspaceLoadStartedAt) || Date.now();
+    window.DojoLearning.json("POST", "/learning/telemetry", {
+        event: "lab_start_state_changed",
+        properties: {
+            stage,
+            durationMs: Math.max(0, Date.now() - started),
+            result,
+        },
+    }).catch(function () {});
+}
+
+function sessionRemainingLabel(seconds) {
+    const value = Math.max(0, Math.floor(Number(seconds) || 0));
+    if (value <= 0) return "即将自动关闭";
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.max(1, Math.ceil((value % 3600) / 60));
+    return hours ? `剩余 ${hours} 小时 ${minutes} 分钟` : `剩余 ${minutes} 分钟`;
+}
+
+function updateWorkspaceSessionStatus(content, result) {
+    const root = $(content).closest(".challenge-workspace").find(".workspace-controls");
+    const status = root.find("[data-workspace-session-status]");
+    clearInterval(content.workspaceExpiryTimer);
+    if (!status.length || !result || !result.expires_at) {
+        status.prop("hidden", true);
+        return;
+    }
+    const expiresAt = new Date(result.expires_at).getTime();
+    if (!Number.isFinite(expiresAt)) {
+        status.prop("hidden", true);
+        return;
+    }
+    const tick = function () {
+        const seconds = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+        status.prop("hidden", false);
+        status.find("[data-workspace-session-remaining]").text(sessionRemainingLabel(seconds));
+        status.attr(
+            "title",
+            "离开此页面不会停止环境；到时自动关闭，/home/hacker 文件仍会保留。",
+        );
+        if (seconds <= 0) clearInterval(content.workspaceExpiryTimer);
+    };
+    tick();
+    content.workspaceExpiryTimer = setInterval(tick, 30000);
+}
+
 function workspaceModeLabel(service) {
     return {
         terminal: "终端",
         code: "VS Code",
         desktop: "远程桌面",
         web: "Web",
-        simulation: "安全模拟",
     }[serviceName(service)] || serviceName(service) || `端口 ${servicePort(service)}`;
+}
+
+function setWorkspaceStage(panel, stage, title, detail) {
+    const order = ["queued", "container", "service", "interaction"];
+    const index = Math.max(0, order.indexOf(stage));
+    panel.attr("data-stage", stage);
+    panel.find("[data-workspace-loading-title]").text(title);
+    panel.find("[data-workspace-loading-detail]").text(detail);
+    panel.find("[data-workspace-stage]").each(function () {
+        const itemIndex = order.indexOf(this.dataset.workspaceStage);
+        $(this)
+            .toggleClass("is-complete", itemIndex < index)
+            .toggleClass("is-active", itemIndex === index);
+        $(this).find("i").attr("class", itemIndex < index ? "fas fa-check" : itemIndex === index ? "fas fa-circle-notch fa-spin" : {
+            queued: "fas fa-clock",
+            container: "fas fa-box",
+            service: "fas fa-link",
+            interaction: "fas fa-keyboard",
+        }[this.dataset.workspaceStage]);
+    });
 }
 
 function beginWorkspaceLoad(content, service) {
@@ -110,21 +172,29 @@ function beginWorkspaceLoad(content, service) {
     }[serviceName(service)] || 650;
     content.dataset.workspaceLoadSequence = loadId;
     content.dataset.workspaceLoadId = loadId;
+    content.dataset.workspaceLoadStartedAt = String(Date.now());
     content.dataset.workspaceLoadSettle = String(settleDelay);
+    content.dataset.workspaceService = String(service || "");
     content.setAttribute("aria-busy", "true");
+    if (content.workspaceRequestController) content.workspaceRequestController.abort();
     clearTimeout(content.workspaceLoadSlowTimer);
     clearTimeout(content.workspaceLoadReadyTimer);
+    clearTimeout(content.workspaceLoadStageTimer);
     $(content).off("load.workspaceLoading");
-    panel.removeClass("is-error is-stopped").addClass("is-active");
-    panel.find("[data-workspace-loading-title]").text(`正在加载${mode}`);
-    panel.find("[data-workspace-loading-detail]").text(
-        serviceName(service) === "desktop"
-            ? "正在启动远程桌面并准备键盘捕获…"
-            : "正在启动服务并准备你的练习环境…"
-    );
+    panel.removeClass("is-error is-stopped is-cancelled").addClass("is-active");
+    panel.find("[data-workspace-loading-retry]").prop("hidden", true);
+    panel.find("[data-workspace-loading-cancel]").prop("hidden", false);
+    setWorkspaceStage(panel, "queued", "已加入启动队列", `正在确认${mode}所需的运行资源…`);
+    emitWorkspaceTelemetry(content, "queued", "started");
+    content.workspaceLoadStageTimer = setTimeout(function () {
+        if (content.dataset.workspaceLoadId === loadId) {
+            setWorkspaceStage(panel, "container", "正在准备容器", "正在恢复你的 Home 文件并准备隔离运行环境…");
+            emitWorkspaceTelemetry(content, "container", "pending");
+        }
+    }, 350);
     content.workspaceLoadSlowTimer = setTimeout(function () {
         if (content.dataset.workspaceLoadId === loadId) {
-            panel.find("[data-workspace-loading-detail]").text(`${mode} 仍在启动。首次启动可能需要更长时间。`);
+            panel.find("[data-workspace-loading-detail]").text(`${mode}仍在启动。首次拉取环境或恢复文件可能需要更长时间；你可以继续等待或取消本次连接。`);
         }
     }, 8000);
     return loadId;
@@ -133,11 +203,16 @@ function beginWorkspaceLoad(content, service) {
 function finishWorkspaceLoad(content, loadId) {
     if (content.dataset.workspaceLoadId !== loadId) return;
     clearTimeout(content.workspaceLoadSlowTimer);
+    clearTimeout(content.workspaceLoadStageTimer);
     const settleDelay = Number(content.dataset.workspaceLoadSettle) || 650;
+    const panel = workspaceLoadingPanel(content);
+    setWorkspaceStage(panel, "interaction", "正在准备交互", "服务已经连接，正在初始化键盘、剪贴板与显示区域…");
+    emitWorkspaceTelemetry(content, "interaction", "pending");
     content.workspaceLoadReadyTimer = setTimeout(function () {
         if (content.dataset.workspaceLoadId !== loadId) return;
-        workspaceLoadingPanel(content).removeClass("is-active is-error is-stopped");
+        panel.removeClass("is-active is-error is-stopped is-cancelled");
         content.setAttribute("aria-busy", "false");
+        emitWorkspaceTelemetry(content, "interaction", "ready");
         try {
             content.focus({preventScroll: true});
             content.contentWindow.postMessage({type: "aisecedu:focus-remote-keyboard"}, "*");
@@ -242,13 +317,31 @@ window.addEventListener("message", function (event) {
     }
 });
 
-function cancelWorkspaceLoad(content) {
+function cancelWorkspaceLoad(content, options) {
+    const cancelledStage = workspaceLoadingPanel(content).attr("data-stage") || "queued";
     content.dataset.workspaceLoadId = "cancelled";
+    if (content.workspaceRequestController) {
+        content.workspaceRequestController.abort();
+        delete content.workspaceRequestController;
+    }
     clearTimeout(content.workspaceLoadSlowTimer);
     clearTimeout(content.workspaceLoadReadyTimer);
+    clearTimeout(content.workspaceLoadStageTimer);
     $(content).off("load.workspaceLoading");
-    workspaceLoadingPanel(content).removeClass("is-active is-error is-stopped");
+    const panel = workspaceLoadingPanel(content);
+    if (options && options.visible) {
+        panel.removeClass("is-error is-stopped").addClass("is-active is-cancelled");
+        panel.find("[data-workspace-loading-title]").text("已取消本次连接");
+        panel.find("[data-workspace-loading-detail]").text("运行环境不会重复创建；需要时可重新连接当前服务。");
+        panel.find("[data-workspace-loading-retry]").prop("hidden", false);
+        panel.find("[data-workspace-loading-cancel]").prop("hidden", true);
+    } else {
+        panel.removeClass("is-active is-error is-stopped is-cancelled");
+    }
     content.setAttribute("aria-busy", "false");
+    if (!(options && options.silentTelemetry)) {
+        emitWorkspaceTelemetry(content, cancelledStage, "cancelled");
+    }
 }
 
 function showWorkspaceLoadError(content, result, loadId) {
@@ -260,7 +353,10 @@ function showWorkspaceLoadError(content, result, loadId) {
     panel.removeClass("is-stopped").addClass("is-active is-error");
     panel.find("[data-workspace-loading-title]").text("工作区不可用");
     panel.find("[data-workspace-loading-detail]").text(message);
+    panel.find("[data-workspace-loading-retry]").prop("hidden", false);
+    panel.find("[data-workspace-loading-cancel]").prop("hidden", true);
     content.setAttribute("aria-busy", "false");
+    emitWorkspaceTelemetry(content, panel.attr("data-stage") || "service", "failed");
     animateBanner(
         {target: $(content).closest(".challenge-workspace").find(".workspace-controls")[0]},
         message,
@@ -315,9 +411,12 @@ async function copyWorkspaceWebAddress(event) {
 }
 
 function requestWorkspace(url, content, loadId, service) {
+    const controller = new AbortController();
+    content.workspaceRequestController = controller;
     fetch(url, {
         method: "GET",
-        credentials: "same-origin"
+        credentials: "same-origin",
+        signal: controller.signal,
     })
     .then(response => response.json())
     .then(result => {
@@ -330,6 +429,15 @@ function requestWorkspace(url, content, loadId, service) {
         if (result["setPort"]) {
             iframeUrl.port = window.location.port;
         }
+        clearTimeout(content.workspaceLoadStageTimer);
+        setWorkspaceStage(
+            workspaceLoadingPanel(content),
+            "service",
+            `正在连接${workspaceModeLabel(service)}`,
+            "运行环境已准备，正在建立安全服务连接…",
+        );
+        emitWorkspaceTelemetry(content, "service", "pending");
+        updateWorkspaceSessionStatus(content, result);
         $(content).off("load.workspaceLoading").one("load.workspaceLoading", function () {
             finishWorkspaceLoad(content, loadId);
         });
@@ -337,7 +445,13 @@ function requestWorkspace(url, content, loadId, service) {
         content.src = iframeUrl.toString();
     })
     .catch(error => {
+        if (error && error.name === "AbortError") return;
         showWorkspaceLoadError(content, {error: error.message || "工作区请求失败。"}, loadId);
+    })
+    .finally(() => {
+        if (content.workspaceRequestController === controller) {
+            delete content.workspaceRequestController;
+        }
     });
 }
 
@@ -366,7 +480,7 @@ function loadIframe(service, content) {
 
 function workspaceModeUrl(service) {
     const url = new URL("/workspace", window.location.origin);
-    if (isSpecialService(service) || isSimulationService(service)) {
+    if (isSpecialService(service)) {
         url.searchParams.set("service", serviceName(service));
     }
     else {
@@ -416,33 +530,9 @@ function selectService(service, log=true) {
         $(this).toggleClass("active", active);
         $(this).attr("aria-pressed", active ? "true" : "false");
     });
-    if (isSimulationService(service)) {
-        cancelWorkspaceLoad(content);
-        updateWorkspaceWebAddress(content, service, null);
-        content.removeAttribute("src");
-        content.hidden = true;
-        $(content).removeClass("SSH");
-        $(".workspace-ssh").hide();
-        if (!isPopout(root)) {
-            updateWorkspaceModeUrl(service);
-        }
-        if (window.AISecEduSimulation) {
-            window.AISecEduSimulation.activate().catch(function (error) {
-                animateBanner(
-                    {target: root[0]},
-                    error.message || "模拟环境加载失败。",
-                    "error"
-                );
-            });
-        }
-        return;
-    }
-    if (window.AISecEduSimulation) {
-        window.AISecEduSimulation.deactivate();
-    }
     content.hidden = false;
     if (serviceName(service) == "ssh" && servicePort(service) == "") {
-        cancelWorkspaceLoad(content);
+        cancelWorkspaceLoad(content, {silentTelemetry: true});
         updateWorkspaceWebAddress(content, service, null);
         content.removeAttribute("src");
         $(content).addClass("SSH");
@@ -472,7 +562,6 @@ function portedService(root) {
         const candidate = $(this).attr("data-service");
         if (
             service === null &&
-            !isSimulationService(candidate) &&
             servicePort(candidate) !== ""
         ) {
             service = candidate;
@@ -502,16 +591,6 @@ function serviceClickCallback(event) {
         selectService(service);
         return;
     }
-    if (isSimulationService(service)) {
-        const targetUrl = workspaceModeUrl(service);
-        const popout = window.open(targetUrl, "workspace-simulation");
-        if (!popout) {
-            animateBanner(event, "浏览器阻止了新窗口，请允许本站点打开弹窗。", "warn");
-            return;
-        }
-        popout.focus();
-        return;
-    }
     if (servicePort(service) === "") {
         if (portedService(context(event))) {
             toggleSshInstructions(context(event));
@@ -534,7 +613,7 @@ function animateBanner(event, message, type, action) {
         warn: "var(--warn)"
     }[type] ?? "var(--warn)";
     const animation = type === "success" ? "animate-banner" : "animate-banner-fast";
-    const banner = context(event).find("#workspace-notification-banner").first();
+    const banner = context(event).find(".workspace-notification-banner").first();
 
     if (!banner.length) return;
     banner.removeClass("animate-banner animate-banner-fast");
@@ -555,7 +634,7 @@ function animateBanner(event, message, type, action) {
 }
 
 function setFlagSubmitting(root, submitting) {
-    const input = root.find("#flag-input");
+    const input = root.find(".flag-input");
     input.data("submitting", submitting);
     input.prop("disabled", submitting).toggleClass("disabled", submitting);
     root.find(".input-icon")
@@ -580,7 +659,7 @@ function challengeAttemptWithTimeout(challengeId, submission) {
 
 function actionSubmitFlag(event) {
     const root = context(event);
-    const input = root.find("#flag-input");
+    const input = root.find(".flag-input");
     const submission = String(input.val() || "").trim();
 
     if (input.data("submitting") || !/^pwn\.college\{[^}\r\n]+\}$/.test(submission)) {
@@ -592,7 +671,7 @@ function actionSubmitFlag(event) {
         return;
     }
 
-    const challengeId = Number(root.find("#current-challenge-id").val());
+    const challengeId = Number(root.find(".current-challenge-id").val());
     if (!Number.isInteger(challengeId) || challengeId < 1) {
         animateBanner(event, "无法识别当前题目，请刷新页面后重试。", "error");
         return;
@@ -602,7 +681,7 @@ function actionSubmitFlag(event) {
     return challengeAttemptWithTimeout(challengeId, submission)
     .then(function (response) {
         const result = response && response.data ? response.data : response;
-        const challengeName = root.find("#current-challenge-id").attr("data-challenge-name") || "当前题目";
+        const challengeName = root.find(".current-challenge-id").attr("data-challenge-name") || "当前题目";
         const safeChallengeName = $("<div>").text(challengeName).html();
 
         if (!result || !result.status) {
@@ -665,8 +744,8 @@ function actionSubmitFlag(event) {
 }
 
 function sendChallengeInfo(root, channel) {
-    const challenge = root.find("#current-challenge-id");
-    const privilege = root.find("#workspace-change-privilege");
+    const challenge = root.find(".current-challenge-id");
+    const privilege = root.find(".workspace-change-privilege");
 
     const challengeData = {
         "challenge-id": challenge.prop("value"),
@@ -688,10 +767,10 @@ function actionbarIsRunning(root) {
 
 function setActionbarRunning(root, running) {
     root.attr("data-workspace-running", running ? "true" : "false");
-    root.find(".workspace-service, #flag-input").prop("disabled", !running);
-    root.find("#challenge-stop, #challenge-reset").prop("disabled", !running);
-    root.find("#workspace-change-privilege input").prop("disabled", !running);
-    root.find("#challenge-restart").prop("disabled", false);
+    root.find(".workspace-service, .flag-input").prop("disabled", !running);
+    root.find(".challenge-stop, .challenge-reset").prop("disabled", !running);
+    root.find(".workspace-change-privilege input").prop("disabled", !running);
+    root.find(".challenge-restart").prop("disabled", false);
 }
 
 function setActionbarBusy(root, busy) {
@@ -699,7 +778,7 @@ function setActionbarBusy(root, busy) {
         .toggleClass("disabled", busy)
         .toggleClass("btn-disabled", busy)
         .prop("disabled", busy);
-    root.find("#workspace-change-privilege input").prop(
+    root.find(".workspace-change-privilege input").prop(
         "disabled",
         busy || !actionbarIsRunning(root)
     );
@@ -708,27 +787,8 @@ function setActionbarBusy(root, busy) {
     }
 }
 
-function updateSimulationRun(root, result) {
-    if (!result || !result.simulationRunId) return;
-    root.attr("data-simulation-run-id", result.simulationRunId);
-    const simulation = root
-        .closest(".challenge-workspace")
-        .find("[data-simulation-workspace]")
-        .first();
-    simulation.attr("data-run-id", result.simulationRunId);
-    if (window.AISecEduSimulation && simulation.length) {
-        window.AISecEduSimulation.reload().catch(function (error) {
-            animateBanner(
-                {target: root[0]},
-                error.message || "新的模拟运行加载失败。",
-                "error"
-            );
-        });
-    }
-}
-
 function challengeLaunchParameters(root, privileged) {
-    const challenge = root.find("#current-challenge-id");
+    const challenge = root.find(".current-challenge-id");
     const embedded = {
         dojo: challenge.attr("data-dojo-id"),
         module: challenge.attr("data-module-id"),
@@ -767,7 +827,7 @@ function challengeLaunchParameters(root, privileged) {
 
 function actionStartChallenge(event, privileged) {
     const root = context(event);
-    const privilegeControl = root.find("#workspace-change-privilege");
+    const privilegeControl = root.find(".workspace-change-privilege");
     if (privileged === undefined) {
         privileged = privilegeControl.attr("data-privileged") === "true";
     }
@@ -808,18 +868,13 @@ function actionStartChallenge(event, privileged) {
             privilegeControl.find("input").prop("checked", privileged);
 
             setActionbarRunning(root, true);
-            updateSimulationRun(root, result);
             refreshWorkspace(root);
             postStartChallenge(event, channel);
             window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
             setActionbarBusy(root, false);
             animateBanner(
                 event,
-                exerciseMode(root) === "SIMULATION"
-                    ? "已创建新的模拟运行，历史回放仍然保留。"
-                    : exerciseMode(root) === "HYBRID"
-                    ? "混合题运行环境与模拟状态已重新创建，Home 文件已保留。"
-                    : "题目容器已重新创建，/home/hacker 文件已保留。",
+                "题目容器已重新创建，/home/hacker 文件已保留。",
                 "success"
             );
         });
@@ -831,26 +886,15 @@ function actionStartChallenge(event, privileged) {
 async function actionStartCallback(event) {
     event.preventDefault();
     const root = context(event);
-    const mode = exerciseMode(root);
     const running = actionbarIsRunning(root);
     const confirmed = await confirmWorkspaceAction(
-        mode === "SIMULATION"
-            ? running
-                ? "当前模拟运行会结束并保留为回放记录，新运行将从场景初始状态开始。"
-                : "将从场景初始状态创建一份新的模拟运行。"
-            : running
+        running
             ? "当前题目运行环境会被替换，正在运行的进程和未写入 /home/hacker 的修改将丢失；Home 文件会保留。"
             : "将重新创建当前题目运行环境，已有的 /home/hacker 文件会继续保留。",
         {
-            title: mode === "SIMULATION"
-                ? running ? "重新开始模拟" : "启动模拟"
-                : running ? "重启题目环境" : "重新启动题目环境",
-            subtitle: mode === "SIMULATION"
-                ? "保留历史，创建全新的场景状态"
-                : "保留 Home，重新创建运行环境",
-            confirmLabel: mode === "SIMULATION"
-                ? running ? "重新开始" : "启动模拟"
-                : running ? "确认重启" : "启动环境",
+            title: running ? "重启题目环境" : "重新启动题目环境",
+            subtitle: "保留 Home，重新创建运行环境",
+            confirmLabel: running ? "确认重启" : "启动环境",
         }
     );
     if (!confirmed) return;
@@ -879,27 +923,22 @@ async function privilegeChangeCallback(event) {
 
 function showWorkspaceStopped(root) {
     const content = workspaceIframe(root);
-    const mode = exerciseMode(root);
-    if (window.AISecEduSimulation) {
-        window.AISecEduSimulation.deactivate();
-    }
     if (content) {
-        cancelWorkspaceLoad(content);
+        cancelWorkspaceLoad(content, {silentTelemetry: true});
         content.removeAttribute("src");
         content.hidden = false;
         const panel = workspaceLoadingPanel(content);
         panel.removeClass("is-error").addClass("is-active is-stopped");
-        panel.find("[data-workspace-loading-title]").text(
-            mode === "SIMULATION" ? "模拟运行已停止" : "题目运行环境已停止"
-        );
+        panel.find("[data-workspace-loading-title]").text("题目运行环境已停止");
         panel.find("[data-workspace-loading-detail]").text(
-            mode === "SIMULATION"
-                ? "本轮事件和状态快照已保留。点击“重新开始”可创建新的模拟运行。"
-                : "/home/hacker 文件仍然保留。点击“重启”可重新创建题目运行环境。"
+            "/home/hacker 文件仍然保留。点击“重启”可重新创建题目运行环境。"
         );
+        panel.find("[data-workspace-loading-retry], [data-workspace-loading-cancel]").prop("hidden", true);
     }
     root.find(".workspace-service").removeClass("active").attr("aria-pressed", "false");
     root.find("[data-workspace-web-address]").prop("hidden", true);
+    if (content) clearInterval(content.workspaceExpiryTimer);
+    root.find("[data-workspace-session-status]").prop("hidden", true);
     setDesktopClipboardControls(root, false);
 }
 
@@ -917,16 +956,11 @@ function collapseEmbeddedWorkspace(root) {
 async function actionStopCallback(event) {
     event.preventDefault();
     const root = context(event);
-    const mode = exerciseMode(root);
     const confirmed = await confirmWorkspaceAction(
-        mode === "SIMULATION"
-            ? "当前模拟运行会结束，但事件链、状态快照与评分证据会保留，之后可以重新开始。"
-            : "运行中的进程以及未写入 /home/hacker 的容器修改会丢失，Home 文件会保留。停止后可再次启动题目。",
+        "运行中的进程以及未写入 /home/hacker 的容器修改会丢失，Home 文件会保留。停止后可再次启动题目。",
         {
-            title: mode === "SIMULATION" ? "停止模拟运行" : "停止题目运行环境",
-            subtitle: mode === "SIMULATION"
-                ? "保留回放，结束当前场景"
-                : "保留 Home，结束当前运行环境",
+            title: "停止题目运行环境",
+            subtitle: "保留 Home，结束当前运行环境",
             confirmLabel: "确认停止",
             confirmStyle: "warning",
         }
@@ -962,9 +996,7 @@ async function actionStopCallback(event) {
         window.dispatchEvent(new CustomEvent("dojo:workspace-stopped"));
         animateBanner(
             event,
-            mode === "SIMULATION"
-                ? "模拟运行已停止，回放与评分证据已保留。"
-                : "题目运行环境已停止，/home/hacker 文件已保留。",
+            "题目运行环境已停止，/home/hacker 文件已保留。",
             "success"
         );
         window.setTimeout(() => collapseEmbeddedWorkspace(root), 180);
@@ -978,19 +1010,14 @@ async function actionStopCallback(event) {
 async function actionResetCallback(event) {
     event.preventDefault();
     const root = context(event);
-    const mode = exerciseMode(root);
     const confirmed = await confirmWorkspaceAction(
-        mode === "SIMULATION"
-            ? "当前模拟运行会结束并保留为历史记录；新的运行将从题目定义的初始状态开始。"
-            : "这会永久清除 /home/hacker 与当前容器中的全部修改，然后从题目初始状态重新创建运行环境。此操作无法撤销。",
+        "这会永久清除 /home/hacker 与当前容器中的全部修改，然后从题目初始状态重新创建运行环境。此操作无法撤销。",
         {
-            title: mode === "SIMULATION" ? "重置模拟状态" : "彻底重置题目",
-            subtitle: mode === "SIMULATION"
-                ? "历史可回放，状态从头开始"
-                : "Home 文件也会被清除",
-            confirmLabel: mode === "SIMULATION" ? "确认重置" : "清除并重置",
-            confirmStyle: mode === "SIMULATION" ? "warning" : "danger",
-            kind: mode === "SIMULATION" ? "warning" : "danger",
+            title: "彻底重置题目",
+            subtitle: "Home 文件也会被清除",
+            confirmLabel: "清除并重置",
+            confirmStyle: "danger",
+            kind: "danger",
         }
     );
     if (!confirmed) return;
@@ -1014,15 +1041,12 @@ async function actionResetCallback(event) {
             return;
         }
         setActionbarRunning(root, true);
-        updateSimulationRun(root, result);
         refreshWorkspace(root);
         postStartChallenge(event, channel);
         window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
         animateBanner(
             event,
-            mode === "SIMULATION"
-                ? "模拟场景已恢复到初始状态。"
-                : "题目已恢复到初始状态。",
+            "题目已恢复到初始状态。",
             "success"
         );
     }).catch(function () {
@@ -1066,10 +1090,6 @@ function refreshWorkspace(root) {
     }
     var active = root.find(".workspace-service.active").attr("data-service");
     if (active) {
-        if (isSimulationService(active) && window.AISecEduSimulation) {
-            window.AISecEduSimulation.reload();
-            return;
-        }
         selectService(active, false);
     }
     else {
@@ -1079,34 +1099,45 @@ function refreshWorkspace(root) {
 
 const channel = new BroadcastChannel("Challenge-Sync-Channel");
 $(() => {
+    $(document).on("click", "[data-workspace-loading-retry]", function () {
+        const panel = $(this).closest("[data-workspace-loading]");
+        const content = panel.closest(".challenge-workspace-surface").find("#workspace-iframe")[0];
+        const service = content && content.dataset.workspaceService;
+        if (content && service) loadIframe(service, content);
+    });
+    $(document).on("click", "[data-workspace-loading-cancel]", function () {
+        const panel = $(this).closest("[data-workspace-loading]");
+        const content = panel.closest(".challenge-workspace-surface").find("#workspace-iframe")[0];
+        if (content) cancelWorkspaceLoad(content, {visible: true});
+    });
     loadWorkspace();
     $(".workspace-controls").each(function () {
         setActionbarRunning($(this), true);
         $(this).find(".workspace-service").click(serviceClickCallback);
 
-        $(this).find("#flag-input").on("input", function(event) {
+        $(this).find(".flag-input").on("input", function(event) {
             event.preventDefault();
             if ($(this).val().match(/pwn.college{.*}/)) {
                 actionSubmitFlag(event);
             }
         });
-        $(this).find("#flag-input").on("keyup", function(event) {
+        $(this).find(".flag-input").on("keyup", function(event) {
             if (event.key === "Enter") {
                 actionSubmitFlag(event);
             }
         });
 
         $(this).find(".btn-challenge-start").click(actionStartCallback);
-        $(this).find("#challenge-stop").click(actionStopCallback);
-        $(this).find("#challenge-reset").click(actionResetCallback);
+        $(this).find(".challenge-stop").click(actionStopCallback);
+        $(this).find(".challenge-reset").click(actionResetCallback);
 
-        $(this).find("#workspace-change-privilege input").on("change", privilegeChangeCallback);
+        $(this).find(".workspace-change-privilege input").on("change", privilegeChangeCallback);
 
         $(this).find("[data-clipboard-action='paste']").on("click", pasteDesktopClipboard);
         $(this).find("[data-clipboard-action='copy']").on("click", copyDesktopClipboard);
         $(this).find("[data-workspace-web-copy]").on("click", copyWorkspaceWebAddress);
 
-        $(this).find("#fullscreen").click((event) => {
+        $(this).find(".workspace-fullscreen").click((event) => {
             event.preventDefault();
             doFullscreen(event);
         })

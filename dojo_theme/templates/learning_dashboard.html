@@ -1,138 +1,73 @@
 {% extends "base.html" %}
 
+{% block body_class %}learning-analysis-page{% endblock %}
+
 {% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1 class="brand-white brand-mono-bold">{{ dojo.name or dojo.id }}<span class="brand-dot">.</span></h1>
-    <br>
-    <h2 class="brand-white">学习分析</h2>
+<div id="learning-dashboard" class="learning-analysis-shell" data-dojo-id="{{ dojo.reference_id }}">
+  <nav class="course-breadcrumbs" aria-label="面包屑"><a href="/student">今天</a><i class="fas fa-chevron-right"></i><a href="/{{ dojo.reference_id }}">{{ dojo.name or dojo.id }}</a><i class="fas fa-chevron-right"></i><span>学习进展</span></nav>
+
+  <header class="learning-analysis-header product-surface">
+    <div><span class="product-kicker">可核验学习状态</span><h1>{{ dojo.name or dojo.id }}</h1><p>用完成事实、过程证据和评估结果决定下一步，而不是用页面浏览量推测学习。</p></div>
+    <div class="product-header-actions">
+      <a class="product-button" href="/{{ dojo.reference_id }}"><i class="fas fa-book-open"></i>返回课程</a>
+      {% if dojo.is_admin() %}<a class="product-button is-primary" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}&amp;tab=students"><i class="fas fa-chart-line"></i>教师学情</a>{% else %}<a class="product-button is-primary" href="/guide"><i class="fas fa-comment-dots"></i>让 AI 帮我分析</a>{% endif %}
+    </div>
+  </header>
+
+  <div id="learning-dashboard-notice" class="learning-analysis-notice" role="status" hidden></div>
+
+  <section class="learning-summary-grid" aria-label="学习摘要">
+    <article class="product-surface"><span><i class="fas fa-list-check"></i></span><div><small>活动进度</small><strong id="learning-progress-percent">正在读取</strong><em id="learning-progress-value">按必修学习条件计算</em></div></article>
+    <article class="product-surface"><span><i class="fas fa-shapes"></i></span><div><small>能力掌握</small><strong id="learning-mastery-summary">正在读取</strong><em id="learning-mastery-detail">需要多次学习证据支持</em></div></article>
+    <article class="product-surface"><span><i class="fas fa-clipboard-check"></i></span><div><small>本次评分</small><strong id="learning-assessment-summary">正在读取</strong><em id="learning-assessment-detail">只表示单次作答结果</em></div></article>
+    <article class="product-surface"><span><i class="fas fa-fingerprint"></i></span><div><small>证据完整性</small><strong id="learning-evidence-summary">正在读取</strong><em id="learning-evidence-detail">只说明过程是否可复核</em></div></article>
+  </section>
+
+  <nav class="learning-analysis-tabs" id="learning-dashboard-tabs" role="tablist" aria-label="学习分析视图">
+    <a class="active" data-toggle="tab" href="#learning-path" role="tab" aria-selected="true"><i class="fas fa-compass"></i>下一步</a>
+    <a data-toggle="tab" href="#learning-skills" role="tab" aria-selected="false"><i class="fas fa-shapes"></i>能力掌握</a>
+    <a data-toggle="tab" href="#learning-attempts" role="tab" aria-selected="false"><i class="fas fa-history"></i>学习记录</a>
+  </nav>
+
+  <div class="tab-content learning-analysis-content">
+    <section id="learning-path" class="tab-pane fade show active" role="tabpanel">
+      <div class="product-section-heading"><div><span class="product-kicker">推荐</span><h2>下一项最值得完成的实训</h2><p>结合前置关系、完成状态、能力与近期尝试排序。</p></div></div>
+      <ul id="learning-recommendations" class="learning-analysis-list"><li class="learning-analysis-loading"><span></span><p>正在根据真实学习证据生成下一步建议…</p></li></ul>
+      <div id="learning-recommendations-empty" class="learning-analysis-empty" hidden>本课程暂时没有未完成的推荐题目。</div>
+    </section>
+
+    <section id="learning-skills" class="tab-pane fade" role="tabpanel">
+      <div class="product-section-heading"><div><span class="product-kicker">能力证据</span><h2>六维能力画像</h2><p>能力变化必须能回到具体实训、证据与评估。</p></div></div>
+      <div id="learning-skills-list" class="learning-skill-grid"><div class="learning-analysis-loading"><span></span><p>正在汇总能力证据…</p></div></div>
+    </section>
+
+    <section id="learning-attempts" class="tab-pane fade" role="tabpanel">
+      <div class="product-section-heading"><div><span class="product-kicker">过程回放</span><h2>尝试与证据记录</h2><p>打开一条记录查看事件链、复盘与智能评估。</p></div></div>
+      <div class="learning-table-wrap product-surface"><table class="learning-analysis-table"><thead><tr><th>题目</th><th>章节</th><th>会话</th><th>状态</th><th>得分</th><th>开始时间</th></tr></thead><tbody id="learning-attempt-list"><tr><td colspan="6">正在载入尝试与证据…</td></tr></tbody></table></div>
+      <div id="learning-attempts-empty" class="learning-analysis-empty" hidden>启动一个题目即可创建第一条学习尝试记录。</div>
+    </section>
+
+    <ul id="learning-catalog-list" hidden aria-hidden="true"></ul>
   </div>
 </div>
 
-<div id="learning-dashboard" class="container" data-dojo-id="{{ dojo.reference_id }}">
-  <div class="row text-center">
-    <div class="col-lg-auto m-3">
-      <figure>
-        <a class="text-decoration-none" href="/{{ dojo.reference_id }}">
-          <i class="fas fa-torii-gate fa-3x"></i>
-          <figcaption><b>课程</b></figcaption>
-        </a>
-      </figure>
-    </div>
-    {% if dojo.is_admin() %}
-    <div class="col-lg-auto m-3">
-      <figure>
-        <a class="text-decoration-none" href="/dojo/{{ dojo.reference_id }}/studio">
-          <i class="fas fa-chalkboard-teacher fa-3x"></i>
-          <figcaption><b>教师工作台</b></figcaption>
-        </a>
-      </figure>
-    </div>
-    {% endif %}
-  </div>
-
-  <div id="learning-dashboard-notice" role="status" hidden></div>
-
-  <h2 class="row">学习状态</h2>
-  <div class="stats-dashboard">
-    <div class="stat-card">
-      <div class="stat-card-header">课程进度</div>
-      <div class="stat-container">
-        <div class="stat-box">
-          <div class="stat-label">必修题目</div>
-          <div id="learning-progress-value" class="stat-value">0 / 0</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">完成度</div>
-          <div id="learning-progress-percent" class="stat-value">0%</div>
-        </div>
-      </div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-card-header">证据标准</div>
-      <p class="m-0">通过哈希链关联 S1–S4 事件，让运行时观察、Tutor 交互、复盘和 Flag 校验都可复核。</p>
-    </div>
-    <div class="stat-card">
-      <div class="stat-card-header">评估标准</div>
-      <p class="m-0">客观结果：60 分。<br>可信过程：40 分。</p>
-    </div>
-  </div>
-
-  <br>
-  <ul class="nav nav-tabs" id="learning-dashboard-tabs" role="tablist">
-    <li class="nav-item"><a class="nav-link active" data-toggle="tab" href="#learning-path" role="tab">推荐路径</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-skills" role="tab">能力</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-attempts" role="tab">尝试记录</a></li>
-    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#learning-catalog" role="tab">题目目录</a></li>
-  </ul>
-
-  <div class="tab-content pt-4">
-    <div id="learning-path" class="tab-pane fade show active" role="tabpanel">
-      <h2>推荐的下一道题目</h2>
-      <ul id="learning-recommendations" class="card-list"></ul>
-      <div id="learning-recommendations-empty" class="alert alert-info" hidden>本课程暂时没有未完成的推荐题目。</div>
-    </div>
-
-    <div id="learning-skills" class="tab-pane fade" role="tabpanel">
-      <h2>六维能力画像</h2>
-      <div id="learning-skills-list" class="row"></div>
-    </div>
-
-    <div id="learning-attempts" class="tab-pane fade" role="tabpanel">
-      <h2>有证据支撑的尝试记录</h2>
-      <div class="table-responsive">
-        <table class="table table-striped">
-          <thead><tr><th>题目</th><th>单元</th><th>会话</th><th>状态</th><th>得分</th><th>开始时间</th></tr></thead>
-          <tbody id="learning-attempt-list"></tbody>
-        </table>
-      </div>
-      <div id="learning-attempts-empty" class="alert alert-info" hidden>启动一个题目即可创建第一条学习尝试记录。</div>
-    </div>
-
-    <div id="learning-catalog" class="tab-pane fade" role="tabpanel">
-      <h2>课程题目目录</h2>
-      <ul id="learning-catalog-list" class="card-list"></ul>
-    </div>
-  </div>
-</div>
-
-<div id="learning-attempt-modal" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="learning-attempt-title" aria-hidden="true">
+<div id="learning-attempt-modal" class="modal fade learning-attempt-modal" tabindex="-1" role="dialog" aria-labelledby="learning-attempt-title" aria-hidden="true">
   <div class="modal-dialog modal-xl" role="document">
-    <div class="modal-content bg-dark text-white">
-      <div class="modal-header">
-        <div>
-          <h2 id="learning-attempt-title" class="modal-title">学习尝试记录</h2>
-          <small id="learning-attempt-meta"></small>
-        </div>
-        <button type="button" class="close text-white" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
-      </div>
+    <div class="modal-content">
+      <div class="modal-header"><div><span class="product-kicker">学习证据</span><h2 id="learning-attempt-title" class="modal-title">尝试记录</h2><small id="learning-attempt-meta"></small></div><button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button></div>
       <div class="modal-body">
         <div id="learning-attempt-notice" role="status" hidden></div>
         <div class="row">
           <div class="col-lg-6">
-            <h3>证据时间线</h3>
-            <p id="learning-evidence-chain"></p>
-            <div class="table-responsive" style="max-height: 18rem; overflow: auto;">
-              <table class="table table-sm table-striped"><tbody id="learning-evidence-list"></tbody></table>
-            </div>
-            <h3>复盘与评估</h3>
-            <textarea id="learning-reflection" class="form-control" rows="7" placeholder="说明你的初始判断、验证过的假设、关键证据、根因和修复建议。"></textarea>
+            <h3>证据时间线</h3><p id="learning-evidence-chain"></p>
+            <div class="learning-evidence-scroll"><table class="table table-sm"><tbody id="learning-evidence-list"></tbody></table></div>
+            <h3>复盘</h3><textarea id="learning-reflection" class="form-control" rows="7" placeholder="说明你的初始判断、验证过的假设、关键证据、根因和修复建议。"></textarea>
             <button id="learning-reflection-submit" type="button" class="btn btn-primary mt-3">保存并重新评估</button>
           </div>
           <div class="col-lg-6">
-            <h3>评估</h3>
+            <h3>评估与反馈</h3>
             <div id="learning-assessment-empty" class="alert alert-info">提交复盘后即可生成评估。</div>
-            <div id="learning-assessment" hidden>
-              <h2 id="learning-assessment-score"></h2>
-              <p id="learning-assessment-summary"></p>
-              <div id="learning-assessment-agent" class="learning-assessment-agent"></div>
-              <p id="learning-assessment-feedback"></p>
-              <div id="learning-assessment-criteria"></div>
-              <hr>
-              <h3>申请复核</h3>
-              <textarea id="learning-appeal-reason" class="form-control" rows="4" placeholder="指出需要复核的证据或评分标准。"></textarea>
-              <button id="learning-appeal-submit" type="button" class="btn btn-outline-secondary mt-3">提交复核申请</button>
-            </div>
+            <div id="learning-assessment" hidden><h2 id="learning-assessment-score"></h2><p id="learning-assessment-feedback-summary"></p><div id="learning-assessment-agent" class="learning-assessment-agent"></div><p id="learning-assessment-feedback"></p><div id="learning-assessment-criteria"></div><hr><h3>申请复核</h3><textarea id="learning-appeal-reason" class="form-control" rows="4" placeholder="指出需要复核的证据或评分标准。"></textarea><button id="learning-appeal-submit" type="button" class="btn btn-outline-secondary mt-3">提交复核申请</button></div>
           </div>
         </div>
       </div>
@@ -141,7 +76,9 @@
 </div>
 {% endblock %}
 
+{% block footer %}{% endblock %}
+
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-20260726-pwn-notices') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-dashboard.js', v='aisecedu-20260726-pwn-notices') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-dashboard.js', v='aisecedu-learning-analysis-v2') }}"></script>
 {% endblock %}

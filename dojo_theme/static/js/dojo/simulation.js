@@ -619,6 +619,11 @@
 
     document.addEventListener("DOMContentLoaded", () => {
         root = document.querySelector("[data-simulation-workspace]");
+        if (!root) return;
+        document.documentElement.classList.add("scenario-runner-active");
+        activate().catch(error => {
+            showObservation(error.message || "情境题暂时无法载入。", "error");
+        });
     });
 
     window.AISecEduSimulation = {

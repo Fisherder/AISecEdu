@@ -1,148 +1,264 @@
 {% extends "base.html" %}
-{% from "macros/widgets.html" import accordion_item %}
+
+{% block body_class %}profile-page{% endblock %}
+
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/account-settings.css', v='aisecedu-profile-v3-readability-v1') }}">
+{% endblock %}
 
 {% block content %}
-  <div class="jumbotron">
-    <div class="container">
-      <h1 class="brand-mono">{{ user.name }}</h1>
-      <p><a href="{{ url_for('pwncollege_belts.view_belts') }}"><i class="fas fa-award mr-2"></i>查看 AISecEdu 成就</a></p>
-      <h2>
-        {% for badge in badges[user.id] %}
-        <span title="{{badge.text}}" {% if badge.stale %}style="opacity: 0.4; filter: grayscale(100%);"{% endif %}>
-          <a href="{{badge.url}}">{{badge.emoji}}</a>
-          </span><span>
-        </span>
-        {% endfor %}
-      </h2>
-
-
-      {% if user.affiliation %}
-        <h3 class="d-inline-block">
-          <span class="badge badge-primary">{{ user.affiliation }}</span>
-        </h3>
-      {% endif %}
-
-      {% if user.country %}
-        <h3 class="d-inline-block">
-          <span class="badge badge-primary">
-            <i class="flag-{{ user.country.lower() }}"></i>
-            {{ lookup_country_code(user.country) }}
+{% set is_self_profile = request.path == url_for('pwncollege_users.view_self') %}
+{% set user_badges = badges[user.id] if user.id in badges else [] %}
+{% set profile = profile_overview %}
+<div class="profile-page-shell">
+  <header class="profile-hero" aria-labelledby="profile-title">
+    <div class="profile-hero-main">
+      <div class="profile-avatar-wrap">
+        <span class="profile-avatar" aria-hidden="true">{{ user.name[:1] | upper }}</span>
+        <span class="profile-role-icon" title="{{ profile.role }}"><i class="fas {{ 'fa-chalkboard-teacher' if profile.role == '教师' else 'fa-user-graduate' }}" aria-hidden="true"></i></span>
+      </div>
+      <div class="profile-identity">
+        <div class="profile-eyebrow">
+          <span class="profile-kicker">{{ '我的学习档案' if is_self_profile else '学习者档案' }}</span>
+          {% if is_self_profile %}
+          <span class="profile-visibility {{ 'is-private' if user.hidden else 'is-public' }}">
+            <i class="fas {{ 'fa-lock' if user.hidden else 'fa-globe-asia' }}" aria-hidden="true"></i>
+            {{ '仅自己可见' if user.hidden else '公开资料' }}
           </span>
-        </h3>
-      {% endif %}
-
-      {% for field in user.fields %}
-        <h3 class="d-block">
-          {{ field.name }}: {{ field.value }}
-        </h3>
-      {% endfor %}
-
-      <div class="pt-3">
-        {% if user.website %}
-          <a href="{{ user.website }}" target="_blank" style="color: inherit;" rel="noopener">
-            <i class="fas fa-external-link-alt fa-2x px-2" data-toggle="tooltip" data-placement="top"
-               title="{{ user.website }}"></i>
-          </a>
+          {% endif %}
+        </div>
+        <h1 id="profile-title">{{ user.name }}</h1>
+        <p class="profile-headline">{{ profile.role_description }}</p>
+        <div class="profile-meta" aria-label="个人资料摘要">
+          <span><i class="fas fa-id-badge" aria-hidden="true"></i>{{ profile.role }}</span>
+          {% if user.affiliation %}<span><i class="fas fa-university" aria-hidden="true"></i>{{ user.affiliation }}</span>{% endif %}
+          {% if user.country %}<span><i class="flag-{{ user.country.lower() }}" aria-hidden="true"></i>{{ lookup_country_code(user.country) }}</span>{% endif %}
+          {% if profile.teaching_course_count %}<span><i class="fas fa-book-open" aria-hidden="true"></i>管理 {{ profile.teaching_course_count }} 门课程</span>{% endif %}
+          <span><i class="fas fa-clock" aria-hidden="true"></i>最近学习 {{ profile.last_activity }}</span>
+        </div>
+        {% if user.fields %}
+        <div class="profile-fields">
+          {% for field in user.fields %}<span><strong>{{ field.name }}：</strong>{{ field.value }}</span>{% endfor %}
+        </div>
         {% endif %}
       </div>
     </div>
-    <div class="social-share">
-      {% if request.path == url_for('pwncollege_users.view_self') %}
-      <a href="https://linkedin.com/share?url={{ url_for('pwncollege_users.view_other', user_id=user.id, _external=True) }}"
-          class="share-button"
-          target="_blank"
-          aria-label="分享到 LinkedIn">
-          <img src="{{ url_for('views.themes', path='img/dojo/linkedin_logo.svg') }}">
-          <span title="分享到 LinkedIn"></span>分享
-      </a>
-      <a href="https://twitter.com/intent/tweet?url={{ url_for('pwncollege_users.view_other', user_id=user.id, _external=True) }}" 
-          class="share-button"
-          target="_blank"
-          aria-label="分享到 X">
-          <img src="{{ url_for('views.themes', path='img/dojo/x_logo.svg') }}">
-          <span title="分享到 X"></span>分享
-      </a>
+
+    <div class="profile-actions">
+      {% if is_self_profile %}
+      <a class="profile-action is-primary" href="{{ url_for('views.settings') }}#profile"><i class="fas fa-pen" aria-hidden="true"></i>编辑个人资料</a>
       {% endif %}
+      <a class="profile-action" href="{{ url_for('pwncollege_belts.view_belts') }}"><i class="fas fa-award" aria-hidden="true"></i>查看全部成就</a>
+      {% if user.website %}<a class="profile-action is-icon" href="{{ user.website }}" target="_blank" rel="noopener" aria-label="访问个人网站" title="访问个人网站"><i class="fas fa-external-link-alt" aria-hidden="true"></i></a>{% endif %}
     </div>
-      <div id="activity-tracker" user-id="{{ user.id }}"></div> 
-  </div>
-  <script defer src="{{ url_for('views.themes', path='js/dojo/activity.js') }}"></script>
-  {% block scripts %}
-  {% endblock %}
-  
-  <div class="container">
-    {% for dojo in dojos if dojo_scores.user_ranks[user.id] and dojo_scores.user_ranks[user.id][dojo.id] %}
-      {% set rank = dojo_scores.user_ranks[user.id][dojo.id] %}
-      {% set max_rank = dojo_scores.dojo_ranks[dojo.id] | length %}
-      {% set solves = dojo_scores.user_solves[user.id][dojo.id] %}
-      <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.listing', dojo=dojo.reference_id) }}">
-        <h2>{{ dojo.name }}</h2>
-        <h4>
-          <i class="fas fa-flag pt-3 pr-3" title="已完成题目"></i>
-          <td>{{ solves }} / {{ dojo.challenges | length }}</td>
-          <i class="fas fa-trophy pt-3 pr-3 pl-5 " title="排名"></i>
-          <td>{{ rank or "-" }} / {{ max_rank or "-" }}</td>
-        </h4>
-      </a>
 
-      <br>
+    <div class="profile-stat-grid" aria-label="学习概览">
+      <article>
+        <span><i class="fas fa-check" aria-hidden="true"></i></span>
+        <div><strong>{{ profile.solved_count }}</strong><small>已完成题目</small></div>
+        <em>{{ profile.completion_rate }}% 总体进度</em>
+      </article>
+      <article>
+        <span><i class="fas fa-layer-group" aria-hidden="true"></i></span>
+        {% if profile.role == '教师' %}
+        <div><strong>{{ profile.teaching_course_count }}</strong><small>教学课程</small></div>
+        <em>{{ profile.course_count }} 门参与学习</em>
+        {% else %}
+        <div><strong>{{ profile.course_count }}</strong><small>参与课程</small></div>
+        <em>{{ profile.completed_course_count }} 门已完成</em>
+        {% endif %}
+      </article>
+      <article>
+        <span><i class="fas fa-calendar-check" aria-hidden="true"></i></span>
+        <div><strong id="profile-stat-active-days">{{ profile.active_days }}</strong><small>年度活跃天数</small></div>
+        <em>过去 12 个月</em>
+      </article>
+      <article>
+        <span><i class="fas fa-fire" aria-hidden="true"></i></span>
+        <div><strong id="profile-stat-streak">{{ profile.current_streak }}</strong><small>连续学习天数</small></div>
+        <em>最长 {{ profile.best_streak }} 天</em>
+      </article>
+    </div>
+  </header>
 
-      <div class="accordion" id="modules-{{dojo.hex_dojo_id}}">
-        {% for module in dojo.modules %}
-          {% set solves = module_scores.user_solves[user.id][dojo.id][module.module_index] %}
-          {% set rank = module_scores.user_ranks[user.id][dojo.id][module.module_index] %}
-          {% set max_rank = module_scores.module_ranks[dojo.id][module.module_index] | length %}
-          {% call(header) accordion_item("modules-{}".format(dojo.hex_dojo_id), loop.index) %}
-            {% if header %}
-              <h4 class="accordion-item-name">{{ module.name }}</h4>
-              <span class="challenge-header-right">
-                <i class="fas fa-flag pr-1" title="已完成题目"></i>
-                <td>{{ solves }} / {{ module.challenges | length }}</td>
-                <i class="fas fa-trophy pr-1 pl-3 " title="排名"></i>
-                <td>{{ rank or "-" }} / {{ max_rank or "-" }}</td>
-              </span>
-            {% else %}
-              {% if module.challenges %}
-                {% for challenge in module.challenges %}
-                {% set solved = "challenge-solved" if dojo.id in user_solves and module.id in user_solves[dojo.id] and challenge.challenge_id in user_solves[dojo.id][module.id] else "challenge-unsolved" %}
-                    {% if solved == "challenge-solved" %}
-                    <div class="challenge-row">
-                      <div class="challenge-info">
-                      <h4>
-                        <span class="d-sm-block d-md-block d-lg-block">
-                          <i class="fas fa-flag pr-3 {{ solved }}"></i>{{ challenge.name or challenge.id }}
-                          {% if not challenge.visible() %}
-                          <small><small><small>
-                                <i>隐藏</i> &mdash; 因你是本课程教师而可见
-                          </small></small></small>
-                          {% endif %}
-                        </span>
-                      </h4>
-                      <h6>首次成功提交：{{user_solves[dojo.id][module.id][challenge.challenge_id]}}</h6>
-                      </div>
-                    </div>
-                    <br>
-                    {% else %}
-                    {% endif %}
+  <nav class="profile-jump-nav" aria-label="个人资料页内导航">
+    <a href="#profile-overview"><i class="fas fa-compass" aria-hidden="true"></i>学习概览</a>
+    <a href="#profile-activity"><i class="fas fa-calendar-alt" aria-hidden="true"></i>学习活动</a>
+    <a href="#profile-courses"><i class="fas fa-book-open" aria-hidden="true"></i>课程进度</a>
+    <a href="#profile-achievements"><i class="fas fa-medal" aria-hidden="true"></i>成就与能力</a>
+  </nav>
+
+  <div class="profile-dashboard">
+    <div class="profile-main-column">
+      <section id="profile-overview" class="profile-panel profile-next-panel" aria-labelledby="profile-overview-title">
+        <div class="profile-panel-heading">
+          <div><span class="profile-kicker">下一步</span><h2 id="profile-overview-title">{{ '继续你的学习路径' if profile.active_course else ('管理你的教学内容' if profile.role == '教师' and profile.teaching_course_count else '开始你的学习路径') }}</h2></div>
+          <p>{{ '从上次进度继续，不必重新查找。' if profile.active_course else ('查看课程、题目与学情状态。' if profile.role == '教师' and profile.teaching_course_count else '选择一门课程，建立第一条学习记录。') }}</p>
+        </div>
+        {% if profile.active_course %}
+        {% set active_course = profile.active_course %}
+        <div class="profile-next-card">
+          <span class="profile-next-icon"><i class="fas {{ 'fa-trophy' if active_course.completed else 'fa-play' }}" aria-hidden="true"></i></span>
+          <div class="profile-next-copy">
+            <small>{{ '已完成课程' if active_course.completed else '正在学习' }}</small>
+            <h3>{{ active_course.name }}</h3>
+            <p>{{ active_course.solved }} / {{ active_course.total }} 道必修题已完成 · 最近学习于 {{ active_course.last_activity_label }}</p>
+            <div class="profile-progress" role="progressbar" aria-label="{{ active_course.name }} 课程进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ active_course.progress }}">
+              <span style="width: {{ active_course.progress }}%"></span>
+            </div>
+          </div>
+          <div class="profile-next-action">
+            <strong>{{ active_course.progress }}%</strong>
+            <a href="{{ active_course.continue_url }}">{{ '复习课程' if active_course.completed else '继续学习' }}<i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+          </div>
+        </div>
+        {% elif profile.role == '教师' and profile.teaching_course_count %}
+        <div class="profile-empty-state">
+          <span><i class="fas fa-chalkboard-teacher" aria-hidden="true"></i></span>
+          <div><strong>正在管理 {{ profile.teaching_course_count }} 门课程</strong><p>进入课程中心继续建设内容、发布题目并查看学习进展。</p></div>
+          <a href="/teacher/courses">进入课程中心<i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+        </div>
+        {% else %}
+        <div class="profile-empty-state">
+          <span><i class="fas fa-route" aria-hidden="true"></i></span>
+          <div><strong>还没有课程进度</strong><p>浏览课程目录，完成第一道实践题后，这里会自动形成你的学习路径。</p></div>
+          <a href="{{ url_for('pwncollege_dojos.listing') }}">浏览课程<i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+        </div>
+        {% endif %}
+      </section>
+
+      <section id="profile-activity" class="profile-panel" aria-labelledby="profile-activity-title">
+        <div class="profile-panel-heading is-inline">
+          <div><span class="profile-kicker">过去一年</span><h2 id="profile-activity-title">学习活动</h2></div>
+          <p>每个方格代表一天，颜色越深表示完成题目越多。</p>
+        </div>
+        <div id="activity-tracker" data-user-id="{{ user.id }}" user-id="{{ user.id }}" aria-live="polite">
+          <div class="profile-activity-loading"><span aria-hidden="true"></span>正在整理学习活动…</div>
+        </div>
+      </section>
+
+      <section id="profile-courses" class="profile-panel profile-courses-panel" aria-labelledby="profile-course-title">
+        <div class="profile-panel-heading is-inline">
+          <div><span class="profile-kicker">课程进度</span><h2 id="profile-course-title">已参与课程</h2></div>
+          <p>{{ profile.course_count }} 门课程 · {{ profile.solved_count }} 道题目已完成</p>
+        </div>
+        <div class="profile-course-list">
+          {% for course in profile.courses %}
+          <article class="profile-course">
+            <div class="profile-course-summary">
+              <span class="profile-course-icon"><i class="fas {{ 'fa-check' if course.completed else 'fa-book-open' }}" aria-hidden="true"></i></span>
+              <div class="profile-course-copy">
+                <div class="profile-course-title-row">
+                  <a href="{{ course.url }}"><strong>{{ course.name }}</strong></a>
+                  <span class="profile-course-status {{ 'is-complete' if course.completed else 'is-active' }}">{{ '已完成' if course.completed else ('进行中' if course.solved else '已加入') }}</span>
+                </div>
+                <p>{{ course.module_count }} 个章节 · {{ course.challenge_count }} 道题目 · 最近学习 {{ course.last_activity_label }}</p>
+                <div class="profile-progress" role="progressbar" aria-label="{{ course.name }} 课程进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ course.progress }}">
+                  <span style="width: {{ course.progress }}%"></span>
+                </div>
+              </div>
+              <div class="profile-course-numbers">
+                <span><strong>{{ course.progress }}%</strong>课程进度</span>
+                <span><strong>{{ course.rank or '-' }} / {{ course.max_rank or '-' }}</strong>当前排名</span>
+                <a href="{{ course.continue_url }}" aria-label="打开 {{ course.name }}"><i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+              </div>
+            </div>
+            {% if course.modules %}
+            <details class="profile-course-details">
+              <summary><span><i class="fas fa-list-ul" aria-hidden="true"></i>查看章节进度</span><small>{{ course.solved }} / {{ course.total }} 道必修题已完成</small><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+              <div class="profile-module-list">
+                {% for module in course.modules %}
+                <a class="profile-module" href="{{ module.url }}">
+                  <span class="profile-module-state {{ 'is-complete' if module.progress == 100 else '' }}"><i class="fas {{ 'fa-check' if module.progress == 100 else 'fa-book' }}" aria-hidden="true"></i></span>
+                  <span class="profile-module-copy"><strong>{{ module.name }}</strong><small>{{ module.solved }} / {{ module.total }} 道题目已完成</small></span>
+                  <span class="profile-module-progress"><span><i style="width: {{ module.progress }}%"></i></span><strong>{{ module.progress }}%</strong></span>
+                  <span class="profile-module-rank">排名 {{ module.rank or '-' }} / {{ module.max_rank or '-' }}</span>
+                  <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                </a>
                 {% endfor %}
-              {% else %}
-              {% endif %}
+              </div>
+            </details>
             {% endif %}
-          {% endcall %}
-        {% endfor %}
-      </div>
-      <style>
-        .challenge-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 5px 0;
-        }
+          </article>
+          {% else %}
+          <div class="profile-empty-state is-compact">
+            <span><i class="fas fa-book" aria-hidden="true"></i></span>
+            <div><strong>还没有可展示的课程</strong><p>加入课程并完成题目后，课程进度会出现在这里。</p></div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+    </div>
 
-        .challenge-info {
-          flex: 1;
-        }
-      </style>
-      <br>
-    {% endfor %}
+    <aside id="profile-achievements" class="profile-side-column" aria-label="资料与成就">
+      {% if is_self_profile %}
+      <section class="profile-side-card profile-completion-card" aria-labelledby="profile-completion-title">
+        <div class="profile-side-heading"><div><span class="profile-kicker">资料状态</span><h2 id="profile-completion-title">完善你的个人资料</h2></div><strong>{{ profile.profile_completion }}%</strong></div>
+        <div class="profile-completion-meter" role="progressbar" aria-label="个人资料完整度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ profile.profile_completion }}"><span style="width: {{ profile.profile_completion }}%"></span></div>
+        <ul class="profile-completion-list">
+          {% for item in profile.completion_items %}
+          <li class="{{ 'is-complete' if item.complete else '' }}"><i class="fas {{ 'fa-check-circle' if item.complete else 'fa-circle' }}" aria-hidden="true"></i><span>{{ item.label }}</span><small>{{ '已填写' if item.complete else '待完善' }}</small></li>
+          {% endfor %}
+        </ul>
+        <a class="profile-side-action" href="{{ url_for('views.settings') }}#profile"><i class="fas fa-user-edit" aria-hidden="true"></i>完善资料与隐私设置</a>
+        <div class="profile-privacy-note">
+          <i class="fas {{ 'fa-lock' if user.hidden else 'fa-eye' }}" aria-hidden="true"></i>
+          <span><strong>{{ '个人资料已隐藏' if user.hidden else '个人资料当前公开' }}</strong><small>{{ '只有你自己可以查看完整学习档案。' if user.hidden else '其他登录用户可以查看此页中的公开信息。' }}</small></span>
+        </div>
+      </section>
+      {% endif %}
+
+      <section class="profile-side-card" aria-labelledby="profile-achievement-title">
+        <div class="profile-side-heading"><div><span class="profile-kicker">学习里程碑</span><h2 id="profile-achievement-title">成就徽章</h2></div><strong>{{ user_badges | length }}</strong></div>
+        {% if user_badges %}
+        <div class="profile-badges" aria-label="获得的成就">
+          {% for badge in user_badges[:8] %}
+          <a href="{{ badge.url }}" title="{{ badge.text }}" class="{{ 'is-stale' if badge.stale else '' }}" aria-label="{{ badge.text }}"><span>{{ badge.emoji }}</span><small>{{ badge.text }}</small>{% if badge.count and badge.count > 1 %}<em>×{{ badge.count }}</em>{% endif %}</a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="profile-side-empty"><i class="fas fa-medal" aria-hidden="true"></i><span><strong>第一枚徽章正在路上</strong><small>完成带有课程奖励的学习路径即可获得。</small></span></div>
+        {% endif %}
+        <a class="profile-text-link" href="{{ url_for('pwncollege_belts.view_belts') }}">查看成就体系<i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+      </section>
+
+      <section class="profile-side-card" aria-labelledby="profile-focus-title">
+        <div class="profile-side-heading"><div><span class="profile-kicker">学习重点</span><h2 id="profile-focus-title">投入最多的章节</h2></div></div>
+        {% if profile.learning_focus %}
+        <div class="profile-focus-list">
+          {% for focus in profile.learning_focus %}
+          <a href="{{ focus.url }}">
+            <span><strong>{{ focus.module }}</strong><small>{{ focus.course }}</small></span>
+            <em>{{ focus.solved }} / {{ focus.total }}</em>
+            <i><span style="width: {{ focus.progress }}%"></span></i>
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="profile-side-empty"><i class="fas fa-bullseye" aria-hidden="true"></i><span><strong>暂无学习重点</strong><small>完成题目后会按章节自动归纳。</small></span></div>
+        {% endif %}
+      </section>
+
+      <section class="profile-side-card" aria-labelledby="profile-recent-title">
+        <div class="profile-side-heading"><div><span class="profile-kicker">最近动态</span><h2 id="profile-recent-title">最新完成</h2></div></div>
+        {% if profile.recent_activity %}
+        <ol class="profile-recent-list">
+          {% for activity in profile.recent_activity %}
+          <li><span><i class="fas fa-check" aria-hidden="true"></i></span><a href="{{ activity.url }}"><strong>{{ activity.challenge }}</strong><small>{{ activity.course }} · {{ activity.module }}</small></a><time datetime="{{ activity.date.isoformat() }}">{{ activity.date_label }}</time></li>
+          {% endfor %}
+        </ol>
+        {% else %}
+        <div class="profile-side-empty"><i class="fas fa-history" aria-hidden="true"></i><span><strong>暂无完成记录</strong><small>第一次完成题目后会在这里留下时间线。</small></span></div>
+        {% endif %}
+      </section>
+    </aside>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/activity.js', v='aisecedu-profile-v3') }}"></script>
 {% endblock %}

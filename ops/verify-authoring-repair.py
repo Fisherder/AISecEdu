@@ -42,7 +42,7 @@ built = {
     "sourceChallengeId": None,
     "sourceReferenceId": None,
     "oracleContract": {
-        "type": "REPORT_JSON_V1",
+        "type": "FLAG_GATE_V1",
         "requiredFields": ["authorization_result"],
         "assertions": [
             {

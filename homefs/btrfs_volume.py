@@ -14,6 +14,9 @@ from utils import file_lock
 
 STORAGE_ROOT = Path(os.environ.get("STORAGE_ROOT", "/data"))
 VOLUME_SIZE = os.environ.get("VOLUME_SIZE", "1G")
+STORAGE_CONNECT_TIMEOUT = float(os.environ.get("STORAGE_CONNECT_TIMEOUT", "5"))
+STORAGE_READ_TIMEOUT = float(os.environ.get("STORAGE_READ_TIMEOUT", "60"))
+STORAGE_TIMEOUT = (STORAGE_CONNECT_TIMEOUT, STORAGE_READ_TIMEOUT)
 
 
 def btrfs(*args, **kwargs):
@@ -58,7 +61,10 @@ class BTRFSVolume:
 
         snapshot_path = self.fetch(host)
 
-        response = requests.post(f"http://{host}:4201/volume/{self.name}/activate")
+        response = requests.post(
+            f"http://{host}:4201/volume/{self.name}/activate",
+            timeout=STORAGE_TIMEOUT,
+        )
         try:
             response.raise_for_status()
         except requests.exceptions.HTTPError:
@@ -159,7 +165,11 @@ class BTRFSVolume:
         headers = {}
         if self.latest_snapshot_path:
             headers["If-None-Match"] = self.latest_snapshot_path.name
-        response = requests.get(f"http://{host}:4201/volume/{self.name}", headers=headers)
+        response = requests.get(
+            f"http://{host}:4201/volume/{self.name}",
+            headers=headers,
+            timeout=STORAGE_TIMEOUT,
+        )
         etag_path = self.snapshots_path / response.headers["ETag"]
         if response.status_code == 304 or etag_path.exists():
             # We already have the latest snapshot (we may have requested the volume from ourselves)

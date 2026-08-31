@@ -1,0 +1,1725 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C二进制逆向：分析编译后的crackme | 交互式安全实验室</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1a1a2e;
+            --surface2: #162032;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --highlight: #f59e0b33;
+            --border: #1e293b;
+            --code-addr: #64748b;
+            --code-bytes: #6b7280;
+            --code-mnemonic: #93c5fd;
+            --code-operand: #fbbf24;
+            --code-comment: #6b7280;
+            --reg-changed: #f59e0b;
+            --bp-color: #ef4444;
+            --cursor-color: #3b82f6;
+            --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+            --font-sans: 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            --radius: 8px;
+            --transition: 0.18s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            min-height: 100vh;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 16px 20px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 14px 20px;
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+        }
+        .header .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header .logo-icon {
+            font-size: 28px;
+        }
+        .header h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: #fff;
+        }
+        .header .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            background: #1e3a5f;
+            color: #60a5fa;
+            border: 1px solid #2563eb44;
+        }
+        .progress-bar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.82rem;
+            color: var(--text2);
+        }
+        .progress-step {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.78rem;
+            border: 2px solid var(--border);
+            background: var(--surface2);
+            transition: var(--transition);
+        }
+        .progress-step.active {
+            border-color: var(--accent);
+            background: #1e3a5f;
+            color: #60a5fa;
+            animation: pulse-step 2s infinite;
+        }
+        .progress-step.done {
+            border-color: var(--success);
+            background: #14532d;
+            color: #4ade80;
+        }
+        @keyframes pulse-step {
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 #3b82f644;
+            }
+            50% {
+                box-shadow: 0 0 0 10px #3b82f600;
+            }
+        }
+
+        /* Briefing */
+        .briefing {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            margin-bottom: 16px;
+            border-left: 3px solid var(--accent);
+        }
+        .briefing h3 {
+            font-size: 0.95rem;
+            margin-bottom: 6px;
+            color: #fff;
+        }
+        .briefing p {
+            font-size: 0.88rem;
+            color: var(--text2);
+            margin: 0;
+        }
+
+        /* Main grid */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 420px;
+            gap: 16px;
+            align-items: start;
+        }
+        @media (max-width: 1100px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Panel */
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        .panel-header {
+            padding: 10px 16px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            background: var(--surface2);
+            border-bottom: 1px solid var(--border);
+            color: var(--text2);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel-header .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot.green {
+            background: var(--success);
+        }
+        .dot.amber {
+            background: var(--warning);
+        }
+        .dot.blue {
+            background: var(--accent);
+        }
+
+        /* Disassembly */
+        .disasm-container {
+            max-height: 620px;
+            overflow-y: auto;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            line-height: 1.55;
+            scroll-behavior: smooth;
+            counter-reset: line;
+            background: #0d1117;
+        }
+        .disasm-row {
+            display: flex;
+            align-items: flex-start;
+            padding: 3px 0;
+            border-bottom: 1px solid #ffffff03;
+            cursor: pointer;
+            transition: background var(--transition);
+            position: relative;
+            min-height: 26px;
+        }
+        .disasm-row:hover {
+            background: #ffffff06;
+        }
+        .disasm-row.current {
+            background: var(--highlight);
+            box-shadow: inset 3px 0 0 var(--warning);
+        }
+        .disasm-row.current::before {
+            content: '➤';
+            position: absolute;
+            left: -18px;
+            color: var(--warning);
+            font-size: 0.7rem;
+            animation: arrow-bounce 0.6s infinite alternate;
+        }
+        @keyframes arrow-bounce {
+            from {
+                transform: translateX(0);
+            }
+            to {
+                transform: translateX(3px);
+            }
+        }
+        .disasm-row.breakpoint {
+            background: #ef444410;
+        }
+        .disasm-row.breakpoint .bp-dot {
+            background: var(--bp-color);
+            box-shadow: 0 0 6px #ef444488;
+        }
+        .disasm-row.executed {
+            opacity: 0.7;
+        }
+        .disasm-addr {
+            width: 100px;
+            flex-shrink: 0;
+            color: var(--code-addr);
+            padding-left: 8px;
+            text-align: right;
+            padding-right: 10px;
+            user-select: all;
+            font-size: 0.78rem;
+        }
+        .disasm-bytes {
+            width: 100px;
+            flex-shrink: 0;
+            color: var(--code-bytes);
+            font-size: 0.76rem;
+            letter-spacing: 0.02em;
+        }
+        .bp-dot {
+            width: 14px;
+            flex-shrink: 0;
+            height: 14px;
+            border-radius: 50%;
+            margin: 3px 6px 0 4px;
+            cursor: pointer;
+            background: #ffffff15;
+            transition: var(--transition);
+            border: 1.5px solid #ffffff30;
+            position: relative;
+            z-index: 2;
+        }
+        .bp-dot:hover {
+            background: #ef444466;
+            border-color: #ef4444;
+            transform: scale(1.2);
+        }
+        .disasm-mnemonic {
+            color: var(--code-mnemonic);
+            font-weight: 600;
+            min-width: 56px;
+            flex-shrink: 0;
+        }
+        .disasm-operands {
+            color: var(--code-operand);
+            flex-shrink: 0;
+            margin-right: 8px;
+        }
+        .disasm-comment {
+            color: var(--code-comment);
+            font-style: italic;
+            font-size: 0.76rem;
+            flex-shrink: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .disasm-label {
+            color: #a78bfa;
+            font-weight: 600;
+            font-size: 0.76rem;
+            margin-right: 4px;
+        }
+
+        /* Right panel */
+        .right-panels {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* Register panel */
+        .reg-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 3px 8px;
+            padding: 10px 14px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+        }
+        .reg-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 8px;
+            border-radius: 3px;
+            background: #ffffff03;
+            transition: background 0.15s;
+        }
+        .reg-item.changed {
+            background: #f59e0b18;
+            animation: flash-reg 0.5s ease-out;
+        }
+        @keyframes flash-reg {
+            0% {
+                background: #f59e0b44;
+            }
+            100% {
+                background: #f59e0b18;
+            }
+        }
+        .reg-name {
+            color: #93c5fd;
+            font-weight: 600;
+        }
+        .reg-value {
+            color: #fbbf24;
+            user-select: all;
+        }
+        .reg-value.zero {
+            color: #64748b;
+        }
+        .flags-row {
+            display: flex;
+            gap: 10px;
+            padding: 8px 14px;
+            flex-wrap: wrap;
+            font-family: var(--font-mono);
+            font-size: 0.76rem;
+            border-top: 1px solid var(--border);
+            margin-top: 4px;
+        }
+        .flag {
+            padding: 2px 7px;
+            border-radius: 3px;
+            background: #ffffff05;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+        .flag.set {
+            background: #f59e0b22;
+            color: #fbbf24;
+            box-shadow: 0 0 4px #f59e0b33;
+        }
+        .flag.clear {
+            color: #64748b;
+        }
+
+        /* Memory panel */
+        .memory-view {
+            padding: 8px 14px;
+            font-family: var(--font-mono);
+            font-size: 0.74rem;
+            max-height: 200px;
+            overflow-y: auto;
+            background: #0d1117;
+        }
+        .mem-row {
+            display: flex;
+            gap: 8px;
+            padding: 2px 0;
+            align-items: center;
+        }
+        .mem-addr {
+            color: var(--code-addr);
+            width: 130px;
+            flex-shrink: 0;
+        }
+        .mem-hex {
+            color: #fbbf24;
+            letter-spacing: 0.04em;
+            flex-shrink: 0;
+        }
+        .mem-ascii {
+            color: #94a3b8;
+            font-size: 0.7rem;
+        }
+        .mem-row.highlight {
+            background: #3b82f622;
+            border-radius: 2px;
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 10px 14px;
+        }
+        .btn {
+            padding: 7px 15px;
+            border-radius: 5px;
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            color: var(--text);
+            cursor: pointer;
+            font-family: var(--font-sans);
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            transition: var(--transition);
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .btn:hover {
+            background: #1e3a5f;
+            border-color: #3b82f666;
+            transform: translateY(-1px);
+        }
+        .btn:active {
+            transform: scale(0.97);
+            transition: 0.05s;
+        }
+        .btn.primary {
+            background: #1e40af;
+            border-color: #3b82f6;
+            color: #fff;
+        }
+        .btn.primary:hover {
+            background: #1e4fd4;
+            box-shadow: 0 0 12px #3b82f644;
+        }
+        .btn.danger {
+            background: #7f1d1d44;
+            border-color: #ef444466;
+            color: #fca5a5;
+        }
+        .btn.success {
+            background: #14532d;
+            border-color: #22c55e66;
+            color: #4ade80;
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        /* Input area */
+        .input-area {
+            padding: 10px 14px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .input-area input {
+            flex: 1;
+            min-width: 140px;
+            padding: 8px 12px;
+            border-radius: 5px;
+            border: 1px solid var(--border);
+            background: #0d1117;
+            color: #fbbf24;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            letter-spacing: 0.04em;
+            transition: var(--transition);
+        }
+        .input-area input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px #3b82f622;
+        }
+        .input-area input.correct-flash {
+            border-color: var(--success);
+            box-shadow: 0 0 16px #22c55e55;
+            animation: correct-glow 0.6s ease-out;
+        }
+        @keyframes correct-glow {
+            0% {
+                box-shadow: 0 0 24px #22c55e88;
+            }
+            100% {
+                box-shadow: 0 0 0 #22c55e00;
+            }
+        }
+
+        /* Flag display */
+        .flag-display {
+            margin: 10px 14px;
+            padding: 14px 18px;
+            border-radius: var(--radius);
+            background: #0d1117;
+            border: 2px dashed #22c55e55;
+            text-align: center;
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #4ade80;
+            letter-spacing: 0.06em;
+            display: none;
+            animation: flag-reveal 0.7s ease-out;
+        }
+        .flag-display.show {
+            display: block;
+        }
+        @keyframes flag-reveal {
+            0% {
+                opacity: 0;
+                transform: translateY(-10px);
+                filter: blur(4px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+                filter: blur(0);
+            }
+        }
+        .flag-icon {
+            font-size: 2rem;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        /* Source compare */
+        .source-compare {
+            display: none;
+            margin-top: 12px;
+            gap: 12px;
+        }
+        .source-compare.show {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        @media (max-width: 900px) {
+            .source-compare.show {
+                grid-template-columns: 1fr;
+            }
+        }
+        .source-pane {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        .source-pane pre {
+            padding: 14px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            line-height: 1.5;
+            overflow-x: auto;
+            margin: 0;
+            color: #e2e8f0;
+            background: #0d1117;
+            white-space: pre;
+        }
+        .source-pane .lang-label {
+            padding: 6px 14px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            background: var(--surface2);
+            border-bottom: 1px solid var(--border);
+            color: #93c5fd;
+        }
+
+        /* Tooltip / hint */
+        .hint-box {
+            margin: 8px 14px;
+            padding: 10px 14px;
+            border-radius: 5px;
+            background: #1e3a5f33;
+            border: 1px solid #3b82f644;
+            font-size: 0.8rem;
+            color: #93c5fd;
+            display: none;
+        }
+        .hint-box.show {
+            display: block;
+            animation: fade-in 0.3s;
+        }
+        @keyframes fade-in {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 18px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            z-index: 999;
+            animation: slide-in 0.3s ease-out;
+            pointer-events: none;
+            box-shadow: 0 8px 24px #00000044;
+        }
+        @keyframes slide-in {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        .toast.info {
+            background: #1e40af;
+            color: #fff;
+        }
+        .toast.success-toast {
+            background: #14532d;
+            color: #4ade80;
+        }
+        .toast.error {
+            background: #7f1d1d;
+            color: #fca5a5;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .disasm-addr {
+                width: 70px;
+                font-size: 0.7rem;
+                padding-left: 4px;
+                padding-right: 6px;
+            }
+            .disasm-bytes {
+                width: 70px;
+                font-size: 0.68rem;
+            }
+            .disasm-mnemonic {
+                min-width: 40px;
+                font-size: 0.72rem;
+            }
+            .disasm-operands {
+                font-size: 0.72rem;
+            }
+            .disasm-comment {
+                display: none;
+            }
+            .reg-grid {
+                grid-template-columns: 1fr 1fr;
+                gap: 2px 4px;
+                font-size: 0.7rem;
+            }
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo-area">
+                <span class="logo-icon">🔬</span>
+                <h1>C二进制逆向：crackme分析实验室</h1>
+                <span class="badge">Category C</span>
+            </div>
+            <div class="progress-bar">
+                <span style="color:#94a3b8;">步骤</span>
+                <span class="progress-step active" id="ps1">1</span>
+                <span style="color:#475569;">→</span>
+                <span class="progress-step" id="ps2">2</span>
+                <span style="color:#475569;">→</span>
+                <span class="progress-step" id="ps3">3</span>
+                <span style="color:#475569;">→</span>
+                <span class="progress-step" id="ps4">🎯</span>
+            </div>
+        </div>
+
+        <!-- Briefing -->
+        <div class="briefing">
+            <h3>📋 任务简报</h3>
+            <p>你获得了一个编译后的<strong>license key验证程序</strong>（crackme）。目标二进制文件使用GCC编译，没有符号表。下方是<code>objdump -d -M intel</code>导出的<strong>check_license</strong>函数反汇编代码（x86-64）。你的任务：<strong>逐行追踪汇编代码执行过程，理解验证算法，计算出正确的license key，并捕获Flag。</strong></p>
+            <p style="margin-top:4px;font-size:0.8rem;color:#64748b;">// EDUCATIONAL PURPOSE ONLY — authorized classroom use | 仅用于授权教学环境</p>
+        </div>
+
+        <!-- Main grid -->
+        <div class="main-grid">
+            <!-- Left: Disassembly -->
+            <div class="panel">
+                <div class="panel-header"><span class="dot blue"></span>反汇编视图 — check_license (x86-64, Intel syntax)</div>
+                <div class="disasm-container" id="disasmContainer">
+                    <!-- Rows generated by JS -->
+                </div>
+                <div class="controls" style="border-top:1px solid var(--border);">
+                    <button class="btn primary" id="btnStep" title="单步执行一条指令 (F8)">⏭ 单步 (F8)</button>
+                    <button class="btn" id="btnRunToCursor" title="运行到光标位置">▶ 运行到光标</button>
+                    <button class="btn" id="btnRun" title="运行直到断点或结束">⏩ 运行</button>
+                    <button class="btn danger" id="btnReset" title="重置调试器状态">↺ 重置</button>
+                    <button class="btn" id="btnHint" title="获取提示">💡 提示</button>
+                </div>
+                <div class="hint-box" id="hintBox"></div>
+            </div>
+
+            <!-- Right panels -->
+            <div class="right-panels">
+                <!-- Registers -->
+                <div class="panel">
+                    <div class="panel-header"><span class="dot amber"></span>寄存器状态</div>
+                    <div class="reg-grid" id="regGrid">
+                        <!-- Generated by JS -->
+                    </div>
+                    <div class="flags-row" id="flagsRow">
+                        <!-- Generated by JS -->
+                    </div>
+                </div>
+
+                <!-- Memory -->
+                <div class="panel">
+                    <div class="panel-header"><span class="dot green"></span>内存检查器 — 栈 & 输入缓冲区</div>
+                    <div class="memory-view" id="memoryView">
+                        <!-- Generated by JS -->
+                    </div>
+                </div>
+
+                <!-- Input -->
+                <div class="panel">
+                    <div class="panel-header"><span class="dot blue"></span>License Key 输入</div>
+                    <div class="input-area">
+                        <input type="text" id="keyInput" value="TESTKEY!" maxlength="20" placeholder="输入8字符license key..." autocomplete="off">
+                        <button class="btn primary" id="btnLoadKey">📥 加载Key并重置</button>
+                        <button class="btn success" id="btnQuickVerify">🔍 快速验证</button>
+                    </div>
+                    <div class="flag-display" id="flagDisplay">
+                        <span class="flag-icon">🚩</span>
+                        <span id="flagText"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Source compare (hidden initially) -->
+        <div class="source-compare" id="sourceCompare">
+            <div class="source-pane">
+                <div class="lang-label">📄 原始C源代码 (check_license.c)</div>
+                <pre id="cSource">// 将在捕获Flag后显示</pre>
+            </div>
+            <div class="source-pane">
+                <div class="lang-label">🔧 对应汇编 (check_license)</div>
+                <pre id="asmMapping">// 将在捕获Flag后显示</pre>
+            </div>
+        </div>
+    </div>
+
+    <div id="toastContainer"></div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use | 仅用于授权教学环境
+        (function() {
+            // ============ SIMULATOR STATE ============
+            const CORRECT_KEY = "REVERSE!";
+            const TARGET_SUM = 2409; // 0x969
+            const INPUT_BUF_ADDR = 0x555555558000;
+            const STACK_INIT = 0x7fffffffe000;
+
+            // Instruction definitions
+            const instructions = [
+                { addr: 0x401136, bytes: '55', mnem: 'push', ops: 'rbp', comment: '; 保存帧指针',
+                    label: '' },
+                { addr: 0x401137, bytes: '48 89 e5', mnem: 'mov', ops: 'rbp, rsp', comment: '; 设置栈帧',
+                    label: '' },
+                { addr: 0x40113a, bytes: '53', mnem: 'push', ops: 'rbx', comment: '; 保存callee-saved寄存器',
+                    label: '' },
+                { addr: 0x40113b, bytes: '41 54', mnem: 'push', ops: 'r12', comment: '; 保存r12',
+                label: '' },
+                { addr: 0x40113d, bytes: '48 89 fb', mnem: 'mov', ops: 'rbx, rdi',
+                    comment: '; rbx = 输入字符串指针', label: '' },
+                { addr: 0x401140, bytes: '45 31 e4', mnem: 'xor', ops: 'r12d, r12d',
+                    comment: '; 累加和 sum = 0', label: '' },
+                { addr: 0x401143, bytes: '31 c9', mnem: 'xor', ops: 'ecx, ecx', comment: '; 索引 i = 0',
+                label: '' },
+                { addr: 0x401145, bytes: '48 89 df', mnem: 'mov', ops: 'rdi, rbx',
+                    comment: '; 准备strlen参数', label: '' },
+                { addr: 0x401148, bytes: 'e8 b3 fe ff ff', mnem: 'call', ops: 'strlen',
+                    comment: '; rax = 输入长度', label: '' },
+                { addr: 0x40114d, bytes: '48 83 f8 08', mnem: 'cmp', ops: 'rax, 8',
+                    comment: '; 长度是否为8？', label: '' },
+                { addr: 0x401151, bytes: '75 1d', mnem: 'jne', ops: 'fail', comment: '; 长度≠8则失败',
+                    label: '' },
+                { addr: 0x401153, bytes: '31 c9', mnem: 'xor', ops: 'ecx, ecx', comment: '; i = 0 (重置)',
+                    label: '' },
+                { addr: 0x401155, bytes: '83 f9 08', mnem: 'cmp', ops: 'ecx, 8', comment: '; i >= 8?',
+                    label: 'loop_start:' },
+                { addr: 0x401158, bytes: '7d 13', mnem: 'jge', ops: 'check_result',
+                    comment: '; i>=8时跳转检查结果', label: '' },
+                { addr: 0x40115a, bytes: '0f b6 04 0b', mnem: 'movzx', ops: 'eax, byte [rbx+rcx]',
+                    comment: '; 取第i个字符', label: '' },
+                { addr: 0x40115e, bytes: '8d 51 01', mnem: 'lea', ops: 'edx, [rcx+1]',
+                    comment: '; edx = i+1 (位置权重)', label: '' },
+                { addr: 0x401161, bytes: '0f af c2', mnem: 'imul', ops: 'eax, edx',
+                    comment: '; eax = 字符ASCII × 位置', label: '' },
+                { addr: 0x401164, bytes: '41 01 c4', mnem: 'add', ops: 'r12d, eax',
+                    comment: '; sum += 加权值', label: '' },
+                { addr: 0x401167, bytes: 'ff c1', mnem: 'inc', ops: 'ecx', comment: '; i++', label: '' },
+                { addr: 0x401169, bytes: 'eb ea', mnem: 'jmp', ops: 'loop_start', comment: '; 继续循环',
+                    label: '' },
+                { addr: 0x40116b, bytes: '41 81 fc 69 09 00 00', mnem: 'cmp', ops: 'r12d, 0x969',
+                    comment: '; sum == 2409 (0x969)？', label: 'check_result:' },
+                { addr: 0x401172, bytes: '75 04', mnem: 'jne', ops: 'fail', comment: '; 不相等则失败',
+                label: '' },
+                { addr: 0x401174, bytes: 'b8 01 00 00 00', mnem: 'mov', ops: 'eax, 1',
+                    comment: '; 返回1 (成功!)', label: '' },
+                { addr: 0x401179, bytes: 'eb 02', mnem: 'jmp', ops: 'done', comment: '; 跳转到清理', label: '' },
+                { addr: 0x40117b, bytes: '31 c0', mnem: 'xor', ops: 'eax, eax', comment: '; 返回0 (失败)',
+                    label: 'fail:' },
+                { addr: 0x40117d, bytes: '41 5c', mnem: 'pop', ops: 'r12', comment: '; 恢复r12',
+                label: 'done:' },
+                { addr: 0x40117f, bytes: '5b', mnem: 'pop', ops: 'rbx', comment: '; 恢复rbx', label: '' },
+                { addr: 0x401180, bytes: '5d', mnem: 'pop', ops: 'rbp', comment: '; 恢复rbp', label: '' },
+                { addr: 0x401181, bytes: 'c3', mnem: 'ret', ops: '', comment: '; 返回调用者', label: '' },
+            ];
+
+            // Find label indices
+            const labelToIndex = {};
+            instructions.forEach((inst, i) => {
+                if (inst.label) {
+                    const lbl = inst.label.replace(':', '').trim();
+                    if (lbl) labelToIndex[lbl] = i;
+                }
+            });
+
+            // Map jump targets
+            const jumpTargets = {
+                'fail': labelToIndex['fail'] || 24,
+                'check_result': labelToIndex['check_result'] || 20,
+                'loop_start': labelToIndex['loop_start'] || 12,
+                'done': labelToIndex['done'] || 25,
+            };
+
+            // State
+            let registers = {};
+            let flags = { ZF: false, SF: false, OF: false, CF: false };
+            let memory = {}; // addr -> byte (0-255)
+            let currentInstIndex = 0;
+            let breakpoints = new Set();
+            let cursorLine = null; // for "run to cursor"
+            let executedLines = new Set();
+            let inputKey = 'TESTKEY!';
+            let hasRunToEnd = false;
+            let prevRegValues = {};
+            let changedRegs = new Set();
+            let flagCaptured = false;
+            let hintLevel = 0;
+
+            function initRegisters() {
+                registers = {
+                    rax: 0n,
+                    rbx: 0n,
+                    rcx: 0n,
+                    rdx: 0n,
+                    rsi: 0n,
+                    rdi: BigInt(INPUT_BUF_ADDR),
+                    rbp: 0n,
+                    rsp: BigInt(STACK_INIT),
+                    r8: 0n,
+                    r9: 0n,
+                    r10: 0n,
+                    r11: 0n,
+                    r12: 0n,
+                    r13: 0n,
+                    r14: 0n,
+                    r15: 0n,
+                    rip: BigInt(instructions[0].addr),
+                };
+                flags = { ZF: false, SF: false, OF: false, CF: false };
+            }
+
+            function initMemory() {
+                memory = {};
+                // Write input key to buffer
+                for (let i = 0; i < inputKey.length; i++) {
+                    memory[INPUT_BUF_ADDR + i] = inputKey.charCodeAt(i) & 0xFF;
+                }
+                memory[INPUT_BUF_ADDR + inputKey.length] = 0x00; // null terminator
+                // Initialize stack area with some recognizable pattern
+                for (let a = STACK_INIT - 64; a < STACK_INIT; a++) {
+                    memory[a] = 0x00;
+                }
+            }
+
+            function resetAll() {
+                initRegisters();
+                initMemory();
+                currentInstIndex = 0;
+                executedLines = new Set();
+                hasRunToEnd = false;
+                changedRegs = new Set();
+                prevRegValues = { ...registers };
+                cursorLine = null;
+                flagCaptured = false;
+                hintLevel = 0;
+                document.getElementById('flagDisplay').classList.remove('show');
+                document.getElementById('sourceCompare').classList.remove('show');
+                document.getElementById('hintBox').classList.remove('show');
+                document.getElementById('hintBox').textContent = '';
+                updateProgress(1);
+                renderAll();
+            }
+
+            function getReg32(name) {
+                const v = registers[name] || 0n;
+                return Number(v & 0xFFFFFFFFn);
+            }
+
+            function setReg32(name, value) {
+                const prev = registers[name] || 0n;
+                const newVal = BigInt(value & 0xFFFFFFFF);
+                registers[name] = (prev & 0xFFFFFFFF00000000n) | newVal;
+                if (prev !== registers[name]) changedRegs.add(name);
+            }
+
+            function getReg64(name) {
+                return registers[name] || 0n;
+            }
+
+            function setReg64(name, value) {
+                const prev = registers[name] || 0n;
+                registers[name] = BigInt(value) & 0xFFFFFFFFFFFFFFFFn;
+                if (prev !== registers[name]) changedRegs.add(name);
+            }
+
+            function readMemByte(addr) {
+                const a = Number(BigInt(addr) & 0xFFFFFFFFFFFFFFFFn);
+                return memory[a] !== undefined ? memory[a] : 0;
+            }
+
+            function writeMemByte(addr, value) {
+                const a = Number(BigInt(addr) & 0xFFFFFFFFFFFFFFFFn);
+                memory[a] = value & 0xFF;
+            }
+
+            function readMemQword(addr) {
+                const a = Number(BigInt(addr) & 0xFFFFFFFFFFFFFFFFn);
+                let val = 0n;
+                for (let i = 7; i >= 0; i--) {
+                    val = (val << 8n) | BigInt(memory[a + i] !== undefined ? memory[a + i] : 0);
+                }
+                return val;
+            }
+
+            function writeMemQword(addr, value) {
+                const a = Number(BigInt(addr) & 0xFFFFFFFFFFFFFFFFn);
+                let v = BigInt(value) & 0xFFFFFFFFFFFFFFFFn;
+                for (let i = 0; i < 8; i++) {
+                    memory[a + i] = Number(v & 0xFFn);
+                    v >>= 8n;
+                }
+            }
+
+            function pushStack(value) {
+                const newRsp = registers.rsp - 8n;
+                setReg64('rsp', newRsp);
+                writeMemQword(Number(newRsp), value);
+            }
+
+            function popStack() {
+                const val = readMemQword(Number(registers.rsp));
+                setReg64('rsp', registers.rsp + 8n);
+                return val;
+            }
+
+            function simulateStrlen() {
+                let addr = Number(registers.rdi & 0xFFFFFFFFFFFFFFFFn);
+                let len = 0;
+                while (readMemByte(addr + len) !== 0 && len < 100) len++;
+                return len;
+            }
+
+            function updateFlagsAfterSub(a, b) {
+                const result = a - b;
+                flags.ZF = (result === 0);
+                flags.SF = (result < 0);
+                flags.OF = (a > 0 && b < 0 && result < 0) || (a < 0 && b > 0 && result > 0);
+                flags.CF = (BigInt(a) & 0xFFFFFFFFn) < (BigInt(b) & 0xFFFFFFFFn);
+            }
+
+            function updateFlagsAfterAdd(a, b) {
+                const result = a + b;
+                flags.ZF = ((result & 0xFFFFFFFF) === 0);
+                flags.SF = ((result & 0x80000000) !== 0);
+                flags.OF = ((a ^ result) & (b ^ result) & 0x80000000) !== 0;
+                flags.CF = (result >>> 32) > 0;
+            }
+
+            function updateFlagsAfterInc(a) {
+                const result = a + 1;
+                flags.ZF = ((result & 0xFFFFFFFF) === 0);
+                flags.SF = ((result & 0x80000000) !== 0);
+                flags.OF = (a === 0x7FFFFFFF);
+            }
+
+            function executeInstruction(index) {
+                if (index >= instructions.length) return { halt: true, success: null };
+                const inst = instructions[index];
+                changedRegs = new Set();
+                const prevRip = registers.rip;
+                let nextIndex = index + 1;
+                let halt = false;
+                let success = null;
+
+                const mnem = inst.mnem;
+                const ops = inst.ops;
+
+                switch (mnem) {
+                    case 'push':
+                        if (ops === 'rbp') pushStack(registers.rbp);
+                        else if (ops === 'rbx') pushStack(registers.rbx);
+                        else if (ops === 'r12') pushStack(registers.r12);
+                        else pushStack(0n);
+                        break;
+                    case 'pop':
+                        if (ops === 'rbp') setReg64('rbp', popStack());
+                        else if (ops === 'rbx') setReg64('rbx', popStack());
+                        else if (ops === 'r12') setReg64('r12', popStack());
+                        else popStack();
+                        break;
+                    case 'mov':
+                        if (ops.includes('rbp, rsp')) setReg64('rbp', registers.rsp);
+                        else if (ops.includes('rbx, rdi')) setReg64('rbx', registers.rdi);
+                        else if (ops.includes('rdi, rbx')) setReg64('rdi', registers.rbx);
+                        else if (ops.includes('eax, 1')) setReg32('rax', 1);
+                        break;
+                    case 'xor':
+                        if (ops.includes('r12d, r12d')) setReg32('r12', 0);
+                        else if (ops.includes('ecx, ecx')) setReg32('rcx', 0);
+                        else if (ops.includes('eax, eax')) setReg32('rax', 0);
+                        break;
+                    case 'call':
+                        if (ops.includes('strlen')) {
+                            const retAddr = BigInt(instructions[nextIndex] ? instructions[nextIndex].addr :
+                                0x401181);
+                            pushStack(retAddr);
+                            const slen = simulateStrlen();
+                            setReg32('rax', slen);
+                        }
+                        break;
+                    case 'cmp':
+                        if (ops.includes('rax, 8')) {
+                            updateFlagsAfterSub(getReg32('rax'), 8);
+                        } else if (ops.includes('ecx, 8')) {
+                            updateFlagsAfterSub(getReg32('rcx'), 8);
+                        } else if (ops.includes('r12d, 0x969')) {
+                            updateFlagsAfterSub(getReg32('r12'), 0x969);
+                        }
+                        break;
+                    case 'jne':
+                        if (!flags.ZF) {
+                            const target = jumpTargets['fail'];
+                            if (target !== undefined) nextIndex = target;
+                        }
+                        break;
+                    case 'jge':
+                        if (flags.SF === flags.OF) {
+                            const target = jumpTargets['check_result'];
+                            if (target !== undefined) nextIndex = target;
+                        }
+                        break;
+                    case 'jmp':
+                        const jtarget = jumpTargets[ops] || jumpTargets['loop_start'];
+                        if (jtarget !== undefined) nextIndex = jtarget;
+                        else if (ops === 'loop_start') nextIndex = jumpTargets['loop_start'] || 12;
+                        break;
+                    case 'movzx':
+                        if (ops.includes('eax, byte [rbx+rcx]')) {
+                            const effAddr = Number((registers.rbx + registers.rcx) & 0xFFFFFFFFFFFFFFFFn);
+                            const byteVal = readMemByte(effAddr);
+                            setReg32('rax', byteVal);
+                        }
+                        break;
+                    case 'lea':
+                        if (ops.includes('edx, [rcx+1]')) {
+                            setReg32('rdx', getReg32('rcx') + 1);
+                        }
+                        break;
+                    case 'imul':
+                        if (ops.includes('eax, edx')) {
+                            const a = getReg32('rax');
+                            const d = getReg32('rdx');
+                            setReg32('rax', a * d);
+                        }
+                        break;
+                    case 'add':
+                        if (ops.includes('r12d, eax')) {
+                            const s = getReg32('r12');
+                            const v = getReg32('rax');
+                            setReg32('r12', s + v);
+                            updateFlagsAfterAdd(s, v);
+                        }
+                        break;
+                    case 'inc':
+                        if (ops.includes('ecx')) {
+                            const c = getReg32('rcx');
+                            setReg32('rcx', c + 1);
+                            updateFlagsAfterInc(c);
+                        }
+                        break;
+                    case 'ret':
+                        halt = true;
+                        const retVal = getReg32('rax');
+                        success = (retVal === 1);
+                        break;
+                    default:
+                        break;
+                }
+
+                // Update rip
+                if (!halt && nextIndex < instructions.length) {
+                    registers.rip = BigInt(instructions[nextIndex].addr);
+                } else if (halt) {
+                    registers.rip = BigInt(instructions[Math.min(index, instructions.length - 1)].addr);
+                }
+
+                return { nextIndex, halt, success };
+            }
+
+            function stepOne() {
+                if (hasRunToEnd) return { halt: true, success: null };
+                if (currentInstIndex >= instructions.length) {
+                    hasRunToEnd = true;
+                    return { halt: true, success: null };
+                }
+                prevRegValues = { ...registers };
+                const result = executeInstruction(currentInstIndex);
+                executedLines.add(currentInstIndex);
+                if (result.halt) {
+                    hasRunToEnd = true;
+                    if (result.success === true) {
+                        captureFlag();
+                    }
+                    return result;
+                }
+                currentInstIndex = result.nextIndex;
+                if (currentInstIndex >= instructions.length) {
+                    hasRunToEnd = true;
+                }
+                // Check breakpoint
+                if (breakpoints.has(currentInstIndex) && !hasRunToEnd) {
+                    // Stop at breakpoint
+                }
+                return result;
+            }
+
+            function runUntilBreakpointOrEnd() {
+                let safety = 0;
+                const maxSteps = 500;
+                while (!hasRunToEnd && currentInstIndex < instructions.length && safety < maxSteps) {
+                    if (breakpoints.has(currentInstIndex) && executedLines.has(currentInstIndex) === false &&
+                        currentInstIndex !== 0) {
+                        // Check if we just hit a breakpoint (not on first step)
+                        if (safety > 0 && breakpoints.has(currentInstIndex)) break;
+                    }
+                    const result = stepOne();
+                    if (result.halt) break;
+                    safety++;
+                    if (breakpoints.has(currentInstIndex) && safety > 1) break;
+                }
+                if (safety >= maxSteps) {
+                    showToast('⚠ 运行步数过多，已暂停', 'error');
+                    hasRunToEnd = true;
+                }
+                renderAll();
+            }
+
+            function runToCursor() {
+                if (cursorLine === null) {
+                    showToast('请先在反汇编视图中点击目标行设置光标', 'info');
+                    return;
+                }
+                if (cursorLine <= currentInstIndex && executedLines.has(cursorLine)) {
+                    showToast('光标位置已在当前执行位置之前，请重置后重试', 'error');
+                    return;
+                }
+                let safety = 0;
+                const maxSteps = 500;
+                while (!hasRunToEnd && currentInstIndex < instructions.length && safety < maxSteps) {
+                    if (currentInstIndex === cursorLine) break;
+                    if (breakpoints.has(currentInstIndex) && safety > 0 && currentInstIndex !== cursorLine) break;
+                    const result = stepOne();
+                    if (result.halt) break;
+                    safety++;
+                }
+                if (safety >= maxSteps) {
+                    showToast('⚠ 运行步数过多，已暂停', 'error');
+                    hasRunToEnd = true;
+                }
+                renderAll();
+            }
+
+            function captureFlag() {
+                if (flagCaptured) return;
+                flagCaptured = true;
+                const flagDisplay = document.getElementById('flagDisplay');
+                const flagText = document.getElementById('flagText');
+                flagText.textContent = 'FLAG{r3v3rs3_3ng1n33r1ng_m4st3r_2024}';
+                flagDisplay.classList.add('show');
+                document.getElementById('sourceCompare').classList.add('show');
+                updateCsourceCompare();
+                updateProgress(4);
+                showToast('🚩 Flag Captured! 逆向分析成功！', 'success-toast');
+            }
+
+            function updateCsourceCompare() {
+                const cSource = document.getElementById('cSource');
+                const asmMapping = document.getElementById('asmMapping');
+                cSource.textContent = `// check_license.c — 原始C源代码
+                // EDUCATIONAL PURPOSE ONLY
+                #include <string.h>
+                #include <stdio.h>
+
+                int check_license(const char *input) {
+                    int sum = 0;
+                    int len = strlen(input);
+
+                    // 长度必须为8
+                    if (len != 8) return 0;
+
+                    // 加权求和: sum += input[i] * (i+1)
+                    for (int i = 0; i < 8; i++) {
+                        sum += (unsigned char)input[i] * (i + 1);
+                    }
+
+                    // 目标值: 2409 (0x969)
+                    // 正确key: "REVERSE!"
+                    // R=82*1 + E=69*2 + V=86*3 + E=69*4
+                    // + R=82*5 + S=83*6 + E=69*7 + !=33*8
+                    // = 82+138+258+276+410+498+483+264 = 2409
+                    if (sum == 2409) return 1;  // 成功!
+
+                    return 0;  // 失败
+                }`;
+                asmMapping.textContent = `; 汇编 ↔ C源代码 对应关系
+                ; check_license 函数 (x86-64, GCC -O1)
+                ;
+                ; 401136 push rbp        → 函数序言
+                ; 401137 mov rbp, rsp    → 栈帧设置
+                ; 401148 call strlen     → int len = strlen(input)
+                ; 40114d cmp rax, 8      → if (len != 8)
+                ; 401151 jne fail        → return 0
+                ; 401155 loop_start:     → for (int i=0; ...)
+                ; 401158 jge check_res   → i>=8 时退出循环
+                ; 40115a movzx eax,[rbx+rcx] → 取input[i]
+                ; 40115e lea edx,[rcx+1] → i+1 (位置权重)
+                ; 401161 imul eax,edx    → input[i]*(i+1)
+                ; 401164 add r12d,eax    → sum += 加权值
+                ; 401167 inc ecx         → i++
+                ; 401169 jmp loop_start  → 循环
+                ; 40116b cmp r12d,0x969  → if (sum==2409)
+                ; 401172 jne fail        → 不相等则失败
+                ; 401174 mov eax,1       → return 1 (成功)
+                ; 40117b fail: xor eax,eax → return 0`;
+            }
+
+            function updateProgress(step) {
+                for (let i = 1; i <= 4; i++) {
+                    const el = document.getElementById('ps' + i);
+                    if (!el) continue;
+                    el.classList.remove('active', 'done');
+                    if (i < step) el.classList.add('done');
+                    else if (i === step) el.classList.add('active');
+                }
+            }
+
+            function showToast(msg, type) {
+                const container = document.getElementById('toastContainer');
+                const toast = document.createElement('div');
+                toast.className = 'toast ' + (type || 'info');
+                toast.textContent = msg;
+                container.appendChild(toast);
+                setTimeout(() => {
+                    toast.style.opacity = '0';
+                    toast.style.transition = 'opacity 0.3s';
+                    setTimeout(() => toast.remove(), 300);
+                }, 2200);
+            }
+
+            // ============ RENDER ============
+            function renderDisassembly() {
+                const container = document.getElementById('disasmContainer');
+                container.innerHTML = '';
+                instructions.forEach((inst, i) => {
+                    const row = document.createElement('div');
+                    row.className = 'disasm-row';
+                    if (i === currentInstIndex && !hasRunToEnd) row.classList.add('current');
+                    if (breakpoints.has(i)) row.classList.add('breakpoint');
+                    if (executedLines.has(i) && i !== currentInstIndex) row.classList.add('executed');
+                    if (cursorLine === i && i !== currentInstIndex) row.style.boxShadow =
+                        'inset 3px 0 0 var(--cursor-color)';
+
+                    // BP dot
+                    const bpDot = document.createElement('span');
+                    bpDot.className = 'bp-dot';
+                    if (breakpoints.has(i)) bpDot.style.background = 'var(--bp-color)';
+                    bpDot.title = '点击切换断点';
+                    bpDot.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        if (breakpoints.has(i)) {
+                            breakpoints.delete(i);
+                        } else {
+                            breakpoints.add(i);
+                        }
+                        renderDisassembly();
+                    });
+
+                    // Address
+                    const addrSpan = document.createElement('span');
+                    addrSpan.className = 'disasm-addr';
+                    addrSpan.textContent = '0x' + inst.addr.toString(16).padStart(6, '0');
+
+                    // Bytes
+                    const bytesSpan = document.createElement('span');
+                    bytesSpan.className = 'disasm-bytes';
+                    bytesSpan.textContent = inst.bytes;
+
+                    // Mnemonic
+                    const mnemSpan = document.createElement('span');
+                    mnemSpan.className = 'disasm-mnemonic';
+                    mnemSpan.textContent = inst.mnem;
+
+                    // Operands
+                    const opsSpan = document.createElement('span');
+                    opsSpan.className = 'disasm-operands';
+                    opsSpan.textContent = inst.ops;
+
+                    // Label if any
+                    if (inst.label) {
+                        const lblSpan = document.createElement('span');
+                        lblSpan.className = 'disasm-label';
+                        lblSpan.textContent = inst.label;
+                        row.appendChild(lblSpan);
+                    }
+
+                    // Comment
+                    const commentSpan = document.createElement('span');
+                    commentSpan.className = 'disasm-comment';
+                    commentSpan.textContent = inst.comment;
+
+                    row.appendChild(bpDot);
+                    row.appendChild(addrSpan);
+                    row.appendChild(bytesSpan);
+                    row.appendChild(mnemSpan);
+                    row.appendChild(opsSpan);
+                    row.appendChild(commentSpan);
+
+                    // Click to set cursor
+                    row.addEventListener('click', (e) => {
+                        if (e.target === bpDot) return;
+                        cursorLine = i;
+                        renderDisassembly();
+                        if (cursorLine !== null) {
+                            showToast('📍 光标已设置到 0x' + inst.addr.toString(16) + ' — 可使用"运行到光标"',
+                                'info');
+                        }
+                    });
+
+                    container.appendChild(row);
+                });
+
+                // Scroll current line into view
+                if (!hasRunToEnd && currentInstIndex < instructions.length) {
+                    const rows = container.querySelectorAll('.disasm-row');
+                    if (rows[currentInstIndex]) {
+                        setTimeout(() => {
+                            rows[currentInstIndex].scrollIntoView({ block: 'center', behavior: 'smooth' });
+                        }, 80);
+                    }
+                }
+            }
+
+            function renderRegisters() {
+                const grid = document.getElementById('regGrid');
+                const regNames = ['rax', 'rbx', 'rcx', 'rdx', 'rsi', 'rdi', 'rbp', 'rsp', 'r8', 'r9', 'r10', 'r11',
+                    'r12', 'r13', 'r14', 'r15', 'rip'
+                ];
+                grid.innerHTML = '';
+                regNames.forEach(name => {
+                    const item = document.createElement('div');
+                    item.className = 'reg-item';
+                    if (changedRegs.has(name)) item.classList.add('changed');
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'reg-name';
+                    nameSpan.textContent = name;
+                    const valSpan = document.createElement('span');
+                    valSpan.className = 'reg-value';
+                    const val = registers[name] || 0n;
+                    if (val === 0n) valSpan.classList.add('zero');
+                    valSpan.textContent = '0x' + val.toString(16).padStart(16, '0').toUpperCase();
+                    item.appendChild(nameSpan);
+                    item.appendChild(valSpan);
+                    grid.appendChild(item);
+                });
+
+                // Flags
+                const flagsRow = document.getElementById('flagsRow');
+                flagsRow.innerHTML = '';
+                const flagNames = ['ZF', 'SF', 'OF', 'CF'];
+                flagNames.forEach(fn => {
+                    const fEl = document.createElement('span');
+                    fEl.className = 'flag ' + (flags[fn] ? 'set' : 'clear');
+                    fEl.textContent = fn + ':' + (flags[fn] ? '1' : '0');
+                    flagsRow.appendChild(fEl);
+                });
+            }
+
+            function renderMemory() {
+                const memView = document.getElementById('memoryView');
+                memView.innerHTML = '';
+                const rspVal = Number(registers.rsp & 0xFFFFFFFFFFFFFFFFn);
+                const rbxVal = Number(registers.rbx & 0xFFFFFFFFFFFFFFFFn);
+
+                // Show stack area
+                const stackTitle = document.createElement('div');
+                stackTitle.style.cssText =
+                    'color:#94a3b8;font-size:0.7rem;font-weight:700;padding:4px 0;border-bottom:1px solid #ffffff10;margin-bottom:4px;';
+                stackTitle.textContent = '▼ 栈区域 (rsp附近)';
+                memView.appendChild(stackTitle);
+
+                for (let offset = 16; offset >= -32; offset -= 8) {
+                    const addr = rspVal + offset;
+                    const row = document.createElement('div');
+                    row.className = 'mem-row';
+                    if (offset === 0) row.classList.add('highlight');
+                    const addrSpan = document.createElement('span');
+                    addrSpan.className = 'mem-addr';
+                    addrSpan.textContent = '0x' + addr.toString(16).padStart(16, '0').toUpperCase();
+                    const hexSpan = document.createElement('span');
+                    hexSpan.className = 'mem-hex';
+                    let hexStr = '';
+                    let asciiStr = '';
+                    for (let b = 7; b >= 0; b--) {
+                        const byteVal = readMemByte(addr + b);
+                        hexStr += byteVal.toString(16).padStart(2, '0') + ' ';
+                        asciiStr += (byteVal >= 32 && byteVal <= 126) ? String.fromCharCode(byteVal) : '.';
+                    }
+                    hexSpan.textContent = hexStr.trim();
+                    const asciiSpan = document.createElement('span');
+                    asciiSpan.className = 'mem-ascii';
+                    asciiSpan.textContent = '|' + asciiStr + '|';
+                    row.appendChild(addrSpan);
+                    row.appendChild(hexSpan);
+                    row.appendChild(asciiSpan);
+                    memView.appendChild(row);
+                }
+
+                // Show input buffer
+                const bufTitle = document.createElement('div');
+                bufTitle.style.cssText =
+                    'color:#94a3b8;font-size:0.7rem;font-weight:700;padding:8px 0 4px;border-bottom:1px solid #ffffff10;margin-bottom:4px;margin-top:6px;';
+                bufTitle.textContent = '▼ 输入缓冲区 (rbx指向)';
+                memView.appendChild(bufTitle);
+
+                for (let offset = 0; offset < 16; offset += 8) {
+                    const addr = INPUT_BUF_ADDR + offset;
+                    const row = document.createElement('div');
+                    row.className = 'mem-row';
+                    if (offset === 0) row.classList.add('highlight');
+                    const addrSpan = document.createElement('span');
+                    addrSpan.className = 'mem-addr';
+                    addrSpan.textContent = '0x' + addr.toString(16).padStart(16, '0').toUpperCase();
+                    const hexSpan = document.createElement('span');
+                    hexSpan.className = 'mem-hex';
+                    let hexStr = '';
+                    let asciiStr = '';
+                    for (let b = 0; b < 8; b++) {
+                        const byteVal = readMemByte(addr + b);
+                        hexStr += byteVal.toString(16).padStart(2, '0') + ' ';
+                        asciiStr += (byteVal >= 32 && byteVal <= 126) ? String.fromCharCode(byteVal) : '.';
+                    }
+                    hexSpan.textContent = hexStr.trim();
+                    const asciiSpan = document.createElement('span');
+                    asciiSpan.className = 'mem-ascii';
+                    asciiSpan.textContent = '|' + asciiStr + '|';
+                    row.appendChild(addrSpan);
+                    row.appendChild(hexSpan);
+                    row.appendChild(asciiSpan);
+                    memView.appendChild(row);
+                }
+            }
+
+            function renderAll() {
+                renderDisassembly();
+                renderRegisters();
+                renderMemory();
+                updateProgressFlags();
+            }
+
+            function updateProgressFlags() {
+                if (flagCaptured) {
+                    updateProgress(4);
+                } else if (executedLines.size > 15) {
+                    updateProgress(3);
+                } else if (executedLines.size > 3) {
+                    updateProgress(2);
+                } else {
+                    updateProgress(1);
+                }
+            }
+
+            // ============ EVENT HANDLERS ============
+            document.getElementById('btnStep').addEventListener('click', () => {
+                if (hasRunToEnd) {
+                    showToast('执行已结束，请重置后继续', 'error');
+                    return;
+                }
+                const result = stepOne();
+                renderAll();
+                if (result.halt && result.success === true) {
+                    showToast('✅ 执行完成 — License Key验证成功！Flag已解锁！', 'success-toast');
+                } else if (result.halt && result.success === false) {
+                    showToast('❌ 执行完成 — License Key验证失败。尝试其他key？', 'error');
+                } else if (result.halt) {
+                    showToast('执行已结束', 'info');
+                }
+            });
+
+            document.getElementById('btnRun').addEventListener('click', () => {
+                if (hasRunToEnd) {
+                    showToast('执行已结束，请重置后继续', 'error');
+                    return;
+                }
+                runUntilBreakpointOrEnd();
+                renderAll();
+                if (hasRunToEnd && flagCaptured) {
+                    showToast('✅ 执行完成 — Flag已解锁！', 'success-toast');
+                } else if (hasRunToEnd && !flagCaptured) {
+                    const retVal = getReg32('rax');
+                    if (retVal === 1 && inputKey === CORRECT_KEY) {
+                        captureFlag();
+                        renderAll();
+                    }
+                }
+            });
+
+            document.getElementById('btnRunToCursor').addEventListener('click', () => {
+                if (hasRunToEnd) {
+                    showToast('执行已结束，请重置后继续', 'error');
+                    return;
+                }
+                runToCursor();
+                renderAll();
+            });
+
+            document.getElementById('btnReset').addEventListener('click', () => {
+                resetAll();
+                showToast('🔄 调试器已重置', 'info');
+            });
+
+            document.getElementById('btnLoadKey').addEventListener('click', () => {
+                const newKey = document.getElementById('keyInput').value;
+                if (newKey.length === 0) {
+                    showToast('请输入license key', 'error');
+                    return;
+                }
+                inputKey = newKey;
+                resetAll();
+                showToast('📥 Key "' + inputKey + '" 已加载，调试器已重置', 'info');
+            });
+
+            document.getElementById('btnQuickVerify').addEventListener('click', () => {
+                const testKey = document.getElementById('keyInput').value;
+                if (testKey === CORRECT_KEY) {
+                    inputKey = testKey;
+                    resetAll();
+                    // Fast-forward to verify
+                    let safety = 0;
+                    while (!hasRunToEnd && safety < 300) {
+                        const r = stepOne();
+                        if (r.halt) break;
+                        safety++;
+                    }
+                    if (!flagCaptured && getReg32('rax') === 1) {
+                        captureFlag();
+                    }
+                    renderAll();
+                    if (flagCaptured) {
+                        document.getElementById('keyInput').classList.add('correct-flash');
+                        setTimeout(() => document.getElementById('keyInput').classList.remove('correct-flash'),
+                            800);
+                        showToast('🎯 正确！Flag已解锁！', 'success-toast');
+                    }
+                } else if (testKey.length === 8) {
+                    // Let them test it through debugger
+                    inputKey = testKey;
+                    resetAll();
+                    let safety = 0;
+                    while (!hasRunToEnd && safety < 300) {
+                        const r = stepOne();
+                        if (r.halt) break;
+                        safety++;
+                    }
+                    renderAll();
+                    const retVal = getReg32('rax');
+                    if (retVal === 1) {
+                        if (!flagCaptured) captureFlag();
+                        renderAll();
+                        showToast('🎯 正确！Flag已解锁！', 'success-toast');
+                    } else {
+                        showToast('❌ Key验证失败 (返回值=' + retVal + ')。继续尝试！', 'error');
+                    }
+                } else {
+                    showToast('⚠ Key长度必须为8个字符', 'error');
+                }
+            });
+
+            document.getElementById('btnHint').addEventListener('click', () => {
+                const hintBox = document.getElementById('hintBox');
+                hintBox.classList.add('show');
+                const hints = [
+                    '💡 提示1: 观察地址0x40116b处的cmp指令，立即数0x969是十进制的2409——这就是目标累加值。',
+                    '💡 提示2: 循环体在0x40115a~0x401169。每条迭代：取字符ASCII码 → 乘以(i+1) → 累加到r12d。',
+                    '💡 提示3: 需要8个字符，使其加权和(位置从1开始)等于2409。试试计算：字符×位置的累加。',
+                    '💡 提示4: 正确答案是"REVERSE!"——R(82)×1 + E(69)×2 + V(86)×3 + E(69)×4 + R(82)×5 + S(83)×6 + E(69)×7 + !(33)×8 = 2409 ✓',
+                ];
+                hintBox.textContent = hints[Math.min(hintLevel, hints.length - 1)];
+                hintLevel = Math.min(hintLevel + 1, hints.length - 1);
+                if (hintLevel >= hints.length - 1) {
+                    hintBox.style.borderColor = '#f59e0b66';
+                    hintBox.style.background = '#f59e0b11';
+                }
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'F8' || (e.key === 'F10' && !e.shiftKey)) {
+                    e.preventDefault();
+                    document.getElementById('btnStep').click();
+                } else if (e.key === 'F9') {
+                    e.preventDefault();
+                    document.getElementById('btnRun').click();
+                } else if (e.key === 'F5') {
+                    e.preventDefault();
+                    document.getElementById('btnReset').click();
+                }
+            });
+
+            // ============ INIT ============
+            function init() {
+                initRegisters();
+                initMemory();
+                prevRegValues = { ...registers };
+                renderAll();
+                updateProgress(1);
+                // Show initial toast
+                setTimeout(() => {
+                    showToast('👋 欢迎！请先观察汇编代码，然后点击"单步"开始追踪执行', 'info');
+                }, 500);
+            }
+
+            init();
+
+            console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+            console.log('// C二进制逆向crackme实验室已就绪');
+            console.log('// 快捷键: F8=单步, F9=运行, F5=重置');
+            console.log('// 正确Key: "' + CORRECT_KEY + '" → sum=' + TARGET_SUM + ' (0x' + TARGET_SUM.toString(16) +
+                ')');
+        })();
+    </script>
+</body>
+</html>

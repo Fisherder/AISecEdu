@@ -1,71 +1,86 @@
 {% extends "base.html" %}
-{% from "macros/widgets.html" import card %}
+
+{% block body_class %}course-system-page content-management-page course-import-page{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='aisecedu-course-hub-v12-readability-v1') }}">
+{% endblock %}
 
 {% block content %}
-<div class="jumbotron">
-    <div class="container">
-        <h1>创建课程</h1>
+<div class="content-management-shell course-import-shell">
+  <nav class="content-breadcrumbs" aria-label="面包屑">
+    <a href="/teacher/courses">课程中心</a>
+    <i class="fas fa-chevron-right" aria-hidden="true"></i>
+    <span>从仓库导入</span>
+  </nav>
+
+  <header class="content-management-header">
+    <div class="content-management-heading">
+      <span class="hub-kicker"><i class="fab fa-git-alt" aria-hidden="true"></i>版本化课程</span>
+      <h1>从 Git 仓库创建课程</h1>
+      <p>连接课程仓库，将章节、题目、文件与运行配置作为一个可审查版本同步。</p>
     </div>
-</div>
-<div class="container">
-  <p>课程由 Git 仓库定义，因此单元、题目、文件和运行时配置可以一起审查和版本化。你可以从下方示例开始，或连接自己的仓库。</p>
-    <ul class="card-list">
+    <div class="content-management-actions">
+      <a class="hub-button" href="/teacher/courses"><i class="fas fa-arrow-left" aria-hidden="true"></i>课程中心</a>
+      <a class="hub-button is-primary" href="/teacher/courses/new"><i class="fas fa-pen" aria-hidden="true"></i>直接创建</a>
+    </div>
+  </header>
+
+  {% if example_dojos %}
+  <section class="content-surface course-example-surface">
+    <header class="content-section-heading">
+      <div><span class="hub-kicker">示例课程</span><h2>从可用模板开始</h2><p>先查看课程结构，再决定是否连接自己的仓库。</p></div>
+    </header>
+    <div class="course-example-grid">
       {% for dojo in example_dojos %}
-      {% set num_challenges = (dojo.challenges | length) %}
-      {{ card(url_for("pwncollege_dojo.view_dojo", dojo=dojo.reference_id),
-      title=dojo.name,
-      text_lines = [
-        "{} 个单元".format(dojo.modules | length),
-        "{} 道题目".format(num_challenges),
-      ],
-      emoji=dojo.award.emoji,
-      solve_percent=(((dojo.solves(user=user, ignore_visibility=True, ignore_admins=False).count() if user else 0) / num_challenges) * 100) if num_challenges else 0,
-      ) }}
+      {% set num_challenges = dojo.challenges | length %}
+      {% set solve_percent = (((dojo.solves(user=user, ignore_visibility=True, ignore_admins=False).count() if user else 0) / num_challenges) * 100) if num_challenges else 0 %}
+      <a class="course-example-card" href="{{ url_for('pwncollege_dojo.view_dojo', dojo=dojo.reference_id) }}">
+        <span class="course-example-icon">{{ dojo.award.emoji }}</span>
+        <div><strong>{{ dojo.name }}</strong><small>{{ dojo.modules | length }} 个章节 · {{ num_challenges }} 道题目</small></div>
+        <i class="fas fa-chevron-right" aria-hidden="true"></i>
+        {% if user %}<span class="course-example-progress"><i style="width: {{ solve_percent }}%"></i></span>{% endif %}
+      </a>
       {% endfor %}
-    </ul>
-  <p>仓库准备好后，请通过下方表单连接。AISecEdu 会同步课程层级和内容。</p>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="content-surface content-form-surface course-repository-form">
+    <header class="content-section-heading">
+      <div><span class="hub-kicker">连接仓库</span><h2>课程内容来源</h2><p>玄甲会读取仓库定义并同步完整课程结构。</p></div>
+    </header>
     <form method="post" id="dojo-create-form" autocomplete="off">
-        <div class="form-group">
-            <b><label>Git 仓库</label></b>
-            <small class="form-text text-muted">对于 GitHub，请输入 <b>owner/course-repository</b> 格式的仓库名。</small>
-            <br>
-            <input class="form-control" name="repository" type="text" placeholder="organization/security-course" value="">
+      <div class="hub-field">
+        <label for="dojo-repository">Git 仓库</label>
+        <input id="dojo-repository" name="repository" type="text" placeholder="organization/security-course" value="">
+        <small>GitHub 仓库请使用 owner/repository 格式。</small>
+      </div>
 
-            <br>
-
-            <b><label>部署密钥</label></b>
-            <small class="form-text text-muted">
-            私有仓库必需：<a href="https://docs.github.com/en/developers/overview/managing-deploy-keys#deploy-keys" target="_blank">部署密钥文档</a>
-            </small>
-            <br>
-            <div class="input-group mb-3">
-                <input class="form-control" name="public_key" type="text" value="{{ public_key }}" readonly>
-                <div class="input-group-append copy-button">
-                    <button class="btn btn-outline-secondary" type="button">
-                        <i class="fas fa-clipboard"></i>
-                    </button>
-                </div>
-            </div>
-
-            <input class="form-control" name="private_key" type="hidden" value="{{ private_key }}">
+      <div class="hub-field">
+        <label for="dojo-public-key">部署公钥</label>
+        <small>私有仓库需要将此公钥添加到仓库的 Deploy Keys。<a href="https://docs.github.com/en/developers/overview/managing-deploy-keys#deploy-keys" target="_blank" rel="noopener">查看 GitHub 文档</a></small>
+        <div class="content-copy-field is-stacked" data-copy-field>
+          <textarea id="dojo-public-key" class="content-code-field" name="public_key" rows="5" readonly>{{ public_key }}</textarea>
+          <button class="hub-button copy-button" type="button"><i class="fas fa-copy" aria-hidden="true"></i>复制公钥</button>
         </div>
+        <input name="private_key" type="hidden" value="{{ private_key }}">
+      </div>
 
-        <br>
-
-        <div id="dojo-create-results" class="form-group">
-        </div>
-
-        <div class="form-group text-right">
-            <input class="btn btn-md btn-primary btn-outlined" id="_submit" name="_submit" type="submit" value="创建课程">
-        </div>
+      <div id="dojo-create-results" class="content-result" role="status" hidden></div>
+      <div class="content-form-actions">
+        <a class="hub-button" href="/teacher/courses">取消</a>
+        <button class="hub-button is-primary" id="_submit" name="_submit" type="submit" value="创建课程"><i class="fas fa-cloud-download-alt" aria-hidden="true"></i>连接并创建课程</button>
+      </div>
     </form>
+  </section>
 </div>
 {% endblock %}
 
 {% block entrypoint %}
-    <script defer src="{{ url_for('views.themes', path='js/pages/settings.js') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/pages/settings.js') }}"></script>
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js', v='aisecedu-20260726-guided-workspace') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js', v='aisecedu-content-management-v2') }}"></script>
 {% endblock %}

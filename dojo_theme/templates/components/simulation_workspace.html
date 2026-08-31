@@ -2,13 +2,13 @@
     class="simulation-workspace"
     data-simulation-workspace
     data-run-id="{{ simulation_run_id or '' }}"
-    aria-label="安全情景模拟环境"
+    aria-label="可评分情境题运行器"
     hidden>
   <header class="simulation-header">
     <div class="simulation-heading">
-      <span class="simulation-domain" data-simulation-domain>SIMULATION</span>
+      <span class="simulation-domain" data-simulation-domain>情境实践</span>
       <div>
-        <h2 data-simulation-title>正在载入模拟场景</h2>
+        <h2 data-simulation-title>正在载入情境题</h2>
         <p data-simulation-description></p>
       </div>
     </div>
@@ -21,7 +21,7 @@
     </div>
   </header>
 
-  <div class="simulation-progress" aria-label="模拟进度">
+  <div class="simulation-progress" aria-label="题目进度">
     <div class="simulation-progress-copy">
       <span data-simulation-turn>回合 0</span>
       <span data-simulation-progress-label>目标进度 0%</span>
@@ -63,7 +63,7 @@
 
   <div class="simulation-loading" data-simulation-loading>
     <div class="workspace-loading-spinner" aria-hidden="true"></div>
-    <strong>正在建立模拟运行</strong>
+    <strong>正在建立题目运行</strong>
     <span>加载题目版本、确定性规则和可视化绑定…</span>
   </div>
 </section>

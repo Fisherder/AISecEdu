@@ -12,11 +12,12 @@ import urllib.request
 import base64
 import logging
 import emoji
+import docker.errors
 
 import yaml
 import requests
 from schema import Schema, Optional, Regex, Or, Use, SchemaError, And
-from flask import abort, g
+from flask import abort, g, has_request_context
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import NoResultFound
 from CTFd.models import db, Challenges, Flags
@@ -42,7 +43,7 @@ INTERFACES_LIST = [
             "name": Regex(r"^[a-zA-Z][a-zA-Z0-9 _-]{0,31}$"),
             "port": int,
         },
-        {"name": Or("SSH", "Simulation")},
+        {"name": "SSH"},
     )
 ]
 DATE = Use(datetime.datetime.fromisoformat)
@@ -78,8 +79,7 @@ DOJO_SPEC = Schema({
     Optional("show_scoreboard"): bool,
     Optional("importable"): bool,
     Optional("interfaces"): INTERFACES_LIST,
-    Optional("exercise_mode"): Or("CONTAINER", "SIMULATION", "HYBRID"),
-    Optional("simulation"): dict,
+    Optional("exercise_mode"): "CONTAINER",
 
     Optional("import"): {
         "dojo": UNIQUE_ID_REGEX,
@@ -106,8 +106,7 @@ DOJO_SPEC = Schema({
         Optional("show_scoreboard"): bool,
         Optional("importable"): bool,
         Optional("interfaces"): INTERFACES_LIST,
-        Optional("exercise_mode"): Or("CONTAINER", "SIMULATION", "HYBRID"),
-        Optional("simulation"): dict,
+        Optional("exercise_mode"): "CONTAINER",
 
         Optional("import"): {
             Optional("dojo"): UNIQUE_ID_REGEX,
@@ -157,8 +156,7 @@ DOJO_SPEC = Schema({
                 Optional("progression_locked"): bool,
                 Optional("auxiliary"): dict,
                 Optional("required", default=True): bool,
-                Optional("exercise_mode"): Or("CONTAINER", "SIMULATION", "HYBRID"),
-                Optional("simulation"): dict,
+                Optional("exercise_mode"): "CONTAINER",
                 Optional("import"): {
                     Optional("dojo"): UNIQUE_ID_REGEX,
                     Optional("module"): ID_REGEX,
@@ -356,33 +354,16 @@ def dojo_from_spec(data, *, dojo_dir=None, dojo=None):
     except SchemaError as e:
         raise AssertionError(e)  # TODO: this probably shouldn't be re-raised as an AssertionError
 
-    from ..learning.simulation import prepare_scenario
-
     for module_data in dojo_data.get("modules", []):
         for resource_data in module_data.get("resources", []):
             if resource_data.get("type") != "challenge":
                 continue
-            exercise_mode = shadowed_mode = (
+            exercise_mode = (
                 resource_data.get("exercise_mode")
                 or module_data.get("exercise_mode")
                 or dojo_data.get("exercise_mode")
                 or "CONTAINER"
             )
-            scenario = (
-                resource_data.get("simulation")
-                or module_data.get("simulation")
-                or dojo_data.get("simulation")
-            )
-            if shadowed_mode in {"SIMULATION", "HYBRID"}:
-                assert isinstance(scenario, dict), (
-                    f"Challenge {resource_data.get('id')} uses {exercise_mode} "
-                    "but has no simulation scenario"
-                )
-                resource_data["simulation"] = prepare_scenario(
-                    scenario,
-                    title=resource_data.get("name"),
-                    description=resource_data.get("description"),
-                )
             resource_data["exercise_mode"] = exercise_mode
 
     def assert_importable(o):
@@ -513,7 +494,6 @@ def dojo_from_spec(data, *, dojo_dir=None, dojo=None):
                     importable=shadow("importable", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
                     interfaces=shadow("interfaces", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
                     exercise_mode=shadow("exercise_mode", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
-                    simulation=shadow("simulation", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
                     challenge=challenge(
                         module_data.get("id"), challenge_data.get("id"), transfer=challenge_data.get("transfer", None)
                     ) if "import" not in challenge_data else None,
@@ -559,7 +539,10 @@ def dojo_from_spec(data, *, dojo_dir=None, dojo=None):
                 challenge
                 for module in dojo.modules
                 for challenge in module.challenges
-                if not (challenge.data.get("image") or challenge.path.exists())
+                if not (
+                    challenge.data.get("image")
+                    or challenge.path.exists()
+                )
             ]
             assert not missing_challenge_paths, "".join(
                 f"Missing challenge path: {challenge.module.id}/{challenge.id}\n"
@@ -798,20 +781,43 @@ def dojo_route(func):
 
 
 def get_current_dojo_challenge(user=None):
-    container = get_current_container(user)
+    resolved_user = user or get_current_user()
+    cache_key = getattr(resolved_user, "id", None)
+    if has_request_context():
+        cache = getattr(g, "_dojo_current_challenges", None)
+        if cache is None:
+            cache = {}
+            g._dojo_current_challenges = cache
+        if cache_key in cache:
+            return cache[cache_key]
+    try:
+        container = get_current_container(resolved_user)
+    except docker.errors.DockerException:
+        logging.getLogger(__name__).warning(
+            "Docker is unavailable while resolving the current challenge"
+        )
+        container = None
+    challenge = None
     if container:
-        return (
+        challenge = (
             DojoChallenges.query
             .filter(DojoChallenges.id == container.labels.get("dojo.challenge_id"),
                     DojoChallenges.module == DojoModules.from_id(container.labels.get("dojo.dojo_id"), container.labels.get("dojo.module_id")).first(),
                     DojoChallenges.dojo == Dojos.from_id(container.labels.get("dojo.dojo_id")).first())
             .first()
         )
+    if challenge is None and resolved_user is not None:
+        from ..models import LearningAttempts
 
-    user = user or get_current_user()
-    if not user:
-        return None
-    from ..learning.simulation import current_simulation_run, simulation_run_challenge
-
-    run = current_simulation_run(user.id)
-    return simulation_run_challenge(run) if run else None
+        attempt = (
+            LearningAttempts.query.filter_by(
+                user_id=resolved_user.id,
+                status="ACTIVE",
+            )
+            .order_by(LearningAttempts.started.desc())
+            .first()
+        )
+        challenge = attempt.dojo_challenge if attempt is not None else None
+    if has_request_context():
+        g._dojo_current_challenges[cache_key] = challenge
+    return challenge

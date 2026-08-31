@@ -1,0 +1,27 @@
+name: Repository hygiene
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Audit repository and deployment manifest
+        run: ./ops/repository-audit.sh
+
+      - name: Compile Python sources
+        run: python3 -m compileall -q dojo_plugin ops
+
+      - name: Verify reproducible source archive
+        run: |
+          ./ops/package-release.sh /tmp/xuanjia-release
+          cd /tmp/xuanjia-release
+          sha256sum -c ./*.tar.gz.sha256

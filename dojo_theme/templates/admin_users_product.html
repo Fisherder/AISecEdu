@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block body_class %}admin-product-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+{% block footer %}{% endblock %}
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/admin-product.css', v='aisecedu-admin-product-v9-readability-v1') }}">
+{% endblock %}
+
+{% block content %}
+<section class="admin-product" aria-labelledby="admin-users-title" data-admin-collection="users">
+  <header class="admin-product-header">
+    <div>
+      <p class="admin-product-eyebrow">身份与权限治理</p>
+      <h1 id="admin-users-title">用户与权限</h1>
+      <p>按角色、账号状态或身份事实定位用户。列表每页 25 人，敏感修改进入独立详情页完成。</p>
+    </div>
+    <div class="admin-product-header-actions">
+      <a class="admin-product-secondary" href="/admin"><i class="fas fa-arrow-left" aria-hidden="true"></i>平台概览</a>
+      <a class="admin-product-primary" href="/admin/users/new"><i class="fas fa-user-plus" aria-hidden="true"></i>新建用户</a>
+    </div>
+  </header>
+
+  <form class="admin-product-filters admin-product-filters-wide" method="get" action="/admin/users" role="search">
+    <label><span>搜索内容</span><input name="q" value="{{ query_text }}" placeholder="输入姓名、邮箱、机构、编号或 IP"></label>
+    <label><span>查询字段</span><select name="field">
+      <option value="name"{{ ' selected' if field == 'name' else '' }}>姓名</option>
+      <option value="email"{{ ' selected' if field == 'email' else '' }}>邮箱</option>
+      <option value="affiliation"{{ ' selected' if field == 'affiliation' else '' }}>机构</option>
+      <option value="id"{{ ' selected' if field == 'id' else '' }}>用户编号</option>
+      <option value="ip"{{ ' selected' if field == 'ip' else '' }}>登录 IP</option>
+    </select></label>
+    <label><span>角色</span><select name="role">
+      <option value="all"{{ ' selected' if role == 'all' else '' }}>全部角色</option>
+      <option value="learner"{{ ' selected' if role == 'learner' else '' }}>学习者</option>
+      <option value="teacher"{{ ' selected' if role == 'teacher' else '' }}>课程教师</option>
+      <option value="admin"{{ ' selected' if role == 'admin' else '' }}>平台管理员</option>
+    </select></label>
+    <label><span>账号状态</span><select name="state">
+      <option value="all"{{ ' selected' if state == 'all' else '' }}>全部状态</option>
+      <option value="active"{{ ' selected' if state == 'active' else '' }}>正常</option>
+      <option value="unverified"{{ ' selected' if state == 'unverified' else '' }}>待验证</option>
+      <option value="banned"{{ ' selected' if state == 'banned' else '' }}>已停用</option>
+      <option value="hidden"{{ ' selected' if state == 'hidden' else '' }}>已隐藏</option>
+    </select></label>
+    <button type="submit">应用筛选</button>
+  </form>
+
+  <section class="admin-product-summary" aria-label="用户统计">
+    <strong>{{ users.total }}</strong><span>名符合条件的用户</span>
+    <span>第 {{ users.page }} / {{ users.pages or 1 }} 页 · 每页 25 人</span>
+  </section>
+
+  {% if rows %}
+  <div class="admin-product-table-wrap">
+    <table class="admin-product-table">
+      <thead><tr><th scope="col">用户</th><th scope="col">角色</th><th scope="col">状态</th><th scope="col">学习与教学活动</th><th scope="col">加入时间</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
+      <tbody>
+      {% for user in rows %}
+        <tr data-user-row data-user-id="{{ user.id }}" data-platform-role="{{ user.platformRole }}">
+          <td data-label="用户"><a class="admin-product-title" href="{{ user.detailHref }}">{{ user.name }}</a><small>{{ user.email or '未填写邮箱' }} · 编号 {{ user.id }}</small>{% if user.affiliation %}<small>{{ user.affiliation }}</small>{% endif %}</td>
+          <td data-label="角色"><span class="admin-product-badge" data-kind="{{ 'warning' if user.role == 'admin' else 'success' if user.role == 'teacher' else 'neutral' }}">{{ user.roleLabel }}</span>{% if user.courseCount %}<small>负责 {{ user.courseCount }} 门课程</small>{% endif %}</td>
+          <td data-label="状态"><span class="admin-product-badge" data-kind="{{ 'success' if user.state == 'active' else 'warning' if user.state == 'unverified' else 'danger' }}">{{ user.stateLabel }}</span></td>
+          <td data-label="学习与教学活动"><strong>{{ user.submissionCount }} 次提交</strong><small>{% if user.lastActivityAt %}最近活动 <time data-time="{{ user.lastActivityAt | isoformat }}">{{ user.lastActivityAt.strftime('%Y-%m-%d %H:%M') }}</time>{% else %}尚无提交记录{% endif %}</small></td>
+          <td data-label="加入时间">{% if user.createdAt %}<time data-time="{{ user.createdAt | isoformat }}">{{ user.createdAt.strftime('%Y-%m-%d') }}</time>{% else %}未知{% endif %}</td>
+          <td data-label="操作">
+            <div class="admin-product-row-actions">
+              <a class="admin-product-row-action" href="{{ user.detailHref }}">查看详情</a>
+              {% if Session.id != user.id %}
+              <button
+                class="admin-product-row-action"
+                type="button"
+                data-admin-user-role
+                data-user-id="{{ user.id }}"
+                data-user-name="{{ user.name }}"
+                data-platform-role="{{ user.platformRole }}"
+                data-standard-role="{{ user.standardRole }}"
+                data-standard-role-label="{{ user.standardRoleLabel }}"
+                data-role-endpoint="/pwncollege_api/v1/admin/users/{{ user.id }}/platform-role"
+              >调整平台权限</button>
+              {% else %}
+              <small>当前账号</small>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <section class="admin-product-empty"><h2>没有符合条件的用户</h2><p>调整角色、状态或搜索条件后重试。</p><a href="/admin/users">清除筛选</a></section>
+  {% endif %}
+
+  <nav class="admin-product-pagination" aria-label="用户分页">
+    {% if pagination.previous %}<a href="{{ pagination.previous }}" rel="prev">上一页</a>{% else %}<span aria-disabled="true">上一页</span>{% endif %}
+    <span>第 {{ users.page }} / {{ users.pages or 1 }} 页</span>
+    {% if pagination.next %}<a href="{{ pagination.next }}" rel="next">下一页</a>{% else %}<span aria-disabled="true">下一页</span>{% endif %}
+  </nav>
+
+  <div id="admin-user-role-dialog" class="ae-dialog" aria-hidden="true" hidden>
+    <button class="ae-dialog-backdrop" type="button" data-dialog-close aria-label="关闭权限变更窗口"></button>
+    <section class="ae-dialog-panel admin-role-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-role-dialog-title" tabindex="-1">
+      <header>
+        <div><p class="admin-product-eyebrow">高影响权限操作</p><h2 id="admin-role-dialog-title">调整平台权限</h2></div>
+        <button type="button" class="admin-role-dialog-close" data-dialog-close aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button>
+      </header>
+      <form id="admin-user-role-form">
+        <input type="hidden" name="userId">
+        <p>目标账号：<strong data-role-user-name></strong></p>
+        <label><span>目标平台角色</span><select name="targetRole" required>
+          <option value="standard">标准账号</option>
+          <option value="platform_admin">平台管理员</option>
+        </select></label>
+
+        <section class="admin-role-impact" aria-labelledby="admin-role-impact-title">
+          <h3 id="admin-role-impact-title">变更预览</h3>
+          <dl>
+            <div><dt>变更前</dt><dd data-role-before>—</dd></div>
+            <div><dt>变更后</dt><dd data-role-after>—</dd></div>
+            <div><dt>新增能力</dt><dd data-role-granted>—</dd></div>
+            <div><dt>撤销能力</dt><dd data-role-revoked>—</dd></div>
+          </dl>
+          <p data-role-impact-summary>正在计算影响…</p>
+          <small>课程教师/学习成员关系不会被本操作修改。</small>
+        </section>
+
+        <label><span>变更原因</span><textarea name="reason" minlength="8" maxlength="240" required placeholder="说明业务原因、授权依据或工单编号"></textarea></label>
+        <label><span>输入完整账号名称确认</span><input name="confirmUser" autocomplete="off" maxlength="128" required></label>
+        <p class="admin-role-live-status" role="status" aria-live="polite"></p>
+        <footer>
+          <button type="button" class="admin-product-secondary" data-dialog-close>取消</button>
+          <button type="submit" class="admin-product-primary" data-role-apply disabled>确认并立即生效</button>
+        </footer>
+      </form>
+    </section>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/admin-users.js', v='aisecedu-admin-users-v1') }}"></script>
+{% endblock %}

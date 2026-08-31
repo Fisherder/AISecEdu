@@ -110,7 +110,7 @@ def main():
 
         course_spec = {
             "id": dojo_id,
-            "name": "AISecEdu Source Authoring Verification",
+            "name": "玄甲 Source Authoring Verification",
             "type": "public",
             "modules": [
                 {

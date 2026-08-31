@@ -1,180 +1,97 @@
 {% extends "base.html" %}
-{% from "macros/widgets.html" import card %}
+{% set is_course_admin = dojo.is_admin(user) %}
+{% set progress = namespace(required=0, solved=0, visible_modules=0) %}
+{% for module in dojo.modules %}
+  {% if module.visible() or is_course_admin %}
+    {% set required_count = module.visible_challenges(required_only=True) | length %}
+    {% set solved_count = module.solves(user=user, ignore_visibility=True, ignore_admins=False).count() if user else 0 %}
+    {% set progress.required = progress.required + required_count %}
+    {% set progress.solved = progress.solved + solved_count %}
+    {% set progress.visible_modules = progress.visible_modules + 1 %}
+  {% endif %}
+{% endfor %}
+{% set progress_percent = ((student_course_context.solved / student_course_context.required) * 100) if student_course_context.required else none %}
+
+{% block body_class %}course-detail-page{% endblock %}
 
 {% block content %}
-<div class="jumbotron">
-  <div class="container">
-    <h1 class="brand-white brand-mono-bold">{{ dojo.name or dojo.id }}<span class="brand-dot">.</span></h1>
-  </div>
-</div>
-<div class="container">
+<div class="course-detail-shell">
+  <nav class="course-breadcrumbs" aria-label="面包屑"><a href="/dojos">课程</a><i class="fas fa-chevron-right"></i><span>{{ dojo.name or dojo.id }}</span></nav>
+
   {% include "components/errors.html" %}
 
-  {% if dojo.description %}
-  <div>
-    {% if description_edit_url %}
-      <a href="{{ description_edit_url }}"
-         target="_blank"
-         class="github-edit-link"
-         title="在 GitHub 中编辑">
-        <i class="fas fa-edit"></i>
-      </a>
-    {% endif %}
+  <header class="course-detail-header">
+    <div>
+      <span class="product-kicker">{{ '教师课程' if is_course_admin else '网络安全课程' }}</span>
+      <h1>{{ dojo.name or dojo.id }}</h1>
+      <p>{{ (dojo.description | striptags | truncate(180)) if dojo.description else '按章节学习课程内容，并通过 CTF 实践题与模拟实训验证掌握情况。' }}</p>
+    </div>
+    <div class="course-detail-actions">
+      {% if is_course_admin %}
+      <a class="product-button" href="/teacher?prompt={{ ('请协助我继续设计课程“' ~ (dojo.name or dojo.id) ~ '”，先总结课程现状并给出下一步建议') | urlencode }}"><i class="fas fa-magic"></i>与 AI 共创</a>
+      <a class="product-button is-primary" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}"><i class="fas fa-layer-group"></i>进入课程中心</a>
+      {% elif user and not dojo_user %}
+        {% if dojo.password %}
+        <a class="product-button is-primary" href="/student#join-course"><i class="fas fa-key" aria-hidden="true"></i>使用课程码加入</a>
+        {% else %}
+        <form method="post" action="{{ url_for('pwncollege_dojo.join_dojo', dojo=dojo.reference_id) }}">
+          <input type="hidden" name="nonce" value="{{ Session.nonce }}">
+          <button class="product-button is-primary" type="submit"><i class="fas fa-user-plus" aria-hidden="true"></i>加入课程</button>
+        </form>
+        {% endif %}
+      {% elif user %}
+      <a class="product-button" href="/dojo/{{ dojo.reference_id }}/learning"><i class="fas fa-chart-line"></i>学习进展</a>
+      {% if student_course_context.next %}<a class="product-button is-primary" href="/{{ dojo.reference_id }}/{{ student_course_context.next.module.id }}{% if student_course_context.next.nextChallenge %}/{{ student_course_context.next.nextChallenge.id }}{% endif %}?returnTo={{ request.full_path | urlencode }}"><i class="fas fa-play"></i>{{ '继续当前项' if student_course_context.required else '打开阅读章节' }}</a>{% endif %}
+      {% else %}
+      <a class="product-button is-primary" href="/login?next={{ request.path | urlencode }}"><i class="fas fa-sign-in-alt" aria-hidden="true"></i>登录后加入</a>
+      {% endif %}
+    </div>
+  </header>
+
+  <div class="course-stat-row" aria-label="课程摘要">
+    <article class="product-surface course-stat-item"><small>课程章节</small><strong>{{ progress.visible_modules }}</strong></article>
+    <article class="product-surface course-stat-item"><small>{{ '课程实训' if is_course_admin else ('我的完成' if user and student_course_context.required else ('学习方式' if user else '必修实训')) }}</small><strong>{{ progress.required if is_course_admin or not user else ((student_course_context.solved ~ ' / ' ~ student_course_context.required) if student_course_context.required else '阅读课程') }}</strong></article>
+    <article class="product-surface course-stat-item"><small>{{ '参与学生' if is_course_admin else ('学习进度' if user else '实训形态') }}</small><strong>{{ stats.get('users', 0) if is_course_admin else (((progress_percent | round(0, 'floor') | int) ~ '%') if user and progress_percent is not none else ('无必修实践' if user else 'CTF + 仿真')) }}</strong></article>
+  </div>
+
+  {% if dojo.description and (dojo.description | striptags | length > 180) %}
+  <section class="product-surface course-description-surface">
+    {% if description_edit_url %}<a href="{{ description_edit_url }}" target="_blank" class="github-edit-link" title="编辑课程说明"><i class="fas fa-edit"></i></a>{% endif %}
     {{ dojo.description | markdown }}
-  </div>
-  <br>
+  </section>
   {% endif %}
 
-  <div class="row text-center">
-    {% if user %}
-    <div class="col-lg-auto m-3">
-      <figure>
-        <a class="text-decoration-none" href="/dojo/{{ dojo.reference_id }}/learning">
-          <i class="fas fa-chart-line fa-3x"></i>
-          <figcaption><b>我的进度</b></figcaption>
-        </a>
-      </figure>
+  {% if dojo.modules or is_course_admin %}
+  <section class="product-section">
+    <div class="product-section-heading">
+      <div><span class="product-kicker">课程路径</span><h2>章节与实训</h2><p>课程内容、CTF 与模拟仿真按照章节顺序组织。</p></div>
+      {% if is_course_admin %}<a class="product-button" href="/teacher/courses/{{ dojo.reference_id | urlencode }}/chapters/new"><i class="fas fa-plus"></i>添加章节</a>{% endif %}
     </div>
-    {% endif %}
-    {% if dojo.course and user %}
-    <div class="col-lg-auto m-3">
-      <figure>
-        <a class="text-decoration-none" href="{{ url_for('course.view_course', dojo=dojo.reference_id) }}">
-          <i class="fas fa-graduation-cap fa-3x"></i>
-          <figcaption><b>课堂信息</b></figcaption>
-        </a>
-      </figure>
+    <div class="course-module-grid">
+      {% set module_number = namespace(value=0) %}
+      {% for module in dojo.modules %}
+        {% if module.visible() or is_course_admin %}
+          {% set module_number.value = module_number.value + 1 %}
+          {% set num_challs = module.visible_challenges(required_only=True) | length %}
+          {% set num_solved_required = student_course_context.byModuleId[module.id].solved if user else 0 %}
+          {% set module_percent = ((num_solved_required / num_challs) * 100) if num_challs else 0 %}
+          <a class="course-module-card" href="{{ url_for('pwncollege_dojo.view_dojo_path', dojo=dojo_id, path=module.id) }}">
+            <span class="course-module-index">{{ '%02d' | format(module_number.value) }}</span>
+            <div class="course-module-copy"><h3>{{ module.name or module.id }}</h3><p>{{ (module.description | striptags | truncate(86)) if module.description else '进入章节查看课程资料与实训题目。' }}</p></div>
+            <div class="course-module-meta">{% if num_challs %}<span>{{ num_challs }} 项必修实训{% if not module.visible() %} · 教师可见{% endif %}</span><span>{{ num_solved_required }} / {{ num_challs }}</span><span class="course-module-progress"><i style="width: {{ module_percent }}%"></i></span>{% else %}<span><i class="fas fa-book-open" aria-hidden="true"></i> 阅读章节 · 无必修实践</span><span>进入阅读</span>{% endif %}</div>
+          </a>
+        {% endif %}
+      {% endfor %}
     </div>
-    {% endif %}
-    {% if dojo.is_admin(user) %}
-    <div class="col-lg-auto m-3">
-      <figure>
-        <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.view_dojo_admin', dojo=dojo.reference_id) }}">
-          <i class="fas fa-users-cog fa-3x"></i>
-          <figcaption><b>名单与设置</b></figcaption>
-        </a>
-      </figure>
-    </div>
-    <div class="col-lg-auto m-3">
-      <figure>
-        <a class="text-decoration-none" href="/dojo/{{ dojo.reference_id }}/studio">
-          <i class="fas fa-chalkboard-teacher fa-3x"></i>
-          <figcaption><b>教师工作台</b></figcaption>
-        </a>
-      </figure>
-    </div>
-    {% endif %}
-    {% if user and not dojo_user and not dojo.is_admin(user) %}
-    <div class="col-lg-auto m-3">
-      <figure>
-        <a class="text-decoration-none" href="{{ url_for('pwncollege_dojo.join_dojo', dojo=dojo.reference_id) }}">
-          <i class="fas fa-user-plus fa-3x"></i>
-          <figcaption><b>加入课程</b></figcaption>
-        </a>
-      </figure>
-    </div>
-    {% endif %}
-  </div>
-
-  <br>
-
-  {% if dojo.award and dojo.award.get("emoji") %}
-  <h2 class="row">课程徽章：<b>{{ dojo.award["emoji"] }}</b></h2>
-  <br>
+  </section>
   {% endif %}
 
-  {% if dojo.modules or dojo.is_admin(user) %}
-  <h2 class="row">学习状态</h2>
-  {% include "components/stat_dashboard.html" %}
-  <div class="row"></div>
-
-  <br>
-
-  <h2 class="row">课程单元</h2>
-  <br>
-  <ul class="card-list">
-    {% for module in dojo.modules %}
-    {% set container_count = module_container_counts.get(module.id, 0) %}
-    {% set num_challs = module.visible_challenges(required_only=True) | length %}
-    {% set num_solved_required = module.solves(user=user, ignore_visibility=True, ignore_admins=False).count() if user else 0 %}
-    {% if module.visible() or dojo.is_admin(user) %}
-      {{ card(
-        url_for('pwncollege_dojo.view_dojo_path', dojo=dojo_id, path=module.id),
-	title=module.name or module.id,
-        text_lines = [
-	  "{} 个活动工作区".format(container_count) if container_count > 0 else "",
-          "已完成 {} / {} 道题目".format(
-            num_solved_required,
-            num_challs
-          ),
-	  "已隐藏" if not module.visible()
-        ],
-        solve_percent=(num_solved_required / num_challs) * 100 if num_challs else 0,
-      ) }}
-    {% endif %}
-    {% endfor %}
-    {% if dojo.is_admin(user) %}
-    <li class="card card-small course-add-unit-card">
-      <button type="button" data-toggle="modal" data-target="#create-unit-modal" title="向此课程添加单元">
-        <i class="fas fa-plus-circle" aria-hidden="true"></i>
-        <span>添加单元</span>
-      </button>
-    </li>
-    {% endif %}
-  </ul>
-
-  {% if dojo.show_scoreboard %}
-  <br>
-
-  <h2 class="row" id="scoreboard-heading">近 30 天学生排行榜</h2>
-  <br>
-  {% from "macros/scoreboard.html" import scoreboard %}
-  {{ scoreboard() }}
-
-  {% endif %}
-
+  {% if is_course_admin %}
+  <section class="course-teacher-callout product-surface">
+    <div><span class="product-kicker">教师工作流</span><h2>课件、实训与学情已经统一到课程中心</h2><p>日常教学无需在多个管理页之间切换；成员与底层设置也从课程中心按需进入。</p></div>
+    <a class="product-button is-primary" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}"><i class="fas fa-arrow-right"></i>打开课程中心</a>
+  </section>
   {% endif %}
 </div>
 
-{% if dojo.is_admin(user) %}
-<div class="modal fade" id="create-unit-modal" tabindex="-1" role="dialog" aria-labelledby="create-unit-title" aria-hidden="true" data-course-id="{{ dojo.reference_id }}">
-  <div class="modal-dialog" role="document">
-    <div class="modal-content bg-dark text-white">
-      <form id="create-unit-form">
-        <div class="modal-header">
-          <h3 class="modal-title" id="create-unit-title">添加课程单元</h3>
-          <button type="button" class="close text-white" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
-        </div>
-        <div class="modal-body">
-          <div id="create-unit-notice" class="alert" role="alert" hidden></div>
-          <div class="form-group">
-            <label for="create-unit-name">单元名称</label>
-            <input id="create-unit-name" class="form-control" maxlength="128" required placeholder="Web 安全基础">
-          </div>
-          <div class="form-group">
-            <label for="create-unit-id">单元 ID</label>
-            <input id="create-unit-id" class="form-control" maxlength="32" required pattern="[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?" placeholder="web-security-foundations">
-            <small class="form-text text-muted">使用小写字母、数字和连字符；它会成为单元 URL 的一部分。</small>
-          </div>
-          <div class="form-group mb-0">
-            <label for="create-unit-description">简介</label>
-            <textarea id="create-unit-description" class="form-control" rows="5" maxlength="24000" placeholder="学生将在这个单元中学习和练习什么。"></textarea>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">取消</button>
-          <button id="create-unit-submit" type="submit" class="btn btn-primary">创建单元</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-{% endif %}
-{% endblock %}
-
-{% block scripts %}
-<script defer onload="loadScoreboard(30, 1);" src="{{ url_for('views.themes', path='js/dojo/scoreboard.js') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/copy.js') }}"></script>
-{% if dojo.is_admin(user) %}<script defer src="{{ url_for('views.themes', path='js/dojo/course-admin.js', v='aisecedu-20260726-pwn-notices') }}"></script>{% endif %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}

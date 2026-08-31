@@ -1,134 +1,207 @@
-document.addEventListener('DOMContentLoaded', async () => {
-    const tracker = document.getElementById('activity-tracker');
+document.addEventListener("DOMContentLoaded", async () => {
+    const tracker = document.getElementById("activity-tracker");
     if (!tracker) return;
-    const userID = tracker.getAttribute('user-id');
-    const container = document.createElement('div');
-    container.className = 'activity-graph';
-    container.innerHTML = `<h3>学习活动</h3>
-        <div class="streak"></div>
-        <div class="grid-wrapper">
-        <div class="month-labels" style="font-size:0.7rem; height: 16px; position: relative;"></div>
-        <div class="grid-container"></div>
-        </div>
-        <div class="legend">
-            <span>较少</span>
-            <div class="legend-cells"></div>
-            <span>较多</span>
-        </div>`;
-    tracker.appendChild(container);
 
-    const grid = container.querySelector('.grid-container');
-    const monthLabels = container.querySelector('.month-labels');
-    const legendCells = container.querySelector('.legend-cells');
-    const streak = container.querySelector('.streak');
+    const userID = tracker.dataset.userId || tracker.getAttribute("user-id");
+    const DAY = 86400000;
+    const monthNames = [
+        "1 月", "2 月", "3 月", "4 月", "5 月", "6 月",
+        "7 月", "8 月", "9 月", "10 月", "11 月", "12 月",
+    ];
 
-    function getLocalISODate(date) {
-        const tzOffset = date.getTimezoneOffset() * 60000;
-        return new Date(date.getTime() - tzOffset).toISOString().split('T')[0];
+    function localDateKey(value) {
+        const date = new Date(value);
+        const offset = date.getTimezoneOffset() * 60000;
+        return new Date(date.getTime() - offset).toISOString().slice(0, 10);
     }
-    
-    const now = Date.now();
-    let monthCount = 1;
-    for (let i = 363; i >= 0; i--) {
-        const cell = document.createElement('div');
-        cell.className = 'activity-cell';
-        const cellDate = new Date(now - i * 86400000);
-        const formattedDate = getLocalISODate(cellDate);
-        const displayDate = cellDate.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
+
+    function dayLabel(value) {
+        return new Intl.DateTimeFormat("zh-CN", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            weekday: "short",
+        }).format(value);
+    }
+
+    function shortDayLabel(value) {
+        return new Intl.DateTimeFormat("zh-CN", {
+            year: "numeric",
+            month: "numeric",
+            day: "numeric",
+        }).format(value);
+    }
+
+    function dailyCounts(timestamps) {
+        return timestamps.reduce((counts, timestamp) => {
+            const date = new Date(timestamp);
+            if (Number.isNaN(date.getTime())) return counts;
+            const key = localDateKey(date);
+            counts[key] = (counts[key] || 0) + 1;
+            return counts;
+        }, {});
+    }
+
+    function streaks(counts, today) {
+        const activeKeys = Object.keys(counts).filter(key => counts[key] > 0).sort();
+        let best = 0;
+        let running = 0;
+        let previous = null;
+        activeKeys.forEach(key => {
+            const current = new Date(`${key}T00:00:00`);
+            if (previous && Math.round((current - previous) / DAY) === 1) {
+                running += 1;
+            } else {
+                running = 1;
+            }
+            best = Math.max(best, running);
+            previous = current;
         });
-        cell.dataset.count = 0;
-        cell.dataset.date = formattedDate;
-        cell.dataset.displayDate = displayDate;
-        cell.title = `${displayDate}: 0 completions`;
+
+        const todayKey = localDateKey(today);
+        const yesterday = new Date(today.getTime() - DAY);
+        let cursor = counts[todayKey] ? new Date(today) : yesterday;
+        let current = 0;
+        while (counts[localDateKey(cursor)] > 0) {
+            current += 1;
+            cursor = new Date(cursor.getTime() - DAY);
+        }
+        return {current, best};
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    start.setDate(today.getDate() - today.getDay() - 52 * 7);
+    const totalDays = Math.floor((today - start) / DAY) + 1;
+
+    const graph = document.createElement("div");
+    graph.className = "activity-graph";
+    graph.innerHTML = `
+        <div class="profile-activity-summary" aria-label="年度活动摘要"></div>
+        <div class="profile-activity-scroll">
+            <div class="activity-calendar">
+                <div class="month-labels" aria-hidden="true"></div>
+                <div class="grid-container" role="grid" aria-label="过去一年的每日学习活动"></div>
+            </div>
+        </div>
+        <div class="profile-activity-footer">
+            <span class="profile-activity-range"></span>
+            <div class="legend" aria-label="活动强度图例">
+                <span>较少</span>
+                <div class="legend-cells" aria-hidden="true"></div>
+                <span>较多</span>
+            </div>
+        </div>`;
+    tracker.replaceChildren(graph);
+
+    const grid = graph.querySelector(".grid-container");
+    const monthLabels = graph.querySelector(".month-labels");
+    const legendCells = graph.querySelector(".legend-cells");
+    const range = graph.querySelector(".profile-activity-range");
+    const summary = graph.querySelector(".profile-activity-summary");
+    const cells = new Map();
+    let previousMonth = null;
+
+    for (let offset = 0; offset < totalDays; offset += 1) {
+        const date = new Date(start.getTime() + offset * DAY);
+        const key = localDateKey(date);
+        const cell = document.createElement("span");
+        cell.className = "activity-cell level-0";
+        cell.dataset.date = key;
+        cell.dataset.count = "0";
+        cell.title = `${dayLabel(date)}：未完成题目`;
+        cell.setAttribute("role", "gridcell");
+        cell.setAttribute("aria-label", cell.title);
+        cell.tabIndex = -1;
         grid.appendChild(cell);
-        const currentMonth = cellDate.toLocaleDateString('en-US', { month: 'short' });
-        if(currentMonth !== monthLabels.lastChild?.textContent &&
-           (currentMonth !== monthLabels.childNodes[0]?.textContent)) {
-            const monthLabel = document.createElement('span');
-            monthLabel.id = `month-label-${monthCount++}`;
-            monthLabel.className = 'month-label';
-            monthLabel.textContent = currentMonth;
-            monthLabel.style.left = `${(Math.ceil((363 - i) / 7) * 12)}px`;
-            monthLabels.appendChild(monthLabel);
+        cells.set(key, cell);
+
+        const month = date.getMonth();
+        if (month !== previousMonth && (date.getDate() <= 7 || offset === 0)) {
+            const label = document.createElement("span");
+            label.className = "month-label";
+            label.textContent = monthNames[month];
+            label.style.left = `${Math.floor(offset / 7) * 14}px`;
+            monthLabels.appendChild(label);
+            previousMonth = month;
         }
     }
 
-    if (document.getElementById('month-label-1').getBoundingClientRect().right >
-        document.getElementById('month-label-2').getBoundingClientRect().left) {
-        document.getElementById('month-label-1').style.display = 'none';
-    }
-
-    for (let i = 0; i < 5; i++) {
-        const cell = document.createElement('div');
-        cell.className = `activity-cell level-${i}`;
+    for (let level = 0; level < 5; level += 1) {
+        const cell = document.createElement("span");
+        cell.className = `activity-cell level-${level}`;
         legendCells.appendChild(cell);
     }
-    
-    function updateGrid(dailyActivityData, max) {
-        for (const date in dailyActivityData) {
-            const cell = grid.querySelector(`[data-date="${date}"]`);
-            if (cell) {
-                const count = dailyActivityData[date];
-                const displayDate = cell.dataset.displayDate;
-                const solveText = '次完成';
-                cell.dataset.count = count;
-                cell.title = `${displayDate}: ${count} ${solveText}`;
-                let level = 0;
-                const ratio = count / max;
-                if(count > 0) {
-                    if(ratio > 0.75) level = 4;
-                    else if(ratio > 0.5) level = 3;
-                    else if(ratio > 0.25) level = 2;
-                    else if(ratio > 0 ) level = 1;
-                }
-                cell.className = `activity-cell level-${level}`;
-            }
-        }
+    range.textContent = `统计范围：${shortDayLabel(start)} 至 ${shortDayLabel(today)}`;
+
+    function renderSummary(counts, total) {
+        const values = Object.values(counts);
+        const activeDays = values.filter(value => value > 0).length;
+        const maximum = values.length ? Math.max(...values) : 0;
+        const {current, best} = streaks(counts, today);
+        summary.innerHTML = `
+            <span><strong>${total}</strong> 次完成</span>
+            <span><strong>${activeDays}</strong> 个活跃日</span>
+            <span><strong>${current}</strong> 天连续学习</span>
+            <span><strong>${best}</strong> 天最长连续</span>
+            <span><strong>${maximum}</strong> 次单日最高</span>`;
     }
 
-    function countDailySolves(timestamps) {
-        const counts = {};
-        timestamps.forEach(ts => {
-            const dateStr = getLocalISODate(new Date(ts));
-            counts[dateStr] = (counts[dateStr] || 0) + 1;
+    function renderGrid(counts) {
+        const maximum = Math.max(...Object.values(counts), 1);
+        cells.forEach((cell, key) => {
+            const count = counts[key] || 0;
+            const date = new Date(`${key}T00:00:00`);
+            let level = 0;
+            if (count > 0) {
+                const ratio = count / maximum;
+                if (ratio >= 0.76) level = 4;
+                else if (ratio >= 0.51) level = 3;
+                else if (ratio >= 0.26) level = 2;
+                else level = 1;
+            }
+            cell.className = `activity-cell level-${level}`;
+            cell.dataset.count = String(count);
+            cell.title = `${dayLabel(date)}：${count ? `完成 ${count} 道题目` : "未完成题目"}`;
+            cell.setAttribute("aria-label", cell.title);
+            cell.tabIndex = count ? 0 : -1;
         });
-        return counts;
     }
 
-    function getStreak(dailyActivityData) {
-        let streak = 0;
-        for (let offset = 0; offset < 364; offset++) {
-            const date = new Date(now - offset * 86400000);
-            const formatted = getLocalISODate(date);
-            if (dailyActivityData[formatted] && dailyActivityData[formatted] > 0) {
-                streak++;
-            } else {
-                break;
+    try {
+        let result;
+        if (window.AISecEdu && typeof window.AISecEdu.request === "function") {
+            result = await window.AISecEdu.request(
+                `/pwncollege_api/v1/activity/${encodeURIComponent(userID)}`,
+                {method: "GET", unwrap: false, cacheTtlMs: 30000},
+            );
+        } else {
+            const request = window.CTFd?.fetch
+                ? window.CTFd.fetch.bind(window.CTFd)
+                : window.fetch.bind(window);
+            const response = await request(`/pwncollege_api/v1/activity/${encodeURIComponent(userID)}`, {
+                method: "GET",
+                credentials: "same-origin",
+                headers: {Accept: "application/json"},
+            });
+            result = await response.json();
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || "活动数据暂时不可用");
             }
         }
-        return streak;
+        const timestamps = Array.isArray(result.data?.solve_timestamps)
+            ? result.data.solve_timestamps
+            : [];
+        const counts = dailyCounts(timestamps);
+        renderGrid(counts);
+        renderSummary(counts, Number(result.data?.total_solves || timestamps.length));
+    } catch (error) {
+        graph.replaceChildren();
+        const message = document.createElement("div");
+        message.className = "profile-empty-state is-compact";
+        message.innerHTML = `<span><i class="fas fa-chart-area" aria-hidden="true"></i></span><div><strong>暂时无法读取学习活动</strong><p></p></div>`;
+        message.querySelector("p").textContent = error.message || "请稍后刷新页面重试。";
+        graph.appendChild(message);
     }
-
-    const endpoint = `/pwncollege_api/v1/activity/${userID}`;
-    CTFd.fetch(endpoint, {
-        method: "GET",
-        credentials: "same-origin",
-        headers: { "Accept": "application/json" }
-    })
-    .then(response => response.json())
-    .then(result => {
-        if(result.success) {
-            const dailySolveCount = countDailySolves(result.data.solve_timestamps || []);
-            const max = Math.max(...Object.values(dailySolveCount), 1);
-            updateGrid(dailySolveCount, max);
-            const streakText = getStreak(dailySolveCount);
-            streak.textContent = streakText > 0 ? `连续 ${streakText} 天` : '';
-        }
-    })
-    .catch(err => {
-        console.error('Error fetching activity data', err);
-    });
 });

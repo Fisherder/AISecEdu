@@ -1,0 +1,1466 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工控安全实验室 — HMI界面欺骗攻击分析</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1a1a2e;
+            --border: #2d3a5c;
+            --text: #e2e8f0;
+            --text-dim: #94a3b8;
+            --green: #22c55e;
+            --green-bg: #0a2e1a;
+            --red: #ef4444;
+            --red-bg: #2e0a0a;
+            --amber: #f59e0b;
+            --amber-bg: #2e1f05;
+            --blue: #3b82f6;
+            --blue-bg: #0a1a3e;
+            --cyan: #06b6d4;
+            --pink: #ec4899;
+            --font-mono: 'SF Mono', 'Cascadia Code', 'Consolas', 'Monaco', monospace;
+            --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+            --radius: 10px;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+            --transition: 0.25s ease;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        .container {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 16px 20px;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .title-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .title-icon {
+            font-size: 2rem;
+        }
+        .title-section h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .badge-ics {
+            background: #1e3a5f;
+            color: #93c5fd;
+            border: 1px solid #3b5998;
+        }
+        .briefing-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+        }
+        .briefing-card::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(180deg, #3b82f6, #a78bfa);
+            border-radius: 4px 0 0 4px;
+        }
+        .briefing-icon {
+            font-size: 2rem;
+            flex-shrink: 0;
+        }
+        .briefing-content h3 {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+            color: #e2e8f0;
+        }
+        .briefing-content p {
+            font-size: 0.9rem;
+            color: #94a3b8;
+            margin: 0;
+        }
+        .progress-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .step-dot {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            border: 2px solid var(--border);
+            background: #1e293b;
+            color: #64748b;
+            transition: all var(--transition);
+            cursor: default;
+        }
+        .step-dot.active {
+            border-color: #3b82f6;
+            background: #1e3a5f;
+            color: #93c5fd;
+            box-shadow: 0 0 16px rgba(59, 130, 246, 0.3);
+            animation: pulse-dot 2s infinite;
+        }
+        .step-dot.done {
+            border-color: #22c55e;
+            background: #0a2e1a;
+            color: #22c55e;
+        }
+        @keyframes pulse-dot {
+            0%,
+            100% {
+                box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+            }
+            50% {
+                box-shadow: 0 0 22px rgba(59, 130, 246, 0.6);
+            }
+        }
+        .step-connector {
+            width: 18px;
+            height: 2px;
+            background: var(--border);
+            border-radius: 2px;
+            transition: background var(--transition);
+        }
+        .step-connector.done {
+            background: #22c55e;
+        }
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        @media (max-width: 900px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .dashboard-panel {
+            background: var(--panel);
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+            transition: all var(--transition);
+        }
+        .dashboard-panel.spoofed {
+            border-color: #22c55e;
+            background: linear-gradient(180deg, #0a1a0f 0%, #1a1a2e 60%);
+        }
+        .dashboard-panel.real {
+            border-color: #ef4444;
+            background: linear-gradient(180deg, #1a0a0a 0%, #1a1a2e 60%);
+            animation: border-pulse 2s infinite;
+        }
+        @keyframes border-pulse {
+            0%,
+            100% {
+                border-color: #ef4444;
+                box-shadow: 0 0 8px rgba(239, 68, 68, 0.2);
+            }
+            50% {
+                border-color: #ff6b6b;
+                box-shadow: 0 0 24px rgba(239, 68, 68, 0.5);
+            }
+        }
+        .panel-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            letter-spacing: 0.03em;
+        }
+        .panel-header .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            animation: blink-dot 1.5s infinite;
+        }
+        .dot.green {
+            background: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+        }
+        .dot.red {
+            background: #ef4444;
+            box-shadow: 0 0 8px #ef4444;
+            animation: blink-dot-fast 0.6s infinite;
+        }
+        @keyframes blink-dot {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.4;
+            }
+        }
+        @keyframes blink-dot-fast {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            30% {
+                opacity: 0.2;
+            }
+            60% {
+                opacity: 0.9;
+            }
+        }
+        .gauge-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .gauge-svg {
+            width: 160px;
+            height: 130px;
+            flex-shrink: 0;
+        }
+        .gauge-value {
+            font-family: var(--font-mono);
+            font-size: 2.6rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            line-height: 1;
+        }
+        .gauge-value.safe {
+            color: #22c55e;
+        }
+        .gauge-value.danger {
+            color: #ef4444;
+            animation: flicker-text 0.3s infinite;
+        }
+        @keyframes flicker-text {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            40% {
+                opacity: 0.6;
+            }
+            80% {
+                opacity: 0.95;
+            }
+        }
+        .gauge-label {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .metric-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .metric-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 12px;
+            text-align: center;
+        }
+        .metric-card .metric-val {
+            font-family: var(--font-mono);
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+        .metric-card .metric-name {
+            font-size: 0.7rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .metric-val.safe {
+            color: #22c55e;
+        }
+        .metric-val.warn {
+            color: #f59e0b;
+        }
+        .metric-val.danger {
+            color: #ef4444;
+        }
+        .centrifuge-visual {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin: 10px auto;
+            position: relative;
+            border: 3px solid #4a5568;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all var(--transition);
+        }
+        .centrifuge-visual .rotor {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .centrifuge-visual .rotor::before {
+            content: '';
+            position: absolute;
+            width: 6px;
+            height: 44px;
+            background: #7c8ba0;
+            border-radius: 3px;
+            animation: spin-rotor 2s linear infinite;
+        }
+        .centrifuge-visual .rotor::after {
+            content: '';
+            position: absolute;
+            width: 44px;
+            height: 6px;
+            background: #7c8ba0;
+            border-radius: 3px;
+            animation: spin-rotor 2s linear infinite;
+        }
+        .centrifuge-visual.spoofed-rotor .rotor::before,
+        .centrifuge-visual.spoofed-rotor .rotor::after {
+            animation-duration: 2.2s;
+            background: #5a8a6a;
+        }
+        .centrifuge-visual.real-rotor {
+            border-color: #ef4444;
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+            animation: shake 0.15s infinite;
+        }
+        .centrifuge-visual.real-rotor .rotor::before,
+        .centrifuge-visual.real-rotor .rotor::after {
+            animation-duration: 0.35s;
+            background: #ff6b6b;
+        }
+        @keyframes spin-rotor {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        @keyframes shake {
+            0%,
+            100% {
+                transform: translate(0, 0);
+            }
+            25% {
+                transform: translate(2px, -1px);
+            }
+            50% {
+                transform: translate(-2px, 1px);
+            }
+            75% {
+                transform: translate(-1px, -2px);
+            }
+        }
+        .section-title {
+            font-weight: 700;
+            font-size: 1rem;
+            letter-spacing: 0.02em;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .protocol-section {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow);
+        }
+        .packet-table-wrap {
+            overflow-x: auto;
+            max-height: 260px;
+            overflow-y: auto;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+        .packet-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+        }
+        .packet-table th {
+            background: #1e293b;
+            color: #94a3b8;
+            padding: 8px 10px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.7rem;
+            letter-spacing: 0.04em;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .packet-table td {
+            padding: 7px 10px;
+            border-bottom: 1px solid #1e293b;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .packet-table tr {
+            transition: all 0.15s;
+        }
+        .packet-table tr:hover {
+            background: rgba(59, 130, 246, 0.08);
+        }
+        .packet-table tr.selected {
+            background: rgba(59, 130, 246, 0.18);
+            outline: 1px solid #3b82f6;
+            outline-offset: -1px;
+        }
+        .packet-table tr.tagged {
+            background: rgba(239, 68, 68, 0.2);
+            outline: 1px solid #ef4444;
+            outline-offset: -1px;
+        }
+        .packet-table tr.tagged::after {
+            content: ' 🏷️';
+            font-size: 0.7rem;
+        }
+        .packet-table .src-ip {
+            color: #93c5fd;
+        }
+        .packet-table .dst-ip {
+            color: #c4b5fd;
+        }
+        .packet-table .attacker-ip {
+            color: #ef4444;
+            font-weight: 700;
+        }
+        .packet-detail-panel {
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+            margin-top: 10px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            display: none;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .packet-detail-panel.visible {
+            display: block;
+            animation: fadeIn 0.3s;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-6px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .hex-dump {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 4px 12px;
+            font-size: 0.72rem;
+            line-height: 1.5;
+        }
+        .hex-offset {
+            color: #64748b;
+        }
+        .hex-bytes {
+            color: #e2e8f0;
+            letter-spacing: 0.06em;
+        }
+        .hex-ascii {
+            color: #94a3b8;
+        }
+        .hex-highlight {
+            background: rgba(239, 68, 68, 0.3);
+            border-radius: 2px;
+            padding: 1px 2px;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all var(--transition);
+            font-family: var(--font-sans);
+        }
+        .btn-tag {
+            background: #ef4444;
+            color: #fff;
+            border-color: #ef4444;
+        }
+        .btn-tag:hover {
+            background: #dc2626;
+            box-shadow: 0 0 14px rgba(239, 68, 68, 0.4);
+        }
+        .btn-verify {
+            background: #3b82f6;
+            color: #fff;
+            border-color: #3b82f6;
+        }
+        .btn-verify:hover {
+            background: #2563eb;
+            box-shadow: 0 0 14px rgba(59, 130, 246, 0.4);
+        }
+        .btn-reveal {
+            background: transparent;
+            color: #f59e0b;
+            border-color: #f59e0b;
+        }
+        .btn-reveal:hover {
+            background: rgba(245, 158, 11, 0.1);
+            box-shadow: 0 0 14px rgba(245, 158, 11, 0.3);
+        }
+        .btn-outline {
+            background: transparent;
+            color: #94a3b8;
+            border-color: var(--border);
+        }
+        .btn-outline:hover {
+            background: rgba(255, 255, 255, 0.04);
+            color: #e2e8f0;
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .analysis-workspace {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: flex-end;
+        }
+        .analysis-input-wrap {
+            flex: 1;
+            min-width: 250px;
+        }
+        .analysis-input-wrap label {
+            display: block;
+            font-weight: 600;
+            font-size: 0.85rem;
+            margin-bottom: 6px;
+            color: #cbd5e1;
+        }
+        .analysis-input-wrap textarea {
+            width: 100%;
+            height: 72px;
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: #e2e8f0;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            padding: 10px;
+            resize: vertical;
+            transition: border-color var(--transition);
+        }
+        .analysis-input-wrap textarea:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        .flag-zone {
+            background: #1a1205;
+            border: 2px dashed #f59e0b;
+            border-radius: var(--radius);
+            padding: 20px;
+            text-align: center;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 16px;
+            transition: all 0.5s;
+        }
+        .flag-zone.revealed {
+            background: #0a2e0a;
+            border-color: #22c55e;
+            border-style: solid;
+            box-shadow: 0 0 30px rgba(34, 197, 94, 0.4);
+            animation: flag-glow 1s ease-out;
+        }
+        @keyframes flag-glow {
+            0% {
+                box-shadow: 0 0 0 rgba(34, 197, 94, 0);
+            }
+            50% {
+                box-shadow: 0 0 60px rgba(34, 197, 94, 0.7);
+            }
+            100% {
+                box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+            }
+        }
+        .flag-text {
+            font-family: var(--font-mono);
+            font-size: 1.4rem;
+            font-weight: 800;
+            color: #22c55e;
+            letter-spacing: 0.04em;
+            display: none;
+        }
+        .flag-text.visible {
+            display: block;
+            animation: typeIn 0.6s steps(30);
+        }
+        @keyframes typeIn {
+            from {
+                opacity: 0;
+                clip-path: inset(0 100% 0 0);
+            }
+            to {
+                opacity: 1;
+                clip-path: inset(0 0 0 0);
+            }
+        }
+        .flag-placeholder {
+            color: #64748b;
+            font-style: italic;
+        }
+        .report-section {
+            margin-bottom: 16px;
+        }
+        .report-section details {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        .report-section summary {
+            padding: 14px 20px;
+            font-weight: 700;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .report-section summary:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .report-section .report-body {
+            padding: 0 20px 20px;
+            font-size: 0.88rem;
+            color: #cbd5e1;
+            line-height: 1.7;
+        }
+        .report-body h4 {
+            color: #e2e8f0;
+            margin-top: 12px;
+            margin-bottom: 4px;
+        }
+        .report-body code {
+            background: #1e293b;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+        }
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 999;
+            background: #1e293b;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 18px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+            animation: slideIn 0.35s ease;
+            font-size: 0.85rem;
+            max-width: 350px;
+        }
+        .toast.success {
+            border-color: #22c55e;
+        }
+        .toast.error {
+            border-color: #ef4444;
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+        }
+        .field-highlight {
+            display: inline-block;
+            background: rgba(239, 68, 68, 0.25);
+            border-radius: 3px;
+            padding: 1px 5px;
+            color: #ffb3b3;
+            font-weight: 600;
+        }
+        .alarm-banner {
+            background: #2e0a0a;
+            border: 1px solid #ef4444;
+            border-radius: 4px;
+            padding: 6px 10px;
+            color: #ef4444;
+            font-weight: 700;
+            font-size: 0.78rem;
+            animation: blink-banner 0.8s infinite;
+            text-align: center;
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        @keyframes blink-banner {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .status-badge.normal {
+            background: #0a2e1a;
+            color: #22c55e;
+            border: 1px solid #22c55e;
+        }
+        .status-badge.critical {
+            background: #2e0a0a;
+            color: #ef4444;
+            border: 1px solid #ef4444;
+        }
+        .tooltip-hint {
+            font-size: 0.75rem;
+            color: #f59e0b;
+            margin-top: 4px;
+            font-style: italic;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0d1117;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3b4a6b;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4a5d82;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="title-section">
+                <span class="title-icon">🛡️</span>
+                <div>
+                    <h1>工控安全实验室 — HMI界面欺骗攻击分析</h1>
+                    <span class="badge badge-ics">⚙️ ICS/SCADA · Modbus TCP · MITM</span>
+                </div>
+            </div>
+            <div class="progress-bar-wrap" id="progressBar">
+                <span class="step-dot active" data-step="1">1</span>
+                <span class="step-connector" data-conn="1"></span>
+                <span class="step-dot" data-step="2">2</span>
+                <span class="step-connector" data-conn="2"></span>
+                <span class="step-dot" data-step="3">3</span>
+                <span class="step-connector" data-conn="3"></span>
+                <span class="step-dot" data-step="4">4</span>
+            </div>
+        </header>
+
+        <!-- Briefing -->
+        <div class="briefing-card">
+            <span class="briefing-icon">📋</span>
+            <div class="briefing-content">
+                <h3>任务简报 — 离心机组异常事件调查</h3>
+                <p>某铀浓缩设施的离心机组#3在过去72小时内出现异常振动。操作员HMI始终显示转速<b>1064 RPM</b>（安全范围），但现场工程师报告听到刺耳的金属疲劳声。你的任务：<b>对比操作员HMI视图与实际系统数据，分析Modbus TCP通信流量，找出攻击者的欺骗手法，并捕获隐藏在流量中的Flag。</b></p>
+                <p style="font-size:0.75rem;color:#64748b;margin-top:4px;">// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境</p>
+            </div>
+        </div>
+
+        <!-- Dual Dashboard -->
+        <div class="main-grid">
+            <!-- Spoofed HMI -->
+            <div class="dashboard-panel spoofed" id="spoofedPanel">
+                <div class="panel-header">
+                    <span class="dot green"></span> 🟢 操作员HMI视图（欺骗后的假象）
+                    <span class="status-badge normal" style="margin-left:auto;">正常</span>
+                </div>
+                <div class="gauge-container">
+                    <svg class="gauge-svg" viewBox="0 0 160 130" id="gaugeSpoofed">
+                        <defs>
+                            <linearGradient id="gradGreen" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" style="stop-color:#22c55e;stop-opacity:1"/>
+                                <stop offset="100%" style="stop-color:#4ade80;stop-opacity:1"/>
+                            </linearGradient>
+                        </defs>
+                        <path d="M 25 115 A 70 70 0 0 1 135 115" fill="none" stroke="#1e3a2f" stroke-width="18" stroke-linecap="round"/>
+                        <path d="M 25 115 A 70 70 0 0 1 135 115" fill="none" stroke="url(#gradGreen)" stroke-width="14" stroke-linecap="round" stroke-dasharray="190 250" stroke-dashoffset="0" id="gaugeArcSpoofed"/>
+                        <circle cx="80" cy="115" r="6" fill="#e2e8f0"/>
+                        <line x1="80" y1="115" x2="80" y2="115" stroke="#e2e8f0" stroke-width="2.5" stroke-linecap="round" id="needleSpoofed" transform="rotate(-40, 80, 115)"/>
+                        <text x="80" y="30" text-anchor="middle" fill="#94a3b8" font-size="10" font-family="monospace">RPM</text>
+                    </svg>
+                    <div>
+                        <div class="gauge-value safe" id="rpmSpoofed">1064</div>
+                        <div class="gauge-label">离心机转速</div>
+                    </div>
+                </div>
+                <div class="centrifuge-visual spoofed-rotor">
+                    <div class="rotor"></div>
+                </div>
+                <div class="metric-row">
+                    <div class="metric-card">
+                        <div class="metric-val safe">42°C</div>
+                        <div class="metric-name">轴承温度</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-val safe">0.8 mm/s</div>
+                        <div class="metric-name">振动幅度</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-val safe">3.2 MPa</div>
+                        <div class="metric-name">腔体压力</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-val safe">正常</div>
+                        <div class="metric-name">运行状态</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real System -->
+            <div class="dashboard-panel real" id="realPanel">
+                <div class="panel-header">
+                    <span class="dot red"></span> 🔴 实际系统状态（真实离心机数据）
+                    <span class="status-badge critical" style="margin-left:auto;">⚠️ 危险</span>
+                </div>
+                <div class="gauge-container">
+                    <svg class="gauge-svg" viewBox="0 0 160 130" id="gaugeReal">
+                        <defs>
+                            <linearGradient id="gradRed" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" style="stop-color:#ef4444;stop-opacity:1"/>
+                                <stop offset="100%" style="stop-color:#ff6b6b;stop-opacity:1"/>
+                            </linearGradient>
+                        </defs>
+                        <path d="M 25 115 A 70 70 0 0 1 135 115" fill="none" stroke="#2e1515" stroke-width="18" stroke-linecap="round"/>
+                        <path d="M 25 115 A 70 70 0 0 1 135 115" fill="none" stroke="url(#gradRed)" stroke-width="14" stroke-linecap="round" stroke-dasharray="280 250" stroke-dashoffset="0" id="gaugeArcReal"/>
+                        <circle cx="80" cy="115" r="6" fill="#ffb3b3"/>
+                        <line x1="80" y1="115" x2="80" y2="115" stroke="#ffb3b3" stroke-width="2.5" stroke-linecap="round" id="needleReal" transform="rotate(55, 80, 115)"/>
+                        <text x="80" y="30" text-anchor="middle" fill="#94a3b8" font-size="10" font-family="monospace">RPM</text>
+                    </svg>
+                    <div>
+                        <div class="gauge-value danger" id="rpmReal">1487</div>
+                        <div class="gauge-label">离心机转速</div>
+                    </div>
+                </div>
+                <div class="centrifuge-visual real-rotor">
+                    <div class="rotor"></div>
+                </div>
+                <div class="alarm-banner">🚨 超速警报 — 转子接近临界转速！</div>
+                <div class="metric-row">
+                    <div class="metric-card">
+                        <div class="metric-val danger">87°C</div>
+                        <div class="metric-name">轴承温度</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-val danger">9.2 mm/s</div>
+                        <div class="metric-name">振动幅度</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-val warn">6.8 MPa</div>
+                        <div class="metric-name">腔体压力</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-val danger">超速危险</div>
+                        <div class="metric-name">运行状态</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Protocol Analyzer -->
+        <div class="protocol-section">
+            <div class="section-title">📡 协议分析器 — Modbus TCP 数据包捕获（端口502）</div>
+            <p style="font-size:0.78rem;color:#94a3b8;margin-bottom:10px;">点击数据包查看详情 · 点击<strong>"标记可疑"</strong>标注异常包 · 至少标记<b>3个</b>可疑包后验证</p>
+            <div class="packet-table-wrap">
+                <table class="packet-table" id="packetTable">
+                    <thead>
+                        <tr>
+                            <th>#</th><th>时间</th><th>源IP</th><th>目标IP</th><th>协议</th><th>功能码</th><th>信息</th><th>长度</th>
+                        </tr>
+                    </thead>
+                    <tbody id="packetTbody"></tbody>
+                </table>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+                <button class="btn btn-tag" id="btnTag" disabled>🏷️ 标记为可疑</button>
+                <button class="btn btn-verify" id="btnVerify">✅ 验证标记结果</button>
+                <button class="btn btn-outline" id="btnClearTags">🔄 清除所有标记</button>
+                <span style="font-size:0.78rem;color:#94a3b8;align-self:center;" id="tagCount">已标记: 0</span>
+            </div>
+            <div class="packet-detail-panel" id="packetDetail">
+                <div style="color:#94a3b8;font-style:italic;">请在上方点击一个数据包以查看详情...</div>
+            </div>
+        </div>
+
+        <!-- Analysis Workspace -->
+        <div class="analysis-workspace">
+            <div class="analysis-input-wrap">
+                <label for="analysisInput">📝 撰写分析结论（描述攻击手法、攻击者IP、欺骗机制）：</label>
+                <textarea id="analysisInput" placeholder="例如：攻击者通过MITM截获Modbus响应，将真实离心机转速替换为伪造的安全值..."></textarea>
+                <div class="tooltip-hint" id="analysisHint"></div>
+            </div>
+            <button class="btn btn-verify" id="btnSubmitAnalysis">📤 提交分析</button>
+        </div>
+
+        <!-- Flag Zone -->
+        <div class="flag-zone" id="flagZone">
+            <span class="flag-placeholder" id="flagPlaceholder">🔒 完成数据包标记和分析后，Flag将在此处揭示...</span>
+            <span class="flag-text" id="flagText">FLAG{hmi_spoof_modbus_mitm_stuxnet_style}</span>
+        </div>
+
+        <!-- Report -->
+        <div class="report-section">
+            <details>
+                <summary>📄 查看完整分析报告</summary>
+                <div class="report-body">
+                    <h4>🔍 攻击概览</h4>
+                    <p>这是一次典型的<strong>工控HMI界面欺骗攻击</strong>，手法与Stuxnet震网病毒高度相似。攻击者通过<strong>中间人（MITM）</strong>方式插入到PLC与HMI之间的Modbus TCP通信链路中，截获并篡改关键寄存器读数。</p>
+                    <h4>🎯 攻击链分析</h4>
+                    <ol>
+                        <li><strong>初始接入：</strong>攻击者获得网络访问权限，在PLC（192.168.1.1）和HMI（192.168.1.10）之间建立MITM位置（192.168.1.99）。</li>
+                        <li><strong>流量截获：</strong>HMI定期通过功能码<code>0x03</code>（读保持寄存器）轮询离心机状态寄存器（地址0x0064起）。</li>
+                        <li><strong>响应篡改：</strong>PLC实际返回转速1487 RPM、温度87°C、振动9.2 mm/s——均超出安全阈值。攻击者拦截该响应，替换为伪造数据（1064 RPM、42°C、0.8 mm/s）后转发给HMI。</li>
+                        <li><strong>恶意写入：</strong>攻击者通过功能码<code>0x06</code>向VFD寄存器（地址0x00C8）写入超速设定值1450，持续推高离心机转速。</li>
+                        <li><strong>持久隐藏：</strong>操作员看到的始终是"正常"数据，无法察觉离心机正在被推向物理极限。</li>
+                    </ol>
+                    <h4>🛡️ 防御建议</h4>
+                    <ul>
+                        <li><strong>网络分段：</strong>将ICS/SCADA网络与企业网络严格隔离，实施VLAN和防火墙规则。</li>
+                        <li><strong>协议认证：</strong>部署Modbus Secure或OPC UA等支持加密和认证的协议替代裸Modbus TCP。</li>
+                        <li><strong>异常检测：</strong>部署ICS-aware IDS（如Snort with Modbus规则），监控响应时间异常和寄存器值突变。</li>
+                        <li><strong>冗余校验：</strong>在关键传感器上部署独立于PLC的物理读数通道，与HMI显示值进行交叉验证。</li>
+                        <li><strong>深度包检测：</strong>在HMI与PLC之间部署DPI设备，检测并告警来自非预期源IP的Modbus响应。</li>
+                    </ul>
+                    <h4>📚 真实世界参考</h4>
+                    <p>Stuxnet（2010年）攻击伊朗核设施时使用了完全相同的手法——拦截WinCC/HMI与S7-300 PLC之间的通信，将离心机转速的监控数据替换为正常值，同时向变频器发送超速指令，导致约1000台离心机因超速旋转而损毁。</p>
+                    <p style="font-size:0.75rem;color:#64748b;margin-top:8px;">// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境。本模拟环境不包含可部署的恶意代码。</p>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <div id="toastContainer"></div>
+
+    <script>
+        // EDUCATIONAL PURPOSE ONLY — authorized classroom use
+        (function() {
+            // ── Packet Data ────────────────────────────────────
+            const packets = [
+                { id: 1, time: '0.000s', src: '192.168.1.10', dst: '192.168.1.1', proto: 'Modbus/TCP', func: '0x03',
+                    info: '读保持寄存器请求 (起始地址0x0064, 数量4)', len: 66,
+                    isSuspicious: false, hexOffset: '0000',
+                    hexBytes: '00 01 00 00 00 06 01 03 00 64 00 04',
+                    hexAscii: '.......d..',
+                    detail: 'HMI向PLC发起标准轮询请求，读取寄存器0x0064-0x0067（转速、温度、振动、状态）。这是正常操作。' },
+                { id: 2, time: '0.032s', src: '192.168.1.1', dst: '192.168.1.10', proto: 'Modbus/TCP', func: '0x03',
+                    info: '读保持寄存器响应 (真实数据: RPM=1487)', len: 73,
+                    isSuspicious: false, hexOffset: '0000',
+                    hexBytes: '00 01 00 00 00 0D 01 03 08 05 CF 00 57 00 5C 00 03',
+                    hexAscii: '.........W.\\..',
+                    detail: 'PLC真实响应：寄存器0x0064=1487(0x05CF) RPM超速！0x0065=87°C温度过高，0x0066=92(0x005C即9.2mm/s)振动超标。此包被攻击者截获，HMI未收到。' },
+                { id: 3, time: '0.035s', src: '192.168.1.99', dst: '192.168.1.10', proto: 'Modbus/TCP', func: '0x03',
+                    info: '⚠️ 欺骗响应 (伪造RPM=1064)', len: 73,
+                    isSuspicious: true, hexOffset: '0000',
+                    hexBytes: '00 02 00 00 00 0D 01 03 08 04 28 00 2A 00 08 00 01 [46 4C 41 47]',
+                    hexAscii: '.......(.*....FLAG',
+                    detail: '【可疑】攻击者(192.168.1.99)伪造的响应包！寄存器0x0064被篡改为1064(0x0428)，温度改为42°C(0x002A)，振动改为0.8mm/s。注意hex尾部隐藏数据[46 4C 41 47]=ASCII"FLAG"——这是攻击者留下的痕迹。' },
+                { id: 4, time: '0.180s', src: '192.168.1.10', dst: '192.168.1.1', proto: 'Modbus/TCP', func: '0x03',
+                    info: '读保持寄存器请求 (起始地址0x00C8, 数量2)', len: 66,
+                    isSuspicious: false, hexOffset: '0000',
+                    hexBytes: '00 03 00 00 00 06 01 03 00 C8 00 02',
+                    hexAscii: '...........',
+                    detail: 'HMI查询VFD变频器设定值寄存器(0x00C8-0x00C9)。正常运维查询。' },
+                { id: 5, time: '0.210s', src: '192.168.1.1', dst: '192.168.1.10', proto: 'Modbus/TCP', func: '0x03',
+                    info: '读保持寄存器响应 (VFD当前设定=1450)', len: 69,
+                    isSuspicious: false, hexOffset: '0000',
+                    hexBytes: '00 03 00 00 00 09 01 03 04 05 AA 00 00',
+                    hexAscii: '...........',
+                    detail: 'PLC返回VFD寄存器值：0x00C8=1450(0x05AA)，已被设定为超速值。此响应也被攻击者截获。' },
+                { id: 6, time: '0.213s', src: '192.168.1.99', dst: '192.168.1.10', proto: 'Modbus/TCP', func: '0x03',
+                    info: '⚠️ 欺骗响应 (伪造VFD设定=1064)', len: 69,
+                    isSuspicious: true, hexOffset: '0000',
+                    hexBytes: '00 04 00 00 00 09 01 03 04 04 28 00 00',
+                    hexAscii: '.......(..',
+                    detail: '【可疑】攻击者再次伪造VFD设定值响应，将1450替换为1064。操作员看到的VFD设定"正常"，实际已被篡改。' },
+                { id: 7, time: '0.400s', src: '192.168.1.10', dst: '192.168.1.1', proto: 'Modbus/TCP', func: '0x01',
+                    info: '读线圈状态请求', len: 64, isSuspicious: false, hexOffset: '0000',
+                    hexBytes: '00 05 00 00 00 06 01 01 00 00 00 10',
+                    hexAscii: '...........',
+                    detail: 'HMI读取线圈状态（报警器、阀门状态等）。标准运维轮询。' },
+                { id: 8, time: '0.430s', src: '192.168.1.99', dst: '192.168.1.1', proto: 'Modbus/TCP', func: '0x06',
+                    info: '⚠️ 恶意写入单寄存器 (VFD速度=1450)', len: 66,
+                    isSuspicious: true, hexOffset: '0000',
+                    hexBytes: '00 06 00 00 00 06 01 06 00 C8 05 AA',
+                    hexAscii: '...........',
+                    detail: '【可疑】攻击者直接向PLC的VFD寄存器(0x00C8)写入1450(0x05AA)！这是导致离心机超速的根因——攻击者绕过了HMI的安全限制。' },
+                { id: 9, time: '0.580s', src: '192.168.1.1', dst: '192.168.1.10', proto: 'Modbus/TCP', func: '0x01',
+                    info: '线圈状态响应', len: 65, isSuspicious: false, hexOffset: '0000',
+                    hexBytes: '00 05 00 00 00 07 01 01 02 00 00',
+                    hexAscii: '.........',
+                    detail: 'PLC返回线圈状态。所有报警继电器均处于正常状态（因为攻击者可能也已篡改报警阈值）。' },
+                { id: 10, time: '0.750s', src: '192.168.1.99', dst: '192.168.1.1', proto: 'Modbus/TCP', func: '0x06',
+                    info: '⚠️ 恶意写入 — 修改报警阈值寄存器', len: 66,
+                    isSuspicious: true, hexOffset: '0000',
+                    hexBytes: '00 07 00 00 00 06 01 06 01 2C 07 D0',
+                    hexAscii: '.......,..',
+                    detail: '【可疑】攻击者修改报警阈值寄存器(0x012C)为2000(0x07D0)，使得即使真实转速达到1487也不会触发PLC报警。这是隐蔽性维持手段。' },
+                { id: 11, time: '0.920s', src: '192.168.1.10', dst: '192.168.1.1', proto: 'Modbus/TCP', func: '0x08',
+                    info: '诊断请求 (回路测试)', len: 64, isSuspicious: false, hexOffset: '0000',
+                    hexBytes: '00 08 00 00 00 06 01 08 00 00 00 00',
+                    hexAscii: '...........',
+                    detail: 'HMI发送Modbus诊断请求（功能码0x08），测试与PLC的通信链路。正常运维操作。' },
+                { id: 12, time: '1.050s', src: '192.168.1.99', dst: '192.168.1.10', proto: 'Modbus/TCP', func: '0x03',
+                    info: '⚠️ 欺骗响应 — 持续伪造正常振动数据', len: 69,
+                    isSuspicious: true, hexOffset: '0000',
+                    hexBytes: '00 09 00 00 00 09 01 03 04 00 08 00 01',
+                    hexAscii: '...........',
+                    detail: '【可疑】攻击者持续伪造振动传感器读数（0.8mm/s），掩盖离心机正在剧烈振动(实际9.2mm/s)的事实。持续的欺骗维持攻击隐蔽性。' },
+            ];
+
+            // ── State ──────────────────────────────────────────
+            let selectedPacketId = null;
+            let taggedPacketIds = new Set();
+            let analysisSubmitted = false;
+            let tagsVerified = false;
+            let flagRevealed = false;
+
+            // ── DOM refs ──────────────────────────────────────
+            const packetTbody = document.getElementById('packetTbody');
+            const packetDetail = document.getElementById('packetDetail');
+            const btnTag = document.getElementById('btnTag');
+            const btnVerify = document.getElementById('btnVerify');
+            const btnClearTags = document.getElementById('btnClearTags');
+            const tagCountEl = document.getElementById('tagCount');
+            const btnSubmitAnalysis = document.getElementById('btnSubmitAnalysis');
+            const analysisInput = document.getElementById('analysisInput');
+            const analysisHint = document.getElementById('analysisHint');
+            const flagZone = document.getElementById('flagZone');
+            const flagPlaceholder = document.getElementById('flagPlaceholder');
+            const flagText = document.getElementById('flagText');
+            const toastContainer = document.getElementById('toastContainer');
+            const progressBar = document.getElementById('progressBar');
+
+            // ── Render packet table ────────────────────────────
+            function renderPacketTable() {
+                packetTbody.innerHTML = '';
+                packets.forEach(p => {
+                    const tr = document.createElement('tr');
+                    tr.dataset.packetId = p.id;
+                    if (p.id === selectedPacketId) tr.classList.add('selected');
+                    if (taggedPacketIds.has(p.id)) tr.classList.add('tagged');
+                    const srcClass = p.src === '192.168.1.99' ? 'attacker-ip' : 'src-ip';
+                    tr.innerHTML = `
+                <td>${p.id}</td>
+                <td>${p.time}</td>
+                <td class="${srcClass}">${p.src}</td>
+                <td class="dst-ip">${p.dst}</td>
+                <td>${p.proto}</td>
+                <td>${p.func}</td>
+                <td>${p.info}</td>
+                <td>${p.len}</td>
+              `;
+                    tr.addEventListener('click', () => selectPacket(p.id));
+                    packetTbody.appendChild(tr);
+                });
+                updateTagButton();
+                updateTagCount();
+            }
+
+            function selectPacket(id) {
+                selectedPacketId = id;
+                renderPacketTable();
+                showPacketDetail(id);
+                updateTagButton();
+            }
+
+            function showPacketDetail(id) {
+                const p = packets.find(pk => pk.id === id);
+                if (!p) return;
+                const hexHighlighted = p.isSuspicious ?
+                    p.hexBytes.replace(/\[46 4C 41 47\]/g,
+                        '<span class="hex-highlight">[46 4C 41 47]</span>') :
+                    p.hexBytes;
+                packetDetail.classList.add('visible');
+                packetDetail.innerHTML = `
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <strong>📦 数据包 #${p.id} 详情</strong>
+                <span style="font-size:0.7rem;color:${p.isSuspicious?'#ef4444':'#94a3b8'};">${p.isSuspicious ? '⚠️ 此包为已知可疑包' : '· 正常通信包'}</span>
+              </div>
+              <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 16px;margin-bottom:10px;">
+                <span style="color:#94a3b8;">源IP:</span><span>${p.src}</span>
+                <span style="color:#94a3b8;">目标IP:</span><span>${p.dst}</span>
+                <span style="color:#94a3b8;">功能码:</span><span>${p.func} ${getFuncName(p.func)}</span>
+                <span style="color:#94a3b8;">长度:</span><span>${p.len} 字节</span>
+              </div>
+              <div style="color:#94a3b8;margin-bottom:4px;">📋 Hex Dump:</div>
+              <div class="hex-dump">
+                <span class="hex-offset">${p.hexOffset}</span>
+                <span class="hex-bytes">${hexHighlighted}</span>
+                <span class="hex-ascii">${p.hexAscii}</span>
+              </div>
+              <div style="margin-top:10px;padding:8px 12px;background:#1a1a2e;border-radius:6px;border-left:3px solid ${p.isSuspicious?'#ef4444':'#3b82f6'};">
+                <strong>📝 分析:</strong> ${p.detail}
+              </div>
+            `;
+            }
+
+            function getFuncName(fc) {
+                const map = { '0x01': '读线圈', '0x03': '读保持寄存器', '0x06': '写单寄存器', '0x08': '诊断' };
+                return map[fc] || '未知';
+            }
+
+            function updateTagButton() {
+                if (!selectedPacketId) {
+                    btnTag.disabled = true;
+                    btnTag.textContent = '🏷️ 请先选择数据包';
+                } else if (taggedPacketIds.has(selectedPacketId)) {
+                    btnTag.disabled = true;
+                    btnTag.textContent = '✅ 已标记';
+                } else {
+                    btnTag.disabled = false;
+                    btnTag.textContent = '🏷️ 标记为可疑';
+                }
+            }
+
+            function updateTagCount() {
+                tagCountEl.textContent = '已标记: ' + taggedPacketIds.size;
+            }
+
+            // ── Tagging ────────────────────────────────────────
+            btnTag.addEventListener('click', () => {
+                if (selectedPacketId && !taggedPacketIds.has(selectedPacketId)) {
+                    taggedPacketIds.add(selectedPacketId);
+                    renderPacketTable();
+                    if (selectedPacketId) showPacketDetail(selectedPacketId);
+                    showToast('已标记数据包 #' + selectedPacketId + ' 为可疑', 'success');
+                    updateProgress();
+                }
+            });
+
+            btnClearTags.addEventListener('click', () => {
+                taggedPacketIds.clear();
+                tagsVerified = false;
+                renderPacketTable();
+                if (selectedPacketId) showPacketDetail(selectedPacketId);
+                updateProgress();
+                showToast('已清除所有标记', 'error');
+                checkFlagConditions();
+            });
+
+            btnVerify.addEventListener('click', () => {
+                if (taggedPacketIds.size < 3) {
+                    showToast('请至少标记3个可疑数据包后再验证', 'error');
+                    return;
+                }
+                const groundTruth = new Set([3, 6, 8, 10, 12]);
+                const correctTags = [...taggedPacketIds].filter(id => groundTruth.has(id));
+                const missedTags = [...groundTruth].filter(id => !taggedPacketIds.has(id));
+                const falsePositives = [...taggedPacketIds].filter(id => !groundTruth.has(id));
+
+                let msg = '';
+                if (correctTags.length >= 3 && falsePositives.length <= 1) {
+                    tagsVerified = true;
+                    msg = `✅ 标记验证通过！正确识别 ${correctTags.length} 个可疑包`;
+                    if (missedTags.length > 0) msg += `，遗漏 ${missedTags.length} 个（#${missedTags.join(',#')}）`;
+                    showToast(msg, 'success');
+                } else if (correctTags.length >= 2) {
+                    msg = `⚠️ 部分正确：识别 ${correctTags.length} 个，误报 ${falsePositives.length} 个`;
+                    if (missedTags.length > 0) msg += `，遗漏 #${missedTags.join(',#')}`;
+                    showToast(msg, 'error');
+                } else {
+                    msg = `❌ 标记不准确：仅识别 ${correctTags.length} 个可疑包，误报 ${falsePositives.length} 个。请重新检查流量`;
+                    showToast(msg, 'error');
+                }
+                updateProgress();
+                checkFlagConditions();
+            });
+
+            // ── Analysis submission ────────────────────────────
+            btnSubmitAnalysis.addEventListener('click', () => {
+                const text = analysisInput.value.trim().toLowerCase();
+                if (text.length < 15) {
+                    showToast('请撰写更详细的分析结论（至少15个字符）', 'error');
+                    analysisHint.textContent = '💡 提示：描述攻击者IP、欺骗机制、被篡改的寄存器值';
+                    return;
+                }
+                const keywords = ['mitm', '中间人', '欺骗', '伪造', '192.168.1.99', 'modbus', '离心机', '超速',
+                    '1487', '1064', '篡改', '响应', '寄存器', 'hmi', 'spoof', '变频器', 'vfd', '拦截'
+                ];
+                const matched = keywords.filter(kw => text.includes(kw));
+                if (matched.length >= 4) {
+                    analysisSubmitted = true;
+                    analysisHint.textContent = '✅ 分析通过！关键词命中: ' + matched.slice(0, 5).join(', ') +
+                        (matched.length > 5 ? '...' : '');
+                    analysisHint.style.color = '#22c55e';
+                    showToast('✅ 分析结论提交成功！命中 ' + matched.length + ' 个关键要素', 'success');
+                } else if (matched.length >= 2) {
+                    analysisHint.textContent =
+                        '⚠️ 分析不够完整，请补充更多细节（已命中: ' + matched.join(', ') + '）';
+                    analysisHint.style.color = '#f59e0b';
+                    showToast('分析部分正确，请补充攻击机制和具体IP等细节', 'error');
+                } else {
+                    analysisHint.textContent = '❌ 分析缺少关键要素，请检查攻击者IP(192.168.1.99)、MITM欺骗机制等';
+                    analysisHint.style.color = '#ef4444';
+                    showToast('分析不充分，请重新撰写', 'error');
+                }
+                updateProgress();
+                checkFlagConditions();
+            });
+
+            // ── Flag reveal ────────────────────────────────────
+            function checkFlagConditions() {
+                if (tagsVerified && analysisSubmitted && !flagRevealed) {
+                    flagRevealed = true;
+                    flagZone.classList.add('revealed');
+                    flagPlaceholder.style.display = 'none';
+                    flagText.classList.add('visible');
+                    flagText.style.display = 'block';
+                    updateProgress();
+                    showToast('🏆 恭喜！Flag已捕获！', 'success');
+                    // Pulse animation on flag
+                    flagZone.style.animation = 'none';
+                    flagZone.offsetHeight;
+                    flagZone.style.animation = 'flag-glow 1.5s ease-out';
+                }
+            }
+
+            // ── Progress tracking ──────────────────────────────
+            function updateProgress() {
+                let completedSteps = 0;
+                // Step 1: Observed dual dashboard (always visible - count if they've interacted)
+                const step1Done = taggedPacketIds.size > 0 || analysisInput.value.trim().length > 10;
+                if (step1Done) completedSteps = Math.max(completedSteps, 1);
+                // Step 2: Tagged suspicious packets
+                if (taggedPacketIds.size >= 3) completedSteps = Math.max(completedSteps, 2);
+                // Step 3: Verified tags
+                if (tagsVerified) completedSteps = Math.max(completedSteps, 3);
+                // Step 4: Analysis submitted + flag revealed
+                if (analysisSubmitted) completedSteps = Math.max(completedSteps, 3);
+                if (flagRevealed) completedSteps = 4;
+
+                const dots = progressBar.querySelectorAll('.step-dot');
+                const conns = progressBar.querySelectorAll('.step-connector');
+                dots.forEach((dot, i) => {
+                    const stepNum = i + 1;
+                    dot.classList.remove('active', 'done');
+                    if (stepNum <= completedSteps) dot.classList.add('done');
+                    else if (stepNum === completedSteps + 1 && completedSteps < 4) dot.classList.add(
+                        'active');
+                    else if (completedSteps === 0 && stepNum === 1) dot.classList.add('active');
+                });
+                conns.forEach((conn, i) => {
+                    if (i + 1 <= completedSteps) conn.classList.add('done');
+                    else conn.classList.remove('done');
+                });
+            }
+
+            // ── Toast system ───────────────────────────────────
+            function showToast(msg, type) {
+                const toast = document.createElement('div');
+                toast.className = 'toast ' + (type || '');
+                toast.textContent = msg;
+                toastContainer.appendChild(toast);
+                setTimeout(() => {
+                    toast.style.animation = 'slideOut 0.35s ease forwards';
+                    setTimeout(() => toast.remove(), 400);
+                }, 2500);
+            }
+
+            // ── Initialization ─────────────────────────────────
+            function init() {
+                renderPacketTable();
+                packetDetail.classList.remove('visible');
+                updateTagButton();
+                updateTagCount();
+                updateProgress();
+                // Check initial conditions
+                checkFlagConditions();
+            }
+
+            // ── Real-time centrifuge RPM simulation ───────────
+            function simulateRPMFluctuation() {
+                const realRpmEl = document.getElementById('rpmReal');
+                const spoofedRpmEl = document.getElementById('rpmSpoofed');
+                let realBase = 1487;
+                let spoofedBase = 1064;
+                setInterval(() => {
+                    realBase = 1487 + Math.floor(Math.random() * 30 - 15);
+                    spoofedBase = 1064 + Math.floor(Math.random() * 8 - 4);
+                    realRpmEl.textContent = realBase;
+                    spoofedRpmEl.textContent = spoofedBase;
+                    // Update gauge needles
+                    updateGaugeNeedle('needleReal', realBase, 2000);
+                    updateGaugeNeedle('needleSpoofed', spoofedBase, 2000);
+                    // Update gauge arcs
+                    updateGaugeArc('gaugeArcReal', realBase, 2000);
+                    updateGaugeArc('gaugeArcSpoofed', spoofedBase, 2000);
+                }, 2000);
+            }
+
+            function updateGaugeNeedle(needleId, value, max) {
+                const needle = document.getElementById(needleId);
+                if (!needle) return;
+                const ratio = Math.min(value / max, 1);
+                const angle = -55 + ratio * 110; // -55 to +55 degrees
+                needle.setAttribute('transform', `rotate(${angle}, 80, 115)`);
+            }
+
+            function updateGaugeArc(arcId, value, max) {
+                const arc = document.getElementById(arcId);
+                if (!arc) return;
+                const ratio = Math.min(value / max, 1);
+                const totalDash = 190;
+                const fillDash = ratio * totalDash;
+                arc.setAttribute('stroke-dasharray', `${fillDash} ${totalDash + 60}`);
+            }
+
+            // ── Keyboard shortcut ──────────────────────────────
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 't' && e.ctrlKey && selectedPacketId && !taggedPacketIds.has(
+                        selectedPacketId)) {
+                    e.preventDefault();
+                    btnTag.click();
+                }
+                if (e.key === 'ArrowDown' && selectedPacketId && selectedPacketId < packets.length) {
+                    e.preventDefault();
+                    selectPacket(selectedPacketId + 1);
+                }
+                if (e.key === 'ArrowUp' && selectedPacketId && selectedPacketId > 1) {
+                    e.preventDefault();
+                    selectPacket(selectedPacketId - 1);
+                }
+            });
+
+            // ── Start ──────────────────────────────────────────
+            init();
+            simulateRPMFluctuation();
+            // Set initial gauge positions
+            setTimeout(() => {
+                updateGaugeNeedle('needleReal', 1487, 2000);
+                updateGaugeNeedle('needleSpoofed', 1064, 2000);
+                updateGaugeArc('gaugeArcReal', 1487, 2000);
+                updateGaugeArc('gaugeArcSpoofed', 1064, 2000);
+            }, 100);
+
+            console.log('🛡️ 工控安全实验室已就绪 — HMI界面欺骗攻击分析');
+            console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+            console.log('💡 操作提示: 点击数据包查看详情 → 标记可疑包 → 验证 → 撰写分析 → 捕获Flag');
+            console.log('⌨️ 快捷键: Ctrl+T 标记 | ↑↓ 切换数据包');
+        })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,736 @@
+{
+  "owasp": [
+    {
+      "id": "A01",
+      "name": "Broken Access Control",
+      "cwe": "CWE-284",
+      "desc": "访问控制失效——用户可越权访问不属于自己的资源或执行未授权操作。",
+      "prevention": "默认拒绝、服务端校验权限、使用基于角色的访问控制(RBAC)"
+    },
+    {
+      "id": "A02",
+      "name": "Cryptographic Failures",
+      "cwe": "CWE-327",
+      "desc": "密码学失效——使用弱加密算法、硬编码密钥、明文传输敏感数据。",
+      "prevention": "使用 TLS 1.2+、AES-GCM、密钥管理服务、禁止 MD5/SHA1 做安全用途"
+    },
+    {
+      "id": "A03",
+      "name": "Injection",
+      "cwe": "CWE-89",
+      "desc": "注入——SQL注入、命令注入、LDAP注入等，用户输入被当作代码执行。",
+      "prevention": "参数化查询/预编译语句、输入验证、最小权限原则、ORM"
+    },
+    {
+      "id": "A04",
+      "name": "Insecure Design",
+      "cwe": "CWE-209",
+      "desc": "不安全设计——架构层面缺乏安全控制，如无速率限制、无业务流程校验。",
+      "prevention": "威胁建模、安全设计模式、深度防御"
+    },
+    {
+      "id": "A05",
+      "name": "Security Misconfiguration",
+      "cwe": "CWE-16",
+      "desc": "安全配置错误——默认密码、开放调试接口、目录列表、不必要的功能开启。",
+      "prevention": "安全基线配置、关闭默认功能、定期审计配置"
+    },
+    {
+      "id": "A06",
+      "name": "Vulnerable & Outdated Components",
+      "cwe": "CWE-1104",
+      "desc": "使用含已知漏洞的第三方组件/库（如 Log4j、Struts）。",
+      "prevention": "SCA 工具、依赖更新策略、组件清单(SBOM)"
+    },
+    {
+      "id": "A07",
+      "name": "Identification & Authentication Failures",
+      "cwe": "CWE-287",
+      "desc": "身份认证失效——弱密码、无多因素认证(MFA)、会话固定、凭证填充。",
+      "prevention": "MFA、密码强度策略、会话超时、防暴力破解"
+    },
+    {
+      "id": "A08",
+      "name": "Software & Data Integrity Failures",
+      "cwe": "CWE-502",
+      "desc": "软件与数据完整性失效——不安全的反序列化、CI/CD 管道未校验、依赖被篡改。",
+      "prevention": "代码签名、反序列化白名单、CI/CD 安全"
+    },
+    {
+      "id": "A09",
+      "name": "Security Logging & Monitoring Failures",
+      "cwe": "CWE-778",
+      "desc": "日志与监控失效——关键事件未记录、无告警、日志可被篡改。",
+      "prevention": "SIEM、日志不可变存储、关键操作审计、异常检测"
+    },
+    {
+      "id": "A10",
+      "name": "Server-Side Request Forgery (SSRF)",
+      "cwe": "CWE-918",
+      "desc": "服务端请求伪造——攻击者诱导服务器发起未授权的内部网络请求。",
+      "prevention": "URL 白名单、禁止访问内网 IP、网络分段"
+    }
+  ],
+  "cwe": [
+    {
+      "id": "CWE-79",
+      "name": "Cross-site Scripting (XSS)",
+      "desc": "跨站脚本——用户输入未经过滤就渲染到页面，攻击者可执行恶意 JS。"
+    },
+    {
+      "id": "CWE-89",
+      "name": "SQL Injection",
+      "desc": "SQL 注入——用户输入被拼接到 SQL 查询中，可绕过认证或提取数据。"
+    },
+    {
+      "id": "CWE-119",
+      "name": "Buffer Overflow",
+      "desc": "缓冲区溢出——写入超过缓冲区边界，覆盖相邻内存（返回地址/函数指针）。"
+    },
+    {
+      "id": "CWE-200",
+      "name": "Information Exposure",
+      "desc": "信息泄露——暴露敏感数据（错误信息、调试输出、源码注释）。"
+    },
+    {
+      "id": "CWE-352",
+      "name": "CSRF",
+      "desc": "跨站请求伪造——诱骗已登录用户在不知情下提交恶意请求。"
+    },
+    {
+      "id": "CWE-22",
+      "name": "Path Traversal",
+      "desc": "路径穿越——使用 ../ 序列访问预期目录之外的文件。"
+    },
+    {
+      "id": "CWE-78",
+      "name": "OS Command Injection",
+      "desc": "操作系统命令注入——用户输入被拼接到系统命令中执行。"
+    },
+    {
+      "id": "CWE-287",
+      "name": "Improper Authentication",
+      "desc": "不当认证——认证机制存在缺陷，可被绕过或暴力破解。"
+    },
+    {
+      "id": "CWE-416",
+      "name": "Use After Free",
+      "desc": "释放后使用——访问已释放的内存指针，可能导致代码执行。"
+    },
+    {
+      "id": "CWE-190",
+      "name": "Integer Overflow",
+      "desc": "整数溢出——算术运算结果超出数据类型范围，导致意外行为。"
+    },
+    {
+      "id": "CWE-502",
+      "name": "Deserialization of Untrusted Data",
+      "desc": "不可信数据反序列化——反序列化用户可控数据可导致远程代码执行。"
+    },
+    {
+      "id": "CWE-918",
+      "name": "SSRF",
+      "desc": "服务端请求伪造——服务器被诱导向非预期目标发起请求（覆盖原有）。"
+    },
+    {
+      "id": "CWE-312",
+      "name": "Cleartext Storage of Sensitive Information",
+      "desc": "敏感信息明文存储——密码/密钥未加密保存。"
+    },
+    {
+      "id": "CWE-798",
+      "name": "Hard-coded Credentials",
+      "desc": "硬编码凭证——源码中包含密码/密钥/API Key。"
+    },
+    {
+      "id": "CWE-94",
+      "name": "Code Injection",
+      "desc": "代码注入——用户输入被当作代码 eval 执行（如 PHP/Python eval）。"
+    },
+    {
+      "id": "CWE-269",
+      "name": "Improper Privilege Management",
+      "desc": "权限管理不当——程序以过高权限运行，可被提权利用。"
+    },
+    {
+      "id": "CWE-400",
+      "name": "Uncontrolled Resource Consumption",
+      "desc": "资源耗尽——无限制的资源请求导致 DoS（内存/CPU/连接数）。"
+    },
+    {
+      "id": "CWE-306",
+      "name": "Missing Authentication for Critical Function",
+      "desc": "关键功能缺少认证——敏感操作（管理/配置）无身份校验。"
+    },
+    {
+      "id": "CWE-522",
+      "name": "Insufficiently Protected Credentials",
+      "desc": "凭证保护不足——密码弱哈希/明文传输/未加盐。"
+    },
+    {
+      "id": "CWE-829",
+      "name": "Inclusion of Functionality from Untrusted Control Sphere",
+      "desc": "引入不受信来源的功能——如不安全的第三方组件/插件。"
+    },
+    {
+      "id": "CWE-125",
+      "name": "Out-of-bounds Read",
+      "desc": "越界读取——读取超出缓冲区边界的数据，可能泄露敏感信息（如 Heartbleed）。"
+    },
+    {
+      "id": "CWE-787",
+      "name": "Out-of-bounds Write",
+      "desc": "越界写入——写入超出缓冲区边界，可覆盖相邻内存数据。"
+    },
+    {
+      "id": "CWE-20",
+      "name": "Improper Input Validation",
+      "desc": "输入校验不当——未验证用户输入的长度/类型/格式/范围。"
+    },
+    {
+      "id": "CWE-862",
+      "name": "Missing Authorization",
+      "desc": "缺少授权检查——未验证用户是否有权执行操作或访问资源。"
+    },
+    {
+      "id": "CWE-863",
+      "name": "Incorrect Authorization",
+      "desc": "授权不正确——授权逻辑有缺陷，导致越权访问。"
+    },
+    {
+      "id": "CWE-732",
+      "name": "Incorrect Permission Assignment",
+      "desc": "权限分配不当——文件/资源权限过于宽松（如 chmod 777）。"
+    },
+    {
+      "id": "CWE-209",
+      "name": "Generation of Error Message Containing Sensitive Information",
+      "desc": "错误信息暴露敏感数据——异常堆栈/SQL 错误/路径泄露给用户。"
+    },
+    {
+      "id": "CWE-601",
+      "name": "Open Redirect",
+      "desc": "开放重定向——未验证的 URL 参数导致用户被重定向到恶意站点。"
+    },
+    {
+      "id": "CWE-434",
+      "name": "Unrestricted Upload of File with Dangerous Type",
+      "desc": "不受限的文件上传——允许上传可执行文件（如 .php/.jsp）导致 RCE。"
+    },
+    {
+      "id": "CWE-611",
+      "name": "XXE (XML External Entity)",
+      "desc": "XXE 注入——XML 解析器处理外部实体引用，可读取文件/SSRF。"
+    },
+    {
+      "id": "CWE-74",
+      "name": "Injection",
+      "desc": "通用注入——将不受信数据注入到程序执行流中（覆盖原有）。"
+    },
+    {
+      "id": "CWE-444",
+      "name": "HTTP Request Smuggling",
+      "desc": "HTTP 请求走私——前后端对 HTTP 请求边界解析不一致导致攻击。"
+    },
+    {
+      "id": "CWE-73",
+      "name": "External Control of File Name or Path",
+      "desc": "文件名/路径外部可控——用户可操纵文件操作路径。"
+    },
+    {
+      "id": "CWE-565",
+      "name": "Reliance on Cookies without Validation",
+      "desc": "依赖未验证的 Cookie——信任客户端 Cookie 做权限判断。"
+    }
+  ],
+  "attack": [
+    {
+      "id": "TA0001",
+      "name": "Initial Access",
+      "techniques": [
+        "T1566 鱼叉钓鱼(Spearphishing)",
+        "T1190 公开应用利用(Exploit Public-Facing App)",
+        "T1078 有效账户(Valid Accounts)",
+        "T1133 外部远程服务(External Remote Services)"
+      ]
+    },
+    {
+      "id": "TA0002",
+      "name": "Execution",
+      "techniques": [
+        "T1059 命令脚本解释器(PowerShell/Bash)",
+        "T1053 计划任务(Scheduled Task)",
+        "T1106 原生API(Native API)",
+        "T1204 用户执行(User Execution)"
+      ]
+    },
+    {
+      "id": "TA0003",
+      "name": "Persistence",
+      "techniques": [
+        "T1546 事件触发执行(Event Triggered Execution)",
+        "T1136 创建账户(Create Account)",
+        "T1543 系统服务(System Services)",
+        "T1098 账户操作(Account Manipulation)"
+      ]
+    },
+    {
+      "id": "TA0004",
+      "name": "Privilege Escalation",
+      "techniques": [
+        "T1068 漏洞利用提权(Exploitation for Privilege Escalation)",
+        "T1078 有效账户(Valid Accounts)",
+        "T1548 滥用提权机制(Abuse Elevation Control Mechanism)"
+      ]
+    },
+    {
+      "id": "TA0005",
+      "name": "Defense Evasion",
+      "techniques": [
+        "T1027 混淆文件(Obfuscated Files)",
+        "T1036 伪装(Masquerading)",
+        "T1140 解码/解压(Deobfuscate/Decode)",
+        "T1562 禁用安全工具(Impair Defenses)"
+      ]
+    },
+    {
+      "id": "TA0006",
+      "name": "Credential Access",
+      "techniques": [
+        "T1110 暴力破解(Brute Force)",
+        "T1552 凭证文件(Credentials in Files)",
+        "T1056 输入捕获(Input Capture)",
+        "T1003 OS凭证转储(OS Credential Dumping)"
+      ]
+    },
+    {
+      "id": "TA0007",
+      "name": "Discovery",
+      "techniques": [
+        "T1046 网络服务发现(Network Service Discovery)",
+        "T1087 账户发现(Account Discovery)",
+        "T1135 网络共享发现(Network Share Discovery)",
+        "T1497 虚拟化/沙箱规避(Virtualization/Sandbox Evasion)"
+      ]
+    },
+    {
+      "id": "TA0008",
+      "name": "Lateral Movement",
+      "techniques": [
+        "T1021 远程服务(Remote Services: SSH/RDP/SMB)",
+        "T1077 Windows管理共享(Windows Admin Shares)",
+        "T1550 替代认证材料(Use Alternate Authentication Material)",
+        "T1570 横向工具传输(Lateral Tool Transfer)"
+      ]
+    },
+    {
+      "id": "TA0009",
+      "name": "Collection",
+      "techniques": [
+        "T1560 归档加密数据(Archive Collected Data)",
+        "T1005 本地数据(Local Data Stash)",
+        "T1119 自动化收集(Automated Collection)",
+        "T1056 输入捕获(Input Capture)"
+      ]
+    },
+    {
+      "id": "TA0011",
+      "name": "Command & Control",
+      "techniques": [
+        "T1071 应用层协议(Web Service: HTTP/HTTPS/DNS)",
+        "T1573 加密信道(Encrypted Channel)",
+        "T1105 入口工具传输(Ingress Tool Transfer)",
+        "T1090 代理(Proxy)"
+      ]
+    },
+    {
+      "id": "TA0010",
+      "name": "Exfiltration",
+      "techniques": [
+        "T1567 数据传输到云(Exfiltration to Cloud)",
+        "T1041 C2信道外发(Exfiltration Over C2 Channel)",
+        "T1052 物理介质(Exfiltration Over Physical Medium)"
+      ]
+    },
+    {
+      "id": "TA0040",
+      "name": "Impact",
+      "techniques": [
+        "T1486 数据加密勒索(Data Encrypted for Impact)",
+        "T1485 数据销毁(Data Destruction)",
+        "T1498 拒绝服务(Denial of Service)",
+        "T1490 禁止恢复(Inhibit System Recovery)"
+      ]
+    }
+  ],
+  "cves": [
+    {
+      "id": "CVE-2021-44228",
+      "name": "Log4Shell",
+      "cwe": "CWE-502",
+      "cvss": 10.0,
+      "desc": "Apache Log4j2 JNDI 注入——日志记录的字符串中可嵌入 ${jndi:ldap://...} 触发远程类加载，导致 RCE。影响全球数百万 Java 应用。",
+      "fix": "升级 Log4j ≥2.15.0，或移除 JndiLookup.class，或设置 log4j2.formatMsgNoLookups=true"
+    },
+    {
+      "id": "CVE-2014-0160",
+      "name": "Heartbleed",
+      "cwe": "CWE-126",
+      "cvss": 7.5,
+      "desc": "OpenSSL TLS heartbeat 扩展缓冲区越界读取——可泄露服务器内存中的私钥/会话/密码。",
+      "fix": "升级 OpenSSL ≥1.0.1g"
+    },
+    {
+      "id": "CVE-2017-0144",
+      "name": "EternalBlue (MS17-010)",
+      "cwe": "CWE-119",
+      "cvss": 8.1,
+      "desc": "Windows SMBv1 缓冲区溢出——可远程未授权执行代码。WannaCry 勒索软件利用此漏洞。",
+      "fix": "安装 MS17-010 补丁，禁用 SMBv1"
+    },
+    {
+      "id": "CVE-2014-6271",
+      "name": "Shellshock",
+      "cwe": "CWE-94",
+      "cvss": 10.0,
+      "desc": "GNU Bash 环境变量注入——CGI/SSH/DHCP 场景中可注入 () { :; }; 后跟任意命令。",
+      "fix": "升级 Bash"
+    },
+    {
+      "id": "CVE-2017-5638",
+      "name": "Apache Struts 2",
+      "cwe": "CWE-94",
+      "cvss": 10.0,
+      "desc": "Struts2 Jakarta Multipart parser OGNL 注入——Content-Type 头中可注入 OGNL 表达式导致 RCE。Equifax 数据泄露（1.43 亿人）的根因。",
+      "fix": "升级 Struts ≥2.5.10.1"
+    },
+    {
+      "id": "CVE-2020-0796",
+      "name": "SMBGhost",
+      "cwe": "CWE-119",
+      "cvss": 10.0,
+      "desc": "Windows SMBv3 压缩缓冲区溢出——可远程 RCE。",
+      "fix": "安装 KB4551762，禁用 SMBv3 压缩"
+    },
+    {
+      "id": "CVE-2019-0708",
+      "name": "BlueKeep",
+      "cwe": "CWE-119",
+      "cvss": 9.8,
+      "desc": "Windows RDP UAF——可远程未授权 RCE，影响 Windows XP/7/2003/2008。",
+      "fix": "安装补丁，启用 NLA，关闭 RDP 如不需要"
+    },
+    {
+      "id": "CVE-2022-22965",
+      "name": "Spring4Shell",
+      "cwe": "CWE-94",
+      "cvss": 9.8,
+      "desc": "Spring Framework RCE——通过 ClassLoader 操纵实现远程代码执行。",
+      "fix": "升级 Spring Framework ≥5.3.18/5.2.20"
+    },
+    {
+      "id": "CVE-2023-44487",
+      "name": "HTTP/2 Rapid Reset",
+      "cwe": "CWE-400",
+      "cvss": 7.5,
+      "desc": "HTTP/2 协议层 DoS——快速建立+取消流导致服务器资源耗尽。",
+      "fix": "限制 HTTP/2 并发流、部署速率限制"
+    },
+    {
+      "id": "CVE-2017-12617",
+      "name": "Apache Tomcat PUT",
+      "cwe": "CWE-434",
+      "cvss": 8.1,
+      "desc": "Tomcat PUT 方法可上传 JSP 文件导致 RCE（readonly=false 时）。",
+      "fix": "禁用 PUT 方法，设 readonly=true"
+    },
+    {
+      "id": "CVE-2021-26855",
+      "name": "ProxyLogon",
+      "cwe": "CWE-862",
+      "cvss": 9.8,
+      "desc": "Microsoft Exchange Server SSRF——绕过认证访问后端，结合任意文件写入实现 RCE。影响 30 万+ 组织。",
+      "fix": "安装 Exchange 累积更新，限制 /ews 暴露面"
+    },
+    {
+      "id": "CVE-2020-1472",
+      "name": "Zerologon",
+      "cwe": "CWE-20",
+      "cvss": 10.0,
+      "desc": "Windows Netlogon 加密缺陷——攻击者可将域控计算机密码置零，完全接管域控。",
+      "fix": "安装 KB4557102，启用强制安全 RPC"
+    },
+    {
+      "id": "CVE-2023-23397",
+      "name": "Outlook NTLM Leak",
+      "cwe": "CWE-200",
+      "cvss": 9.8,
+      "desc": "Microsoft Outlook 特制 .msg 文件触发 NTLM 凭证哈希泄露——无需用户交互即可中继。",
+      "fix": "安装补丁，配置 Outlook 外部协议处理"
+    },
+    {
+      "id": "CVE-2022-30190",
+      "name": "Follina",
+      "cwe": "CWE-94",
+      "cvss": 7.8,
+      "desc": "Windows MSDT 远程代码执行——通过 Office 文档中的 ms-msdt:// 协议触发。",
+      "fix": "禁用 MSDT URL 协议，安装补丁"
+    },
+    {
+      "id": "CVE-2021-34527",
+      "name": "PrintNightmare",
+      "cwe": "CWE-269",
+      "cvss": 8.8,
+      "desc": "Windows Print Spooler 权限提升——利用 RpcAddPrinterDriverEx 安装任意驱动获得 SYSTEM 权限。",
+      "fix": "禁用 Print Spooler（如不需要），安装补丁"
+    },
+    {
+      "id": "CVE-2019-11510",
+      "name": "Pulse Secure SSL VPN",
+      "cwe": "CWE-862",
+      "cvss": 10.0,
+      "desc": "Pulse Secure SSL VPN 任意文件读取——未授权读取 /dana-na/../dana/html/../../../etc/passwd 等敏感文件。",
+      "fix": "升级 Pulse Connect Secure ≥ 9.1R8.2"
+    },
+    {
+      "id": "CVE-2020-5902",
+      "name": "BIG-IP F5 RCE",
+      "cwe": "CWE-22",
+      "cvss": 10.0,
+      "desc": "F5 BIG-IP TMUI 路径穿越——通过 ..; 可读取任意文件+执行命令。",
+      "fix": "升级 BIG-IP，限制 TMUI 访问"
+    },
+    {
+      "id": "CVE-2023-34362",
+      "name": "MOVEit SQLi",
+      "cwe": "CWE-89",
+      "cvss": 9.8,
+      "desc": "MOVEit Transfer SQL 注入——未授权 SQL 注入可执行任意 SQL，导致数据窃取。Cl0p 勒索组织利用。",
+      "fix": "升级 MOVEit Transfer，打补丁"
+    },
+    {
+      "id": "CVE-2021-40539",
+      "name": "Zimbra Auth Bypass",
+      "cwe": "CWE-287",
+      "cvss": 9.8,
+      "desc": "Zimbra 认证绕过——利用 SAML 认证逻辑缺陷绕过登录，上传 webshell。",
+      "fix": "升级 Zimbra ≥ 9.0.0 P31"
+    },
+    {
+      "id": "CVE-2022-42475",
+      "name": "FortiOS SSL VPN",
+      "cwe": "CWE-119",
+      "cvss": 9.6,
+      "desc": "Fortinet FortiOS SSL VPN 堆溢出——未授权远程代码执行。",
+      "fix": "升级 FortiOS ≥ 7.2.3"
+    }
+  ],
+  "regulations": [
+    {
+      "name": "网络安全法",
+      "key": "第21条 网络安全等级保护制度 / 第25条 网络运营者应当制定网络安全事件应急预案 / 第27条 任何人不得从事非法侵入他人网络、干扰他人网络正常功能、窃取网络数据等危害网络安全的活动",
+      "year": 2017
+    },
+    {
+      "name": "数据安全法",
+      "key": "第21条 国家建立数据分类分级保护制度 / 第27条 数据处理者应当建立健全全流程数据安全管理制度 / 第31条 关键信息基础设施运营者在境内收集的数据应当在境内存储",
+      "year": 2021
+    },
+    {
+      "name": "个人信息保护法",
+      "key": "第13条 处理个人信息须取得同意 / 第38条 向境外提供个人信息须通过安全评估 / 第51条 处理者应当采取相应技术措施确保个人信息安全",
+      "year": 2021
+    },
+    {
+      "name": "刑法(网络犯罪条款)",
+      "key": "第285条 非法侵入计算机信息系统罪 / 非法获取计算机信息系统数据罪 / 第286条 破坏计算机信息系统罪 / 第287条 利用计算机实施犯罪的提示性规定",
+      "year": 2015
+    }
+  ],
+  "tools": [
+    {
+      "name": "nmap",
+      "purpose": "网络扫描与服务发现",
+      "usage": "nmap -sV -sC -p- <target>",
+      "detection": "扫描流量可被 IDS/IPS 检测"
+    },
+    {
+      "name": "Wireshark",
+      "purpose": "网络协议分析与抓包",
+      "usage": "捕获+过滤+分析网络流量",
+      "detection": "被动监听，不可远程检测"
+    },
+    {
+      "name": "Metasploit",
+      "purpose": "漏洞利用框架",
+      "usage": "msfconsole → search/use exploit modules",
+      "detection": "payload 特征可被 EDR/AV 检测"
+    },
+    {
+      "name": "Burp Suite",
+      "purpose": "Web 应用安全测试代理",
+      "usage": "拦截/重放/扫描 HTTP 请求",
+      "detection": "代理行为可在服务端日志发现"
+    },
+    {
+      "name": "sqlmap",
+      "purpose": "自动化 SQL 注入检测与利用",
+      "usage": "sqlmap -u <url> --dbs",
+      "detection": "特征化的注入 payload 模式"
+    },
+    {
+      "name": "John the Ripper",
+      "purpose": "密码哈希破解",
+      "usage": "john --wordlist=rockyou.txt hashfile",
+      "detection": "离线工具，不可检测"
+    },
+    {
+      "name": "Hashcat",
+      "purpose": "GPU 加速密码破解",
+      "usage": "hashcat -m <type> hash.txt wordlist.txt",
+      "detection": "离线工具，不可检测"
+    },
+    {
+      "name": "Ghidra",
+      "purpose": "逆向工程与反汇编",
+      "usage": "导入二进制 → 反编译 → 分析控制流",
+      "detection": "离线工具"
+    },
+    {
+      "name": "IDA Pro",
+      "purpose": "逆向工程与反汇编（商业）",
+      "usage": "反汇编+反编译+F5 伪代码",
+      "detection": "离线工具"
+    },
+    {
+      "name": "Cobalt Strike",
+      "purpose": "红队模拟框架",
+      "usage": "Beacon 通信+后渗透模块",
+      "detection": "Beacon 特征可被 EDR/网络设备检测"
+    }
+  ],
+  "crypto": [
+    {
+      "name": "AES-256-GCM",
+      "type": "对称加密",
+      "status": "安全",
+      "note": "当前标准，提供加密+认证。禁用 ECB 模式。"
+    },
+    {
+      "name": "ChaCha20-Poly1305",
+      "type": "对称加密",
+      "status": "安全",
+      "note": "移动端友好的流密码+AEAD。TLS 1.3 支持的算法之一。"
+    },
+    {
+      "name": "RSA-2048+",
+      "type": "非对称加密",
+      "status": "安全（短期）",
+      "note": "当前 2048 位安全，3072+ 推荐。PKCS#1 v1.5 padding 有 Bleichenbacher 攻击风险，推荐 OAEP。"
+    },
+    {
+      "name": "ECC (P-256+)",
+      "type": "非对称加密",
+      "status": "安全",
+      "note": "比 RSA 更短的密钥，更高效率。注意曲线选择（避免非标准曲线）。"
+    },
+    {
+      "name": "SHA-256/384/512",
+      "type": "哈希函数",
+      "status": "安全",
+      "note": "SHA-2 家族，当前标准。"
+    },
+    {
+      "name": "SHA-3",
+      "type": "哈希函数",
+      "status": "安全",
+      "note": "Keccak 结构，与 SHA-2 不同的数学基础，作为备选。"
+    },
+    {
+      "name": "MD5",
+      "type": "哈希函数",
+      "status": "已破解",
+      "note": "存在碰撞攻击（2004），禁用于安全场景。可用于文件完整性校验（非安全场景）。"
+    },
+    {
+      "name": "SHA-1",
+      "type": "哈希函数",
+      "status": "已破解",
+      "note": "SHAttered 攻击（2017），实际碰撞。CA/B Forum 已弃用。"
+    },
+    {
+      "name": "bcrypt",
+      "type": "密码哈希",
+      "status": "推荐",
+      "note": "自适应计算成本的密码哈希。推荐 cost factor ≥ 12。"
+    },
+    {
+      "name": "Argon2id",
+      "type": "密码哈希",
+      "status": "推荐",
+      "note": "PHC 竞赛获胜者。抗 GPU/ASIC 并发攻击。"
+    },
+    {
+      "name": "HMAC-SHA256",
+      "type": "消息认证码",
+      "status": "安全",
+      "note": "标准 MAC 算法。注意密钥长度 ≥ 哈希输出长度。"
+    },
+    {
+      "name": "Diffie-Hellman",
+      "type": "密钥交换",
+      "status": "安全（需大素数）",
+      "note": "使用 ≥2048 位素数。避免固定 DH（用 DHE/ECDHE 前向保密）。"
+    }
+  ],
+  "protocols": [
+    {
+      "name": "TLS 1.3",
+      "port": "443",
+      "status": "推荐",
+      "note": "简化握手（1-RTT/0-RTT），强制 PFS，移除不安全算法（RSA/CBC/SHA1）"
+    },
+    {
+      "name": "TLS 1.2",
+      "port": "443",
+      "status": "可用",
+      "note": "需禁用弱密码套件（RC4/3DES/CBC），强制 ECDHE 前向保密"
+    },
+    {
+      "name": "SSH",
+      "port": "22",
+      "status": "安全",
+      "note": "禁用密码登录（仅密钥），禁用 SSHv1，限制 AllowUsers"
+    },
+    {
+      "name": "DNS over HTTPS (DoH)",
+      "port": "443",
+      "status": "推荐",
+      "note": "加密 DNS 查询，防止 ISP/中间人窃听"
+    },
+    {
+      "name": "IPsec/IKEv2",
+      "port": "500/4500",
+      "status": "安全",
+      "note": "企业 VPN 标准。使用 PFS（Diffie-Hellman group ≥ 14）"
+    },
+    {
+      "name": "WireGuard",
+      "port": "51820",
+      "status": "推荐",
+      "note": "现代 VPN 协议，更小代码量+更高性能。Curve25519+ChaCha20+Poly1305"
+    },
+    {
+      "name": "HTTP/2",
+      "port": "443",
+      "status": "安全（需配置）",
+      "note": "注意 Rapid Reset DoS（CVE-2023-44487），需限制并发流"
+    },
+    {
+      "name": "SMBv3",
+      "port": "445",
+      "status": "可用",
+      "note": "禁用 SMBv1（EternalBlue），SMBv3 需打补丁防 SMBGhost"
+    }
+  ]
+}

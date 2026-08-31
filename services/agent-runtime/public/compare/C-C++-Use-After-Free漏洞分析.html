@@ -1,0 +1,1287 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UAF 漏洞分析实验室 | Use-After-Free Deep Dive</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --card2: #1a2332;
+            --border: #334155;
+            --text: #e2e8f0;
+            --text2: #94a3b8;
+            --code-bg: #0d1117;
+            --danger: #ef4444;
+            --danger-glow: #ef444466;
+            --success: #22c55e;
+            --success-glow: #22c55e66;
+            --info: #3b82f6;
+            --info-glow: #3b82f666;
+            --warning: #f59e0b;
+            --warning-glow: #f59e0b66;
+            --purple: #a855f7;
+            --mono: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+            --sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            min-height: 100vh;
+            line-height: 1.6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        .main-container {
+            max-width: 1100px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+            background: var(--card);
+            border-radius: 16px;
+            padding: 1.2rem 1.5rem;
+            border: 1px solid var(--border);
+        }
+        .header .title-group {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+        }
+        .header .badge {
+            background: var(--danger);
+            color: #fff;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 0.25rem 0.6rem;
+            border-radius: 20px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            animation: pulse-badge 2s infinite;
+        }
+        @keyframes pulse-badge {
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 var(--danger-glow);
+            }
+            50% {
+                box-shadow: 0 0 0 10px transparent;
+            }
+        }
+        .header h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }
+        .header .cwe-tag {
+            background: #1e293b;
+            border: 1px solid var(--border);
+            color: var(--warning);
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            padding: 0.2rem 0.55rem;
+            border-radius: 6px;
+        }
+        .progress-wrap {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .progress-bar-outer {
+            width: 200px;
+            height: 8px;
+            background: #1e293b;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+        .progress-bar-inner {
+            height: 100%;
+            background: linear-gradient(90deg, var(--info), var(--success));
+            border-radius: 10px;
+            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            width: 0%;
+        }
+        .progress-text {
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            color: var(--text2);
+            white-space: nowrap;
+            min-width: 55px;
+            text-align: right;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--card);
+            border-radius: 14px;
+            padding: 1.4rem 1.6rem;
+            border: 1px solid var(--border);
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        .card.active-step {
+            border-color: var(--info);
+            box-shadow: 0 0 24px var(--info-glow);
+        }
+        .card h2 {
+            font-size: 1.05rem;
+            font-weight: 700;
+            margin-bottom: 0.8rem;
+            letter-spacing: -0.2px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .card h2 .step-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--info);
+            flex-shrink: 0;
+        }
+        .card h2 .step-dot.done {
+            background: var(--success);
+        }
+        .card h2 .step-dot.active {
+            animation: dot-pulse 1.2s infinite;
+        }
+        @keyframes dot-pulse {
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 var(--info-glow);
+            }
+            50% {
+                box-shadow: 0 0 0 12px transparent;
+            }
+        }
+
+        /* Code display */
+        .code-block {
+            background: var(--code-bg);
+            border-radius: 10px;
+            padding: 1rem 0;
+            font-family: var(--mono);
+            font-size: 0.82rem;
+            line-height: 1.7;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            position: relative;
+            counter-reset: line;
+        }
+        .code-line {
+            display: flex;
+            align-items: flex-start;
+            padding: 0.15rem 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+            position: relative;
+            white-space: pre;
+            border-left: 3px solid transparent;
+        }
+        .code-line:hover {
+            background: #1a2738;
+        }
+        .code-line .line-num {
+            color: #555;
+            min-width: 36px;
+            text-align: right;
+            margin-right: 1rem;
+            user-select: none;
+            font-size: 0.7rem;
+            padding-top: 1px;
+        }
+        .code-line .line-content {
+            color: #c9d1d9;
+            flex: 1;
+        }
+        .code-line.clicked-wrong {
+            animation: shake 0.5s;
+            background: #2d1a1a !important;
+            border-left-color: var(--danger) !important;
+        }
+        .code-line.clicked-correct {
+            animation: glow-green 0.6s;
+        }
+        .code-line.found-vuln {
+            background: #1a2d1a !important;
+            border-left-color: var(--success) !important;
+            box-shadow: inset 0 0 30px rgba(34, 197, 94, 0.1);
+        }
+        .code-line.hint-root-cause {
+            background: #2d2a1a !important;
+            border-left-color: var(--warning) !important;
+        }
+        @keyframes shake {
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+            20% {
+                transform: translateX(-6px);
+            }
+            40% {
+                transform: translateX(6px);
+            }
+            60% {
+                transform: translateX(-4px);
+            }
+            80% {
+                transform: translateX(4px);
+            }
+        }
+        @keyframes glow-green {
+            0% {
+                box-shadow: 0 0 0 0 var(--success-glow);
+            }
+            50% {
+                box-shadow: 0 0 30px 8px var(--success-glow);
+            }
+            100% {
+                box-shadow: 0 0 0 0 transparent;
+            }
+        }
+
+        /* Heap viz */
+        .heap-container {
+            background: #0a0f16;
+            border-radius: 12px;
+            padding: 1.2rem;
+            border: 1px solid var(--border);
+            min-height: 220px;
+            position: relative;
+        }
+        .heap-title {
+            font-family: var(--mono);
+            font-size: 0.7rem;
+            color: var(--text2);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.8rem;
+        }
+        .heap-blocks {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            position: relative;
+        }
+        .heap-block {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            border: 2px solid var(--border);
+            background: #111827;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            position: relative;
+            min-height: 48px;
+        }
+        .heap-block.addr {
+            color: #888;
+            min-width: 70px;
+            font-size: 0.7rem;
+        }
+        .heap-block.content {
+            flex: 1;
+            color: #c9d1d9;
+        }
+        .heap-block.status {
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+        .heap-block.state-alloc {
+            border-color: #22c55e;
+            background: #0d1f14;
+        }
+        .heap-block.state-alloc .status {
+            background: #22c55e;
+            color: #000;
+        }
+        .heap-block.state-freed {
+            border-color: #ef4444;
+            background: #1f0d0d;
+            border-style: dashed;
+            opacity: 0.75;
+        }
+        .heap-block.state-freed .status {
+            background: #ef4444;
+            color: #fff;
+        }
+        .heap-block.state-reused {
+            border-color: #f59e0b;
+            background: #1f1808;
+            animation: reused-pulse 1.5s infinite;
+        }
+        .heap-block.state-reused .status {
+            background: #f59e0b;
+            color: #000;
+        }
+        @keyframes reused-pulse {
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 var(--warning-glow);
+            }
+            50% {
+                box-shadow: 0 0 16px 4px var(--warning-glow);
+            }
+        }
+        .dangling-ptr-indicator {
+            position: absolute;
+            right: -55px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 0.6rem;
+            color: #ef4444;
+            font-weight: 700;
+            animation: blink-ptr 0.8s infinite;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+        @keyframes blink-ptr {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 0.55rem 1.2rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.25s;
+            font-family: var(--sans);
+            letter-spacing: 0.2px;
+        }
+        .btn-primary {
+            background: var(--info);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            box-shadow: 0 0 20px var(--info-glow);
+            transform: translateY(-1px);
+        }
+        .btn-success {
+            background: var(--success);
+            color: #000;
+        }
+        .btn-success:hover {
+            box-shadow: 0 0 20px var(--success-glow);
+            transform: translateY(-1px);
+        }
+        .btn-outline {
+            background: transparent;
+            border: 2px solid var(--border);
+            color: var(--text);
+        }
+        .btn-outline:hover {
+            border-color: var(--info);
+            background: #1a2738;
+        }
+        .btn-sm {
+            padding: 0.35rem 0.8rem;
+            font-size: 0.75rem;
+            border-radius: 6px;
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        /* Inputs */
+        textarea,
+        input[type="text"] {
+            width: 100%;
+            background: var(--code-bg);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            padding: 0.7rem 1rem;
+            color: var(--text);
+            font-family: var(--mono);
+            font-size: 0.82rem;
+            resize: vertical;
+            transition: border-color 0.3s;
+        }
+        textarea:focus,
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--info);
+            box-shadow: 0 0 16px var(--info-glow);
+        }
+        textarea {
+            min-height: 80px;
+        }
+
+        /* Feedback */
+        .feedback {
+            padding: 0.7rem 1rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            margin-top: 0.6rem;
+            display: none;
+            animation: fadeIn 0.3s;
+        }
+        .feedback.show {
+            display: block;
+        }
+        .feedback.error {
+            background: #2d1a1a;
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+        }
+        .feedback.success {
+            background: #1a2d1a;
+            border: 1px solid #22c55e;
+            color: #86efac;
+        }
+        .feedback.info {
+            background: #1a2530;
+            border: 1px solid #3b82f6;
+            color: #93c5fd;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-6px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Flag */
+        .flag-reveal {
+            background: #1a1300;
+            border: 3px dashed var(--warning);
+            border-radius: 12px;
+            padding: 1.2rem;
+            text-align: center;
+            font-family: var(--mono);
+            font-size: 1.1rem;
+            color: var(--warning);
+            animation: flag-pop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: none;
+            letter-spacing: 1px;
+        }
+        .flag-reveal.show {
+            display: block;
+        }
+        @keyframes flag-pop {
+            0% {
+                transform: scale(0.3);
+                opacity: 0;
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        /* Diff view */
+        .diff-view {
+            background: var(--code-bg);
+            border-radius: 8px;
+            overflow: hidden;
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            border: 1px solid var(--border);
+        }
+        .diff-line {
+            padding: 0.35rem 1rem;
+            display: flex;
+            gap: 0.6rem;
+        }
+        .diff-line.added {
+            background: #0d2a1a;
+            border-left: 3px solid var(--success);
+        }
+        .diff-line.removed {
+            background: #2a0d0d;
+            border-left: 3px solid var(--danger);
+        }
+        .diff-line .diff-sign {
+            min-width: 20px;
+            font-weight: 700;
+        }
+        .diff-line.added .diff-sign {
+            color: var(--success);
+        }
+        .diff-line.removed .diff-sign {
+            color: var(--danger);
+        }
+
+        /* Collapsible */
+        .analysis-section details {
+            background: var(--card2);
+            border-radius: 10px;
+            padding: 1rem 1.3rem;
+            border: 1px solid var(--border);
+        }
+        .analysis-section summary {
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: var(--info);
+            user-select: none;
+        }
+        .analysis-section details[open] summary {
+            margin-bottom: 1rem;
+        }
+
+        /* Row layout */
+        .row-2col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        @media (max-width: 800px) {
+            .row-2col {
+                grid-template-columns: 1fr;
+            }
+            .heap-block {
+                flex-wrap: wrap;
+                font-size: 0.7rem;
+            }
+            .dangling-ptr-indicator {
+                right: -30px;
+                font-size: 0.5rem;
+            }
+        }
+
+        .text-muted {
+            color: var(--text2);
+            font-size: 0.8rem;
+        }
+        .mt-1 {
+            margin-top: 0.5rem;
+        }
+        .mt-2 {
+            margin-top: 1rem;
+        }
+        .gap-1 {
+            gap: 0.5rem;
+        }
+        .flex-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            align-items: center;
+        }
+        .tag {
+            display: inline-block;
+            font-size: 0.7rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+        .tag-red {
+            background: #3b1111;
+            color: #fca5a5;
+        }
+        .tag-green {
+            background: #113b11;
+            color: #86efac;
+        }
+        .tag-blue {
+            background: #11223b;
+            color: #93c5fd;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- HEADER -->
+        <div class="header">
+            <div class="title-group">
+                <span class="badge">CWE-416</span>
+                <h1>🔍 Use-After-Free 漏洞分析实验室</h1>
+                <span class="cwe-tag">CWE-416</span>
+            </div>
+            <div class="progress-wrap">
+                <span style="font-size:0.75rem;color:var(--text2)">进度</span>
+                <div class="progress-bar-outer">
+                    <div class="progress-bar-inner" id="progressBar" style="width:0%"></div>
+                </div>
+                <span class="progress-text" id="progressLabel">步骤 0/5</span>
+            </div>
+        </div>
+
+        <!-- STEP 0: BRIEFING -->
+        <div class="card active-step" id="step0Card">
+            <h2><span class="step-dot active"></span> 📋 任务简报</h2>
+            <p style="margin-bottom:0.6rem;">你是一名安全研究员，正在审计一个 <strong>C++ 用户管理系统</strong>。代码中存在一个 <strong>Use-After-Free (UAF)</strong> 漏洞——对象被释放后，悬空指针仍被使用。</p>
+            <p style="margin-bottom:0.8rem;color:var(--text2);">你的任务：<strong>定位漏洞 → 理解堆内存布局 → 分析利用机制 → 编写修复补丁</strong>。全程在浏览器中完成，无需任何外部工具。</p>
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                <span class="tag tag-red">悬空指针</span>
+                <span class="tag tag-red">堆内存重用</span>
+                <span class="tag tag-blue">类型混淆</span>
+                <span class="tag tag-green">智能指针防御</span>
+            </div>
+            <p class="text-muted mt-1">// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境</p>
+            <button class="btn btn-primary mt-2" onclick="advanceToStep(1)">开始分析 →</button>
+        </div>
+
+        <!-- STEP 1: VULNERABILITY HUNT -->
+        <div class="card" id="step1Card" style="display:none;">
+            <h2><span class="step-dot active" id="dot1"></span> 步骤 1：定位 UAF 漏洞</h2>
+            <p class="text-muted" style="margin-bottom:0.8rem;">👆 <strong>点击</strong>你认为存在 Use-After-Free 的代码行。仔细分析 <code>delete</code> 和后续的指针使用。</p>
+            <div class="code-block" id="codeBlock">
+                <div class="code-line" data-line="1" data-vuln="false"><span class="line-num">1</span><span class="line-content"><span style="color:#ff7b72">class</span> <span style="color:#d2a8ff">UserAccount</span> {</span></div>
+                <div class="code-line" data-line="2" data-vuln="false"><span class="line-num">2</span><span class="line-content"><span style="color:#ff7b72">public</span>:</span></div>
+                <div class="code-line" data-line="3" data-vuln="false"><span class="line-num">3</span><span class="line-content">    <span style="color:#ff7b72">int</span> uid;</span></div>
+                <div class="code-line" data-line="4" data-vuln="false"><span class="line-num">4</span><span class="line-content">    <span style="color:#ff7b72">char</span>* username;</span></div>
+                <div class="code-line" data-line="5" data-vuln="false"><span class="line-num">5</span><span class="line-content">    <span style="color:#ff7b72">bool</span> isAdmin;</span></div>
+                <div class="code-line" data-line="6" data-vuln="false"><span class="line-num">6</span><span class="line-content">    <span style="color:#d2a8ff">UserAccount</span>(<span style="color:#ff7b72">int</span> id, <span style="color:#ff7b72">const char</span>* name, <span style="color:#ff7b72">bool</span> adm=<span style="color:#79c0ff">false</span>)</span></div>
+                <div class="code-line" data-line="7" data-vuln="false"><span class="line-num">7</span><span class="line-content">        : uid(id), isAdmin(adm) {</span></div>
+                <div class="code-line" data-line="8" data-vuln="false"><span class="line-num">8</span><span class="line-content">        username = <span style="color:#ff7b72">new char</span>[<span style="color:#d2a8ff">strlen</span>(name)+<span style="color:#79c0ff">1</span>];</span></div>
+                <div class="code-line" data-line="9" data-vuln="false"><span class="line-num">9</span><span class="line-content">        <span style="color:#d2a8ff">strcpy</span>(username, name); }</span></div>
+                <div class="code-line" data-line="10" data-vuln="false"><span class="line-num">10</span><span class="line-content">    ~<span style="color:#d2a8ff">UserAccount</span>() { <span style="color:#ff7b72">delete</span>[] username; }</span></div>
+                <div class="code-line" data-line="11" data-vuln="false"><span class="line-num">11</span><span class="line-content">    <span style="color:#ff7b72">void</span> <span style="color:#d2a8ff">printInfo</span>() {</span></div>
+                <div class="code-line" data-line="12" data-vuln="false"><span class="line-num">12</span><span class="line-content">        <span style="color:#d2a8ff">printf</span>(<span style="color:#a5d6ff">"User %d: %s (admin:%d)\n"</span>,uid,username,isAdmin);</span></div>
+                <div class="code-line" data-line="13" data-vuln="false"><span class="line-num">13</span><span class="line-content">    }</span></div>
+                <div class="code-line" data-line="14" data-vuln="false"><span class="line-num">14</span><span class="line-content">};</span></div>
+                <div class="code-line" data-line="15" data-vuln="false"><span class="line-num">15</span><span class="line-content">&nbsp;</span></div>
+                <div class="code-line" data-line="16" data-vuln="false"><span class="line-num">16</span><span class="line-content"><span style="color:#ff7b72">void</span> <span style="color:#d2a8ff">processUser</span>() {</span></div>
+                <div class="code-line" data-line="17" data-vuln="false"><span class="line-num">17</span><span class="line-content">    <span style="color:#d2a8ff">UserAccount</span>* admin = <span style="color:#ff7b72">new</span> <span style="color:#d2a8ff">UserAccount</span>(<span style="color:#79c0ff">1</span>,<span style="color:#a5d6ff">"root_admin"</span>,<span style="color:#79c0ff">true</span>);</span></div>
+                <div class="code-line" data-line="18" data-vuln="false"><span class="line-num">18</span><span class="line-content">&nbsp;</span></div>
+                <div class="code-line" data-line="19" data-vuln="false"><span class="line-num">19</span><span class="line-content">    <span style="color:#8b949e">// 管理员验证后释放对象</span></span></div>
+                <div class="code-line" data-line="20" data-vuln="true" data-rootcause="true"><span class="line-num">20</span><span class="line-content">    <span style="color:#ff7b72">delete</span> admin;  <span style="color:#8b949e">// ← 内存释放，但指针未置空</span></span></div>
+                <div class="code-line" data-line="21" data-vuln="false"><span class="line-num">21</span><span class="line-content">&nbsp;</span></div>
+                <div class="code-line" data-line="22" data-vuln="false"><span class="line-num">22</span><span class="line-content">    <span style="color:#8b949e">// 后续代码分配新对象（可能重用刚释放的内存）</span></span></div>
+                <div class="code-line" data-line="23" data-vuln="false"><span class="line-num">23</span><span class="line-content">    <span style="color:#d2a8ff">UserAccount</span>* guest = <span style="color:#ff7b72">new</span> <span style="color:#d2a8ff">UserAccount</span>(<span style="color:#79c0ff">2</span>,<span style="color:#a5d6ff">"guest_user"</span>,<span style="color:#79c0ff">false</span>);</span></div>
+                <div class="code-line" data-line="24" data-vuln="false"><span class="line-num">24</span><span class="line-content">&nbsp;</span></div>
+                <div class="code-line" data-line="25" data-vuln="true" data-primary="true"><span class="line-num">25</span><span class="line-content">    admin-><span style="color:#d2a8ff">printInfo</span>();  <span style="color:#8b949e">// ← UAF! 悬空指针访问已释放内存</span></span></div>
+                <div class="code-line" data-line="26" data-vuln="false"><span class="line-num">26</span><span class="line-content">&nbsp;</span></div>
+                <div class="code-line" data-line="27" data-vuln="false"><span class="line-num">27</span><span class="line-content">    <span style="color:#ff7b72">delete</span> guest;</span></div>
+                <div class="code-line" data-line="28" data-vuln="false"><span class="line-num">28</span><span class="line-content">}</span></div>
+            </div>
+            <div class="feedback" id="step1Feedback"></div>
+            <div class="flex-row mt-2">
+                <span id="clickedLinesDisplay" class="text-muted" style="font-size:0.75rem;">已尝试行：—</span>
+            </div>
+        </div>
+
+        <!-- STEP 2: HEAP VISUALIZATION -->
+        <div class="card" id="step2Card" style="display:none;">
+            <h2><span class="step-dot active" id="dot2"></span> 步骤 2：堆内存布局可视化</h2>
+            <p class="text-muted" style="margin-bottom:0.8rem;">观察堆内存的<strong>分配→释放→重用</strong>生命周期。点击按钮推进状态，观察悬空指针的影响。</p>
+            <div class="row-2col">
+                <div class="heap-container" id="heapViz">
+                    <div class="heap-title">📦 堆内存 Heap Memory — 地址空间 0x7f00</div>
+                    <div class="heap-blocks" id="heapBlocks">
+                        <!-- JS populated -->
+                    </div>
+                    <div style="margin-top:0.8rem;font-size:0.7rem;color:var(--text2);">
+                        <span id="heapStateDesc">初始状态：admin 对象已分配</span>
+                    </div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:0.6rem;">
+                    <div style="font-size:0.8rem;color:var(--text2);">🖱️ 推进堆状态：</div>
+                    <button class="btn btn-outline btn-sm" id="heapBtnNext" onclick="advanceHeapState()">下一状态 ▶</button>
+                    <button class="btn btn-outline btn-sm" onclick="resetHeapState()">↺ 重置</button>
+                    <div class="feedback" id="step2Feedback"></div>
+                    <div style="font-size:0.7rem;color:var(--text2);margin-top:0.4rem;">
+                        <div>🟢 绿色边框 = 已分配 (Allocated)</div>
+                        <div>🔴 红色虚线 = 已释放 (Freed)</div>
+                        <div>🟠 橙色脉冲 = 被重用 (Reused) ⚠️</div>
+                        <div style="color:#ef4444;">⬅ 红色箭头 = 悬空指针</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 3: EXPLOIT UNDERSTANDING -->
+        <div class="card" id="step3Card" style="display:none;">
+            <h2><span class="step-dot active" id="dot3"></span> 步骤 3：理解利用机制</h2>
+            <p class="text-muted" style="margin-bottom:0.8rem;">攻击者如何利用 UAF？请描述：<strong>当 guest 对象重用 admin 的内存后，调用 <code>admin->printInfo()</code> 会读取什么数据？攻击者能控制哪些字段？</strong></p>
+            <textarea id="exploitInput" placeholder="描述攻击者如何利用这个UAF漏洞实现类型混淆或信息泄露...&#10;例如：攻击者可以通过控制新分配的对象来..."></textarea>
+            <div class="flex-row mt-1">
+                <button class="btn btn-primary btn-sm" onclick="checkExploit()">提交分析</button>
+                <span class="text-muted" style="font-size:0.7rem;">关键词提示：类型混淆、内存重用、覆盖、控制</span>
+            </div>
+            <div class="feedback" id="step3Feedback"></div>
+            <div id="exploitScoreDisplay" class="text-muted mt-1" style="font-size:0.75rem;display:none;"></div>
+        </div>
+
+        <!-- STEP 4: WRITE THE FIX -->
+        <div class="card" id="step4Card" style="display:none;">
+            <h2><span class="step-dot active" id="dot4"></span> 步骤 4：编写修复补丁</h2>
+            <p class="text-muted" style="margin-bottom:0.8rem;">✍️ 请在下方<strong>编写修复代码</strong>。你可以选择：(a) 在 <code>delete</code> 后将指针置为 <code>nullptr</code>，或 (b) 使用智能指针重构。写出你的修复方案（1-3行代码即可）。</p>
+            <textarea id="patchInput" placeholder="在此输入你的修复代码...&#10;例如：&#10;delete admin;&#10;admin = nullptr;&#10;&#10;或者：&#10;std::unique_ptr<UserAccount> admin = std::make_unique<UserAccount>(...);"></textarea>
+            <div class="flex-row mt-1">
+                <button class="btn btn-success btn-sm" onclick="checkPatch()">验证补丁</button>
+                <button class="btn btn-outline btn-sm" id="revealPatchBtn" onclick="revealPatch()">💡 显示参考答案</button>
+            </div>
+            <div class="feedback" id="step4Feedback"></div>
+            <div class="diff-view mt-2" id="diffView" style="display:none;"></div>
+        </div>
+
+        <!-- STEP 5: FLAG & ANALYSIS -->
+        <div class="card" id="step5Card" style="display:none;">
+            <h2><span class="step-dot done" id="dot5"></span> 🏁 实验完成</h2>
+            <div class="flag-reveal show" id="flagDisplay">
+                🚩 FLAG{u4f_h34p_r3us3_m3m0ry_c0rrupti0n_2024}
+            </div>
+            <p style="margin-top:0.8rem;color:var(--success);font-weight:600;">✅ 恭喜！你已成功完成 UAF 漏洞的完整分析流程。</p>
+            <p class="text-muted">你完成了：漏洞定位 → 堆内存可视化 → 利用机制分析 → 补丁编写</p>
+        </div>
+
+        <!-- ANALYSIS SECTION -->
+        <div class="analysis-section">
+            <details>
+                <summary>📖 查看完整分析报告（点击展开）</summary>
+                <div style="padding:1rem 0;">
+                    <h3 style="color:var(--danger);margin-bottom:0.5rem;">🔴 漏洞根因</h3>
+                    <p>第20行 <code>delete admin</code> 释放了 <code>UserAccount</code> 对象占用的堆内存，但<strong>未将指针置为 nullptr</strong>。第25行通过悬空指针调用 <code>admin->printInfo()</code>，此时该内存区域可能已被第23行的 <code>guest</code> 对象重用，导致读取到错误或攻击者可控的数据。</p>
+
+                    <h3 style="color:var(--warning);margin-top:1.2rem;">🟠 利用链</h3>
+                    <p><strong>1.</strong> 释放 admin 对象（堆块归还给分配器）→ <strong>2.</strong> 攻击者触发新分配（guest 对象或精心构造的数据）占据同一内存块 → <strong>3.</strong> 悬空指针访问被覆盖的内存 → <strong>4.</strong> 类型混淆：将 guest 的数据按 UserAccount 布局解释 → <strong>5.</strong> 可能的信息泄露（读取 isAdmin/username）或代码执行（虚表劫持）。</p>
+
+                    <h3 style="color:var(--success);margin-top:1.2rem;">🟢 修复方案</h3>
+                    <p><strong>方案A（最小修复）：</strong><code>delete admin; admin = nullptr;</code> —— 后续对 nullptr 的解引用会立即崩溃（可预测的失败），而非静默的数据损坏。</p>
+                    <p><strong>方案B（推荐）：</strong>使用 <code>std::unique_ptr&lt;UserAccount&gt; admin = std::make_unique&lt;UserAccount&gt;(...);</code> —— 智能指针在析构时自动释放内存并将内部指针置空，从根本上消除悬空指针。</p>
+
+                    <h3 style="color:var(--info);margin-top:1.2rem;">🔵 现实世界参考</h3>
+                    <p>CWE-416 是 OWASP Top 25 中最危险的软件弱点之一。Chrome、Firefox、Linux 内核等大型项目中 UAF 漏洞屡见不鲜。现代防御包括：AddressSanitizer (ASan)、Control Flow Integrity (CFI)、隔离堆 (PartitionAlloc) 以及 Rust 等内存安全语言。</p>
+                    <p class="text-muted" style="font-size:0.7rem;margin-top:0.5rem;">// EDUCATIONAL PURPOSE ONLY — 仅用于授权教学环境。本实验不包含可部署的利用代码。</p>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <script>
+        // ============ LAB STATE MACHINE ============
+        const state = {
+            currentStep: 0,
+            maxStepReached: 0,
+            vulnLineFound: false,
+            rootCauseFound: false,
+            clickedLines: new Set(),
+            heapStateIndex: 0, // 0=initial alloc, 1=freed, 2=reused, 3=uaf_trigger
+            exploitPassed: false,
+            patchPassed: false,
+            flagRevealed: false,
+        };
+
+        // Heap state definitions
+        const heapStates = [{
+            index: 0,
+            desc: '状态 0：admin 对象已分配在 0x7f00',
+            blocks: [
+                { addr: '0x7f00', content: 'UserAccount {uid:1, username:"root_admin", isAdmin:true}',
+                    size: '48B', status: 'alloc', label: 'ALLOC', ptrLabel: 'admin →' },
+                { addr: '0x7f30', content: '[ 空闲内存 Free Space ]', size: '112B', status: 'free',
+                label: 'FREE', ptrLabel: '' },
+                { addr: '0x7fa0', content: '[ 空闲内存 Free Space ]', size: '96B', status: 'free',
+                label: 'FREE', ptrLabel: '' },
+            ],
+        }, {
+            index: 1,
+            desc: '状态 1：delete admin — 0x7f00 处的内存已释放回堆',
+            blocks: [
+                { addr: '0x7f00', content: '[ FREED CHUNK — 原 UserAccount 数据已无效 ]', size: '48B', status: 'freed',
+                    label: 'FREED ⚠️', ptrLabel: 'admin → (悬空!)', dangling: true },
+                { addr: '0x7f30', content: '[ 空闲内存 Free Space ]', size: '112B', status: 'free',
+                label: 'FREE', ptrLabel: '' },
+                { addr: '0x7fa0', content: '[ 空闲内存 Free Space ]', size: '96B', status: 'free',
+                label: 'FREE', ptrLabel: '' },
+            ],
+        }, {
+            index: 2,
+            desc: '状态 2：new UserAccount(guest) — 分配器重用了 0x7f00 的内存！',
+            blocks: [
+                { addr: '0x7f00', content: 'UserAccount {uid:2, username:"guest_user", isAdmin:false}', size: '48B',
+                    status: 'reused', label: 'REUSED ⚡', ptrLabel: 'admin → (悬空!)  guest →', dangling: true },
+                { addr: '0x7f30', content: '[ 空闲内存 Free Space ]', size: '112B', status: 'free',
+                label: 'FREE', ptrLabel: '' },
+                { addr: '0x7fa0', content: '[ 空闲内存 Free Space ]', size: '96B', status: 'free',
+                label: 'FREE', ptrLabel: '' },
+            ],
+        }, {
+            index: 3,
+            desc: '状态 3：admin->printInfo() — UAF触发！读取到 guest 的数据',
+            blocks: [
+                { addr: '0x7f00', content: 'UserAccount {uid:2, username:"guest_user", isAdmin:false}', size: '48B',
+                    status: 'reused', label: 'UAF 读取! 💥', ptrLabel: 'admin→ (读取此处!)  guest→',
+                    dangling: true, uafActive: true },
+                { addr: '0x7f30', content: '[ 空闲内存 Free Space ]', size: '112B', status: 'free',
+                label: 'FREE', ptrLabel: '' },
+                { addr: '0x7fa0', content: '[ 空闲内存 Free Space ]', size: '96B', status: 'free',
+                label: 'FREE', ptrLabel: '' },
+            ],
+        }, ];
+
+        // ============ DOM REFERENCES ============
+        function $(id) { return document.getElementById(id); }
+
+        function getEl(sel) { return document.querySelector(sel); }
+
+        function getAll(sel) { return document.querySelectorAll(sel); }
+
+        // ============ PROGRESS ============
+        function updateProgress(step) {
+            state.currentStep = step;
+            if (step > state.maxStepReached) state.maxStepReached = step;
+            const totalSteps = 5;
+            const pct = Math.round((state.maxStepReached / totalSteps) * 100);
+            $('progressBar').style.width = pct + '%';
+            $('progressLabel').textContent = '步骤 ' + state.maxStepReached + '/' + totalSteps;
+
+            // Update step dots
+            for (let i = 1; i <= 5; i++) {
+                const dot = $('dot' + i);
+                if (!dot) continue;
+                dot.classList.remove('active', 'done');
+                if (i < step) dot.classList.add('done');
+                if (i === step) dot.classList.add('active');
+            }
+
+            // Highlight active card
+            for (let i = 0; i <= 5; i++) {
+                const card = $('step' + i + 'Card');
+                if (card) card.classList.remove('active-step');
+            }
+            const activeCard = $('step' + step + 'Card');
+            if (activeCard) activeCard.classList.add('active-step');
+        }
+
+        function advanceToStep(step) {
+            // Hide all step cards
+            for (let i = 0; i <= 5; i++) {
+                const card = $('step' + i + 'Card');
+                if (card) card.style.display = 'none';
+            }
+            // Show target step
+            const target = $('step' + step + 'Card');
+            if (target) target.style.display = '';
+            updateProgress(step);
+            // Scroll to the new card
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Special handling
+            if (step === 2 && state.heapStateIndex === 0) {
+                renderHeapState(0);
+            }
+        }
+
+        // ============ STEP 1: VULNERABILITY HUNT ============
+        function initCodeLines() {
+            const lines = getAll('#codeBlock .code-line');
+            lines.forEach(line => {
+                line.addEventListener('click', function() {
+                    const lineNum = parseInt(this.getAttribute('data-line'));
+                    const isPrimary = this.getAttribute('data-primary') === 'true';
+                    const isRootCause = this.getAttribute('data-rootcause') === 'true';
+                    const isVuln = this.getAttribute('data-vuln') === 'true';
+
+                    if (state.vulnLineFound && isPrimary) return; // Already found
+
+                    state.clickedLines.add(lineNum);
+                    updateClickedLinesDisplay();
+
+                    if (isPrimary && !state.vulnLineFound) {
+                        // CORRECT — primary UAF line
+                        this.classList.add('found-vuln', 'clicked-correct');
+                        state.vulnLineFound = true;
+                        state.rootCauseFound = true;
+                        showFeedback('step1Feedback', 'success',
+                            '✅ <strong>正确！</strong>第 ' + lineNum +
+                            ' 行 <code>admin->printInfo()</code> 是 UAF 的触发点——此时 admin 指向的内存已被释放，且可能已被 guest 对象重用。悬空指针解引用导致<strong>未定义行为</strong>。',
+                            true);
+                        // Also highlight the root cause line
+                        const rootLine = document.querySelector('#codeBlock .code-line[data-rootcause="true"]');
+                        if (rootLine && rootLine !== this) {
+                            rootLine.classList.add('hint-root-cause');
+                        }
+                        // Auto-advance after delay
+                        setTimeout(() => {
+                            if (state.currentStep === 1) advanceToStep(2);
+                        }, 2200);
+                    } else if (isRootCause && !state.rootCauseFound) {
+                        // Root cause line — good catch but not the UAF trigger
+                        this.classList.add('hint-root-cause');
+                        state.rootCauseFound = true;
+                        showFeedback('step1Feedback', 'info',
+                            '💡 <strong>有道理！</strong>第 ' + lineNum +
+                            ' 行 <code>delete admin</code> 是漏洞的<strong>根因</strong>（释放后未置空指针）。但 UAF 的<strong>触发点</strong>在第25行——请继续寻找悬空指针<strong>被使用</strong>的位置。',
+                            true);
+                    } else if (!isVuln) {
+                        // Wrong line
+                        this.classList.add('clicked-wrong');
+                        setTimeout(() => this.classList.remove('clicked-wrong'), 500);
+                        showFeedback('step1Feedback', 'error',
+                            '❌ 第 ' + lineNum + ' 行不是 UAF 漏洞所在。请关注 <code>delete</code> 之后仍然被使用的指针。提示：寻找<strong>释放后仍被调用的对象方法</strong>。',
+                            true);
+                    }
+                });
+            });
+        }
+
+        function updateClickedLinesDisplay() {
+            const arr = Array.from(state.clickedLines).sort((a, b) => a - b);
+            $('clickedLinesDisplay').textContent = '已尝试行：' + (arr.length > 0 ? arr.join(', ') : '—');
+        }
+
+        function showFeedback(id, type, msg, show) {
+            const fb = $(id);
+            if (!fb) return;
+            fb.className = 'feedback ' + type + (show ? ' show' : '');
+            fb.innerHTML = msg;
+        }
+
+        // ============ STEP 2: HEAP VISUALIZATION ============
+        function renderHeapState(stateIndex) {
+            const hs = heapStates[stateIndex];
+            if (!hs) return;
+            state.heapStateIndex = stateIndex;
+            const container = $('heapBlocks');
+            $('heapStateDesc').textContent = hs.desc;
+
+            let html = '';
+            hs.blocks.forEach((blk, i) => {
+                let statusClass = '';
+                switch (blk.status) {
+                    case 'alloc':
+                        statusClass = 'state-alloc';
+                        break;
+                    case 'freed':
+                        statusClass = 'state-freed';
+                        break;
+                    case 'reused':
+                        statusClass = 'state-reused';
+                        break;
+                    default:
+                        statusClass = '';
+                }
+                const danglingHTML = blk.dangling ?
+                    '<span class="dangling-ptr-indicator">⬅ 悬空指针</span>' : '';
+                const uafFlash = blk.uafActive ?
+                    ' style="box-shadow: 0 0 20px #ef4444aa; border-color: #ef4444;"' : '';
+                html += `
+                <div class="heap-block ${statusClass}"${uafFlash}>
+                    <span class="addr">${blk.addr}</span>
+                    <span class="content">${blk.content}</span>
+                    <span style="font-size:0.65rem;color:#888;">${blk.size}</span>
+                    <span class="status">${blk.label}</span>
+                    ${blk.ptrLabel ? '<span style="font-size:0.65rem;color:#93c5fd;margin-left:4px;">' + blk.ptrLabel + '</span>' : ''}
+                    ${danglingHTML}
+                </div>`;
+            });
+            container.innerHTML = html;
+
+            // Update button
+            const btn = $('heapBtnNext');
+            if (stateIndex >= heapStates.length - 1) {
+                btn.textContent = '✓ 已完成';
+                btn.disabled = true;
+                // Show feedback
+                if (stateIndex === 3) {
+                    showFeedback('step2Feedback', 'success',
+                        '💥 <strong>UAF 触发！</strong>admin 指针仍然指向 0x7f00，但该内存现在存储的是 guest 对象的数据。<code>printInfo()</code> 将读取到 <strong>uid=2, username="guest_user", isAdmin=false</strong>——完全错误的信息！如果攻击者能控制新分配的数据，就能操纵程序行为。',
+                        true);
+                    // Auto-advance
+                    setTimeout(() => {
+                        if (state.currentStep === 2 && state.heapStateIndex === 3) advanceToStep(3);
+                    }, 3000);
+                }
+            } else {
+                btn.textContent = '下一状态 ▶';
+                btn.disabled = false;
+            }
+        }
+
+        function advanceHeapState() {
+            if (state.heapStateIndex < heapStates.length - 1) {
+                renderHeapState(state.heapStateIndex + 1);
+            }
+        }
+
+        function resetHeapState() {
+            renderHeapState(0);
+            $('heapBtnNext').disabled = false;
+            $('heapBtnNext').textContent = '下一状态 ▶';
+            showFeedback('step2Feedback', '', '', false);
+        }
+
+        // ============ STEP 3: EXPLOIT UNDERSTANDING ============
+        function checkExploit() {
+            const input = $('exploitInput').value.trim().toLowerCase();
+            if (input.length < 15) {
+                showFeedback('step3Feedback', 'error',
+                    '请提供更详细的分析（至少15个字符）。描述攻击者如何利用这个UAF。', true);
+                return;
+            }
+
+            // Keywords to check
+            const keywords = [
+                { word: '类型混淆', weight: 3, cn: '类型混淆' },
+                { word: 'type confusion', weight: 3, cn: 'type confusion' },
+                { word: '重用', weight: 2, cn: '内存重用' },
+                { word: 'reuse', weight: 2, cn: 'reuse' },
+                { word: '覆盖', weight: 2, cn: '覆盖/覆写' },
+                { word: 'overwrite', weight: 2, cn: 'overwrite' },
+                { word: '控制', weight: 2, cn: '控制数据' },
+                { word: 'control', weight: 2, cn: 'control' },
+                { word: '悬空', weight: 1, cn: '悬空指针' },
+                { word: 'dangling', weight: 1, cn: 'dangling pointer' },
+                { word: '分配', weight: 1, cn: '新分配' },
+                { word: 'allocate', weight: 1, cn: 'allocate' },
+                { word: '未定义', weight: 1, cn: '未定义行为' },
+                { word: 'undefined', weight: 1, cn: 'undefined behavior' },
+                { word: 'isadmin', weight: 2, cn: 'isAdmin字段' },
+                { word: 'uid', weight: 1, cn: 'uid字段' },
+                { word: 'username', weight: 1, cn: 'username字段' },
+                { word: '堆', weight: 1, cn: '堆内存' },
+            ];
+
+            let score = 0;
+            const matched = [];
+            keywords.forEach(kw => {
+                if (input.includes(kw.word)) {
+                    score += kw.weight;
+                    if (!matched.includes(kw.cn)) matched.push(kw.cn);
+                }
+            });
+
+            const scoreDisplay = $('exploitScoreDisplay');
+            scoreDisplay.style.display = '';
+            scoreDisplay.innerHTML = '匹配关键词：' + (matched.length > 0 ? matched.join('、') :
+                '未匹配到关键概念') + ' | 得分：' + score + '/15';
+
+            if (score >= 6) {
+                state.exploitPassed = true;
+                showFeedback('step3Feedback', 'success',
+                    '✅ <strong>分析通过！</strong>你准确识别了UAF的核心利用机制：释放的内存被新对象重用，悬空指针读取到攻击者可控的数据，导致<strong>类型混淆</strong>。攻击者可以通过精心构造新分配的数据来控制 <code>isAdmin</code>、<code>uid</code> 等字段，甚至劫持虚函数表实现代码执行。',
+                    true);
+                $('exploitScoreDisplay').style.color = '#86efac';
+                setTimeout(() => {
+                    if (state.currentStep === 3) advanceToStep(4);
+                }, 2500);
+            } else if (score >= 3) {
+                showFeedback('step3Feedback', 'info',
+                    '🤔 <strong>方向正确，但不够深入。</strong>你已经触及了一些关键概念。请思考：当 guest 对象覆盖了 admin 的内存后，<code>admin->printInfo()</code> 会输出什么？攻击者如何利用这一点？尝试使用"类型混淆"或"内存重用"等术语。',
+                    true);
+                $('exploitScoreDisplay').style.color = '#f59e0b';
+            } else {
+                showFeedback('step3Feedback', 'error',
+                    '❌ 分析还需要更具体。请思考：<strong>释放后的内存被谁占用了？悬空指针读取到了什么？攻击者能控制哪些数据？</strong>重新观察堆可视化状态3。',
+                    true);
+                $('exploitScoreDisplay').style.color = '#fca5a5';
+            }
+        }
+
+        // ============ STEP 4: WRITE THE FIX ============
+        function checkPatch() {
+            const input = $('patchInput').value.trim();
+            if (input.length < 5) {
+                showFeedback('step4Feedback', 'error', '请编写至少一行修复代码。', true);
+                return;
+            }
+
+            const lower = input.toLowerCase();
+            let passed = false;
+            let feedbackMsg = '';
+            let feedbackType = 'info';
+            let diffHTML = '';
+
+            // Check for nullptr approach
+            const hasNullptr = lower.includes('nullptr') || lower.includes('null') || lower.includes('= 0') || lower
+                .includes('=0');
+            const hasDelete = lower.includes('delete');
+            const hasSmartPtr = lower.includes('unique_ptr') || lower.includes('shared_ptr') || lower.includes(
+                'make_unique') || lower.includes('make_shared');
+            const hasAuto = lower.includes('auto');
+            const hasScope = lower.includes('scope') || lower.includes('{}') || lower.includes('作用域');
+
+            if (hasSmartPtr || (hasAuto && lower.includes('unique'))) {
+                passed = true;
+                feedbackMsg =
+                    '✅ <strong>优秀！</strong>使用智能指针（<code>std::unique_ptr</code> 或 <code>std::shared_ptr</code>）是<strong>最佳实践</strong>——自动管理生命周期，从根本上消除悬空指针。';
+                feedbackType = 'success';
+                diffHTML = `
+                <div class="diff-line removed"><span class="diff-sign">-</span> UserAccount* admin = new UserAccount(1, "root_admin", true);</div>
+                <div class="diff-line removed"><span class="diff-sign">-</span> delete admin;</div>
+                <div class="diff-line added"><span class="diff-sign">+</span> auto admin = std::make_unique&lt;UserAccount&gt;(1, "root_admin", true);</div>
+                <div class="diff-line added"><span class="diff-sign">+</span> // 无需手动 delete — unique_ptr 自动释放</div>`;
+            } else if (hasNullptr && (hasDelete || input.includes('='))) {
+                passed = true;
+                feedbackMsg =
+                    '✅ <strong>正确！</strong>在 <code>delete</code> 后立即将指针置为 <code>nullptr</code> 是有效的防御措施。后续对 nullptr 的解引用会导致确定的崩溃（而非静默的数据损坏），便于调试和防止利用。';
+                feedbackType = 'success';
+                diffHTML = `
+                <div class="diff-line removed"><span class="diff-sign">-</span> delete admin;</div>
+                <div class="diff-line added"><span class="diff-sign">+</span> delete admin;</div>
+                <div class="diff-line added"><span class="diff-sign">+</span> admin = nullptr;  // 防止悬空指针</div>`;
+            } else if (lower.includes('delete') && lower.includes('guest') && lower.includes('admin')) {
+                passed = false;
+                feedbackMsg =
+                    '🤔 你似乎在调整对象生命周期。请更直接地解决<strong>悬空指针</strong>问题——在 delete 后添加 <code>admin = nullptr;</code> 或使用智能指针。';
+                feedbackType = 'info';
+            } else {
+                feedbackMsg =
+                    '🤔 请尝试以下修复方式之一：<br>(a) <code>delete admin; admin = nullptr;</code><br>(b) 使用 <code>std::unique_ptr</code> 替代裸指针。<br>请修改你的代码后重新提交。';
+                feedbackType = 'info';
+            }
+
+            showFeedback('step4Feedback', feedbackType, feedbackMsg, true);
+
+            if (passed) {
+                state.patchPassed = true;
+                $('diffView').style.display = '';
+                $('diffView').innerHTML = diffHTML;
+                $('revealPatchBtn').style.display = 'none';
+                // Reveal flag
+                setTimeout(() => {
+                    revealFlag();
+                }, 1800);
+            } else {
+                $('diffView').style.display = 'none';
+            }
+        }
+
+        function revealPatch() {
+            state.patchPassed = true;
+            showFeedback('step4Feedback', 'success',
+                '💡 <strong>参考修复方案：</strong><br>最小修复：<code>delete admin; admin = nullptr;</code><br>推荐方案：<code>auto admin = std::make_unique&lt;UserAccount&gt;(1, "root_admin", true);</code>',
+                true);
+            $('diffView').style.display = '';
+            $('diffView').innerHTML = `
+            <div class="diff-line removed"><span class="diff-sign">-</span> UserAccount* admin = new UserAccount(1, "root_admin", true);</div>
+            <div class="diff-line removed"><span class="diff-sign">-</span> delete admin;  // 指针未置空</div>
+            <div class="diff-line added"><span class="diff-sign">+</span> auto admin = std::make_unique&lt;UserAccount&gt;(1, "root_admin", true);</div>
+            <div class="diff-line added"><span class="diff-sign">+</span> // unique_ptr 自动管理生命周期，消除悬空指针</div>`;
+            $('revealPatchBtn').style.display = 'none';
+            setTimeout(() => {
+                revealFlag();
+            }, 1500);
+        }
+
+        // ============ FLAG ============
+        function revealFlag() {
+            if (state.flagRevealed) return;
+            state.flagRevealed = true;
+            advanceToStep(5);
+            const flagEl = $('flagDisplay');
+            flagEl.classList.add('show');
+            flagEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Confetti-like effect with CSS
+            flagEl.style.animation = 'none';
+            flagEl.offsetHeight;
+            flagEl.style.animation = 'flag-pop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+            updateProgress(5);
+        }
+
+        // ============ INITIALIZATION ============
+        function init() {
+            initCodeLines();
+            renderHeapState(0);
+            updateProgress(0);
+            // Show step 0 initially
+            $('step0Card').style.display = '';
+            for (let i = 1; i <= 5; i++) {
+                const card = $('step' + i + 'Card');
+                if (card) card.style.display = 'none';
+            }
+            $('flagDisplay').classList.remove('show');
+            $('diffView').style.display = 'none';
+            $('revealPatchBtn').style.display = '';
+            // Initialize dots
+            for (let i = 1; i <= 5; i++) {
+                const dot = $('dot' + i);
+                if (dot) { dot.classList.remove('active', 'done'); }
+            }
+            $('dot0')?.classList.add('active');
+        }
+
+        // Override advanceToStep to also handle card visibility properly
+        const originalAdvanceToStep = advanceToStep;
+        advanceToStep = function(step) {
+            for (let i = 0; i <= 5; i++) {
+                const card = $('step' + i + 'Card');
+                if (card) card.style.display = 'none';
+            }
+            const target = $('step' + step + 'Card');
+            if (target) target.style.display = '';
+            updateProgress(step);
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (step === 2 && state.heapStateIndex === 0) {
+                renderHeapState(0);
+            }
+            if (step === 5 && !state.flagRevealed) {
+                state.flagRevealed = true;
+                $('flagDisplay').classList.add('show');
+            }
+        };
+
+        // Run init
+        document.addEventListener('DOMContentLoaded', init);
+
+        // Allow Enter key in exploit textarea to submit
+        $('exploitInput')?.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                checkExploit();
+            }
+        });
+        $('patchInput')?.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                checkPatch();
+            }
+        });
+
+        console.log('// EDUCATIONAL PURPOSE ONLY — authorized classroom use');
+        console.log('🔍 UAF 漏洞分析实验室已就绪 — 共5个步骤');
+        console.log('  步骤1: 点击定位漏洞行 → 步骤2: 堆内存可视化 → 步骤3: 利用机制分析 → 步骤4: 编写补丁 → 步骤5: 捕获Flag');
+    </script>
+</body>
+</html>
