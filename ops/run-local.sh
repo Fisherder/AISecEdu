@@ -26,6 +26,24 @@ dojo_host=${DOJO_HOST:-localhost.pwn.college}
 workspace_host=${WORKSPACE_HOST:-workspace.localhost.pwn.college}
 future_host=${FUTURE_HOST-}
 
+install_client_return_route() {
+    docker exec "$container" mkdir -p /etc/systemd/system/pwn.college.service.d
+    docker exec "$container" ln -sfn \
+        /opt/pwn.college/ops/pwn.college-client-route.conf \
+        /etc/systemd/system/pwn.college.service.d/client-route.conf
+    docker exec "$container" /opt/pwn.college/ops/configure-client-return-route.sh
+
+    local attempt
+    for attempt in {1..30}; do
+        if docker exec "$container" systemctl daemon-reload >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    echo "Timed out enabling the pwn.college client return-route hook" >&2
+    return 1
+}
+
 if [[ ! $listen_address =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "DOJO_LISTEN_ADDRESS must be an IPv4 address: $listen_address" >&2
     exit 1
@@ -89,6 +107,7 @@ if docker container inspect "$container" >/dev/null 2>&1; then
         exit 1
     fi
     docker start "$container" >/dev/null
+    install_client_return_route
     echo "$container is running"
     exit 0
 fi
@@ -157,6 +176,8 @@ docker run \
     -p "$listen_address:$workspace_https_port:4443" \
     -p "$listen_address:$ssh_port:22" \
     "$image"
+
+install_client_return_route
 
 echo "HTTPS: https://$dojo_host:$https_port"
 echo "Workspace: https://$workspace_host:$workspace_https_port"
