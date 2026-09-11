@@ -1,0 +1,51 @@
+<section id="teaching-showcase" class="teaching-showcase" aria-labelledby="showcase-heading">
+  <header class="showcase-heading">
+    <div><span class="teaching-eyebrow">从原理到课堂 · 互动教学预演</span><h2 id="showcase-heading">让知识变成可以参与的课堂</h2><p>先体验一个案例，再交给 AI 按你的课程生成、编辑和发布。</p></div>
+    <a href="#teaching-visual-learning"><i class="fas fa-chart-line" aria-hidden="true"></i>观察真实学情</a>
+  </header>
+  <div class="showcase-cases" aria-label="选择教学案例">
+    <button type="button" data-showcase-case="industrial" aria-pressed="true"><i class="fas fa-industry" aria-hidden="true"></i><span>工控 · 震网启发案例</span></button>
+    <button type="button" data-showcase-case="vehicle" aria-pressed="false"><i class="fas fa-car" aria-hidden="true"></i><span>车联网 · 信任边界</span></button>
+    <span>概念仿真 · 数值为教学示意</span>
+  </div>
+  <div class="showcase-modes" role="tablist" aria-label="课堂呈现方式">
+    <button id="showcase-tab-simulation" type="button" role="tab" data-showcase-mode="simulation" aria-selected="true" aria-controls="showcase-stage"><span>01</span>动态演示</button>
+    <button id="showcase-tab-slides" type="button" role="tab" data-showcase-mode="slides" aria-selected="false" aria-controls="showcase-stage" tabindex="-1"><span>02</span>动态课件</button>
+    <button id="showcase-tab-debate" type="button" role="tab" data-showcase-mode="debate" aria-selected="false" aria-controls="showcase-stage" tabindex="-1"><span>03</span>课堂辩论</button>
+  </div>
+  <div id="showcase-stage" class="showcase-stage" role="tabpanel" aria-labelledby="showcase-tab-simulation" tabindex="0">
+    <div class="showcase-stage-top"><div><span id="showcase-stage-label">课堂示例 / 01</span><h3 id="showcase-title"></h3></div><button id="showcase-fullscreen" type="button" aria-label="全屏展示案例"><i class="fas fa-expand" aria-hidden="true"></i></button></div>
+    <div id="showcase-visual" class="showcase-visual">
+      <div class="showcase-mobile-graph" aria-label="控制链与反馈链"><div><span id="showcase-mobile-source"></span><b>变更输入 →</b></div><div><span id="showcase-mobile-controller"></span><b id="showcase-mobile-command"></b></div><div><span id="showcase-mobile-process"></span><strong id="showcase-mobile-actual"></strong></div><div><span>← 监控反馈</span><strong id="showcase-mobile-reported"></strong></div></div>
+      <svg id="showcase-diagram" viewBox="0 0 900 340" role="img" aria-label="工程站、控制器、物理过程和监控反馈的动态关系">
+        <defs><pattern id="showcase-grid" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M28 0H0V28" fill="none" stroke="#9dc8ef" stroke-opacity=".08"/></pattern><marker id="showcase-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10" fill="#68d7ed"/></marker></defs>
+        <rect width="900" height="340" fill="url(#showcase-grid)"/>
+        <path class="showcase-signal" d="M216 115H338M514 115H638V220H576" marker-end="url(#showcase-arrow)"/>
+        <path class="showcase-feedback" d="M474 266H258V186H216" marker-end="url(#showcase-arrow)"/>
+        <text x="252" y="100" class="showcase-svg-small">控制链</text><text x="285" y="292" class="showcase-svg-small">反馈链</text>
+        <g class="showcase-node"><rect x="44" y="62" width="172" height="146" rx="14"/><text id="showcase-source" x="64" y="92"></text><rect class="showcase-screen" x="65" y="110" width="128" height="65" rx="5"/><path class="showcase-screen-line" d="M76 145H96L105 132L116 153L130 129L143 146H182"/><text x="65" y="193" class="showcase-svg-small">变更与配置</text></g>
+        <g id="showcase-controller" class="showcase-node"><rect x="338" y="62" width="176" height="111" rx="14"/><text id="showcase-controller-label" x="359" y="93"></text><rect x="360" y="116" width="23" height="32" rx="4"/><rect x="391" y="116" width="23" height="32" rx="4"/><rect x="422" y="116" width="23" height="32" rx="4"/><circle id="showcase-led" cx="480" cy="132" r="7"/></g>
+        <g id="showcase-plant" class="showcase-plant"><path d="M502 178V205H556V228M596 288H675V216H721"/><rect x="487" y="212" width="137" height="91" rx="18"/><rect id="showcase-tank-level" x="491" y="258" width="129" height="41" rx="13"/><circle cx="556" cy="255" r="26"/><g class="showcase-rotor"><path d="M556 232V278M533 255H579M540 239L572 271M540 271L572 239"/></g><path d="M488 310H626"/><text x="654" y="313" class="showcase-svg-small">抽象工业过程</text></g>
+        <g id="showcase-car" class="showcase-car" hidden><path d="M455 282L472 234L510 224L544 189H640L685 224L732 238L744 282Z"/><path d="M552 201L532 226H664L635 201Z"/><circle cx="508" cy="278" r="25"/><circle cx="692" cy="278" r="25"/><circle cx="508" cy="278" r="10"/><circle cx="692" cy="278" r="10"/><path d="M438 318H765"/><text x="490" y="338" class="showcase-svg-small">抽象车辆执行过程</text></g>
+        <g class="showcase-monitor"><rect x="700" y="48" width="166" height="144" rx="14"/><text x="720" y="79">监控反馈</text><text id="showcase-monitor-value" x="720" y="132" class="showcase-svg-value">50%</text><text id="showcase-monitor-status" x="720" y="163" class="showcase-svg-small">与过程一致</text></g>
+        <text id="showcase-process-label" x="360" y="216" class="showcase-svg-small"></text><text id="showcase-process-value" x="360" y="250" class="showcase-svg-value">50%</text>
+      </svg>
+      <div id="showcase-slide-copy" class="showcase-slide-copy" hidden><span id="showcase-slide-number"></span><h4 id="showcase-slide-title"></h4><p id="showcase-slide-body"></p></div>
+    </div>
+    <div id="showcase-debate" class="showcase-debate" hidden>
+      <p class="showcase-preset-label">预设示范发言 · 用于预演课堂结构</p><h4 id="showcase-debate-topic"></h4>
+      <div class="showcase-debate-roles"><article><span class="showcase-role-mark">A</span><h5>安全负责人 · 优先控制影响</h5><p id="showcase-debate-contain"></p><button type="button" data-showcase-vote="contain" aria-pressed="false">试投：优先控制影响</button></article><article><span class="showcase-role-mark">B</span><h5>运行负责人 · 优先核验证据</h5><p id="showcase-debate-verify"></p><button type="button" data-showcase-vote="verify" aria-pressed="false">试投：优先核验证据</button></article></div>
+      <div class="showcase-moderator"><span>教师主持</span><p id="showcase-debate-moderator"></p></div>
+      <div class="showcase-debate-controls"><button id="showcase-round-prev" type="button">上一轮</button><strong id="showcase-round-label"></strong><button id="showcase-round-next" type="button">下一轮</button><button id="showcase-debate-reset" type="button">重置辩论</button><span id="showcase-vote-result" role="status">试投票仅保留在当前页面</span></div>
+    </div>
+    <div id="showcase-playback" class="showcase-playback"><button id="showcase-play" type="button"><i class="fas fa-play" aria-hidden="true"></i><span>播放演示</span></button><button id="showcase-step" type="button">下一步</button><button id="showcase-reset" type="button"><i class="fas fa-undo" aria-hidden="true"></i><span>重置</span></button><span id="showcase-status" role="status" aria-live="polite"></span></div>
+    <div id="showcase-timeline" class="showcase-timeline" role="group" aria-label="演示阶段"></div>
+    <div id="showcase-evidence" class="showcase-evidence" aria-label="同步观测证据"></div>
+  </div>
+  <div class="showcase-footer">
+    <div class="showcase-parameters"><label for="showcase-intensity">异常偏移 <output id="showcase-intensity-value">30</output><input id="showcase-intensity" type="range" min="0" max="50" step="5" value="30"/></label><label class="showcase-check"><input id="showcase-verify" type="checkbox"/><span>开启独立校验</span></label></div>
+    <div class="showcase-cue"><span id="showcase-cue-label">教师讲解提示</span><p id="showcase-cue"></p></div>
+    <div class="showcase-generation"><button id="showcase-generate" type="button"><i class="fas fa-magic" aria-hidden="true"></i><span>用 AI 生成我的演示</span></button><small>将案例要求带入上方同一教学助手，可继续修改。</small></div>
+  </div>
+  <details class="showcase-details"><summary>过程记录、对照与案例说明</summary><p id="showcase-comparison"></p><ol id="showcase-events"></ol><p>这是浏览器内的概念仿真。工控案例借鉴震网引发的控制系统信任问题；流程与负载数值经过教学抽象，不是历史事件逐步复现。车联网案例为虚构教学情境。</p><a href="https://www.cisa.gov/uscert/ics/advisories/ICSA-10-272-01" target="_blank" rel="noopener noreferrer">案例背景：CISA 原始震网通告</a></details>
+</section>

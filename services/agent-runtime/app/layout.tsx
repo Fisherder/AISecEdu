@@ -12,6 +12,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { ServerProvidersInit } from '@/components/server-providers-init';
 import { StorageHealthNotice } from '@/components/storage-health-notice';
 import { AccessCodeGuard } from '@/components/access-code-guard';
+import { getStageRoute } from '@/lib/server/model-routes';
 
 const inter = localFont({
   src: '../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2',
@@ -30,9 +31,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   const integrated = process.env.AISECEDU_INTEGRATED === 'true';
+  const classroomModel = integrated ? getStageRoute('chat-adapter')?.model || process.env.DEFAULT_MODEL || '' : '';
   return (
     <html lang="en" className={inter.variable} suppressHydrationWarning>
       <head>
+        {integrated && <script dangerouslySetInnerHTML={{ __html: `window.__AISECEDU_CLASSROOM_MODEL__=${JSON.stringify(classroomModel).replace(/</g, '\\u003c')};` }} />}
         {process.env.AISECEDU_INTEGRATED === 'true' && process.env.NEXT_PUBLIC_BASE_PATH ? (
           <script
             // The vendored renderer uses root-relative browser API calls. Add

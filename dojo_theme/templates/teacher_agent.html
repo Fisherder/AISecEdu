@@ -11,6 +11,7 @@
   rel="stylesheet"
   href="{{ url_for('views.themes', path='css/teaching-agent.css', v='aisecedu-agent-workbench-v40') }}"
 />
+{% if not is_student_agent %}<link rel="stylesheet" href="{{ url_for('views.themes', path='css/teaching-showcase.css', v='teaching-visual-v2') }}"/>{% endif %}
 {% endblock %} {% block content %}
 {% if is_student_agent %}<h1 class="sr-only">AI 学习助手</h1>{% endif %}
 <div id="teacher-agent" class="teaching-shell" data-role="{{ agent_role }}" aria-busy="true">
@@ -108,8 +109,8 @@
   <div id="teaching-dashboard" class="teaching-dashboard" aria-labelledby="teaching-dashboard-title" hidden>
     <header class="teaching-dashboard-header">
       <div>
-        <span class="teaching-eyebrow">教师工作台</span>
-        <h1 id="teaching-dashboard-title">今天先处理最重要的教学工作</h1>
+        <span class="teaching-eyebrow">教师工作台 · 玄甲</span>
+        <h1 id="teaching-dashboard-title">AI 教学智能体</h1>
         <p id="teaching-dashboard-updated">正在汇总跨课程事实…</p>
       </div>
       <div>
@@ -121,24 +122,27 @@
     <section class="teaching-dashboard-command" aria-labelledby="teaching-dashboard-command-title">
       <div class="teaching-dashboard-command-heading">
         <span class="teaching-agent-mark" aria-hidden="true"><i class="fas fa-magic"></i></span>
-        <div><span class="teaching-eyebrow">上下文操作</span><h2 id="teaching-dashboard-command-title">告诉 AI 你要完成什么教学工作</h2></div>
+        <div><span class="teaching-eyebrow">备课 · 演示 · 互动 · 学情</span><h2 id="teaching-dashboard-command-title">告诉 AI 你要完成什么教学工作</h2></div>
       </div>
       <div class="teaching-dashboard-scope">
         <label><span>课程</span><select id="teaching-dashboard-course" aria-label="选择课程"></select></label>
         <label><span>章节</span><select id="teaching-dashboard-module" aria-label="选择章节"></select></label>
       </div>
       <div class="teaching-dashboard-input-row">
-        <textarea id="teaching-dashboard-input" rows="2" maxlength="16000" aria-label="向 AI 教学助手描述教学任务" placeholder="例如：为逆向工程章节准备 5 道彼此独立、难度递进的动态 Flag CTF 题"></textarea>
+        <textarea id="teaching-dashboard-input" rows="2" maxlength="16000" aria-label="向 AI 教学助手描述教学任务" placeholder="例如：围绕工控异常，准备图文课件、可播放演示和一场学生辩论"></textarea>
         <button id="teaching-dashboard-send" type="button" aria-label="开始 AI 教学任务"><i class="fas fa-arrow-up" aria-hidden="true"></i><span>开始任务</span></button>
       </div>
       <div class="teaching-dashboard-quick-actions" aria-label="常用教学目标">
         <button type="button" data-dashboard-prompt="为当前章节准备本节课所需的课件与教学活动"><i class="fas fa-chalkboard-teacher"></i><span>准备本节课</span></button>
         <button type="button" data-dashboard-prompt="为当前章节设计彼此独立、可核验的 CTF 实践题"><i class="fas fa-flag"></i><span>为当前章节出题</span></button>
         <button type="button" data-dashboard-prompt="设计一段适合课堂使用的交互演示"><i class="fas fa-project-diagram"></i><span>设计课堂演示</span></button>
+        <button type="button" data-dashboard-prompt="为当前课程生成一场可在平台预览、编辑并发布到课堂的 AI 辩论：包含明确辩题、正反方立场、学生参与、教师主持、三轮交锋和评价量规"><i class="fas fa-comments"></i><span>组织学生辩论</span></button>
         <button type="button" data-dashboard-prompt="找出当前课程最需要关注的学生并给出证据与行动建议"><i class="fas fa-user-check"></i><span>找出需关注学生</span></button>
         <button id="teaching-dashboard-more-actions" class="teaching-dashboard-more-actions" type="button" aria-expanded="false"><i class="fas fa-ellipsis-h" aria-hidden="true"></i><span>更多</span></button>
       </div>
     </section>
+
+    {% include "components/teaching_showcase.html" %}
 
     <div id="teaching-dashboard-notice" class="teaching-notice" role="alert" hidden></div>
     <div class="teaching-dashboard-grid">
@@ -156,6 +160,7 @@
       </section>
       <section class="teaching-dashboard-card is-wide" aria-labelledby="teaching-dashboard-learning-title">
         <header><div><span class="teaching-eyebrow">行动信号</span><h2 id="teaching-dashboard-learning-title">学情变化</h2></div><small>仅展示有真实证据的异常与趋势</small></header>
+        {% include "components/teaching_learning_visual.html" %}
         <div id="teaching-dashboard-learning" class="teaching-dashboard-learning-list" aria-live="polite" aria-busy="true"><div class="teaching-dashboard-skeleton" role="status"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span>正在准备证据分析…</span></div></div>
       </section>
     </div>
@@ -724,6 +729,11 @@
 ></script>
 <script
   defer
-  src="{{ url_for('views.themes', path=('js/dojo/learning-guide.js' if is_student_agent else 'js/dojo/teaching-agent.js'), v=('aisecedu-student-agent-unified-v5' if is_student_agent else 'aisecedu-global-agent-v79')) }}"
+  src="{{ url_for('views.themes', path=('js/dojo/learning-guide.js' if is_student_agent else 'js/dojo/teaching-agent.js'), v=('aisecedu-student-agent-unified-v5' if is_student_agent else 'aisecedu-global-agent-v80')) }}"
 ></script>
+{% if not is_student_agent %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/teaching-showcase-model.js', v='teaching-visual-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/teaching-showcase.js', v='teaching-visual-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/teaching-learning-visual.js', v='teaching-visual-v2') }}"></script>
+{% endif %}
 {% endblock %}

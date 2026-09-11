@@ -19,6 +19,7 @@
     </div>
     <div class="artifact-detail-actions">
       {% if artifact_viewer_role == 'teacher' %}
+      <button id="artifact-start-classroom" class="artifact-header-button" type="button" hidden><i class="fas fa-chalkboard-teacher" aria-hidden="true"></i><span>开始课堂</span></button>
       <button id="artifact-student-preview" class="artifact-header-button" type="button" aria-pressed="false">
         <i class="fas fa-user-graduate" aria-hidden="true"></i><span>学生视图</span>
       </button>
@@ -140,5 +141,5 @@
 
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/teaching-artifact.js', v='aisecedu-teaching-v25-review-state') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/teaching-artifact.js', v='aisecedu-teaching-v26-classroom') }}"></script>
 {% endblock %}

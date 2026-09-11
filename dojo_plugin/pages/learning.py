@@ -29,6 +29,9 @@ from ..models import (
 from ..agent_runtime.artifacts import artifact_course_teacher, artifact_for_viewer
 from ..agent_runtime.metrics import teaching_api_metric_rows
 from ..agent_runtime.scope import ScopeError
+from ..agent_runtime.scope import build_scope, owner_or_teacher
+from ..agent_runtime.auth import mint_launch_ticket
+from .. import config
 from ..learning.student_experience import (
     TELEMETRY_EVENTS,
     safe_return_path,
@@ -567,6 +570,26 @@ def teacher_practice_create(dojo):
         dojo=dojo,
         selected_module_id=selected_module.id if selected_module else None,
     )
+
+
+@learning.route("/classrooms/<session_id>")
+@authed_only
+def teaching_classroom_entry(session_id):
+    user = get_current_user()
+    classroom = TeachingSessions.query.filter_by(id=session_id).first()
+    if classroom is None or classroom.status not in {"LIVE", "ENDED"}:
+        abort(404)
+    teacher = owner_or_teacher(user, classroom.owner_id, classroom.dojo_id)
+    if not teacher and DojoUsers.query.filter_by(dojo_id=classroom.dojo_id, user_id=user.id).first() is None:
+        abort(404)
+    try:
+        scope = build_scope(user, role="teacher" if teacher else "student", dojo_id=classroom.dojo_id, module_index=classroom.module_index)
+        ticket, _ = mint_launch_ticket(user, scope, target=f"/classroom/{classroom.id}")
+        response = redirect(f"{config.AGENT_RUNTIME_PUBLIC_ORIGIN}/api/integration/exchange?{urlencode({'ticket': ticket})}")
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+    except ScopeError:
+        abort(404)
 
 
 @learning.route("/teacher/artifacts/<artifact_id>")

@@ -238,8 +238,8 @@ function assembleSlide(plan: SlidePlan, order: number): SlideBuild {
       width,
       height,
       rotate: 0,
-      content: `<p style="margin:0;font-size:${size}px;font-weight:${weight};line-height:1.35;color:${color};text-align:${align};">${escapeHtml(value)}</p>`,
-      defaultFontName: 'Microsoft YaHei',
+      content: `<p style="margin:0;font-size:${size}px;font-weight:${weight};line-height:1.35;color:${color};text-align:${align};white-space:normal;overflow-wrap:anywhere;word-break:normal;">${escapeHtml(value)}</p>`,
+      defaultFontName: 'system-ui, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
       defaultColor: color,
       lineHeight: 1.35,
       vAlign,
@@ -259,7 +259,7 @@ function assembleSlide(plan: SlidePlan, order: number): SlideBuild {
       .slice(0, 5)
       .map(
         (item) =>
-          `<p style="margin:0 0 10px;font-size:${size}px;line-height:1.45;color:${color};">• ${escapeHtml(item)}</p>`,
+          `<p style="margin:0 0 10px;font-size:${size}px;line-height:1.45;color:${color};white-space:normal;overflow-wrap:anywhere;word-break:normal;">• ${escapeHtml(item)}</p>`,
       )
       .join('');
     elements.push({
@@ -271,7 +271,7 @@ function assembleSlide(plan: SlidePlan, order: number): SlideBuild {
       height,
       rotate: 0,
       content,
-      defaultFontName: 'Microsoft YaHei',
+      defaultFontName: 'system-ui, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
       defaultColor: color,
       lineHeight: 1.45,
     } as PPTElement);

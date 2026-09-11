@@ -281,7 +281,7 @@ function escapeHtml(value: string): string {
 export function buildDebateArtifactHtml(input: SingleArtifactInput): string {
   const title = escapeHtml(input.title);
   const description = escapeHtml(
-    input.description || '围绕该议题比较不同立场的证据、假设、收益与风险。',
+    String(input.description || '').split(/视觉表达[：:]|讲授提示[：:]|教师修改要求|当前模拟配置|交付要求/)[0].trim() || '围绕该议题比较不同立场的证据、假设、收益与风险。',
   );
   const keyPoints = (
     input.keyPoints?.length

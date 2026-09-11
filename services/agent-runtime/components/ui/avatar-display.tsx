@@ -12,8 +12,10 @@ export function AvatarDisplay({ src, alt, className }: AvatarDisplayProps) {
   const isUrl = src.startsWith('http') || src.startsWith('data:') || src.startsWith('/');
 
   if (isUrl) {
+    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+    const url = basePath && src.startsWith('/') && !src.startsWith('//') && !src.startsWith(basePath + '/') ? basePath + src : src;
     return (
-      <img src={src} alt={alt || ''} className={cn('w-full h-full object-cover', className)} />
+      <img src={url} alt={alt || ''} className={cn('w-full h-full object-cover', className)} />
     );
   }
 

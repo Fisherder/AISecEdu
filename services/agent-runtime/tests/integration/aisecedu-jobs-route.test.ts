@@ -1988,6 +1988,23 @@ describe('玄甲 durable job integration route', () => {
     ).toEqual([1, 2, 3, 4]);
   });
 
+  it('preserves debate scenes so classroom rendering can attach the multi-agent roster', async () => {
+    mocks.generateSingleArtifact.mockImplementation(async (input: { type: string; title: string }, order: number) => ({
+      id: `debate_${order}`, type: input.type, title: input.title,
+      outline: { ...input, type: 'interactive', widgetType: 'simulation', id: `outline_${order}`, order },
+      content: { html: '<!doctype html><html><body>课堂辩论</body></html>', widgetType: 'simulation' }, order, createdAt: 1,
+    }));
+    const { POST } = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request({ ...body('artifact.materialize'), payload: {
+      artifactId: 'artifact_debate', title: '停机与验证辩论', artifactType: 'debate',
+      plan: { title: '停机与验证辩论', outline: ['立论', '质询', '综合决策'] },
+    } }));
+    const result = await response.json();
+    expect(response.status).toBe(200);
+    expect(result.result.content.lesson.artifacts.length).toBeGreaterThan(0);
+    expect(result.result.content.lesson.artifacts.every((artifact: { type: string }) => artifact.type === 'debate')).toBe(true);
+  });
+
   it('materializes a slide-deck outline as renderable global-agent pages', async () => {
     let active = 0;
     let maxActive = 0;

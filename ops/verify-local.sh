@@ -264,14 +264,14 @@ for path in /login /register /reset_password; do
 done
 pass "authentication pages use 玄甲 branding"
 
-for asset in ui navbar learning-common learning-overview learning-dashboard learning-tutor learning-guide learning-score product-error course-admin self-learning-extend teacher-courses teaching-agent teaching-artifact; do
+for asset in ui navbar learning-common learning-overview learning-dashboard learning-tutor learning-guide learning-score product-error course-admin self-learning-extend teacher-courses teaching-agent teaching-artifact teaching-showcase-model teaching-showcase teaching-learning-visual; do
     curl -sS --fail -o /dev/null \
         --noproxy '*' \
         --cacert "$repo_dir/data/local-tls/ca.crt" \
         --resolve "$dojo_host:$https_port:$listen_address" \
         "https://$dojo_host:$https_port/themes/dojo_theme/static/js/dojo/$asset.min.js"
 done
-for stylesheet in teaching-agent product-shell course-hub; do
+for stylesheet in teaching-agent product-shell course-hub teaching-showcase; do
     curl -sS --fail -o /dev/null \
         --noproxy '*' \
         --cacert "$repo_dir/data/local-tls/ca.crt" \

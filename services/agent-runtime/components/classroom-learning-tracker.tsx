@@ -2,6 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useStageStore } from '@/lib/store';
+import { IntegratedClassroomTracker } from './integrated-classroom-tracker';
+
+export function ClassroomLearningTracker(props: { classroomId: string; active: boolean }) {
+  return process.env.NEXT_PUBLIC_AISECEDU_INTEGRATED === 'true'
+    ? <IntegratedClassroomTracker key={props.classroomId} {...props} />
+    : <StandaloneClassroomLearningTracker {...props} />;
+}
 
 function eventId(parts: string[]): string {
   return parts.join('.').replace(/[^\w:.-]/g, '_').slice(0, 220);
@@ -12,7 +19,7 @@ function eventId(parts: string[]): string {
  * It renders nothing and fails silently for public/teacher playback. Visiting a
  * scene is learning evidence, not a formal mastery or grade decision.
  */
-export function ClassroomLearningTracker({ classroomId, active }: { classroomId: string; active: boolean }) {
+function StandaloneClassroomLearningTracker({ classroomId, active }: { classroomId: string; active: boolean }) {
   const currentSceneId = useStageStore((state) => state.currentSceneId);
   const [studentId, setStudentId] = useState<string | null>(null);
 

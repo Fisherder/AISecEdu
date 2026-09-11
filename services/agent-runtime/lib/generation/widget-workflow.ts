@@ -14,6 +14,7 @@ import type { GeneratedInteractiveContent } from '@/lib/types/generation';
 import type { WidgetConfig } from '@/lib/types/widgets';
 import { parseJsonResponse } from './json-repair';
 import type { AICallFn } from './pipeline-types';
+import { buildControlFeedbackScenario, renderControlFeedbackHtml } from './control-feedback-simulation';
 
 const log = createLogger('WidgetWorkflow');
 
@@ -580,6 +581,7 @@ export async function generateProceduralSkillViaWorkflow(
 
 export interface SimulationScenario {
   type: 'simulation-scenario';
+  controlFeedback?: 'industrial' | 'vehicle';
   title: string;
   description?: string;
   startScene: string;
@@ -890,7 +892,9 @@ export function buildSimulationScenarioFromOutline(outline: SceneOutline): Simul
   ]
     .filter(Boolean)
     .join(' ');
-  const sqlFocused = /SQL|注入|数据库|查询|参数化|prepared\s*statement/i.test(sourceText);
+  const controlDomain = /工控|工业过程|PLC|震网|Stuxnet/i.test(sourceText) ? 'industrial' : /车联网|车载|车辆|汽车/i.test(sourceText) ? 'vehicle' : null;
+  const sqlFocused = /SQL|数据库|查询|参数化|prepared\s*statement/i.test(sourceText);
+  if (controlDomain && !sqlFocused) return buildControlFeedbackScenario(outline, controlDomain);
   const attackFocused = sqlFocused || /攻击|漏洞|绕过|恶意|载荷|payload|攻防/i.test(sourceText);
   const rawDescription = String(outline.description || '')
     .replace(/\s+/g, ' ')
@@ -1068,6 +1072,7 @@ export function buildSimulationScenarioFromOutline(outline: SceneOutline): Simul
 }
 
 export function renderScenarioHtml(cfg: SimulationScenario): string {
+  if (cfg.controlFeedback) return renderControlFeedbackHtml(cfg);
   const runtimeConfig: SimulationScenario = {
     ...cfg,
     controls: parseSimulationControls(cfg.controls),

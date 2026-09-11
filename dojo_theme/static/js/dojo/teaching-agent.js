@@ -785,7 +785,7 @@
     if (!elements.dashboardCourse) return;
     const rows = (state.context && state.context.teacherDojos) || [];
     elements.dashboardCourse.innerHTML =
-      '<option value="">请选择课程</option>' +
+      '<option value="">不限定课程 · 先讨论教学想法</option>' +
       rows
         .map(
           (dojo) =>
@@ -941,6 +941,7 @@
       "aria-busy",
       String(learningState === "deferred"),
     );
+    document.dispatchEvent(new CustomEvent("teaching:dashboard", { detail: { courses: (state.context && state.context.teacherDojos) || [] } }));
   }
 
   function setDashboardMode(open) {
@@ -1069,15 +1070,6 @@
       elements.dashboardModule.value === ""
         ? null
         : Number(elements.dashboardModule.value);
-    if (!dojoId) {
-      api.showNotice(
-        elements.dashboardNotice,
-        "请先选择这项工作所属的课程。",
-        "warning",
-      );
-      elements.dashboardCourse.focus();
-      return;
-    }
     if (!content) {
       api.showNotice(elements.dashboardNotice, "请先写下教学目标。", "warning");
       elements.dashboardInput.focus();
@@ -1139,6 +1131,8 @@
     "slide-deck": "课件",
     "attack-defense-scene": "攻防演示",
     simulation: "模拟实训",
+    debate: "课堂辩论",
+    roleplay: "角色扮演",
     "question-set": "CTF 实践题",
     assessment: "评测内容",
   };
@@ -2522,6 +2516,8 @@
       "ctf-challenge": "CTF 实践题",
       "attack-defense-scene": "实训演示",
       simulation: "模拟实训",
+      debate: "课堂辩论",
+      roleplay: "角色扮演",
     };
     const baseArguments =
       bundle.baseArguments && typeof bundle.baseArguments === "object"
@@ -7238,6 +7234,16 @@
   elements.dashboardSend?.addEventListener("click", () =>
     startDashboardTask().catch(showError),
   );
+  root.addEventListener("teaching:compose", (event) => {
+    const content = String(event.detail?.content || "").slice(0, 16000);
+    if (!content || !elements.dashboardInput) return;
+    setDashboardMode(true);
+    elements.dashboardInput.value = content;
+    elements.dashboardSend.disabled = state.dashboardLoading;
+    elements.dashboardInput.focus();
+    elements.dashboardInput.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    api.showNotice(elements.dashboardNotice, "案例要求已带入教学助手，可修改后开始任务。正式生成时沿用课程、方案选择和发布流程。", "info");
+  });
   elements.dashboardInput?.addEventListener("input", () => {
     elements.dashboardSend.disabled =
       state.dashboardLoading || !elements.dashboardInput.value.trim();

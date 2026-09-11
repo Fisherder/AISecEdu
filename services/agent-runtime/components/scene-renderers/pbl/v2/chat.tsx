@@ -490,6 +490,8 @@ export function PBLV2Chat({
     const microtaskId = currentMicrotaskId(project);
     const withUser = appendUserMessage(project, activeAgentId, text, microtaskId);
     onProjectChange(withUser);
+    const submitted = withUser.threads.find(thread => thread.agentId === activeAgentId)?.messages.at(-1);
+    if (submitted?.roleType === 'user') window.dispatchEvent(new CustomEvent('aisecedu:student-response', { detail: { messageId: submitted.id } }));
     if (isRoleplay) {
       void run({
         endpoint: '/api/pbl/v2/simulator',

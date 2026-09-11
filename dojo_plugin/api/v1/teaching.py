@@ -2442,6 +2442,8 @@ def _classroom_lesson(artifact):
         )
     if not lesson["artifacts"]:
         raise ValueError("The selected artifact contains no classroom scenes")
+    if artifact.artifact_type == "debate":
+        lesson = {**lesson, "artifacts": [{**item, "type": "debate"} for item in lesson["artifacts"]]}
     return lesson
 
 
@@ -2915,7 +2917,6 @@ def _teacher_agent_context(user, thread):
             "updated": _timestamp(row.updated),
             "currentConversation": artifact_thread_id(row) == thread.id,
             "publishedChallengeId": row.published_challenge_id,
-                "runtimeEnvironment": (row.spec or {}).get("runtimeEnvironment", "linux"),
         }
 
     snapshot["artifacts"] = {
@@ -11581,6 +11582,56 @@ class TeachingProgress(Resource):
             return _error(exc)
 
 
+@teaching_namespace.route("/progress/<string:dojo_id>/classroom")
+class TeachingClassroomProgress(Resource):
+    @authed_only
+    def get(self, dojo_id):
+        user = _current_user()
+        try:
+            dojo = dojo_for_user(user, dojo_id, teacher=True)
+            now = datetime.datetime.utcnow()
+            since = now - datetime.timedelta(days=28)
+            members = db.session.query(DojoUsers.user_id).filter(
+                DojoUsers.dojo_id == dojo.dojo_id,
+                DojoUsers.type != "admin",
+            )
+            events = db.session.query(TeachingSessionEvents).join(
+                TeachingSessions, TeachingSessions.id == TeachingSessionEvents.session_id
+            ).filter(
+                TeachingSessions.dojo_id == dojo.dojo_id,
+                TeachingSessionEvents.actor_id.in_(members),
+                TeachingSessionEvents.created >= since,
+                TeachingSessionEvents.event_type.in_((
+                    "student.joined", "student.response", "checkpoint.completed", "activity.completed"
+                )),
+            )
+            participants = events.with_entities(func.count(func.distinct(TeachingSessionEvents.actor_id))).scalar()
+            counts = dict(events.with_entities(TeachingSessionEvents.event_type, func.count(TeachingSessionEvents.id)).group_by(TeachingSessionEvents.event_type).all())
+            weekly = events.with_entities(
+                func.date_trunc("week", TeachingSessionEvents.created),
+                func.count(func.distinct(TeachingSessionEvents.actor_id)),
+                func.count(TeachingSessionEvents.id),
+            ).group_by(func.date_trunc("week", TeachingSessionEvents.created)).order_by(func.date_trunc("week", TeachingSessionEvents.created)).all()
+            sessions = TeachingSessions.query.filter(
+                TeachingSessions.dojo_id == dojo.dojo_id,
+                TeachingSessions.created >= since,
+            )
+            return _ok({
+                "scope": {"courseId": dojo.reference_id, "days": 28},
+                "asOf": _timestamp(now),
+                "participantCount": int(participants or 0),
+                "responseCount": int(counts.get("student.response", 0)),
+                "completionCount": int(counts.get("checkpoint.completed", 0) + counts.get("activity.completed", 0)),
+                "sessionCount": sessions.count(),
+                "liveSessionCount": sessions.filter(TeachingSessions.status == "LIVE").count(),
+                "classrooms": [{"id": row.id, "title": row.title, "status": row.status, "url": f"/classrooms/{row.id}"} for row in sessions.filter(TeachingSessions.status.in_(("LIVE", "ENDED"))).order_by(TeachingSessions.updated.desc()).limit(6).all()],
+                "timeline": [{"label": f"{week.month}/{week.day}", "participants": int(participants), "events": int(count)} for week, participants, count in weekly],
+                "definition": "近 28 天当前课程成员的课堂加入、回应与活动完成记录；排除教师、AI 角色与首页预演，不作为成绩。",
+            })
+        except ScopeError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+
+
 def _learning_export_cell(value):
     text_value = "" if value is None else str(value)
     return f"'{text_value}" if text_value.startswith(("=", "+", "-", "@")) else text_value
@@ -12683,8 +12734,54 @@ class AgentRuntimeEvents(Resource):
     @bypass_csrf_protection
     def post(self):
         try:
-            user, scope, session_id = _service_session("evidence:append")
             body = _body()
+            if body.get("classroomId"):
+                user, scope, _ = _service_session("session:view")
+                classroom = _session_for_user(str(body["classroomId"]), user, lock=True)
+                if scope.dojo_id != classroom.dojo_id or (
+                    scope.module_index is not None
+                    and scope.module_index != classroom.module_index
+                ):
+                    raise ScopeError("Classroom not found")
+                if scope.role != "student" or owner_or_teacher(
+                    user, classroom.owner_id, classroom.dojo_id
+                ):
+                    return _ok({"accepted": False, "reason": "teacher-preview"})
+                if classroom.status not in {"LIVE", "ENDED"}:
+                    raise ScopeError("Classroom not available")
+                event_type = str(body.get("type") or "")
+                if event_type not in {
+                    "student.joined", "student.response", "scene.viewed", "activity.completed"
+                }:
+                    return _error("Unsupported classroom event", 403)
+                client_key = str(body.get("id") or "").strip()[:128]
+                if not client_key:
+                    return _error("Event id is required")
+                payload = scrub_payload(body.get("payload") if isinstance(body.get("payload"), dict) else {})
+                if _json_size(payload) > MAX_SESSION_EVENT_BYTES:
+                    return _error("Classroom event payload exceeds 64 KiB", 413)
+                scene_id = payload.get("sceneId")
+                scenes = (classroom.state or {}).get("scenes") or []
+                if event_type != "student.joined" and (
+                    not scene_id or not any(scene.get("id") == scene_id for scene in scenes)
+                ):
+                    return _error("Classroom scene not found", 404)
+                key = f"actor:{user.id}:{hashlib.sha256(client_key.encode('utf-8')).hexdigest()}"
+                existing = TeachingSessionEvents.query.filter_by(
+                    session_id=classroom.id, actor_id=user.id, idempotency_key=key
+                ).first()
+                if existing:
+                    return _ok({"accepted": True, "deduplicated": True, "eventId": existing.id})
+                sequence = (db.session.query(func.max(TeachingSessionEvents.sequence)).filter_by(session_id=classroom.id).scalar() or 0) + 1
+                event = TeachingSessionEvents(
+                    session_id=classroom.id, actor_id=user.id, sequence=sequence,
+                    event_type=event_type, idempotency_key=key,
+                    payload={**payload, "engagementOnly": True, "source": "agent-runtime"},
+                )
+                db.session.add(event)
+                db.session.commit()
+                return _ok({"accepted": True, "eventId": event.id}, 201)
+            user, scope, session_id = _service_session("evidence:append")
             workspace = _workspace_for_student(scope.workspace_id, user, lock=True)
             event_id = str(body.get("id") or uuid.uuid4().hex)[:128]
             event_type = str(body.get("type") or "interaction")[:80]

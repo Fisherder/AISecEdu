@@ -1707,6 +1707,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
 
       const now = Date.now();
       const userMessageId = `user-${now}`;
+      window.dispatchEvent(new CustomEvent('aisecedu:student-response', { detail: { messageId: userMessageId } }));
 
       // Read all selected agent IDs from settings store
       const settingsState = useSettingsStore.getState();

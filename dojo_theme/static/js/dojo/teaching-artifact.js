@@ -33,6 +33,7 @@
   let previewSequence = 0;
   let previewAwaitingNavigation = false;
   let publishInFlight = false;
+  let classroomInFlight = false;
 
   function notify(message, kind, options) {
     if (window.AISecEduUI && typeof window.AISecEduUI.notify === "function") {
@@ -519,6 +520,8 @@
     if (!requestButton) return;
     const terminal = artifact && artifact.status === "PUBLISHED";
     const contentReady = artifact && !activeJob && !["GENERATING", "FAILED", "VALIDATION_FAILED", "CANCELED"].includes(String(artifact.status || "").toUpperCase());
+    const classroomButton = document.getElementById("artifact-start-classroom");
+    if (classroomButton) classroomButton.hidden = !contentReady || !artifact?.capabilities?.publishToCourse || !artifact?.revision?.content?.lesson;
     requestButton.hidden = !artifact || !artifact.capabilities?.publishToCourse || (!terminal && !contentReady);
     requestButton.disabled = terminal || publishInFlight;
     requestButton.dataset.publishState = terminal ? "published" : publishInFlight ? "loading" : "ready";
@@ -535,6 +538,28 @@
     previewRole = viewerRole;
     activeJob = artifact.activeJob || null;
     render();
+  }
+
+  async function startArtifactClassroom() {
+    if (!artifact || classroomInFlight) return;
+    const button = document.getElementById("artifact-start-classroom");
+    classroomInFlight = true; button.disabled = true;
+    try {
+      notify("正在准备当前版本的课堂…", "progress");
+      const data = unwrap(await api.request("/teaching/sessions"));
+      let session = (data.sessions || []).find(item => ["LIVE", "READY", "PAUSED"].includes(item.status) && item.state?.artifactId === artifact.id && item.state?.artifactRevision === artifact.currentRevision);
+      if (!session) {
+        const created = unwrap(await api.json("POST", "/teaching/sessions", { dojoId: artifact.dojoId, moduleIndex: artifact.moduleIndex, artifactId: artifact.id, title: artifact.title }));
+        session = { id: created.sessionId, status: "READY" };
+      }
+      if (session.status !== "LIVE") {
+        const control = unwrap(await api.json("POST", `/teaching/sessions/${encodeURIComponent(session.id)}/control`, { command: "start" }));
+        const decision = unwrap(await api.json("POST", `/teaching/actions/${encodeURIComponent(control.action.id)}/decision`, { decision: "APPROVED", confirmed: true, comment: "教师点击当前内容的开始课堂按钮" }));
+        if (decision.action.status !== "APPROVED") throw new Error("课堂暂未成功开始，请重试。");
+      }
+      location.href = `/classrooms/${encodeURIComponent(session.id)}`;
+    } catch (error) { notify(error.message || "课堂准备失败，请重试。", "danger"); }
+    finally { classroomInFlight = false; button.disabled = false; }
   }
 
   async function toggleStudentPreview() {
@@ -790,6 +815,7 @@
   if (reviseButton) reviseButton.addEventListener("click", revise);
   document.getElementById("artifact-student-preview")?.addEventListener("click", () => toggleStudentPreview().catch(showError));
   document.getElementById("artifact-request-publish")?.addEventListener("click", requestPublish);
+  document.getElementById("artifact-start-classroom")?.addEventListener("click", startArtifactClassroom);
   document.getElementById("artifact-rename")?.addEventListener("click", () => renamePersonalArtifact().catch(showError));
   document.getElementById("artifact-delete")?.addEventListener("click", () => deletePersonalArtifact().catch(showError));
   document.getElementById("artifact-request-review")?.addEventListener("click", () => requestPersonalReview().catch(showError));

@@ -48,6 +48,7 @@ export function usePBLChat({ projectConfig, userRole, onConfigUpdate }: UsePBLCh
       };
       updatedConfig.chat.messages.push(userMsg);
       onConfigUpdate(updatedConfig);
+      window.dispatchEvent(new CustomEvent('aisecedu:student-response', { detail: { messageId: userMsg.id } }));
 
       // Parse @mention to determine target agent, fallback to question agent
       const targetAgent = resolveTargetAgent(text, currentIssue, projectConfig.agents);

@@ -2064,6 +2064,8 @@ export function Roundtable({
                       e.stopPropagation();
                       handleToggleInput();
                     }}
+                    aria-label={t('roundtable.textInput')}
+                    title={t('roundtable.textInput')}
                     className={cn(
                       'w-8 h-8 rounded-full border flex items-center justify-center transition-all active:scale-95 shadow-sm',
                       isInputOpen

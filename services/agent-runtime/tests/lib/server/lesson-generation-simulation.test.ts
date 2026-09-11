@@ -2,6 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { generateSingleArtifact } from '@/lib/server/lesson-generation';
 
 describe('deterministic simulation materialization', () => {
+  it.each(['工控 PLC 概念化异常注入', '车联网执行与监控反馈'])('renders a planned control and feedback process: %s', async (title) => {
+    const model = vi.fn(async () => { throw new Error('No extra model formatting call'); });
+    const artifact = await generateSingleArtifact({ type: 'simulation', title, description: '比较物理过程与监控反馈。视觉表达：内部版式要求。', keyPoints: ['校验开启和关闭的对照'] }, 1, model, { deterministicSimulation: true });
+    const content = artifact?.content as unknown as { html: string; widgetConfig: { scenes: unknown[]; controlFeedback: string } };
+    expect(content.widgetConfig.scenes).toHaveLength(6);
+    expect(content.widgetConfig.controlFeedback).toBe(title.includes('车联网') ? 'vehicle' : 'industrial');
+    expect(content.html).toContain('id="water"');
+    expect(content.html).toContain('id="verification"');
+    expect(content.html).not.toContain('内部版式要求');
+    expect(model).not.toHaveBeenCalled();
+  });
+
   it('compiles an already planned SQL simulation without another model call', async () => {
     const aiCall = vi.fn(async () => {
       throw new Error('the compiler must not call the model');

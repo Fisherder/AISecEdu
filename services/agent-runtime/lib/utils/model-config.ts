@@ -11,6 +11,21 @@ import { getCatalogThinkingCapability } from '@/lib/ai/model-metadata';
  * Get current model configuration from settings store
  */
 export function getCurrentModelConfig() {
+  if (process.env.NEXT_PUBLIC_AISECEDU_INTEGRATED === 'true' && typeof window !== 'undefined') {
+    const modelString = (window as Window & { __AISECEDU_CLASSROOM_MODEL__?: string }).__AISECEDU_CLASSROOM_MODEL__ || '';
+    const separator = modelString.indexOf(':');
+    return {
+      providerId: separator >= 0 ? modelString.slice(0, separator) : '',
+      modelId: separator >= 0 ? modelString.slice(separator + 1) : modelString,
+      modelString,
+      apiKey: '',
+      baseUrl: '',
+      providerType: undefined,
+      requiresApiKey: false,
+      isServerConfigured: Boolean(modelString),
+      thinkingConfig: undefined,
+    };
+  }
   const { providerId, modelId, providersConfig, thinkingConfigs } = useSettingsStore.getState();
   const modelString = `${providerId}:${modelId}`;
 

@@ -1163,7 +1163,8 @@ function lessonArtifactType(kind: string, index: number): LessonArtifactType {
   if (kind === 'simulation' || kind === 'classroom-activity' || kind === 'classroom-scenario')
     return 'simulation';
   if (kind === 'whiteboard' || kind === 'chapter-outline') return index === 0 ? 'diagram' : 'slide';
-  if (kind === 'debate' || kind === 'roleplay') return index === 0 ? 'slide' : 'procedural-skill';
+  if (kind === 'debate') return 'debate';
+  if (kind === 'roleplay') return index === 0 ? 'slide' : 'procedural-skill';
   return index === 1 ? 'diagram' : 'slide';
 }
 
