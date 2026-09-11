@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import json
+import os
 import pathlib
 import socket
 import sys
@@ -15,7 +16,8 @@ def main():
     else:
         request = json.loads(sys.stdin.read(20001))
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.settimeout(360)
+        boot_timeout = max(60, min(1800, int(os.environ.get("DOJO_WINDOWS_BOOT_TIMEOUT_SECONDS", "240"))))
+        connection.settimeout(boot_timeout + 180)
         connection.connect("/run/windows-runtime.sock")
         connection.sendall(json.dumps(request).encode() + b"\n")
         with connection.makefile("rb") as stream:

@@ -3,6 +3,7 @@
 本目录记录玄甲单节点学生题目平台的部署与验收。它在 pwn.college 原生服务拓扑内完成单系统改造；外层镜像和容器继续使用 `pwncollege/dojo:*` 与 `pwncollege-dojo` 兼容名，不代表并存第二套平台。跨机器克隆、仓库边界和源码归档规则见 [`../docs/repository-release.md`](../docs/repository-release.md)。
 
 完整的实机测试范围、结果和边界见 [`verification-report.md`](./verification-report.md)。
+无 KVM、小容量云主机的 Windows 软件虚拟化、只读模板和端口配置见 [`small-cloud-deployment.md`](./small-cloud-deployment.md)。
 全局智能体是教师完成任务的唯一产品入口；内部 `agent-runtime` 仅提供生成、渲染和课堂能力。架构、数据迁移、监控与回滚要求分别见 [`../docs/global-agent-architecture.md`](../docs/global-agent-architecture.md) 和 [`../docs/global-agent-operations.md`](../docs/global-agent-operations.md)。
 
 服务绑定到本机 LAN 地址 `192.168.3.111`，目标客户端为 `192.168.200.17`：

@@ -25,12 +25,21 @@ modules:
         name: Compile and run
 ```
 
-Windows uses a fresh QEMU copy-on-write disk per workspace, 4 guest CPUs and
-4 GiB guest RAM inside a 6 GiB unprivileged course container. The runtime
-requires `/dev/kvm`. QEMU runs as UID 60000 and has no virtual network adapter.
+Windows uses a fresh QEMU copy-on-write disk per workspace and 4 GiB guest RAM
+inside a 6 GiB unprivileged course container. It automatically uses KVM with
+4 guest CPUs when `/dev/kvm` is available, or TCG with 2 guest CPUs otherwise.
+`DOJO_WINDOWS_ACCELERATOR` can explicitly select `kvm` or `tcg`. QEMU runs as
+UID 60000 and has no virtual network adapter. Software emulation takes longer
+to boot; set `DOJO_WINDOWS_BOOT_TIMEOUT_SECONDS` in the deployment config to
+give the command bridge and solution agent a matching startup budget.
 Only two legacy serial ports are configured: COM1 for course checks and COM2
 for provisioning and native commands. A third port shares COM1's IRQ and can
 make Windows reject both devices with resource error 12.
+
+For small disks, `DOJO_WINDOWS_SEED_PATH` can supply a shared host QCOW2 file
+instead of embedding it in the runtime image. The platform mounts this file
+read-only into Windows workspaces. Deployment and artifact details are in
+[`ops/small-cloud-deployment.md`](../../../ops/small-cloud-deployment.md).
 
 Public starter files are copied to `C:\Course`; learner output belongs in
 `C:\CourseWork`. The installed evaluation seed provides Windows, OllyDbg,
@@ -61,6 +70,13 @@ Private answers and the dynamic Flag remain in the platform checker. Running
 the serial bridge, verifying the original process identity and course files.
 Successful checks also populate the browser's result button. Resetting the
 workspace creates a fresh disk and removes the previous result.
+
+The runtime image builds a small Win32 serial client from `guest-check.c`
+with MinGW. Bootstrap copies it into Windows and installs a course-local
+`check.cmd` wrapper after service initialization. This avoids launching another
+PowerShell process for each check under TCG. The client preserves UTF-8 messages
+and the existing checker protocol; private validation and Flag binding still
+run on the platform. The evaluation seed's protected scripts stay intact.
 
 ## Building an evaluation seed
 

@@ -10,12 +10,26 @@ services:
         expected=/nix/store/0hs7db796vbhdnjfzpyq7h7aq3wr6wm6-dojo-workspace-full
         actual=$$(readlink -f "$$profile")
         test "$$actual" = "$$expected"
-        closure_count=$$(nix-store --store local -qR "$$actual" | wc -l)
+        closure_count=$$(nix-store --extra-experimental-features read-only-local-store --store local?read-only=true -qR "$$actual" | wc -l)
         test "$$closure_count" -eq 2366
         suid_file="$$actual/suid"
         test -f "$$suid_file"
         while IFS= read -r path; do
           test -e "$$path"
-          chmod u+s "$$path"
+          test -u "$$path" || chmod u+s "$$path"
         done < "$$suid_file"
         echo "Reused verified migrated workspace profile: $$actual ($$closure_count paths)"
+  ctfd:
+    image: pwncollege-ctfd:latest
+  stats-worker:
+    image: pwncollege-ctfd:latest
+  image-pull-worker:
+    image: pwncollege-ctfd:latest
+  teaching-worker:
+    image: pwncollege-ctfd:latest
+  teaching-interactive-worker:
+    image: pwncollege-ctfd:latest
+  teaching-authoring-worker:
+    image: pwncollege-ctfd:latest
+  teaching-authoring-worker-2:
+    image: pwncollege-ctfd:latest

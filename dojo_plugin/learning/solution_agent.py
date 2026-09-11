@@ -7,7 +7,7 @@ import requests
 
 from CTFd.models import Users, db
 
-from ..config import DOJO_AI_SOLUTION_MODEL
+from ..config import DOJO_AI_SOLUTION_MODEL, DOJO_WINDOWS_BOOT_TIMEOUT_SECONDS
 from ..models import (
     DojoChallenges,
     LearningChallengeProfiles,
@@ -258,11 +258,12 @@ def _command_policy_violation(command):
 
 
 def _execute_as_learner(container, command):
+    windows = (getattr(container, "labels", None) or {}).get("dojo.runtime_environment") == "windows"
     wrapped = [
         "/run/dojo/bin/timeout",
         "-k",
         "2",
-        "25",
+        "120" if windows else "25",
         "/run/dojo/bin/bash",
         "--noprofile",
         "--norc",
@@ -533,7 +534,7 @@ def _run_solution_agent(app, run_id):
             solver_user = _temporary_solver_user(run.id)
             container = start_challenge(solver_user, challenge, False)
             if challenge.runtime_environment == "windows":
-                ready = container.exec_run(["/usr/bin/timeout", "270", "/usr/local/bin/windows-exec", "--ready"], user="1000")
+                ready = container.exec_run(["/usr/bin/timeout", str(DOJO_WINDOWS_BOOT_TIMEOUT_SECONDS + 150), "/usr/local/bin/windows-exec", "--ready"], user="1000")
                 if ready.exit_code:
                     raise RuntimeError("Windows 课程文件与服务未能就绪：" + ready.output.decode(errors="replace")[-1000:])
             run = _set_run_state(

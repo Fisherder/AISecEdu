@@ -19,6 +19,22 @@ ROOT = pathlib.Path("/usr/local/lib/windows-runtime")
 UID = 60000
 
 
+def acceleration():
+    mode = os.environ.get("DOJO_WINDOWS_ACCELERATOR", "auto")
+    if mode not in {"auto", "kvm", "tcg"}:
+        raise RuntimeError("DOJO_WINDOWS_ACCELERATOR must be auto, kvm, or tcg")
+    available = os.access("/dev/kvm", os.R_OK | os.W_OK)
+    if mode == "kvm" and not available:
+        raise RuntimeError("KVM was requested but is unavailable on this workspace node")
+    return "kvm" if mode == "kvm" or mode == "auto" and available else "tcg"
+
+
+def guest_options(mode):
+    if mode == "kvm":
+        return ["-accel", "kvm", "-cpu", "host", "-smp", "4"]
+    return ["-accel", "tcg,thread=multi", "-cpu", "max", "-smp", "2"]
+
+
 def private_copy(source, destination):
     if source.is_dir():
         shutil.copytree(source, destination)
@@ -73,7 +89,9 @@ def supervise():
     tpm_root = pathlib.Path(tempfile.mkdtemp(prefix="aisecedu-windows-tpm-"))
     os.chown(tpm_root, UID, UID)
     private_copy(STATE / "tpm", tpm_root / "state")
-    identity = ["/usr/bin/setpriv", f"--reuid={UID}", f"--regid={UID}", "--groups=" + str(os.stat("/dev/kvm").st_gid), "--no-new-privs"]
+    mode = acceleration()
+    groups = ["--groups=" + str(os.stat("/dev/kvm").st_gid)] if mode == "kvm" else ["--clear-groups"]
+    identity = ["/usr/bin/setpriv", f"--reuid={UID}", f"--regid={UID}", *groups, "--no-new-privs"]
 
     def launch(command, *, guest_user=False):
         child = subprocess.Popen((identity if guest_user else []) + command, stdin=subprocess.DEVNULL)
@@ -99,8 +117,8 @@ def supervise():
         tpm = launch(["/usr/bin/swtpm", "socket", "--tpm2", "--tpmstate", f"dir={tpm_root}/state", "--ctrl", f"type=unixio,path={tpm_root}/tpm.sock"], guest_user=True)
         wait_socket(tpm_root / "tpm.sock", tpm)
         guest = launch([
-            "/usr/bin/qemu-system-x86_64", "-name", "AISecEdu-Windows-Workspace", "-enable-kvm",
-            "-machine", "pc-q35-8.2,smm=on", "-cpu", "host", "-m", "4096", "-smp", "4",
+            "/usr/bin/qemu-system-x86_64", "-name", "AISecEdu-Windows-Workspace", *guest_options(mode),
+            "-machine", "pc-q35-8.2,smm=on", "-m", "4096",
             "-uuid", "51dc9b66-281d-42f1-9bfb-344489e36424",
             "-global", "driver=cfi.pflash01,property=secure,value=on",
             "-drive", "if=pflash,format=raw,unit=0,readonly=on,file=/opt/windows/firmware.fd",
@@ -157,8 +175,7 @@ def initialize():
         fcntl.flock(lock, fcntl.LOCK_EX)
         if (STATE / "started").exists():
             return
-        if not os.access("/dev/kvm", os.R_OK | os.W_OK):
-            raise RuntimeError("The Windows profile requires a KVM-enabled workspace node")
+        acceleration()
         STATE.mkdir(mode=0o700)
         os.chown(STATE, UID, UID)
         subprocess.run(["/usr/bin/qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", "/opt/windows/course-seed.qcow2", str(STATE / "student.qcow2")], check=True)

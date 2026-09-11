@@ -5,6 +5,22 @@ import requests
 from sqlalchemy.orm.exc import DetachedInstanceError
 
 
+@pytest.mark.parametrize('environment, seconds', [('windows', '120'), ('linux', '25'), (None, '25')])
+def test_native_bridge_can_finish_before_the_outer_command_deadline(environment, seconds):
+    from CTFd.plugins.dojo_plugin.learning import solution_agent
+
+    calls = []
+    def execute(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(exit_code=0, output=b'444631\n')
+
+    container = SimpleNamespace(labels={'dojo.runtime_environment': environment}, exec_run=execute)
+    assert solution_agent._execute_as_learner(container, 'windows-exec example') == (0, '444631\n')
+    command, options = calls[0]
+    assert command[:4] == ['/run/dojo/bin/timeout', '-k', '2', seconds]
+    assert options['user'] == '1000'
+
+
 @pytest.mark.parametrize('status', [401, 402, 403])
 def test_model_account_errors_are_not_retried(monkeypatch, status):
     from CTFd.plugins.dojo_plugin.learning import intelligence, solution_agent

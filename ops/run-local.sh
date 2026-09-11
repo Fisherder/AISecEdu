@@ -21,6 +21,7 @@ http_port=${DOJO_HTTP_PORT:-80}
 https_port=${DOJO_HTTPS_PORT:-443}
 ssh_port=${DOJO_SSH_PORT:-2223}
 workspace_https_port=${WORKSPACE_HTTPS_PORT:-4443}
+workspace_publish_port=${DOJO_WORKSPACE_PUBLISH_PORT:-$workspace_https_port}
 shm_size=${DOJO_SHM_SIZE:-230g}
 dojo_host=${DOJO_HOST:-localhost.pwn.college}
 workspace_host=${WORKSPACE_HOST:-workspace.localhost.pwn.college}
@@ -53,7 +54,7 @@ if [[ $listen_address != 0.0.0.0 ]] && \
     echo "DOJO_LISTEN_ADDRESS is not assigned to this host: $listen_address" >&2
     exit 1
 fi
-for port in "$http_port" "$https_port" "$ssh_port" "$workspace_https_port"; do
+for port in "$http_port" "$https_port" "$ssh_port" "$workspace_https_port" "$workspace_publish_port"; do
     if [[ ! $port =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
         echo "Invalid deployment port: $port" >&2
         exit 1
@@ -99,10 +100,15 @@ if docker container inspect "$container" >/dev/null 2>&1; then
     current_dojo_host=$(docker inspect -f '{{index .Config.Labels "local.pwncollege.dojo-host"}}' "$container")
     current_workspace_host=$(docker inspect -f '{{index .Config.Labels "local.pwncollege.workspace-host"}}' "$container")
     current_workspace_https_port=$(docker inspect -f '{{index .Config.Labels "local.pwncollege.workspace-https-port"}}' "$container")
+    current_workspace_publish_port=$(docker inspect -f '{{index .Config.Labels "local.pwncollege.workspace-publish-port"}}' "$container")
+    if [[ -z $current_workspace_publish_port || $current_workspace_publish_port == '<no value>' ]]; then
+        current_workspace_publish_port=$current_workspace_https_port
+    fi
     if [[ $current_listen_address != "$listen_address" || \
         $current_dojo_host != "$dojo_host" || \
         $current_workspace_host != "$workspace_host" || \
-        $current_workspace_https_port != "$workspace_https_port" ]]; then
+        $current_workspace_https_port != "$workspace_https_port" || \
+        $current_workspace_publish_port != "$workspace_publish_port" ]]; then
         echo "$container exists with different deployment settings; back up data, then recreate it" >&2
         exit 1
     fi
@@ -164,6 +170,7 @@ docker run \
     --label "local.pwncollege.dojo-host=$dojo_host" \
     --label "local.pwncollege.workspace-host=$workspace_host" \
     --label "local.pwncollege.workspace-https-port=$workspace_https_port" \
+    --label "local.pwncollege.workspace-publish-port=$workspace_publish_port" \
     -d \
     "${env_args[@]}" \
     "${proxy_mount_args[@]}" \
@@ -173,7 +180,7 @@ docker run \
     -v "$data_dir:/data:shared" \
     -p "$listen_address:$http_port:80" \
     -p "$listen_address:$https_port:443" \
-    -p "$listen_address:$workspace_https_port:4443" \
+    -p "$listen_address:$workspace_publish_port:4443" \
     -p "$listen_address:$ssh_port:22" \
     "$image"
 

@@ -26,6 +26,8 @@ from ...config import (
     SECCOMP,
     USER_FIREWALL_ALLOWED,
     WORKSPACE_SESSION_SECONDS,
+    DOJO_WINDOWS_BOOT_TIMEOUT_SECONDS,
+    DOJO_WINDOWS_SEED_PATH,
 )
 from ...models import DojoModules, DojoChallenges
 from ...utils import (
@@ -162,6 +164,9 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
         *user_mounts,
     ]
 
+    if profile.id == "windows" and DOJO_WINDOWS_SEED_PATH:
+        mounts.append(docker.types.Mount("/opt/windows/course-seed.qcow2", DOJO_WINDOWS_SEED_PATH, "bind", read_only=True))
+
     allowed_devices = ["/dev/kvm", "/dev/net/tun"]
     available_devices = set(get_available_devices(docker_client))
     devices = [f"{device}:{device}:rwm" for device in allowed_devices if device in available_devices]
@@ -192,6 +197,7 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
             "SHELL": f"{dojo_bin_path}/bash",
             "DOJO_CHALLENGE_DIR": "/challenge",
             "DOJO_RUNTIME_ENVIRONMENT": profile.id,
+            "DOJO_WINDOWS_BOOT_TIMEOUT_SECONDS": str(DOJO_WINDOWS_BOOT_TIMEOUT_SECONDS),
             "DOJO_AUTH_TOKEN": auth_token,
         },
         labels={
