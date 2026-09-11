@@ -192,3 +192,108 @@
     itemCard,
   };
 })();
+
+/* aisecedu-reading-navigation-v1 */
+(() => {
+  "use strict";
+
+  const currentReturnContext = () => {
+    const current = new URL(window.location.href);
+    return current.searchParams.get("returnTo") || `${current.pathname}${current.search}`;
+  };
+
+  const destinationWithReturnContext = (rawHref) => {
+    if (!rawHref) return "";
+    const destination = new URL(rawHref, window.location.origin);
+    if (destination.origin !== window.location.origin) return "";
+    if (!destination.searchParams.has("returnTo")) {
+      destination.searchParams.set("returnTo", currentReturnContext());
+    }
+    return `${destination.pathname}${destination.search}${destination.hash}`;
+  };
+
+  const installNavigationStyles = () => {
+    if (document.getElementById("aisecedu-unit-sequence-style")) return;
+    const style = document.createElement("style");
+    style.id = "aisecedu-unit-sequence-style";
+    style.textContent = [
+      ".unit-mobile-sequence{display:flex;gap:.75rem;flex-wrap:wrap;margin:1rem 0;}",
+      ".unit-mobile-sequence a{align-items:center;display:inline-flex;justify-content:center;min-height:44px;padding:.55rem .9rem;border-radius:.5rem;text-decoration:none;}",
+      ".unit-mobile-sequence a.is-next{margin-left:auto;}",
+      ".module-practice-not-applicable{margin:0 0 1rem;}",
+      "@media (max-width:575px){.unit-mobile-sequence a{flex:1 1 44%;}.unit-mobile-sequence a.is-next:only-child{margin-left:0;}}",
+    ].join("");
+    document.head.appendChild(style);
+  };
+
+  const addReadingOnlyState = () => {
+    const pathParts = window.location.pathname.split("/").filter(Boolean);
+    if (pathParts.length !== 2) return;
+    if (document.querySelector(".module-practice-not-applicable")) return;
+    if (document.querySelector("[data-challenge-outline], .unit-outline-item, .challenge-name, .challenge-card")) return;
+    const main = document.querySelector("main#main-content");
+    if (!main) return;
+    const status = document.createElement("p");
+    status.className = "module-practice-not-applicable alert alert-secondary";
+    status.setAttribute("role", "status");
+    status.textContent = "阅读章节 · 无必修实践";
+    const heading = main.querySelector("h1, h2");
+    if (heading) {
+      heading.insertAdjacentElement("afterend", status);
+    } else {
+      main.prepend(status);
+    }
+  };
+
+  const createSequenceLink = (href, label, modifier) => {
+    const link = document.createElement("a");
+    link.className = `btn btn-outline-primary ${modifier}`;
+    link.href = href;
+    link.textContent = label;
+    return link;
+  };
+
+  const addUnitSequence = () => {
+    const items = Array.from(document.querySelectorAll(".unit-outline-item[href]"));
+    if (!items.length) return;
+    const currentIndex = items.findIndex((item) => item.classList.contains("is-current"));
+    if (currentIndex < 0) return;
+
+    const previous = items.slice(0, currentIndex).reverse()
+      .map((item) => destinationWithReturnContext(item.getAttribute("href")))
+      .find(Boolean);
+    const next = items.slice(currentIndex + 1)
+      .map((item) => destinationWithReturnContext(item.getAttribute("href")))
+      .find(Boolean);
+    if (!previous && !next) return;
+
+    installNavigationStyles();
+    const existingSequence = document.querySelector(".unit-mobile-sequence");
+    const sequence = existingSequence || document.createElement("nav");
+    sequence.className = "unit-mobile-sequence";
+    sequence.setAttribute("aria-label", "章节导航");
+    sequence.replaceChildren();
+    if (previous) sequence.appendChild(createSequenceLink(previous, "上一章", "is-previous"));
+    if (next) sequence.appendChild(createSequenceLink(next, "下一章", "is-next"));
+
+    if (!existingSequence) {
+      const outline = items[0].parentElement;
+      if (outline && outline.parentElement) {
+        outline.insertAdjacentElement("afterend", sequence);
+      } else {
+        document.querySelector("main#main-content")?.appendChild(sequence);
+      }
+    }
+  };
+
+  const enhanceLearningPage = () => {
+    addReadingOnlyState();
+    addUnitSequence();
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", enhanceLearningPage, { once: true });
+  } else {
+    enhanceLearningPage();
+  }
+})();

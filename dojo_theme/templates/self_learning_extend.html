@@ -3,7 +3,7 @@
 {% block body_class %}course-system-page self-learning-center-page{% endblock %}
 
 {% block stylesheets %}
-<link rel="stylesheet" href="{{ url_for('views.themes', path='css/course-system.css', v='aisecedu-student-agent-v3-readability-v1') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/course-system.css', v='aisecedu-student-agent-v3-review-state-v1') }}">
 {% endblock %}
 
 {% block content %}
@@ -30,7 +30,7 @@
     <section class="sx-library-toolbar" aria-label="筛选个人创作">
       <label><i class="fas fa-search" aria-hidden="true"></i><span class="sr-only">搜索创作</span><input id="self-learning-search" type="search" placeholder="搜索名称或学习目标" autocomplete="off"></label>
       <label><span class="sr-only">成果类型</span><select id="self-learning-type"><option value="">全部类型</option><option value="slides">个人课件</option><option value="quiz">练习与测验</option><option value="attack-defense-scene">攻防演示</option><option value="learning-path">学习计划</option><option value="debate">辩论练习</option></select></label>
-      <label><span class="sr-only">提交状态</span><select id="self-learning-visibility"><option value="">全部状态</option><option value="仅自己可见">仅自己可见</option><option value="已提交教师">已提交教师</option></select></label>
+      <label><span class="sr-only">提交状态</span><select id="self-learning-visibility"><option value="">全部状态</option><option value="仅自己可见">仅自己可见</option><option value="已提交教师">已提交教师</option><option value="审核已通过">审核已通过</option><option value="需修改后再提交">需修改后再提交</option></select></label>
       <span id="self-learning-count" class="cs-status">正在加载</span>
     </section>
 
@@ -47,5 +47,5 @@
 
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/self-learning-extend.js', v='aisecedu-my-creations-v4') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/self-learning-extend.js', v='aisecedu-my-creations-v7-review-state-icons') }}"></script>
 {% endblock %}

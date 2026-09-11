@@ -16,6 +16,9 @@
   const previewRetry = document.getElementById("artifact-preview-retry");
   const previewPanel = document.getElementById("artifact-preview-panel");
   const previewStateLabel = document.getElementById("artifact-preview-state-label");
+  const previewHint = document.getElementById("artifact-preview-hint");
+  const previewActions = previewPanel.querySelector(".artifact-preview-actions");
+  const textPreview = document.getElementById("artifact-text-preview");
   const inspector = document.getElementById("artifact-inspector");
   const inspectorToggle = document.getElementById("artifact-inspector-toggle");
   const inspectorClose = document.getElementById("artifact-inspector-close");
@@ -88,6 +91,8 @@
     PERSONAL_DRAFT: "个人草稿",
     COURSE_CANDIDATE: "已提交教师审阅",
     SUBMITTED: "已提交教师审阅",
+    APPROVED_PERSONAL: "审核已通过",
+    CHANGES_REQUESTED: "需修改后再提交",
     GENERATED: "已生成",
     PASS: "通过",
     PASSED: "通过",
@@ -185,7 +190,10 @@
     const failed = state === "error";
     root.dataset.previewState = state;
     iframe.hidden = !ready;
+    if (textPreview) textPreview.hidden = true;
     placeholder.hidden = ready;
+    if (previewActions) previewActions.hidden = false;
+    if (previewHint) previewHint.textContent = "方向键翻页 · O 查看全部页面 · F 全屏";
     placeholder.setAttribute("aria-busy", ready || failed ? "false" : "true");
     previewRetry.hidden = !failed;
     if (message) placeholder.querySelector("p").textContent = message;
@@ -197,6 +205,109 @@
           : "正在准备预览";
     }
     if (ready) window.clearTimeout(previewTimer);
+  }
+
+  function asRecord(value) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+
+  function stringValue(value) {
+    return typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
+  }
+
+  function makePreviewElement(tag, className, value) {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (value) element.textContent = value;
+    return element;
+  }
+
+  function renderLearningPathPreview() {
+    const content = asRecord(artifact?.revision?.content);
+    if (!textPreview || !Object.keys(content).length) {
+      setPreviewState("error", "学习路径内容暂时无法读取。");
+      return;
+    }
+
+    const outline = Array.isArray(content.outline) ? content.outline : [];
+    const activities = Array.isArray(content.activities) ? content.activities : [];
+    const objectives = Array.isArray(content.objectives) ? content.objectives : [];
+    const assessment = asRecord(content.assessment);
+    const criteria = Array.isArray(assessment.criteria) ? assessment.criteria : [];
+
+    textPreview.replaceChildren();
+    const heading = makePreviewElement("header", "artifact-text-preview-heading");
+    heading.append(
+      makePreviewElement("span", "teaching-eyebrow", "个人学习路径"),
+      makePreviewElement("h2", "", artifact.title || "学习路径"),
+      makePreviewElement("p", "", "按照步骤完成学习，并保留可核验的过程证据。"),
+    );
+    textPreview.append(heading);
+
+    if (objectives.length) {
+      const section = makePreviewElement("section", "artifact-path-section");
+      section.append(makePreviewElement("h3", "", "学习目标"));
+      const list = makePreviewElement("ul", "artifact-path-bullets");
+      objectives.forEach(value => {
+        const item = stringValue(value);
+        if (item) list.append(makePreviewElement("li", "", item));
+      });
+      if (list.childElementCount) section.append(list);
+      textPreview.append(section);
+    }
+
+    const steps = outline.length ? outline : activities;
+    if (steps.length) {
+      const section = makePreviewElement("section", "artifact-path-section");
+      section.append(makePreviewElement("h3", "", "学习步骤"));
+      const list = makePreviewElement("ol", "artifact-path-steps");
+      steps.forEach((value, index) => {
+        const step = asRecord(value);
+        const item = makePreviewElement("li", "artifact-path-step");
+        const order = Number(step.order);
+        item.append(makePreviewElement("strong", "", `${Number.isFinite(order) && order > 0 ? order : index + 1}. ${stringValue(step.title) || `步骤 ${index + 1}`}`));
+        const description = stringValue(step.description || step.instruction || step.learnerAction);
+        if (description) item.append(makePreviewElement("p", "", description));
+        const points = Array.isArray(step.keyPoints) ? step.keyPoints : [];
+        if (points.length) {
+          const pointList = makePreviewElement("ul", "artifact-path-bullets");
+          points.forEach(point => {
+            const text = stringValue(point);
+            if (text) pointList.append(makePreviewElement("li", "", text));
+          });
+          if (pointList.childElementCount) item.append(pointList);
+        }
+        list.append(item);
+      });
+      section.append(list);
+      textPreview.append(section);
+    }
+
+    if (criteria.length) {
+      const section = makePreviewElement("section", "artifact-path-section");
+      section.append(makePreviewElement("h3", "", "完成与证据"));
+      const list = makePreviewElement("ul", "artifact-path-bullets");
+      criteria.forEach(value => {
+        const item = stringValue(value);
+        if (item) list.append(makePreviewElement("li", "", item));
+      });
+      if (list.childElementCount) section.append(list);
+      textPreview.append(section);
+    }
+
+    if (!textPreview.childElementCount || (!outline.length && !activities.length && !objectives.length && !criteria.length)) {
+      const fallback = makePreviewElement("pre", "artifact-path-json", JSON.stringify(content, null, 2));
+      textPreview.append(fallback);
+    }
+    window.clearTimeout(previewTimer);
+    root.dataset.previewState = "ready";
+    iframe.hidden = true;
+    placeholder.hidden = true;
+    textPreview.hidden = false;
+    previewRetry.hidden = true;
+    if (previewActions) previewActions.hidden = true;
+    if (previewHint) previewHint.textContent = "阅读目标、学习步骤与证据要求";
+    if (previewStateLabel) previewStateLabel.textContent = "学习路径已就绪";
   }
 
   function embeddedPreviewState() {
@@ -546,6 +657,10 @@
           } catch (error) { showError(error); }
         }, 1800);
       }
+      return;
+    }
+    if (artifact.type === "learning-path") {
+      renderLearningPathPreview();
       return;
     }
     previewAttempt = retrying ? previewAttempt + 1 : 1;

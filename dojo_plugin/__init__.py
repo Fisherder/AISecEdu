@@ -1,3 +1,4 @@
+from . import submission_query_optimization
 import datetime
 import base64
 import gzip
@@ -540,6 +541,7 @@ def handle_authorization(default_handler):
 
 
 def load(app):
+    submission_query_optimization.install()
     if DOJO_IP_MODE:
         app.config["SESSION_COOKIE_NAME"] = "__Host-aisecedu-session"
         app.config["SESSION_COOKIE_SECURE"] = True

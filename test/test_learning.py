@@ -4454,19 +4454,19 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     assert "solution.json" not in draft["spec"]["description"]
     assert "动态 Flag" in draft["spec"]["description"]
     assert draft["spec"]["authoringPipeline"]["plan"]["model"] == "deepseek-v4-flash"
-    assert draft["spec"]["authoringPipeline"]["build"]["model"] == "deepseek-v4-pro"
-    assert draft["spec"]["authoringPipeline"]["review"]["model"] == "deepseek-v4-pro"
+    assert draft["spec"]["authoringPipeline"]["build"]["model"] == "deepseek-v4-flash"
+    assert draft["spec"]["authoringPipeline"]["review"]["model"] == "deepseek-v4-flash"
     assert (
-        draft["spec"]["authoringPipeline"]["postReview"]["model"] == "deepseek-v4-pro"
+        draft["spec"]["authoringPipeline"]["postReview"]["model"] == "deepseek-v4-flash"
     )
-    assert draft["spec"]["authoringPipeline"]["validate"]["model"] == "deepseek-v4-pro"
+    assert draft["spec"]["authoringPipeline"]["validate"]["model"] == "deepseek-v4-flash"
 
     validated_response = admin_session.post(
         f"{API}/drafts/{draft['id']}/validate", json={}
     )
     validated, _ = wait_for_authoring(admin_session, validated_response)
     assert validated["validation"]["summary"]["blocked"] == 0
-    assert validated["validation"]["agentReview"]["model"] == "deepseek-v4-pro"
+    assert validated["validation"]["agentReview"]["model"] == "deepseek-v4-flash"
 
     published = admin_session.post(f"{API}/drafts/{draft['id']}/publish", json={})
     assert published.status_code == 200
@@ -4752,7 +4752,7 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     assert len(submitted.json()["assessment"]["abilities"]) == 6
     grader = submitted.json()["assessment"]["criteria"][0]["evidence"]["grader"]
     if grader["provider"] == "MODEL":
-        assert grader["model"] == "deepseek-v4-pro"
+        assert grader["model"] == "deepseek-v4-flash"
         assert grader["liveContext"]
         assert grader["solutionProvider"]
 

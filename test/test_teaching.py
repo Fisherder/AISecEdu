@@ -3528,9 +3528,9 @@ def test_teacher_thread_isolation_and_native_progress(
     complex_route = data(admin_session.get(f"{API}/jobs/{complex_job_id}"))["job"]
     assert simple_route["modelRoute"]["route"] == "teaching-default"
     assert complex_route["modelRoute"] == {
-        "route": "deepseek-v4-pro",
-        "requiredModel": "deepseek-v4-pro",
-        "actualModel": "deepseek-v4-pro",
+        "route": "deepseek-v4-flash",
+        "requiredModel": "deepseek-v4-flash",
+        "actualModel": "deepseek-v4-flash",
         "provider": "deepseek",
         "degraded": False,
         "invocationStatus": None,
@@ -4444,7 +4444,7 @@ def test_trial_load_30_teachers_200_students(
                 range(len(teacher_threads)),
             )
         )
-    assert set(candidate_visibility) == {(200, 3, 404, "deepseek-v4-pro", 404)}
+    assert set(candidate_visibility) == {(200, 3, 404, "deepseek-v4-flash", 404)}
 
     def register_student(index):
         name = f"loads-{run_id}-{index:03d}"

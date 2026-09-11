@@ -84,6 +84,7 @@ from ...models import (
     TeachingSessions,
 )
 from ...agent_runtime.artifacts import (
+    PERSONAL_REVIEWABLE_ARTIFACT_STATUSES,
     RevisionConflict,
     add_card,
     artifact_capabilities,
@@ -192,6 +193,9 @@ COURSE_DEMO_ARTIFACT_TYPES = {
     "classroom-scenario",
     "simulation",
 }
+COURSEWARE_EXCLUDED_ARTIFACT_TYPES = (
+    QUESTION_ARTIFACT_TYPES | COURSE_DEMO_ARTIFACT_TYPES | {"debate"}
+)
 CONTENT_STATE_ALIASES = {
     "PENDING": "draft",
     "PLANNED": "draft",
@@ -1091,14 +1095,23 @@ def _course_content_snapshot(
     if artifacts is None:
         artifacts = (
             TeachingArtifacts.query.filter_by(dojo_id=dojo.dojo_id)
-            .filter(TeachingArtifacts.status != "ARCHIVED")
+            .filter(
+                TeachingArtifacts.status != "ARCHIVED",
+                # Personal self-learning artifacts have a separate review and
+                # visibility lifecycle.  They must not inflate the normal
+                # courseware counts shown by a teacher course workspace.
+                TeachingArtifacts.self_workspace_id.is_(None),
+            )
             .order_by(TeachingArtifacts.updated.desc())
             .all()
         )
     demo_items = []
     courseware_items = []
     for artifact in artifacts:
-        if artifact.artifact_type in QUESTION_ARTIFACT_TYPES:
+        if (
+            artifact.artifact_type in QUESTION_ARTIFACT_TYPES
+            or artifact.artifact_type == "debate"
+        ):
             continue
         item = {
             "objectType": (
@@ -1312,6 +1325,7 @@ def _dojo_summary_views(dojos):
     for artifact in TeachingArtifacts.query.filter(
         TeachingArtifacts.dojo_id.in_(dojo_ids),
         TeachingArtifacts.status != "ARCHIVED",
+        TeachingArtifacts.self_workspace_id.is_(None),
     ).options(
         load_only(
             TeachingArtifacts.id,
@@ -1897,6 +1911,77 @@ def _workspace_view(workspace, *, include_usage=False):
             if isinstance(limit, (int, float))
         }
     return result
+
+
+class SelfLearningReviewStateConflict(ValueError):
+    """A personal artifact cannot be submitted again in its current review state."""
+
+
+def _workspace_visibility_label(workspace):
+    return {
+        "SUBMITTED": "已提交教师",
+        "APPROVED": "审核已通过",
+        "CHANGES_REQUESTED": "需修改后再提交",
+    }.get(str(workspace.status or "").upper(), "仅自己可见")
+
+
+def _personal_artifact_visibility_label(artifact):
+    return {
+        "COURSE_CANDIDATE": "已提交教师审阅",
+        "APPROVED_PERSONAL": "审核已通过（仍为个人成果）",
+        "CHANGES_REQUESTED": "需修改后再提交",
+    }.get(str(artifact.status or "").upper(), "仅自己可见")
+
+
+def _queue_personal_artifact_review(workspace, artifact, *, actor_id):
+    """Create one review action per artifact revision without rewinding decisions."""
+
+    if (
+        artifact.owner_id != actor_id
+        or artifact.self_workspace_id != workspace.id
+        or artifact.dojo_id != workspace.dojo_id
+        or workspace.dojo_id is None
+    ):
+        raise ScopeError("A course-bound personal artifact is required")
+
+    key = f"self-review:{workspace.id}:{artifact.id}:{artifact.current_revision}"
+    action = TeachingAgentActions.query.filter_by(idempotency_key=key).first()
+    if action is not None:
+        if action.status == "AWAITING_APPROVAL":
+            return action
+        raise SelfLearningReviewStateConflict(
+            "该成果的当前版本已完成审核；请先生成新版本，再重新提交。"
+        )
+
+    if (
+        str(artifact.status or "").upper()
+        not in PERSONAL_REVIEWABLE_ARTIFACT_STATUSES
+    ):
+        raise SelfLearningReviewStateConflict(
+            "该成果当前不能提交教师审核；请先生成新版本后再试。"
+        )
+
+    action = TeachingAgentActions(
+        thread_id=workspace.thread_id,
+        actor_id=actor_id,
+        action_type="review-self-artifact",
+        risk_level="R3",
+        target_type="self_workspace",
+        target_id=workspace.id,
+        status="AWAITING_APPROVAL",
+        idempotency_key=key,
+        request_json={
+            "artifactId": artifact.id,
+            "dojoId": workspace.dojo_id,
+            "expectedRevision": artifact.current_revision,
+        },
+    )
+    db.session.add(action)
+    artifact.status = "COURSE_CANDIDATE"
+    workspace.submitted_artifact_id = artifact.id
+    workspace.status = "SUBMITTED"
+    workspace.updated = datetime.datetime.utcnow()
+    return action
 
 
 def _workspace_activity_view(workspace):
@@ -4374,14 +4459,8 @@ class ManagedCourseContentCollection(Resource):
                 rows = query.offset((page - 1) * page_size).limit(page_size).all()
                 items = [_material_attachment_view(row) for row in rows]
             else:
-                demo_types = {
-                    "simulation",
-                    "attack-defense-scene",
-                    "classroom-scenario",
-                }
-                non_courseware_types = QUESTION_ARTIFACT_TYPES | demo_types | {
-                    "debate",
-                }
+                demo_types = COURSE_DEMO_ARTIFACT_TYPES
+                non_courseware_types = COURSEWARE_EXCLUDED_ARTIFACT_TYPES
                 query = TeachingArtifacts.query.filter_by(dojo_id=dojo.dojo_id).filter(
                     TeachingArtifacts.status != "ARCHIVED",
                     TeachingArtifacts.self_workspace_id.is_(None),
@@ -4514,12 +4593,8 @@ class ManagedCourseWorkspace(Resource):
             )
             as_of = datetime.datetime.utcnow()
             snapshot = _course_content_snapshot(loaded_dojo, as_of=as_of)
-            demo_types = {
-                "simulation",
-                "attack-defense-scene",
-                "classroom-scenario",
-            }
-            non_courseware_types = QUESTION_ARTIFACT_TYPES | demo_types | {"debate"}
+            demo_types = COURSE_DEMO_ARTIFACT_TYPES
+            non_courseware_types = COURSEWARE_EXCLUDED_ARTIFACT_TYPES
             include_collections = (
                 str(request.args.get("includeCollections") or "1") != "0"
             )
@@ -8260,9 +8335,7 @@ class ArtifactBulkDelete(Resource):
                     "课件列表已变化或包含不可管理的内容，请刷新后重新选择。",
                     409,
                 )
-            non_courseware_types = QUESTION_ARTIFACT_TYPES | COURSE_DEMO_ARTIFACT_TYPES | {
-                "debate"
-            }
+            non_courseware_types = COURSEWARE_EXCLUDED_ARTIFACT_TYPES
             if any(row.artifact_type in non_courseware_types for row in artifacts):
                 raise ArtifactBulkDeleteError("批量删除仅适用于课程课件与教案。", 409)
             if any(row.status == "PUBLISHED" for row in artifacts):
@@ -8534,7 +8607,7 @@ class Artifact(Resource):
                     else "teacher_only"
                 ),
                 "label": (
-                    "仅自己可见"
+                    _personal_artifact_visibility_label(artifact)
                     if personal
                     else "学生可见"
                     if artifact.status == "PUBLISHED"
@@ -8807,37 +8880,13 @@ class ArtifactReviewRequest(Resource):
         user = _current_user()
         try:
             artifact = artifact_for_user(artifact_id, user)
-            if not artifact_capabilities(artifact, user)["requestReview"]:
-                raise ScopeError("Artifact not found")
             workspace = SelfLearningWorkspaces.query.filter_by(
                 id=artifact.self_workspace_id,
                 student_id=user.id,
             ).first()
-            if workspace is None or workspace.dojo_id != artifact.dojo_id:
+            if workspace is None:
                 raise ScopeError("Artifact not found")
-            key = f"self-review:{workspace.id}:{artifact.id}:{artifact.current_revision}"
-            action = TeachingAgentActions.query.filter_by(idempotency_key=key).first()
-            if action is None:
-                action = TeachingAgentActions(
-                    thread_id=workspace.thread_id,
-                    actor_id=user.id,
-                    action_type="review-self-artifact",
-                    risk_level="R3",
-                    target_type="self_workspace",
-                    target_id=workspace.id,
-                    status="AWAITING_APPROVAL",
-                    idempotency_key=key,
-                    request_json={
-                        "artifactId": artifact.id,
-                        "dojoId": workspace.dojo_id,
-                        "expectedRevision": artifact.current_revision,
-                    },
-                )
-                db.session.add(action)
-            artifact.status = "COURSE_CANDIDATE"
-            workspace.submitted_artifact_id = artifact.id
-            workspace.status = "SUBMITTED"
-            workspace.updated = datetime.datetime.utcnow()
+            _queue_personal_artifact_review(workspace, artifact, actor_id=user.id)
             db.session.commit()
             return _ok(
                 {
@@ -8850,6 +8899,9 @@ class ArtifactReviewRequest(Resource):
         except ScopeError as exc:
             db.session.rollback()
             return _error(exc, 404, code="NOT_FOUND")
+        except SelfLearningReviewStateConflict as exc:
+            db.session.rollback()
+            return _error(exc, 409, code="REVIEW_STATE_CONFLICT")
 
 
 @teaching_namespace.route("/artifacts/<string:artifact_id>/duplicate")
@@ -10172,6 +10224,9 @@ class TeachingActionDecision(Resource):
                     if decision == "APPROVED"
                     else "CHANGES_REQUESTED"
                 )
+                now = datetime.datetime.utcnow()
+                workspace.updated = now
+                submitted.updated = now
                 if decision == "APPROVED":
                     submitted_revision = TeachingArtifactRevisions.query.filter_by(
                         artifact_id=submitted.id,
@@ -11819,9 +11874,7 @@ class SelfLearningWorkspaceCollection(Resource):
                         for artifact in versions
                     ),
                     "visibility": (
-                        "已提交教师"
-                        if row.status == "SUBMITTED"
-                        else "仅自己可见"
+                        _workspace_visibility_label(row)
                     ),
                 }
             )
@@ -12017,33 +12070,9 @@ class SelfLearningSubmit(Resource):
             artifact = artifact_for_user(str(_body().get("artifactId") or ""), user)
             if artifact.self_workspace_id != workspace.id:
                 raise ScopeError("Artifact does not belong to this workspace")
-            if workspace.dojo_id is None:
-                return _error("A course-bound personal artifact is required", 409)
-            key = (
-                f"self-review:{workspace.id}:{artifact.id}:{artifact.current_revision}"
+            action = _queue_personal_artifact_review(
+                workspace, artifact, actor_id=user.id
             )
-            action = TeachingAgentActions.query.filter_by(idempotency_key=key).first()
-            if action is None:
-                action = TeachingAgentActions(
-                    thread_id=workspace.thread_id,
-                    actor_id=user.id,
-                    action_type="review-self-artifact",
-                    risk_level="R3",
-                    target_type="self_workspace",
-                    target_id=workspace.id,
-                    status="AWAITING_APPROVAL",
-                    idempotency_key=key,
-                    request_json={
-                        "artifactId": artifact.id,
-                        "dojoId": workspace.dojo_id,
-                        "expectedRevision": artifact.current_revision,
-                    },
-                )
-                db.session.add(action)
-            artifact.status = "COURSE_CANDIDATE"
-            workspace.submitted_artifact_id = artifact.id
-            workspace.status = "SUBMITTED"
-            workspace.updated = datetime.datetime.utcnow()
             db.session.commit()
             return _ok(
                 {
@@ -12054,7 +12083,11 @@ class SelfLearningSubmit(Resource):
                 202,
             )
         except ScopeError as exc:
+            db.session.rollback()
             return _error(exc, 404, code="NOT_FOUND")
+        except SelfLearningReviewStateConflict as exc:
+            db.session.rollback()
+            return _error(exc, 409, code="REVIEW_STATE_CONFLICT")
 
 
 @teaching_namespace.route("/runtime/launch")
@@ -13310,32 +13343,14 @@ class AgentRuntimeClientSelfSubmit(Resource):
             ).first()
             if artifact is None or workspace.dojo_id is None:
                 raise ScopeError("A course-bound personal artifact is required")
-            key = (
-                f"self-review:{workspace.id}:{artifact.id}:{artifact.current_revision}"
+            action = _queue_personal_artifact_review(
+                workspace, artifact, actor_id=user.id
             )
-            action = TeachingAgentActions.query.filter_by(idempotency_key=key).first()
-            if action is None:
-                action = TeachingAgentActions(
-                    thread_id=workspace.thread_id,
-                    actor_id=user.id,
-                    action_type="review-self-artifact",
-                    risk_level="R3",
-                    target_type="self_workspace",
-                    target_id=workspace.id,
-                    status="AWAITING_APPROVAL",
-                    idempotency_key=key,
-                    request_json={
-                        "artifactId": artifact.id,
-                        "dojoId": workspace.dojo_id,
-                        "expectedRevision": artifact.current_revision,
-                    },
-                )
-                db.session.add(action)
-            workspace.submitted_artifact_id = artifact.id
-            workspace.status = "SUBMITTED"
-            artifact.status = "COURSE_CANDIDATE"
             db.session.commit()
             return _ok({"actionId": action.id, "status": action.status}, 202)
         except (AgentRuntimeAuthError, ScopeError) as exc:
             db.session.rollback()
             return _error(exc, 404, code="NOT_FOUND")
+        except SelfLearningReviewStateConflict as exc:
+            db.session.rollback()
+            return _error(exc, 409, code="REVIEW_STATE_CONFLICT")

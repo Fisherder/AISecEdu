@@ -68,6 +68,14 @@
     history.replaceState(null, "", next);
   }
 
+  window.addEventListener("message", event => {
+    if (event.origin !== window.location.origin || event.source !== frame.contentWindow) return;
+    const data = event.data || {};
+    const artifactId = String(data.artifactId || "");
+    if (data.type !== "aisecedu:open-personal-artifact" || !/^[A-Za-z0-9_-]+$/.test(artifactId)) return;
+    window.location.assign(`/learning/artifacts/${encodeURIComponent(artifactId)}?returnTo=/learning/extend`);
+  });
+
   function filteredRows() {
     const needle = search.value.trim().toLocaleLowerCase("zh-CN");
     return state.workspaces.filter(item => {
@@ -86,11 +94,26 @@
       const [label, icon] = modeMeta(mode);
       const artifact = item.artifact;
       const capabilities = artifact && artifact.capabilities || {};
+      const reviewState = String(item.status || "").toUpperCase();
+      const visibilityClass = reviewState === "SUBMITTED"
+        ? "is-submitted"
+        : reviewState === "APPROVED"
+          ? "is-approved"
+          : reviewState === "CHANGES_REQUESTED"
+            ? "is-changes-requested"
+            : "";
+      const visibilityIcon = reviewState === "SUBMITTED"
+        ? "fa-paper-plane"
+        : reviewState === "APPROVED"
+          ? "fa-check-circle"
+          : reviewState === "CHANGES_REQUESTED"
+            ? "fa-edit"
+            : "fa-lock";
       const open = artifact
         ? `<a class="cs-btn cs-btn-primary" href="${escape(artifact.url)}">查看成果</a>`
         : `<button class="cs-btn cs-btn-primary" type="button" data-open-workspace="${escape(item.id)}">继续创作</button>`;
       return `<article class="sx-creation-card" data-workspace-id="${escape(item.id)}">
-        <div class="sx-creation-head"><span><i class="fas ${icon}" aria-hidden="true"></i></span><div><small>${escape(label)}</small><h3>${escape(artifact && artifact.title || item.title || "未命名创作")}</h3></div><span class="sx-visibility ${item.visibility === "已提交教师" ? "is-submitted" : ""}"><i class="fas ${item.visibility === "已提交教师" ? "fa-paper-plane" : "fa-lock"}" aria-hidden="true"></i>${escape(item.visibility)}</span></div>
+        <div class="sx-creation-head"><span><i class="fas ${icon}" aria-hidden="true"></i></span><div><small>${escape(label)}</small><h3>${escape(artifact && artifact.title || item.title || "未命名创作")}</h3></div><span class="sx-visibility ${visibilityClass}"><i class="fas ${visibilityIcon}" aria-hidden="true"></i>${escape(item.visibility)}</span></div>
         <p>${escape(item.goal || "继续完善这项个人学习成果。").slice(0, 220)}</p>
         <div class="sx-creation-meta"><span><i class="fas fa-code-branch" aria-hidden="true"></i>${Number(item.versionCount || 0) || 1} 个版本</span><span><i class="far fa-clock" aria-hidden="true"></i>${escape(relativeTime(item.updated))}</span></div>
         <div class="sx-creation-actions">${open}${artifact ? `<button class="cs-btn cs-btn-secondary" type="button" data-open-workspace="${escape(item.id)}">继续改进</button>` : ""}${artifact && capabilities.edit ? `<button class="sx-icon-action" type="button" data-rename-artifact="${escape(artifact.id)}" aria-label="重命名${escape(artifact.title || item.title)}"><i class="fas fa-pen" aria-hidden="true"></i></button><button class="sx-icon-action is-danger" type="button" data-delete-artifact="${escape(artifact.id)}" aria-label="删除${escape(artifact.title || item.title)}"><i class="fas fa-trash" aria-hidden="true"></i></button>` : ""}${artifact && capabilities.requestReview && item.visibility !== "已提交教师" ? `<button class="cs-btn cs-btn-secondary" type="button" data-review-artifact="${escape(artifact.id)}"><i class="fas fa-paper-plane" aria-hidden="true"></i>提交教师查看</button>` : ""}</div>

@@ -1,6 +1,4 @@
 'use client';
-
-import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
@@ -131,6 +129,18 @@ function workspaceStatusLabel(value: string) {
     REJECTED: '需要修改',
     ARCHIVED: '已归档',
   } as Record<string, string>)[value] || value;
+}
+
+function openPersonalArtifact(artifactId: string) {
+  const href = `/learning/artifacts/${encodeURIComponent(artifactId)}?returnTo=/learning/extend`;
+  if (window.parent === window) {
+    window.location.assign(href);
+    return;
+  }
+  window.parent.postMessage(
+    { type: 'aisecedu:open-personal-artifact', artifactId },
+    window.location.origin,
+  );
 }
 
 export default function SecurityLearningPage() {
@@ -452,7 +462,7 @@ export default function SecurityLearningPage() {
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-400/10 text-emerald-300"><CheckCircle2 className="h-5 w-5" /></span>
                   <div className="min-w-0 flex-1"><strong className="block truncate text-sm">{artifact.title}</strong><small className="text-xs text-slate-400">个人草稿 · 可继续用自然语言修改</small></div>
-                  <Link href={`/classroom/study_${artifact.id}`} className="inline-flex items-center gap-2 rounded-lg bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950"><BookOpen className="h-4 w-4" />打开学习</Link>
+                  <button type="button" onClick={() => openPersonalArtifact(artifact.id)} className="inline-flex items-center gap-2 rounded-lg bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950"><BookOpen className="h-4 w-4" />查看成果</button>
                   {workspace.dojoId ? <button type="button" disabled={busy || workspace.status === 'SUBMITTED'} onClick={submit} className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-4 py-2 text-sm disabled:opacity-50"><Send className="h-4 w-4" />{workspace.status === 'SUBMITTED' ? '已提交审核' : '提交教师审核'}</button> : null}
                 </div>
               </div>

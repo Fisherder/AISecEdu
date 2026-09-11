@@ -403,6 +403,11 @@ def artifact_for_viewer(artifact_id, user):
     return artifact
 
 
+PERSONAL_REVIEWABLE_ARTIFACT_STATUSES = frozenset(
+    {"DRAFT", "PERSONAL_DRAFT", "CHANGES_REQUESTED"}
+)
+
+
 def artifact_capabilities(artifact, user):
     is_course_teacher = artifact_course_teacher(artifact, user)
     is_owner = artifact.owner_id == user.id
@@ -421,7 +426,8 @@ def artifact_capabilities(artifact, user):
         and is_personal
         and artifact.dojo_id is not None
         and not is_archived
-        and artifact.status != "PUBLISHED"
+        and str(artifact.status or "").upper()
+        in PERSONAL_REVIEWABLE_ARTIFACT_STATUSES
     )
     return {
         "view": True,

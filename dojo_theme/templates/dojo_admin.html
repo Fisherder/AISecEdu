@@ -132,6 +132,15 @@
     </aside>
   </div>
 </div>
+
+  <!-- aisecedu-manual-practice-entry-v1 -->
+  <section class="card mt-4" data-testid="manual-practice-entry">
+    <div class="card-body">
+      <h2 class="h4">创建一组独立题目</h2>
+      <p class="mb-3">Agent 出题流水线</p>
+      <a class="btn btn-primary" href="{{ url_for('pwncollege_learning.teacher_practice_create', dojo=dojo.reference_id) }}">创建一组独立题目</a>
+    </div>
+  </section>
 {% endblock %}
 
 {% block entrypoint %}

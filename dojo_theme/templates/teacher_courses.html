@@ -174,6 +174,25 @@
         <div class="hub-inline-actions"><button id="cs-question-create" class="hub-button is-primary" type="button" data-create-kind="question" aria-haspopup="dialog" aria-controls="cs-create-dialog"><i class="fas fa-plus" aria-hidden="true"></i>新建题目</button><button id="cs-question-manage-toggle" class="hub-button is-secondary cs-question-manage-toggle" type="button" data-question-management-toggle aria-pressed="false"><i class="fas fa-sliders-h" aria-hidden="true"></i><span>管理题目</span></button></div>
       </header>
 
+      {# aisededu-manual-practice-entry-v2 #}
+      {% if request.args.get('dojo') %}
+      <section class="hub-surface hub-practice-entry" id="cs-practice-create-entry" aria-labelledby="cs-practice-create-title">
+        <header class="hub-section-heading">
+          <div>
+            <span class="hub-kicker">实践题</span>
+            <h2 id="cs-practice-create-title">创建一组独立题目</h2>
+            <p>Agent 出题流水线</p>
+          </div>
+          <div class="hub-inline-actions">
+            <a class="hub-button is-primary" id="cs-practice-create-link" href="{{ url_for('pwncollege_learning.teacher_practice_create', dojo=request.args.get('dojo')) }}">
+              <i class="fas fa-plus" aria-hidden="true"></i><span>创建实践题</span>
+            </a>
+          </div>
+        </header>
+      </section>
+      {% endif %}
+
+
       <section id="cs-question-batch-review" class="hub-surface cs-question-batch-review" aria-labelledby="cs-question-batch-title" hidden>
         <header>
           <div><span class="hub-kicker">独立题目批次</span><h2 id="cs-question-batch-title">批次审核</h2><p id="cs-question-batch-scope">正在读取课程与章节…</p></div>

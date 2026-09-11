@@ -3,7 +3,7 @@
 {% block body_class %}teaching-artifact-page{% endblock %}
 
 {% block stylesheets %}
-<link rel="stylesheet" href="{{ url_for('views.themes', path='css/teaching-agent.css', v='aisecedu-teaching-v22-readability-v1') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/teaching-agent.css', v='aisecedu-teaching-v23-learning-path-preview') }}">
 {% endblock %}
 
 {% block content %}
@@ -51,7 +51,7 @@
         <div class="artifact-preview-status">
           <span id="artifact-preview-state-dot" aria-hidden="true"></span>
           <strong id="artifact-preview-state-label" role="status" aria-live="polite">正在准备预览</strong>
-          <small>方向键翻页 · O 查看全部页面 · F 全屏</small>
+          <small id="artifact-preview-hint">方向键翻页 · O 查看全部页面 · F 全屏</small>
         </div>
         <div class="artifact-preview-actions">
           <button id="artifact-preview-reload" type="button" title="重新加载预览"><i class="fas fa-sync-alt" aria-hidden="true"></i><span>重新加载</span></button>
@@ -65,6 +65,7 @@
         <span class="artifact-preview-loading-line" aria-hidden="true"><span></span></span>
         <button id="artifact-preview-retry" class="artifact-preview-retry" type="button" hidden><i class="fas fa-redo" aria-hidden="true"></i>重新加载预览</button>
       </div>
+      <div id="artifact-text-preview" class="artifact-text-preview" aria-live="polite" hidden></div>
       <iframe id="artifact-preview" title="教学内容预览" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals" allow="fullscreen" allowfullscreen referrerpolicy="no-referrer" hidden></iframe>
     </section>
 
@@ -139,5 +140,5 @@
 
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/teaching-artifact.js', v='aisecedu-teaching-v23') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/teaching-artifact.js', v='aisecedu-teaching-v25-review-state') }}"></script>
 {% endblock %}
