@@ -217,6 +217,25 @@ http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
 [[ $http_code == 301 || $http_code == 302 || $http_code == 307 || $http_code == 308 ]]
 pass "HTTP redirects to HTTPS"
 
+expected_https_origin="https://$dojo_host"
+if [[ $https_port != 443 ]]; then
+    expected_https_origin+=":$https_port"
+fi
+redirect_path='/login?next=%2Fcourses'
+for entry_port in "$http_port" "$https_port"; do
+    redirect_url=$(curl -fsS -o /dev/null -w '%{redirect_url}' \
+        --noproxy '*' \
+        --resolve "$dojo_host:$entry_port:$listen_address" \
+        "http://$dojo_host:$entry_port$redirect_path")
+    [[ $redirect_url == "$expected_https_origin$redirect_path" ]]
+done
+workspace_redirect=$(curl -fsS -o /dev/null -w '%{redirect_url}' \
+    --noproxy '*' \
+    --resolve "$workspace_host:$workspace_https_port:$listen_address" \
+    "http://$workspace_host:$workspace_https_port/trust-check")
+[[ $workspace_redirect == "https://$workspace_host:$workspace_https_port/trust-check" ]]
+pass "plain HTTP entry preserves the HTTPS port, path, query, and workspace origin"
+
 lan_health=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/lan-health")
 [[ $lan_health == "玄甲 LAN endpoint ready" ]]
 downloaded_fingerprint=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/local-tls.crt" \

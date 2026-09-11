@@ -475,11 +475,13 @@ services:
       - WORKSPACE_HOST=${WORKSPACE_HOST}
       - WORKSPACE_HTTPS_PORT=${WORKSPACE_HTTPS_PORT:-443}
       - WORKSPACE_SECRET=${WORKSPACE_SECRET}
+      - AISECEDU_PUBLIC_ORIGIN=${AISECEDU_PUBLIC_ORIGIN}
     volumes:
       - /data/acme:/var/cache/nginx/acme-letsencrypt
       - /data/local-tls:/etc/nginx/local-tls:ro
       - /data/local-tls/ca.crt:/usr/share/nginx/html/pwncollege-local-ca.crt:ro
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/templates/public-origin.conf.template:/etc/nginx/templates/public-origin.conf.template:ro
       - ./nginx/conf.d/location-theme-assets.conf:/etc/nginx/conf.d/location-theme-assets.conf:ro
       - ./ops/nginx-local/server-http.conf:/etc/nginx/conf.d/server-http.prod.conf:ro
       - ./ops/nginx-local/server-https.conf:/etc/nginx/conf.d/server-https.prod.conf:ro
