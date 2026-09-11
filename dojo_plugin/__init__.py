@@ -30,7 +30,7 @@ from .models import (
     Dojos,
     Emojis,
 )
-from .config import DOJO_HOST, DOJO_IP_MODE, bootstrap
+from .config import DOJO_HOST, DOJO_HTTP_ENABLED, DOJO_IP_MODE, bootstrap
 from .utils import unserialize_user_flag, render_markdown
 from .utils.dojo import get_current_dojo_challenge
 from .utils.awards import update_awards
@@ -543,8 +543,10 @@ def handle_authorization(default_handler):
 def load(app):
     submission_query_optimization.install()
     if DOJO_IP_MODE:
-        app.config["SESSION_COOKIE_NAME"] = "__Host-aisecedu-session"
-        app.config["SESSION_COOKIE_SECURE"] = True
+        app.config["SESSION_COOKIE_NAME"] = (
+            "aisecedu-vpn-session" if DOJO_HTTP_ENABLED else "__Host-aisecedu-session"
+        )
+        app.config["SESSION_COOKIE_SECURE"] = not DOJO_HTTP_ENABLED
         app.config["SESSION_COOKIE_HTTPONLY"] = True
         app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 

@@ -46,10 +46,6 @@ while read -r nameserver; do
     fi
 done < <(awk '$1 == "nameserver" {print $2}' /etc/resolv.conf)
 
-if ((${#route_addresses[@]} == 0)); then
-    exit 0
-fi
-
 default_route=$(ip -4 route show default | head -n 1)
 gateway=$(awk '{for (i = 1; i <= NF; i++) if ($i == "via") print $(i + 1)}' <<<"$default_route")
 device=$(awk '{for (i = 1; i <= NF; i++) if ($i == "dev") print $(i + 1)}' <<<"$default_route")
@@ -73,3 +69,5 @@ for route_address in "${route_addresses[@]}"; do
     printf 'Configured return route: %s/32 via %s dev %s\n' \
         "$route_address" "$gateway" "$device"
 done
+
+"$repo_dir/ops/configure-ingress-return-route.sh"

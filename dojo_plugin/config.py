@@ -85,6 +85,9 @@ DOJO_IP_MODE = (os.getenv("DOJO_IP_MODE") or "false").strip().lower() in {
     "true",
     "yes",
 }
+DOJO_HTTP_ENABLED = (os.getenv("DOJO_HTTP_ENABLED") or "false").strip().lower() in {
+    "1", "true", "yes",
+}
 WORKSPACE_SECRET = os.environ.get("WORKSPACE_SECRET")
 WORKSPACE_SESSION_SECONDS = max(
     900,

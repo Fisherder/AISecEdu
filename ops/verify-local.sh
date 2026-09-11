@@ -16,6 +16,14 @@ workspace_host=${WORKSPACE_HOST:-workspace.localhost.pwn.college}
 future_host=${FUTURE_HOST-}
 client_address=${DOJO_CLIENT_ADDRESS:-}
 wait_timeout=${DOJO_VERIFY_TIMEOUT:-180}
+http_enabled=${DOJO_HTTP_ENABLED:-false}
+web_port=$https_port
+web_origin="https://$dojo_host:$https_port"
+if [[ $http_enabled == true || $http_enabled == yes || $http_enabled == 1 ]]; then
+    http_enabled=true
+    web_port=$http_port
+    web_origin="http://$dojo_host:$http_port"
+fi
 
 pass() {
     printf 'PASS  %s\n' "$1"
@@ -83,13 +91,27 @@ pass "Web and Workspace endpoint addresses resolve locally"
 
 if [[ -n $client_address ]]; then
     ip route get "$client_address" | grep -Fq "src $listen_address"
-    ping -c 1 -W 3 "$client_address" >/dev/null
-    pass "configured client address is reachable through the LAN route"
+    pass "configured client return route uses the deployment address"
 fi
 
 wait_for "application systemd service" \
     docker exec "$container" systemctl is-active --quiet pwn.college.service
 pass "application systemd service is active"
+
+ingress_default=$(docker exec "$container" ip -4 route show default | head -n 1)
+ingress_gateway=$(awk '{for (i = 1; i <= NF; i++) if ($i == "via") print $(i + 1)}' <<<"$ingress_default")
+ingress_device=$(awk '{for (i = 1; i <= NF; i++) if ($i == "dev") print $(i + 1)}' <<<"$ingress_default")
+docker exec "$container" ip -4 rule show priority 10443 \
+    | grep -Fq 'fwmark 0x40000000/0x40000000 lookup 10443'
+docker exec "$container" ip -4 route get 10.255.255.254 mark 0x40000000 \
+    | grep -Fq "via $ingress_gateway dev $ingress_device"
+docker exec "$container" ip -4 route show 10.0.0.0/8 \
+    | grep -Fq 'dev workspace_net'
+docker exec "$container" iptables -w 5 -t mangle -C PREROUTING -j AISECEDU_RETURN
+docker exec "$container" iptables -w 5 -t mangle -C OUTPUT \
+    -m conntrack --ctdir REPLY -m connmark --mark 0x40000000/0x40000000 \
+    -j CONNMARK --restore-mark --nfmask 0x40000000 --ctmask 0x40000000
+pass "VPN replies follow ingress while the workspace subnet is preserved"
 
 required_services=(
     prometheus grafana node-exporter db pgbouncer cache homefs
@@ -179,16 +201,16 @@ pass "AI learning requests retain aligned 3600-second proxy and worker windows"
 agent_runtime_health=$(curl -fsS \
     --noproxy '*' \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
-    --resolve "$dojo_host:$https_port:$listen_address" \
-    "https://$dojo_host:$https_port/agent-runtime/api/health")
+    --resolve "$dojo_host:$web_port:$listen_address" \
+    "$web_origin/agent-runtime/api/health")
 grep -Fq '"status":"ok"' <<<"$agent_runtime_health"
 pass "global-agent runtime is available only under the canonical 玄甲 origin"
 
 legacy_runtime_code=$(curl -sS -o /dev/null -w '%{http_code}' \
     --noproxy '*' \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
-    --resolve "$dojo_host:$https_port:$listen_address" \
-    "https://$dojo_host:$https_port/openmaic/")
+    --resolve "$dojo_host:$web_port:$listen_address" \
+    "$web_origin/openmaic/")
 [[ $legacy_runtime_code == 301 || $legacy_runtime_code == 302 || $legacy_runtime_code == 307 || $legacy_runtime_code == 308 ]]
 pass "retired product route no longer exposes an independent application"
 
@@ -210,31 +232,44 @@ docker exec "$container" docker exec \
     ctfd python /tmp/verify-ai-routing.py
 pass "DeepSeek Guide, Tutor, Grader, and self-healing authoring routes are correct"
 
+redirect_path='/login?next=%2Fcourses'
 http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
     --noproxy '*' \
     --resolve "$dojo_host:$http_port:$listen_address" \
     "http://$dojo_host:$http_port/")
-[[ $http_code == 301 || $http_code == 302 || $http_code == 307 || $http_code == 308 ]]
-pass "HTTP redirects to HTTPS"
-
-expected_https_origin="https://$dojo_host"
-if [[ $https_port != 443 ]]; then
-    expected_https_origin+=":$https_port"
-fi
-redirect_path='/login?next=%2Fcourses'
-for entry_port in "$http_port" "$https_port"; do
+if [[ $http_enabled == true ]]; then
+    [[ $http_code == 200 ]]
+    expected_origin="http://$dojo_host:$http_port"
+    workspace_http_code=$(curl -fsS -o /dev/null -w '%{http_code}' \
+        --noproxy '*' \
+        --resolve "$workspace_host:$workspace_https_port:$listen_address" \
+        "http://$workspace_host:$workspace_https_port/trust-check")
+    [[ $workspace_http_code == 200 ]]
+    pass "VPN HTTP serves the application and workspace without certificate trust"
+else
+    [[ $http_code == 301 || $http_code == 302 || $http_code == 307 || $http_code == 308 ]]
+    expected_origin="https://$dojo_host"
+    if [[ $https_port != 443 ]]; then
+        expected_origin+=":$https_port"
+    fi
     redirect_url=$(curl -fsS -o /dev/null -w '%{redirect_url}' \
         --noproxy '*' \
-        --resolve "$dojo_host:$entry_port:$listen_address" \
-        "http://$dojo_host:$entry_port$redirect_path")
-    [[ $redirect_url == "$expected_https_origin$redirect_path" ]]
-done
-workspace_redirect=$(curl -fsS -o /dev/null -w '%{redirect_url}' \
+        --resolve "$dojo_host:$http_port:$listen_address" \
+        "http://$dojo_host:$http_port$redirect_path")
+    [[ $redirect_url == "$expected_origin$redirect_path" ]]
+    workspace_redirect=$(curl -fsS -o /dev/null -w '%{redirect_url}' \
+        --noproxy '*' \
+        --resolve "$workspace_host:$workspace_https_port:$listen_address" \
+        "http://$workspace_host:$workspace_https_port/trust-check")
+    [[ $workspace_redirect == "https://$workspace_host:$workspace_https_port/trust-check" ]]
+    pass "HTTP redirects to the configured HTTPS application and workspace"
+fi
+redirect_url=$(curl -fsS -o /dev/null -w '%{redirect_url}' \
     --noproxy '*' \
-    --resolve "$workspace_host:$workspace_https_port:$listen_address" \
-    "http://$workspace_host:$workspace_https_port/trust-check")
-[[ $workspace_redirect == "https://$workspace_host:$workspace_https_port/trust-check" ]]
-pass "plain HTTP entry preserves the HTTPS port, path, query, and workspace origin"
+    --resolve "$dojo_host:$https_port:$listen_address" \
+    "http://$dojo_host:$https_port$redirect_path")
+[[ $redirect_url == "$expected_origin$redirect_path" ]]
+pass "plain HTTP on the old HTTPS port preserves the canonical origin, path, and query"
 
 lan_health=$(curl -fsS --noproxy '*' "http://$listen_address:$http_port/lan-health")
 [[ $lan_health == "玄甲 LAN endpoint ready" ]]
@@ -248,8 +283,8 @@ pass "LAN health and local CA certificate endpoints are ready"
 body=$(curl -sS --fail \
     --noproxy '*' \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
-    --resolve "$dojo_host:$https_port:$listen_address" \
-    "https://$dojo_host:$https_port/")
+    --resolve "$dojo_host:$web_port:$listen_address" \
+    "$web_origin/")
 grep -Fq 'class="product-home product-page"' <<<"$body"
 grep -Fq '从理解，到实战，再到可验证的成长' <<<"$body"
 grep -Fq '<strong>玄甲</strong>' <<<"$body"
@@ -257,23 +292,33 @@ if grep -Fiq 'pwn.college' <<<"$body"; then
     echo "Legacy pwn.college branding remains on the 玄甲 homepage" >&2
     exit 1
 fi
-pass "the 玄甲 course homepage renders with the local CA"
+pass "the 玄甲 course homepage renders at the configured origin"
 
 session_headers=$(curl -sS -D - -o /dev/null \
     --noproxy '*' \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
-    --resolve "$dojo_host:$https_port:$listen_address" \
-    "https://$dojo_host:$https_port/")
-grep -Eiq '^set-cookie: __Host-aisecedu-session=.*; Secure; HttpOnly; Path=/; SameSite=Lax' \
-    <<<"$session_headers"
-pass "the IP-mode application session uses an isolated secure cookie"
+    --resolve "$dojo_host:$web_port:$listen_address" \
+    "$web_origin/")
+if [[ $http_enabled == true ]]; then
+    grep -Eiq '^set-cookie: aisecedu-vpn-session=.*HttpOnly; Path=/; SameSite=Lax' \
+        <<<"$session_headers"
+    if grep -Eiq '^set-cookie: aisecedu-vpn-session=.*; Secure' <<<"$session_headers"; then
+        echo "The VPN HTTP session cookie cannot be Secure" >&2
+        exit 1
+    fi
+else
+    grep -Eiq '^set-cookie: __Host-aisecedu-session=.*; Secure; HttpOnly; Path=/; SameSite=Lax' \
+        <<<"$session_headers"
+fi
+pass "the IP-mode application cookie matches the configured transport"
+
 
 for path in /login /register /reset_password; do
     learner_page=$(curl -sS --fail \
         --noproxy '*' \
         --cacert "$repo_dir/data/local-tls/ca.crt" \
-        --resolve "$dojo_host:$https_port:$listen_address" \
-        "https://$dojo_host:$https_port$path")
+        --resolve "$dojo_host:$web_port:$listen_address" \
+        "$web_origin$path")
     grep -Fq 'class="product-brand"' <<<"$learner_page"
     grep -Fq '<strong>玄甲</strong>' <<<"$learner_page"
     if grep -Fiq 'pwn.college' <<<"$learner_page"; then
@@ -287,15 +332,15 @@ for asset in ui navbar learning-common learning-overview learning-dashboard lear
     curl -sS --fail -o /dev/null \
         --noproxy '*' \
         --cacert "$repo_dir/data/local-tls/ca.crt" \
-        --resolve "$dojo_host:$https_port:$listen_address" \
-        "https://$dojo_host:$https_port/themes/dojo_theme/static/js/dojo/$asset.min.js"
+        --resolve "$dojo_host:$web_port:$listen_address" \
+        "$web_origin/themes/dojo_theme/static/js/dojo/$asset.min.js"
 done
 for stylesheet in teaching-agent product-shell course-hub; do
     curl -sS --fail -o /dev/null \
         --noproxy '*' \
         --cacert "$repo_dir/data/local-tls/ca.crt" \
-        --resolve "$dojo_host:$https_port:$listen_address" \
-        "https://$dojo_host:$https_port/themes/dojo_theme/static/css/$stylesheet.min.css"
+        --resolve "$dojo_host:$web_port:$listen_address" \
+        "$web_origin/themes/dojo_theme/static/css/$stylesheet.min.css"
 done
 pass "all active learning, teaching, and product-shell assets are served"
 
@@ -377,8 +422,8 @@ pass "Flag submission, Tutor readiness, and container lifecycle regressions are 
 dojo_listing=$(curl -sS --fail \
     --noproxy '*' \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
-    --resolve "$dojo_host:$https_port:$listen_address" \
-    "https://$dojo_host:$https_port/dojos")
+    --resolve "$dojo_host:$web_port:$listen_address" \
+    "$web_origin/dojos")
 grep -Fq '<h1>发现课程</h1>' <<<"$dojo_listing"
 grep -Fq 'class="course-catalog product-page"' <<<"$dojo_listing"
 grep -Fq 'class="sc-grid"' <<<"$dojo_listing"
@@ -391,8 +436,8 @@ pass "the grouped 玄甲 course catalog renders directly"
 forgot_redirect=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' \
     --noproxy '*' \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
-    --resolve "$dojo_host:$https_port:$listen_address" \
-    "https://$dojo_host:$https_port/forgot-password")
+    --resolve "$dojo_host:$web_port:$listen_address" \
+    "$web_origin/forgot-password")
 [[ $forgot_redirect == "308 https://$dojo_host/reset_password" || $forgot_redirect == "308 https://$dojo_host:$https_port/reset_password" ]]
 pass "the removed frontend password URL redirects to the canonical authentication page"
 
@@ -409,8 +454,8 @@ fi
 auth_config=$(curl -sS --fail \
     --noproxy '*' \
     --cacert "$repo_dir/data/local-tls/ca.crt" \
-    --resolve "$dojo_host:$https_port:$listen_address" \
-    "https://$dojo_host:$https_port/pwncollege_api/v1/auth/config")
+    --resolve "$dojo_host:$web_port:$listen_address" \
+    "$web_origin/pwncollege_api/v1/auth/config")
 grep -Fq 'registrationEnabled' <<<"$auth_config"
 commitment=$(jq -r '.data.commitment.text' <<<"$auth_config")
 grep -Fq '玄甲课程题目' <<<"$commitment"

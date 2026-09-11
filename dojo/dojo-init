@@ -48,6 +48,7 @@ define DOJO_HOST "${DEFAULT_DOJO_HOST}"
 define WORKSPACE_HOST workspace."${DEFAULT_DOJO_HOST}"
 define WORKSPACE_HTTPS_PORT 443
 define DOJO_IP_MODE false
+define DOJO_HTTP_ENABLED false
 define DOJO_ENV development
 define DOJO_OFFLINE false
 define DOJO_WORKSPACE full

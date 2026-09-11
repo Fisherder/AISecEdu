@@ -124,6 +124,7 @@ env_args=(
     -e "WORKSPACE_HOST=$workspace_host"
     -e "WORKSPACE_HTTPS_PORT=$workspace_https_port"
     -e "DOJO_IP_MODE=${DOJO_IP_MODE:-false}"
+    -e "DOJO_HTTP_ENABLED=${DOJO_HTTP_ENABLED:-false}"
 )
 proxy_mount_args=()
 udev_mount_args=()

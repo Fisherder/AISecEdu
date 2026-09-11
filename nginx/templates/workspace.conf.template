@@ -14,7 +14,7 @@ location ~ "^/w/(?P<container_id>[0-9a-f]{12})/auth/(?P<sig>[^/]+)/(?P<port>\d+)
         return 404;
     }
 
-    add_header Set-Cookie "aisecedu_workspace_cap=$sig; Path=/w/$container_id/; Max-Age=43200; Secure; HttpOnly; SameSite=Lax" always;
+    add_header Set-Cookie "aisecedu_workspace_cap=$sig; Path=/w/$container_id/; Max-Age=43200$aisecedu_workspace_cookie_secure; HttpOnly; SameSite=Lax" always;
     return 302 /w/$container_id/$port/$path$is_args$args;
 }
 

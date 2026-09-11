@@ -1,0 +1,29 @@
+map $host $aisecedu_canonical_origin {
+    default "${AISECEDU_PUBLIC_ORIGIN}";
+}
+
+map "${DOJO_HTTP_ENABLED}" $aisecedu_http_enabled {
+    default 0;
+    ~*^(true|yes|1)$ 1;
+}
+
+map "$aisecedu_http_enabled:$uri" $aisecedu_http_redirect {
+    default 1;
+    ~^1: 0;
+    ~^0:/(lan-health|local-tls\.crt)$ 0;
+}
+
+map $aisecedu_http_enabled $aisecedu_workspace_cookie_secure {
+    default "; Secure";
+    1 "";
+}
+
+map $aisecedu_http_enabled $aisecedu_runtime_cookie_security {
+    default secure;
+    1 nosecure;
+}
+
+map $http_host $aisecedu_forwarded_port {
+    ~:(?<aisecedu_public_port>[0-9]+)$ $aisecedu_public_port;
+    default $server_port;
+}
