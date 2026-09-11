@@ -3014,6 +3014,8 @@ def _execute_local_job(job):
     """
     if job.kind == "learning.solution":
         run_id = job.payload.get("solutionRunId")
+        attempt_count = int(job.attempt_count or 0)
+        max_attempts = max(1, int(job.max_attempts or 1))
         if not run_id:
             raise PermanentJobError("Missing solution validation run id")
         from ..learning.solution_agent import _run_solution_agent
@@ -3022,7 +3024,7 @@ def _execute_local_job(job):
         run = LearningSolutionRuns.query.filter_by(id=run_id).first()
         if run is None:
             raise PermanentJobError("Solution validation run no longer exists")
-        if job.attempt_count > 1 and _reset_native_solution_compatibility_run(run):
+        if attempt_count > 1 and _reset_native_solution_compatibility_run(run):
             db.session.commit()
         _run_solution_agent(current_app._get_current_object(), run_id)
         run = LearningSolutionRuns.query.filter_by(id=run_id).first()
@@ -3030,8 +3032,7 @@ def _execute_local_job(job):
             raise PermanentJobError("Solution validation run no longer exists")
         if run.status != "VERIFIED":
             retryable_error = _native_solution_retryable_error(run)
-            max_attempts = max(1, int(job.max_attempts or 1))
-            if retryable_error and job.attempt_count < max_attempts:
+            if retryable_error and attempt_count < max_attempts:
                 _reset_native_solution_compatibility_run(run)
                 db.session.commit()
                 raise RetryableJobError(retryable_error)

@@ -3,6 +3,8 @@ import logging
 import re
 import secrets
 
+import requests
+
 from CTFd.models import Users, db
 
 from ..config import DOJO_AI_SOLUTION_MODEL
@@ -109,6 +111,12 @@ def _solution_model_json(*args, **kwargs):
     try:
         return model_json(*args, **kwargs)
     except Exception as exception:
+        if isinstance(exception, requests.HTTPError):
+            status = getattr(exception.response, "status_code", None)
+            if status == 402:
+                raise RuntimeError("DeepSeek 模型服务返回 HTTP 402：账号余额或计费授权不可用，请恢复账号付费状态后重试。") from exception
+            if status in {401, 403}:
+                raise RuntimeError(f"DeepSeek 模型服务返回 HTTP {status}：账号认证或权限未通过，请检查已授权的模型账号。") from exception
         raise SolutionModelError(
             "DeepSeek V4 Flash 模型服务或响应暂时失败，请稍后重试。"
         ) from exception

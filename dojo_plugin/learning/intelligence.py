@@ -240,6 +240,8 @@ def model_json(
             json.JSONDecodeError,
         ) as exception:
             last_error = exception
+            if isinstance(exception, requests.HTTPError) and getattr(exception.response, "status_code", None) in {401, 402, 403}:
+                raise
             remaining_seconds = total_deadline - time.monotonic()
             if (
                 attempt_number >= max(1, attempts)

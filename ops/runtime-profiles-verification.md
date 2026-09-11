@@ -35,6 +35,25 @@ two additional integration cases then verified Windows/Linux selection across
 all three generation choices (9 cases passed in that focused file).
 The production Next.js build completed with TypeScript validation.
 
+After deployment, the authenticated manual authoring page returned HTTP 200
+with both runtime choices, and the production workspace API started a fresh
+Windows workspace. Native compilation, checking and all three workspace routes
+passed again. The hidden account's repeated Flag submissions correctly returned
+`already_solved`; the first-run incorrect/correct results remain in the evidence.
+
+The additional AI solution run `solve_9c8243a16dc445bebc0d4fbbf908fd24` booted
+Windows and observed its public files, but the model endpoint returned HTTP
+402 Payment Required before its first action. Full model-driven execution is
+therefore pending restoration of the already configured account's billing
+authorization. This is separate from the completed deterministic runtime and
+Flag acceptance checks. Account authorization errors now stop automatic retry
+and report the required account action; a detached queue-record bug that masked
+the original failure was also corrected.
+
+Five additional recovery tests cover HTTP 401/402/403 and detached queue records
+on retryable and permanent failures. All five passed alongside the 23 profile
+tests; the surrounding 171-test Python regression selection passed again.
+
 Host-side acceptance evidence is retained at
 `/srv/aisecedu-dojo/data/agent-runtime/runtime-profiles-20260911`.
 Build and regression source snapshots are retained at
