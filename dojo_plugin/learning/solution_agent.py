@@ -14,6 +14,7 @@ from ..models import (
     LearningSolutionRuns,
 )
 from ..utils import unserialize_user_flag
+from ..runtime_profiles import runtime_profile
 from ..api.v1.docker import remove_container, start_challenge
 from .exercise_modes import exercise_mode
 from .intelligence import model_json
@@ -176,6 +177,7 @@ def _set_run_state(run_id, *, phase, progress, status=None, error=None):
 
 
 def _public_challenge_context(challenge):
+    profile = runtime_profile(challenge.runtime_environment)
     return {
         "course": challenge.dojo.name or challenge.dojo.reference_id,
         "unit": challenge.module.name or challenge.module.id,
@@ -183,7 +185,8 @@ def _public_challenge_context(challenge):
         "description": str(challenge.description or "")[:16000],
         "interfaces": challenge.interfaces or [],
         "runtimeEnvironment": challenge.runtime_environment,
-        "nativeWorkspace": "C:\\Course" if challenge.runtime_environment == "windows" else "/challenge",
+        "nativeWorkspace": profile.directory,
+        "runtime": profile.public_context,
         "workingDirectory": "/challenge",
         "identity": "hacker (uid 1000)",
     }
@@ -334,6 +337,8 @@ def _agent_command(challenge_context, trace):
             "解释器正常运行，例如 `bash /challenge/run`。绝不能因为入口点暂时失败而扫描根目录、"
             "探查 /flag 的属性、枚举 setuid 程序、检查 /opt 或平台运行时。收到策略拒绝后，只能"
             "依据已经获得的题面与可见证据缩小范围并调整下一步。"
+            "已安装工具与可写目录以 challenge.runtime 为准，C 编译器使用其中的 cCompiler。"
+            "题目要求编译并运行源码时，必须实际编译并运行该程序，不能用 Shell 求值代替程序运行。"
             "如果 challenge.runtimeEnvironment=windows，学生程序在 Windows 原生执行。"
             "通过 windows-exec '<PowerShell 命令>' 操作 C:\\Course 中的文件和原生程序，"
             "不要在 Linux 运行 Windows 脚本；服务已由平台自动启动。/challenge/check 仍为平台门禁。"

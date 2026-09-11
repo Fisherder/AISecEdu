@@ -29,6 +29,7 @@ from CTFd.utils.decorators import authed_only
 from CTFd.utils.user import get_current_user
 
 from ... import config
+from ...runtime_profiles import RUNTIME_PROFILES
 from ...course_codes import (
     course_join_code,
     ensure_course_join_code,
@@ -2718,7 +2719,7 @@ def _teacher_agent_context(user, thread):
         "candidateSets": {"statusCounts": {}},
         "artifacts": {"statusCounts": {}, "recent": []},
         "assignments": {"statusCounts": {}, "recent": []},
-        "runtimeEnvironments": [{"id": "linux", "name": "Linux", "default": True}, {"id": "windows", "name": "Windows 远程桌面", "default": False}],
+        "runtimeEnvironments": [profile.public_context for profile in RUNTIME_PROFILES.values()],
         "nativeAuthoring": {"recentDrafts": [], "recentJobs": []},
         "jobs": {"statusCounts": {}, "recent": []},
         "classrooms": {"statusCounts": {}, "recent": []},

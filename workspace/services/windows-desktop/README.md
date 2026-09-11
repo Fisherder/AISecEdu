@@ -39,6 +39,20 @@ opens Windows; the existing Code and Terminal entries remain available for
 workspace tooling. Native commands can be run from the terminal or solution
 agent with `windows-exec '<PowerShell command>'`.
 
+The runtime profile supplies the same public tool and directory facts to the
+teacher assistant, package authoring and solution agent. Windows uses
+`C:\tcc\tcc.exe`; Linux uses `gcc`. Windows compiler output belongs in
+`C:\CourseWork`, for example from PowerShell:
+
+```powershell
+& 'C:\tcc\tcc.exe' 'C:\Course\main.c' -o 'C:\CourseWork\main.exe'
+& 'C:\CourseWork\main.exe'
+```
+
+The compiler does not need to be on `PATH`. A replacement runtime image must
+provide the tools declared by its profile. Compilation exercises require the
+solution agent to compile and run the supplied program before checking it.
+
 `guest-agent.ps1` transfers public files with SHA-256 verification, starts
 PowerShell/cmd services, and returns native process exit status and output.
 Private answers and the dynamic Flag remain in the platform checker. Running

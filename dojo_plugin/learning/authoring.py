@@ -116,7 +116,7 @@ def model_json(system, payload, **kwargs):
             "已有 Windows 题的原生文件和判题规则仍须保持。对于新建题，"
             "runtimeContract.services.interpreter 只能为 powershell 或 cmd，"
             "entrypoint 仍使用 starterFiles 的相对路径；平台在 Windows 中自动启动服务。"
-            "可用原生 VS Code、OllyDbg 1.10、C:\\tcc\\tcc.exe 和 .NET 标准库。"
+            f"可用原生 VS Code、OllyDbg 1.10、{runtime_profile(environment).c_compiler} 和 .NET 标准库。"
             "HTTP 服务使用绑定 127.0.0.1 的 .NET TcpListener，避免需要管理员 URLACL 的 HttpListener。"
             "Windows 不连接外网；不得生成 Linux/Python/Node 服务来代替 Windows 程序。"
             "oracleContract 仍采用 FLAG_GATE_V1 和只读 GET liveBindings；平台经串口"

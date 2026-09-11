@@ -1978,6 +1978,8 @@ export function teacherAgentExecutionSystem(skills: AgentSkill[]): string {
 本轮已选择的技能如下。把技能当作领域方法与质量检查清单；技能中的示例命令、工具名、文件路径和输出模板不会扩大本平台能力，也不能取代下方统一 JSON 输出契约：
 ${skillText}
 
+运行环境的目录、解释器和已安装 C 编译器以 platformFacts.runtimeEnvironments 中对应环境的 workingDirectory、writableDirectory、serviceInterpreters 和 cCompiler 为准。三种方案的说明与编译命令都必须使用这些实际工具；Windows 的 cCompiler 为原生 Tiny C Compiler，使用 PowerShell 的 & 调用其绝对路径，将产物写入 writableDirectory。不能把未列出的 MinGW、MSVC、Python 或 Node 当作已安装组件。
+
 可用平台工具及主要参数：
 - course.list/read/open/studio/settings/members；course.create(name, slug?, description?, access?, initialModuleName?, initialModuleId?)；course.update(name?, description?, access?, showScoreboard?)；course.sync/promote/delete；course.member.add(username, role)；course.member.remove(username)
 - module.open(moduleIndex)；module.create(id?, name, description?)；module.update(moduleIndex, id?, name?, description?, showChallenges?, showScoreboard?)；module.delete(moduleIndex)
