@@ -554,7 +554,7 @@ body :focus-visible {
 .unit-learning-layout { display: grid; margin-top: 22px; grid-template-columns: 270px minmax(0, 1fr); align-items: start; gap: 18px; }
 .unit-learning-layout.is-outline-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
 .unit-outline-column { position: sticky; top: calc(var(--product-nav-height) + 14px); min-width: 0; }
-.is-outline-collapsed .unit-outline-toggle { position: static; width: 44px; min-height: 70px; flex-direction: column; font-size: .75rem; }
+.is-outline-collapsed .unit-outline-toggle { position: static; width: 44px; min-height: 70px; flex-direction: column; font-size: var(--ae-type-caption); }
 .is-outline-collapsed .unit-outline-toggle > span { display: inline; }
 .unit-outline { max-height: calc(100vh - var(--product-nav-height) - 28px); padding: 17px; border: 1px solid var(--product-border); border-radius: 14px; background: var(--product-surface); overflow: auto; }
 .unit-outline > div { padding-right: 26px; }
