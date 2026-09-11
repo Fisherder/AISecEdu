@@ -88,27 +88,29 @@
 
   {% set previous_challenge = None %}
 
-  <button id="unit-outline-toggle" class="unit-outline-toggle" type="button" aria-controls="unit-outline" aria-expanded="false"><i class="fas fa-list" aria-hidden="true"></i>打开本章目录</button>
   <div class="unit-learning-layout">
-    <aside id="unit-outline" class="unit-outline" aria-label="本章学习路径">
-      <div><span class="product-kicker">课程路径</span><h2>本章内容</h2><small>{{ module.unified_items | length }} 项混合内容</small></div>
-      <nav>
-        {% set outline = namespace(previous_challenge=none, first=true) %}
-        {% for item in module.unified_items %}
-          {% if item.item_type == 'resource' and item.type != 'header' %}
-            <a class="unit-outline-item{{ ' is-current' if outline.first else '' }}" href="#module-content-item-{{ loop.index }}" data-outline-target="module-content-header-button-{{ loop.index }}"><span><i class="fas {{ 'fa-video' if item.type == 'lecture' else 'fa-file-alt' }}" aria-hidden="true"></i></span><span><strong>{{ item.name or '课程资料' }}</strong><small>资料 · 预计 8 分钟</small></span><em>{{ '当前' if outline.first else '阅读' }}</em></a>
-            {% set outline.first = false %}
-          {% elif item.item_type == 'challenge' and (module.show_challenges or is_dojo_admin) and (item in visible_challenges or is_dojo_admin) %}
-            {% set outline_locked = item.progression_locked and outline.previous_challenge and outline.previous_challenge.challenge_id not in user_solves and item.challenge_id not in user_solves and not is_dojo_admin %}
-            {% set outline_current = item.id == scroll_to_challenge or item.challenge_id == current_challenge_id or outline.first %}
-            <a class="unit-outline-item{{ ' is-current' if outline_current else '' }}{{ ' is-complete' if item.challenge_id in user_solves else '' }}{{ ' is-locked' if outline_locked else '' }}" href="#module-content-item-{{ loop.index }}" data-challenge-outline="{{ item.id }}"><span><i class="fas {{ 'fa-lock' if outline_locked else ('fa-check' if item.challenge_id in user_solves else 'fa-flag') }}" aria-hidden="true"></i></span><span><strong>{{ item.name or item.id }}</strong><small>{{ '选修实践' if not item.required else '必修实践' }} · 预计 20 分钟</small></span><em>{{ '当前' if outline_current else ('完成' if item.challenge_id in user_solves else ('锁定' if outline_locked else '未开始')) }}</em></a>
-            {% set outline.first = false %}
-            {% set outline.previous_challenge = item %}
-          {% endif %}
-        {% endfor %}
-      </nav>
-      <a class="unit-outline-progress" href="/dojo/{{ dojo.reference_id }}/learning"><i class="fas fa-chart-line" aria-hidden="true"></i>查看本课程学习进展</a>
-    </aside>
+    <div class="unit-outline-column">
+      <button id="unit-outline-toggle" class="unit-outline-toggle" type="button" aria-controls="unit-outline" aria-expanded="true" aria-label="收起本章目录" title="收起本章目录"><i class="fas fa-chevron-left" aria-hidden="true"></i><span>目录</span></button>
+      <aside id="unit-outline" class="unit-outline" aria-label="本章学习路径">
+        <div><span class="product-kicker">课程路径</span><h2>本章内容</h2><small>{{ module.unified_items | length }} 项混合内容</small></div>
+        <nav>
+          {% set outline = namespace(previous_challenge=none, first=true) %}
+          {% for item in module.unified_items %}
+            {% if item.item_type == 'resource' and item.type != 'header' %}
+              <a class="unit-outline-item{{ ' is-current' if outline.first else '' }}" href="#module-content-item-{{ loop.index }}" data-outline-target="module-content-header-button-{{ loop.index }}"><span><i class="fas {{ 'fa-video' if item.type == 'lecture' else 'fa-file-alt' }}" aria-hidden="true"></i></span><span><strong>{{ item.name or '课程资料' }}</strong><small>资料 · 预计 8 分钟</small></span><em>{{ '当前' if outline.first else '阅读' }}</em></a>
+              {% set outline.first = false %}
+            {% elif item.item_type == 'challenge' and (module.show_challenges or is_dojo_admin) and (item in visible_challenges or is_dojo_admin) %}
+              {% set outline_locked = item.progression_locked and outline.previous_challenge and outline.previous_challenge.challenge_id not in user_solves and item.challenge_id not in user_solves and not is_dojo_admin %}
+              {% set outline_current = item.id == scroll_to_challenge or item.challenge_id == current_challenge_id or outline.first %}
+              <a class="unit-outline-item{{ ' is-current' if outline_current else '' }}{{ ' is-complete' if item.challenge_id in user_solves else '' }}{{ ' is-locked' if outline_locked else '' }}" href="#module-content-item-{{ loop.index }}" data-challenge-outline="{{ item.id }}"><span><i class="fas {{ 'fa-lock' if outline_locked else ('fa-check' if item.challenge_id in user_solves else 'fa-flag') }}" aria-hidden="true"></i></span><span><strong>{{ item.name or item.id }}</strong><small>{{ '选修实践' if not item.required else '必修实践' }} · 预计 20 分钟</small></span><em>{{ '当前' if outline_current else ('完成' if item.challenge_id in user_solves else ('锁定' if outline_locked else '未开始')) }}</em></a>
+              {% set outline.first = false %}
+              {% set outline.previous_challenge = item %}
+            {% endif %}
+          {% endfor %}
+        </nav>
+        <a class="unit-outline-progress" href="/dojo/{{ dojo.reference_id }}/learning"><i class="fas fa-chart-line" aria-hidden="true"></i>查看本课程学习进展</a>
+      </aside>
+    </div>
     <section class="unit-learning-content">
       <div class="product-section-heading unit-content-heading"><div><span class="product-kicker">当前章节</span><h2>课程资料与实训</h2><p>按顺序学习；题目说明、实验环境、提交和反馈会保留同一课程上下文。</p></div></div>
       <div class="accordion" id="module-content">
@@ -325,7 +327,7 @@
 <script defer src="{{ url_for('views.themes', path='js/dojo/challenges.js', v='aisecedu-20260726-score-short-web') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js', v='aisecedu-student-context-v2') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-module.js', v='aisecedu-course-shell-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-module.js', v='aisecedu-course-outline-v2') }}"></script>
 {% if scroll_to_challenge %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {

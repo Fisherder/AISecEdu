@@ -4,13 +4,39 @@
   const toggle = document.getElementById("unit-outline-toggle");
   const outline = document.getElementById("unit-outline");
   const content = document.getElementById("module-content");
-  if (!outline || !content) return;
+  const layout = document.querySelector(".unit-learning-layout");
+  if (!toggle || !outline || !content || !layout) return;
 
-  function setOutline(open, restoreFocus) {
-    outline.classList.toggle("is-open", open);
-    document.body.classList.toggle("unit-outline-open", open);
-    if (toggle) toggle.setAttribute("aria-expanded", String(open));
-    if (restoreFocus && toggle) toggle.focus();
+  const mobileViewport = window.matchMedia("(max-width: 760px)");
+  const preferenceKey = "aisecedu-unit-outline-collapsed";
+  let desktopCollapsed = false;
+  let mobileOpen = false;
+  try {
+    desktopCollapsed = window.localStorage.getItem(preferenceKey) === "true";
+  } catch (_) {}
+
+  function renderOutline() {
+    const mobile = mobileViewport.matches;
+    const open = mobile ? mobileOpen : !desktopCollapsed;
+    const label = mobile ? (open ? "关闭本章目录" : "打开本章目录") : (open ? "收起本章目录" : "展开本章目录");
+    layout.classList.toggle("is-outline-collapsed", !mobile && desktopCollapsed);
+    outline.hidden = !mobile && desktopCollapsed;
+    outline.inert = !open;
+    outline.setAttribute("aria-hidden", String(!open));
+    outline.classList.toggle("is-open", mobile && open);
+    document.body.classList.toggle("unit-outline-open", mobile && open);
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-label", label);
+    toggle.title = label;
+    toggle.querySelector("i").className = `fas ${mobile ? (open ? "fa-times" : "fa-list") : (open ? "fa-chevron-left" : "fa-chevron-right")}`;
+    toggle.querySelector("span").textContent = mobile ? label : "目录";
+  }
+
+  function closeMobileOutline(restoreFocus) {
+    if (!mobileOpen) return;
+    mobileOpen = false;
+    renderOutline();
+    if (restoreFocus) toggle.focus();
   }
 
   function itemForLink(link) {
@@ -35,7 +61,7 @@
         item.focus({preventScroll: true});
       }
     }, button ? 260 : 0);
-    setOutline(false, false);
+    closeMobileOutline(false);
   }
 
   outline.querySelectorAll(".unit-outline-item").forEach(link => {
@@ -45,14 +71,29 @@
     });
   });
 
-  if (toggle) toggle.addEventListener("click", () => setOutline(!outline.classList.contains("is-open"), false));
+  toggle.addEventListener("click", () => {
+    if (mobileViewport.matches) {
+      mobileOpen = !mobileOpen;
+    } else {
+      desktopCollapsed = !desktopCollapsed;
+      try {
+        window.localStorage.setItem(preferenceKey, String(desktopCollapsed));
+      } catch (_) {}
+    }
+    renderOutline();
+  });
+  mobileViewport.addEventListener("change", () => {
+    mobileOpen = false;
+    renderOutline();
+  });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && outline.classList.contains("is-open")) setOutline(false, true);
+    if (event.key === "Escape") closeMobileOutline(true);
   });
   document.addEventListener("click", event => {
-    if (window.innerWidth > 760 || !outline.classList.contains("is-open")) return;
-    if (!outline.contains(event.target) && event.target !== toggle) setOutline(false, false);
+    if (!mobileViewport.matches || !mobileOpen) return;
+    if (!outline.contains(event.target) && !toggle.contains(event.target)) closeMobileOutline(false);
   });
+  renderOutline();
 
   document.querySelectorAll("[data-learning-transition]").forEach(link => {
     link.addEventListener("click", event => {

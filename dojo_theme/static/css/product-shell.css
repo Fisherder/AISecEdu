@@ -547,9 +547,17 @@ body :focus-visible {
 .unit-detail-shell .challenge-header-right { color: var(--product-dim); font-size: var(--ae-type-caption); }
 .unit-detail-shell .challenge-icon.challenge-solved { color: var(--product-accent); }
 .unit-detail-shell .challenge-workspace { border: 1px solid var(--product-border); border-radius: 10px; overflow: hidden; }
-.unit-outline-toggle { display: none; width: 100%; min-height: 46px; margin: 14px 0 10px; padding: 10px 14px; border: 1px solid var(--product-border-strong); border-radius: 10px; align-items: center; justify-content: center; gap: 8px; color: var(--product-text); background: var(--product-surface); font-weight: 700; }
+.unit-outline-toggle { display: flex; position: absolute; z-index: 1; top: 10px; right: 10px; width: 34px; min-height: 34px; padding: 8px; border: 1px solid var(--product-border-strong); border-radius: 10px; align-items: center; justify-content: center; gap: 8px; color: var(--product-text); background: var(--product-surface); font-weight: 700; cursor: pointer; }
+.unit-outline-toggle:hover { background: var(--product-surface-hover); }
+.unit-outline-toggle:focus-visible { outline: 2px solid var(--product-accent); outline-offset: 3px; }
+.unit-outline-toggle > span { display: none; }
 .unit-learning-layout { display: grid; margin-top: 22px; grid-template-columns: 270px minmax(0, 1fr); align-items: start; gap: 18px; }
-.unit-outline { position: sticky; top: calc(var(--product-nav-height) + 14px); max-height: calc(100vh - var(--product-nav-height) - 28px); padding: 17px; border: 1px solid var(--product-border); border-radius: 14px; background: var(--product-surface); overflow: auto; }
+.unit-learning-layout.is-outline-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
+.unit-outline-column { position: sticky; top: calc(var(--product-nav-height) + 14px); min-width: 0; }
+.is-outline-collapsed .unit-outline-toggle { position: static; width: 44px; min-height: 70px; flex-direction: column; font-size: .75rem; }
+.is-outline-collapsed .unit-outline-toggle > span { display: inline; }
+.unit-outline { max-height: calc(100vh - var(--product-nav-height) - 28px); padding: 17px; border: 1px solid var(--product-border); border-radius: 14px; background: var(--product-surface); overflow: auto; }
+.unit-outline > div { padding-right: 26px; }
 .unit-outline > div h2 { margin: 5px 0 3px; font-size: .96rem; }
 .unit-outline > div small { color: var(--product-muted); font-size: var(--ae-type-caption); }
 .unit-outline nav { display: grid; margin-top: 15px; gap: 6px; }
@@ -717,7 +725,11 @@ body :focus-visible {
   .learning-skill-grid { grid-template-columns: 1fr; }
   .learning-summary-grid { grid-template-columns: 1fr; }
   .unit-detail-shell { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
-  .unit-outline-toggle { display: flex; position: sticky; top: calc(var(--product-nav-height) + 6px); z-index: 16; }
+  .unit-outline-column { display: contents; }
+  .unit-outline-toggle { position: sticky; top: calc(var(--product-nav-height) + 6px); right: auto; z-index: 16; width: 100%; min-height: 46px; margin: 14px 0 10px; padding: 10px 14px; }
+  .unit-outline-toggle > span { display: inline; }
+  .unit-outline-open .unit-outline-toggle { position: fixed; z-index: 1101; top: calc(var(--product-nav-height) + 12px); right: 14px; width: 44px; min-height: 44px; margin: 0; }
+  .unit-outline-open .unit-outline-toggle > span { display: none; }
   .unit-learning-layout { display: block; margin-top: 10px; }
   .unit-outline { position: fixed; z-index: 1100; inset: var(--product-nav-height) 0 0; max-height: none; padding: 20px; border: 0; border-radius: 0; transform: translateX(-105%); transition: transform 180ms ease; }
   .unit-outline.is-open { transform: translateX(0); }
