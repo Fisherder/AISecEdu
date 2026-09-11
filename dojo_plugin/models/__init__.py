@@ -571,6 +571,7 @@ class DojoChallenges(db.Model):
         "unified_index",
         "interfaces",
         "exercise_mode",
+        "runtime_environment",
         "simulation",
     ]
     data_defaults = {
@@ -579,6 +580,7 @@ class DojoChallenges(db.Model):
         "allow_privileged": True,
         "progression_locked": False,
         "exercise_mode": "CONTAINER",
+        "runtime_environment": "linux",
         "simulation": None,
         "interfaces": [
             dict(name="Terminal", port=7681),
@@ -618,6 +620,7 @@ class DojoChallenges(db.Model):
             # TODO: maybe we should track the entire import
             kwargs["data"]["image"] = default.data.get("image")
             kwargs["data"]["path_override"] = str(default.path)
+            kwargs["data"]["runtime_environment"] = default.runtime_environment
             kwargs["data"]["exercise_mode"] = default.exercise_mode
             kwargs["data"]["simulation"] = default.simulation
             # only update the unified_index for module and dojo imports, not challenge specific ones
@@ -748,7 +751,9 @@ class DojoChallenges(db.Model):
 
     @property
     def image(self):
-        return self.data.get("image") or "pwncollege/challenge-legacy"
+        from ..runtime_profiles import runtime_profile
+
+        return self.data.get("image") or runtime_profile(self.runtime_environment).image
 
     @property
     def reference_id(self):

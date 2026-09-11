@@ -2762,6 +2762,7 @@ class LearningPackageImport(Resource):
             "objectives": spec.get("objectives") or spec.get("learningObjectives"),
             "tags": metadata.get("tags") or spec.get("tags"),
             "image": runtime.get("image") or spec.get("image"),
+            "runtimeEnvironment": runtime.get("environment") or spec.get("runtimeEnvironment") or spec.get("runtime_environment"),
             "interfaces": runtime.get("interfaces") or spec.get("interfaces"),
             "exerciseMode": (
                 spec.get("exerciseMode")

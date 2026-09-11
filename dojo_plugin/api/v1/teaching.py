@@ -2718,6 +2718,7 @@ def _teacher_agent_context(user, thread):
         "candidateSets": {"statusCounts": {}},
         "artifacts": {"statusCounts": {}, "recent": []},
         "assignments": {"statusCounts": {}, "recent": []},
+        "runtimeEnvironments": [{"id": "linux", "name": "Linux", "default": True}, {"id": "windows", "name": "Windows 远程桌面", "default": False}],
         "nativeAuthoring": {"recentDrafts": [], "recentJobs": []},
         "jobs": {"statusCounts": {}, "recent": []},
         "classrooms": {"statusCounts": {}, "recent": []},
@@ -2913,6 +2914,7 @@ def _teacher_agent_context(user, thread):
             "updated": _timestamp(row.updated),
             "currentConversation": artifact_thread_id(row) == thread.id,
             "publishedChallengeId": row.published_challenge_id,
+                "runtimeEnvironment": (row.spec or {}).get("runtimeEnvironment", "linux"),
         }
 
     snapshot["artifacts"] = {
@@ -2990,6 +2992,7 @@ def _teacher_agent_context(user, thread):
                 "moduleIndex": row.module_index,
                 "validationStatus": (row.validation or {}).get("status"),
                 "publishedChallengeId": row.published_challenge_id,
+                "runtimeEnvironment": (row.spec or {}).get("runtimeEnvironment", "linux"),
             }
             for row in recent_drafts
         ],
@@ -6197,6 +6200,8 @@ def _course_tool_arguments(tool, raw_arguments):
 
 
 def _practice_challenge_constraints(brief, raw_constraints):
+    from ...runtime_profiles import authoring_runtime_constraints
+
     constraints = dict(raw_constraints) if isinstance(raw_constraints, dict) else {}
     requested_mode = str(
         constraints.get("exerciseMode")
@@ -6210,7 +6215,7 @@ def _practice_challenge_constraints(brief, raw_constraints):
     )
     if constraints["exerciseMode"] == "CONTAINER":
         constraints.pop("simulation", None)
-    return constraints
+    return authoring_runtime_constraints(brief, constraints)
 
 
 def _challenge_material_grounding_requested(brief):

@@ -1,0 +1,5 @@
+ARG BASE_IMAGE=aisecedu/windows-course-runtime:20260911-v2
+FROM ${BASE_IMAGE}
+LABEL org.aisecedu.desktop.display="fit-utf8-v1"
+COPY install-display.py /usr/local/lib/windows-lab/install-display.py
+RUN python3 /usr/local/lib/windows-lab/install-display.py

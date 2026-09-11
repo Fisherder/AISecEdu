@@ -72,7 +72,7 @@
       if (module && module.index !== "") params.set("moduleIndex", module.index);
       params.set("objectType", "practice");
       params.set("field", link.dataset.aiField);
-      params.set("prompt", fieldPrompts[link.dataset.aiField] || "请协助填写当前字段。");
+      params.set("prompt", (fieldPrompts[link.dataset.aiField] || "请协助填写当前字段。") + ` 运行环境：${document.getElementById("manual-runtime-environment")?.value || "linux"}。`);
       link.href = `/teacher?${params.toString()}`;
     });
   }
@@ -87,7 +87,7 @@
       const module = selectedModule();
       params.set("dojo", dojoId);
       if (module && module.index !== "") params.set("moduleIndex", module.index);
-      prompt = `请在课程“${dojoName}”${module ? `的“${module.name}”章节` : ""}创建一道 CTF 实践题，并确认题面、学习目标、难度、运行方式和确定性判题条件。`;
+      prompt = `请在课程“${dojoName}”${module ? `的“${module.name}”章节` : ""}创建一道 CTF 实践题，使用 ${document.getElementById("manual-runtime-environment").value} 运行环境，并确认题面、学习目标、难度、运行方式和确定性判题条件。`;
     } else if (nameInput && nameInput.value.trim()) {
       prompt = `请帮我创建课程“${nameInput.value.trim()}”，并确认课程简介、可见范围和第一章。`;
     }
@@ -104,7 +104,7 @@
       : "填写左侧内容，这里会同步显示摘要。";
     if (kind === "practice") {
       const module = selectedModule();
-      summaryScope.textContent = module ? module.name : "请选择章节";
+      summaryScope.textContent = `${module ? module.name : "请选择章节"} · ${document.getElementById("manual-runtime-environment").value === "windows" ? "Windows 远程桌面" : "Linux"}`;
     }
     const count = document.getElementById("manual-description-count");
     if (count && descriptionInput) count.textContent = String(descriptionInput.value.length);
@@ -280,7 +280,8 @@
       tags: lines(document.getElementById("manual-tags").value, 20),
       expectedAnswer: document.getElementById("manual-expected-answer").value.trim(),
       teacherSolution: document.getElementById("manual-teacher-solution").value.trim(),
-      runtimeMode: form.querySelector('input[name="runtimeMode"]:checked').value,
+      runtimeEnvironment: document.getElementById("manual-runtime-environment").value,
+      runtimeMode: document.getElementById("manual-runtime-environment").value === "windows" && form.querySelector('input[name="runtimeMode"]:checked').value === "terminal" ? "desktop" : form.querySelector('input[name="runtimeMode"]:checked').value,
       image: document.getElementById("manual-image").value.trim(),
       starterPath: document.getElementById("manual-starter-path").value.trim(),
       starterContent: document.getElementById("manual-starter-content").value,
@@ -514,14 +515,20 @@
     });
   }
 
-  form.querySelectorAll('input[name="runtimeMode"]').forEach(radio => {
-    radio.addEventListener("change", () => {
-      const web = radio.value === "web" && radio.checked;
-      document.getElementById("manual-port-field").hidden = !web;
-      document.getElementById("manual-runtime-hint").textContent = web
-        ? "Web 服务题必须提供 .py、.js 或 .sh 入口文件，并在代码中使用上方端口。"
-        : "终端题可以不填写；如填写，路径和内容必须同时提供。";
-    });
+  function updateRuntimeFields() {
+    if (kind !== "practice") return;
+    const windows = document.getElementById("manual-runtime-environment").value === "windows";
+    const web = form.querySelector('input[name="runtimeMode"]:checked').value === "web";
+    document.getElementById("manual-port-field").hidden = !web;
+    document.getElementById("manual-native-label").textContent = windows ? "Windows 桌面" : "终端环境";
+    document.getElementById("manual-native-help").textContent = windows ? "学生在原生 Windows 桌面中编写、运行或调试程序" : "学生在隔离终端中完成目标并获取 Flag";
+    document.getElementById("manual-starter-path").placeholder = windows ? "例如：main.c 或 app.ps1" : "例如：app.py";
+    document.getElementById("manual-runtime-hint").textContent = web
+      ? (windows ? "提供 .ps1 或 .cmd 入口，并使用上方端口；学生在 Windows 浏览器访问 localhost。" : "提供 .py、.js 或 .sh 入口文件，并在代码中使用上方端口。")
+      : (windows ? "文件将放入 C:\\Course，编译输出与可变数据请写入 C:\\CourseWork。" : "可不填写；如填写，路径和内容必须同时提供。");
+  }
+  form.querySelectorAll('input[name="runtimeMode"], #manual-runtime-environment').forEach(control => {
+    control.addEventListener("change", updateRuntimeFields);
   });
 
   window.addEventListener("beforeunload", event => {
@@ -532,6 +539,7 @@
     }
   });
   restoreLocalDraft();
+  updateRuntimeFields();
   updateSummary();
   root.dataset.manualReady = "true";
 })();

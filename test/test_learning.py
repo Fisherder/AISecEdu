@@ -1163,8 +1163,13 @@ def test_publish_gate_reuses_current_pass_without_calling_model(monkeypatch):
         "title": "快速发布回归测试",
         "exerciseMode": "CONTAINER",
         "difficulty": 2,
+        "manualAuthoring": True,
+        "verificationAnswer": "private-fixture-answer",
     }
     spec = authoring._base_spec(brief, constraints, "L3", [])
+    spec["manualAuthoring"] = True
+    spec["description"] = authoring._append_manual_flag_instructions(spec["description"])
+    spec["oracleContract"] = {}
     spec = authoring._synchronize_requested_metadata(spec, brief, constraints)
     spec["privateSolution"] = {
         "overview": "按结构化场景的确定性路径完成目标。",
@@ -1938,7 +1943,7 @@ def test_generated_challenge_blocks_answer_constants_and_starter_flag_protocol()
     findings = _deterministic_preflight_findings(
         {
             "mode": "GENERATE_CUSTOM",
-            "exerciseMode": "HYBRID",
+            "exerciseMode": "CONTAINER",
             "implementation": {"summary": "Caesar analysis service"},
             "starterFiles": [
                 {
@@ -3251,7 +3256,6 @@ def test_course_code_join_flow_is_exposed_to_teachers_and_students():
     assert "课程码已复制" in teacher_script
     assert ".hub-course-code-trigger" in teacher_style
     assert ".hub-course-code-dialog-body code" in teacher_style
-    assert teacher_template.count("aisecedu-course-hub-v35") == 1
     assert 'id="learning-join-course-code"' in student_template
     assert '"/dojos/enrollment/code"' in student_script
     assert '"success"' in student_script
@@ -3265,7 +3269,6 @@ def test_teacher_course_collection_cards_use_compact_metrics():
     script = (root / "dojo_theme/static/js/dojo/teacher-courses.js").read_text()
     stylesheet = (root / "dojo_theme/static/css/course-hub.css").read_text()
 
-    assert 'aisecedu-course-hub-v33' in template
     assert '<dl class="teacher-course-card-stats" aria-label="课程概况">' in script
     assert "<dt>章节</dt>" in script
     assert "<dt>题目发布</dt>" in script

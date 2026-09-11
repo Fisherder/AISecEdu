@@ -33,7 +33,9 @@ from ..models import (
     LearningSolutionRuns,
 )
 from .challenge_corpus import search_corpus
-from .intelligence import model_json
+from .intelligence import model_json as _model_json
+from ..runtime_profiles import authoring_runtime_constraints, runtime_profile, normalize_runtime_environment, valid_windows_course_paths
+from .runtime_package import install_runtime_package
 from .simulation import (
     DOMAIN_SCENARIO_PRESETS,
     SimulationError,
@@ -79,7 +81,7 @@ ORACLE_FORBIDDEN_HEADERS = {
     "proxy-authorization",
     "transfer-encoding",
 }
-RUNTIME_INTERPRETERS = {"bash", "node", "python3"}
+RUNTIME_INTERPRETERS = {"bash", "node", "python3", "powershell", "cmd"}
 HTTP_SERVER_PUBLIC_ATTRIBUTES = {
     "BaseHTTPRequestHandler",
     "CGIHTTPRequestHandler",
@@ -92,8 +94,38 @@ RESERVED_STARTER_PATHS = {
     "check",
     "check-server.py",
     "runtime-launcher.py",
+    "runtime-public.json",
+    "runtime-services.json",
 }
 logger = logging.getLogger(__name__)
+
+
+def model_json(system, payload, **kwargs):
+    context = payload if isinstance(payload, dict) else {}
+    environment = context.get("runtimeEnvironment")
+    for key in ("constraints", "frozenPublicSpec", "plannedSpec", "currentSpec", "spec", "baselineSpec", "draftSpec", "deterministicBaseline", "publicSpec", "teachingSpec"):
+        item = context.get(key)
+        if isinstance(item, dict) and item.get("runtimeEnvironment"):
+            environment = item["runtimeEnvironment"]
+            break
+    if environment == "windows":
+        system += (
+            "\n本题明确选择 runtimeEnvironment=windows，必须保留该字段和平台指定镜像。"
+            "这是原生 Windows 桌面题：前文 Linux 解释器和路径的默认约束在此替换为 "
+            "PowerShell 5.1/cmd、C:\\Course（题目文件）和 C:\\CourseWork（可变数据）。"
+            "已有 Windows 题的原生文件和判题规则仍须保持。对于新建题，"
+            "runtimeContract.services.interpreter 只能为 powershell 或 cmd，"
+            "entrypoint 仍使用 starterFiles 的相对路径；平台在 Windows 中自动启动服务。"
+            "可用原生 VS Code、OllyDbg 1.10、C:\\tcc\\tcc.exe 和 .NET 标准库。"
+            "HTTP 服务使用绑定 127.0.0.1 的 .NET TcpListener，避免需要管理员 URLACL 的 HttpListener。"
+            "Windows 不连接外网；不得生成 Linux/Python/Node 服务来代替 Windows 程序。"
+            "oracleContract 仍采用 FLAG_GATE_V1 和只读 GET liveBindings；平台经串口"
+            "读取 Windows 服务的真实响应并核对进程身份，签发动态 Flag 的程序在宿主侧。"
+            "学生在 Windows 运行 C:\\Course\\check.cmd 获取 Flag；Terminal 中的 /challenge/check 也可用。"
+            "需要从 Terminal 执行 Windows 命令时使用 windows-exec '<PowerShell 命令>'。"
+            "题面、私有解法、修复方案、文件和验证必须全部遵守上述 Windows 运行约定。"
+        )
+    return _model_json(system, payload, **kwargs)
 
 
 class DraftPublishBusy(ValueError):
@@ -112,6 +144,7 @@ PUBLIC_CONSTRAINT_KEYS = {
     "difficulty",
     "id",
     "image",
+    "runtimeEnvironment",
     "interfaces",
     "independentChallenge",
     "exerciseMode",
@@ -150,6 +183,7 @@ PLAN_FIELDS = {
 }
 BUILD_FIELDS = PLAN_FIELDS | {"starterFiles"}
 PROTECTED_SPEC_FIELDS = {
+    "runtimeEnvironment",
     "allowPrivileged",
     "hintPolicy",
     "mode",
@@ -590,6 +624,7 @@ def search_candidates(brief, category, *, target_dojo=None, limit=16):
             "objectives": (profile.objectives if profile else []) or [],
             "tags": (profile.tags if profile else []) or [],
             "image": challenge.image,
+            "runtimeEnvironment": challenge.runtime_environment,
             "exerciseMode": normalize_exercise_mode(challenge.exercise_mode),
             "score": score,
             "origin": "PLATFORM_CATALOG",
@@ -983,7 +1018,9 @@ def _infer_exercise_mode(brief, constraints, selected=None):
 
 def _base_spec(brief, constraints, level, candidates):
     brief = str(brief or "").strip()
-    constraints = constraints if isinstance(constraints, dict) else {}
+    constraints = authoring_runtime_constraints(brief, constraints)
+    environment = runtime_profile(constraints["runtimeEnvironment"])
+    candidates = [item for item in candidates if item.get("origin") == "EXTERNAL_CORPUS" or item.get("runtimeEnvironment", "linux") == environment.id]
     category = str(constraints.get("category") or _infer_category(brief)).upper()
     difficulty = _infer_difficulty(brief, constraints)
     first_line = next(
@@ -1087,10 +1124,11 @@ def _base_spec(brief, constraints, level, candidates):
         "sourceReferenceId": selected["referenceId"]
         if selected and mode != "GENERATE_CUSTOM"
         else None,
+        "runtimeEnvironment": environment.id,
         "image": str(
             constraints.get("image")
             or (selected or {}).get("image")
-            or "pwncollege/challenge-legacy:latest"
+            or environment.image
         ),
         "category": category,
         "difficulty": difficulty,
@@ -1122,12 +1160,7 @@ def _base_spec(brief, constraints, level, candidates):
         or (
             [{"name": "Simulation"}]
             if exercise_mode == "SIMULATION"
-            else [
-                {"name": "Terminal", "port": 7681},
-                {"name": "Code", "port": 8080},
-                {"name": "Desktop", "port": 6080},
-                {"name": "SSH"},
-            ]
+            else environment.interfaces
         ),
         "rubric": copy.deepcopy(DEFAULT_RUBRIC),
         "hintPolicy": copy.deepcopy(DEFAULT_HINT_POLICY),
@@ -1373,7 +1406,7 @@ def _normalize_runtime_contract(value):
             ),
             "interpreter": interpreter,
             "entrypoint": entrypoint,
-            "workingDirectory": "/challenge",
+            "workingDirectory": "C:\\Course" if interpreter in {"powershell", "cmd"} else "/challenge",
             "arguments": [
                 str(argument)[:200]
                 for argument in arguments[:16]
@@ -1739,7 +1772,7 @@ def _synchronize_generated_metadata(spec):
             f"{path}：学生可见且纳入当前发布包的实际产物" for path in starter_paths
         ],
         "runtimeAssumptions": [
-            "工作目录由平台固定为 /challenge，运行身份为非特权 hacker。",
+            ("程序在原生 Windows 中运行，题目目录为 C:\\Course，可变数据目录为 C:\\CourseWork。" if spec.get("runtimeEnvironment") == "windows" else "工作目录由平台固定为 /challenge，运行身份为非特权 hacker。"),
             "运行合约不注入题目自定义环境变量，产物必须离线自包含。",
             *[
                 (
@@ -1778,6 +1811,10 @@ def _synchronize_requested_metadata(spec, brief, constraints):
 
     spec = copy.deepcopy(spec or {})
     constraints = constraints if isinstance(constraints, dict) else {}
+    environment = runtime_profile(constraints.get("runtimeEnvironment") or spec.get("runtimeEnvironment"))
+    spec["runtimeEnvironment"] = environment.id
+    if spec.get("mode") == "GENERATE_CUSTOM":
+        spec["image"] = str(constraints.get("image") or environment.image)
     if constraints.get("id"):
         spec["id"] = _slug(str(constraints["id"]))
     if constraints.get("title"):
@@ -1858,11 +1895,12 @@ def _append_oracle_instructions(description, contract):
     return f"{description}\n\n{instructions}"[:24000]
 
 
-def _append_manual_flag_instructions(description):
+def _append_manual_flag_instructions(description, runtime_environment="linux"):
     description = _strip_legacy_submission_instructions(description)
+    checker = "C:\\Course\\check.cmd" if runtime_environment == "windows" else "/challenge/check"
     instructions = (
         "### 提交与验证\n"
-        "完成题目并取得验证答案后，运行 `/challenge/check <答案>` 获取本次环境的"
+        f"完成题目并取得验证答案后，运行 `{checker} <答案>` 获取本次环境的"
         "动态 Flag，再将 Flag 提交到平台。"
     )
     return f"{description}\n\n{instructions}"[:24000]
@@ -2246,6 +2284,8 @@ def _runtime_contract_diagnostics(spec, normalized):
             diagnostics.append(f"服务 {index} 引用不存在的 starter file")
             continue
         interpreter = service["interpreter"]
+        if interpreter not in runtime_profile(spec.get("runtimeEnvironment")).interpreters:
+            diagnostics.append(f"服务 {index} 的解释器与所选运行环境不兼容")
         environment_dependency = (
             re.search(r"\bos\s*\.\s*(?:environ|getenv)\b", content)
             or re.search(
@@ -3688,7 +3728,7 @@ def _normalize_model_spec(generated, fallback, allowed):
     for key in ("privileged", "allowPrivileged"):
         if not isinstance(refined.get(key), bool):
             refined[key] = fallback[key]
-    refined["image"] = str(refined.get("image") or fallback["image"])[:256]
+    refined["image"] = str(fallback["image"])[:256]
     starter_files = refined.get("starterFiles")
     if isinstance(starter_files, list):
         refined["starterFiles"] = []
@@ -3707,7 +3747,7 @@ def _normalize_model_spec(generated, fallback, allowed):
     else:
         refined["starterFiles"] = copy.deepcopy(fallback.get("starterFiles") or [])
     for key in PROTECTED_SPEC_FIELDS:
-        refined[key] = copy.deepcopy(fallback[key])
+        refined[key] = copy.deepcopy(fallback.get(key, "linux") if key == "runtimeEnvironment" else fallback[key])
     return refined
 
 
@@ -3728,6 +3768,7 @@ def _enforce_explicit_public_constraints(spec, baseline, constraints):
         ("allowPrivileged", "allowPrivileged"),
         ("interfaces", "interfaces"),
         ("exerciseMode", "exerciseMode"),
+        ("runtimeEnvironment", "runtimeEnvironment"),
     ):
         if (
             constraint_key in constraints
@@ -4754,8 +4795,8 @@ def _model_preflight_review(
                     else "FLAG_GATE_V1"
                 ),
                 "studentArtifactRequired": False,
-                "runtimeLauncherUser": (None if source_native else "hacker"),
-                "workingDirectory": (None if source_native else "/challenge"),
+                "runtimeLauncherUser": (None if source_native else "Student" if built.get("runtimeEnvironment") == "windows" else "hacker"),
+                "workingDirectory": (None if source_native else runtime_profile(built.get("runtimeEnvironment")).directory),
                 "generatedReservedFiles": (
                     [] if source_native else sorted(RESERVED_STARTER_PATHS)
                 ),
@@ -6568,7 +6609,7 @@ def create_draft(
     progress_callback=None,
 ):
     brief = str(brief or "").strip()
-    constraints = dict(constraints) if isinstance(constraints, dict) else {}
+    constraints = authoring_runtime_constraints(brief, constraints)
     category = str(constraints.get("category") or _infer_category(brief)).upper()
     _emit_progress(
         progress_callback,
@@ -6578,6 +6619,7 @@ def create_draft(
         4,
     )
     candidates = search_candidates(brief, category, target_dojo=dojo)
+    candidates = [item for item in candidates if item.get("origin") == "EXTERNAL_CORPUS" or item.get("runtimeEnvironment", "linux") == constraints["runtimeEnvironment"]]
     external_evidence_count = sum(
         1 for candidate in candidates if candidate.get("origin") == "EXTERNAL_CORPUS"
     )
@@ -6694,7 +6736,8 @@ def create_manual_draft(dojo, module, author, fields):
     expected_answer = str(fields.get("expectedAnswer") or "").strip()
     teacher_solution = str(fields.get("teacherSolution") or "").strip()
     category = str(fields.get("category") or "GENERAL").strip().upper()
-    image = str(fields.get("image") or "pwncollege/challenge-legacy:latest").strip()
+    environment = runtime_profile(authoring_runtime_constraints(description, fields)["runtimeEnvironment"])
+    image = str(fields.get("image") or environment.image).strip()
     runtime_mode = str(fields.get("runtimeMode") or "terminal").strip().lower()
 
     if not 1 <= len(title) <= 128:
@@ -6709,7 +6752,7 @@ def create_manual_draft(dojo, module, author, fields):
         raise ValueError("题目类别格式无效。")
     if not IMAGE_PATTERN.fullmatch(image):
         raise ValueError("运行镜像格式无效。")
-    if runtime_mode not in {"terminal", "web"}:
+    if runtime_mode not in {"terminal", "desktop", "web"} or (runtime_mode == "desktop" and environment.id != "windows"):
         raise ValueError("运行方式必须为终端题或 Web 服务题。")
 
     try:
@@ -6766,6 +6809,8 @@ def create_manual_draft(dojo, module, author, fields):
             or starter_path in RESERVED_STARTER_PATHS
         ):
             raise ValueError("起始文件路径无效或使用了系统保留名称。")
+        if environment.id == "windows" and not valid_windows_course_paths([starter_path]):
+            raise ValueError("起始文件路径不兼容 Windows 或与平台 check.cmd 冲突。")
         if not starter_content:
             raise ValueError("已填写起始文件路径，请同时填写文件内容。")
         if len(starter_content) > 100000:
@@ -6779,14 +6824,14 @@ def create_manual_draft(dojo, module, author, fields):
         raise ValueError("确定性答案不能出现在学生可见题面或起始文件中。")
 
     runtime_contract = {"services": []}
-    interfaces = [{"name": "Terminal", "port": 7681}]
+    interfaces = environment.interfaces
     if runtime_mode == "web":
         if not starter_files:
             raise ValueError("Web 服务题需要提供一个可运行的起始文件。")
         suffix = pathlib.PurePosixPath(starter_path).suffix.lower()
-        interpreter = {".py": "python3", ".js": "node", ".sh": "bash"}.get(suffix)
+        interpreter = ({".ps1": "powershell", ".cmd": "cmd"} if environment.id == "windows" else {".py": "python3", ".js": "node", ".sh": "bash"}).get(suffix)
         if interpreter is None:
-            raise ValueError("Web 服务入口仅支持 .py、.js 或 .sh 文件。")
+            raise ValueError("Windows 服务入口支持 .ps1 或 .cmd；Linux 支持 .py、.js 或 .sh。")
         try:
             port = int(fields.get("port") or 8000)
         except (TypeError, ValueError) as exc:
@@ -6806,10 +6851,11 @@ def create_manual_draft(dojo, module, author, fields):
                 }
             ]
         }
-        interfaces.insert(0, {"name": "Web", "port": port})
+        if environment.id == "linux":
+            interfaces.insert(0, {"name": "Web", "port": port})
 
     oracle_contract = {}
-    public_description = _append_manual_flag_instructions(description)
+    public_description = _append_manual_flag_instructions(description, environment.id)
     constraints = {
         "id": challenge_id,
         "title": title,
@@ -6819,6 +6865,7 @@ def create_manual_draft(dojo, module, author, fields):
         "objectives": objectives,
         "tags": tags,
         "image": image,
+        "runtimeEnvironment": environment.id,
         "interfaces": interfaces,
         "exerciseMode": "CONTAINER",
         "starterFiles": starter_files,
@@ -6842,10 +6889,10 @@ def create_manual_draft(dojo, module, author, fields):
             {
                 "goal": "完成实践并获取动态 Flag",
                 "action": teacher_solution
-                or "推导验证答案，再运行 /challenge/check <答案> 获取动态 Flag。",
+                or ("推导验证答案，再运行 C:\\Course\\check.cmd <答案> 获取动态 Flag。" if environment.id == "windows" else "推导验证答案，再运行 /challenge/check <答案> 获取动态 Flag。"),
             }
         ],
-        "successIndicators": ["/challenge/check 返回本次学习会话的动态 Flag。"],
+        "successIndicators": [("C:\\Course\\check.cmd" if environment.id == "windows" else "/challenge/check") + " 返回本次学习会话的动态 Flag。"],
         "protectedFacts": {"expectedAnswer": expected_answer},
     }
     spec["authoringStrategy"] = {
@@ -6893,7 +6940,7 @@ def create_manual_draft(dojo, module, author, fields):
 def revise_draft(draft, teacher_message, *, progress_callback=None):
     conversation = list(draft.conversation or [])
     conversation.append({"role": "teacher", "content": str(teacher_message)[:12000]})
-    constraints = dict(draft.constraints or {})
+    constraints = authoring_runtime_constraints(teacher_message, draft.constraints, revision=True)
     constraints["latestTeacherMessage"] = str(teacher_message)[:12000]
     fallback = {**draft.spec}
     brief = "\n".join(
@@ -6908,6 +6955,7 @@ def revise_draft(draft, teacher_message, *, progress_callback=None):
         4,
     )
     candidates = search_candidates(brief, category, target_dojo=draft.dojo)
+    candidates = [item for item in candidates if item.get("origin") == "EXTERNAL_CORPUS" or item.get("runtimeEnvironment", "linux") == constraints["runtimeEnvironment"]]
     external_evidence_count = sum(
         1 for candidate in candidates if candidate.get("origin") == "EXTERNAL_CORPUS"
     )
@@ -6964,7 +7012,7 @@ def revise_draft(draft, teacher_message, *, progress_callback=None):
         ("allowPrivileged", "allowPrivileged"),
         ("interfaces", "interfaces"),
     ):
-        if spec_key in draft.spec and constraint_key not in constraints:
+        if spec_key in draft.spec and constraint_key not in constraints and not (spec_key in {"image", "interfaces"} and draft.spec.get("runtimeEnvironment", "linux") != constraints["runtimeEnvironment"]):
             fallback[spec_key] = copy.deepcopy(draft.spec[spec_key])
     fallback = _synchronize_requested_metadata(fallback, brief, constraints)
     spec, pipeline = _authoring_pipeline(
@@ -7286,8 +7334,8 @@ def _model_validate(draft, spec):
                     else "FLAG_GATE_V1"
                 ),
                 "studentArtifactRequired": False,
-                "runtimeLauncherUser": (None if source_native else "hacker"),
-                "workingDirectory": (None if source_native else "/challenge"),
+                "runtimeLauncherUser": (None if source_native else "Student" if spec.get("runtimeEnvironment") == "windows" else "hacker"),
+                "workingDirectory": (None if source_native else runtime_profile(spec.get("runtimeEnvironment")).directory),
                 "generatedReservedFiles": (
                     [] if source_native else sorted(RESERVED_STARTER_PATHS)
                 ),
@@ -7354,7 +7402,7 @@ def validate_draft(
         incoming_spec["manualAuthoring"] = True
         incoming_spec["oracleContract"] = {}
         incoming_spec["description"] = _append_manual_flag_instructions(
-            incoming_spec.get("description")
+            incoming_spec.get("description"), incoming_spec.get("runtimeEnvironment", "linux")
         )
     spec = _synchronize_requested_metadata(
         incoming_spec,
@@ -7821,6 +7869,12 @@ def validate_draft(
         )
         check(
             f"starter-file-{index + 1}", "SUPPLY_CHAIN", valid, "起始文件路径与大小安全"
+        )
+    if spec.get("runtimeEnvironment") == "windows":
+        check(
+            "windows-course-paths", "RUNTIME",
+            valid_windows_course_paths([item.get("path") if isinstance(item, dict) else None for item in starter_files]),
+            "Windows 题目文件使用兼容路径，不存在大小写冲突或保留设备名称",
         )
     check(
         "mutable-image-tag",
@@ -9037,6 +9091,7 @@ exit 1
     for relative in ("check", "runtime-launcher.py", ".init"):
         os.chmod(package_path / relative, 0o755)
     os.chmod(package_path / "check-server.py", 0o700)
+    install_runtime_package(package_path, spec)
     return package_path
 
 
@@ -9152,6 +9207,7 @@ def publish_draft(draft, actor):
     )
     if simulation is not None:
         simulation["version"] = version
+    runtime_environment = normalize_runtime_environment(spec.get("runtimeEnvironment"))
     if source:
         package_path = _snapshot_source_package(
             draft,
@@ -9160,6 +9216,7 @@ def publish_draft(draft, actor):
             source,
         )
         image = source.image
+        runtime_environment = source.runtime_environment
         privileged = source.privileged
         allow_privileged = source.allow_privileged
         interfaces = source.interfaces
@@ -9193,6 +9250,7 @@ def publish_draft(draft, actor):
             description=spec["description"],
             required=bool(draft.constraints.get("required", True)),
             image=image,
+            runtime_environment=runtime_environment,
             privileged=privileged,
             allow_privileged=allow_privileged,
             interfaces=interfaces,
@@ -9209,6 +9267,7 @@ def publish_draft(draft, actor):
         dojo_challenge.data = {
             **(dojo_challenge.data or {}),
             "image": image,
+            "runtime_environment": runtime_environment,
             "privileged": privileged,
             "allow_privileged": allow_privileged,
             "interfaces": interfaces,
@@ -9285,6 +9344,7 @@ def publish_draft(draft, actor):
         ),
         "packagePath": str(package_path),
         "image": image,
+        "runtimeEnvironment": runtime_environment,
         "interfaces": interfaces,
         "generatedFiles": sorted(
             [
@@ -9397,6 +9457,8 @@ def catalog_item_view(dojo_challenge, include_private=False):
         "moduleId": dojo_challenge.module.id,
         "required": dojo_challenge.required,
         "image": dojo_challenge.image,
+        "runtimeEnvironment": dojo_challenge.runtime_environment,
+        "runtimeLabel": runtime_profile(dojo_challenge.runtime_environment).label,
         "exerciseMode": normalize_exercise_mode(dojo_challenge.exercise_mode),
         "category": profile.category
         if profile

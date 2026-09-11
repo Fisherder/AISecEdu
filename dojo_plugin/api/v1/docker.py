@@ -41,6 +41,7 @@ from ...utils import (
 )
 from ...utils.dojo import dojo_accessible, get_current_dojo_challenge
 from ...utils.workspace import exec_run, reset_home, workspace_start_slot
+from ...runtime_profiles import runtime_profile, container_runtime_profile
 from ...utils.feed import publish_container_start
 from ...utils.background_stats import publish_stat_event
 from ...utils.request_logging import get_trace_id, log_generator_output
@@ -136,6 +137,10 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
     challenge_bin_path = "/run/challenge/bin"
     dojo_bin_path = "/run/dojo/bin"
     image = docker_client.images.get(resolved_dojo_challenge.image)
+    profile = runtime_profile(resolved_dojo_challenge.runtime_environment)
+    image_labels = image.attrs["Config"].get("Labels") or {}
+    if not (resolved_dojo_challenge.data or {}).get("runtime_environment") and image_labels.get("org.aisecedu.runtime") == "windows-qemu":
+        profile = runtime_profile("windows")
     image_env = image.attrs["Config"].get("Env") or []
     image_path = next((env_var[len("PATH="):].split(":") for env_var in image_env if env_var.startswith("PATH=")), [])
     env_path = ":".join([challenge_bin_path, dojo_bin_path, *image_path])
@@ -186,9 +191,12 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
             "PATH": env_path,
             "SHELL": f"{dojo_bin_path}/bash",
             "DOJO_CHALLENGE_DIR": "/challenge",
+            "DOJO_RUNTIME_ENVIRONMENT": profile.id,
             "DOJO_AUTH_TOKEN": auth_token,
         },
         labels={
+            "dojo.runtime_environment": profile.id,
+            "dojo.runtime.bootstrap": image_labels.get("org.aisecedu.runtime.bootstrap", ""),
             "dojo.dojo_id": dojo_challenge.dojo.reference_id,
             "dojo.module_id": dojo_challenge.module.id,
             "dojo.challenge_id": dojo_challenge.id,
@@ -219,7 +227,7 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
         cpu_period=100000,
         cpu_quota=400000,
         pids_limit=1024,
-        mem_limit="6G" if resolved_dojo_challenge.image == "aisecedu/windows-course-runtime:20260911-v1" else "4G",
+        mem_limit=profile.memory,
         runtime="io.containerd.run.kata.v2" if resolved_dojo_challenge.privileged else "runc",
         cap_add=capabilities,
         security_opt=[f"seccomp={SECCOMP}"],
@@ -376,6 +384,9 @@ def start_challenge(user, dojo_challenge, practice, *, as_user=None):
             raise RuntimeError(f"DOJO_INIT_FAILED: {cause}")
     else:
         raise RuntimeError("Workspace failed to become ready.")
+    profile = container_runtime_profile(container)
+    if profile.initializer and container.labels.get("dojo.runtime.bootstrap") == profile.initializer:
+        exec_run([profile.initializer], container=container)
     return container
 
 

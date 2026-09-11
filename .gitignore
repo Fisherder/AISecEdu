@@ -43,3 +43,7 @@ ops/deployment.env
 /ai_secedu_dev.db
 /*.sqlite
 /*.sqlite3
+
+ops/deployment.env.bak-*
+
+dojo/dojo-init.bak-*

@@ -81,3 +81,5 @@ make verify
 项目保留 `/opt/pwn.college`、`/pwncollege_api`、`pwn.college{...}` 答案凭证格式及部分服务名，用于兼容现有题库、工作区协议和运维工具；它们是同一玄甲系统的内部兼容接口，不代表第二套应用。
 
 本项目基于 pwn.college DOJO 开发，并继续遵循仓库中的许可证与上游归属。上游背景见 [历史](./docs/history.md)，核心架构见 [架构](./docs/architecture.md)，参与开发前请阅读 [贡献指南](./CONTRIBUTING.md) 与 [开发说明](./docs/development.md)。
+
+Linux / Windows 运行环境选择、Windows 镜像构建和桌面适配见 [Windows runtime](workspace/services/windows-desktop/README.md)，部署验收见 [运行环境验收记录](ops/runtime-profiles-verification.md)。

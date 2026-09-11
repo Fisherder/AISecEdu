@@ -174,6 +174,8 @@ def _public_challenge_context(challenge):
         "exercise": challenge.name or challenge.id,
         "description": str(challenge.description or "")[:16000],
         "interfaces": challenge.interfaces or [],
+        "runtimeEnvironment": challenge.runtime_environment,
+        "nativeWorkspace": "C:\\Course" if challenge.runtime_environment == "windows" else "/challenge",
         "workingDirectory": "/challenge",
         "identity": "hacker (uid 1000)",
     }
@@ -324,6 +326,9 @@ def _agent_command(challenge_context, trace):
             "解释器正常运行，例如 `bash /challenge/run`。绝不能因为入口点暂时失败而扫描根目录、"
             "探查 /flag 的属性、枚举 setuid 程序、检查 /opt 或平台运行时。收到策略拒绝后，只能"
             "依据已经获得的题面与可见证据缩小范围并调整下一步。"
+            "如果 challenge.runtimeEnvironment=windows，学生程序在 Windows 原生执行。"
+            "通过 windows-exec '<PowerShell 命令>' 操作 C:\\Course 中的文件和原生程序，"
+            "不要在 Linux 运行 Windows 脚本；服务已由平台自动启动。/challenge/check 仍为平台门禁。"
             "每轮只返回一个紧凑 JSON 对象："
             "{\"rationale\":string,\"command\":string,\"expectedEvidence\":string,"
             "\"done\":boolean}。command 必须是下一条可执行 shell 命令；基于已有证据推进，"
@@ -514,6 +519,10 @@ def _run_solution_agent(app, run_id):
                 raise RuntimeError("确定性情境题应通过可重放目标路径验证。")
             solver_user = _temporary_solver_user(run.id)
             container = start_challenge(solver_user, challenge, False)
+            if challenge.runtime_environment == "windows":
+                ready = container.exec_run(["/usr/bin/timeout", "270", "/usr/local/bin/windows-exec", "--ready"], user="1000")
+                if ready.exit_code:
+                    raise RuntimeError("Windows 课程文件与服务未能就绪：" + ready.output.decode(errors="replace")[-1000:])
             run = _set_run_state(
                 run_id,
                 phase="executing",

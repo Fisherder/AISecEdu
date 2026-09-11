@@ -25,6 +25,7 @@ from CTFd.utils.user import get_current_user, is_admin
 
 from ..models import DojoAdmins, Dojos, DojoModules, DojoChallenges, DojoResources, DojoChallengeVisibilities, DojoResourceVisibilities, DojoModuleVisibilities
 from ..config import DOJOS_DIR
+from ..runtime_profiles import runtime_profile
 from ..utils import get_current_container, sanitize_survey
 
 
@@ -80,6 +81,7 @@ DOJO_SPEC = Schema({
     Optional("importable"): bool,
     Optional("interfaces"): INTERFACES_LIST,
     Optional("exercise_mode"): "CONTAINER",
+    Optional("runtime_environment"): Or("linux", "windows"),
 
     Optional("import"): {
         "dojo": UNIQUE_ID_REGEX,
@@ -107,6 +109,7 @@ DOJO_SPEC = Schema({
         Optional("importable"): bool,
         Optional("interfaces"): INTERFACES_LIST,
         Optional("exercise_mode"): "CONTAINER",
+        Optional("runtime_environment"): Or("linux", "windows"),
 
         Optional("import"): {
             Optional("dojo"): UNIQUE_ID_REGEX,
@@ -157,6 +160,7 @@ DOJO_SPEC = Schema({
                 Optional("auxiliary"): dict,
                 Optional("required", default=True): bool,
                 Optional("exercise_mode"): "CONTAINER",
+                Optional("runtime_environment"): Or("linux", "windows"),
                 Optional("import"): {
                     Optional("dojo"): UNIQUE_ID_REGEX,
                     Optional("module"): ID_REGEX,
@@ -492,7 +496,8 @@ def dojo_from_spec(data, *, dojo_dir=None, dojo=None):
                     privileged=shadow("privileged", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
                     allow_privileged=shadow("allow_privileged", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
                     importable=shadow("importable", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
-                    interfaces=shadow("interfaces", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
+                    interfaces=shadow("interfaces", dojo_data, module_data, challenge_data, default=runtime_profile(shadow("runtime_environment", dojo_data, module_data, challenge_data, default="linux")).interfaces),
+                    runtime_environment=shadow("runtime_environment", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
                     exercise_mode=shadow("exercise_mode", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
                     challenge=challenge(
                         module_data.get("id"), challenge_data.get("id"), transfer=challenge_data.get("transfer", None)

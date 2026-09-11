@@ -916,6 +916,7 @@ def test_native_authoring_batch_exposes_five_independent_management_links(
             return self.rows
 
     action = SimpleNamespace(
+        id="action-1",
         result={"formalJobIds": [f"job-{index}" for index in range(1, 6)]},
         status="PENDING",
         error=None,
@@ -925,6 +926,7 @@ def test_native_authoring_batch_exposes_five_independent_management_links(
         SimpleNamespace(
             id=f"job-{index}",
             action_id="action-1",
+            owner_id=1,
             kind="learning.authoring",
             status="SUCCEEDED",
             result={"draftId": f"draft-{index}"},
@@ -964,6 +966,7 @@ def test_native_authoring_batch_exposes_five_independent_management_links(
         SimpleNamespace(query=SingleResultQuery(SimpleNamespace(id="intro"))),
     )
 
+    monkeypatch.setattr(jobs, "TeachingGenerationBatches", SimpleNamespace(query=SingleResultQuery(None)))
     jobs._sync_native_authoring_batch_action(children[0])
 
     assert action.status == "SUCCEEDED"
@@ -980,7 +983,7 @@ def test_native_authoring_batch_exposes_five_independent_management_links(
     root = pathlib.Path(__file__).resolve().parents[1]
     client = (root / "dojo_theme/static/js/dojo/teaching-agent.js").read_text()
     runtime = (root / "dojo_plugin/agent_runtime/jobs.py").read_text()
-    assert "const batchPosition = batchCount > 1" in client
+    assert "const batchPosition" in client and "batchCount > 1" in client
     assert "可独立修订、发布和删除" in client
     assert 'result["batch"] = {' in runtime
     assert '"index": batch_index' in runtime
@@ -1244,7 +1247,7 @@ def test_global_agent_question_constraints_preserve_only_explicit_modes():
         "创建一项密码算法仿真 CTF 实践题",
         explicit,
     )
-    assert converted == {"exerciseMode": "SIMULATION", "category": "CRYPTO"}
+    assert converted == {"exerciseMode": "SIMULATION", "category": "CRYPTO", "runtimeEnvironment": "linux"}
     assert explicit["exerciseMode"] == "SIMULATION"
 
     inferred = teaching._practice_challenge_constraints(

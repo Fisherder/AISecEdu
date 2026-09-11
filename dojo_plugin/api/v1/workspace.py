@@ -22,6 +22,7 @@ from ...utils.request_logging import get_trace_id
 from ...utils.workspace import start_on_demand_service, reset_home
 from ...pages.workspace import forward_workspace, forward_port, forward_short_port
 from ...config import WORKSPACE_SECRET, WORKSPACE_SESSION_SECONDS
+from ...runtime_profiles import container_runtime_profile
 
 
 workspace_namespace = Namespace(
@@ -173,7 +174,7 @@ class view_desktop(Resource):
                     "autoconnect": 1,
                     "reconnect": 1,
                     "reconnect_delay": 200,
-                    "resize": "remote",
+                    "resize": container_runtime_profile(container).desktop_resize,
                     "path": forward_workspace(service=service_param, service_path="websockify", signature=signature, message=message, include_host=False),
                     "view_only": int(view_only),
                     "password": password,
@@ -186,7 +187,7 @@ class view_desktop(Resource):
                     "autoconnect": 1,
                     "reconnect": 1,
                     "reconnect_delay": 200,
-                    "resize": "local",
+                    "resize": "scale",
                     "path": forward_workspace(service=service_param, service_path="websockify", signature=signature, message=message, include_host=False),
                     "password": "password",
                 }

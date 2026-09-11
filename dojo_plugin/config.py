@@ -117,6 +117,9 @@ DOJO_AI_ENABLED = (
 DOJO_AI_BASE_URL = (
     os.getenv("DOJO_AI_BASE_URL") or "https://api.deepseek.com"
 ).rstrip("/")
+DOJO_LINUX_RUNTIME_IMAGE = os.getenv("DOJO_LINUX_RUNTIME_IMAGE") or "pwncollege/challenge-legacy:latest"
+DOJO_WINDOWS_RUNTIME_IMAGE = os.getenv("DOJO_WINDOWS_RUNTIME_IMAGE") or "aisecedu/windows-runtime:1"
+
 DOJO_AI_TUTOR_MODEL = os.getenv("DOJO_AI_TUTOR_MODEL") or "deepseek-v4-flash"
 DOJO_AI_GUIDE_MODEL = os.getenv("DOJO_AI_GUIDE_MODEL") or "deepseek-v4-flash"
 DOJO_AI_GRADER_MODEL = os.getenv("DOJO_AI_GRADER_MODEL") or "deepseek-v4-flash"

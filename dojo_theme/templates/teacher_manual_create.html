@@ -103,12 +103,14 @@
         </div>
       </section>
 
+      <label class="manual-field is-wide"><span>运行环境</span><select id="manual-runtime-environment" name="runtimeEnvironment"><option value="linux">Linux</option><option value="windows">Windows 远程桌面</option></select><small>Windows 提供原生桌面、VS Code 和 OllyDbg；题目文件位于 C:\Course。</small></label>
+
       <details id="manual-section-runtime" class="manual-advanced" {% if not dojo.modules %}hidden{% endif %}>
-        <summary><span><strong>运行环境</strong><small>默认终端环境可以满足大多数 CTF 实践题</small></span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+        <summary><span><strong>运行环境</strong><small>选择学生操作方式与起始文件</small></span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
         <div class="manual-form-section">
           <div class="manual-field-grid">
-            <fieldset class="manual-field manual-choice-group is-wide"><legend>学生如何操作</legend><label><input type="radio" name="runtimeMode" value="terminal" checked><span><strong>终端环境</strong><small>学生在隔离终端中完成目标并获取 Flag</small></span></label><label><input type="radio" name="runtimeMode" value="web"><span><strong>Web 服务</strong><small>启动一个带网页入口的隔离服务</small></span></label></fieldset>
-            <label class="manual-field is-wide"><span>运行镜像</span><input id="manual-image" type="text" maxlength="255" value="pwncollege/challenge-legacy:latest"><small>不确定时保留默认值。</small></label>
+            <fieldset class="manual-field manual-choice-group is-wide"><legend>学生如何操作</legend><label><input type="radio" name="runtimeMode" value="terminal" checked><span><strong id="manual-native-label">终端环境</strong><small id="manual-native-help">学生在隔离终端中完成目标并获取 Flag</small></span></label><label><input type="radio" name="runtimeMode" value="web"><span><strong>Web 服务</strong><small>启动一个带网页入口的隔离服务</small></span></label></fieldset>
+            <label class="manual-field is-wide"><span>运行镜像</span><input id="manual-image" type="text" maxlength="255" placeholder="自动使用所选环境的课程镜像"><small>留空即可使用所选运行环境。</small></label>
             <label class="manual-field"><span>起始文件路径</span><input id="manual-starter-path" type="text" maxlength="240" placeholder="例如：challenge/app.py"></label>
             <label id="manual-port-field" class="manual-field" hidden><span>Web 服务端口</span><input id="manual-port" type="number" min="1024" max="65535" value="8000"></label>
             <label class="manual-field is-wide"><span>起始文件内容</span><textarea id="manual-starter-content" class="is-code" rows="10" maxlength="100000" placeholder="可选。为学生准备源代码、数据或 Web 服务入口。"></textarea><small id="manual-runtime-hint">终端题可以不填写；如填写，路径和内容必须同时提供。</small></label>
@@ -157,5 +159,5 @@
 
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-upload-v2') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/teacher-manual-create.js', v='aisecedu-manual-create-v4') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/teacher-manual-create.js', v='aisecedu-runtime-profiles-v1') }}"></script>
 {% endblock %}

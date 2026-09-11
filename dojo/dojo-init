@@ -85,6 +85,8 @@ define DOJO_AI_ENABLED auto
 define DOJO_AI_BASE_URL https://api.deepseek.com
 define DEEPSEEK_API_KEY
 define DOJO_AI_API_KEY
+define DOJO_LINUX_RUNTIME_IMAGE pwncollege/challenge-legacy:latest
+define DOJO_WINDOWS_RUNTIME_IMAGE aisecedu/windows-runtime:1
 define DOJO_AI_TUTOR_MODEL deepseek-v4-flash
 define DOJO_AI_GUIDE_MODEL deepseek-v4-flash
 define DOJO_AI_GRADER_MODEL deepseek-v4-flash

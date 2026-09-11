@@ -826,11 +826,38 @@ function enforceSlideDeckPageInstruction(
   };
 }
 
+export function requestedRuntimeEnvironment(prompt: string): 'windows' | 'linux' | null {
+  const choices: Array<{ environment: 'windows' | 'linux'; score: number }> = [];
+  const tokens = /(?<![a-z0-9])(?:windows(?:\s*1[01])?|win1[01]|linux|ubuntu|debian)(?![a-z0-9])/gi;
+  for (const match of prompt.matchAll(tokens)) {
+    const offset = match.index ?? 0;
+    const prefix = prompt.slice(Math.max(0, offset - 32), offset);
+    const suffix = prompt.slice(offset + match[0].length, offset + match[0].length + 12);
+    if (/(?:不要|不用|不使用|不选|非|不需要|无需|without|not|don't\s+use)(?:\s|使用|选用|选择|用)*$/i.test(prefix)) continue;
+    let score = /(?:用|在|选择|改成|改为|换成|切换到|运行环境[：:为]?|use|using|on|switch\s+to)\s*$/i.test(prefix) ? 2 : 1;
+    if (/^\s*(?:远程桌面|运行环境|环境|桌面)/.test(suffix)) score += 1;
+    choices.push({ environment: /^win/i.test(match[0]) ? 'windows' : 'linux', score });
+  }
+  if (!choices.length) return null;
+  const score = Math.max(...choices.map((choice) => choice.score));
+  const selected = choices.filter((choice) => choice.score === score);
+  if (score === 1 && new Set(selected.map((choice) => choice.environment)).size > 1) return null;
+  return selected[selected.length - 1].environment;
+}
+
 function enforceChallengeBatchInstruction(
   generationOptions: TeacherGenerationOptions,
   originalPrompt: string,
 ): TeacherGenerationOptions {
   if (generationOptions.artifactType !== 'ctf-challenge') return generationOptions;
+  const runtimeEnvironment = requestedRuntimeEnvironment(originalPrompt);
+  if (runtimeEnvironment) {
+    generationOptions = {
+      ...generationOptions,
+      baseArguments: { ...generationOptions.baseArguments, constraints: { ...(recordValue(generationOptions.baseArguments.constraints) ?? {}), runtimeEnvironment } },
+      options: generationOptions.options.map((option) => ({ ...option, rewrittenPrompt: `${option.rewrittenPrompt}\n运行环境必须为 ${runtimeEnvironment === 'windows' ? 'Windows 原生远程桌面' : 'Linux'}，题目程序与运行步骤均须兼容该环境。` })),
+    };
+  }
   const inferred = requestedChallengeCount(originalPrompt);
   const existing = Number(generationOptions.baseArguments.challengeCount);
   const challengeCount =
@@ -1954,7 +1981,7 @@ ${skillText}
 可用平台工具及主要参数：
 - course.list/read/open/studio/settings/members；course.create(name, slug?, description?, access?, initialModuleName?, initialModuleId?)；course.update(name?, description?, access?, showScoreboard?)；course.sync/promote/delete；course.member.add(username, role)；course.member.remove(username)
 - module.open(moduleIndex)；module.create(id?, name, description?)；module.update(moduleIndex, id?, name?, description?, showChallenges?, showScoreboard?)；module.delete(moduleIndex)
-- challenge.open(moduleIndex, challengeId)；challenge.generate(moduleIndex, brief, challengeCount?, difficulty?, constraints?) 一次可原子启动 1–5 道彼此独立的学生实践任务，每道题都有独立任务、草稿、运行状态、解题路径和评分记录。CTF 实践题必须拥有独立隔离环境与动态 Flag；教师说“一次生成 5 道 CTF”时必须令 challengeCount=5，不能压成一道含五个小问的大题，也不能在选择方案阶段拆成五组候选。教师明确要求学生完成可自动评分的确定性场景模拟题时，也使用 challenge.generate，并设置 constraints.exerciseMode=SIMULATION；这类题依据场景状态、操作过程与反思证据评分，不强制动态 Flag。challenge.revise(draftIds, instruction) 用一条自然语言要求并行修订最近生成的 1–5 个真实草稿，draftIds 必须从 platformFacts.nativeAuthoring.recentDrafts 复制，instruction 必须完整保留教师提出的每一点；challenge.publish(draftId)；challenge.delete(moduleIndex, challengeId)
+- challenge.open(moduleIndex, challengeId)；challenge.generate(moduleIndex, brief, challengeCount?, difficulty?, constraints?) 一次可原子启动 1–5 道彼此独立的学生实践任务，每道题都有独立任务、草稿、运行状态、解题路径和评分记录。CTF 实践题必须拥有独立隔离环境与动态 Flag；运行环境可选 Linux 或原生 Windows 桌面，教师说“用 Windows 出题”时设置 constraints.runtimeEnvironment=windows，说“使用 Linux”时设置 linux，未指定时沿用 Linux。必须在三种方案的每份 rewrittenPrompt 和 baseArguments.constraints 中保留该选择；修订时保留既有环境，除非教师明确要求切换。不要要求教师提供镜像名称。Windows 题目文件在 C:\\Course，学生使用原生 VS Code、OllyDbg、PowerShell 和 C:\\Course\\check.cmd；教师说“一次生成 5 道 CTF”时必须令 challengeCount=5，不能压成一道含五个小问的大题，也不能在选择方案阶段拆成五组候选。教师明确要求学生完成可自动评分的确定性场景模拟题时，也使用 challenge.generate，并设置 constraints.exerciseMode=SIMULATION；这类题依据场景状态、操作过程与反思证据评分，不强制动态 Flag。challenge.revise(draftIds, instruction) 用一条自然语言要求并行修订最近生成的 1–5 个真实草稿，draftIds 必须从 platformFacts.nativeAuthoring.recentDrafts 复制，instruction 必须完整保留教师提出的每一点；challenge.publish(draftId)；challenge.delete(moduleIndex, challengeId)
 - assignment.list；assignment.read(assignmentId)；assignment.submissions(assignmentId)；assignment.generate(prompt, title?, kind?, moduleIndex?, questionCount?, difficulty?, challengeIds?, availableFrom?, dueAt?, allowLate?, allowResubmit?, passPercent?) 每次创建一个可包含多道选择、判断、简答或知识检查题的作业/测验，也可引用已有 CTF；assignment.update(assignmentId, ...)；assignment.publish(assignmentId)；assignment.close(assignmentId)；assignment.delete(assignmentId)；assignment.grade.override(assignmentId, submissionId, score, feedback?)
 - dojo.select(referenceId, moduleIndex?)；progress.read；material.list；material.analyze(materialId) 在需要重新提取/持久化索引时刷新单份材料；material.add_to_module(materialId, referenceId, moduleIndex, name?) 把教师上传的原文件作为可下载资料原子加入指定课程的既有章节，并把对话切换到该章节；material.apply_chapters(materialId, chapterIndexes) 根据材料分析结果新建一个或多个章节候选并保留材料溯源
 - candidate.generate(prompt, artifactType, candidateCount, sourceRefs?) 创建平台原生内容；artifactType 必须使用渲染引擎的规范值：lesson-plan（平台教案）、slide-deck（页面式课件）、attack-defense-scene（攻防拓扑演示）、simulation（可操作参数与状态变化的模拟实训）、debate（多智能体辩论）、roleplay（角色扮演）或 assessment（评分方案），不得自造 courseware、slides、demo 等同义类型；candidateCount 是正式生成的产物数量，不是页面、题目、角色或环节数量；candidate.compare(candidateSetId)
