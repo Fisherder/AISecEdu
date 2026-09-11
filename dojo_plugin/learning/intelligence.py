@@ -141,6 +141,7 @@ def model_json(
     else:
         body["temperature"] = temperature
     last_error = None
+    request_max_tokens = int(max_tokens)
     total_started = time.monotonic()
     total_deadline = total_started + DOJO_AI_TOTAL_TIMEOUT_SECONDS
     for attempt_number in range(1, max(1, attempts) + 1):
@@ -153,6 +154,7 @@ def model_json(
                 )
             request_body = {
                 **body,
+                "max_tokens": request_max_tokens,
                 "messages": [dict(message) for message in body["messages"]],
             }
             if attempt_number > 1:
@@ -165,10 +167,11 @@ def model_json(
                     isinstance(last_error, ValueError)
                     and "output-token limit" in str(last_error)
                 ):
-                    request_body["max_tokens"] = min(
-                        max(int(max_tokens) * 2, int(max_tokens) + 1024),
-                        16000,
+                    request_max_tokens = min(
+                        max(request_max_tokens * 2, request_max_tokens + 1024),
+                        max(32768, int(max_tokens)),
                     )
+                    request_body["max_tokens"] = request_max_tokens
                 if isinstance(last_error, ValueError) and "response contract" in str(
                     last_error
                 ):

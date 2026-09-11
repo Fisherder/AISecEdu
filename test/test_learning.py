@@ -1461,6 +1461,37 @@ def test_model_json_total_deadline_includes_retries(monkeypatch):
     assert 1 <= len(calls) <= 2
 
 
+@pytest.mark.parametrize(('initial_limit', 'failures', 'expected_limits'), [
+    (10000, ('length', 'length'), [10000, 20000, 32768]),
+    (14000, ('length',), [14000, 28000]),
+    (50000, ('length',), [50000, 50000]),
+    (4096, ('malformed',), [4096, 4096]),
+    (10000, ('length', 'malformed'), [10000, 20000, 20000]),
+])
+def test_model_json_truncation_grows_a_bounded_output_limit(monkeypatch, initial_limit, failures, expected_limits):
+    import requests
+    from CTFd.plugins.dojo_plugin.learning import intelligence
+
+    limits = []
+
+    def post(*args, **kwargs):
+        failure = failures[len(limits)] if len(limits) < len(failures) else None
+        limits.append(kwargs['json']['max_tokens'])
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps({'choices': [{'finish_reason': 'length' if failure == 'length' else 'stop', 'message': {'content': '{' if failure else '{"ok":true}'}}]}).encode()
+        return response
+
+    monkeypatch.setattr(intelligence, 'DOJO_AI_ENABLED', True)
+    monkeypatch.setattr(intelligence, 'DOJO_AI_API_KEY', 'test-key')
+    monkeypatch.setattr(intelligence.requests, 'post', post)
+    monkeypatch.setattr(intelligence.time, 'sleep', lambda _: None)
+    result = intelligence.model_json('Return JSON', {}, model='test-model', max_tokens=initial_limit, attempts=len(failures) + 1)
+    assert result['ok'] is True
+    assert limits == expected_limits
+    assert result['_agentMeta']['requestedMaxTokens'] == expected_limits[-1]
+
+
 def test_oracle_live_binding_accepts_bounded_json_array_selector():
     from CTFd.plugins.dojo_plugin.learning.authoring import (
         _normalize_oracle_contract,
