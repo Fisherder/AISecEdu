@@ -79,11 +79,11 @@ def _assert_verified(run):
             + json.dumps(_solution_diagnostics(run), ensure_ascii=False)
         )
     if (
-        run.get("model") != "deepseek-v4-pro"
-        or solution.get("model") != "deepseek-v4-pro"
+        run.get("model") != "deepseek-v4-flash"
+        or solution.get("model") != "deepseek-v4-flash"
         or solution.get("provider") != "MODEL_EXECUTED"
     ):
-        raise AssertionError("teacher solution did not use the configured DeepSeek V4 Pro route")
+        raise AssertionError("teacher solution did not use the configured DeepSeek V4 Flash route")
     if not trace or not teacher_steps:
         raise AssertionError("teacher solution omitted its real execution trace or teacher steps")
     if not any(step.get("flagObserved") for step in trace):
@@ -235,12 +235,12 @@ while True:
             ),
             (202,),
         ).json()["solutionRun"]
-        if queued.get("model") != "deepseek-v4-pro":
+        if queued.get("model") != "deepseek-v4-flash":
             raise AssertionError("teacher solution queue selected an unexpected model")
         run = _wait_for_solution(admin, dojo, challenge_id)
         _assert_verified(run)
         flow.passed(
-            "DeepSeek V4 Pro solved a real isolated learner workspace and produced trace-bound, redacted teacher steps"
+            "DeepSeek V4 Flash solved a real isolated learner workspace and produced trace-bound, redacted teacher steps"
         )
     finally:
         if dojo:

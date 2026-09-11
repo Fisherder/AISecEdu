@@ -352,7 +352,7 @@ describe('OpenAI provider defaults', () => {
     ['xiaomi', 'mimo-v2.5', { mode: 'disabled' }, { thinking: { type: 'disabled' } }],
     [
       'deepseek',
-      'deepseek-v4-pro',
+      'deepseek-v4-flash',
       { mode: 'enabled', effort: 'max' },
       { thinking: { type: 'enabled' }, reasoning_effort: 'max' },
     ],
@@ -394,7 +394,7 @@ describe('OpenAI provider defaults', () => {
     ],
     [
       'openrouter',
-      'deepseek/deepseek-v4-pro',
+      'deepseek/deepseek-v4-flash',
       { mode: 'enabled', effort: 'high' },
       { reasoning: { enabled: true, effort: 'high' } },
     ],

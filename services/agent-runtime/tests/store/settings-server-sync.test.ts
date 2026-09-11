@@ -50,7 +50,7 @@ vi.mock('@/lib/ai/providers', () => ({
       requiresApiKey: true,
       icon: '/logos/deepseek.svg',
       models: [
-        { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+        { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
         { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
       ],
     },

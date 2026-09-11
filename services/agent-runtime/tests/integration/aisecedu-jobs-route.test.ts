@@ -38,7 +38,7 @@ function body(kind = 'agent.chat') {
     modelRoute: {
       route: 'standard',
       provider: 'deepseek',
-      actual_model: 'deepseek-v4-pro',
+      actual_model: 'deepseek-v4-flash',
     },
   };
 }
@@ -103,9 +103,9 @@ describe('玄甲 durable job integration route', () => {
     mocks.resolveModel.mockReset();
     mocks.resolveModel.mockResolvedValue({
       providerId: 'deepseek',
-      modelId: 'deepseek-v4-pro',
-      modelString: 'deepseek:deepseek-v4-pro',
-      model: { id: 'deepseek-v4-pro' },
+      modelId: 'deepseek-v4-flash',
+      modelString: 'deepseek:deepseek-v4-flash',
+      model: { id: 'deepseek-v4-flash' },
       modelInfo: { outputWindow: 16_000 },
       thinkingConfig: { effort: 'high' },
     });
@@ -366,15 +366,15 @@ describe('玄甲 durable job integration route', () => {
   it('fails loudly when a required complex-scene model is not resolved', async () => {
     mocks.resolveModel.mockResolvedValue({
       providerId: 'deepseek',
-      modelId: 'deepseek-v4-flash',
-      modelString: 'deepseek:deepseek-v4-flash',
-      model: { id: 'deepseek-v4-flash' },
+      modelId: 'unexpected-model',
+      modelString: 'deepseek:unexpected-model',
+      model: { id: 'unexpected-model' },
       modelInfo: { outputWindow: 16_000 },
     });
     const base = body('candidate.generate');
     const payload = {
       ...base,
-      modelRoute: { ...base.modelRoute, required_model: 'deepseek-v4-pro' },
+      modelRoute: { ...base.modelRoute, required_model: 'deepseek-v4-flash' },
     };
     const { POST } = await import('@/app/api/integration/jobs/execute/route');
     const response = await POST(request(payload));
@@ -881,7 +881,7 @@ describe('玄甲 durable job integration route', () => {
     ]);
     expect(result.model).toMatchObject({
       provider: 'deepseek',
-      actualModel: 'deepseek-v4-pro',
+      actualModel: 'deepseek-v4-flash',
       degraded: false,
     });
     expect(mocks.callLLM).toHaveBeenCalledTimes(2);
@@ -1008,7 +1008,7 @@ describe('玄甲 durable job integration route', () => {
     expect(mocks.callLLM.mock.calls[0][0].prompt).toContain(prompt);
     expect(mocks.callLLM.mock.calls[1][0].prompt).toContain(prompt);
     expect(mocks.callLLM.mock.calls[1][0].system).toContain('# Lesson plan file');
-    expect(result.model.actualModel).toBe('deepseek-v4-pro');
+    expect(result.model.actualModel).toBe('deepseek-v4-flash');
     expect(result.model.executionMode).toBeUndefined();
   });
 

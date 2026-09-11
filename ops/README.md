@@ -361,8 +361,8 @@ docker exec pwncollege-dojo dojo compose restart ctfd
 
 `verify-learning-flow.py` 使用一次性课程、用户和由验证器随机生成的 L3 教学挑战，在真实 Kata workspace 中验证红队修复、私有声明式 Flag Gate、Guide、Tutor、证据链和 Pro 过程评分。验证器确认题包不存在学生报告提交路径，每个判定字段都由私有 `liveBindings` 直接读取当前本地服务状态；root 私有检查器同时复核响应、starter file 完整性和平台服务进程记录，满足目标后只返回该挑战的动态 Flag。结束时会删除对应 workspace、home、用户、课程、生成包、solve 与 submission，并断言运行前后的全局 solve/submission 数量一致，不读取或完成任何现有课程题目。
 
-`verify-solution-agent-real.py` 创建一次性课程和普通学习者可见的握手题，真实调用 `deepseek-v4-pro` 以临时隐藏学习者身份启动 Kata workspace。它要求 Agent 仅沿题面公开入口解题、在 uid 1000 下获得与该临时账号和题目绑定的动态 Flag，并断言 Flag 只以脱敏证据出现。教师步骤必须与真实允许命令轨迹逐 turn、逐顺序一一对应；最后验证器删除临时课程、题目、工作区、用户和解题记录。
+`verify-solution-agent-real.py` 创建一次性课程和普通学习者可见的握手题，真实调用 `deepseek-v4-flash` 以临时隐藏学习者身份启动 Kata workspace。它要求 Agent 仅沿题面公开入口解题、在 uid 1000 下获得与该临时账号和题目绑定的动态 Flag，并断言 Flag 只以脱敏证据出现。教师步骤必须与真实允许命令轨迹逐 turn、逐顺序一一对应；最后验证器删除临时课程、题目、工作区、用户和解题记录。
 
-`verify-container-context-real.py` 创建一次性原生题和 Kata 工作区，直接验证可信容器快照能识别并有界读取 `/challenge` 下的挂载文件；扫描固定使用只读平台工具的绝对路径、非登录 shell、虚拟文件系统剪枝、深度/数量/字节上限，且不会跟随符号链接。`verify-source-authoring-real.py` 使用部署 key 创建一次性课程，依次真实验证 L1/L2 的 `deepseek-v4-flash` 方案、`deepseek-v4-pro` 规格构建/红队/最终验证、原生源题快照，并在发布后启动真实 Kata workspace，要求 Flash Tutor 同时使用源题基线、实时文件、学生证据和固定包版本；它断言复用题不会获得模型生成的 `solution.json`、Oracle 或第二套运行合约，并确保全局 solve/submission 计数不变。两个脚本都会删除其临时 workspace、Home、用户、课程及相关数据。
+`verify-container-context-real.py` 创建一次性原生题和 Kata 工作区，直接验证可信容器快照能识别并有界读取 `/challenge` 下的挂载文件；扫描固定使用只读平台工具的绝对路径、非登录 shell、虚拟文件系统剪枝、深度/数量/字节上限，且不会跟随符号链接。`verify-source-authoring-real.py` 使用部署 key 创建一次性课程，依次真实验证 L1/L2 的 `deepseek-v4-flash` 方案、`deepseek-v4-flash` 规格构建/红队/最终验证、原生源题快照，并在发布后启动真实 Kata workspace，要求 Flash Tutor 同时使用源题基线、实时文件、学生证据和固定包版本；它断言复用题不会获得模型生成的 `solution.json`、Oracle 或第二套运行合约，并确保全局 solve/submission 计数不变。两个脚本都会删除其临时 workspace、Home、用户、课程及相关数据。
 
 真实模型质量验收可依次运行 `verify-agent-context.py`、`verify-guide-real.py`、`verify-tutor-real.py`、`verify-grader-real.py`、`verify-authoring-build.py`、`verify-solution-agent-real.py` 和 `evaluate-ai-agents.py`。它们分别验证完整基线/实时容器上下文、连续 Guide/Tutor 交互、证据型 Pro 评分、Pro 构建与红队修复闭环、真实学习者边界内的教师解题轨迹，以及由独立 Pro 评审的四类 Agent 综合质量；除完整学习流程、源题发布和教师解题验证脚本外，这些聚焦验证器使用事务回滚或临时目录，不发布题目，也不会输出私有答案。

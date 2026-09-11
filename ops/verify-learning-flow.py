@@ -60,6 +60,44 @@ def require(response, statuses=(200,)):
     return response
 
 
+# aisededu-async-authoring-contract-v1
+def resolve_authoring_response(admin, response, api_base):
+    """Normalize synchronous and accepted asynchronous authoring responses."""
+    if response.status_code == 201:
+        return response.json()
+    if response.status_code != 202:
+        raise AssertionError("unexpected authoring response status")
+
+    payload = response.json()
+    job = payload.get("job") if isinstance(payload, dict) else None
+    job_id = job.get("id") if isinstance(job, dict) else None
+    if not isinstance(job_id, str) or not job_id:
+        raise AssertionError("authoring response did not provide a job identifier")
+
+    import time
+
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        detail = require(
+            admin.get(f"{api_base}/learning/authoring/jobs/{job_id}", timeout=30),
+            200,
+            "read authoring job",
+        ).json()
+        current = detail.get("job") if isinstance(detail, dict) else None
+        if not isinstance(current, dict):
+            raise AssertionError("authoring job response was malformed")
+        state = str(current.get("status", "")).upper()
+        if state == "COMPLETED":
+            draft_id = current.get("draftId")
+            if not isinstance(draft_id, str) or not draft_id:
+                raise AssertionError("completed authoring job did not provide a draft")
+            return {"draft": {"id": draft_id}}
+        if state in {"FAILED", "CANCELLED", "CANCELED"}:
+            raise AssertionError("authoring job reached a failed terminal state")
+        time.sleep(1)
+    raise AssertionError("authoring job did not reach a terminal state")
+
+
 def validation_diagnostics(validation):
     """Return useful validation metadata without printing private solution data."""
 
@@ -598,25 +636,8 @@ def main():
             "Create a beginner incident-verification lab in which the learner establishes a baseline, "
             "inspects ordered runtime evidence, validates one hypothesis, and explains remediation."
         )
-        created = require(
-            admin.post(
-                f"{API}/dojos/{dojo}/authoring",
-                json={
-                    "brief": brief,
-                    "moduleId": "lab",
-                    "level": "L3",
-                    "constraints": {
-                        "id": challenge_id,
-                        "title": "Trusted Evidence Verification",
-                        "category": "FORENSICS",
-                        "difficulty": 2,
-                        "verificationAnswer": verification_answer,
-                    },
-                },
-                timeout=3600,
-            ),
-            (201,),
-        ).json()
+        authoring_response = require(admin.post(f'{API}/dojos/{dojo}/authoring', json={'brief': brief, 'moduleId': 'lab', 'level': 'L3', 'constraints': {'id': challenge_id, 'title': 'Trusted Evidence Verification', 'category': 'FORENSICS', 'difficulty': 2, 'verificationAnswer': verification_answer}}, timeout=3600), (201, 202))
+        created = resolve_authoring_response(admin, authoring_response, API)
         draft = created["draft"]
         draft_id = draft["id"]
         if (
@@ -629,13 +650,13 @@ def main():
         pipeline = draft["spec"].get("authoringPipeline") or {}
         if (
             (pipeline.get("plan") or {}).get("model") != "deepseek-v4-flash"
-            or (pipeline.get("build") or {}).get("model") != "deepseek-v4-pro"
+            or (pipeline.get("build") or {}).get("model") != "deepseek-v4-flash"
             or (pipeline.get("review") or {}).get("model")
-            != "deepseek-v4-pro"
+            != "deepseek-v4-flash"
             or (pipeline.get("postReview") or {}).get("model")
-            != "deepseek-v4-pro"
+            != "deepseek-v4-flash"
             or (pipeline.get("validate") or {}).get("model")
-            != "deepseek-v4-pro"
+            != "deepseek-v4-flash"
         ):
             raise AssertionError("authoring draft used the wrong DeepSeek model route")
         preflight = draft["spec"].get("preflightReview") or {}
@@ -656,7 +677,7 @@ def main():
             validation["status"] != "PASS"
             or validation["summary"]["blocked"]
             or (validation.get("agentReview") or {}).get("model")
-            != "deepseek-v4-pro"
+            != "deepseek-v4-flash"
         ):
             raise AssertionError(
                 "challenge package did not pass the publish gate: "
@@ -700,7 +721,7 @@ def main():
             revision_validation["status"] != "PASS"
             or revision_validation["summary"]["blocked"]
             or (revision_validation.get("agentReview") or {}).get("model")
-            != "deepseek-v4-pro"
+            != "deepseek-v4-flash"
         ):
             raise AssertionError(
                 "revised challenge package did not pass validation: "
@@ -761,7 +782,7 @@ def main():
                 level_validation["status"] != "PASS"
                 or level_validation["summary"]["blocked"]
                 or (level_validation.get("agentReview") or {}).get("model")
-                != "deepseek-v4-pro"
+                != "deepseek-v4-flash"
             ):
                 raise AssertionError(
                     f"{level} package did not pass validation: "
@@ -1170,7 +1191,7 @@ def main():
         )
         if (
             grader.get("provider") != "MODEL"
-            or grader.get("model") != "deepseek-v4-pro"
+            or grader.get("model") != "deepseek-v4-flash"
             or not grader.get("liveContext")
             or not grader.get("solutionProvider")
             or len(assessment.get("feedback") or "") < 100

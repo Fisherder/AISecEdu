@@ -53,7 +53,7 @@ def is_complex_scene(kind, prompt="", payload=None):
     # Only the current request may semantically promote a job to the complex
     # model.  The payload also contains trusted course context and conversation
     # history; scanning all of it made an unrelated course/module name such as
-    # ``Web攻防基础`` route a simple slide deck through deepseek-v4-pro.
+    # ``Web攻防基础`` route a simple slide deck through deepseek-v4-flash.
     semantic_payload = {
         key: payload.get(key)
         for key in (
@@ -137,7 +137,7 @@ def route_model(kind, *, prompt="", payload=None, allow_degraded=False):
         else config.DOJO_AI_AUTHORING_PLAN_MODEL
     )
     return {
-        "route": "deepseek-v4-pro" if complex_scene else "teaching-default",
+        "route": "deepseek-v4-flash" if complex_scene else "teaching-default",
         "provider": "deepseek",
         "actual_model": actual_model,
         "required_model": (

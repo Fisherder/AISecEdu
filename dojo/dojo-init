@@ -87,11 +87,11 @@ define DEEPSEEK_API_KEY
 define DOJO_AI_API_KEY
 define DOJO_AI_TUTOR_MODEL deepseek-v4-flash
 define DOJO_AI_GUIDE_MODEL deepseek-v4-flash
-define DOJO_AI_GRADER_MODEL deepseek-v4-pro
-define DOJO_AI_SOLUTION_MODEL deepseek-v4-pro
+define DOJO_AI_GRADER_MODEL deepseek-v4-flash
+define DOJO_AI_SOLUTION_MODEL deepseek-v4-flash
 define DOJO_AI_AUTHORING_PLAN_MODEL deepseek-v4-flash
-define DOJO_AI_AUTHORING_BUILD_MODEL deepseek-v4-pro
-define DOJO_AI_AUTHORING_VALIDATE_MODEL deepseek-v4-pro
+define DOJO_AI_AUTHORING_BUILD_MODEL deepseek-v4-flash
+define DOJO_AI_AUTHORING_VALIDATE_MODEL deepseek-v4-flash
 define DOJO_AI_AUTHORING_VALIDATION_MAX_ROUNDS 5
 define DOJO_AI_TIMEOUT_SECONDS 120
 define DOJO_AI_MAX_CONTEXT_CHARS 180000
@@ -100,6 +100,9 @@ legacy_agent_ticket_secret="$(grep -oP '^OPENMAIC_TICKET_SECRET=\K.*' /data/conf
 legacy_agent_service_secret="$(grep -oP '^OPENMAIC_SERVICE_SECRET=\K.*' /data/config.env)"
 define GLOBAL_AGENT_RUNTIME_TICKET_SECRET "${legacy_agent_ticket_secret:-$(openssl rand -hex 32)}"
 define GLOBAL_AGENT_RUNTIME_SERVICE_SECRET "${legacy_agent_service_secret:-$(openssl rand -hex 32)}"
+define GLOBAL_AGENT_RUNTIME_PUBLIC_ORIGIN "https://${DOJO_HOST}/agent-runtime"
+define AISECEDU_PUBLIC_ORIGIN "https://${DOJO_HOST}"
+define GLOBAL_AGENT_RUNTIME_FRAME_ANCESTORS "https://${DOJO_HOST} http://${DOJO_HOST}"
 define GLOBAL_AGENT_RUNTIME_DATA_VOLUME pwncollege_agent-runtime-data
 
 mv /data/.config.env /data/config.env

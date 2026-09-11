@@ -137,7 +137,7 @@ describe('applyTokenPlan', () => {
           apiFormat: 'openai' as const,
           // dotted plan alias of a native Doubao Seed 2.0 model + a cross-vendor
           // model the Ark plan serves through its OpenAI-compatible endpoint
-          defaultModels: ['doubao-seed-2.0-pro', 'deepseek-v4-pro'],
+          defaultModels: ['doubao-seed-2.0-pro', 'deepseek-v4-flash'],
         },
       },
     };

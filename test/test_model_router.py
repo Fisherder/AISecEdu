@@ -34,7 +34,7 @@ def test_explicit_complex_artifacts_and_current_prompt_still_require_pro():
             prompt="生成教学内容",
             payload={"artifactType": artifact_type},
         )
-        assert route["route"] == "deepseek-v4-pro"
+        assert route["route"] == "deepseek-v4-flash"
         assert route["required_model"]
 
     prompt_route = route_model(
@@ -42,7 +42,7 @@ def test_explicit_complex_artifacts_and_current_prompt_still_require_pro():
         prompt="请生成一个多智能体攻防联动处置推演",
         payload={"courseContext": {"course": {"name": "普通课程"}}},
     )
-    assert prompt_route["route"] == "deepseek-v4-pro"
+    assert prompt_route["route"] == "deepseek-v4-flash"
     assert prompt_route["required_model"]
 
 
@@ -86,4 +86,4 @@ def test_large_slide_deck_revision_does_not_promote_flash_to_pro():
     )
     assert route_model("artifact.revise", payload=large_simulation_revision)[
         "route"
-    ] == "deepseek-v4-pro"
+    ] == "deepseek-v4-flash"

@@ -555,7 +555,7 @@ class CompleteTeachingLearningLifecycle(flow.TeacherAgentVerifier):
             "拓扑、证据面板、重置方法和安全边界。",
             "attack-defense-scene",
             "single",
-            "deepseek-v4-pro",
+            "deepseek-v4-flash",
             materialize=True,
         )
         self.send_generation(
@@ -564,7 +564,7 @@ class CompleteTeachingLearningLifecycle(flow.TeacherAgentVerifier):
             "评分标准、复盘以及一键重置。",
             "simulation",
             "single",
-            "deepseek-v4-pro",
+            "deepseek-v4-flash",
             materialize=True,
         )
         self.verify_teacher_generation_volume_and_quality()

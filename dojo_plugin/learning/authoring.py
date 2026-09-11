@@ -7966,7 +7966,7 @@ def validate_draft(
                 "agent-validation",
                 "AI_REVIEW",
                 not model_blocking,
-                agent_review["summary"] or "DeepSeek V4 Pro 独立复核完成",
+                agent_review["summary"] or "DeepSeek V4 Flash 独立复核完成",
             )
         for index, finding in enumerate(agent_review["findings"]):
             resolved = finding.get("status") == "RESOLVED"
@@ -7999,7 +7999,7 @@ def validate_draft(
                 "agent-verdict",
                 "AI_REVIEW",
                 False,
-                agent_review["summary"] or "DeepSeek V4 Pro 要求阻止发布并人工复核",
+                agent_review["summary"] or "DeepSeek V4 Flash 要求阻止发布并人工复核",
             )
     else:
         check(

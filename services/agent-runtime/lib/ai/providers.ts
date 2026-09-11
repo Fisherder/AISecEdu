@@ -791,22 +791,6 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     icon: '/logos/deepseek.svg',
     models: [
       {
-        id: 'deepseek-v4-pro',
-        name: 'DeepSeek V4 Pro',
-        contextWindow: 1048576,
-        outputWindow: 393216,
-        capabilities: {
-          streaming: true,
-          tools: true,
-          vision: false,
-          thinking: {
-            toggleable: true,
-            budgetAdjustable: true,
-            defaultEnabled: true,
-          },
-        },
-      },
-      {
         id: 'deepseek-v4-flash',
         name: 'DeepSeek V4 Flash',
         contextWindow: 1048576,
@@ -1105,13 +1089,6 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     requiresApiKey: true,
     icon: '/logos/openrouter.svg',
     models: [
-      {
-        id: 'deepseek/deepseek-v4-pro',
-        name: 'DeepSeek V4 Pro',
-        contextWindow: 1048576,
-        outputWindow: 131072,
-        capabilities: { streaming: true, tools: true, vision: false },
-      },
       {
         id: 'deepseek/deepseek-v4-flash',
         name: 'DeepSeek V4 Flash',

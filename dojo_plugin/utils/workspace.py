@@ -41,6 +41,12 @@ service_start_lease_seconds = max(
     max(service_start_timeouts.values()) + 30,
     int(os.getenv("DOJO_SERVICE_START_LEASE_SECONDS", "300")),
 )
+workspace_start_limit = max(1, int(os.getenv("DOJO_WORKSPACE_START_CONCURRENCY", "16")))
+workspace_start_wait_seconds = max(60, int(os.getenv("DOJO_WORKSPACE_START_WAIT_SECONDS", "900")))
+workspace_start_lease_seconds = max(
+    workspace_start_wait_seconds + 60,
+    int(os.getenv("DOJO_WORKSPACE_START_LEASE_SECONDS", "960")),
+)
 
 _ACQUIRE_SERVICE_SLOT = """
 local now = tonumber(ARGV[1])
@@ -105,6 +111,55 @@ def service_start_slot(service_name):
             client.zrem(key, token)
         except redis.RedisError:
             logger.exception("failed to release service start slot")
+
+
+@contextmanager
+def workspace_start_slot():
+    """Bound full workspace cold starts across every Gunicorn worker.
+
+    Creating a workspace simultaneously exercises Docker, HomeFS, Nix
+    initialization, and challenge injection. Admission control keeps a burst
+    from timing out otherwise healthy starts. Redis failures deliberately fail
+    open so an observability dependency cannot make a learner unusable.
+    """
+    client = get_redis_client()
+    key = "workspace:container-start:leases"
+    token = uuid.uuid4().hex
+    deadline = time.monotonic() + workspace_start_wait_seconds
+    acquired = False
+    try:
+        while time.monotonic() < deadline:
+            now = time.time()
+            acquired = bool(
+                client.eval(
+                    _ACQUIRE_SERVICE_SLOT,
+                    1,
+                    key,
+                    now,
+                    workspace_start_limit,
+                    now + workspace_start_lease_seconds,
+                    token,
+                    workspace_start_lease_seconds,
+                )
+            )
+            if acquired:
+                break
+            time.sleep(0.1)
+    except redis.RedisError:
+        logger.exception("workspace start limiter unavailable; proceeding without a slot")
+        yield
+        return
+
+    if not acquired:
+        raise TimeoutError("timed out waiting for workspace start capacity")
+
+    try:
+        yield
+    finally:
+        try:
+            client.zrem(key, token)
+        except redis.RedisError:
+            logger.exception("failed to release workspace start slot")
 
 
 def _command_audit_fields(cmd):

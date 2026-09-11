@@ -12,7 +12,7 @@
  * per the model's capability by callLLM. e.g.
  *
  *   DEFAULT_MODEL=openai:gpt-5.4-mini
- *   MODEL_ROUTES='{"scene-content":"openai:gpt-5.4","pbl-chat":{"model":"anthropic:claude-sonnet-4","thinking":{"enabled":false}},"pbl-v2-runtime":"deepseek:deepseek-v4-pro"}'
+ *   MODEL_ROUTES='{"scene-content":"openai:gpt-5.4","pbl-chat":{"model":"anthropic:claude-sonnet-4","thinking":{"enabled":false}},"pbl-v2-runtime":"deepseek:deepseek-v4-flash"}'
  *
  * Only the *routable* stages below are valid keys — each is backed by a real
  * `resolveModel` call site. Downstream sub-calls (e.g. `pbl-generate`,

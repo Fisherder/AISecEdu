@@ -253,12 +253,12 @@ providers:
 
     it('maps OpenRouter env prefix to provider ID', async () => {
       vi.stubEnv('OPENROUTER_API_KEY', 'sk-openrouter');
-      vi.stubEnv('OPENROUTER_MODELS', 'deepseek/deepseek-v4-pro,deepseek/deepseek-v4-flash');
+      vi.stubEnv('OPENROUTER_MODELS', 'deepseek/deepseek-v4-flash,deepseek/deepseek-v4-flash');
       const { getServerProviders } = await import('@/lib/server/provider-config');
       const providers = getServerProviders();
 
       expect(providers.openrouter.models).toEqual([
-        'deepseek/deepseek-v4-pro',
+        'deepseek/deepseek-v4-flash',
         'deepseek/deepseek-v4-flash',
       ]);
     });

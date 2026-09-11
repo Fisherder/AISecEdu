@@ -180,14 +180,14 @@ describe('resolveModel — per-stage resolution order', () => {
   });
 
   it('routed-without-thinking drops client thinking (routed model uses its default)', async () => {
-    process.env.MODEL_ROUTES = JSON.stringify({ 'scene-content': 'deepseek:deepseek-v4-pro' });
+    process.env.MODEL_ROUTES = JSON.stringify({ 'scene-content': 'deepseek:deepseek-v4-flash' });
     const { resolveModel } = await import('@/lib/server/resolve-model');
     const r = await resolveModel({ stage: 'scene-content', thinkingConfig: { effort: 'high' } });
     expect(r.thinkingConfig).toBeUndefined();
   });
 
   it('unrouted stage keeps the client thinking config', async () => {
-    process.env.MODEL_ROUTES = JSON.stringify({ 'scene-content': 'deepseek:deepseek-v4-pro' });
+    process.env.MODEL_ROUTES = JSON.stringify({ 'scene-content': 'deepseek:deepseek-v4-flash' });
     const { resolveModel } = await import('@/lib/server/resolve-model');
     const r = await resolveModel({
       stage: 'quiz-grade',

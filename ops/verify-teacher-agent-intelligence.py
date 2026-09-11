@@ -78,7 +78,7 @@ def run():
         )
         require_condition(submitted.get("candidateSetId") is None, "raw request was pre-routed to candidates")
         require_condition((submitted.get("job") or {}).get("kind") == "agent.chat", "raw request did not reach agent.chat")
-        job = verifier.wait_job(submitted["job"]["id"], expected_model="deepseek-v4-pro")
+        job = verifier.wait_job(submitted["job"]["id"], expected_model="deepseek-v4-flash")
         result = job.get("result") or {}
         files = result.get("files") or []
         require_condition(files, "agent returned no downloadable file")
@@ -147,7 +147,7 @@ def run():
         )
         loop_job = verifier.wait_job(
             loop_submitted["job"]["id"],
-            expected_model="deepseek-v4-pro",
+            expected_model="deepseek-v4-flash",
         )
         loop_proposals = (loop_job.get("result") or {}).get("toolProposals") or []
         proposal_index = next(
@@ -248,7 +248,7 @@ def run():
         )
         followup = verifier.wait_job(
             continued["job"]["id"],
-            expected_model="deepseek-v4-pro",
+            expected_model="deepseek-v4-flash",
         )
         followup_result = followup.get("result") or {}
         followup_answer = str(followup_result.get("answer") or "")

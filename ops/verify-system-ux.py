@@ -49,6 +49,32 @@ AXE_SOURCE_CANDIDATES = (
 )
 
 
+def readable_local_ca():
+    """Return the deployment CA only when this verifier can actually read it."""
+    candidate = ROOT / "data" / "local-tls" / "ca.crt"
+    try:
+        return candidate if candidate.is_file() and os.access(candidate, os.R_OK) else None
+    except OSError:
+        return None
+
+
+def verifier_ssl_context():
+    """Build the same local-TLS policy used by the requests-based checks."""
+    local_ca = readable_local_ca()
+    if local_ca:
+        try:
+            return ssl.create_default_context(cafile=str(local_ca))
+        except OSError:
+            pass
+    # The verifier commonly runs from the deployment host while the local CA is
+    # mounted only inside the service container.  This is a test-only client;
+    # preserve live-route coverage rather than crash before emitting evidence.
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
 class ChromeDriver:
     """Small dependency-free WebDriver client for the system evidence run."""
 
@@ -912,8 +938,8 @@ def crawl_internal_links(base_url, hrefs, headers, timeout):
     session = requests.Session()
     session.trust_env = False
     session.headers.update(headers)
-    local_ca = ROOT / "data" / "local-tls" / "ca.crt"
-    verify = str(local_ca) if local_ca.is_file() else False
+    local_ca = readable_local_ca()
+    verify = str(local_ca) if local_ca else False
     for candidate in candidates:
         current = candidate
         redirects = []
@@ -984,12 +1010,7 @@ def request_route(base_url, route, sessions, fixture_env, timeout):
     url = urllib.parse.urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
     started = time.perf_counter()
     request = urllib.request.Request(url, headers=headers, method="GET")
-    local_ca = ROOT / "data" / "local-tls" / "ca.crt"
-    ssl_context = (
-        ssl.create_default_context(cafile=str(local_ca))
-        if local_ca.is_file()
-        else ssl.create_default_context()
-    )
+    ssl_context = verifier_ssl_context()
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}),
         urllib.request.HTTPSHandler(context=ssl_context),
@@ -1139,10 +1160,10 @@ def browser_evidence(base_url, routes, sessions, fixture_env, viewports, output_
                       activeNavigation: document.querySelectorAll('.product-navbar [aria-current="page"]').length,
                       privatePublicLinks: [...document.querySelectorAll('.product-navbar a[href]')]
                         .map(node => node.getAttribute('href') || '')
-                        .filter(href => /^\/(student|guide|teacher|admin)(\/|\?|$)/.test(href)),
+                        .filter(href => /^\\/(student|guide|teacher|admin)(\\/|\\?|$)/.test(href)),
                       unauthorizedEventResources: performance.getEntriesByType('resource')
                         .map(entry => entry.name)
-                        .filter(name => /\/(events|notifications\/stream)(\?|$)/.test(name)),
+                        .filter(name => /\\/(events|notifications\\/stream)(\\?|$)/.test(name)),
                       unlabeledControls: [...document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]),select,textarea')]
                         .filter(visible)
                         .filter(node => {
@@ -1411,8 +1432,8 @@ def suite_environment(base_url):
     if parsed.port:
         environment["DOJO_HTTPS_PORT"] = str(parsed.port)
     environment.setdefault("DOJO_CONTAINER", "pwncollege-dojo")
-    local_ca = ROOT / "data" / "local-tls" / "ca.crt"
-    if local_ca.is_file():
+    local_ca = readable_local_ca()
+    if local_ca:
         environment.setdefault("REQUESTS_CA_BUNDLE", str(local_ca))
     return environment
 

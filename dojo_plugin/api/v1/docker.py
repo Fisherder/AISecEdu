@@ -1,6 +1,7 @@
 import datetime
 import hashlib
 import pathlib
+import os
 import logging
 import time
 import re
@@ -39,7 +40,7 @@ from ...utils import (
     is_challenge_locked,
 )
 from ...utils.dojo import dojo_accessible, get_current_dojo_challenge
-from ...utils.workspace import exec_run, reset_home
+from ...utils.workspace import exec_run, reset_home, workspace_start_slot
 from ...utils.feed import publish_container_start
 from ...utils.background_stats import publish_stat_event
 from ...utils.request_logging import get_trace_id, log_generator_output
@@ -54,6 +55,8 @@ from ...learning.simulation import (
 )
 
 logger = logging.getLogger(__name__)
+
+DOCKER_LOCK_SECONDS = max(60, int(os.getenv("DOJO_DOCKER_LOCK_SECONDS", "1200")))
 
 docker_namespace = Namespace(
     "docker", description="Endpoint to manage docker containers"
@@ -216,7 +219,7 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
         cpu_period=100000,
         cpu_quota=400000,
         pids_limit=1024,
-        mem_limit="4G",
+        mem_limit="6G" if resolved_dojo_challenge.image == "aisecedu/windows-course-runtime:20260911-v1" else "4G",
         runtime="io.containerd.run.kata.v2" if resolved_dojo_challenge.privileged else "runc",
         cap_add=capabilities,
         security_opt=[f"seccomp={SECCOMP}"],
@@ -384,12 +387,13 @@ def start_challenge_session(user, dojo_challenge, practice, *, as_user=None):
                 f"Starting challenge for user {user.id} "
                 f"(attempt {attempt_number}/{max_attempts})..."
             )
-            container = start_challenge(
-                user,
-                dojo_challenge,
-                practice,
-                as_user=as_user,
-            )
+            with workspace_start_slot():
+                container = start_challenge(
+                    user,
+                    dojo_challenge,
+                    practice,
+                    as_user=as_user,
+                )
             actual_user = as_user or user
             node_id = user_node(actual_user)
             learning_attempt = start_attempt(
@@ -442,11 +446,11 @@ def docker_locked(func):
         try:
             with redis_client.lock(f"user.{user.id}.docker.lock",
                                    blocking_timeout=0,
-                                   timeout=20,
+                                   timeout=DOCKER_LOCK_SECONDS,
                                    raise_on_release_error=False):
                 return func(*args, **kwargs)
         except redis.exceptions.LockError:
-            return {"success": False, "error": "题目正在启动中，请在 20 秒后重试。"}
+            return {"success": False, "error": "题目正在启动或排队中，请稍后重试。"}
     return wrapper
 
 

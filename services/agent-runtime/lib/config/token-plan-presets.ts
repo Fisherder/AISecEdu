@@ -153,7 +153,6 @@ export const TOKEN_PLAN_PRESETS: TokenPlanPreset[] = [
           'doubao-seed-2.0-code',
           'doubao-seed-2.0-lite',
           'doubao-seed-2.0-mini',
-          'deepseek-v4-pro',
           'deepseek-v4-flash',
           'deepseek-v3.2',
           'minimax-m3',

@@ -32,11 +32,11 @@ x-ctfd-env: &ctfd-env
   DOJO_AI_API_KEY: ${DOJO_AI_API_KEY:-}
   DOJO_AI_TUTOR_MODEL: ${DOJO_AI_TUTOR_MODEL:-deepseek-v4-flash}
   DOJO_AI_GUIDE_MODEL: ${DOJO_AI_GUIDE_MODEL:-deepseek-v4-flash}
-  DOJO_AI_GRADER_MODEL: ${DOJO_AI_GRADER_MODEL:-deepseek-v4-pro}
-  DOJO_AI_SOLUTION_MODEL: ${DOJO_AI_SOLUTION_MODEL:-deepseek-v4-pro}
+  DOJO_AI_GRADER_MODEL: ${DOJO_AI_GRADER_MODEL:-deepseek-v4-flash}
+  DOJO_AI_SOLUTION_MODEL: ${DOJO_AI_SOLUTION_MODEL:-deepseek-v4-flash}
   DOJO_AI_AUTHORING_PLAN_MODEL: ${DOJO_AI_AUTHORING_PLAN_MODEL:-deepseek-v4-flash}
-  DOJO_AI_AUTHORING_BUILD_MODEL: ${DOJO_AI_AUTHORING_BUILD_MODEL:-deepseek-v4-pro}
-  DOJO_AI_AUTHORING_VALIDATE_MODEL: ${DOJO_AI_AUTHORING_VALIDATE_MODEL:-deepseek-v4-pro}
+  DOJO_AI_AUTHORING_BUILD_MODEL: ${DOJO_AI_AUTHORING_BUILD_MODEL:-deepseek-v4-flash}
+  DOJO_AI_AUTHORING_VALIDATE_MODEL: ${DOJO_AI_AUTHORING_VALIDATE_MODEL:-deepseek-v4-flash}
   DOJO_AI_AUTHORING_VALIDATION_MAX_ROUNDS: ${DOJO_AI_AUTHORING_VALIDATION_MAX_ROUNDS:-5}
   DOJO_AI_TIMEOUT_SECONDS: ${DOJO_AI_TIMEOUT_SECONDS:-120}
   # Deep reasoning authoring calls can legitimately need a retry after a
@@ -178,7 +178,7 @@ services:
       # observed at 200 concurrent learners.
       WORKERS: ${CTFD_WORKERS:-32}
       CTFD_GEVENT_PSYCOPG: ${CTFD_GEVENT_PSYCOPG:-true}
-      # DeepSeek Pro authoring can run several bounded build/review/repair
+      # DeepSeek Flash authoring can run several bounded build/review/repair
       # calls in one request. Keep Gunicorn aligned with the 3600-second
       # learning API proxy window instead of killing a healthy worker at the
       # default timeout.
@@ -306,9 +306,9 @@ services:
       AISECEDU_AGENT_SKILLS_DIR: /app/agent-skills
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-${DOJO_AI_API_KEY:-}}
       DEEPSEEK_BASE_URL: ${DOJO_AI_BASE_URL:-https://api.deepseek.com}
-      DEEPSEEK_MODELS: ${GLOBAL_AGENT_RUNTIME_MODELS:-deepseek-v4-flash,deepseek-v4-pro}
+      DEEPSEEK_MODELS: ${GLOBAL_AGENT_RUNTIME_MODELS:-deepseek-v4-flash}
       DEFAULT_MODEL: ${GLOBAL_AGENT_RUNTIME_DEFAULT_MODEL:-deepseek:deepseek-v4-flash}
-      MODEL_ROUTES: ${GLOBAL_AGENT_RUNTIME_MODEL_ROUTES:-{"scene-content":"deepseek:deepseek-v4-pro","scene-actions":"deepseek:deepseek-v4-pro","generate-classroom":"deepseek:deepseek-v4-pro","pbl-v2-runtime":"deepseek:deepseek-v4-pro","pbl-chat":"deepseek:deepseek-v4-pro","chat-adapter":"deepseek:deepseek-v4-pro","security-roleplay":"deepseek:deepseek-v4-pro","maic-agent":"deepseek:deepseek-v4-pro"}}
+      MODEL_ROUTES: ${GLOBAL_AGENT_RUNTIME_MODEL_ROUTES:-{"scene-content":"deepseek:deepseek-v4-flash","scene-actions":"deepseek:deepseek-v4-flash","generate-classroom":"deepseek:deepseek-v4-flash","pbl-v2-runtime":"deepseek:deepseek-v4-flash","pbl-chat":"deepseek:deepseek-v4-flash","chat-adapter":"deepseek:deepseek-v4-flash","security-roleplay":"deepseek:deepseek-v4-flash","maic-agent":"deepseek:deepseek-v4-flash"}}
       ALLOWED_FRAME_ANCESTORS: ${GLOBAL_AGENT_RUNTIME_FRAME_ANCESTORS:-https://${DOJO_HOST} http://${DOJO_HOST}}
     volumes:
       - agent-runtime-data:/app/data

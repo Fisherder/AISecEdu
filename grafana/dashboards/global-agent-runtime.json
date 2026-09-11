@@ -65,8 +65,8 @@
       "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
       "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16},
       "id": 8,
-      "targets": [{"expr": "sum by (status, degraded) (aisecedu_model_invocations{route=\"deepseek-v4-pro\"})", "legendFormat": "{{status}} / degraded={{degraded}}", "refId": "A"}],
-      "title": "deepseek-v4-pro route audit",
+      "targets": [{"expr": "sum by (status, degraded) (aisecedu_model_invocations{route=\"deepseek-v4-flash\"})", "legendFormat": "{{status}} / degraded={{degraded}}", "refId": "A"}],
+      "title": "deepseek-v4-flash route audit",
       "type": "timeseries"
     },
     {

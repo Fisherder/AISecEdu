@@ -47,13 +47,13 @@ groups:
           description: 最近 10 分钟至少有 3 次模型调用失败，请按 route、trace ID 和 provider 排查。
 
       - alert: TeachingProRouteDegraded
-        expr: sum(aisecedu_model_invocations_recent_10m{route="deepseek-v4-pro",degraded="true"}) > 0
+        expr: sum(aisecedu_model_invocations_recent_10m{route="deepseek-v4-flash",degraded="true"}) > 0
         for: 30s
         labels:
           severity: critical
         annotations:
           summary: 复杂场景 Pro 路由发生降级
-          description: 最近 10 分钟存在 deepseek-v4-pro 降级调用，禁止将其结果标记为 Pro 生成。
+          description: 最近 10 分钟存在 deepseek-v4-flash 降级调用，禁止将其结果标记为 Pro 生成。
 
       - alert: TeachingJobFailureBurst
         expr: sum(aisecedu_teaching_job_failures_recent_10m) >= 3

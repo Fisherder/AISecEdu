@@ -45,16 +45,16 @@ def assert_source_routes(draft, level, expected_mode):
         or (pipeline.get("plan") or {}).get("model")
         != "deepseek-v4-flash"
         or (pipeline.get("plan") or {}).get("provider") != "MODEL"
-        or build.get("model") != "deepseek-v4-pro"
+        or build.get("model") != "deepseek-v4-flash"
         or build.get("provider") != "MODEL"
         or ((build.get("stages") or {}).get("sourceSnapshot") or {}).get(
             "provider"
         )
         != "PLATFORM"
         or (pipeline.get("review") or {}).get("model")
-        != "deepseek-v4-pro"
+        != "deepseek-v4-flash"
         or (pipeline.get("validate") or {}).get("model")
-        != "deepseek-v4-pro"
+        != "deepseek-v4-flash"
     ):
         raise AssertionError(
             f"{level} source authoring route/contract mismatch: "
@@ -216,7 +216,7 @@ def main():
                 or (validation.get("summary") or {}).get("blocked")
                 or review.get("provider")
                 not in {"MODEL", "MODEL_ATTESTED"}
-                or review.get("model") != "deepseek-v4-pro"
+                or review.get("model") != "deepseek-v4-flash"
                 or review.get("verdict") != "PASS"
             ):
                 raise AssertionError(

@@ -380,15 +380,21 @@ class StudentUXVerifier:
 
     def catalog(self) -> str:
         assert self.driver is not None
+        # student-ux-enrollment-fixture
+        self.db_sql(
+            "INSERT INTO dojo_users (dojo_id, user_id, type) "
+            f"VALUES ({int(self.course['id'])}, {int(self.student_id)}, 'member') ON CONFLICT DO NOTHING;"
+        )
+        course_name = str(self.course["name"])
         encoded = urllib.parse.quote(COURSE_REFERENCE, safe="")
         self.driver.navigate(
             f"{self.flow.BASE_URL}/dojos?tab=discover&type=CTF&provider=TEACHER&page=1"
         )
         discover = self.driver.execute(
-            """
+            f"""
             return {{
               cards: document.querySelectorAll('.sc-card').length,
-              joinedVisible: document.body.innerText.includes('软件安全'),
+              joinedVisible: document.body.innerText.includes({json.dumps(course_name)}),
               query: location.search,
             }};
             """
@@ -402,7 +408,7 @@ class StudentUXVerifier:
         mine = self.driver.execute(
             "return {cards: document.querySelectorAll('.sc-card').length, text: document.body.innerText};"
         )
-        if int(mine["cards"]) > 24 or "软件安全" not in mine["text"]:
+        if int(mine["cards"]) > 24 or course_name not in mine["text"]:
             raise AssertionError(f"mine catalog is incomplete: {mine}")
         return f"server-rendered mine/discover catalog, URL-backed filters, 24-card cap ({encoded})"
 
@@ -1055,6 +1061,9 @@ class StudentUXVerifier:
         self.driver.navigate(f"{self.flow.BASE_URL}/student")
         self.wait_student()
         self.driver.execute(
+            f"window.__studentCourseName = {json.dumps(str(self.course['name']))}; return true;"
+        )
+        self.driver.execute(
             "document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true})); return true;"
         )
         self.driver.wait_for(
@@ -1064,7 +1073,7 @@ class StudentUXVerifier:
         )
         self.driver.execute(
             """
-            const input = document.getElementById('searchInput'); input.value='软件'; input.dispatchEvent(new Event('input',{bubbles:true})); return true;
+            const input = document.getElementById('searchInput'); input.value=window.__studentCourseName; input.dispatchEvent(new Event('input',{bubbles:true})); return true;
             """
         )
         grouped = self.driver.wait_for(

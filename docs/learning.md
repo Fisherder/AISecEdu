@@ -208,7 +208,7 @@ Tutor 同时接收当前容器快照和/或模拟公开状态、可用动作、�
    - **L3**：候选不足或要求新的运行/验证产物，创建自包含新题。
    教师只有在题目需求中明确写出“直接复用”“基于现有题改编”“从零新建”或 L1/L2/L3 时才覆盖 Agent 决策；客户端提交的隐藏 `level` 字段不参与选策。选策来源、理由、候选数和源题身份随任务持久化并显示在进度中。
 4. `deepseek-v4-flash` 方案 Agent 理解教师输入和后续修改，冻结公开题目信息并形成教学、实现、产物、验证和风险控制方案。
-5. `deepseek-v4-pro` 构建实现规格。L1/L2 的构建只允许调整公开教学元数据并审阅真实源题参考文件；平台在发布时复制源题目录，并原样保留其 `.init`、checker/flag、运行镜像、权限和接口，不生成 `verificationAnswer`、starter files、私有 Flag Gate 或第二套运行合约。L3 才由 Pro 单独生成最小自包含的 starter files、私有标准解法、声明式 `FLAG_GATE_V1` 和受限运行合约。自定义服务不得依赖联网安装或题目自定义环境变量注入，平台只允许 Python/Bash/Node 的受限启动方式。Flag Gate 的每个判定字段都必须通过 `liveBindings` 由私有检查器直接读取运行合约中已有服务的状态码、完整响应哈希或 JSON 字段，并具有非 `exists` 的具体目标值断言；学生自报的布尔值、结论或报告文件不参与客观判题。
+5. `deepseek-v4-flash` 构建实现规格。L1/L2 的构建只允许调整公开教学元数据并审阅真实源题参考文件；平台在发布时复制源题目录，并原样保留其 `.init`、checker/flag、运行镜像、权限和接口，不生成 `verificationAnswer`、starter files、私有 Flag Gate 或第二套运行合约。L3 才由 Pro 单独生成最小自包含的 starter files、私有标准解法、声明式 `FLAG_GATE_V1` 和受限运行合约。自定义服务不得依赖联网安装或题目自定义环境变量注入，平台只允许 Python/Bash/Node 的受限启动方式。Flag Gate 的每个判定字段都必须通过 `liveBindings` 由私有检查器直接读取运行合约中已有服务的状态码、完整响应哈希或 JSON 字段，并具有非 `exists` 的具体目标值断言；学生自报的布尔值、结论或报告文件不参与客观判题。
 6. 独立的 Pro 红队 Agent 逐项检查题面、全部文件、运行假设、Flag Gate 和标准解法；平台同时把依赖、语法、常见标准库属性错误、未支持的环境输入、路径、端口、缺失服务、未绑定状态字段等确定性诊断注入同一 finding 流，直接驱动后续修复。finding 带稳定 ID 及 `OPEN/RESOLVED` 状态；模型声称 PASS 但仍有开放中高风险项时，服务端会强制纠正为 BLOCK。
 7. 确定性检查若发现自定义题缺少 starter file 或运行合约，先交给有严格大小、路径、依赖和端口边界的 Pro 最小闭环恢复 Agent；Flag Gate、运行合约或私有解法不一致时，交给不允许改动公开文件的 Pro 验证闭环 Agent。平台会强制同步 starter file 完整性清单，并阻止 status-only 弱判据、没有同名实时绑定的判定字段、过期文件路径，以及私有解法重新启动平台已经托管的服务。其余问题由 Pro 修复 Agent 应用可审计的精确文件差异并同步修复标准解法与合约。若局部补丁仍无法闭环，再整体重建四类耦合产物并重新红队复审。遗漏的旧 finding 会保守地继续保持 OPEN。
 8. 草稿建立后不再等待教师点击“校验”。后台编排器立即运行独立 Pro 最终验证和全部确定性 Schema、运行时、Flag 条件、评分、路径、权限与供应链门禁；若出现 BLOCK，服务端把模型 finding 与确定性失败统一转换为修复输入，自动执行“修复—独立复验—完整发布门重跑”。每一轮验证、阻断数、修复周期、剩余 finding 和题包是否变化都会动态追加到任务进度。
@@ -275,11 +275,11 @@ Workspace API 只接受 allowlist 内的事件类型。命令和 payload 会递�
 
 Guide 使用 `deepseek-v4-flash`，以线程形式保存连续对话。没有题目引用时，每轮请求构建有界的整体学习档案：已加入课程及模块/题目进度、Submission 数、最近 attempt 和反思、最新评分反馈、六维能力以及推荐；“这道题”等无法唯一定位的提问不会根据最近活动自动猜题，而会要求学生先引用题目。学生显式引用最多六道可见题目后，服务端不信任客户端标签，而是用稳定的课程/单元/题目标识重新做可见性校验，并将引用持久化为该线程的题目范围。模型上下文只保留引用题目的课程目录、attempt、最新评测、反思、可信事件和 Tutor 对话；与引用无关的活动 workspace 和历史轮次会被移除。修复前生成、没有 `scopeValidation` 的历史助手消息也不会进入新的引用轮次，并在界面明确标成未校验历史回答。若活动 workspace 恰好属于引用集合，才补充其容器状态、进程、监听端口、文件路径与变化及最近过程事件。多题引用时模型必须比较共同薄弱点与差异，证据不足时必须明确说明。模型响应还必须回报完整的引用标识、点名全部引用题目，并通过未引用题目名称检查；范围不一致的输出会被服务端拦截并替换为范围安全回答。无效或已失去权限的引用直接返回 400，不会静默降级为另一题。模型只能返回当前范围档案中已有的站内链接。若问题进入具体解法，Guide 会引导学生转到 Workspace Tutor。Guide 页面将当前范围明确显示为“整体学习记录”或“本对话题目”，引用 chip 在发送后持续保留；页面同时取消 CTFd 通用 Footer 预留的 100px 底部边距，使消息区占满剩余高度、输入区贴合视口底部，移动端对话列表以覆盖层展开。
 
-Tutor 不再暴露或执行 L1/L2/L3 引导等级。侧栏只用一个紧凑状态元素显示“正在检查 Tutor”“Tutor 已就绪”或“Tutor 未就绪”，状态直接来自当前活动 attempt 是否可用，不再用上一条回答的 `liveContext` 元数据推断并显示容易误解的“容器待就绪”。每次问答都采用同一个提示模式：先比较私有标准解法所需状态与学生实时状态，再准确指出已经完成的观察、当前误区和一个最小验证动作；不会给出可直接照抄的完整命令、载荷、步骤链或最终答案。它使用 `deepseek-v4-flash`，上下文按 attempt 的 `challengeVersion` 固定，包括该版本完整公开题面与发布时基线文件、实时 `/challenge` 文件、容器镜像/工作目录、脱敏环境、进程、监听端口、资源、Git 变化、当前 epoch 哈希证据链、Tutor 历史和同版本服务端私有标准解法。发布前遗留且没有 profile 元数据的题目明确按兼容版本 1 绑定；没有作者解法的旧题会由 `deepseek-v4-pro` 生成并缓存私有参考。
+Tutor 不再暴露或执行 L1/L2/L3 引导等级。侧栏只用一个紧凑状态元素显示“正在检查 Tutor”“Tutor 已就绪”或“Tutor 未就绪”，状态直接来自当前活动 attempt 是否可用，不再用上一条回答的 `liveContext` 元数据推断并显示容易误解的“容器待就绪”。每次问答都采用同一个提示模式：先比较私有标准解法所需状态与学生实时状态，再准确指出已经完成的观察、当前误区和一个最小验证动作；不会给出可直接照抄的完整命令、载荷、步骤链或最终答案。它使用 `deepseek-v4-flash`，上下文按 attempt 的 `challengeVersion` 固定，包括该版本完整公开题面与发布时基线文件、实时 `/challenge` 文件、容器镜像/工作目录、脱敏环境、进程、监听端口、资源、Git 变化、当前 epoch 哈希证据链、Tutor 历史和同版本服务端私有标准解法。发布前遗留且没有 profile 元数据的题目明确按兼容版本 1 绑定；没有作者解法的旧题会由 `deepseek-v4-flash` 生成并缓存私有参考。
 
-教师工作台的“生成已验证步骤”使用独立的 `deepseek-v4-pro` 解题 Agent，而不是让模型编写想象中的答案。平台为每个运行创建隐藏的临时学习者和隔离 Kata 容器，固定为 `hacker`（uid 1000）及 `/challenge` 工作目录；Agent 只能使用题面和学习者可见入口，策略拒绝直接读取 `/flag`、私有 checker、平台运行时、进程环境、提权及容器控制。只有输出中出现可反序列化、同时绑定临时账号和当前 challenge 的动态 Flag 才标记 VERIFIED。随后 Pro 只能把每条真实允许命令按原顺序映射为教师步骤；若映射不完整或不合法则回退到同一条真实轨迹，Flag 始终以 `[VERIFIED_FLAG_CAPTURED]` 脱敏。临时容器和用户会在运行结束后删除。
+教师工作台的“生成已验证步骤”使用独立的 `deepseek-v4-flash` 解题 Agent，而不是让模型编写想象中的答案。平台为每个运行创建隐藏的临时学习者和隔离 Kata 容器，固定为 `hacker`（uid 1000）及 `/challenge` 工作目录；Agent 只能使用题面和学习者可见入口，策略拒绝直接读取 `/flag`、私有 checker、平台运行时、进程环境、提权及容器控制。只有输出中出现可反序列化、同时绑定临时账号和当前 challenge 的动态 Flag 才标记 VERIFIED。随后 Pro 只能把每条真实允许命令按原顺序映射为教师步骤；若映射不完整或不合法则回退到同一条真实轨迹，Flag 始终以 `[VERIFIED_FLAG_CAPTURED]` 脱敏。临时容器和用户会在运行结束后删除。
 
-评分 Agent 使用 `deepseek-v4-pro` 和与 Tutor 相同的完整上下文，并额外读取学生反思和 Oracle 结果。它只能分配过程 40 分，分数上限和客观 60 分由服务端强制锁定；加分必须引用存在的事件 sequence 或经过脱敏的具体容器证据。总评、单项理由、容器证据摘要和能力说明全部经过同一防泄露检查。
+评分 Agent 使用 `deepseek-v4-flash` 和与 Tutor 相同的完整上下文，并额外读取学生反思和 Oracle 结果。它只能分配过程 40 分，分数上限和客观 60 分由服务端强制锁定；加分必须引用存在的事件 sequence 或经过脱敏的具体容器证据。总评、单项理由、容器证据摘要和能力说明全部经过同一防泄露检查。
 
 正确 Flag 或“已完成”响应继续使用非阻塞横幅/题目卡片提示，并附带“查看评分”按钮。按钮优先进入该用户在本题最近一次 `SOLVED` attempt 的独立评分页；若尚无已完成记录，则回退到最近 attempt，便于检查正在形成的客观证据。评分页展示总分、客观结果 60 分、可信过程 40 分、证据可信度、每项评分理由和引用、六维能力、学生复盘及可信事件时间线，并提供返回题目和课程学习分析的入口。学生只能查看自己的 attempt，课程教师可查看本课程学生的评分页。
 
@@ -314,11 +314,11 @@ DOJO_AI_BASE_URL=https://api.deepseek.com
 DEEPSEEK_API_KEY=replace-with-secret
 DOJO_AI_GUIDE_MODEL=deepseek-v4-flash
 DOJO_AI_TUTOR_MODEL=deepseek-v4-flash
-DOJO_AI_GRADER_MODEL=deepseek-v4-pro
-DOJO_AI_SOLUTION_MODEL=deepseek-v4-pro
+DOJO_AI_GRADER_MODEL=deepseek-v4-flash
+DOJO_AI_SOLUTION_MODEL=deepseek-v4-flash
 DOJO_AI_AUTHORING_PLAN_MODEL=deepseek-v4-flash
-DOJO_AI_AUTHORING_BUILD_MODEL=deepseek-v4-pro
-DOJO_AI_AUTHORING_VALIDATE_MODEL=deepseek-v4-pro
+DOJO_AI_AUTHORING_BUILD_MODEL=deepseek-v4-flash
+DOJO_AI_AUTHORING_VALIDATE_MODEL=deepseek-v4-flash
 DOJO_AI_TIMEOUT_SECONDS=120
 DOJO_AI_MAX_CONTEXT_CHARS=180000
 DOJO_AI_MAX_FILE_CHARS=32000
@@ -434,4 +434,4 @@ docker exec pwncollege-dojo nginx -t
 ./ops/verify-solution-agent-real.py
 ```
 
-自动化测试位于 `test/test_learning.py`。`ops/verify-ai-routing.py` 在无外部调用条件下验证模型路由、请求参数、Guide 引用上下文、秘密边界、源题原生运行语义、审查状态机、确定性修复信号和无 key 降级；`ops/verify-guide-references.py` 在真实部署数据库中以当前可见题目验证引用目录、attempt、评测、过程事件和权限边界；`ops/verify-container-context-real.py` 创建一次性原生题与 Kata 工作区，验证平台工具不受题目 `PATH` 干扰、登录 profile 不污染机器可读输出，并能在不跟随符号链接的前提下有界读取 `/challenge` 挂载文件；`ops/verify-source-authoring-real.py` 使用部署密钥创建一次性课程，真实验证 L1/L2 的 Flash 方案、Pro 构建/预审/终审、无第二判题协议的源包快照、发布，以及 Flash Tutor 对基线、实时容器、学生证据和固定版本的联合使用与完整清理；`ops/verify-solution-agent-real.py` 创建一次性公开握手题，要求真实 `deepseek-v4-pro` 在隔离学习者容器内取得账号/题目绑定的动态 Flag，并验证脱敏、策略边界和逐 turn 教师步骤映射；`ops/evaluate-ai-agents.py` 使用真实 DeepSeek API 对 Guide 多轮对话、Tutor、Grader 和完整出题链做独立 Pro 质量评分。完整流程验证器还验证单点身份与角色越权边界、L1/L2 源包快照、L3 无源生成、稳定身份上的两版不可变发布、发布门、真实 workspace、完全重置容器与 Home、新 epoch、Nix CLI 自动证据、脱敏与哈希链、当前 epoch Tutor、动态 flag、60/40 评分、六维能力、申诉复评、教师分析和完整清理。
+自动化测试位于 `test/test_learning.py`。`ops/verify-ai-routing.py` 在无外部调用条件下验证模型路由、请求参数、Guide 引用上下文、秘密边界、源题原生运行语义、审查状态机、确定性修复信号和无 key 降级；`ops/verify-guide-references.py` 在真实部署数据库中以当前可见题目验证引用目录、attempt、评测、过程事件和权限边界；`ops/verify-container-context-real.py` 创建一次性原生题与 Kata 工作区，验证平台工具不受题目 `PATH` 干扰、登录 profile 不污染机器可读输出，并能在不跟随符号链接的前提下有界读取 `/challenge` 挂载文件；`ops/verify-source-authoring-real.py` 使用部署密钥创建一次性课程，真实验证 L1/L2 的 Flash 方案、Pro 构建/预审/终审、无第二判题协议的源包快照、发布，以及 Flash Tutor 对基线、实时容器、学生证据和固定版本的联合使用与完整清理；`ops/verify-solution-agent-real.py` 创建一次性公开握手题，要求真实 `deepseek-v4-flash` 在隔离学习者容器内取得账号/题目绑定的动态 Flag，并验证脱敏、策略边界和逐 turn 教师步骤映射；`ops/evaluate-ai-agents.py` 使用真实 DeepSeek API 对 Guide 多轮对话、Tutor、Grader 和完整出题链做独立 Pro 质量评分。完整流程验证器还验证单点身份与角色越权边界、L1/L2 源包快照、L3 无源生成、稳定身份上的两版不可变发布、发布门、真实 workspace、完全重置容器与 Home、新 epoch、Nix CLI 自动证据、脱敏与哈希链、当前 epoch Tutor、动态 flag、60/40 评分、六维能力、申诉复评、教师分析和完整清理。

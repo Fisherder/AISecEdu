@@ -47,19 +47,19 @@ def verify_http_contract(intelligence):
         result = intelligence.model_json(
             "Return JSON.",
             {"input": "safe"},
-            model="deepseek-v4-pro",
+            model="deepseek-v4-flash",
             thinking=True,
             reasoning_effort="max",
             max_tokens=2048,
         )
     assert result["ok"] is True
-    assert result["_agentMeta"]["model"] == "deepseek-v4-pro"
+    assert result["_agentMeta"]["model"] == "deepseek-v4-flash"
     assert len(requests) == 1
     url, request = requests[0]
     body = request["json"]
     assert url == "https://api.deepseek.com/chat/completions"
     assert request["headers"]["Authorization"] == "Bearer test-only-key"
-    assert body["model"] == "deepseek-v4-pro"
+    assert body["model"] == "deepseek-v4-flash"
     assert body["thinking"] == {"type": "enabled"}
     assert body["reasoning_effort"] == "max"
     assert body["response_format"] == {"type": "json_object"}
@@ -798,7 +798,7 @@ def verify_grader_routing(assessment):
             attempt, events, {"valid": True}, True, fallback
         )
     assert len(calls) == 1
-    assert calls[0][2]["model"] == "deepseek-v4-pro"
+    assert calls[0][2]["model"] == "deepseek-v4-flash"
     assert calls[0][2]["thinking"] is True
     assert calls[0][2]["reasoning_effort"] == "max"
     assert calls[0][1]["context"]["privateReference"][
@@ -947,11 +947,11 @@ def verify_authoring_routing(authoring):
         "model": "deepseek-v4-flash",
     }
     assert build_stage["provider"] == "MODEL"
-    assert build_stage["model"] == "deepseek-v4-pro"
+    assert build_stage["model"] == "deepseek-v4-flash"
     assert set(build_stage["stages"]) == {"specification", "artifacts"}
     assert validate_stage == {
         "provider": "MODEL",
-        "model": "deepseek-v4-pro",
+        "model": "deepseek-v4-flash",
     }
     assert review["verdict"] == "PASS"
     assert built["verificationAnswer"] is None
@@ -959,9 +959,9 @@ def verify_authoring_routing(authoring):
     assert built["oracleContract"]["type"] == "FLAG_GATE_V1"
     assert [call[2]["model"] for call in calls] == [
         "deepseek-v4-flash",
-        "deepseek-v4-pro",
-        "deepseek-v4-pro",
-        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash",
     ]
     assert calls[0][2]["thinking"] is False
     assert calls[1][2]["thinking"] is True
@@ -1084,7 +1084,7 @@ def verify_source_native_authoring(authoring):
             spec,
         )
     assert len(calls) == 1
-    assert calls[0][2]["model"] == "deepseek-v4-pro"
+    assert calls[0][2]["model"] == "deepseek-v4-flash"
     assert calls[0][1]["sourceRuntime"]["available"] is True
     assert build_stage["provider"] == "MODEL"
     assert set(build_stage["stages"]) == {
@@ -1143,8 +1143,8 @@ def verify_source_native_authoring(authoring):
         )
     assert review["verdict"] == "PASS"
     assert final_review["verdict"] == "PASS", final_review
-    assert review_stage["model"] == "deepseek-v4-pro"
-    assert final_stage["model"] == "deepseek-v4-pro"
+    assert review_stage["model"] == "deepseek-v4-flash"
+    assert final_stage["model"] == "deepseek-v4-flash"
     assert len(review_calls) == 2
     assert all(call[1]["sourceNativeSnapshot"] for call in review_calls)
     assert all(
@@ -1152,7 +1152,7 @@ def verify_source_native_authoring(authoring):
         == "PRESERVE_SOURCE_NATIVE"
         for call in review_calls
     )
-    assert all(call[2]["model"] == "deepseek-v4-pro" for call in review_calls)
+    assert all(call[2]["model"] == "deepseek-v4-flash" for call in review_calls)
     with (
         patch.object(
             authoring,
@@ -1205,7 +1205,7 @@ def verify_source_native_authoring(authoring):
     }
     stage = {
         "provider": "MODEL",
-        "model": "deepseek-v4-pro",
+        "model": "deepseek-v4-flash",
     }
     with tempfile.TemporaryDirectory() as directory:
         fake_source = SimpleNamespace(
@@ -1376,7 +1376,7 @@ def verify_model_validation_gate(authoring):
             }
         ],
     }
-    stage = {"provider": "MODEL", "model": "deepseek-v4-pro"}
+    stage = {"provider": "MODEL", "model": "deepseek-v4-flash"}
     with patch.object(authoring, "_audit", lambda *args, **kwargs: None):
         low_draft = draft_with(spec)
         with patch.object(
@@ -1423,7 +1423,7 @@ def verify_model_validation_gate(authoring):
                 resolved_high_review,
                 {
                     "provider": "MODEL",
-                    "model": "deepseek-v4-pro",
+                    "model": "deepseek-v4-flash",
                     "cycles": [{"cycle": 1, "mode": "EXACT_PATCH"}],
                     "resolved": True,
                 },
@@ -1469,7 +1469,7 @@ def verify_model_validation_gate(authoring):
         and attested_report["agentReview"]["provider"]
         == "MODEL_ATTESTED"
         and attested_report["agentReview"]["model"]
-        == "deepseek-v4-pro"
+        == "deepseek-v4-flash"
     )
     attested_draft.spec["description"] = (
         "This package changed. " + attested_draft.spec["description"]
@@ -2007,7 +2007,7 @@ def verify_structural_closure_agent(authoring):
     closure_call = next(
         call for call in calls if "最小闭环恢复 Agent" in call[0]
     )
-    assert closure_call[2]["model"] == "deepseek-v4-pro"
+    assert closure_call[2]["model"] == "deepseek-v4-flash"
     assert closure_call[2]["thinking"] is True
     assert "verificationAnswer" not in json.dumps(
         closure_call[1], ensure_ascii=False
@@ -2462,7 +2462,7 @@ def verify_live_oracle_and_metadata_gate(authoring):
 def verify_solution_agent_contract(solution_agent):
     from CTFd.plugins.dojo_plugin.utils import serialize_user_flag
 
-    assert solution_agent.DOJO_AI_SOLUTION_MODEL == "deepseek-v4-pro"
+    assert solution_agent.DOJO_AI_SOLUTION_MODEL == "deepseek-v4-flash"
     forbidden = [
         "cat /flag",
         "cat$IFS/flag",
@@ -2616,7 +2616,7 @@ def verify_autonomous_authoring_orchestration(authoring):
         ],
         "agentReview": {
             "provider": "MODEL",
-            "model": "deepseek-v4-pro",
+            "model": "deepseek-v4-flash",
             "verdict": "PASS",
             "summary": "The deterministic runtime gate still blocks.",
             "findings": [],
@@ -2631,7 +2631,7 @@ def verify_autonomous_authoring_orchestration(authoring):
         "checks": [],
         "agentReview": {
             "provider": "MODEL",
-            "model": "deepseek-v4-pro",
+            "model": "deepseek-v4-flash",
             "verdict": "PASS",
             "summary": "The repaired package passes.",
             "findings": [],
@@ -2639,7 +2639,7 @@ def verify_autonomous_authoring_orchestration(authoring):
     }
     repair_stage = {
         "provider": "MODEL",
-        "model": "deepseek-v4-pro",
+        "model": "deepseek-v4-flash",
         "resolved": True,
         "cycles": [
             {
@@ -2685,7 +2685,7 @@ def verify_autonomous_authoring_orchestration(authoring):
                     "findings": [],
                 },
                 repair_stage,
-                {"provider": "MODEL", "model": "deepseek-v4-pro"},
+                {"provider": "MODEL", "model": "deepseek-v4-flash"},
             ),
         ) as repair,
         patch.object(authoring, "_audit", lambda *args, **kwargs: None),
@@ -2732,8 +2732,8 @@ def main():
 
     assert intelligence.DOJO_AI_TUTOR_MODEL == "deepseek-v4-flash"
     assert authoring.DOJO_AI_AUTHORING_PLAN_MODEL == "deepseek-v4-flash"
-    assert authoring.DOJO_AI_AUTHORING_BUILD_MODEL == "deepseek-v4-pro"
-    assert authoring.DOJO_AI_AUTHORING_VALIDATE_MODEL == "deepseek-v4-pro"
+    assert authoring.DOJO_AI_AUTHORING_BUILD_MODEL == "deepseek-v4-flash"
+    assert authoring.DOJO_AI_AUTHORING_VALIDATE_MODEL == "deepseek-v4-flash"
     try:
         verify_http_contract(intelligence)
         verify_tutor_routing(intelligence)

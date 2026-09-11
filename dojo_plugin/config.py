@@ -119,19 +119,19 @@ DOJO_AI_BASE_URL = (
 ).rstrip("/")
 DOJO_AI_TUTOR_MODEL = os.getenv("DOJO_AI_TUTOR_MODEL") or "deepseek-v4-flash"
 DOJO_AI_GUIDE_MODEL = os.getenv("DOJO_AI_GUIDE_MODEL") or "deepseek-v4-flash"
-DOJO_AI_GRADER_MODEL = os.getenv("DOJO_AI_GRADER_MODEL") or "deepseek-v4-pro"
-DOJO_AI_SOLUTION_MODEL = os.getenv("DOJO_AI_SOLUTION_MODEL") or "deepseek-v4-pro"
+DOJO_AI_GRADER_MODEL = os.getenv("DOJO_AI_GRADER_MODEL") or "deepseek-v4-flash"
+DOJO_AI_SOLUTION_MODEL = os.getenv("DOJO_AI_SOLUTION_MODEL") or "deepseek-v4-flash"
 DOJO_AI_AUTHORING_PLAN_MODEL = (
     os.getenv("DOJO_AI_AUTHORING_PLAN_MODEL") or "deepseek-v4-flash"
 )
 DOJO_AI_AUTHORING_BUILD_MODEL = (
-    os.getenv("DOJO_AI_AUTHORING_BUILD_MODEL") or "deepseek-v4-pro"
+    os.getenv("DOJO_AI_AUTHORING_BUILD_MODEL") or "deepseek-v4-flash"
 )
 DOJO_AI_AUTHORING_VALIDATE_MODEL = (
-    os.getenv("DOJO_AI_AUTHORING_VALIDATE_MODEL") or "deepseek-v4-pro"
+    os.getenv("DOJO_AI_AUTHORING_VALIDATE_MODEL") or "deepseek-v4-flash"
 )
 DOJO_AI_COMPLEX_SCENE_MODEL = (
-    os.getenv("DOJO_AI_COMPLEX_SCENE_MODEL") or "deepseek-v4-pro"
+    os.getenv("DOJO_AI_COMPLEX_SCENE_MODEL") or "deepseek-v4-flash"
 )
 DOJO_AI_TIMEOUT_SECONDS = float(os.getenv("DOJO_AI_TIMEOUT_SECONDS") or "120")
 DOJO_AI_TOTAL_TIMEOUT_SECONDS = max(

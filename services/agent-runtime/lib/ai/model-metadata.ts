@@ -362,7 +362,6 @@ const THINKING_CAPABILITIES: Record<string, ThinkingCapability> = {
   [getModelMetadataKey('qwen', 'qwen3-max')]: qwenBudgetDisabled,
   [getModelMetadataKey('qwen', 'qwen3-vl-plus')]: qwenBudgetDisabled,
 
-  [getModelMetadataKey('deepseek', 'deepseek-v4-pro')]: deepseekEffort,
   [getModelMetadataKey('deepseek', 'deepseek-v4-flash')]: deepseekEffort,
 
   [getModelMetadataKey('kimi', 'kimi-k3')]: kimiK3Effort,
@@ -405,7 +404,6 @@ const THINKING_CAPABILITIES: Record<string, ThinkingCapability> = {
   // field (low/medium/high) and actually reasons, so they share the doubao
   // effort adapter — which sends `minimal` (not `none`) to disable, matching
   // what the plan endpoint accepts. The token-plan preset seeds these aliases.
-  [getModelMetadataKey('doubao', 'deepseek-v4-pro')]: doubaoSeed20Effort,
   [getModelMetadataKey('doubao', 'deepseek-v4-flash')]: doubaoSeed20Effort,
   [getModelMetadataKey('doubao', 'glm-5.2')]: doubaoSeed20Effort,
   [getModelMetadataKey('doubao', 'kimi-k2.7-code')]: doubaoSeed20Effort,
@@ -414,11 +412,6 @@ const THINKING_CAPABILITIES: Record<string, ThinkingCapability> = {
   [getModelMetadataKey('doubao', 'minimax-m2.7')]: doubaoSeed20Effort,
   [getModelMetadataKey('doubao', 'ark-code-latest')]: doubaoSeed20Effort,
 
-  [getModelMetadataKey('openrouter', 'deepseek/deepseek-v4-pro')]: effortCapability(
-    'openrouter',
-    ['low', 'medium', 'high'],
-    'medium',
-  ),
   [getModelMetadataKey('openrouter', 'deepseek/deepseek-v4-flash')]: effortCapability(
     'openrouter',
     ['low', 'medium', 'high'],

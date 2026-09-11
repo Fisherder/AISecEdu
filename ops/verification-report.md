@@ -46,7 +46,7 @@
 | PostgreSQL / Redis | `17.5` / `8.8.0` |
 | Prometheus / Grafana | `3.13.1` / `13.1.0` |
 | nginx | `1.29.1` |
-| DeepSeek | 部署密钥保存在 Git 忽略且不对外输出的 `/data/config.env`；官方 `/chat/completions` 真实调用通过；Guide/Tutor/方案层使用 `deepseek-v4-flash`，Grader/私有解法/规格/产物/红队/修复/最终验证使用 `deepseek-v4-pro`；离线 mock 契约与真实模型质量验收均通过 |
+| DeepSeek | 部署密钥保存在 Git 忽略且不对外输出的 `/data/config.env`；官方 `/chat/completions` 真实调用通过；Guide/Tutor/方案层使用 `deepseek-v4-flash`，Grader/私有解法/规格/产物/红队/修复/最终验证使用 `deepseek-v4-flash`；离线 mock 契约与真实模型质量验收均通过 |
 
 外层容器使用 `unless-stopped` 重启策略和特权模式，以运行嵌套 Docker、Kata、Btrfs homefs 与相关内核功能。源码挂载已验证为可写且 `BindOptions.NonRecursive=true`；`data/` 单独以 shared propagation 持久化。这样既支持直接改代码，也不会把内层 overlay2 子挂载递归暴露回源码树。
 
@@ -78,7 +78,7 @@ SAN 均为 IP `192.168.3.111`。CA 证书 SHA-256 指纹为
 | 持久人工验收场 | 通过 | 四道题均使用 Kata 启动；文件、端口和签名 Web 代理可用；未读取或提交 flag |
 | 智能出题 | 通过 | Flash 策略 Agent 基于题库和教师自然语言自动选择 L1/L2/L3；Pro 构建、独立红队及后台“验证—修复—复验”自主闭环逐轮可见；模型高危阻断、确定性 finding、真实服务响应绑定、文件/根进程完整性、私有解法禁止重启托管服务、稳定挑战身份、不可变版本和原生模块发布 |
 | Guide、证据与 Tutor | 通过 | Guide 支持最多六道可见题目引用并将其持久化为线程范围；上下文过滤无关活动题、历史轮次、目录与推荐，失效引用返回 400，偏题模型输出触发范围保护；读取各题真实 attempt、评测、反思、事件和 Tutor 历史；当前 epoch、CLI 自动命令、allowlist、脱敏、S1–S4、SHA-256 哈希链；Tutor 使用完整题面、基线/实时容器、私有解法和学生过程 |
-| 学习评测 | 通过 | Oracle 独立锁定客观 60 分；`deepseek-v4-pro` Grader 使用完整上下文、反思和 Oracle 结果评过程 40 分，返回可核对的事件/容器证据引用；完成提示可进入本次独立评分页查看总分、分项、能力、复盘与证据；支持回放、推荐、申诉和确定性复评 |
+| 学习评测 | 通过 | Oracle 独立锁定客观 60 分；`deepseek-v4-flash` Grader 使用完整上下文、反思和 Oracle 结果评过程 40 分，返回可核对的事件/容器证据引用；完成提示可进入本次独立评分页查看总分、分项、能力、复盘与证据；支持回放、推荐、申诉和确定性复评 |
 | 单系统与单入口 | 通过 | CTFd + `dojo_theme` 统一学生、认证与管理 UI；可选 frontend 未运行；Web 只使用 LAN IP |
 | 清理与解题边界 | 通过 | 临时用户、dojo、密钥、home、容器、原生/生成 challenge、版本包和审计均删除；有符号 dojo ID 目录换算与 solve/submission 边界均通过 |
 | 重启恢复 | 通过 | 外层容器重建后数据库和 SSH 主机密钥保持不变；TLS 按 LAN SAN 受控轮换，服务自动恢复 |
@@ -91,7 +91,7 @@ SAN 均为 IP `192.168.3.111`。CA 证书 SHA-256 指纹为
 ## Workspace Flag、Tutor 与容器生命周期专项验收
 
 - 故障日志复现确认：修复前一次正确 Flag 请求在 `DojoChallenge.solve()` 中同步执行两次 Pro Grader 调用，模型阶段分别约 34 秒和 75 秒，`POST /api/v1/challenges/attempt` 总耗时 110.26 秒；前端又缺少 `catch/finally`，网络异常或长请求会让提交图标永久保持旋转。该路径还在 `BaseChallenge.solve()` 提交 Solve 后写学习记录却未再次提交事务，存在学习基线被请求结束回滚的问题。
-- 正确 Flag 现在只同步记录 Oracle 证据并生成本地确定性 60 分基线，显式提交并在失败时回滚隔离，不再等待外部模型，也不会因学习记录异常阻断 Flag 结果。学生主动提交反思、教师复核和申诉仍走 `deepseek-v4-pro`，过程分评分能力没有删除。
+- 正确 Flag 现在只同步记录 Oracle 证据并生成本地确定性 60 分基线，显式提交并在失败时回滚隔离，不再等待外部模型，也不会因学习记录异常阻断 Flag 结果。学生主动提交反思、教师复核和申诉仍走 `deepseek-v4-flash`，过程分评分能力没有删除。
 - `actionSubmitFlag()` 增加重复提交锁、严格 Flag 格式检查、30 秒超时、异常横幅和无条件状态恢复。真实部署的 `/api/v1/challenges/attempt` 严格定向测试在 `0.15s` 返回正确结果，并确认客观分 `60`、assessment revision `1`、source 与 Grader provider 均为 `DETERMINISTIC`；临时 dojo、用户、工作区、Home、Solve 和 Submission 均自动清理，清理前后全局计数一致。
 - Tutor 展开态取消占宽的左侧切换轨道，内容使用整个面板宽度；趋势图入口移到面板底部的“查看学习分析”。大块“就绪”通知和基于历史回复推测的“容器待就绪”均已移除，改为直接查询当前活动 attempt 的紧凑状态元素。
 - 左右侧栏切换按钮现分别固定在外侧左上角和右上角，展开/收起只改变面板宽度和图标，真实 Chromium 中两种状态的按钮横纵坐标均保持一致。左侧原 `3.25rem` 占宽轨道改为覆盖式按钮层，课程、单元与题目列表从面板内边距开始，使用原绿框空间。
@@ -132,11 +132,11 @@ SAN 均为 IP `192.168.3.111`。CA 证书 SHA-256 指纹为
 
 - Guide 使用 `deepseek-v4-flash` 完成两轮连续对话，读取活动题目的课程/单元/题目身份、实时进程和端口、文件变化及最近事件。独立 Pro 评分为 specificity 4、personalization 5、actionability 5、safety 5、coherence 5；回答不再建议重复启动已经运行的服务。
 - Tutor 使用 `deepseek-v4-flash`，确认基线与实时容器均可用、题目包版本一致，并引用 2 个参考文件、1 个实时文件和 5 个过程事件；回答通过私有解法防泄露检查。
-- Grader 使用 `deepseek-v4-pro`，在服务端锁定的 6 项过程 rubric 内返回 18 个有效证据引用，题目包版本一致，私有标准解法来源为 `MODEL`，未泄露受保护事实。
+- Grader 使用 `deepseek-v4-flash`，在服务端锁定的 6 项过程 rubric 内返回 18 个有效证据引用，题目包版本一致，私有标准解法来源为 `MODEL`，未泄露受保护事实。
 - 完整出题质量评审中，Flash 方案层与 Pro 构建/验证层先因确定性运行/Oracle 闭环不足被正确 BLOCK，再由 Pro 修复并把全部中高风险 finding 标记为 `RESOLVED`，最终独立验证 PASS。
 - 新增“私有解法不得手动重启平台托管服务”门禁后又单独运行一次真实 Pro 出题：初审捕获 `det-private-solution-runtime` HIGH finding 并强制 BLOCK，Pro `CONTRACT_CLOSURE` 一轮修复后该 finding 为 `RESOLVED`，最终 PASS；生成 1 个 starter file、1 个 runtime service、2 个实时响应绑定，私有检查器权限为 `0700`。
 - `verify-container-context-real.py` 使用真实 Kata 工作区确认源题 `/challenge/run` 挂载文件进入可信 live context 且内容可用；采集器改用非登录 shell 和只读平台工具绝对路径，避免题目优先 `PATH` 与 profile 输出污染机器记录，同时保留虚拟文件系统剪枝、符号链接不跟随和有界读取。
-- `verify-source-authoring-real.py` 进一步使用部署密钥真实创建并发布 L1/L2：两者的第一层均为 `deepseek-v4-flash/MODEL`，公开规格构建、红队与最终验证均为 `deepseek-v4-pro`；发布包分别为 `USE_EXISTING` / `ADAPT_EXISTING` 的独立快照，保留源题原生文件、启动和 checker/flag 语义，且 `verificationAnswer`、starter files、自定义 Oracle 和第二套运行合约均为空。发布后真实启动 L2 Kata workspace，Flash Tutor 返回 `MODEL`，同时使用 1 个源题参考文件、至少 1 个实时文件、3 个可信过程事件和匹配的 attempt/package 版本，未触发泄漏拦截。临时课程、workspace、Home、用户、draft、challenge/profile、快照和审计全部清理，solve/submission 计数未变化。
+- `verify-source-authoring-real.py` 进一步使用部署密钥真实创建并发布 L1/L2：两者的第一层均为 `deepseek-v4-flash/MODEL`，公开规格构建、红队与最终验证均为 `deepseek-v4-flash`；发布包分别为 `USE_EXISTING` / `ADAPT_EXISTING` 的独立快照，保留源题原生文件、启动和 checker/flag 语义，且 `verificationAnswer`、starter files、自定义 Oracle 和第二套运行合约均为空。发布后真实启动 L2 Kata workspace，Flash Tutor 返回 `MODEL`，同时使用 1 个源题参考文件、至少 1 个实时文件、3 个可信过程事件和匹配的 attempt/package 版本，未触发泄漏拦截。临时课程、workspace、Home、用户、draft、challenge/profile、快照和审计全部清理，solve/submission 计数未变化。
 
 ## LAN 与目标客户端验收
 

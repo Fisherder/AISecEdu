@@ -1346,10 +1346,10 @@ class TeacherAgentVerifier:
             raise VerificationError(
                 f"{artifact_type} reported completion before its preview was ready"
             )
-        if expected_model == "deepseek-v4-pro" and (
-            (job.get("modelRoute") or {}).get("requiredModel") != "deepseek-v4-pro"
+        if expected_model == "deepseek-v4-flash" and (
+            (job.get("modelRoute") or {}).get("requiredModel") != "deepseek-v4-flash"
         ):
-            raise VerificationError(f"{artifact_type} did not enforce deepseek-v4-pro")
+            raise VerificationError(f"{artifact_type} did not enforce deepseek-v4-flash")
         actual_model = str((job.get("modelRoute") or {}).get("actualModel") or "unknown")
         self.ledger.pass_(
             f"{artifact_type}: {expected_mode}, {expected_count} output(s), {actual_model}"
@@ -1475,7 +1475,7 @@ class TeacherAgentVerifier:
             "SQL注入攻防演示实验，不要生成下载文件；包含攻击者、防守者、拓扑和验证步骤",
             "attack-defense-scene",
             "single",
-            "deepseek-v4-pro",
+            "deepseek-v4-flash",
             materialize=True,
         )
         self.send_generation(
@@ -1483,7 +1483,7 @@ class TeacherAgentVerifier:
             "不要生成下载文件；包含即时反馈、评分标准和复盘",
             "simulation",
             "single",
-            "deepseek-v4-pro",
+            "deepseek-v4-flash",
             materialize=True,
         )
 
@@ -2022,7 +2022,7 @@ SQL 注入来自把不可信输入拼接进查询。攻击者可改变查询语�
             "不要生成下载文件；包含角色立场、三轮交锋和评价量规",
             "debate",
             "single",
-            "deepseek-v4-pro",
+            "deepseek-v4-flash",
         )
 
     def cleanup(self) -> None:
@@ -2484,7 +2484,7 @@ SQL 注入来自把不可信输入拼接进查询。攻击者可改变查询语�
                 "包含可操作参数、状态变化、即时反馈和复盘。",
                 "simulation",
                 "single",
-                "deepseek-v4-pro",
+                "deepseek-v4-flash",
                 materialize=True,
             )
 
@@ -2604,7 +2604,7 @@ SQL 注入来自把不可信输入拼接进查询。攻击者可改变查询语�
             "包含可操作参数、状态变化、即时反馈、成功条件和复盘。",
             "simulation",
             "single",
-            "deepseek-v4-pro",
+            "deepseek-v4-flash",
             materialize=True,
         )
         simulation = self.artifacts[-1]

@@ -139,7 +139,7 @@ describe('model-routes', () => {
       },
       'scene-content:slide': { model: 'google:gemini-3-flash-preview', thinking: { level: 'low' } },
       'scene-content:quiz': {
-        model: 'deepseek:deepseek-v4-pro',
+        model: 'deepseek:deepseek-v4-flash',
         thinking: { mode: 'disabled', enabled: false },
       },
     });

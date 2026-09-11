@@ -17,7 +17,7 @@
 
 配置 DeepSeek API key 后，教师请求先由全局智能体直接理解和规划；系统不会先把请求压缩成“课件生成”等固定意图。智能体可从仓库内、带来源和许可证的技能目录中按需选择方法，并通过有界“模型—工具—服务端观察”循环继续处理原始目标。分析类请求直接返回分析，文件请求生成带鉴权下载地址的真实 DOCX、Markdown、CSV、HTML、JSON 或 Notebook，只有需要平台原生交互内容时才创建内容产物。课程和章节只是权限内可操作对象，不是对话的固定容器。
 
-Guide、Tutor、一般规划与方案使用 `deepseek-v4-flash`；复杂规格构建、红队、修复、最终验证、旧题私有解法和过程评分使用 `deepseek-v4-pro`。CTF 内部流水线仍可自动决定 L1 复用、L2 改编或 L3 新建，但它只是全局智能体的一项受控工具。L1/L2 保留源题原生文件、`.init`、checker/flag 和运行镜像，不叠加第二套提交协议；L3 生成自包含产物与私有声明式 Flag Gate。学生完成目标后统一取得并提交动态 Flag，不以 `solution.json` 报告作为完成条件。任何开放的中高风险 finding 或确定性门禁失败都会阻止发布。
+Guide、Tutor、一般规划与方案使用 `deepseek-v4-flash`；复杂规格构建、红队、修复、最终验证、旧题私有解法和过程评分使用 `deepseek-v4-flash`。CTF 内部流水线仍可自动决定 L1 复用、L2 改编或 L3 新建，但它只是全局智能体的一项受控工具。L1/L2 保留源题原生文件、`.init`、checker/flag 和运行镜像，不叠加第二套提交协议；L3 生成自包含产物与私有声明式 Flag Gate。学生完成目标后统一取得并提交动态 Flag，不以 `solution.json` 报告作为完成条件。任何开放的中高风险 finding 或确定性门禁失败都会阻止发布。
 
 ## 领域对应关系
 
@@ -74,7 +74,7 @@ make verify
 ./ops/verify-learning-flow.py
 ```
 
-`verify-container-context-real.py` 使用一次性原生题和 Kata 工作区验证 Tutor/Grader 能安全读取独立挂载在 `/challenge` 下的实时文件；`verify-source-authoring-real.py` 使用部署密钥真实验证 L1/L2 的 Flash 方案、Pro 构建/审查、原生源题快照，以及 Flash Tutor 对基线、实时工作区、过程证据和固定包版本的联合使用；`verify-learning-flow.py` 会创建一次性教师/学生流程，在真实 Kata 工作区内验证出题、红队修复、绑定实时服务/文件/进程的私有 Flag Gate、Guide、Tutor、命令证据、Pro 60/40 评分、六维能力、申诉和分析。三个脚本都会清理各自创建的临时课程、用户、工作区、Home 与生成数据。
+`verify-container-context-real.py` 使用一次性原生题和 Kata 工作区验证 Tutor/Grader 能安全读取独立挂载在 `/challenge` 下的实时文件；`verify-source-authoring-real.py` 使用部署密钥真实验证 L1/L2 的 Flash 方案、Flash 构建/审查、原生源题快照，以及 Flash Tutor 对基线、实时工作区、过程证据和固定包版本的联合使用；`verify-learning-flow.py` 会创建一次性教师/学生流程，在真实 Kata 工作区内验证出题、红队修复、绑定实时服务/文件/进程的私有 Flag Gate、Guide、Tutor、命令证据、Flash 60/40 评分、六维能力、申诉和分析。三个脚本都会清理各自创建的临时课程、用户、工作区、Home 与生成数据。
 
 ## 兼容性与来源
 
