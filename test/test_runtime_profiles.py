@@ -117,5 +117,6 @@ def test_runtime_tools_reach_teacher_and_solution_contexts(monkeypatch, environm
     learner = _public_challenge_context(challenge)
     assert selected['cCompiler'] == compiler
     assert selected['writableDirectory'] == directory
+    assert selected['checkCommand'] == ('C:\\Course\\check.cmd' if environment == 'windows' else '/challenge/check')
     assert learner['runtime'] == selected
     assert learner['nativeWorkspace'] == selected['workingDirectory']

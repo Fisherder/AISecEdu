@@ -108,6 +108,18 @@ def model_json(system, payload, **kwargs):
         if isinstance(item, dict) and item.get("runtimeEnvironment"):
             environment = item["runtimeEnvironment"]
             break
+    profile = runtime_profile(environment)
+    system += (
+        "\n运行平台的已实现契约（生成、审查和修复阶段均适用）："
+        f"mode=GENERATE_CUSTOM 的题包由平台自动提供 {profile.check_command} 检查入口，也提供 /challenge/check。"
+        "FLAG_GATE_V1 使用无答案参数的检查入口，平台根据 oracleContract 读取声明服务的实时状态并签发动态 Flag。"
+        "新建自定义题的这些入口不属于 starterFiles；不得生成 check、check.cmd 或占位提示脚本替代平台检查器。"
+        "不能因 starterFiles 未列出平台检查器而判定检查入口缺失。"
+        "复用或改编已有题时保留其原生检查器与完成协议，不强加自定义题的检查入口。"
+        "runtimeContract 声明的服务由平台启动，入口可以是只读 starterFile；平台核对源文件完整性和原始服务进程身份。"
+        "只读起始文件可执行、可被解释器读取；不能仅因服务源码可见或只读就认定服务不可启动或源码可被修改。"
+        "服务的可变状态必须写入运行环境的可写目录，不能写入只读题目目录。"
+    )
     if environment == "windows":
         system += (
             "\n本题明确选择 runtimeEnvironment=windows，必须保留该字段和平台指定镜像。"

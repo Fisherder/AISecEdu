@@ -16,6 +16,7 @@ class RuntimeProfile:
     c_compiler: str = "gcc"
     writable_directory: str = "/home/hacker"
     command_bridge: str | None = None
+    check_command: str = "/challenge/check"
 
     @property
     def public_context(self):
@@ -28,6 +29,7 @@ class RuntimeProfile:
             "serviceInterpreters": list(self.interpreters),
             "cCompiler": self.c_compiler,
             "commandBridge": self.command_bridge,
+            "checkCommand": self.check_command,
         }
 
     @property
@@ -46,7 +48,7 @@ class RuntimeProfile:
 
 RUNTIME_PROFILES = {
     "linux": RuntimeProfile("linux", "Linux", "DOJO_LINUX_RUNTIME_IMAGE", "4G", "/challenge", ("python3", "node", "bash"), "remote"),
-    "windows": RuntimeProfile("windows", "Windows 远程桌面", "DOJO_WINDOWS_RUNTIME_IMAGE", "6G", "C:\\Course", ("powershell", "cmd"), "scale", "/usr/local/bin/windows-runtime-start", c_compiler="C:\\tcc\\tcc.exe", writable_directory="C:\\CourseWork", command_bridge="windows-exec"),
+    "windows": RuntimeProfile("windows", "Windows 远程桌面", "DOJO_WINDOWS_RUNTIME_IMAGE", "6G", "C:\\Course", ("powershell", "cmd"), "scale", "/usr/local/bin/windows-runtime-start", c_compiler="C:\\tcc\\tcc.exe", writable_directory="C:\\CourseWork", command_bridge="windows-exec", check_command="C:\\Course\\check.cmd"),
 }
 RUNTIME_ALIASES = {"win": "windows", "win10": "windows", "win11": "windows", "windows-qemu": "windows", "windows-desktop": "windows", "ubuntu": "linux", "debian": "linux"}
 RUNTIME_TOKEN = re.compile(r"(?<![a-z0-9])(?:windows(?:\s*1[01])?|win1[01]|linux|ubuntu|debian)(?![a-z0-9])", re.I)
