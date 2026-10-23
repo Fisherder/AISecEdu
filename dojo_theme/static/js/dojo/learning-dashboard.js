@@ -115,7 +115,8 @@ document.addEventListener("DOMContentLoaded", function () {
     empty.hidden = true;
     container.hidden = false;
     document.getElementById("learning-assessment-score").textContent = `${assessment.totalScore} / 100`;
-    document.getElementById("learning-assessment-feedback-summary").textContent = `客观结果 ${assessment.objectiveScore}/60 · 过程表现 ${assessment.processScore}/40`;
+    const credit = Number(assessment.scorePolicy && assessment.scorePolicy.completionCredit) || 0;
+    document.getElementById("learning-assessment-feedback-summary").textContent = `客观结果 ${assessment.objectiveScore}/60 · 过程表现 ${assessment.processScore}/40${credit > 0 ? ` · 完成奖励 +${credit}（补足至 90 分）` : ""}`;
     document.getElementById("learning-assessment-feedback").textContent = assessment.feedback || "";
     const objective = (assessment.criteria || []).find(criterion => criterion.id === "objective-success") || {};
     const grader = (objective.evidence || {}).grader || {};
@@ -208,7 +209,7 @@ document.addEventListener("DOMContentLoaded", function () {
       modalNotice,
     );
     try {
-      const response = await learning.json("POST", `/learning/attempts/${encodeURIComponent(selectedAttempt.id)}`, { reflection, submit: true });
+      const response = await learning.json("POST", `/learning/attempts/${encodeURIComponent(selectedAttempt.id)}`, { reflection, submit: true }, {timeoutMs: 240000, retries: 0});
       if (!response.success) throw new Error(learning.errorMessage(response, "无法提交复盘内容。"));
       renderAttempt(response.attempt);
       learning.showNotice(modalNotice, "复盘已保存，新的评估修订已生成。", "success");

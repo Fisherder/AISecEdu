@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block stylesheets %}<link rel="stylesheet" href="{{ url_for('views.themes', path='css/teacher-projects.css', v='frontend-restored-20261001-1') }}"><link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/bulk-management.css', v='frontend-restored-20261001-1') }}">{% endblock %}
+{% block content %}
+<main id="teacher-projects" class="projects-shell">
+  <header><div><a href="/teacher">教师工作台</a><h1>生成项目合集</h1><p>先创作，再决定在哪里授课。课件、动画演示与互动内容无需指定课程，默认仅自己可见。</p></div><a class="project-primary" href="/teacher?view=conversation&amp;newProject=1">＋ 新建项目</a><a class="ui-button" href="/teacher/inquiry/new">流程探究式学习</a></header>
+  <div class="projects-toolbar">
+    <a href="/teacher/library">素材库 · 跨课程复用</a>
+    <label class="project-search-label">搜索项目<input id="project-search" type="search" placeholder="按标题搜索" maxlength="240"></label>
+    <label>项目类型<select id="project-type"><option value="">全部类型</option><option value="learning-flow">流程探究式学习</option><option value="slide-deck">课件</option><option value="attack-defense-scene">动画演示</option><option value="simulation">交互仿真</option><option value="debate">AI 辩论</option><option value="roleplay">角色互动</option></select></label>
+    <button id="project-refresh" type="button">刷新</button>
+    <button id="project-bulk-toggle" type="button" aria-pressed="false" aria-controls="project-bulk-bar"><i class="fas fa-sliders-h" aria-hidden="true"></i> <span>批量管理</span></button>
+  </div>
+  <div class="project-status-filters" role="group" aria-label="按生成状态筛选" aria-describedby="project-status-help">
+    <button type="button" data-project-status="all" aria-pressed="false">全部<span data-status-count>—</span></button>
+    <button type="button" data-project-status="generating" aria-pressed="false">生成中<span data-status-count>—</span></button>
+    <button type="button" data-project-status="failed" aria-pressed="false">失败 / 已取消<span data-status-count>—</span></button>
+    <button type="button" data-project-status="succeeded" aria-pressed="true">生成成功<span data-status-count>—</span></button>
+  </div>
+  <p id="project-status-help" class="project-help">按当前生成或调整任务归类；分类数量随搜索和类型筛选更新。</p>
+  <p id="project-notice" role="status" aria-live="polite">正在读取项目…</p>
+  <section id="project-bulk-bar" class="bulk-management-bar" aria-label="项目批量管理" hidden><div><strong id="project-bulk-count" role="status" aria-live="polite">已选 0 项</strong><p class="project-help">只选择当前列表；切换分类或翻页会清空选择。</p></div><div class="bulk-management-controls"><button id="project-bulk-all" type="button" aria-pressed="false">全选当前列表</button><button id="project-bulk-clear" type="button" disabled>清空选择</button><button id="project-bulk-delete" type="button" disabled><i class="fas fa-trash-alt" aria-hidden="true"></i> 批量删除</button></div></section>
+  <section id="project-list" class="projects-grid" aria-label="独立生成项目" aria-busy="true"></section>
+  <section id="project-empty" class="project-empty" hidden><h2 id="project-empty-title"></h2><p id="project-empty-description"></p><button id="project-clear" type="button">清除筛选</button></section>
+  <nav id="project-pagination" class="project-pagination" aria-label="项目分页" hidden><button id="project-prev" type="button" disabled>上一页</button><span id="project-page-summary"></span><button id="project-next" type="button" disabled>下一页</button></nav>
+  <dialog id="project-course-dialog"><form id="project-course-form"><h2>关联到课程</h2><p>作品会作为草稿进入所选章节，不会自动对学生发布。</p><label>课程<select id="project-course" required></select></label><label>章节<select id="project-module" required></select></label><p id="project-course-error" role="alert"></p><footer><button id="project-course-cancel" type="button">取消</button><button class="project-primary" type="submit">确认关联</button></footer></form></dialog>
+  <dialog id="project-manage-dialog" aria-labelledby="project-manage-title"><form id="project-manage-form"><h2 id="project-manage-title">重命名项目</h2><p id="project-manage-description"></p><label id="project-name-label">项目名称<input id="project-name" required maxlength="240" autocomplete="off"></label><p id="project-manage-error" role="alert"></p><footer><button id="project-manage-cancel" type="button">取消</button><button id="project-manage-submit" class="project-primary" type="submit">保存名称</button></footer></form></dialog>
+</main>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script><script src="{{ url_for('views.themes', path='js/dojo/core/teaching-job-progress.js', v='frontend-restored-20261001-1') }}"></script><script src="{{ url_for('views.themes_beta', path='js/dojo/core/bulk-selection.js', v='frontend-restored-20261001-1') }}"></script><script src="{{ url_for('views.themes_beta', path='js/dojo/teacher-projects.js', inquiry='20261019-4', v='frontend-restored-20261001-1') }}"></script>{% endblock %}

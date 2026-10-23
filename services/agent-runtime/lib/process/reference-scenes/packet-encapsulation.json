@@ -1,0 +1,2558 @@
+{
+  "id": "packet-encapsulation-verified-r91",
+  "source": "r91_full_20260925/packet, browser PASSED, quality 100",
+  "scene": {
+    "schemaVersion": "process-v1",
+    "title": "数据包封装过程",
+    "summary": "这个互动演示把应用数据依次加上传输层、网络层和链路层头部，最后得到可以在链路上传输的帧。你可以选择应用数据长度和传输层协议，先构造应用数据，再单步执行三层封装。每一步都能查看头部字节、总长度、协议字段和连续字节结构，并用核对题检查当前可见读数。",
+    "modelNote": "这是教学用的简化封装模型，不连接真实网络设备。TCP 头部按 20 字节、UDP 头部按 8 字节、网络层头部按 20 字节、以太网帧头按 14 字节、帧尾按 4 字节计算。端口、IP 地址等字段取固定教学值；帧尾校验和用网络层分组所有字节求和算出，不是真实 CRC 校验。改变输入会清空旧封装过程并回到初始状态。",
+    "inputs": [
+      {
+        "id": "appLength",
+        "label": "应用数据长度（字节）",
+        "type": "range",
+        "default": 4,
+        "min": 1,
+        "max": 16,
+        "step": 1
+      },
+      {
+        "id": "transport",
+        "label": "传输层协议",
+        "type": "select",
+        "default": "TCP",
+        "options": [
+          {
+            "label": "TCP",
+            "value": "TCP"
+          },
+          {
+            "label": "UDP",
+            "value": "UDP"
+          }
+        ]
+      }
+    ],
+    "initialState": {
+      "stepIndex": 0,
+      "appData": [],
+      "transportHeader": [],
+      "transportSegment": [],
+      "networkHeader": [],
+      "packet": [],
+      "linkHeader": [],
+      "linkTrailer": [],
+      "frame": []
+    },
+    "views": [
+      {
+        "id": "currentStageValue",
+        "title": "当前步骤序号",
+        "kind": "value",
+        "value": {
+          "state": "stepIndex"
+        }
+      },
+      {
+        "id": "currentLengthValue",
+        "title": "当前封装对象长度（字节）",
+        "kind": "value",
+        "value": {
+          "op": "if",
+          "args": [
+            {
+              "op": "eq",
+              "args": [
+                {
+                  "state": "stepIndex"
+                },
+                4
+              ]
+            },
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "frame"
+                }
+              ]
+            },
+            {
+              "op": "if",
+              "args": [
+                {
+                  "op": "eq",
+                  "args": [
+                    {
+                      "state": "stepIndex"
+                    },
+                    3
+                  ]
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "packet"
+                    }
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "state": "stepIndex"
+                        },
+                        2
+                      ]
+                    },
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "transportSegment"
+                        }
+                      ]
+                    },
+                    {
+                      "op": "if",
+                      "args": [
+                        {
+                          "op": "eq",
+                          "args": [
+                            {
+                              "state": "stepIndex"
+                            },
+                            1
+                          ]
+                        },
+                        {
+                          "op": "length",
+                          "args": [
+                            {
+                              "state": "appData"
+                            }
+                          ]
+                        },
+                        {
+                          "op": "length",
+                          "args": [
+                            {
+                              "state": "appData"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "transportHeaderLengthValue",
+        "title": "传输层头部长度（字节）",
+        "kind": "value",
+        "value": {
+          "op": "length",
+          "args": [
+            {
+              "state": "transportHeader"
+            }
+          ]
+        }
+      },
+      {
+        "id": "networkTotalLengthValue",
+        "title": "网络层总长度字段（字节）",
+        "kind": "value",
+        "value": {
+          "op": "if",
+          "args": [
+            {
+              "op": "gte",
+              "args": [
+                {
+                  "state": "stepIndex"
+                },
+                3
+              ]
+            },
+            {
+              "op": "add",
+              "args": [
+                20,
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "transportSegment"
+                    }
+                  ]
+                }
+              ]
+            },
+            0
+          ]
+        }
+      },
+      {
+        "id": "protocolSummary",
+        "title": "协议字段",
+        "kind": "text",
+        "value": {
+          "op": "concat",
+          "args": [
+            "传输层协议：",
+            {
+              "input": "transport"
+            },
+            "；网络层协议字段：",
+            {
+              "op": "if",
+              "args": [
+                {
+                  "op": "eq",
+                  "args": [
+                    {
+                      "input": "transport"
+                    },
+                    "UDP"
+                  ]
+                },
+                17,
+                6
+              ]
+            },
+            "（TCP 为 6，UDP 为 17）"
+          ]
+        }
+      },
+      {
+        "id": "appDataBytes",
+        "title": "应用数据字节（十六进制和字符）",
+        "kind": "array",
+        "value": {
+          "state": "appData"
+        },
+        "format": "byte",
+        "activeIndex": {
+          "op": "sub",
+          "args": [
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "appData"
+                }
+              ]
+            },
+            1
+          ]
+        }
+      },
+      {
+        "id": "transportSegmentBytes",
+        "title": "传输层段字节（传输层头部 + 应用数据）",
+        "kind": "array",
+        "value": {
+          "state": "transportSegment"
+        },
+        "format": "byte",
+        "regions": [
+          {
+            "start": 0,
+            "end": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "transportSegment"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "transportHeader"
+                    }
+                  ]
+                },
+                0
+              ]
+            },
+            "label": "传输层头部"
+          },
+          {
+            "start": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "transportSegment"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "transportHeader"
+                    }
+                  ]
+                },
+                0
+              ]
+            },
+            "end": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "transportSegment"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "transportSegment"
+                    }
+                  ]
+                },
+                0
+              ]
+            },
+            "label": "应用数据"
+          }
+        ]
+      },
+      {
+        "id": "packetBytes",
+        "title": "网络层分组字节（网络层头部 + 传输层段）",
+        "kind": "array",
+        "value": {
+          "state": "packet"
+        },
+        "format": "byte",
+        "regions": [
+          {
+            "start": 0,
+            "end": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "packet"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "networkHeader"
+                    }
+                  ]
+                },
+                0
+              ]
+            },
+            "label": "网络层头部"
+          },
+          {
+            "start": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "packet"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "networkHeader"
+                    }
+                  ]
+                },
+                0
+              ]
+            },
+            "end": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "packet"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "packet"
+                    }
+                  ]
+                },
+                0
+              ]
+            },
+            "label": "传输层段"
+          }
+        ]
+      },
+      {
+        "id": "frameBytes",
+        "title": "链路层帧字节（帧头 + 网络层分组 + 帧尾）",
+        "kind": "array",
+        "value": {
+          "state": "frame"
+        },
+        "format": "byte",
+        "regions": [
+          {
+            "start": 0,
+            "end": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "frame"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                14,
+                0
+              ]
+            },
+            "label": "链路层头部"
+          },
+          {
+            "start": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "frame"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                14,
+                0
+              ]
+            },
+            "end": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "frame"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "add",
+                  "args": [
+                    14,
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "packet"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                0
+              ]
+            },
+            "label": "网络层分组"
+          },
+          {
+            "start": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "frame"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "add",
+                  "args": [
+                    14,
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "packet"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                0
+              ]
+            },
+            "end": {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gt",
+                  "args": [
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "frame"
+                        }
+                      ]
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "frame"
+                    }
+                  ]
+                },
+                0
+              ]
+            },
+            "label": "帧尾"
+          }
+        ]
+      }
+    ],
+    "actions": [
+      {
+        "id": "buildAppData",
+        "label": "构造应用数据",
+        "description": "按“应用数据长度”逐个字节生成应用数据。每个字节是一个可打印字母，从 A 开始按字母表顺序往后排，超过 Z 再回到 A。",
+        "enabledWhen": {
+          "op": "lt",
+          "args": [
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "appData"
+                }
+              ]
+            },
+            {
+              "input": "appLength"
+            }
+          ]
+        },
+        "repeatWhile": {
+          "op": "lt",
+          "args": [
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "appData"
+                }
+              ]
+            },
+            {
+              "input": "appLength"
+            }
+          ]
+        },
+        "locals": [
+          {
+            "id": "n",
+            "value": {
+              "op": "length",
+              "args": [
+                {
+                  "state": "appData"
+                }
+              ]
+            }
+          },
+          {
+            "id": "b",
+            "value": {
+              "op": "add",
+              "args": [
+                65,
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "local": "n"
+                    },
+                    26
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "nextLen",
+            "value": {
+              "op": "add",
+              "args": [
+                {
+                  "local": "n"
+                },
+                1
+              ]
+            }
+          },
+          {
+            "id": "ready",
+            "value": {
+              "op": "gte",
+              "args": [
+                {
+                  "local": "nextLen"
+                },
+                {
+                  "input": "appLength"
+                }
+              ]
+            }
+          }
+        ],
+        "feedback": {
+          "op": "concat",
+          "args": [
+            "应用数据现在有 ",
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "appData"
+                }
+              ]
+            },
+            " 字节，目标是 ",
+            {
+              "input": "appLength"
+            },
+            " 字节。",
+            {
+              "op": "if",
+              "args": [
+                {
+                  "local": "ready"
+                },
+                "字节数已经够了，接下来执行传输层封装。",
+                "继续执行，把剩下的字节补齐。"
+              ]
+            }
+          ]
+        },
+        "updates": [
+          {
+            "target": "appData",
+            "value": {
+              "op": "append",
+              "args": [
+                {
+                  "state": "appData"
+                },
+                {
+                  "local": "b"
+                }
+              ]
+            }
+          },
+          {
+            "target": "stepIndex",
+            "value": {
+              "op": "if",
+              "args": [
+                {
+                  "local": "ready"
+                },
+                1,
+                0
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "transportEncap",
+        "label": "执行传输层封装",
+        "description": "在应用数据前面加上传输层头部。选 TCP 加 20 字节头部，头部包含源端口、目的端口、序列号等固定教学值；选 UDP 加 8 字节头部，头部包含源端口、目的端口和长度字段，长度字段按 8 加应用数据长度计算。",
+        "enabledWhen": {
+          "op": "eq",
+          "args": [
+            {
+              "state": "stepIndex"
+            },
+            1
+          ]
+        },
+        "locals": [
+          {
+            "id": "udp",
+            "value": {
+              "op": "eq",
+              "args": [
+                {
+                  "input": "transport"
+                },
+                "UDP"
+              ]
+            }
+          },
+          {
+            "id": "udpHdr",
+            "value": {
+              "op": "array",
+              "args": [
+                31,
+                144,
+                0,
+                80,
+                0,
+                {
+                  "op": "add",
+                  "args": [
+                    8,
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "state": "appData"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                0,
+                0
+              ]
+            }
+          },
+          {
+            "id": "tcpA",
+            "value": {
+              "op": "array",
+              "args": [
+                31,
+                144,
+                0,
+                80
+              ]
+            }
+          },
+          {
+            "id": "tcpB",
+            "value": {
+              "op": "array",
+              "args": [
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          {
+            "id": "tcpC",
+            "value": {
+              "op": "array",
+              "args": [
+                80,
+                24,
+                32,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          },
+          {
+            "id": "tcpHdr",
+            "value": {
+              "op": "concatArrays",
+              "args": [
+                {
+                  "op": "concatArrays",
+                  "args": [
+                    {
+                      "local": "tcpA"
+                    },
+                    {
+                      "local": "tcpB"
+                    }
+                  ]
+                },
+                {
+                  "local": "tcpC"
+                }
+              ]
+            }
+          },
+          {
+            "id": "hdr",
+            "value": {
+              "op": "if",
+              "args": [
+                {
+                  "local": "udp"
+                },
+                {
+                  "local": "udpHdr"
+                },
+                {
+                  "local": "tcpHdr"
+                }
+              ]
+            }
+          },
+          {
+            "id": "seg",
+            "value": {
+              "op": "concatArrays",
+              "args": [
+                {
+                  "local": "hdr"
+                },
+                {
+                  "state": "appData"
+                }
+              ]
+            }
+          }
+        ],
+        "feedback": {
+          "op": "concat",
+          "args": [
+            "传输层协议是 ",
+            {
+              "input": "transport"
+            },
+            "，头部占 ",
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "transportHeader"
+                }
+              ]
+            },
+            " 字节；应用数据 ",
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "appData"
+                }
+              ]
+            },
+            " 字节接在头部后面，传输层段一共 ",
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "transportSegment"
+                }
+              ]
+            },
+            " 字节。下一步给这段数据加网络层头部。"
+          ]
+        },
+        "updates": [
+          {
+            "target": "transportHeader",
+            "value": {
+              "local": "hdr"
+            }
+          },
+          {
+            "target": "transportSegment",
+            "value": {
+              "local": "seg"
+            }
+          },
+          {
+            "target": "stepIndex",
+            "value": 2
+          }
+        ]
+      },
+      {
+        "id": "networkEncap",
+        "label": "执行网络层封装",
+        "description": "在传输层段前面加上 20 字节网络层头部。头部里的总长度写“20 加传输层段长度”，协议字段按传输层协议填：TCP 填 6，UDP 填 17。",
+        "enabledWhen": {
+          "op": "eq",
+          "args": [
+            {
+              "state": "stepIndex"
+            },
+            2
+          ]
+        },
+        "locals": [
+          {
+            "id": "udp",
+            "value": {
+              "op": "eq",
+              "args": [
+                {
+                  "input": "transport"
+                },
+                "UDP"
+              ]
+            }
+          },
+          {
+            "id": "totLen",
+            "value": {
+              "op": "add",
+              "args": [
+                20,
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "transportSegment"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "proto",
+            "value": {
+              "op": "if",
+              "args": [
+                {
+                  "local": "udp"
+                },
+                17,
+                6
+              ]
+            }
+          },
+          {
+            "id": "ipA",
+            "value": {
+              "op": "array",
+              "args": [
+                69,
+                0,
+                0,
+                {
+                  "local": "totLen"
+                }
+              ]
+            }
+          },
+          {
+            "id": "ipB",
+            "value": {
+              "op": "array",
+              "args": [
+                0,
+                1,
+                64,
+                0,
+                64,
+                {
+                  "local": "proto"
+                },
+                0,
+                0
+              ]
+            }
+          },
+          {
+            "id": "ipC",
+            "value": {
+              "op": "array",
+              "args": [
+                192,
+                168,
+                1,
+                1,
+                10,
+                0,
+                0,
+                5
+              ]
+            }
+          },
+          {
+            "id": "ipHdr",
+            "value": {
+              "op": "concatArrays",
+              "args": [
+                {
+                  "op": "concatArrays",
+                  "args": [
+                    {
+                      "local": "ipA"
+                    },
+                    {
+                      "local": "ipB"
+                    }
+                  ]
+                },
+                {
+                  "local": "ipC"
+                }
+              ]
+            }
+          },
+          {
+            "id": "pkt",
+            "value": {
+              "op": "concatArrays",
+              "args": [
+                {
+                  "local": "ipHdr"
+                },
+                {
+                  "state": "transportSegment"
+                }
+              ]
+            }
+          }
+        ],
+        "feedback": {
+          "op": "concat",
+          "args": [
+            "网络层头部 20 字节，协议字段填 ",
+            {
+              "local": "proto"
+            },
+            "；总长度字段填 ",
+            {
+              "local": "totLen"
+            },
+            "，也就是头部 20 字节加传输层段 ",
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "transportSegment"
+                }
+              ]
+            },
+            " 字节。现在网络层分组一共 ",
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "packet"
+                }
+              ]
+            },
+            " 字节，下一步加链路层帧头和帧尾。"
+          ]
+        },
+        "updates": [
+          {
+            "target": "networkHeader",
+            "value": {
+              "local": "ipHdr"
+            }
+          },
+          {
+            "target": "packet",
+            "value": {
+              "local": "pkt"
+            }
+          },
+          {
+            "target": "stepIndex",
+            "value": 3
+          }
+        ]
+      },
+      {
+        "id": "linkEncap",
+        "label": "执行链路层封装",
+        "description": "在网络层分组前面加上 14 字节以太网帧头，后面加上 4 字节帧尾。帧尾是简化校验和：把网络层分组所有字节求和，写成 4 个字节。",
+        "enabledWhen": {
+          "op": "eq",
+          "args": [
+            {
+              "state": "stepIndex"
+            },
+            3
+          ]
+        },
+        "locals": [
+          {
+            "id": "ethHdr",
+            "value": {
+              "op": "array",
+              "args": [
+                0,
+                26,
+                43,
+                60,
+                77,
+                94,
+                170,
+                187,
+                204,
+                221,
+                238,
+                255,
+                8,
+                0
+              ]
+            }
+          },
+          {
+            "id": "sumPacket",
+            "value": {
+              "op": "sum",
+              "args": [
+                {
+                  "state": "packet"
+                }
+              ]
+            }
+          },
+          {
+            "id": "crcHigh",
+            "value": {
+              "op": "floor",
+              "args": [
+                {
+                  "op": "div",
+                  "args": [
+                    {
+                      "local": "sumPacket"
+                    },
+                    256
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "crcLow",
+            "value": {
+              "op": "mod",
+              "args": [
+                {
+                  "local": "sumPacket"
+                },
+                256
+              ]
+            }
+          },
+          {
+            "id": "crc",
+            "value": {
+              "op": "array",
+              "args": [
+                0,
+                0,
+                {
+                  "local": "crcHigh"
+                },
+                {
+                  "local": "crcLow"
+                }
+              ]
+            }
+          },
+          {
+            "id": "fr",
+            "value": {
+              "op": "concatArrays",
+              "args": [
+                {
+                  "op": "concatArrays",
+                  "args": [
+                    {
+                      "local": "ethHdr"
+                    },
+                    {
+                      "state": "packet"
+                    }
+                  ]
+                },
+                {
+                  "local": "crc"
+                }
+              ]
+            }
+          }
+        ],
+        "feedback": {
+          "op": "concat",
+          "args": [
+            "链路层加了 14 字节帧头和 4 字节帧尾，帧尾校验和是 ",
+            {
+              "op": "join",
+              "args": [
+                {
+                  "local": "crc"
+                }
+              ]
+            },
+            "。整个帧一共 ",
+            {
+              "op": "length",
+              "args": [
+                {
+                  "state": "frame"
+                }
+              ]
+            },
+            " 字节，可以在连续字节视图里从帧头一直读到帧尾。"
+          ]
+        },
+        "updates": [
+          {
+            "target": "linkHeader",
+            "value": {
+              "local": "ethHdr"
+            }
+          },
+          {
+            "target": "linkTrailer",
+            "value": {
+              "local": "crc"
+            }
+          },
+          {
+            "target": "frame",
+            "value": {
+              "local": "fr"
+            }
+          },
+          {
+            "target": "stepIndex",
+            "value": 4
+          }
+        ]
+      }
+    ],
+    "stages": [
+      {
+        "id": "stageBuildApp",
+        "title": "构造应用数据",
+        "when": {
+          "op": "eq",
+          "args": [
+            {
+              "state": "stepIndex"
+            },
+            0
+          ]
+        },
+        "explanation": "应用数据数组按设定长度逐个填入字母。每点一次“构造应用数据”，字节数增加 1；从 A 开始按字母表顺序循环。看“应用数据字节”视图，橙色边框标出本次写入的字节。长度达到设定值后，这个阶段结束。"
+      },
+      {
+        "id": "stageTransportReady",
+        "title": "传输层封装准备",
+        "when": {
+          "op": "eq",
+          "args": [
+            {
+              "state": "stepIndex"
+            },
+            1
+          ]
+        },
+        "explanation": "应用数据已经达到设定长度。接下来点“执行传输层封装”：选 TCP 会在应用数据前加 20 字节头部，头部包含源端口、目的端口、序列号等字段；选 UDP 会加 8 字节头部，头部包含源端口、目的端口和长度字段，长度字段等于 8 加应用数据长度。执行后，传输层段视图会显示头部和应用数据拼成的连续字节。"
+      },
+      {
+        "id": "stageNetworkReady",
+        "title": "网络层封装准备",
+        "when": {
+          "op": "eq",
+          "args": [
+            {
+              "state": "stepIndex"
+            },
+            2
+          ]
+        },
+        "explanation": "传输层段已经生成。网络层会在它前面加 20 字节头部。网络层头部的总长度字段等于 20 加传输层段长度；协议字段按传输层协议填，TCP 是 6，UDP 是 17。点“执行网络层封装”后，分组视图会显示网络层头部和传输层段。"
+      },
+      {
+        "id": "stageLinkReady",
+        "title": "链路层封装准备",
+        "when": {
+          "op": "eq",
+          "args": [
+            {
+              "state": "stepIndex"
+            },
+            3
+          ]
+        },
+        "explanation": "网络层分组已经生成。链路层会在分组前加 14 字节帧头，后面加 4 字节帧尾。帧尾的校验和由网络层分组所有字节求和算出。点“执行链路层封装”后，帧视图会显示帧头、网络层分组和帧尾。"
+      },
+      {
+        "id": "stageDone",
+        "title": "封装完成",
+        "when": {
+          "op": "eq",
+          "args": [
+            {
+              "state": "stepIndex"
+            },
+            4
+          ]
+        },
+        "explanation": "链路层帧已经生成。帧字节视图按顺序显示 14 字节帧头、网络层分组和 4 字节帧尾；各段用不同底色交替标出。可以用长度视图核对当前帧总长度，也可以撤销或重置后再试另一种传输层协议。"
+      }
+    ],
+    "questions": [
+      {
+        "id": "qCurrentLength",
+        "prompt": "看“当前封装对象长度”视图：当前封装对象一共有多少字节？只填数字。",
+        "evidenceView": "currentLengthValue"
+      },
+      {
+        "id": "qTransportHeaderLength",
+        "prompt": "看“传输层头部长度”视图：当前传输层头部占多少字节？还没有执行传输层封装时显示 0。只填数字。",
+        "evidenceView": "transportHeaderLengthValue"
+      },
+      {
+        "id": "qNetworkTotalLength",
+        "prompt": "看“网络层总长度字段”视图：网络层头部的总长度字段当前显示多少？如果还没有执行网络层封装，视图显示 0。只填数字。",
+        "evidenceView": "networkTotalLengthValue"
+      }
+    ],
+    "coverage": [
+      {
+        "description": "选择应用数据长度",
+        "inputs": [
+          "appLength"
+        ],
+        "actions": [
+          "buildAppData"
+        ],
+        "views": [
+          "appDataBytes",
+          "currentLengthValue"
+        ]
+      },
+      {
+        "description": "选择传输层协议",
+        "inputs": [
+          "transport"
+        ],
+        "actions": [
+          "transportEncap",
+          "networkEncap"
+        ],
+        "views": [
+          "protocolSummary",
+          "transportSegmentBytes",
+          "packetBytes"
+        ]
+      },
+      {
+        "description": "构造应用数据",
+        "inputs": [
+          "appLength"
+        ],
+        "actions": [
+          "buildAppData"
+        ],
+        "views": [
+          "appDataBytes"
+        ]
+      },
+      {
+        "description": "执行传输层封装",
+        "inputs": [
+          "transport"
+        ],
+        "actions": [
+          "transportEncap"
+        ],
+        "views": [
+          "transportSegmentBytes",
+          "protocolSummary"
+        ]
+      },
+      {
+        "description": "执行网络层封装",
+        "inputs": [
+          "transport"
+        ],
+        "actions": [
+          "networkEncap"
+        ],
+        "views": [
+          "packetBytes",
+          "networkTotalLengthValue",
+          "protocolSummary"
+        ]
+      },
+      {
+        "description": "执行链路层封装",
+        "inputs": [],
+        "actions": [
+          "linkEncap"
+        ],
+        "views": [
+          "frameBytes"
+        ]
+      },
+      {
+        "description": "观察每层头部和协议字段",
+        "inputs": [],
+        "actions": [
+          "transportEncap",
+          "networkEncap",
+          "linkEncap"
+        ],
+        "views": [
+          "transportSegmentBytes",
+          "packetBytes",
+          "frameBytes",
+          "protocolSummary"
+        ]
+      },
+      {
+        "description": "观察总长度与连续字节结构",
+        "inputs": [],
+        "actions": [
+          "transportEncap",
+          "networkEncap",
+          "linkEncap"
+        ],
+        "views": [
+          "currentLengthValue",
+          "networkTotalLengthValue",
+          "transportSegmentBytes",
+          "packetBytes",
+          "frameBytes"
+        ]
+      },
+      {
+        "description": "单步推进封装步骤",
+        "inputs": [],
+        "actions": [
+          "buildAppData",
+          "transportEncap",
+          "networkEncap",
+          "linkEncap"
+        ],
+        "views": [
+          "currentStageValue"
+        ]
+      },
+      {
+        "description": "撤销一步封装",
+        "inputs": [],
+        "actions": [
+          "buildAppData",
+          "transportEncap",
+          "networkEncap",
+          "linkEncap"
+        ],
+        "views": [
+          "currentStageValue",
+          "currentLengthValue",
+          "appDataBytes",
+          "transportSegmentBytes",
+          "packetBytes",
+          "frameBytes"
+        ]
+      },
+      {
+        "description": "重置到初始状态",
+        "inputs": [],
+        "actions": [
+          "buildAppData",
+          "transportEncap",
+          "networkEncap",
+          "linkEncap"
+        ],
+        "views": [
+          "currentStageValue",
+          "currentLengthValue",
+          "appDataBytes",
+          "transportSegmentBytes",
+          "packetBytes",
+          "frameBytes"
+        ]
+      },
+      {
+        "description": "核对当前观察结果",
+        "inputs": [],
+        "actions": [],
+        "views": [
+          "currentLengthValue",
+          "transportHeaderLengthValue",
+          "networkTotalLengthValue"
+        ]
+      }
+    ]
+  },
+  "tests": [
+    {
+      "name": "TCP-4字节完整封装",
+      "inputs": {
+        "appLength": 4,
+        "transport": "TCP"
+      },
+      "actions": [
+        {
+          "id": "buildAppData",
+          "count": "untilDone"
+        },
+        {
+          "id": "transportEncap",
+          "count": 1
+        },
+        {
+          "id": "networkEncap",
+          "count": 1
+        },
+        {
+          "id": "linkEncap",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "stepIndex"
+          },
+          "equals": 4
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "appData"
+              }
+            ]
+          },
+          "equals": 4
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "transportHeader"
+              }
+            ]
+          },
+          "equals": 20
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "transportSegment"
+              }
+            ]
+          },
+          "equals": 24
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "networkHeader"
+              }
+            ]
+          },
+          "equals": 20
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "packet"
+              }
+            ]
+          },
+          "equals": 44
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "linkHeader"
+              }
+            ]
+          },
+          "equals": 14
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "linkTrailer"
+              }
+            ]
+          },
+          "equals": 4
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "frame"
+              }
+            ]
+          },
+          "equals": 62
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "networkHeader"
+              },
+              3
+            ]
+          },
+          "equals": 44
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "networkHeader"
+              },
+              9
+            ]
+          },
+          "equals": 6
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "appData"
+              },
+              0
+            ]
+          },
+          "equals": 65
+        }
+      ]
+    },
+    {
+      "name": "UDP-1字节仅构造应用数据",
+      "inputs": {
+        "appLength": 1,
+        "transport": "UDP"
+      },
+      "actions": [
+        {
+          "id": "buildAppData",
+          "count": "untilDone"
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "stepIndex"
+          },
+          "equals": 1
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "appData"
+              }
+            ]
+          },
+          "equals": 1
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "appData"
+              },
+              0
+            ]
+          },
+          "equals": 65
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "transportHeader"
+              }
+            ]
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "transportSegment"
+              }
+            ]
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "frame"
+              }
+            ]
+          },
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "name": "UDP-1字节传输层封装",
+      "inputs": {
+        "appLength": 1,
+        "transport": "UDP"
+      },
+      "actions": [
+        {
+          "id": "buildAppData",
+          "count": "untilDone"
+        },
+        {
+          "id": "transportEncap",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "stepIndex"
+          },
+          "equals": 2
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "transportHeader"
+              }
+            ]
+          },
+          "equals": 8
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "transportSegment"
+              }
+            ]
+          },
+          "equals": 9
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "transportHeader"
+              },
+              5
+            ]
+          },
+          "equals": 9
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "transportSegment"
+              },
+              8
+            ]
+          },
+          "equals": 65
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "packet"
+              }
+            ]
+          },
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "name": "UDP-1字节网络层封装",
+      "inputs": {
+        "appLength": 1,
+        "transport": "UDP"
+      },
+      "actions": [
+        {
+          "id": "buildAppData",
+          "count": "untilDone"
+        },
+        {
+          "id": "transportEncap",
+          "count": 1
+        },
+        {
+          "id": "networkEncap",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "stepIndex"
+          },
+          "equals": 3
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "networkHeader"
+              }
+            ]
+          },
+          "equals": 20
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "networkHeader"
+              },
+              3
+            ]
+          },
+          "equals": 29
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "networkHeader"
+              },
+              9
+            ]
+          },
+          "equals": 17
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "packet"
+              }
+            ]
+          },
+          "equals": 29
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "frame"
+              }
+            ]
+          },
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "name": "UDP-1字节链路层封装",
+      "inputs": {
+        "appLength": 1,
+        "transport": "UDP"
+      },
+      "actions": [
+        {
+          "id": "buildAppData",
+          "count": "untilDone"
+        },
+        {
+          "id": "transportEncap",
+          "count": 1
+        },
+        {
+          "id": "networkEncap",
+          "count": 1
+        },
+        {
+          "id": "linkEncap",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "stepIndex"
+          },
+          "equals": 4
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "frame"
+              }
+            ]
+          },
+          "equals": 47
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "linkHeader"
+              }
+            ]
+          },
+          "equals": 14
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "linkTrailer"
+              }
+            ]
+          },
+          "equals": 4
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "packet"
+              }
+            ]
+          },
+          "equals": 29
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "frame"
+              },
+              0
+            ]
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "frame"
+              },
+              14
+            ]
+          },
+          "equals": 69
+        }
+      ]
+    },
+    {
+      "name": "TCP-16字节完整封装",
+      "inputs": {
+        "appLength": 16,
+        "transport": "TCP"
+      },
+      "actions": [
+        {
+          "id": "buildAppData",
+          "count": "untilDone"
+        },
+        {
+          "id": "transportEncap",
+          "count": 1
+        },
+        {
+          "id": "networkEncap",
+          "count": 1
+        },
+        {
+          "id": "linkEncap",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "stepIndex"
+          },
+          "equals": 4
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "appData"
+              }
+            ]
+          },
+          "equals": 16
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "appData"
+              },
+              0
+            ]
+          },
+          "equals": 65
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "appData"
+              },
+              15
+            ]
+          },
+          "equals": 80
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "transportHeader"
+              }
+            ]
+          },
+          "equals": 20
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "transportSegment"
+              }
+            ]
+          },
+          "equals": 36
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "networkHeader"
+              },
+              3
+            ]
+          },
+          "equals": 56
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "networkHeader"
+              },
+              9
+            ]
+          },
+          "equals": 6
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "packet"
+              }
+            ]
+          },
+          "equals": 56
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "frame"
+              }
+            ]
+          },
+          "equals": 74
+        }
+      ]
+    },
+    {
+      "name": "UDP-16字节完整封装",
+      "inputs": {
+        "appLength": 16,
+        "transport": "UDP"
+      },
+      "actions": [
+        {
+          "id": "buildAppData",
+          "count": "untilDone"
+        },
+        {
+          "id": "transportEncap",
+          "count": 1
+        },
+        {
+          "id": "networkEncap",
+          "count": 1
+        },
+        {
+          "id": "linkEncap",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "stepIndex"
+          },
+          "equals": 4
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "appData"
+              }
+            ]
+          },
+          "equals": 16
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "transportHeader"
+              }
+            ]
+          },
+          "equals": 8
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "transportSegment"
+              }
+            ]
+          },
+          "equals": 24
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "networkHeader"
+              },
+              3
+            ]
+          },
+          "equals": 44
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "networkHeader"
+              },
+              9
+            ]
+          },
+          "equals": 17
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "packet"
+              }
+            ]
+          },
+          "equals": 44
+        },
+        {
+          "value": {
+            "op": "length",
+            "args": [
+              {
+                "state": "frame"
+              }
+            ]
+          },
+          "equals": 62
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "frame"
+              },
+              0
+            ]
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "frame"
+              },
+              14
+            ]
+          },
+          "equals": 69
+        }
+      ]
+    }
+  ],
+  "review": {
+    "languageReview": {
+      "version": "plain-teaching-v1",
+      "checks": [
+        {
+          "unitId": "introduction",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "inputs",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-currentStageValue",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-currentLengthValue",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-transportHeaderLengthValue",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-networkTotalLengthValue",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-protocolSummary",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-appDataBytes",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-transportSegmentBytes",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-packetBytes",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-frameBytes",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "action-buildAppData",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "action-transportEncap",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "action-networkEncap",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "action-linkEncap",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-stageBuildApp",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-stageTransportReady",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-stageNetworkReady",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-stageLinkReady",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-stageDone",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "questions",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        }
+      ],
+      "issues": []
+    },
+    "faithful": true,
+    "scientificallySound": true,
+    "causalInteraction": true,
+    "issues": []
+  }
+}

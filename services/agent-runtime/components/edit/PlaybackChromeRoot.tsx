@@ -12,6 +12,7 @@ import {
 import { useStageStore } from '@/lib/store';
 import { PENDING_SCENE_ID } from '@/lib/store/stage';
 import { useCanvasStore } from '@/lib/store/canvas';
+import { consumeCoursewareNavigation } from '@/lib/courseware/playback';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { SceneSidebar } from '@/components/stage/scene-sidebar';
@@ -1094,6 +1095,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
 
     // previous scene (gated)
     const handlePreviousScene = useCallback(() => {
+      if (consumeCoursewareNavigation('previous')) return;
       if (isPendingScene) {
         // From pending page → go to last real scene
         if (scenes.length > 0) {
@@ -1109,6 +1111,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
 
     // next scene (gated)
     const handleNextScene = useCallback(() => {
+      if (consumeCoursewareNavigation('next')) return;
       if (isPendingScene) return; // Already on pending, nowhere to go
       const currentIndex = scenes.findIndex((s) => s.id === currentSceneId);
       if (currentIndex < scenes.length - 1) {

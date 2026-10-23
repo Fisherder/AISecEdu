@@ -4,8 +4,10 @@ import { useMemo } from 'react';
 import type { Scene, StageMode } from '@/lib/types/stage';
 import { SlideEditor as SlideRenderer } from '../slide-renderer/Editor';
 import { QuizView } from '../scene-renderers/quiz-view';
+import { DebatePlayer } from '../debate-player';
 import { InteractiveRenderer } from '../scene-renderers/interactive-renderer';
 import { PBLRenderer } from '../scene-renderers/pbl-renderer';
+import { CoursewareSlidePreview } from '../courseware-slide-preview';
 
 interface SceneRendererProps {
   readonly scene: Scene;
@@ -22,6 +24,7 @@ export function SceneRenderer({ scene, mode }: SceneRendererProps) {
     switch (scene.type) {
       case 'slide':
         if (scene.content.type !== 'slide') return <div>Invalid slide content</div>;
+        if (scene.content.studio) return <div className="w-full h-full overflow-auto"><CoursewareSlidePreview key={scene.id} data={scene.content.studio} nativeCanvas={scene.content.canvas} /></div>;
         return <SlideRenderer mode={mode} />;
       case 'quiz':
         if (scene.content.type !== 'quiz') return <div>Invalid quiz content</div>;
@@ -35,6 +38,7 @@ export function SceneRenderer({ scene, mode }: SceneRendererProps) {
         );
       case 'interactive':
         if (scene.content.type !== 'interactive') return <div>Invalid interactive content</div>;
+        if (scene.content.debate && scene.content.debateArtifactId) return <DebatePlayer artifactId={scene.content.debateArtifactId} spec={scene.content.debate} />;
         return <InteractiveRenderer content={scene.content} sceneId={scene.id} />;
       case 'pbl':
         if (scene.content.type !== 'pbl') return <div>Invalid PBL content</div>;

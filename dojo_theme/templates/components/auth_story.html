@@ -1,0 +1,7 @@
+{% from "components/ui.html" import icon %}
+<aside class="account-auth-story" aria-label="玄甲教学与创作">
+  <a class="account-auth-story-brand" href="/"><img src="{{ url_for('views.themes', path='img/aisecedu-mark.svg') }}" alt=""><span><strong>玄甲</strong><small>教学 · 创作 · 实践</small></span></a>
+  <div class="account-auth-story-copy"><h2>从一份资料，<br>到一堂好课。</h2><p>整理课程内容，与 AI 一起创作，<br>把完成的作品用于教学与实践。</p></div>
+  <div class="account-auth-flow" aria-label="创作流程"><div>{{ icon('book') }}<span>课程资料</span></div><span class="account-auth-flow-line" aria-hidden="true"></span><div>{{ icon('magic') }}<span>AI 共创</span></div><span class="account-auth-flow-line" aria-hidden="true"></span><div>{{ icon('folder-open') }}<span>课程与素材库</span></div></div>
+  <div class="account-auth-story-footer"><a href="/about">了解玄甲 {{ icon('chevron-right') }}</a></div>
+</aside>

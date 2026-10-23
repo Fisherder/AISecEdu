@@ -15,6 +15,7 @@
   </header>
 
   <div id="learning-dashboard-notice" class="learning-analysis-notice" role="status" hidden></div>
+  <p class="alert alert-info" id="learning-dashboard-score-policy">本次 AI 智能评分为实践附加分，不代表课程总成绩。有效 flag 通过校验后至少获得 90 分（满分 100 分）。</p>
 
   <section class="learning-summary-grid" aria-label="学习摘要">
     <article class="product-surface"><span><i class="fas fa-list-check"></i></span><div><small>活动进度</small><strong id="learning-progress-percent">正在读取</strong><em id="learning-progress-value">按必修学习条件计算</em></div></article>
@@ -66,6 +67,7 @@
           </div>
           <div class="col-lg-6">
             <h3>评估与反馈</h3>
+            <p class="alert alert-info">本次 AI 智能评分为实践附加分，不代表课程总成绩。</p>
             <div id="learning-assessment-empty" class="alert alert-info">提交复盘后即可生成评估。</div>
             <div id="learning-assessment" hidden><h2 id="learning-assessment-score"></h2><p id="learning-assessment-feedback-summary"></p><div id="learning-assessment-agent" class="learning-assessment-agent"></div><p id="learning-assessment-feedback"></p><div id="learning-assessment-criteria"></div><hr><h3>申请复核</h3><textarea id="learning-appeal-reason" class="form-control" rows="4" placeholder="指出需要复核的证据或评分标准。"></textarea><button id="learning-appeal-submit" type="button" class="btn btn-outline-secondary mt-3">提交复核申请</button></div>
           </div>
@@ -80,5 +82,5 @@
 
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-dashboard.js', v='aisecedu-learning-analysis-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-dashboard.js', v='practice-bonus-20261010-v1') }}"></script>
 {% endblock %}

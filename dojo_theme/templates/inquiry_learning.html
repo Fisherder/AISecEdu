@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block body_class %}inquiry-page{% endblock %}
+{% block navigation %}{% if not inquiry_embedded %}{{ super() }}{% endif %}{% endblock %}
+{% block footer %}{% if not inquiry_embedded %}{{ super() }}{% endif %}{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+{% block stylesheets %}<link rel="stylesheet" href="{{ url_for('views.themes', path='css/inquiry-learning.css', v='inquiry-20261019-4') }}">{% endblock %}
+{% block content %}
+<main id="inquiry-learning" class="inq-shell" data-artifact-id="{{ inquiry_artifact_id }}" aria-busy="true">
+  <header class="inq-heading"><div><a id="inq-back" class="inq-back" href="/student">返回课程</a><h1 id="inq-title">正在打开学习项目</h1><p id="inq-context">正在读取学习版本与已保存进度…</p></div><div id="inq-teacher-tools" class="inq-actions" hidden><button id="inq-edit-open" class="inq-button" type="button" aria-expanded="false" aria-controls="inq-editor">内容与审核</button><button id="inq-library-save" class="inq-button" type="button">存入素材库</button></div></header>
+  <div id="inq-notice" class="inq-notice" role="status" aria-live="polite">正在连接学习服务…</div>
+  <section id="inq-editor" class="inq-paper" hidden aria-labelledby="inq-editor-title">
+    <h2 id="inq-editor-title">内容与审核</h2><p id="inq-release-state"></p>
+    <form id="inq-edit-form"><div class="inq-form-grid"><label>项目名称<input name="title" maxlength="160" required></label><label>学生基础<input name="audience" maxlength="400" required></label><label>学习时长（分钟）<input name="minutes" type="number" min="10" max="120" required></label></div><label>情境说明<textarea name="intro" rows="2" maxlength="1200" required></textarea></label><details class="inq-details"><summary>编辑学习目标与环节说明</summary><div id="inq-edit-objectives"></div><div id="inq-edit-phases"></div></details><div class="inq-actions"><button class="inq-button" type="submit">保存新版本</button><button id="inq-review" class="inq-button" type="button">运行发布检查</button></div></form>
+    <p id="inq-validation"></p><label class="inq-check"><input id="inq-teacher-reviewed" type="checkbox">我已预览学生流程、检查内容与完成条件，确认发布当前版本。</label>
+    <div class="inq-actions"><button id="inq-publish" class="inq-button is-primary" type="button">审核并发布</button><button id="inq-evidence-open" class="inq-button" type="button">查看学生操作证据</button></div>
+    <div id="inq-evidence" hidden></div>
+  </section>
+  <div id="inq-workspace" class="inq-workspace" hidden>
+    <aside class="inq-outline"><nav id="inq-phases" aria-label="学习环节"></nav><div class="inq-progress"><strong id="inq-progress-label">尚未核验</strong><p>浏览进度与目标达成分别记录。</p></div></aside>
+    <div class="inq-content">
+      <div class="inq-phase-heading"><h2 id="inq-phase-title"></h2><p id="inq-phase-instruction"></p></div>
+      <section id="inq-orient" class="inq-paper inq-phase" aria-label="情境与目标"><p id="inq-intro"></p><h3>完成后，你能够</h3><ol id="inq-objectives"></ol><p id="inq-audience" class="inq-note"></p><button type="button" class="inq-button is-primary" data-inq-phase="observe">开始观察</button></section>
+      <section id="inq-observe" class="inq-phase" hidden aria-label="分步观察">
+        <div class="inq-lab-layout"><div class="inq-paper inq-stage"><div class="inq-stage-heading"><h3 id="inq-step-title"></h3><span id="inq-step-count"></span></div><div id="inq-matrices" class="inq-matrices"></div><p id="inq-byte-detail" class="inq-byte-detail" aria-live="polite">点击一个字节，比较它的输入和输出。</p><p id="inq-step-explanation"></p><div class="inq-playback"><button id="inq-prev" class="inq-button" type="button">上一步</button><button id="inq-play" class="inq-button" type="button" aria-pressed="false">播放</button><button id="inq-next" class="inq-button" type="button">下一步</button><label class="inq-sr-only" for="inq-step">选择流程位置</label><input id="inq-step" type="range" min="0" max="40" value="0"></div></div><aside class="inq-paper inq-parameters"><h3>同一组输入</h3><form id="inq-inputs"><label>明文（16 字节）<input name="plaintext" pattern="[0-9a-fA-F]{32}" required maxlength="32" spellcheck="false"></label><label>密钥（16 字节）<input name="key" pattern="[0-9a-fA-F]{32}" required maxlength="32" spellcheck="false"></label><div class="inq-actions"><button type="submit" class="inq-button is-primary">重新计算</button><button id="inq-reset" type="button" class="inq-button">重置实验</button></div></form><details class="inq-details"><summary>密文、解密与轮密钥</summary><p>最终密文</p><output id="inq-ciphertext" class="inq-hex"></output><p>用同一密钥解密恢复</p><output id="inq-decrypted" class="inq-hex"></output><div id="inq-round-keys"></div></details><p class="inq-note">状态按列映射。格子内为十六进制，矩阵的每一列对应连续四字节。</p></aside></div>
+      </section>
+      <section id="inq-experiment" class="inq-paper inq-phase" hidden aria-label="动手探究"><h3>只改变明文中的一位</h3><p>保持当前密钥不变，选择一个位进行翻转，比较每个步骤的状态差异。</p><form id="inq-contrast-form" class="inq-actions"><label>翻转位编号（0–127）<input name="bit" type="number" min="0" max="127" value="0" required></label><button class="inq-button is-primary" type="submit">计算并比较</button></form><div id="inq-contrast-result"></div><p class="inq-note">纵轴为两组状态不同的比特数（0–128），横轴为加密步骤。不同输入会有不同结果，不要求固定改变 64 位。</p></section>
+      <section id="inq-challenge" class="inq-paper inq-phase" hidden aria-label="迁移挑战"><div class="inq-stage-heading"><h3>亲自完成第 10 轮</h3><button id="inq-challenge-start" type="button" class="inq-button">开始新挑战</button></div><p>你接手第 9 轮结束时的状态。用下面的真实变换完成最后一轮，再提交核验；每个按钮都会改变当前矩阵。</p><div id="inq-challenge-workspace" hidden><div id="inq-challenge-matrices" class="inq-matrices"></div><div class="inq-transform-controls" role="group" aria-label="选择 AES 变换"><button type="button" class="inq-button" data-inq-transform="subBytes">字节代换</button><button type="button" class="inq-button" data-inq-transform="shiftRows">行移位</button><button type="button" class="inq-button" data-inq-transform="mixColumns">列混合</button><button type="button" class="inq-button" data-inq-transform="addRoundKey">轮密钥加</button></div><p id="inq-challenge-history" aria-live="polite"></p><div class="inq-actions"><button id="inq-challenge-verify" type="button" class="inq-button is-primary">提交核验</button><button id="inq-challenge-reset" type="button" class="inq-button">重新开始</button></div></div><p class="inq-note">服务端保存操作序列并独立计算结果。无需复制 Flag 或编写报告。</p></section>
+      <section id="inq-reflect" class="inq-paper inq-phase" hidden aria-label="反馈与归纳"><h3>用操作证据检查本次学习</h3><div id="inq-results"></div><ul><li>字节代换改变数值，行移位改变位置，列混合传播列内影响，轮密钥加引入密钥。</li><li>AES-128 有 10 轮，初始轮密钥加单独进行，末轮不含列混合。</li><li>通过本项目说明你完成了单比特实验和末轮操作，不等同于完成了整个密码系统的设计与安全证明。</li></ul><div class="inq-actions"><button type="button" class="inq-button" data-inq-phase="experiment">返回实验</button><button type="button" class="inq-button" data-inq-phase="challenge">重做挑战</button></div></section>
+      <footer class="inq-learning-footer"><button id="inq-phase-prev" class="inq-button" type="button">上一环节</button><span id="inq-save-state" role="status">进度已保存</span><button id="inq-phase-next" class="inq-button" type="button">下一环节</button></footer>
+      <details class="inq-details inq-source"><summary>资料来源与模型边界</summary><div id="inq-sources"></div><p id="inq-boundaries"></p></details>
+    </div>
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}<script defer src="{{ url_for('views.themes', path='js/dojo/inquiry-learning.js', v='inquiry-20261019-4') }}"></script>{% endblock %}

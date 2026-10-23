@@ -8,6 +8,7 @@ import sys
 import time
 import signal
 import threading
+import re
 import docker
 import redis
 
@@ -61,6 +62,9 @@ def main():
         print(f"{sys.argv[0]} <container_name>")
         exit(1)
     container_name = sys.argv[1]
+    if not re.fullmatch(r"user_[1-9][0-9]*", container_name):
+        __builtins__.print("Invalid workspace identity.", file=sys.stderr)
+        return 1
     user_id = int(container_name.split("_")[1])
 
     docker_host, docker_client, is_mac = get_docker_client(user_id)
@@ -78,8 +82,8 @@ def main():
                     os.execv(sys.executable, [sys.executable, __file__, container_name])
             except Exception:
                 print("Failed to launch challenge tui")
-        print("No active challenge session; start a challenge!")
-        exit(1)
+        __builtins__.print("当前没有运行中的题目环境。请在玄甲启动题目后重新连接。", file=sys.stderr)
+        return 1
 
     attempts = 0
     while attempts < 30:
@@ -103,8 +107,12 @@ def main():
             time.sleep(1)
             continue
 
+        if not is_mac and str(container.labels.get("dojo.user_id")) != str(user_id):
+            __builtins__.print("Workspace ownership mismatch; connection refused.", file=sys.stderr)
+            return 1
+        execution_target = container.id if not is_mac else container_name
         attempts = 0
-        print("\r", " " * 80, "\rConnected!")
+        print("\r", " " * 80, "\r已连接你的当前题目环境。")
         child_pid = os.fork()
         if not child_pid:
             ssh_entrypoint = "/run/dojo/bin/ssh-entrypoint"
@@ -124,7 +132,7 @@ def main():
                         "--workdir=/challenge",
                         "--detach-keys=ctrl-q,ctrl-q",
                         *environ,
-                        container_name,
+                        execution_target,
                         *command,
                     ],
                     {
@@ -143,14 +151,11 @@ def main():
                                                   daemon=True)
                 monitor_thread.start()
             _, status = os.wait()
-            if simple or status == 0:
-                break
-            print()
-            print("\r", " " * 80, "\rConnecting", end="")
-            time.sleep(0.5)
+            return os.waitstatus_to_exitcode(status)
     else:
-        print("\r", " " * 80, "\rError: failed to connect!")
+        __builtins__.print("题目环境尚未准备好。请等待页面显示就绪后重新连接。", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

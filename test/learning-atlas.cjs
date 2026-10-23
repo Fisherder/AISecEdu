@@ -1,0 +1,22 @@
+const assert=require('node:assert/strict');
+const {JSDOM}=require('jsdom');
+const atlas=require('../dojo_theme/static/js/dojo/learning-atlas.js');
+const students=Array.from({length:500},(_,i)=>({userId:i+1,name:`示例学生${i+1}`,completed:0,cells:[]}));
+const tasks=Array.from({length:10},(_,i)=>({key:`q:${i+1}`,name:'第十次作业：一个很长的课程项目名称 <script>alert(1)</script>',moduleName:'示例章节',studentCount:500,completed:0,completionRate:0}));
+const data={students,tasks,summary:{students:500,requiredTasks:10}};
+function markup(config){return new JSDOM(atlas.scene(data,config)).window.document;}
+let doc=markup({});
+assert.equal(doc.querySelectorAll('.ix-scene-cell').length,240);
+assert.equal(doc.querySelectorAll('.ix-scene-cell[tabindex="0"]').length,3);
+assert.equal(doc.querySelectorAll('script').length,0);
+assert(doc.querySelector('.ix-scene-task title').textContent.includes('<script>'));
+assert.equal(doc.querySelectorAll('.ix-scene-cell[data-task="q:1"]').length,80);
+doc=markup({taskPage:3,studentPage:6,compact:true});
+assert.equal(doc.querySelectorAll('.ix-scene-cell').length,20);
+assert.equal(doc.querySelector('.ix-scene-cell').dataset.student,'481');
+assert.equal(doc.querySelector('.ix-scene-cell').dataset.task,'q:10');
+assert.equal(doc.querySelector('svg').getAttribute('viewBox'),'0 0 960 330');
+const projected=atlas.derive({...data,students:[{userId:1,completed:0,cells:[{taskKey:'q:1',checks:2,passedChecks:0,failedChecks:1,lastCheckPassed:null,recordCount:2,status:'working'}]}],summary:{students:1,requiredTasks:10}});
+assert.equal(projected.checks.unknown,1);assert.equal(projected.checks.passed,0);
+assert.equal(projected.taskStates['q:2'].not_started,1);
+console.log('PASS atlas: bounded 500-student/10-task rendering, pagination, stable identity, compact scene, keyboard entry points, escaped labels, unknown check outcomes');

@@ -1,0 +1,20 @@
+{
+  "type": "diagram",
+  "diagramType": "flowchart",
+  "title": "从选课到反馈：一次完整学习流程",
+  "description": "点击步骤查看说明，并沿箭头理解前后关系。反馈后可以返回练习，形成完整的学习过程。",
+  "nodes": [
+    { "id": "choose", "label": "选课", "kind": "goal", "details": "查看课程目标、适用对象和时间安排，选择适合自己的课程。\n确认选课结果后再进入学习，不以点击按钮本身代替选课成功。" },
+    { "id": "learn", "label": "学习", "kind": "action", "details": "阅读课程材料并观看讲解，记录尚不理解的概念。可以反复回看材料、比较示例与说明，再将知识用于练习。\n这一整段说明必须完整呈现，不能截断为节点上的短摘要。" },
+    { "id": "practice", "label": "练习", "kind": "action", "details": "根据题目要求完成练习，并自行检查每个步骤。\n收到反馈后，可回到这里改进自己的作答；这里表示学习流程，不执行代码。" },
+    { "id": "submit", "label": "提交", "kind": "action", "details": "确认作答内容和附件齐全后提交。记录提交时间与系统回执，等待后续反馈。" },
+    { "id": "feedback", "label": "反馈", "kind": "goal", "details": "阅读反馈，区分已经掌握的内容与仍需练习的部分。\n依据具体建议返回练习并修正；完成后再次提交，形成可回顾的学习记录。" }
+  ],
+  "edges": [
+    { "from": "choose", "to": "learn", "label": "开始" },
+    { "from": "learn", "to": "practice", "label": "应用" },
+    { "from": "practice", "to": "submit", "label": "完成" },
+    { "from": "submit", "to": "feedback", "label": "查看" },
+    { "from": "feedback", "to": "practice", "label": "改进后再练习" }
+  ]
+}

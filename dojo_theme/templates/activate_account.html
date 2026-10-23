@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block body_class %}account-auth-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/account-auth.css', v='frontend-restored-20261001-1') }}">
+{% endblock %}
+
+{% block content %}
+<div class="account-auth-shell">
+  <aside class="account-auth-story" aria-label="账号激活说明">
+    <a class="account-auth-story-brand" href="/">
+      <img src="{{ url_for('views.themes', path='img/aisecedu-mark.svg') }}" alt="">
+      <span><strong>玄甲</strong><small>课程 · 智能体 · 实践工作区</small></span>
+    </a>
+    <div class="account-auth-story-copy">
+      <span><i class="fas fa-key" aria-hidden="true"></i> 首次登录</span>
+      <h1>激活你的账号</h1>
+      <p>请设置你自己的密码。完成后即可继续访问课程、建设任务和其他已分配的内容。</p>
+    </div>
+    <div class="account-auth-story-footer"><i class="fas fa-lock"></i><span>初始密码仅用于首次登录</span></div>
+  </aside>
+
+  <section class="account-auth-panel">
+    <div class="account-auth-card">
+      <header class="account-auth-heading">
+        <span>账号安全</span>
+        <h2>修改初始密码</h2>
+        <p>新密码至少 8 位，且不能与初始密码相同。</p>
+      </header>
+      <div id="account-activation-errors" class="account-auth-errors" role="alert" aria-live="assertive" hidden><i class="fas fa-exclamation-circle" aria-hidden="true"></i><span></span></div>
+      <form id="account-activation-form" autocomplete="off">
+        <label class="account-auth-field" for="activation-current"><span>初始密码</span><input id="activation-current" class="form-control" type="password" autocomplete="current-password" required></label>
+        <label class="account-auth-field" for="activation-new"><span>新密码</span><input id="activation-new" class="form-control" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
+        <label class="account-auth-field" for="activation-confirm"><span>确认新密码</span><input id="activation-confirm" class="form-control" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
+        <input id="activation-next" type="hidden" value="{{ request.args.get('next', '') }}">
+        <button class="account-auth-submit" type="submit"><span>激活账号并继续</span><i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block footer %}{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/account-activation.js', v='frontend-restored-20261001-1') }}"></script>
+{% endblock %}

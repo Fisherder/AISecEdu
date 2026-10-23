@@ -218,6 +218,24 @@ Tutor 同时接收当前容器快照和/或模拟公开状态、可用动作、�
 
 教师也可将外部 JSON package 规范化为 L3 草稿，但 package 必须经过完全相同的安全验证和发布过程，不能直接写入运行目录。
 
+## 客户机操作系统版本
+
+题目运行环境不再只有 `linux` 与 `windows` 两种，而是一组可选择的客户机系统版本，统一由 `dojo_plugin/runtime_profiles.py` 的 `RUNTIME_PROFILES` 定义。每个档案声明自己的家族（`family`）、显示名、镜像设置项、容器内存上限、题目目录、可写目录、可用解释器、检查入口和命令桥；教师的自然语言、手工出题表单、课程 YAML 与课程包元数据都使用同一个 `runtimeEnvironment` 标识。
+
+当前档案：
+
+| 标识 | 显示名 | 家族 | 解释器 | 说明 |
+| --- | --- | --- | --- | --- |
+| `linux` | Linux | linux | python3、node、bash | 默认环境 |
+| `windows` | Windows 11 远程桌面 | windows | powershell、cmd | 提供 PowerShell 5.1、原生 VS Code、OllyDbg 与 TCC |
+| `windows2000` | Windows 2000 远程桌面 | windows | cmd | 轻量旧版客户机，只有 cmd 与 OllyDbg，没有 PowerShell 与 VS Code |
+
+- **自然语言**：`infer_runtime_environment` 按“最具体优先”识别版本词，例如“用 Windows 2000 出题”“换成 win2000”“使用 W2K 客户机”都会得到 `windows2000`；只写“Windows”仍得到默认的 `windows`；“比较 Windows 和 Linux”这类跨家族并列不猜，返回空。
+- **表单**：教师手工出题页的运行环境下拉框由 `runtime_environment_choices()` 渲染，新增档案会自动出现，不需要改模板。
+- **课程 YAML**：`runtime_environment` 在课程、单元、题目三层都接受任意已注册标识，由 `RUNTIME_ENVIRONMENT` 校验器统一归一化。
+- **镜像**：每个档案通过 `image_setting` 绑定一个配置项（`DOJO_WINDOWS_RUNTIME_IMAGE`、`DOJO_WINDOWS2000_RUNTIME_IMAGE` 等）。镜像未安装时启动会返回明确的“运行环境镜像未安装”错误，而不是笼统的启动失败。
+- **命令桥**：`command_bridge` 为空表示该客户机没有宿主机命令通道。此时平台不代为启动 Windows 服务，出题提示与运行合约诊断都会据此约束可生成的题目形态；`windows2000` 当前即为此类，题目通过桌面在客户机内完成。
+
 ## 工作区交互与重置
 
 `/workspace` 是 Terminal、Code、Desktop、SSH 和自定义端口的唯一完整工作区页面。模块题目中内嵌工作区的 Terminal、Code 与 Desktop 按钮打开 `/workspace?service=<mode>`；自定义 Web 服务使用 `/workspace?port=<port>`。历史 `/workspace/<service>` 与 `/workspace/<port>` 只保留 308 兼容跳转，不再维护重复页面。

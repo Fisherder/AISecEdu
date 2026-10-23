@@ -13,6 +13,7 @@ from CTFd.utils.decorators import authed_only, ratelimit
 from CTFd.utils.security.auth import update_user
 from CTFd.utils.user import get_current_user
 from ...config import DOJO_SSH_SERVICE_KEY
+from ...account_activation import activation_required, complete_password_change
 from ...models import DojoAdmins, UserAccountPreferences
 from ...utils import get_current_container
 
@@ -385,6 +386,37 @@ class CurrentUserSettings(Resource):
                 "message": "设置已保存。",
             },
         }
+
+
+@user_namespace.route("/activation")
+class AssignedAccountActivation(Resource):
+    @authed_only
+    @ratelimit(method="POST", limit=5, interval=60)
+    def post(self):
+        user = get_current_user()
+        if not activation_required(user):
+            return _settings_error("账号已激活。", 409, code="ACCOUNT_ALREADY_ACTIVE")
+        body = _json_body()
+        if body is None or set(body) - {"currentPassword", "newPassword", "confirmPassword"}:
+            return _settings_error("请填写当前密码、新密码和确认密码。")
+        current_password = body.get("currentPassword")
+        new_password = body.get("newPassword")
+        confirmation = body.get("confirmPassword")
+        if not all(isinstance(value, str) for value in (current_password, new_password, confirmation)):
+            return _settings_error("请完整填写当前密码和新密码。")
+        if not user.password or user.oauth_id or not verify_password(current_password, user.password):
+            return _settings_error("当前密码不正确。", 403, field="currentPassword", code="CURRENT_PASSWORD_INVALID")
+        if new_password != confirmation:
+            return _settings_error("两次输入的新密码不一致。", field="confirmPassword", code="PASSWORD_MISMATCH")
+        if len(new_password) < 8 or len(new_password) > 128:
+            return _settings_error("新密码需为 8–128 个字符。", field="newPassword")
+        if new_password == user.name or verify_password(new_password, user.password):
+            return _settings_error("新密码不能与用户名或当前密码相同。", field="newPassword")
+        user.password = new_password
+        complete_password_change(user)
+        db.session.commit()
+        update_user(user)
+        return {"success": True, "data": {"activated": True}}
 
 
 @user_namespace.route("/settings/password")

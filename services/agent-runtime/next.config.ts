@@ -1,6 +1,9 @@
 import type { NextConfig } from 'next';
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH?.trim() || '';
+const integratedMode = /^(1|true|yes)$/i.test(
+  (process.env.AISECEDU_INTEGRATED ?? process.env.NEXT_PUBLIC_AISECEDU_INTEGRATED ?? '').trim(),
+);
 const configuredBuildCpus = Number.parseInt(
   process.env.GLOBAL_AGENT_RUNTIME_BUILD_CPUS ?? process.env.OPENMAIC_BUILD_CPUS ?? '4',
   10,
@@ -11,12 +14,19 @@ const buildCpus =
     : 4;
 
 const nextConfig: NextConfig = {
+  typescript: {tsconfigPath: 'tsconfig.build.json'},
   ...(basePath ? { basePath } : {}),
+  env: { NEXT_PUBLIC_AISECEDU_INTEGRATED: String(integratedMode) },
   output: process.env.VERCEL ? undefined : 'standalone',
   // Lets CI/verification builds avoid clobbering a running developer server.
   distDir:
     process.env.GLOBAL_AGENT_RUNTIME_NEXT_DIST_DIR || process.env.OPENMAIC_NEXT_DIST_DIR || '.next',
   transpilePackages: ['mathml2omml', 'pptxgenjs', '@openmaic/importer'],
+  webpack(config) {
+    if (process.env.GLOBAL_AGENT_RUNTIME_BUILD_CACHE === '0') config.cache = false;
+    config.module.rules.push({ resourceQuery: /raw/, type: 'asset/source' });
+    return config;
+  },
   // The parent workspace contains unrelated projects and lockfiles. Pinning
   // Turbopack here avoids scanning the entire /ccr workspace during builds.
   turbopack: {

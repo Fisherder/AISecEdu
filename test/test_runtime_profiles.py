@@ -21,9 +21,36 @@ from CTFd.plugins.dojo_plugin.runtime_profiles import (
     ('Use Windows 11 for the exercise', 'windows'),
     ('Compare Windows and Linux', None),
     ('编写一个简单程序', None),
+    ('用 Windows 2000 出一道 OllyDbg 逆向题', 'windows2000'),
+    ('把这门课换成 win2000 环境', 'windows2000'),
+    ('使用 W2K 客户机做实验', 'windows2000'),
+    ('改成 Windows 2000 远程桌面', 'windows2000'),
 ])
 def test_teacher_runtime_selection(brief, environment):
     assert infer_runtime_environment(brief) == environment
+
+
+def test_guest_os_versions_are_selectable():
+    from CTFd.plugins.dojo_plugin.runtime_profiles import (
+        RUNTIME_PROFILES,
+        profile_for_runtime_label,
+        runtime_environment_choices,
+    )
+    choices = {item['id']: item for item in runtime_environment_choices()}
+    assert {'linux', 'windows', 'windows2000'} <= set(choices)
+    assert choices['windows2000']['family'] == 'windows'
+    assert choices['windows']['family'] == 'windows'
+    assert normalize_runtime_environment('w2k') == 'windows2000'
+    assert normalize_runtime_environment('Windows 2000') == 'windows2000'
+    legacy = runtime_profile('windows2000')
+    assert legacy.is_windows and legacy.family == 'windows'
+    assert legacy.command_bridge is None
+    assert 'cmd' in legacy.interpreters and 'powershell' not in legacy.interpreters
+    assert legacy.interfaces[0] == {'name': 'Desktop', 'port': 6080}
+    assert profile_for_runtime_label('windows2000').id == 'windows2000'
+    assert profile_for_runtime_label('windows-qemu').id == 'windows'
+    assert profile_for_runtime_label('unknown-guest') is None
+    assert RUNTIME_PROFILES['windows2000'].desktop_resize == 'scale'
 
 
 def test_runtime_revision_changes_only_runtime_defaults():
@@ -103,6 +130,7 @@ def test_windows_interpreter_contract():
 
 @pytest.mark.parametrize(('environment', 'compiler', 'directory'), [
     ('windows', 'C:\\tcc\\tcc.exe', 'C:\\CourseWork'),
+    ('windows2000', 'C:\\tcc\\tcc.exe', 'C:\\CourseWork'),
     ('linux', 'gcc', '/home/hacker'),
 ])
 def test_runtime_tools_reach_teacher_and_solution_contexts(monkeypatch, environment, compiler, directory):
@@ -117,6 +145,6 @@ def test_runtime_tools_reach_teacher_and_solution_contexts(monkeypatch, environm
     learner = _public_challenge_context(challenge)
     assert selected['cCompiler'] == compiler
     assert selected['writableDirectory'] == directory
-    assert selected['checkCommand'] == ('C:\\Course\\check.cmd' if environment == 'windows' else '/challenge/check')
+    assert selected['checkCommand'] == ('C:\\Course\\check.cmd' if selected['family'] == 'windows' else '/challenge/check')
     assert learner['runtime'] == selected
     assert learner['nativeWorkspace'] == selected['workingDirectory']

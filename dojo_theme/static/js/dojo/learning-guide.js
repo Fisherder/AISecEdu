@@ -626,11 +626,17 @@
       try {
         var response = await api.json("POST", "/learning/guide", {
           threadId: state.thread && state.thread.id, question: content, references: Array.from(state.selected.keys())
-        });
+        }, {timeoutMs: 110000, retries: 0});
         if (!response.success || !response.thread) throw new Error(api.errorMessage(response, "智能体暂时无法回答。"));
         await load(response.thread.id);
       } catch (error) {
         state.messages = state.messages.filter(function (item) { return item !== pending; });
+        // A lost response is not proof that the server rejected the question.
+        // Keep the draft for the student, without replaying the mutation or
+        // overwriting a newer draft that another UI action may have supplied.
+        if (!String(el.input.value || "").trim()) {
+          el.input.value = content; resizeInput();
+        }
         renderMessages(); notice(error.message || "智能体暂时无法回答。", "danger");
       } finally { setBusy(false); el.input.focus(); }
     }

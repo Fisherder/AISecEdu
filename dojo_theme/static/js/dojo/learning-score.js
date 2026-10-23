@@ -142,11 +142,24 @@
         : attempt.assessmentState === "PENDING"
           ? `已提交于 ${learning.formatDate(attempt.submitted)}；评分完成前不会显示 0 分占位。`
           : "完成并提交本次学习后，这里会显示单次评分结果。";
+      const credit = assessmentReady ? Number(assessment.scorePolicy && assessment.scorePolicy.completionCredit) || 0 : 0;
+      const creditNotice = document.getElementById("learning-score-completion-credit");
+      if (creditNotice) {
+        creditNotice.hidden = credit <= 0;
+        creditNotice.textContent = credit > 0 ? `有效 flag 已通过：完成奖励 +${credit} 分，补足至 90 分。` : "";
+      }
       document.getElementById("learning-score-revision").textContent = assessment
         ? `第 ${assessment.revision} 次评估`
         : "等待评估";
       document.getElementById("learning-score-reflection").textContent =
         attempt.reflection || "本次作答尚未填写复盘。可前往课程学习分析中的尝试记录补充复盘并重新评估。";
+      if (assessment?.source === 'CODING_RUBRIC') {
+        document.querySelector('#learning-score-objective-value').previousElementSibling.textContent = '基础部分';
+        document.querySelector('#learning-score-objective-value > span:last-child').textContent = '/ '+assessment.criteria.filter(c=>c.stage==='basic').reduce((n,c)=>n+c.maxScore,0);
+        document.querySelector('#learning-score-process-value > span:last-child').textContent = '/ '+assessment.criteria.filter(c=>c.stage==='thinking'||c.id==='ai.quality').reduce((n,c)=>n+c.maxScore,0);
+        document.querySelector('#learning-score-process-value').previousElementSibling.textContent = '思考题';
+        document.getElementById('learning-score-reflection').textContent = '已自动保存源码与核验结果；查看“工程与核验”中的提交记录、AI 评价和代码证据。';
+      }
       renderCriteria(assessmentReady ? assessment.criteria : []);
       renderAbilities(assessmentReady ? assessment.abilities : {});
       renderEvidence(attempt);

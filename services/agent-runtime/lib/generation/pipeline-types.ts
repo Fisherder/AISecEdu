@@ -61,4 +61,5 @@ export type AICallFn = (
   systemPrompt: string,
   userPrompt: string,
   images?: Array<{ id: string; src: string }>,
+  options?: { stage?: 'cinematic-scene' | 'cinematic-repair' | 'cinematic-review' | 'intent-source-verification' | 'process-scene' | 'process-repair' },
 ) => Promise<string>;

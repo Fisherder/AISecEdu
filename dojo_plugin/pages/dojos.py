@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 
 from flask import Blueprint, render_template, redirect, request, url_for
 from CTFd.models import Users, db
+from CTFd.utils import get_config
 from CTFd.utils.user import get_current_user
 from CTFd.utils.decorators import authed_only, admins_only
 
@@ -28,6 +29,7 @@ def listing(template="dojos.html"):
     }
 
     user = get_current_user()
+    hidden_ids = set(str(get_config(f"course_catalog_hidden_user_{user.id}", "") or "").split(",")) if user else set()
     user_dojo_admins = []
     user_dojo_members = []
     dojo_solves = (
@@ -54,6 +56,8 @@ def listing(template="dojos.html"):
         dojo_solves = dojo_solves.add_columns(0)
 
     for dojo, solves in dojo_solves:
+        if str(dojo.dojo_id) in hidden_ids:
+            continue
         if not (dojo.type == "hidden" or (dojo.type == "example" and dojo.official)):
             categorized_dojos.setdefault(dojo.type, []).append((dojo, solves))
             categorized_dojos["member"].extend((dojo_member.dojo, 0) for dojo_member in user_dojo_members

@@ -27,12 +27,56 @@ import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
 import { llmApiError } from '@/lib/server/llm-error-response';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
+import { createAgentRunNdjsonResponse } from '@/lib/agent-run/server';
+import { withServerAgentRunTrace } from '@/lib/agent-run/server-context';
 
 const log = createLogger('Scene Actions API');
 
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
+  if (req.headers?.get?.('accept')?.includes('application/x-ndjson')) {
+    const bodyText = await req.text();
+    let parsed: { outline?: { title?: string } } = {};
+    try {
+      parsed = JSON.parse(bodyText) as typeof parsed;
+    } catch {
+      // The inner JSON route returns the canonical validation error through the stream.
+    }
+    const headers = new Headers(req.headers);
+    headers.set('accept', 'application/json');
+    const innerRequest = new NextRequest(req.url, {
+      method: 'POST',
+      headers,
+      body: bodyText,
+      signal: req.signal,
+    });
+    return createAgentRunNdjsonResponse({
+      label: `编排讲解 · ${parsed.outline?.title ?? '未命名'}`,
+      signal: req.signal,
+      execute: (trace) =>
+        withServerAgentRunTrace(trace, async () => {
+          const toolId = trace.startItem(undefined, 'tool', '生成讲解与交互动作', {
+            subtitle: 'scene-actions',
+            input: parsed.outline,
+          });
+          const response = await POST(innerRequest);
+          const payload = (await response.json()) as Record<string, unknown>;
+          if (!response.ok || payload.success === false) {
+            const message = String(
+              payload.details ?? payload.error ?? 'Scene actions generation failed',
+            );
+            trace.completeItem(undefined, toolId, { status: 'failed', output: message });
+            const error = new Error(message) as Error & { errorCode?: string; statusCode?: number };
+            if (typeof payload.errorCode === 'string') error.errorCode = payload.errorCode;
+            error.statusCode = response.status;
+            throw error;
+          }
+          trace.completeItem(undefined, toolId);
+          return payload;
+        }),
+    });
+  }
   let outlineTitle: string | undefined;
   let resolvedModelString: string | undefined;
   try {

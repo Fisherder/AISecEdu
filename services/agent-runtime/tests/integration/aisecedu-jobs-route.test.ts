@@ -1,5 +1,9 @@
 import { NextRequest } from 'next/server';
+import { passingLanguageReview } from '../fixtures/learner-language';
+import { processLanguageUnits } from '@/lib/teaching/learner-language-surfaces';
+import { parseProcessScene } from '@/lib/process/schema';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import processAccumulator from '../fixtures/process-accumulator.json';
 
 const mocks = vi.hoisted(() => ({
   callLLM: vi.fn(),
@@ -99,6 +103,10 @@ describe('玄甲 durable job integration route', () => {
   beforeEach(() => {
     vi.resetModules();
     mocks.callLLM.mockReset();
+    mocks.callLLM.mockImplementation(async (_params, label) => {
+      if (label === 'simulation-option-review') return { text: '{"issues":[],"corrections":[]}', usage: { inputTokens: 1, outputTokens: 1 } };
+      throw Error('Unexpected unconfigured model call: ' + label);
+    });
     mocks.generateSingleArtifact.mockReset();
     mocks.resolveModel.mockReset();
     mocks.resolveModel.mockResolvedValue({
@@ -111,6 +119,59 @@ describe('玄甲 durable job integration route', () => {
     });
   });
 
+  it('logs bounded visual-intent failure fields without exposing them in the API response', async () => {
+    const sentinel = 'PRIVATE_GENERATION_TEXT_SENTINEL';
+    mocks.callLLM.mockResolvedValue({
+      text: JSON.stringify({
+        mode: 'cinematic-v1', reason: '连续三维观察是必要的表达',
+        interactions: ['暂停播放'],
+        interactionRequirements: [{ description: '暂停播放', kind: 'player-control', controls: [] }],
+      }),
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { POST } = await import('@/app/api/integration/jobs/execute/route');
+      const response = await POST(request({ ...body('artifact.materialize'), payload: {
+        artifactType: 'simulation', requestPrompt: sentinel, plan: { title: '只用模拟调用验证错误传递' },
+      } }));
+      const result = await response.json();
+      expect(response.status).toBe(500);
+      expect(result).toEqual({ success: false, error: '本轮内容未通过结构、交互或教学检查，需要继续定向修复；尚未发布为完成作品。', errorCode: 'GENERATION_REPAIR_REQUIRED', failureCategory: 'quality' });
+      expect(mocks.callLLM).toHaveBeenCalledTimes(2);
+      const lines = logged.mock.calls.flat().join('\n');
+      expect(lines).toContain('visual-intent-diagnostics-v1');
+      expect(lines).toContain('interactionRequirements.0.controls');
+      expect(lines).toContain('SCHEMA_INVALID');
+      expect(lines).not.toContain(sentinel);
+      expect(JSON.stringify(result)).not.toContain('visualIntentDiagnostics');
+    } finally { logged.mockRestore(); }
+  });
+
+  it('keeps cinematic correction text out of both private logs and API errors', async () => {
+    const { CinematicQualityError } = await import('@/lib/server/cinematic-generation');
+    const sentinel = 'PRIVATE_CINEMATIC_CORRECTION_SENTINEL';
+    mocks.generateSingleArtifact.mockRejectedValue(new CinematicQualityError(sentinel, [{
+      status: 'FAIL', metrics: { teachingNodes: 4, detailedModels: 2, relations: 0 },
+      issues: [{ code: 'composition-assembly', severity: 'error', message: sentinel }],
+    }]));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { POST } = await import('@/app/api/integration/jobs/execute/route');
+      const response = await POST(request({ ...body('artifact.materialize'), payload: {
+        artifactType: 'quiz', requestPrompt: sentinel, plan: { title: '错误路径单元检查', outline: ['检查'] },
+      } }));
+      const result = await response.json();
+      expect(response.status).toBe(500);
+      expect(mocks.generateSingleArtifact).toHaveBeenCalled();
+      const lines = logged.mock.calls.flat().join('\n');
+      expect(lines).toContain('cinematic-quality-diagnostics-v1');
+      expect(lines).toContain('composition-assembly');
+      expect(lines).not.toContain(sentinel);
+      expect(JSON.stringify(result)).not.toContain(sentinel);
+      expect(result).not.toHaveProperty('cinematicQualityDiagnostics');
+    } finally { logged.mockRestore(); }
+  });
+
   it('rejects a request without the shared service credential', async () => {
     const { POST } = await import('@/app/api/integration/jobs/execute/route');
     const response = await POST(request(body(), 'wrong-secret'));
@@ -118,20 +179,83 @@ describe('玄甲 durable job integration route', () => {
     expect(mocks.resolveModel).not.toHaveBeenCalled();
   });
 
-  it('analyzes PDF text returned by the current flat extraction envelope', async () => {
-    mocks.callLLM.mockResolvedValue({
-      text: JSON.stringify({
-        analysis: {
-          summary: '课程资料介绍最小权限与网络安全实践。',
-          functionalPoints: ['最小权限'],
-          knowledgeGraph: { nodes: [], edges: [] },
-          chapterCandidates: [
-            { title: '最小权限', objectives: ['解释最小权限原则'], sourceLocators: [] },
-          ],
-        },
-      }),
-      usage: { inputTokens: 60, outputTokens: 80 },
-    });
+  it('loads a user-selected account skill using the trusted job scope owner', async () => {
+    const previousUrl = process.env.AISECEDU_INTERNAL_URL;
+    const previousSecret = process.env.AISECEDU_SERVICE_SECRET;
+    process.env.AISECEDU_INTERNAL_URL = 'http://ctfd';
+    process.env.AISECEDU_SERVICE_SECRET = 'integration-secret';
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () => ({ data: url.includes('view=body') ? { skill: {
+        name: 'account-scope-checker',
+        description: 'Scope-bound account skill.',
+        instructions: 'ACCOUNT_SKILL_LOADED_FROM_OWNER_7',
+        modelInvocable: false,
+        userInvocable: true,
+      } } : { skills: [{
+        name: 'account-scope-checker',
+        description: 'Scope-bound account skill.',
+        modelInvocable: false,
+        userInvocable: true,
+      }] } }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      mockAgentTurn({ answer: '已按账号技能完成检查。', toolProposals: [], deliverables: [] });
+      const { POST } = await import('@/app/api/integration/jobs/execute/route');
+      const response = await POST(request({
+        ...body(),
+        payload: { prompt: '/account-scope-checker 请检查这个请求。', context: {} },
+      }));
+      expect(response.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://ctfd/pwncollege_api/v1/teaching/agent-skills/resolve?ownerId=7&view=catalog',
+        expect.objectContaining({ headers: expect.objectContaining({ 'X-AISecEdu-Service-Token': 'integration-secret' }) }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://ctfd/pwncollege_api/v1/teaching/agent-skills/resolve?ownerId=7&view=body&name=account-scope-checker&audience=user',
+        expect.anything(),
+      );
+      expect(mocks.callLLM.mock.calls[1][0].system).toContain('ACCOUNT_SKILL_LOADED_FROM_OWNER_7');
+    } finally {
+      vi.unstubAllGlobals();
+      if (previousUrl === undefined) delete process.env.AISECEDU_INTERNAL_URL;
+      else process.env.AISECEDU_INTERNAL_URL = previousUrl;
+      if (previousSecret === undefined) delete process.env.AISECEDU_SERVICE_SECRET;
+      else process.env.AISECEDU_SERVICE_SECRET = previousSecret;
+    }
+  });
+
+  it('returns a structured question without generating files or selecting a plan, with auditable prompt versions', async () => {
+    mockAgentTurn({ answer: '你希望修改哪个项目？', questions: [{ id: 'target', text: '要修改哪个项目？', choices: ['DNA结构演示', '太阳系演示'] }], toolProposals: [], deliverables: [] });
+    const { POST } = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request({ ...body(), payload: { prompt: '把它改成一分钟。', context: {} } }));
+    const result = await response.json();
+    expect(response.status).toBe(200);
+    expect(result.result.interaction.state).toBe('awaiting-input');
+    expect(result.result.questions[0].allowFreeText).toBe(true);
+    expect(result.result.toolProposals).toEqual([]);
+    expect(mocks.callLLM).toHaveBeenCalledTimes(2);
+    expect(mocks.generateSingleArtifact).not.toHaveBeenCalled();
+    expect(result.result.promptManifest.map((item: {phase: string}) => item.phase)).toEqual(['planning', 'execution']);
+    expect(mocks.callLLM.mock.calls[0][0].abortSignal).toBeInstanceOf(AbortSignal);
+    expect(mocks.callLLM.mock.calls[1][0].abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('uses the bound original request and answer in both real planning and execution prompts', async () => {
+    mockAgentTurn({ answer: '已根据这段要求整理好说明。', toolProposals: [], deliverables: [] });
+    const { POST } = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request({ ...body(), payload: { prompt: '高中生', context: {
+      questionReply: { originalRequest: '解释DNA双螺旋的两条链怎样连接', answers: [{ question: '面向谁？', answer: '高中生' }] },
+    } } }));
+    expect(response.status).toBe(200);
+    for (const call of mocks.callLLM.mock.calls.slice(0, 2)) {
+      expect(call[0].prompt).toContain('解释DNA双螺旋的两条链怎样连接');
+      expect(call[0].prompt).toContain('高中生');
+    }
+  });
+
+  it('indexes PDF text without waiting for semantic model analysis', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
@@ -170,7 +294,9 @@ describe('玄甲 durable job integration route', () => {
       const result = await response.json();
 
       expect(response.status).toBe(200);
-      expect(result.result.analysis.functionalPoints).toEqual(['最小权限']);
+      expect(result.result.analysis.coverage.analysisVersion).toBe('source-index-v1');
+      expect(result.result.analysis.coverage.complete).toBe(true);
+      expect(mocks.callLLM).not.toHaveBeenCalled();
       expect(result.result.chunks).toEqual([
         expect.objectContaining({
           content: 'Network security course material: apply least privilege in practice.',
@@ -238,7 +364,7 @@ describe('玄甲 durable job integration route', () => {
       const { POST } = await import('@/app/api/integration/jobs/execute/route');
       const response = await POST(
         request({
-          ...body('material.analyze'),
+          ...body('material.enrich'),
           payload: {
             materialId: 'material_long',
             revisionId: 'revision_long',
@@ -256,12 +382,12 @@ describe('玄甲 durable job integration route', () => {
           complete: true,
           extractedCharacters: source.length,
           analyzedCharacters: source.length,
-          segmentCount: 3,
+          segmentCount: Math.ceil(source.length / 24_000),
         }),
       );
-      expect(result.result.analysis.sectionSummaries).toHaveLength(3);
-      expect(result.result.analysis.sectionSummaries[2].summary).toContain('FINAL-EVIDENCE');
-      expect(mocks.callLLM).toHaveBeenCalledTimes(4);
+      expect(result.result.analysis.sectionSummaries).toHaveLength(Math.ceil(source.length / 24_000));
+      expect(result.result.analysis.sectionSummaries.at(-1).summary).toContain('FINAL-EVIDENCE');
+      expect(mocks.callLLM).toHaveBeenCalledTimes(Math.ceil(source.length / 24_000) + 1);
       expect(fetchMock).toHaveBeenCalledTimes(1);
     } finally {
       fetchMock.mockRestore();
@@ -338,7 +464,7 @@ describe('玄甲 durable job integration route', () => {
       const { POST } = await import('@/app/api/integration/jobs/execute/route');
       const response = await POST(
         request({
-          ...body('material.analyze'),
+          ...body('material.enrich'),
           payload: {
             materialId: 'material_outline_repair',
             revisionId: 'revision_outline_repair',
@@ -928,6 +1054,53 @@ describe('玄甲 durable job integration route', () => {
     expect(mocks.callLLM.mock.calls[1][0].system).toContain('有界的自主执行循环');
   });
 
+  it.each(['new-request', 'continue'] as const)('scopes real agent.chat planning and execution to provenance: %s', async (mode) => {
+    const original = '生成一份可操作的结构演示，保持主体层次清晰。';
+    const prompt = mode === 'new-request' ? original : '按方案2继续，并保留原有要求';
+    const oldRewrite = '历史模型扩写不应自动继承：逐针脚匹配和卡扣闭合。';
+    const selectedRewrite = '明确采用方案二时应该保留的完整模型方案正文。';
+    const source = { ref: 'option:101:option-2', kind: 'generation-option', authorship: 'model', sourceMessageId: 101,
+      sourceJobId: 'job-options', optionId: 'option-2', title: '观察优先', originalRequest: original, content: selectedRewrite };
+    mockAgentTurn({ answer: '已经整理好本轮要求，等待教师进一步说明。', suggestions: [], toolProposals: [], deliverables: [] }, {
+      understanding: prompt, selectedSkills: [], plan: [],
+      requestRelation: { mode, sourceRefs: mode === 'continue' ? [source.ref] : [], evidence: mode === 'continue' ? '按方案2继续' : '' },
+    });
+    const { POST } = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request({ ...body(), payload: { prompt, context: {
+      thread: { oldExpandedPrompt: oldRewrite },
+      conversation: [{ id: 102, role: 'user', origin: 'model-draft-selection', content: oldRewrite }],
+      requestProvenance: { version: 'teacher-request-v1', currentMessageId: 103, sources: [source,
+        { ...source, ref: 'option:101:option-1', optionId: 'option-1', content: oldRewrite, selected: true }] },
+      platformFacts: { availableCourses: [], pendingAttachments: [{ id: 'material-1' }],
+        artifacts: { recent: [{ id: 'artifact-1', currentRevision: { instruction: oldRewrite } }] } },
+      agentLoop: { depth: 1, trace: [{ status: 'verified', observation: { materialId: 'material-1' } }] },
+    } } }));
+    expect(response.status).toBe(200);
+    const planning = mocks.callLLM.mock.calls[0][0].prompt;
+    const execution = mocks.callLLM.mock.calls[1][0].prompt;
+    expect(planning).not.toContain(oldRewrite);
+    expect(planning).not.toContain(selectedRewrite);
+    expect(planning).toContain(source.ref);
+    expect(execution).not.toContain(oldRewrite);
+    if (mode === 'continue') expect(execution).toContain(selectedRewrite);
+    else expect(execution).not.toContain(selectedRewrite);
+    expect(execution).toContain(prompt);
+    expect(execution).toContain('"status": "verified"');
+    expect(execution).toContain('material-1');
+  });
+
+  it('fails closed before execution if provenance-aware planning cannot identify a valid source', async () => {
+    mockAgentTurn({ answer: '不应执行', toolProposals: [] }, { understanding: '继续', selectedSkills: [], plan: [],
+      requestRelation: { mode: 'continue', sourceRefs: ['option:404:option-1'], evidence: '继续' } });
+    const { POST } = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request({ ...body(), payload: { prompt: '继续', context: {
+      requestProvenance: { version: 'teacher-request-v1', currentMessageId: 103, sources: [] },
+    } } }));
+    expect(response.status).toBe(500);
+    expect(mocks.callLLM).toHaveBeenCalledTimes(1);
+    expect(mocks.generateSingleArtifact).not.toHaveBeenCalled();
+  });
+
   it('analyzes a named PDF and returns the requested real lesson-plan file', async () => {
     const prompt =
       '请分析课程“软件安全”中课件“2 《软件安全》_缓冲区溢出基础.pdf”，给出一份教案文件。';
@@ -1461,6 +1634,54 @@ describe('玄甲 durable job integration route', () => {
     expect(result.result.generationOptions.options).toHaveLength(3);
   });
 
+  it('resumes proposal review through the actual route without rerunning the planner or author', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const checkpoint = await import('@/lib/cinematic/call-checkpoint');
+    const directory = await mkdtemp(join(tmpdir(), 'proposal-route-'));
+    vi.doMock('@/lib/cinematic/call-checkpoint', () => ({ ...checkpoint,
+      openCinematicCallCheckpoint: (identity: unknown) => checkpoint.openCinematicCallCheckpoint(identity, directory),
+    }));
+    try {
+      const prompt = '做一个输入目标数字、逐步操作的二分查找实验。';
+      mockAgentTurn({ answer: '请从三个方案中选择。', suggestions: [], deliverables: [], toolProposals: [{
+        tool: 'candidate.generate', arguments: { prompt, artifactType: 'simulation' }, reason: '教师要求互动过程',
+      }] });
+      let reviews = 0;
+      let firstOptions: unknown;
+      mocks.callLLM.mockImplementation(async (params, label) => {
+        if (label !== 'simulation-option-review') throw Error('Unexpected repeated planner or author: ' + label);
+        const draft = JSON.parse(params.prompt).candidateOptions;
+        firstOptions ??= structuredClone(draft.options);
+        if (reviews++ === 0) {
+          const { id: _id, ...fields } = draft.options[2];
+          return { text: JSON.stringify({ issues: [{ option: 2, code: 'factual', detail: '比较次数与剩余候选数量的统计定义不一致。' }],
+            corrections: [{ option: 2, ...fields, title: '看懂每一次比较怎样缩小范围' }] }), usage: { inputTokens: 3, outputTokens: 4 } };
+        }
+        if (reviews === 2) throw Object.assign(Error('service unavailable'), { statusCode: 503 });
+        expect(draft.options[2].title).toBe('看懂每一次比较怎样缩小范围');
+        expect(draft.options.slice(0, 2)).toEqual((firstOptions as unknown[]).slice(0, 2));
+        return { text: '{"issues":[],"corrections":[]}', usage: { inputTokens: 1, outputTokens: 2 } };
+      });
+      const { POST } = await import('@/app/api/integration/jobs/execute/route');
+      const payload = { ...body(), payload: { prompt, context: {} } };
+      const interrupted = await (await POST(request(payload))).json();
+      expect(interrupted.success).toBe(false);
+      expect(interrupted.failureCategory).toBe('service');
+      const resumedResponse = await POST(request(payload));
+      const resumed = await resumedResponse.json();
+      expect(resumedResponse.status).toBe(200);
+      expect(resumed.result.generationOptions.options[2].title).toBe('看懂每一次比较怎样缩小范围');
+      expect(mocks.callLLM.mock.calls.filter(([, label]) => label === 'aisecedu-agent-plan')).toHaveLength(1);
+      expect(mocks.callLLM.mock.calls.filter(([, label]) => label === 'aisecedu-integration-job')).toHaveLength(1);
+      expect(resumed.model.usage).toEqual({ inputTokens: 1, outputTokens: 2 });
+    } finally {
+      vi.doUnmock('@/lib/cinematic/call-checkpoint');
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('continues from the raw request when the optional planning pass is malformed', async () => {
     mocks.callLLM
       .mockResolvedValueOnce({ text: '{"selectedSkills":[]}', usage: {} })
@@ -1804,55 +2025,85 @@ describe('玄甲 durable job integration route', () => {
     expect(generationInput.description).toContain('旧场景');
   });
 
-  it('materializes every string outline item as an engine-backed simulation', async () => {
-    mocks.generateSingleArtifact.mockImplementation(
-      async (input: { type: string; title: string }, order: number) => ({
-        id: `simulation_${order}`,
-        type: input.type,
-        title: input.title,
-        outline: { ...input, id: `outline_${order}`, order },
-        content: {
-          html: `<main data-simulation="${order}"></main>`,
-          widgetType: 'simulation',
-          widgetConfig: { type: 'simulation-scenario', stateTransitions: ['ready', 'active'] },
-        },
-        order,
-        createdAt: 1,
-      }),
-    );
+  it('preserves every string outline item in one connected input-driven process', async () => {
+    const intent = { mode: 'interactive-2d', twoDimensionalFormat: 'simulation', reason: '学生改变输入逐轮观察累加状态', objects: [], interactions: [], interactionRequirements: [] };
+    const processScene = {
+      ...processAccumulator.scene,
+      views: [
+        ...processAccumulator.scene.views,
+        { id: 'step', title: '当前轮次', kind: 'value', value: { state: 'count' } },
+        { id: 'increment', title: '每轮增量', kind: 'value', value: { input: 'unit' } },
+      ],
+      stages: [
+        processAccumulator.scene.stages[0],
+        { id: 'first', title: '第一次累加', when: { op: 'and', args: [
+          { op: 'eq', args: [{ state: 'count' }, 1] },
+          { op: 'lt', args: [{ state: 'count' }, { input: 'rounds' }] },
+        ] }, explanation: '核对第一次增量与当前总量。' },
+        { ...processAccumulator.scene.stages[1], when: { op: 'and', args: [
+          { op: 'gt', args: [{ state: 'count' }, 1] },
+          { op: 'lt', args: [{ state: 'count' }, { input: 'rounds' }] },
+        ] } },
+        processAccumulator.scene.stages[2],
+      ],
+    };
+    const processTests = [...processAccumulator.tests, {
+      name: '三次加一', inputs: { unit: 1, rounds: 3 },
+      actions: [{ id: 'add', count: 'untilDone' }],
+      expect: [{ value: { state: 'total' }, equals: 3 }],
+    }];
+    mocks.callLLM
+      .mockResolvedValueOnce({ text: JSON.stringify(intent) })
+      .mockResolvedValueOnce({ text: JSON.stringify({ intent, sourceChecks: [] }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({ inputs: processScene.inputs, initialState: processScene.initialState }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({ actions: processScene.actions }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({
+        title: processScene.title,
+        summary: processScene.summary,
+        modelNote: processScene.modelNote,
+        views: processScene.views,
+        stages: processScene.stages,
+        questions: processScene.questions,
+        coverage: processScene.coverage,
+      }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({ tests: processTests }) })
+      .mockResolvedValueOnce({ text: JSON.stringify({ faithful: true, scientificallySound: true, causalInteraction: true, issues: [], languageReview: passingLanguageReview(processLanguageUnits(parseProcessScene(processScene))) }) });
     const requestBody = {
       ...body('artifact.materialize'),
       payload: {
         artifactId: 'artifact_simulation',
-        title: 'Diffie-Hellman 中间人攻击仿真',
+        title: '逐轮观察累加过程',
         artifactType: 'simulation',
         plan: {
-          title: 'Diffie-Hellman 中间人攻击仿真',
-          objectives: ['观察密钥协商中的状态变化'],
-          outline: ['参数与参与方初始化', 'Mallory 拦截并替换公钥', '比较共享密钥并复盘'],
+          title: '逐轮观察累加过程',
+          objectives: ['观察输入怎样影响累加状态'],
+          outline: ['设置每轮增量', '逐步累加并记录', '比较结果并复盘'],
         },
       },
     };
     const { POST } = await import('@/app/api/integration/jobs/execute/route');
-    const response = await POST(request(requestBody));
+    vi.stubEnv('AISECEDU_INTEGRATED', 'false');
+    let response: Response;
+    try { response = await POST(request(requestBody)); }
+    finally { vi.unstubAllEnvs(); }
     const result = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(mocks.generateSingleArtifact).toHaveBeenCalledTimes(3);
-    for (const call of mocks.generateSingleArtifact.mock.calls) {
-      expect(call[0]).toMatchObject({ type: 'simulation' });
-      expect(call[3]).toMatchObject({ deterministicSimulation: true });
+    expect(response.status, JSON.stringify(result)).toBe(200);
+    expect(mocks.generateSingleArtifact).not.toHaveBeenCalled();
+    for (const section of requestBody.payload.plan.outline) {
+      expect(mocks.callLLM.mock.calls[2][0].messages[1].content).toContain(section);
     }
     expect(result.result.content.artifactType).toBe('simulation');
-    expect(result.result.content.lesson.artifacts).toHaveLength(3);
+    expect(result.result.content.lesson.artifacts).toHaveLength(1);
     expect(result.result.content.lesson.artifacts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           type: 'simulation',
           content: expect.objectContaining({
-            html: expect.stringContaining('data-simulation'),
+            html: expect.stringContaining('data-process="v1"'),
             widgetType: 'simulation',
-            widgetConfig: expect.objectContaining({ type: 'simulation-scenario' }),
+            renderingMode: 'process-v1',
+            processValidation: expect.objectContaining({ status: 'deterministic-process-verified' }),
           }),
         }),
       ]),
@@ -1944,7 +2195,8 @@ describe('玄甲 durable job integration route', () => {
     ]);
   });
 
-  it('materializes independent simulation phases concurrently while preserving order', async () => {
+  it('does not split or replace a failed interactive process with independent fixed phases', async () => {
+    mocks.callLLM.mockResolvedValue({ text: JSON.stringify({ mode: 'interactive-2d', twoDimensionalFormat: 'simulation', reason: '二维变量与演化状态的分阶段模拟', objects: [], interactions: [], interactionRequirements: [] }) });
     let active = 0;
     let maxActive = 0;
     mocks.generateSingleArtifact.mockImplementation(
@@ -1981,11 +2233,11 @@ describe('玄甲 durable job integration route', () => {
     );
     const result = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(maxActive).toBe(4);
-    expect(
-      result.result.content.lesson.artifacts.map((item: { order: number }) => item.order),
-    ).toEqual([1, 2, 3, 4]);
+    expect(response.status).toBe(500);
+    expect(result.success).toBe(false);
+    expect(mocks.generateSingleArtifact).not.toHaveBeenCalled();
+    expect(maxActive).toBe(0);
+    expect(mocks.callLLM).toHaveBeenCalledTimes(3);
   });
 
   it('materializes a slide-deck outline as renderable global-agent pages', async () => {

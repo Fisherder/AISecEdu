@@ -7,6 +7,7 @@
 
 import type { ActionType } from './action';
 import type { MediaGenerationRequest } from '@/lib/media/types';
+import type { CoursewareSlideData } from '@/lib/courseware/schema';
 
 // ==================== PDF Image Types ====================
 
@@ -191,6 +192,7 @@ import type { QuizQuestion } from './stage';
  */
 export interface GeneratedSlideContent {
   elements: PPTElement[];
+  studio?: CoursewareSlideData;
   background?: SlideBackground;
   /** Private, page-specific presenter script synchronized with the active slide. */
   speakerNotes?: string;
@@ -242,11 +244,77 @@ export interface ScientificModel {
  * AI-generated interactive content
  */
 export interface GeneratedInteractiveContent {
+  debate?: import('@/lib/debate/schema').DebateSpec;
+  debateArtifactId?: string;
   html: string;
   scientificModel?: ScientificModel;
   widgetType?: WidgetType;
   widgetConfig?: WidgetConfig;
   generationFallback?: boolean;
+  renderingMode?: 'animated-html' | 'cinematic-v1' | 'process-v1';
+  processScene?: import('@/lib/process/schema').ProcessScene;
+  processIntent?: import('@/lib/cinematic/capabilities').VisualGenerationIntent;
+  processValidation?: {
+    status: 'deterministic-process-verified'; runtimeVersion: string; testCount: number; totalSteps: number;
+    reviewScope?: 'revision-delta-and-dependencies' | 'full-generation';
+    referenceSceneId?: string;
+    revisionPlan?: {changes:Array<{path:string;reason:string}>};
+    review: { faithful: boolean; scientificallySound: boolean; causalInteraction: boolean; issues: string[]; advisoryIssues?:string[]; preExistingIssues?: string[] };
+    reviewStatus?: 'verified' | 'advisory';
+    testSource?: 'deterministic-branch-exploration-v1';
+    presentationWarnings?:string[];
+    decisionEvidence?: ReturnType<typeof import('@/lib/server/process-quality').validateProcessPackage>['decisionEvidence'];
+    residualClosure?: {
+      mode: 'residual-closure';
+      residualIssues: string[];
+      checks: Array<{issue:string; resolved:boolean; evidence:string}>;
+    };
+    attempts: Array<{ attempt: number; issue: string }>;
+    browserValidation: 'PASSED' | 'NOT_PERFORMED';
+    qualityProfile?: {id:'openmaic-gold-v1'; score:number; contract:'causal-state-browser-v1'; deterministicTests:number};
+    browserRender?: import('@/lib/process/render-client').ProcessRenderInspection['evidence'];
+  };
+  cinematicIntent?: import('@/lib/cinematic/capabilities').VisualGenerationIntent;
+  cinematicScene?: import('@/lib/cinematic/schema').CinematicScene;
+  cinematicDirection?: {
+    title: string;
+    visualThesis: string;
+    artDirection: string;
+    objectives: string[];
+    shots: Array<{title: string; purpose: string; visibleChange: string; composition: string}>;
+    groundingReview?: {
+      issues: string[];
+      patchCount: number;
+      finalIssues?: string[];
+      history?: Array<{issues: string[]; patchCount: number}>;
+      method?: 'model-semantic-review';
+    };
+  };
+  cinematicValidation?: {
+    status: 'STRUCTURE_VALIDATED' | 'COPY_VALIDATED_SCENE_UNCHANGED';
+    rendererVersion: string;
+    stages: string[];
+    shots: number;
+    modelCount: number;
+    visualReview: 'REQUIRED' | 'APPROVED';
+    geometricQuality?: import('@/lib/cinematic/quality').CinematicQualityReport;
+    assembly?: {version: string; placements: number; portAnchors: number; coordinateSpace: string};
+    repair?: {
+      geometryRepairs: number;
+      attempts: Array<{
+        attempt: number;
+        status: string;
+        issues: unknown[];
+        assembly?: {version: string; placements: number; portAnchors: number; coordinateSpace: string};
+      }>;
+      semanticRepairs: number;
+      geometryLimitPerPass: number;
+      semanticLimit: number;
+    };
+    humanReview?: 'NOT_PERFORMED';
+    runtimeRender?: 'PASSED' | 'NOT_PERFORMED';
+    browserRender?: import('@/lib/cinematic/render-client').CinematicRenderInspection['evidence'];
+  };
 }
 
 // ==================== Legacy Types (for compatibility) ====================

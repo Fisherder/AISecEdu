@@ -162,6 +162,14 @@
       body = JSON.stringify(config.json);
     }
 
+    // CTFd reads the CSRF header only for application/json requests. Bodyless
+    // mutations (including Stop/DELETE) must not enter its form-token branch.
+    // Keep explicit content types and multipart/form bodies untouched.
+    if (body == null && !safeMethods.has(method)
+      && !Object.keys(headers).some(key => key.toLowerCase() === "content-type")) {
+      headers["Content-Type"] = "application/json";
+    }
+
     const externalSignal = config.signal || config.controller?.signal || null;
     const controller = config.controller || new AbortController();
     let timedOut = false;

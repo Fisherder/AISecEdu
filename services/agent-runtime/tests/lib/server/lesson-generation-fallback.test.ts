@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { generateSingleArtifact } from '@/lib/server/lesson-generation';
 
 describe('deterministic materialization fallback', () => {
+  it('lets interaction-critical diagram delivery reject a static fallback', async () => {
+    await expect(generateSingleArtifact(
+      {type:'diagram',title:'点击步骤查看说明',keyPoints:['选课','学习','反馈']},
+      1,
+      vi.fn(async()=>{throw new Error('provider unavailable');}),
+      {useWorkflow:true,subjectProfile:false,securityKnowledge:'',rejectFallback:true},
+    )).rejects.toThrow();
+  });
+  it('never replaces a failed cinematic request with a static fallback card', async () => {
+    await expect(generateSingleArtifact({type:'visualization3d',title:'三维结构'},0,vi.fn(async()=>{throw Error('provider unavailable');}),{useWorkflow:true})).rejects.toThrow('原作品保持不变');
+  });
   it('keeps a slide usable when the model returns no renderable content', async () => {
     const artifact = await generateSingleArtifact(
       {

@@ -444,7 +444,9 @@ class DojoModules(db.Model):
 
     @classmethod
     def from_id(cls, dojo_reference_id, id):
-        return cls.query.filter_by(id=id).join(Dojos.from_id(dojo_reference_id).subquery())
+        scope = Dojos.from_id(dojo_reference_id).subquery()
+        module_alias = scope.c.data["auxiliary"]["moduleAliases"][id].astext
+        return cls.query.join(scope).filter(or_(cls.id == id, module_alias == cls.id))
 
     @hybrid_property
     def challenges(self):
@@ -510,7 +512,8 @@ class DojoModules(db.Model):
                 or_(DojoChallengeVisibilities.stop == None, when <= DojoChallengeVisibilities.stop),
             )
             .filter(
-                not required_only or DojoChallenges.required
+                not required_only or DojoChallenges.required,
+                db.func.coalesce(DojoChallenges.data["publication_state"].astext, "PUBLISHED") != "DRAFT",
             )
             .filter(DojoChallenges.supported())
             .order_by(DojoChallenges.challenge_index)
@@ -573,6 +576,8 @@ class DojoChallenges(db.Model):
         "exercise_mode",
         "runtime_environment",
         "simulation",
+        "coding_workspace",
+        "workspace_layout",
     ]
     data_defaults = {
         "privileged": False,
@@ -657,7 +662,7 @@ class DojoChallenges(db.Model):
     @hybrid_method
     def visible(self, when=None):
         when = when or datetime.datetime.utcnow()
-        return self.supported() and (
+        return (self.data or {}).get("publication_state") != "DRAFT" and self.supported() and (
             not self.visibility
             or all(
                 (
@@ -672,6 +677,7 @@ class DojoChallenges(db.Model):
         when = when or datetime.datetime.utcnow()
         return and_(
             cls.supported(),
+            db.func.coalesce(cls.data["publication_state"].astext, "PUBLISHED") != "DRAFT",
             or_(cls.visibility == None, and_(
                 cls.visibility.has(or_(DojoChallengeVisibilities.start == None, when >= DojoChallengeVisibilities.start)),
                 cls.visibility.has(or_(DojoChallengeVisibilities.stop == None, when <= DojoChallengeVisibilities.stop)),
@@ -1040,7 +1046,10 @@ from .global_agent import (
     StudentAgentMemories,
     TeachingAgentActions,
     TeachingAgentApprovals,
+    TeachingAgentEventOutbox,
+    TeachingAgentSkills,
     TeachingAgentMessages,
+    TeachingAgentSessionEvents,
     TeachingAgentThreads,
     TeachingArtifactCandidates,
     TeachingArtifactRevisions,
@@ -1063,3 +1072,15 @@ from .coursework import (
     TeachingAssignments,
     TeachingAssignmentSubmissions,
 )
+from .material_library import (
+    MaterialCollections,
+    MaterialCollectionItems,
+    MaterialLibraryImports,
+    MaterialLibraryItems,
+    MaterialLibraryVersions,
+)
+from .material_assets import MaterialAssetCopies
+from .inquiry import InquiryAttempts, InquiryEvents, InquiryReleases
+
+from .construction import (ConstructionBatches, ConstructionMembers, ConstructionCourses, ConstructionTasks,
+                           ConstructionSubmissions, ConstructionSpaces, ConstructionReleases, ConstructionEvents, ConstructionNotices)

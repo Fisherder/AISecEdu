@@ -55,6 +55,8 @@ import { useThinkingTimers } from './thinking-timers';
 import { useSceneRuntimeErrors } from '@/lib/store/scene-runtime-errors';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { editElementsApplyCorrectionKey } from './edit-elements-result';
+import { isAgentRunEnvelope } from '@/lib/agent-run/protocol';
+import { emitAgentRunEvent, useAgentRunStore } from '@/lib/agent-run/store';
 
 export interface UseAgentRuntimeOptions {
   scene?: { id: string; title: string };
@@ -274,6 +276,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
     setMessages([]);
     useRegenSnapshots.getState().clearAll();
     useThinkingTimers.getState().clear();
+    useAgentRunStore.getState().clear('editor');
     const sid = useStageStore.getState().stage?.id;
     if (sid) {
       // Archive-then-new: the prior session stays in Dexie; just start a fresh,
@@ -600,12 +603,17 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
             if (!line) continue;
             const json = line.slice(5).trim();
             if (!json || json === '{}') continue;
-            let event: AgentEvent;
+            let parsed: unknown;
             try {
-              event = JSON.parse(json) as AgentEvent;
+              parsed = JSON.parse(json) as unknown;
             } catch {
               continue;
             }
+            if (isAgentRunEnvelope(parsed)) {
+              if (isCurrent()) emitAgentRunEvent('editor', parsed.event);
+              continue;
+            }
+            const event = parsed as AgentEvent;
             // Skip late events from a superseded run (don't apply stale tool
             // results to the stage or rewrite the new run's message).
             if (isCurrent()) await handleEvent(event, refresh, assistantId);

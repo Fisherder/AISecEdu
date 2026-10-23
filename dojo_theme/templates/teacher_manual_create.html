@@ -6,7 +6,7 @@
 {% block entrypoint %}{% endblock %}
 
 {% block stylesheets %}
-<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='aisecedu-course-hub-v31-readability-v1') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='frontend-restored-20261001-1') }}">
 {% endblock %}
 
 {% set is_course = create_kind == 'course' %}
@@ -103,7 +103,7 @@
         </div>
       </section>
 
-      <label class="manual-field is-wide"><span>运行环境</span><select id="manual-runtime-environment" name="runtimeEnvironment"><option value="linux">Linux</option><option value="windows">Windows 远程桌面</option></select><small>Windows 提供原生桌面、VS Code 和 OllyDbg；题目文件位于 C:\Course。</small></label>
+      <label class="manual-field is-wide"><span>运行环境</span><select id="manual-runtime-environment" name="runtimeEnvironment">{% for environment in runtime_environments %}<option value="{{ environment.id }}" data-family="{{ environment.family }}" data-description="{{ environment.description }}"{% if environment.isDefault %} selected{% endif %}>{{ environment.name }}</option>{% endfor %}</select><small id="manual-runtime-description">{{ runtime_environments[0].description }}</small></label>
 
       <details id="manual-section-runtime" class="manual-advanced" {% if not dojo.modules %}hidden{% endif %}>
         <summary><span><strong>运行环境</strong><small>选择学生操作方式与起始文件</small></span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
@@ -158,6 +158,6 @@
 {% block footer %}{% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-upload-v2') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/teacher-manual-create.js', v='aisecedu-runtime-profiles-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='frontend-restored-20261001-1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/teacher-manual-create.js', v='frontend-restored-20261001-1') }}"></script>
 {% endblock %}

@@ -1,3 +1,5 @@
+import { generateDebate, debateLesson } from '@/lib/server/debate-generation';
+import { openDebateCheckpoint } from '@/lib/debate/checkpoint';
 import { nanoid } from 'nanoid';
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompts';
 import { buildSecurityKnowledgeContext } from '@/lib/security/context-builder';
@@ -19,7 +21,9 @@ import type {
   GeneratedQuizContent,
 } from '@/lib/types/generation';
 import type { LessonArtifact, LessonArtifactType } from '@/lib/types/lesson';
+import type { VisualGenerationIntent } from '@/lib/cinematic/capabilities';
 import { createLogger } from '@/lib/logger';
+import { generateCinematicExplainer } from './cinematic-generation';
 
 const log = createLogger('LessonGeneration');
 
@@ -217,6 +221,8 @@ function buildFallbackInteractiveContent(input: SingleArtifactInput): GeneratedI
 }
 
 export function buildDeterministicFallbackContent(input: SingleArtifactInput): ArtifactContent {
+  if (input.type === 'visualization3d')
+    throw new Error('三维演示生成失败，未用平面占位内容替代；请重试。');
   if (input.type === 'slide') return buildFallbackSlideContent(input);
   if (input.type === 'quiz') return buildFallbackQuizContent(input);
   return buildFallbackInteractiveContent(input);
@@ -495,6 +501,9 @@ export interface SingleArtifactInput {
   title: string;
   keyPoints?: string[];
   description?: string;
+  originalRequest?: string;
+  teacherLearningRequest?: import('./cinematic-learner-copy').TeacherLearningRequest;
+  visualIntent?: VisualGenerationIntent;
   quizConfig?: QuizConfig;
 }
 
@@ -660,24 +669,18 @@ export async function generateSingleArtifact(
     securityKnowledge?: string;
     deterministicLab?: boolean;
     deterministicSimulation?: boolean;
+    rejectFallback?: boolean;
   },
 ): Promise<LessonArtifact | null> {
+  if (input.type === 'visualization3d') return generateCinematicExplainer(input, order, aiCall);
   const outline = buildOutlineForArtifact(input, order);
 
-  // Debate uses a deterministic, safe visual briefing. Its autonomous agent
-  // roster and director instructions are attached when the lesson is published.
   if (input.type === 'debate') {
-    const html = buildDebateArtifactHtml(input);
-    return {
-      id: nanoid(),
-      type: 'debate',
-      title: input.title,
-      outline,
-      content: { html, widgetType: 'simulation' } as GeneratedInteractiveContent,
-      order,
-      createdAt: Date.now(),
-      validation: await validateHtmlSafely(html),
-    };
+    const state = await openDebateCheckpoint({kind: 'lesson-design', input, order});
+    const spec = await generateDebate({request: input, languageDirective: opts.languageDirective,
+      securityKnowledge: opts.securityKnowledge}, aiCall, state);
+    return {...debateLesson(spec).artifacts[0], id: nanoid(), order, outline: {...outline,
+      title: spec.title, description: spec.scenario, keyPoints: spec.objectives}};
   }
 
   if (opts.deterministicLab && input.type === 'simulation') {
@@ -825,6 +828,7 @@ export async function generateSingleArtifact(
       securityKnowledge: secKnowledge,
     });
   } catch (error) {
+    if (opts.rejectFallback) throw error;
     log.warn('Artifact model stage failed; using deterministic fallback', error);
   }
   if (
@@ -837,6 +841,7 @@ export async function generateSingleArtifact(
     );
     content = null;
   }
+  if (!content && opts.rejectFallback) throw new Error('Model content generation failed; no fallback was substituted');
   if (!content) content = buildDeterministicFallbackContent(input);
   // Use a descriptive title from the generated HTML when available (widgets have
   // a <title> tag that's more descriptive than the raw requirement text).

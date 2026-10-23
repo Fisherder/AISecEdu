@@ -97,6 +97,7 @@ in pkgs.stdenv.mkDerivation {
     tigervnc
     novnc
     xclip
+    xorg.xprop
     xfce
     elementary-xfce-icon-theme  # If we include this in `xfce`, we get a "Permission denied" error related to `nix-support/propagated-build-inputs`.
   ];
@@ -115,6 +116,7 @@ in pkgs.stdenv.mkDerivation {
     cp ${serviceScript} $out/bin/dojo-desktop
     ln -s ${pkgs.xfce.xfce4-terminal}/bin/xfce4-terminal $out/bin/x-terminal-emulator
     ln -s ${pkgs.xclip}/bin/xclip $out/bin/xclip
+    ln -s ${pkgs.xorg.xprop}/bin/xprop $out/bin/xprop
     rsync -a --ignore-existing $src/. ${xfce}/. ${pkgs.elementary-xfce-icon-theme}/. $out
     runHook postInstall
   '';

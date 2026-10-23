@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "node_modules",
+    "dist",
+    "tests",
+    "eval",
+    "e2e",
+    "openclaw",
+    "render-service",
+    "packages/*/test",
+    "packages/*/tests",
+    "packages/@openmaic/*/test",
+    "packages/@openmaic/*/tests",
+    "packages/docs",
+    "packages/*/src",
+    "packages/@openmaic/*/src"
+  ],
+  "files": [
+    "packages/@openmaic/importer/src/types/vendor-shims.d.ts"
+  ]
+}

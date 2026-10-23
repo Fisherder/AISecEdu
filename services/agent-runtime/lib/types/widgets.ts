@@ -42,6 +42,9 @@ export interface DiagramNode {
   label: string;
   position?: { x: number; y: number };
   details?: string;
+  kind?: string;
+  column?: string;
+  row?: string;
   type?: 'default' | 'decision' | 'start' | 'end';
 }
 
@@ -54,6 +57,7 @@ export interface DiagramEdge {
 
 export interface DiagramConfig {
   type: 'diagram';
+  title?: string;
   diagramType:
     | 'flowchart'
     | 'mindmap'
@@ -68,6 +72,8 @@ export interface DiagramConfig {
   nodes: DiagramNode[];
   edges: DiagramEdge[];
   revealOrder?: string[]; // Node IDs in reveal sequence
+  layout?: import('@/lib/widgets/diagram').DiagramLayout;
+  steps?: import('@/lib/widgets/diagram').DiagramStep[];
 }
 
 // ==================== Code Widget ====================

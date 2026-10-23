@@ -49,6 +49,8 @@ import { RegenerateSceneUI } from './regenerate-scene-tool-ui';
 import { EditInteractiveHtmlUI } from './edit-interactive-html-tool-ui';
 import { EditElementsUI } from './edit-elements-tool-ui';
 import { ReadSceneContentUI } from './read-tool-ui';
+import { AgentRunTimeline } from '@/components/agent-run/agent-run-timeline';
+import { useAgentRunStore } from '@/lib/agent-run/store';
 
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 640;
@@ -188,6 +190,7 @@ export function AgentPanel({
   naked,
 }: AgentPanelProps) {
   const { t } = useI18n();
+  const activeRun = useAgentRunStore((state) => state.runs.editor);
 
   // Interactive scenes expose a different agent capability (fix the page's bugs)
   // than slides (regenerate content/narration), so the empty-state copy and the
@@ -296,6 +299,7 @@ export function AgentPanel({
             </ThreadPrimitive.Empty>
 
             <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+            <AgentRunTimeline run={activeRun} compact />
           </ThreadPrimitive.Viewport>
 
           <ThreadPrimitive.ScrollToBottom className="absolute bottom-2 left-1/2 grid size-7 -translate-x-1/2 place-items-center rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-opacity hover:text-foreground disabled:pointer-events-none disabled:opacity-0">
@@ -517,6 +521,7 @@ export function AgentPanel({
             </ThreadPrimitive.Empty>
 
             <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+            <AgentRunTimeline run={activeRun} compact />
           </ThreadPrimitive.Viewport>
 
           <ThreadPrimitive.ScrollToBottom className="absolute bottom-2 left-1/2 grid size-7 -translate-x-1/2 place-items-center rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-opacity hover:text-foreground disabled:pointer-events-none disabled:opacity-0">

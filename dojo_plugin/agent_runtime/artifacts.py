@@ -63,6 +63,7 @@ _PRIVATE_ARTIFACT_KEYS = {
     "private",
     "privatesolution",
     "referenceanswer",
+    "remark",  # Native slide DSL alias for private speaker notes.
     "secret",
     "secrets",
     "solution",
@@ -70,6 +71,15 @@ _PRIVATE_ARTIFACT_KEYS = {
     "speakernotes",
     "teachernotes",
     "validation",
+    "processvalidation",
+    "processintent",
+    "languagereview",
+    "learnertextunits",
+    "cinematiclearnerreview",
+    "cinematiclearnercopy",
+    "cinematiclearningplan",
+    "librarynativepackage",
+    "librarysource",
 }
 _FLAG_TEXT_PATTERN = re.compile(
     r"(?i)(?:\bflag\s*[:=]\s*[^\s<]{3,}|(?:flag|pwn\.college)\{[^}\r\n]{1,512}\})"
@@ -331,6 +341,24 @@ def current_artifact_revision(artifact):
     ).first()
 
 
+def artifact_revision_source_issue(artifact_type, content):
+    """Reject a simulation plan placeholder before scheduling a revision.
+
+    Initial materialization creates a durable artifact row containing the chosen
+    plan. If generation fails, that row is not an editable simulation lesson.
+    Match the runtime's minimum revision-source contract, without claiming that
+    the retained lesson has passed its separate content and browser checks.
+    Other artifact types keep their existing revision behavior.
+    """
+    if str(artifact_type or "").strip().lower() != "simulation":
+        return None
+    lesson = content.get("lesson") if isinstance(content, dict) else None
+    items = lesson.get("artifacts") if isinstance(lesson, dict) else None
+    if not isinstance(items, list) or not any(isinstance(item, dict) for item in items):
+        return "这份演示尚未生成可修改的内容。请先在生成任务中重试，生成成功后再提出修改要求。"
+    return None
+
+
 def artifact_for_user(artifact_id, user):
     artifact = TeachingArtifacts.query.filter_by(
         id=artifact_id,
@@ -412,7 +440,8 @@ def artifact_capabilities(artifact, user):
     is_course_teacher = artifact_course_teacher(artifact, user)
     is_owner = artifact.owner_id == user.id
     is_personal = artifact.self_workspace_id is not None
-    is_archived = artifact.status in {"ARCHIVED", "DELETED"}
+    from ..construction_guards import frozen_course
+    is_archived = artifact.status in {"ARCHIVED", "DELETED"} or frozen_course(artifact.dojo_id)
     can_edit = bool(is_owner and not is_archived)
     can_publish = bool(
         is_owner

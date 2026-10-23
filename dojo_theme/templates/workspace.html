@@ -4,7 +4,7 @@
 {% block stylesheets %}
 {{ super() }}
 {% if exercise_mode in ["SIMULATION", "HYBRID"] %}
-<link rel="stylesheet" href="{{ url_for('views.themes', path='css/simulation.css') }}?v=aisecedu-scenario-runner-v2-readability-v1">
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/simulation.css', v='frontend-restored-20261001-1') }}">
 {% endif %}
 <style>
     html, body {
@@ -95,6 +95,11 @@
         margin: 1em;
     }
 </style>
+<script>
+  window.addEventListener("pageshow", function (event) {
+    if (event.persisted) window.location.reload();
+  });
+</script>
 {% endblock %}
 
 
@@ -121,6 +126,7 @@
         <select class="form-control" data-workspace-module></select>
       </label>
       <div class="workspace-navigation-challenges" data-workspace-challenges aria-label="练习"></div>
+      {% if challenge.id == "safe-copy" %}<a href="/workspace/environment" target="_blank" rel="noopener" class="btn btn-outline-primary mt-3">工程与核验</a>{% endif %}
       <div class="workspace-navigation-status" data-workspace-navigation-status>正在加载课程…</div>
     </div>
   </aside>
@@ -139,8 +145,7 @@
         <iframe src="about:blank" id="workspace-iframe" name="workspace" allow="clipboard-read *; clipboard-write *; fullscreen *" allowfullscreen></iframe>
         {% include "components/workspace_loading.html" %}
         <div class="workspace-ssh" style="display: none;">
-          <h3>通过 SSH 连接</h3>
-          先绑定你的<a href="/settings#ssh-key" target="_blank"> SSH 密钥</a>，然后连接：<code>ssh hacker@{{ request.host.split(':')[0] }}</code>
+          {% include "components/workspace_ssh.html" %}
         </div>
       </div>
       {% include "components/learning_tutor.html" %}
@@ -154,10 +159,12 @@
 
 {% block scripts %}
 {% if exercise_mode in ["SIMULATION", "HYBRID"] %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/simulation.js') }}?v=aisecedu-scenario-runner-v2"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/simulation.js', v='frontend-restored-20261001-1') }}"></script>
 {% endif %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/actionbar.js') }}?v=aisecedu-20260726-score-short-web"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/actionbar.js', v='console-20261012-22') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/coding-reset.js', v='coding-workspace-20261012-1') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}?v=aisecedu-toast-v1"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js') }}?v=aisecedu-student-context-v2"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/workspace.js') }}?v=aisecedu-20260726-guided-workspace"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js') }}?v=aisecedu-student-context-v6"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/workspace.js') }}?v=aisecedu-20260922-guided-workspace"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/desktop-keyboard.js') }}?v=aisecedu-desktop-keyboard-v11"></script>
 {% endblock %}

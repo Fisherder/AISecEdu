@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import type { PromptId, LoadedPrompt, SnippetId } from './types';
 import { createLogger } from '@/lib/logger';
+import { LEARNER_LANGUAGE_BRIEF } from '@/lib/teaching/learner-language';
 const log = createLogger('PromptLoader');
 
 /**
@@ -132,11 +133,13 @@ export function buildPrompt(
   const prompt = loadPrompt(promptId);
   if (!prompt) return null;
 
+  const teachingTextPrompt = /(?:-content|-config|-actions|-outlines|-plan|-scenario)$/.test(promptId) || promptId === 'pbl-design';
+
   return {
     system: interpolateVariables(
       processConditionalBlocks(prompt.systemPrompt, variables),
       variables,
-    ),
+    ) + (teachingTextPrompt ? '\n' + LEARNER_LANGUAGE_BRIEF : ''),
     user: interpolateVariables(
       processConditionalBlocks(prompt.userPromptTemplate, variables),
       variables,

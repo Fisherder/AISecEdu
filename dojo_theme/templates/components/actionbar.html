@@ -179,17 +179,23 @@
     0% {
       left: 50%;
       width: 0%;
+      opacity: 0;
+      transform: translateY(6px);
     }
-    5% {
+    4% {
       left: 10%;
       width: 80%;
+      opacity: 1;
+      transform: translateY(0);
     }
-    95% {
+    88% {
       left: 10%;
       width: 80%;
       border-width: 2px;
       padding-left: 1em;
       padding-right: 1em;
+      opacity: 1;
+      transform: translateY(0);
     }
     100% {
       left: 50%;
@@ -198,36 +204,37 @@
       border-right-width: 0;
       padding-left: 0;
       padding-right: 0;
+      opacity: 0;
+      transform: translateY(-4px);
     }
   }
 
-  .animate-banner {
-    display: block !important;
-    animation-name: banner-animation;
-    animation-duration: 20s;
-    animation-fill-mode: forwards;
-  }
-
+  .animate-banner,
   .animate-banner-fast {
     display: block !important;
     animation-name: banner-animation;
-    animation-duration: 5s;
+    animation-duration: 3.2s;
+    animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
     animation-fill-mode: forwards;
   }
 
   .workspace-notification-banner {
     position: absolute;
-    bottom: 4em;
+    bottom: 3.6em;
     z-index: 20;
     display: none;
-    min-height: 4em;
+    min-height: 3em;
     height: auto;
-    padding: 1em;
+    padding: 0.7em 1em;
     overflow: hidden;
     color: var(--ui-text);
     background-color: var(--ui-surface-raised);
-    border: 2px solid var(--brand-green);
-    border-radius: 1em;
+    background-color: color-mix(in srgb, var(--ui-surface-raised) 82%, transparent);
+    border: 1.5px solid var(--brand-green);
+    border-radius: 0.85em;
+    box-shadow: 0 10px 28px rgba(8, 20, 32, 0.18);
+    backdrop-filter: blur(8px) saturate(1.1);
+    -webkit-backdrop-filter: blur(8px) saturate(1.1);
     pointer-events: none;
     text-align: center;
     white-space: normal;
@@ -333,6 +340,7 @@
   {% if service_key != "simulation" %}
   <button class="workspace-control workspace-service btn btn-md btn-outline-secondary"
       data-service="{{ service_key }}: {{ service.port }}"
+      {% if popout %}hidden{% endif %}
       aria-pressed="false"
       title="{% if not popout %}切换到 {{ service.name }}{% elif service.port %}在新标签页打开 {{ service.name }}{% else %}显示 {{ service.name }} 连接信息{% endif %}">
     <i class="fas {{ service_icons.get(service_key, 'fa-network-wired') }}"></i>
@@ -345,8 +353,11 @@
   <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="paste" title="将本机剪贴板文本粘贴到远程桌面" hidden>
     <i class="fas fa-paste"></i><span>粘贴</span>
   </button>
-  <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="copy" title="将远程桌面的最新剪贴板文本复制到本机" hidden>
+  <button type="button" class="workspace-control workspace-clipboard btn btn-md btn-outline-secondary" data-clipboard-action="copy" title="将客户机剪贴板里的文本复制到本机" hidden>
     <i class="fas fa-copy"></i><span>复制</span>
+  </button>
+  <button type="button" class="workspace-control workspace-clipboard workspace-flag-copy btn btn-md btn-outline-secondary" data-clipboard-action="flag" title="把本题已验证的 Flag 复制到本机剪贴板" hidden>
+    <i class="fas fa-flag"></i><span>复制 Flag</span>
   </button>
   <div title="提交 Flag" class="workspace-control workspace-input">
     <i class="fas fa-flag workspace-highlight input-icon"></i>
@@ -363,22 +374,20 @@
   </div>
   <div class="workspace-control-spacer"></div>
   <button
-      title="重新创建题目容器；保留 /home/hacker，运行中的进程和其他容器修改会丢失"
+      title="重新创建题目运行环境；客户机里的文件与改动会保留，只重启环境"
       class="workspace-control workspace-lifecycle challenge-restart btn btn-md btn-outline-secondary btn-challenge-start btn-challenge-busy">
     <i class="fas fa-redo"></i>
     <span>重启</span>
   </button>
   <button
-      title="停止并删除当前题目容器；保留 /home/hacker，之后可点击“重启”再次创建"
+      title="停止当前题目运行环境；客户机里的文件与改动会保留，之后可点「重启」继续"
       class="workspace-control workspace-lifecycle workspace-stop challenge-stop btn btn-md btn-outline-warning btn-challenge-busy">
     <i class="fas fa-stop"></i>
     <span>停止</span>
   </button>
-  <button
-      title="清除 Home 文件并恢复题目初始状态"
+  <button title="恢复当前题目的起始状态，保留其他题目文件和历史成绩"
       class="workspace-control workspace-reset challenge-reset btn btn-md btn-outline-danger btn-challenge-busy">
-    <i class="fas fa-eraser"></i>
-    <span class="workspace-service-name">重置</span>
+    <i class="fas fa-eraser"></i><span class="workspace-service-name">重置</span>
   </button>
   {% if challenge.allow_privileged %}
   <label

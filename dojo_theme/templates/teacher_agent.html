@@ -9,11 +9,12 @@
 {% block stylesheets %}
 <link
   rel="stylesheet"
-  href="{{ url_for('views.themes', path='css/teaching-agent.css', v='aisecedu-agent-workbench-v40') }}"
+  href="{{ url_for('views.themes', path='css/teaching-agent.css', v='cocreation-20261002-v2') }}"
 />
+{% if not is_student_agent %}<link rel="stylesheet" href="{{ url_for('views.themes', path='css/teaching-agent-workbench.css', v='dark-theme-20261003-v1') }}" />{% endif %}
 {% endblock %} {% block content %}
 {% if is_student_agent %}<h1 class="sr-only">AI 学习助手</h1>{% endif %}
-<div id="teacher-agent" class="teaching-shell" data-role="{{ agent_role }}" aria-busy="true">
+<div id="teacher-agent" class="teaching-shell" data-role="{{ agent_role }}" data-owner-id="{{ agent_owner_id | default('') }}" aria-busy="true">
   <select id="teaching-dojo" hidden aria-hidden="true" tabindex="-1"></select>
   <select id="teaching-module" hidden aria-hidden="true" tabindex="-1"></select>
   <select id="teaching-artifact-type" hidden aria-hidden="true" tabindex="-1">
@@ -22,6 +23,7 @@
     <option value="slide-deck">课件</option>
     <option value="attack-defense-scene">攻防演示</option>
     <option value="simulation">模拟实训</option>
+    <option value="debate">AI 辩论</option>
     <option value="question-set">CTF 实践题</option>
     <option value="assessment">评分方案</option>
   </select>
@@ -46,6 +48,8 @@
     hidden
   ></button>
   <aside id="teaching-sidebar" class="teaching-sidebar" aria-label="对话管理">
+    {% if not is_student_agent %}<div class="teaching-workspace-caption"><span>工作空间</span><strong>AI 共创</strong></div>{% endif %}
+    {% if not is_student_agent %}<a class="teaching-new-button" href="/teacher/projects"><i class="fas fa-folder-open"></i>生成项目合集</a>{% endif %}
     <div class="teaching-sidebar-header">
       <div class="teaching-sidebar-brand-row">
         <a
@@ -114,6 +118,7 @@
       </div>
       <div>
         <a href="/teacher/courses"><i class="fas fa-layer-group" aria-hidden="true"></i><span>课程中心</span></a>
+        <a href="/teacher/projects"><i class="fas fa-folder-open" aria-hidden="true"></i><span>生成项目合集</span></a>
         <button id="teaching-dashboard-conversations" type="button"><i class="far fa-comments" aria-hidden="true"></i><span>AI 共创记录</span></button>
       </div>
     </header>
@@ -136,6 +141,7 @@
         <button type="button" data-dashboard-prompt="为当前章节设计彼此独立、可核验的 CTF 实践题"><i class="fas fa-flag"></i><span>为当前章节出题</span></button>
         <button type="button" data-dashboard-prompt="设计一段适合课堂使用的交互演示"><i class="fas fa-project-diagram"></i><span>设计课堂演示</span></button>
         <button type="button" data-dashboard-prompt="找出当前课程最需要关注的学生并给出证据与行动建议"><i class="fas fa-user-check"></i><span>找出需关注学生</span></button>
+        <button type="button" data-dashboard-prompt="生成一个学生能亲自与 AI 分轮辩论的学习活动，包含预设情境、辩题、证据与学习复盘"><i class="fas fa-comments"></i><span>生成 AI 辩论</span></button>
         <button id="teaching-dashboard-more-actions" class="teaching-dashboard-more-actions" type="button" aria-expanded="false"><i class="fas fa-ellipsis-h" aria-hidden="true"></i><span>更多</span></button>
       </div>
     </section>
@@ -180,10 +186,18 @@
           ><i class="fas fa-magic"></i
         ></span>
         <div class="teaching-brand-copy">
+          {% if not is_student_agent %}<span class="teaching-workbench-breadcrumb">AI 共创 <i class="fas fa-chevron-right" aria-hidden="true"></i> 当前对话</span>{% endif %}
           <strong id="teaching-thread-title">{{ agent_label }}</strong>
         </div>
       </div>
       <div class="teaching-header-actions">
+        {% if not is_student_agent %}<span id="teaching-run-status" class="teaching-run-status" data-state="idle" role="status"><i class="fas fa-circle" aria-hidden="true"></i><span>准备就绪</span></span>{% endif %}
+        {% if not is_student_agent %}
+        <div class="teaching-view-switch" role="group" aria-label="对话显示方式">
+          <button type="button" data-teaching-view="chat" aria-pressed="true" title="对话视图"><i class="far fa-comment-alt" aria-hidden="true"></i><span>对话</span></button>
+          <button type="button" data-teaching-view="trajectory" aria-pressed="false" title="执行轨迹"><i class="fas fa-stream" aria-hidden="true"></i><span>轨迹</span></button>
+        </div>
+        {% endif %}
         <button
           id="teaching-drawer-open"
           type="button"
@@ -207,6 +221,9 @@
       aria-busy="false"
       tabindex="-1"
     ></div>
+    {% if not is_student_agent %}
+    <div id="teaching-trajectory" class="teaching-trajectory" role="region" aria-label="本对话执行轨迹" tabindex="-1" hidden></div>
+    {% endif %}
     <button
       id="teaching-jump-latest"
       class="teaching-jump-latest"
@@ -270,6 +287,12 @@
         >
           <i class="fas fa-project-diagram"></i><span>生成实训演示</span>
         </button>
+        <button type="button" data-quick-action="debate"
+          data-command="生成一个学生可以亲自与 AI 分轮辩论的学习活动"
+          data-detail-placeholder="例如：在校园 AI 工具使用听证会中，辩论是否允许用 AI 完成作业，包含证据资料、四轮交锋和学习复盘"
+          data-artifact="debate">
+          <i class="fas fa-comments"></i><span>生成 AI 辩论</span>
+        </button>
         <button
           type="button"
           data-quick-action="learning-analysis"
@@ -296,8 +319,23 @@
         aria-atomic="true"
         hidden
       ></section>
+      {% if not is_student_agent %}
+      <section id="teaching-source-menu" class="teaching-source-menu" aria-label="本轮引用的资料" hidden></section>
+      {% endif %}
       {% if is_student_agent %}
       <div id="student-reference-summary" class="student-reference-summary" aria-label="本对话引用题目" hidden></div>
+      {% else %}
+      <section id="teaching-skill-menu" class="teaching-skill-menu" aria-label="可用技能" hidden>
+        <div class="teaching-skill-menu-header">
+          <div><strong>技能</strong><small>选择后加入本轮要求；发送时加载完整指令</small></div>
+          <button id="teaching-skill-menu-close" type="button" aria-label="关闭技能列表"><i class="fas fa-times" aria-hidden="true"></i></button>
+        </div>
+        <label class="teaching-skill-search" for="teaching-skill-search">
+          <i class="fas fa-search" aria-hidden="true"></i>
+          <input id="teaching-skill-search" type="search" autocomplete="off" placeholder="搜索技能名称或用途" aria-label="搜索技能" />
+        </label>
+        <div id="teaching-skill-list" class="teaching-skill-list" role="listbox" aria-label="技能选择" aria-live="polite"></div>
+      </section>
       {% endif %}
       <div class="teaching-composer-row">
         <textarea
@@ -316,8 +354,18 @@
         >
           <i class="fas fa-arrow-up"></i>
         </button>
+        {% if not is_student_agent %}
+        <button id="teaching-stop" type="button" class="teaching-icon-button teaching-stop-button" aria-label="停止当前任务" title="停止当前任务" hidden><i class="fas fa-stop" aria-hidden="true"></i></button>
+        {% endif %}
       </div>
+      {% if not is_student_agent %}<section id="teaching-pending-turns" class="teaching-pending-turns" aria-label="排队中的要求" aria-live="polite" hidden></section>{% endif %}
       <div class="teaching-composer-tools">
+        {% if not is_student_agent %}<label class="teaching-inquiry-mode" for="teaching-learning-pattern" style="display:inline-flex;align-items:center;gap:8px;font-size:13px;margin:0">学习模式 <select id="teaching-learning-pattern" style="max-width:220px;border:1px solid var(--theme-border);border-radius:7px;background:var(--theme-surface);color:var(--theme-text);padding:6px 8px"><option value="">通用创作</option><option value="process-inquiry">流程探究式学习 · AES-128</option></select></label>{% endif %}
+        {% if not is_student_agent %}
+        <label id="teaching-delivery-control" class="teaching-delivery-control" hidden>
+          <span>运行中发送</span><select id="teaching-input-delivery" aria-label="运行中要求的处理时机"><option value="after-current">下一轮排队</option><option value="next-step">下一步补充</option></select>
+        </label>
+        {% endif %}
         {% if is_student_agent %}
         <button
           id="student-reference-trigger"
@@ -339,11 +387,18 @@
           <i class="fas fa-paperclip" aria-hidden="true"></i
           ><span>上传文件</span>
         </button>
+        <button id="teaching-source-trigger" class="teaching-upload-label" type="button" aria-expanded="false" aria-controls="teaching-source-menu" hidden>
+          <i class="fas fa-book-open" aria-hidden="true"></i><span>引用资料</span>
+        </button>
+        <button id="teaching-skills-trigger" class="teaching-upload-label teaching-skills-trigger" type="button" aria-expanded="false" aria-controls="teaching-skill-menu" title="从技能目录选择，或在输入框输入 /技能名">
+          <i class="fas fa-magic" aria-hidden="true"></i><span>技能</span>
+        </button>
         <input
           id="teaching-upload"
           type="file"
-          accept=".pdf,.ppt,.pptx,.doc,.docx,.txt,.md,.jpeg,.jpg,.png,.webp"
-          aria-label="选择要交给智能体处理的文件"
+          multiple
+          accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.txt,.md,.markdown,.jpeg,.jpg,.png,.webp,.gif,.bmp"
+          aria-label="选择要随消息发送的文件，可多选"
           hidden
         />
         {% endif %}
@@ -354,6 +409,13 @@
       </div>
     </div>
   </section>
+
+  {% if not is_student_agent %}
+  <aside id="teaching-artifact-review" class="teaching-artifact-review" aria-label="成品审阅" hidden>
+    <header><div><span>成品审阅</span><strong id="teaching-artifact-review-title">教学内容</strong></div><a id="teaching-artifact-review-full" target="_blank" rel="noopener" aria-label="在新页面打开成品">完整工作区 <i class="fas fa-external-link-alt" aria-hidden="true"></i></a><button id="teaching-artifact-review-close" type="button" class="teaching-icon-button" aria-label="关闭成品审阅"><i class="fas fa-times" aria-hidden="true"></i></button></header>
+    <iframe id="teaching-artifact-review-frame" title="成品预览、局部修改与版本审阅" allow="fullscreen" referrerpolicy="same-origin"></iframe>
+  </aside>
+  {% endif %}
 
   {% if is_student_agent %}
   <dialog
@@ -499,6 +561,29 @@
       </footer>
     </form>
   </dialog>
+  <dialog id="teaching-question-dialog" class="teaching-question-dialog" aria-labelledby="teaching-question-dialog-title">
+    <form id="teaching-question-form" novalidate>
+      <header>
+        <div>
+          <span><i class="fas fa-comment-dots" aria-hidden="true"></i> AI 共创 · 需要你的信息</span>
+          <h2 id="teaching-question-dialog-title">确认一个关键细节</h2>
+        </div>
+        <button id="teaching-question-later" type="button" aria-label="稍后回答"><i class="fas fa-times" aria-hidden="true"></i></button>
+      </header>
+      <div class="teaching-question-dialog-body">
+        <p class="teaching-question-intro">智能体已暂停当前任务，回答后会接着完成原来的要求。</p>
+        <div id="teaching-question-content"></div>
+        <p id="teaching-question-error" role="alert" hidden></p>
+      </div>
+      <footer>
+        <span id="teaching-question-progress" aria-live="polite"></span>
+        <div>
+          <button id="teaching-question-back" type="button">上一题</button>
+          <button id="teaching-question-submit" type="submit" class="is-primary">继续</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
   {% endif %}
 
   <div
@@ -511,6 +596,7 @@
     <button type="button" role="menuitem" data-thread-action="rename">
       <i class="fas fa-pen"></i><span>重命名</span>
     </button>
+    <button type="button" role="menuitem" data-thread-action="fork"><i class="fas fa-code-branch" aria-hidden="true"></i><span>从已完成回复创建分支</span></button>
     <button type="button" role="menuitem" data-thread-action="pin">
       <i class="fas fa-thumbtack"></i><span id="teaching-pin-label">置顶</span>
     </button>
@@ -611,12 +697,12 @@
   aria-hidden="true"
   hidden
 >
-  <button class="ae-dialog-backdrop" type="button" data-dialog-close aria-label="关闭课件分析"></button>
+  <button class="ae-dialog-backdrop" type="button" data-dialog-close aria-label="关闭资料详情"></button>
   <div class="modal-dialog modal-xl ae-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="material-modal-title" tabindex="-1">
     <div class="modal-content">
       <div class="modal-header">
         <div>
-          <span class="teaching-eyebrow">课件分析</span>
+          <span class="teaching-eyebrow">资料详情</span>
           <h2 id="material-modal-title" class="modal-title">
             功能点、知识图谱与章节候选
           </h2>
@@ -658,7 +744,7 @@
             type="button"
             class="btn btn-outline-secondary mt-3 ml-2"
           >
-            重新分析课件
+            更新原文与摘要
           </button>
         </section>
         <details class="mt-4">
@@ -718,12 +804,21 @@
 </div>
 {% endif %}
 {% endblock %} {% block footer %}{% endblock %} {% block scripts %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/core/teaching-command.js', v='cocreation-20261002-v2') }}"></script>
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/teaching-job-progress.css', v='cocreation-20261002-v2') }}">
+<script defer src="{{ url_for('views.themes', path='js/dojo/core/teaching-job-progress.js', v='cocreation-20261002-v2') }}"></script>
 <script
   defer
-  src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-upload-v3') }}"
+  src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='cocreation-20261002-v2') }}"
 ></script>
+{% if not is_student_agent %}
+<script defer src="{{ url_for('views.themes', path='js/dojo/core/agent-activity-store.js', v='cocreation-20261002-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/core/agent-activity-view.js', v='cocreation-20261002-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/core/agent-transcript.js', v='cocreation-20261002-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/core/agent-stream-text.js', v='cocreation-20261002-v2') }}"></script>
+{% endif %}
 <script
   defer
-  src="{{ url_for('views.themes', path=('js/dojo/learning-guide.js' if is_student_agent else 'js/dojo/teaching-agent.js'), v=('aisecedu-student-agent-unified-v5' if is_student_agent else 'aisecedu-global-agent-v79')) }}"
+  src="{{ url_for('views.themes', path=('js/dojo/learning-guide.js' if is_student_agent else 'js/dojo/teaching-agent.js'), v=('aisecedu-student-agent-unified-v6-deadline' if is_student_agent else 'inquiry-cocreation-20261019-4')) }}"
 ></script>
 {% endblock %}

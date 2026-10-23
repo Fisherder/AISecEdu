@@ -30,6 +30,12 @@ RUN apt-get update \
         libssl3 \
         git \
         openssh-client \
+        catdoc \
+        libreoffice-impress \
+        fonts-noto-cjk \
+        poppler-utils \
+        tesseract-ocr \
+        tesseract-ocr-chi-sim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

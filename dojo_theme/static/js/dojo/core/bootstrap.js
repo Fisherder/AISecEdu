@@ -9,8 +9,11 @@
     const link = event.target.closest("[data-product-mode-link]");
     if (!link) return;
     const mode = link.dataset.productModeLink;
-    localStorage.setItem("aisecedu-product-mode", mode);
-    document.cookie = `aisecedu-mode=${encodeURIComponent(mode)}; Path=/; SameSite=Lax`;
+    const viewer = root.product?.viewer?.id;
+    if (!viewer) return;
+    const choice = `${viewer}:${mode}`;
+    localStorage.setItem("aisecedu-product-mode", choice);
+    document.cookie = `aisecedu-mode=${encodeURIComponent(choice)}; Path=/; SameSite=Lax`;
   });
 
   root.refreshProductContext = async function refreshProductContext(options) {

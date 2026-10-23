@@ -21,6 +21,8 @@ import {
   runClassroomLoad,
 } from '@/lib/classroom/load-classroom';
 import { ClassroomLearningTracker } from '@/components/classroom-learning-tracker';
+import { AgentRunTimeline } from '@/components/agent-run/agent-run-timeline';
+import { useAgentRunStore } from '@/lib/agent-run/store';
 
 const log = createLogger('Classroom');
 
@@ -47,6 +49,7 @@ export default function ClassroomDetailPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const generationRun = useAgentRunStore((state) => state.runs.generation);
 
   const generationStartedRef = useRef(false);
 
@@ -228,6 +231,13 @@ export default function ClassroomDetailPage() {
           ) : (
             <Stage onRetryOutline={retrySingleOutline} allowEditMode={false} />
           )}
+          {generationRun?.runId ? (
+            <AgentRunTimeline
+              run={generationRun}
+              compact
+              className="fixed bottom-4 right-4 z-50 w-[min(420px,calc(100vw-2rem))] shadow-2xl"
+            />
+          ) : null}
         </div>
       </MediaStageProvider>
     </ThemeProvider>

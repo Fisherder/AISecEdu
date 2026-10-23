@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="container py-4" style="max-width:1000px">
+  <div class="d-flex align-items-center justify-content-between flex-wrap mb-4" style="gap:.75rem">
+    <div><p class="text-muted mb-1">{{ instruction_title }}</p><strong>{{ instruction_name }}</strong></div>
+    <a class="btn btn-outline-primary" href="/workspace?service=code">返回 VS Code</a>
+  </div>
+  <article class="assignment-reader">{{ instruction_html|safe }}</article>
+</section>
+{% endblock %}
+{% block stylesheets %}{{ super() }}
+<style>
+.assignment-reader{line-height:1.8;overflow-wrap:anywhere;color:var(--ui-text,#233044)}
+.assignment-reader h1{font-size:1.9rem;line-height:1.4;margin:1rem 0}
+.assignment-reader h2{font-size:1.35rem;margin:2rem 0 .8rem}
+.assignment-reader h3{font-size:1.1rem;margin:1.5rem 0 .6rem}
+.assignment-reader pre{background:var(--ui-bg,#f3f6fb);border:1px solid var(--ui-border-soft,#dae2ed);border-radius:10px;padding:1rem;overflow-x:auto;line-height:1.6}
+.assignment-reader table{display:block;overflow-x:auto;border-collapse:collapse;margin:1rem 0;width:100%}
+.assignment-reader th,.assignment-reader td{padding:.65rem .85rem;border:1px solid var(--ui-border-soft,#dae2ed);vertical-align:top}
+.assignment-reader th{background:var(--ui-bg,#f3f6fb);font-weight:600}
+.assignment-reader code{font-size:.94em}.assignment-reader a{color:var(--brand-blue,#245fac)}
+</style>{% endblock %}

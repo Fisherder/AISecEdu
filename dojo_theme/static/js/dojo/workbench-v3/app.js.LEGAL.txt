@@ -1,0 +1,128 @@
+Bundled license information:
+
+react/cjs/react.production.js:
+  /**
+   * @license React
+   * react.production.js
+   *
+   * Copyright (c) Meta Platforms, Inc. and affiliates.
+   *
+   * This source code is licensed under the MIT license found in the
+   * LICENSE file in the root directory of this source tree.
+   */
+
+scheduler/cjs/scheduler.production.js:
+  /**
+   * @license React
+   * scheduler.production.js
+   *
+   * Copyright (c) Meta Platforms, Inc. and affiliates.
+   *
+   * This source code is licensed under the MIT license found in the
+   * LICENSE file in the root directory of this source tree.
+   */
+
+react-dom/cjs/react-dom.production.js:
+  /**
+   * @license React
+   * react-dom.production.js
+   *
+   * Copyright (c) Meta Platforms, Inc. and affiliates.
+   *
+   * This source code is licensed under the MIT license found in the
+   * LICENSE file in the root directory of this source tree.
+   */
+
+react-dom/cjs/react-dom-client.production.js:
+  /**
+   * @license React
+   * react-dom-client.production.js
+   *
+   * Copyright (c) Meta Platforms, Inc. and affiliates.
+   *
+   * This source code is licensed under the MIT license found in the
+   * LICENSE file in the root directory of this source tree.
+   */
+
+react/cjs/react-jsx-runtime.production.js:
+  /**
+   * @license React
+   * react-jsx-runtime.production.js
+   *
+   * Copyright (c) Meta Platforms, Inc. and affiliates.
+   *
+   * This source code is licensed under the MIT license found in the
+   * LICENSE file in the root directory of this source tree.
+   */
+
+lucide-react/dist/esm/shared/src/utils.js:
+lucide-react/dist/esm/defaultAttributes.js:
+lucide-react/dist/esm/Icon.js:
+lucide-react/dist/esm/createLucideIcon.js:
+lucide-react/dist/esm/icons/activity.js:
+lucide-react/dist/esm/icons/archive.js:
+lucide-react/dist/esm/icons/arrow-down.js:
+lucide-react/dist/esm/icons/arrow-up-right.js:
+lucide-react/dist/esm/icons/arrow-up.js:
+lucide-react/dist/esm/icons/book-open.js:
+lucide-react/dist/esm/icons/brain-circuit.js:
+lucide-react/dist/esm/icons/check.js:
+lucide-react/dist/esm/icons/chevron-down.js:
+lucide-react/dist/esm/icons/chevron-right.js:
+lucide-react/dist/esm/icons/circle-alert.js:
+lucide-react/dist/esm/icons/circle.js:
+lucide-react/dist/esm/icons/clock-3.js:
+lucide-react/dist/esm/icons/code-xml.js:
+lucide-react/dist/esm/icons/copy.js:
+lucide-react/dist/esm/icons/corner-down-left.js:
+lucide-react/dist/esm/icons/download.js:
+lucide-react/dist/esm/icons/ellipsis.js:
+lucide-react/dist/esm/icons/external-link.js:
+lucide-react/dist/esm/icons/eye.js:
+lucide-react/dist/esm/icons/file-code-corner.js:
+lucide-react/dist/esm/icons/file-text.js:
+lucide-react/dist/esm/icons/folder-open.js:
+lucide-react/dist/esm/icons/funnel.js:
+lucide-react/dist/esm/icons/git-branch.js:
+lucide-react/dist/esm/icons/graduation-cap.js:
+lucide-react/dist/esm/icons/history.js:
+lucide-react/dist/esm/icons/layers.js:
+lucide-react/dist/esm/icons/list-todo.js:
+lucide-react/dist/esm/icons/loader-circle.js:
+lucide-react/dist/esm/icons/maximize-2.js:
+lucide-react/dist/esm/icons/message-square.js:
+lucide-react/dist/esm/icons/minimize-2.js:
+lucide-react/dist/esm/icons/monitor.js:
+lucide-react/dist/esm/icons/moon.js:
+lucide-react/dist/esm/icons/mouse-pointer-2.js:
+lucide-react/dist/esm/icons/panel-left-close.js:
+lucide-react/dist/esm/icons/panel-left.js:
+lucide-react/dist/esm/icons/panel-right.js:
+lucide-react/dist/esm/icons/paperclip.js:
+lucide-react/dist/esm/icons/pencil.js:
+lucide-react/dist/esm/icons/pin.js:
+lucide-react/dist/esm/icons/play.js:
+lucide-react/dist/esm/icons/plus.js:
+lucide-react/dist/esm/icons/refresh-cw.js:
+lucide-react/dist/esm/icons/rotate-ccw.js:
+lucide-react/dist/esm/icons/search.js:
+lucide-react/dist/esm/icons/settings-2.js:
+lucide-react/dist/esm/icons/shield-check.js:
+lucide-react/dist/esm/icons/sliders-horizontal.js:
+lucide-react/dist/esm/icons/sparkles.js:
+lucide-react/dist/esm/icons/square-pen.js:
+lucide-react/dist/esm/icons/square.js:
+lucide-react/dist/esm/icons/sun.js:
+lucide-react/dist/esm/icons/terminal.js:
+lucide-react/dist/esm/icons/wand-sparkles.js:
+lucide-react/dist/esm/icons/wifi-off.js:
+lucide-react/dist/esm/icons/workflow.js:
+lucide-react/dist/esm/icons/wrench.js:
+lucide-react/dist/esm/icons/x.js:
+lucide-react/dist/esm/lucide-react.js:
+  /**
+   * @license lucide-react v0.562.0 - ISC
+   *
+   * This source code is licensed under the ISC license.
+   * See the LICENSE file in the root directory of this source tree.
+   */

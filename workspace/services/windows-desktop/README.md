@@ -1,10 +1,19 @@
 # Windows course runtime
 
-The shared runtime profile selects the image, memory allowance, native working
-directory, service interpreters and desktop behavior. Linux remains the default.
-Teachers can say `用 Windows 远程桌面出一道 C 程序运行题` or `改用 Linux 环境`;
-the three generation choices and later draft revisions preserve that selection.
-The manual authoring form also exposes a Linux/Windows selector.
+The shared runtime profile selects the guest operating system image, memory
+allowance, native working directory, service interpreters and desktop behavior.
+Linux remains the default. Guest systems are registered in
+`dojo_plugin/runtime_profiles.py`: `windows` is the Windows 11 LTSC desktop and
+`windows2000` is a lightweight legacy desktop with `cmd` and OllyDbg but no
+PowerShell or VS Code. Teachers can say `用 Windows 远程桌面出一道 C 程序运行题`,
+`用 Windows 2000 出一道 OllyDbg 逆向题` or `改用 Linux 环境`; the three generation
+choices and later draft revisions preserve that selection. The manual authoring
+form renders every registered guest system instead of a fixed Linux/Windows pair.
+
+A profile with an empty `command_bridge` has no host-to-guest command channel, so
+the platform does not start Windows services for it and challenges are completed
+through the desktop. `windows2000` is such a profile until a native guest agent
+is installed in its seed.
 
 Authoring requests use `constraints.runtimeEnvironment: windows`; imported
 course YAML uses `runtime_environment: windows` at course, module or challenge

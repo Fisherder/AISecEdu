@@ -6,7 +6,9 @@
 {% block entrypoint %}{% endblock %}
 
 {% block stylesheets %}
-<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='aisecedu-course-hub-v34-material-preview') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='frontend-restored-20261001-1') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/learning-insights.css', v='atlas-20261023-5') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/bulk-management.css', v='frontend-restored-20261001-1') }}">
 {% endblock %}
 
 {% block content %}
@@ -48,6 +50,7 @@
       </div>
     </div>
     <div class="course-hub-actions">
+      <a id="cs-library-open" class="hub-button is-secondary" href="/teacher/library"><i class="fas fa-book" aria-hidden="true"></i><span>素材库</span></a>
       <a id="cs-switch-course" class="hub-button is-secondary" href="/teacher/courses"><i class="fas fa-exchange-alt" aria-hidden="true"></i><span>切换课程</span></a>
       <a id="cs-open-course" class="hub-button is-secondary" href="/dojos"><i class="fas fa-eye"></i><span>学员视图</span></a>
     </div>
@@ -153,11 +156,12 @@
             <select id="cs-artifact-sort" aria-label="课件排序"><option value="updated_desc">最近更新</option><option value="updated_asc">最早更新</option><option value="title_asc">名称排序</option></select>
             <footer class="hub-filter-mobile-actions"><button class="hub-button is-secondary" type="button" data-filter-reset="courseware">重置</button><button class="hub-button is-primary" type="button" data-filter-close>查看结果</button></footer>
           </div>
-          <div id="cs-courseware-management-bar" class="cs-question-management-bar cs-courseware-management-bar" hidden>
+          <div id="cs-courseware-management-bar" class="cs-question-management-bar cs-courseware-management-bar bulk-management-bar" hidden>
             <span><i class="fas fa-layer-group" aria-hidden="true"></i><span><strong>管理未发布课件</strong><small>勾选当前页课件后可批量删除；生成或检查中的课件需等待任务结束。</small></span></span>
             <div class="cs-question-management-controls">
               <span id="cs-courseware-selection-status" class="cs-question-selection-status" role="status" aria-live="polite">已选 0 份未发布课件</span>
-              <button id="cs-courseware-select-all" class="hub-button is-secondary" type="button" data-courseware-batch-action="select-all">全选可删除</button>
+              <button id="cs-courseware-select-all" class="hub-button is-secondary" type="button" data-courseware-batch-action="select-all">全选当前列表</button>
+              <button id="cs-courseware-clear-selection" class="hub-button is-secondary" type="button" data-courseware-batch-action="clear" disabled>清空选择</button>
               <button id="cs-courseware-batch-delete" class="hub-button is-danger" type="button" data-courseware-batch-action="delete" disabled><i class="fas fa-trash-alt" aria-hidden="true"></i>批量删除</button>
               <em id="cs-courseware-management-status" role="status" aria-live="polite">等待选择</em>
             </div>
@@ -173,25 +177,6 @@
         <div><span class="hub-kicker">课程题目</span><h2>CTF 题目</h2><p>按章节创建和组织题目，为学员提供隔离运行环境、确定性 Flag 判题与可核验过程证据。</p></div>
         <div class="hub-inline-actions"><button id="cs-question-create" class="hub-button is-primary" type="button" data-create-kind="question" aria-haspopup="dialog" aria-controls="cs-create-dialog"><i class="fas fa-plus" aria-hidden="true"></i>新建题目</button><button id="cs-question-manage-toggle" class="hub-button is-secondary cs-question-manage-toggle" type="button" data-question-management-toggle aria-pressed="false"><i class="fas fa-sliders-h" aria-hidden="true"></i><span>管理题目</span></button></div>
       </header>
-
-      {# aisededu-manual-practice-entry-v2 #}
-      {% if request.args.get('dojo') %}
-      <section class="hub-surface hub-practice-entry" id="cs-practice-create-entry" aria-labelledby="cs-practice-create-title">
-        <header class="hub-section-heading">
-          <div>
-            <span class="hub-kicker">实践题</span>
-            <h2 id="cs-practice-create-title">创建一组独立题目</h2>
-            <p>Agent 出题流水线</p>
-          </div>
-          <div class="hub-inline-actions">
-            <a class="hub-button is-primary" id="cs-practice-create-link" href="{{ url_for('pwncollege_learning.teacher_practice_create', dojo=request.args.get('dojo')) }}">
-              <i class="fas fa-plus" aria-hidden="true"></i><span>创建实践题</span>
-            </a>
-          </div>
-        </header>
-      </section>
-      {% endif %}
-
 
       <section id="cs-question-batch-review" class="hub-surface cs-question-batch-review" aria-labelledby="cs-question-batch-title" hidden>
         <header>
@@ -221,11 +206,12 @@
           <select id="cs-question-sort" aria-label="题目排序"><option value="course_order">课程顺序</option><option value="updated_desc">最近更新</option><option value="updated_asc">最早更新</option><option value="title_asc">名称排序</option></select>
           <footer class="hub-filter-mobile-actions"><button class="hub-button is-secondary" type="button" data-filter-reset="questions">重置</button><button class="hub-button is-primary" type="button" data-filter-close>查看结果</button></footer>
         </div>
-        <div id="cs-question-management-bar" class="cs-question-management-bar" hidden>
+        <div id="cs-question-management-bar" class="cs-question-management-bar bulk-management-bar" hidden>
           <span><i class="fas fa-grip-vertical" aria-hidden="true"></i><span><strong>管理模式</strong><small>拖动题目前的手柄调整顺序，也可以直接拖入其他章节；放下后自动保存。</small></span></span>
           <div class="cs-question-management-controls">
             <span id="cs-question-selection-status" class="cs-question-selection-status" role="status" aria-live="polite">已选 0 道未发布题目</span>
-            <button id="cs-question-select-all" class="hub-button is-secondary" type="button" data-question-batch-action="select-all">全选草稿</button>
+            <button id="cs-question-select-all" class="hub-button is-secondary" type="button" data-question-batch-action="select-all">全选当前列表</button>
+            <button id="cs-question-clear-selection" class="hub-button is-secondary" type="button" data-question-batch-action="clear" disabled>清空选择</button>
             <button id="cs-question-batch-revise" class="hub-button is-secondary" type="button" data-question-batch-action="revise" disabled><i class="fas fa-magic" aria-hidden="true"></i>批量修订</button>
             <button id="cs-question-batch-publish" class="hub-button is-primary" type="button" data-question-batch-action="publish" disabled><i class="fas fa-paper-plane" aria-hidden="true"></i>批量发布</button>
             <em id="cs-question-management-status" role="status" aria-live="polite">等待调整</em>
@@ -233,6 +219,10 @@
         </div>
         <div id="cs-challenge-list" class="hub-challenge-groups"></div>
         <nav id="cs-question-pagination" class="hub-pagination" aria-label="课程题目分页"></nav>
+      </section>
+      <section class="hub-surface hub-lab-section" aria-labelledby="cs-assignment-heading">
+        <header class="hub-section-heading"><div><span class="hub-kicker">知识检查与课程任务</span><h2 id="cs-assignment-heading">测验与作业</h2><p>从素材库选入后先检查草稿，再发布给本课程学生。</p></div><a id="cs-assignment-library" href="/teacher/library">从素材库选用</a></header>
+        <div id="cs-assignment-list" class="hub-library-list" aria-live="polite"></div>
       </section>
     </section>
 
@@ -265,82 +255,8 @@
       </section>
     </section>
 
-    <section class="hub-panel cs-learning-panel" data-cs-panel="students" role="tabpanel" hidden>
-      <header class="hub-panel-header cs-learning-header">
-        <div>
-          <span class="hub-kicker">证据驱动学情</span>
-          <h2>学习诊断与教学干预</h2>
-          <p>从判题结果下钻到能力掌握、学习过程、具体误区与停滞原因；没有证据时明确标为“未观测”，不把浏览量或低活跃度误当成低能力。</p>
-        </div>
-        <div class="cs-learning-refresh">
-          <small id="cs-progress-freshness">正在汇总最新证据…</small>
-          <button id="cs-refresh-progress" class="hub-button is-secondary" type="button"><i class="fas fa-sync-alt" aria-hidden="true"></i><span>刷新证据</span></button>
-        </div>
-      </header>
-
-      <section class="hub-surface cs-learning-scope" aria-labelledby="cs-learning-scope-title">
-        <header>
-          <div><span class="hub-kicker">统一分析范围</span><h3 id="cs-learning-scope-title">筛选学生、章节、题目与时间</h3><p>所有指标、名单、干预队列和图表使用同一服务端口径；筛选状态会写入网址，便于分享与复查。</p></div>
-          <strong id="cs-learning-scope-summary" role="status" aria-live="polite">全班 · 全部章节 · 全部题目 · 过去 12 周</strong>
-        </header>
-        <div class="cs-learning-filter-grid">
-          <label><span>学生</span><select id="cs-learning-student" aria-label="选择学情分析学生"><option value="">全班学生</option></select></label>
-          <label><span>章节</span><select id="cs-learning-module" aria-label="选择学情分析章节"><option value="">全部章节</option></select></label>
-          <label><span>题目</span><select id="cs-learning-question" aria-label="选择学情分析题目"><option value="">全部题目</option></select></label>
-          <label><span>时间</span><select id="cs-learning-range" aria-label="选择学情分析时间范围"><option value="7d">过去 7 天</option><option value="30d">过去 30 天</option><option value="90d">过去 90 天</option><option value="12w" selected>过去 12 周</option><option value="lifetime">课程全部时间</option></select></label>
-          <button id="cs-reset-learning-scope" class="hub-button is-secondary" type="button"><i class="fas fa-undo-alt" aria-hidden="true"></i><span>重置范围</span></button>
-          <button id="cs-export-learning" class="hub-button is-secondary" type="button"><i class="fas fa-download" aria-hidden="true"></i><span>导出当前范围</span></button>
-        </div>
-      </section>
-
-      <section class="hub-surface cs-analytics-card cs-learning-action-card" aria-labelledby="cs-intervention-title">
-        <header><div><span class="hub-kicker">先行动，再看图表</span><h3 id="cs-intervention-title">教学干预队列</h3><p>每条建议都列出触发依据、建议动作和对应学生；选择队列后可直接下钻并记录干预基线。</p></div></header>
-        <div id="cs-intervention-effect-summary" class="cs-intervention-effect-summary" aria-label="教学干预跟踪摘要"></div>
-        <div id="cs-intervention-list" class="cs-intervention-list"></div>
-      </section>
-
-      <div class="cs-learning-kpis" aria-label="班级学情关键指标">
-        <article class="is-evidence"><span><i class="fas fa-shield-alt" aria-hidden="true"></i></span><div><small>证据覆盖</small><strong id="cs-insight-coverage">0%</strong><em id="cs-insight-coverage-note">0 / 0 名学生达到基础证据量</em></div></article>
-        <article class="is-mastery"><span><i class="fas fa-brain" aria-hidden="true"></i></span><div><small>平均掌握度</small><strong id="cs-insight-mastery">—</strong><em id="cs-insight-mastery-note">仅统计已有能力评估的学生</em></div></article>
-        <article class="is-risk"><span><i class="fas fa-exclamation-triangle" aria-hidden="true"></i></span><div><small>优先干预</small><strong id="cs-insight-risk">0</strong><em id="cs-insight-risk-note">基于多项可回溯风险信号</em></div></article>
-        <article class="is-stalled"><span><i class="fas fa-pause-circle" aria-hidden="true"></i></span><div><small>学习停滞</small><strong id="cs-insight-stalled">0</strong><em id="cs-insight-stalled-note">仍有未完成尝试且近期无进展</em></div></article>
-      </div>
-
-      <section class="hub-surface hub-table-surface cs-learning-roster" aria-labelledby="cs-student-roster-title">
-        <header class="cs-roster-heading">
-          <div><span class="hub-kicker">学生下钻</span><h3 id="cs-student-roster-title">学生诊断名单</h3><p>按干预优先级排序，打开学生可查看能力、过程、题目卡点、目标与证据时间线。</p></div>
-          <strong id="cs-student-result-count">0 名学生</strong>
-        </header>
-        <div class="hub-table-tools cs-student-tools">
-          <label><i class="fas fa-search" aria-hidden="true"></i><input id="cs-student-search" type="search" placeholder="搜索学生" aria-label="搜索学生"></label>
-          <select id="cs-student-risk-filter" aria-label="按关注状态筛选"><option value="all">全部关注状态</option><option value="high">优先干预</option><option value="medium">持续关注</option><option value="low">进展稳定</option><option value="unknown">证据不足</option></select>
-          <select id="cs-student-evidence-filter" aria-label="按证据充分度筛选"><option value="all">全部证据水平</option><option value="充分">证据充分</option><option value="基础">基础证据</option><option value="不足">证据不足</option></select>
-          <button id="cs-clear-cohort-filter" class="cs-cohort-filter" type="button" hidden><i class="fas fa-times" aria-hidden="true"></i><span>清除干预队列筛选</span></button>
-          <span id="cs-progress-source">只使用可核验判题、尝试、过程证据、评估与已发布任务</span>
-        </div>
-        <div class="hub-table-scroll"><table class="hub-table cs-learning-table"><thead><tr><th>学生与状态</th><th>能力掌握</th><th>真实完成</th><th>主要薄弱点</th><th>学习过程</th><th>证据充分度</th><th>最后活动</th><th><span class="sr-only">操作</span></th></tr></thead><tbody id="cs-student-table"></tbody></table></div>
-      </section>
-
-      <div class="cs-learning-analysis-grid">
-        <section class="hub-surface cs-analytics-card cs-learning-timeline-card" aria-labelledby="cs-timeline-title">
-          <header><div><span id="cs-timeline-range" class="hub-kicker">过去 12 周</span><h3 id="cs-timeline-title">学习活动与成果轨迹</h3><p id="cs-timeline-subtitle">按周展示活跃学生、尝试、通过与形成性评估，零活动周也如实保留。</p></div><span class="cs-chart-legend"><i class="is-activity"></i>过程证据<i class="is-solve"></i>通过题目</span></header>
-          <div id="cs-learning-timeline" class="cs-learning-timeline" role="img" aria-label="所选时间范围的学习活动趋势"></div>
-        </section>
-        <section class="hub-surface cs-analytics-card" aria-labelledby="cs-ability-title">
-          <header><div><span class="hub-kicker">六维能力模型</span><h3 id="cs-ability-title">能力掌握与证据人数</h3><p>同一量尺展示掌握度、证据人数与低掌握人数；未形成评估的学生不按零分计算。</p></div></header>
-          <div id="cs-ability-overview" class="cs-ability-overview"></div>
-        </section>
-      </div>
-
-      <section class="hub-surface cs-analytics-card cs-learning-bottleneck-card" aria-labelledby="cs-bottleneck-title">
-        <header><div><span class="hub-kicker">题目诊断</span><h3 id="cs-bottleneck-title">课程瓶颈与过程缺口</h3><p>成功率以“已尝试学生”为分母，同时显示参与人数、反复试错与主要过程缺口；小样本会明确标为证据不足。</p></div></header>
-        <div id="cs-bottleneck-list" class="cs-bottleneck-list"></div>
-      </section>
-
-      <details class="hub-surface cs-learning-methodology">
-        <summary><span><i class="fas fa-database" aria-hidden="true"></i><strong>数据口径与可信边界</strong><small id="cs-data-quality-summary">查看指标定义、数据来源与限制</small></span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
-        <div id="cs-data-quality" class="cs-data-quality"></div>
-      </details>
+    <section class="hub-panel xj-insights" id="learning-insights" data-cs-panel="students" role="tabpanel" aria-label="课程学情分析" hidden>
+      <div class="ix-loading" role="status"><span></span><strong>正在准备学情分析</strong><p>读取已保存的作业与核验记录。</p></div>
     </section>
   </div>
 
@@ -414,13 +330,6 @@
     </aside>
   </div>
 
-  <div id="cs-student-insight-drawer" class="hub-drawer cs-learning-drawer" aria-hidden="true" hidden>
-    <button class="hub-modal-backdrop" type="button" data-student-drawer-close aria-label="关闭学生学情详情"></button>
-    <aside role="dialog" aria-modal="true" aria-labelledby="cs-student-drawer-title" aria-describedby="cs-student-drawer-subtitle" tabindex="-1">
-      <header><div><span class="hub-kicker">学生学习画像</span><h2 id="cs-student-drawer-title">学生详情</h2><p id="cs-student-drawer-subtitle">正在读取学习证据…</p></div><button type="button" data-student-drawer-close aria-label="关闭"><i class="fas fa-times" aria-hidden="true"></i></button></header>
-      <div id="cs-student-drawer-body" class="hub-drawer-body cs-student-drawer-body"></div>
-    </aside>
-  </div>
   </section>
 </div>
 
@@ -429,6 +338,10 @@
 {% block footer %}{% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-upload-v2') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/teacher-courses.js', v='aisecedu-course-hub-v36') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='frontend-restored-20261001-1') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/vendor/echarts-6.1.0/echarts.min.js', v='frontend-restored-20261001-1') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/learning-atlas.js', v='atlas-20261023-5') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/learning-insights.js', v='atlas-20261023-5') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/bulk-selection.js', v='frontend-restored-20261001-1') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/teacher-courses.js', inquiry='20261022-draft-standard', v='atlas-20261023-5') }}"></script>
 {% endblock %}

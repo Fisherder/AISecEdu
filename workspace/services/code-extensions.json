@@ -1,0 +1,110 @@
+[
+  {
+    "publisher": "charliermarsh",
+    "name": "ruff",
+    "version": "2026.86.0",
+    "platform": "linux-x64",
+    "url": "https://open-vsx.org/api/charliermarsh/ruff/linux-x64/2026.86.0/file/charliermarsh.ruff-2026.86.0@linux-x64.vsix",
+    "hash": "sha256-5zLiGFUh+1Ja2ry8dI12aHwsgNzIp0zc2qqJb7q0LHc=",
+    "engine": "^1.91.0"
+  },
+  {
+    "publisher": "DavidAnson",
+    "name": "vscode-markdownlint",
+    "version": "0.60.0",
+    "platform": "universal",
+    "url": "https://open-vsx.org/api/DavidAnson/vscode-markdownlint/0.60.0/file/DavidAnson.vscode-markdownlint-0.60.0.vsix",
+    "hash": "sha256-/j9v1GDpKw/q8FcczPTQ874SL7BG+dbjLRDSYoyyekQ=",
+    "engine": "^1.75.0"
+  },
+  {
+    "publisher": "dbaeumer",
+    "name": "vscode-eslint",
+    "version": "3.0.34",
+    "platform": "universal",
+    "url": "https://open-vsx.org/api/dbaeumer/vscode-eslint/3.0.34/file/dbaeumer.vscode-eslint-3.0.34.vsix",
+    "hash": "sha256-ylM01G9qOQeedR70YBv8n4a8OkZIPocpHsYJI50WEwg=",
+    "engine": "^1.90.0"
+  },
+  {
+    "publisher": "detachhead",
+    "name": "basedpyright",
+    "version": "1.29.0",
+    "platform": "universal",
+    "url": "https://open-vsx.org/api/detachhead/basedpyright/1.29.0/file/detachhead.basedpyright-1.29.0.vsix",
+    "hash": "sha256-0fllKnEKKEpT+tI2KoachJONl3Shjljsg6+T6oFcW08=",
+    "engine": "^1.91.0"
+  },
+  {
+    "publisher": "EditorConfig",
+    "name": "EditorConfig",
+    "version": "0.17.2",
+    "platform": "universal",
+    "url": "https://open-vsx.org/api/EditorConfig/EditorConfig/0.17.2/file/EditorConfig.EditorConfig-0.17.2.vsix",
+    "hash": "sha256-Xi2+mN6zjIKm0HWxfRAFs2vYkZ10Gv6poR2b2d8XCug=",
+    "engine": "^1.90.0"
+  },
+  {
+    "publisher": "esbenp",
+    "name": "prettier-vscode",
+    "version": "11.0.3",
+    "platform": "universal",
+    "url": "https://open-vsx.org/api/esbenp/prettier-vscode/11.0.3/file/esbenp.prettier-vscode-11.0.3.vsix",
+    "hash": "sha256-HwyXnYuQkAPZBzM4Y/wuxMpU1Ogt5DhYoL867qLjjVk=",
+    "engine": "^1.80.0"
+  },
+  {
+    "publisher": "llvm-vs-code-extensions",
+    "name": "vscode-clangd",
+    "version": "0.6.0",
+    "platform": "universal",
+    "url": "https://open-vsx.org/api/llvm-vs-code-extensions/vscode-clangd/0.6.0/file/llvm-vs-code-extensions.vscode-clangd-0.6.0.vsix",
+    "hash": "sha256-MgMGlPpsDvQ49OQhn4RnfNMvYDx/qkxxooPvwfW1F1E=",
+    "engine": "^1.75.0"
+  },
+  {
+    "publisher": "ms-python",
+    "name": "debugpy",
+    "version": "2024.8.0",
+    "platform": "linux-x64",
+    "url": "https://open-vsx.org/api/ms-python/debugpy/linux-x64/2024.8.0/file/ms-python.debugpy-2024.8.0@linux-x64.vsix",
+    "hash": "sha256-1H8+ihFHWu+kVEPTbu87Cr0yYSA0tJxX1xmRki38uMs=",
+    "engine": "^1.87.0"
+  },
+  {
+    "publisher": "ms-python",
+    "name": "python",
+    "version": "2024.14.1",
+    "platform": "universal",
+    "url": "https://open-vsx.org/api/ms-python/python/2024.14.1/file/ms-python.python-2024.14.1.vsix",
+    "hash": "sha256-5fLzr9WHvzAvtMSBseai+2BOoIs86dgqssElHgpRBgw=",
+    "engine": "^1.91.0"
+  },
+  {
+    "publisher": "redhat",
+    "name": "vscode-yaml",
+    "version": "1.25.0",
+    "platform": "universal",
+    "url": "https://open-vsx.org/api/redhat/vscode-yaml/1.25.0/file/redhat.vscode-yaml-1.25.0.vsix",
+    "hash": "sha256-KoM0gNl1TYOvtk33WMUHNSAddZtTzbKb57eoEU3KKuQ=",
+    "engine": "^1.90.0"
+  },
+  {
+    "publisher": "vadimcn",
+    "name": "vscode-lldb",
+    "version": "1.11.4",
+    "platform": "linux-x64",
+    "url": "https://github.com/vadimcn/codelldb/releases/download/v1.11.4/codelldb-linux-x64.vsix",
+    "hash": "sha256-mPeWXz205nlvWmCwDW2/JwcG9M8vMnsWd2/bYHnnoy8=",
+    "engine": "^1.61.0"
+  },
+  {
+    "publisher": "shd101wyy",
+    "name": "markdown-preview-enhanced",
+    "version": "0.8.40",
+    "platform": "universal",
+    "url": "https://open-vsx.org/api/shd101wyy/markdown-preview-enhanced/0.8.40/file/shd101wyy.markdown-preview-enhanced-0.8.40.vsix",
+    "hash": "sha256-HXlzzRVLm5C1Nh9+LWEa2cfakxdWtTARiMoIQFD0NAk=",
+    "engine": "^1.82.0"
+  }
+]

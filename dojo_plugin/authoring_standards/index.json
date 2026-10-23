@@ -1,0 +1,274 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    {
+      "version": "1.0.0",
+      "id": "global.core",
+      "level": "global",
+      "document": "global/core.md",
+      "requirements": {
+        "preserveStudentWork": true,
+        "recordStandardsVersion": true,
+        "separateTeacherAnswers": true
+      },
+      "locked": [
+        "preserveStudentWork",
+        "recordStandardsVersion",
+        "separateTeacherAnswers"
+      ],
+      "defaults": {
+        "publishMode": "draft"
+      }
+    },
+    {
+      "version": "1.0.0",
+      "id": "type.quiz",
+      "level": "type",
+      "questionType": "quiz",
+      "document": "types/quiz.md",
+      "requirements": {
+        "preserveQuestionCount": true
+      },
+      "locked": [
+        "preserveQuestionCount"
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "id": "type.practice",
+      "level": "type",
+      "questionType": "practice",
+      "document": "types/practice.md",
+      "requirements": {
+        "explicitCompletionCondition": true,
+        "structuredWorkspace": true
+      },
+      "locked": [
+        "explicitCompletionCondition",
+        "structuredWorkspace"
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "id": "type.coding",
+      "level": "type",
+      "questionType": "coding",
+      "document": "types/coding.md",
+      "requirements": {
+        "numberedWorkspace": true,
+        "sourceAtWorkspaceRoot": true,
+        "publicCommand": "make check",
+        "formalCommand": "make submit",
+        "reportRequired": false,
+        "submission": "code"
+      },
+      "locked": [
+        "numberedWorkspace",
+        "sourceAtWorkspaceRoot",
+        "publicCommand",
+        "formalCommand",
+        "reportRequired",
+        "submission"
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "id": "type.simulation",
+      "level": "type",
+      "questionType": "simulation",
+      "document": "types/simulation.md",
+      "requirements": {
+        "resettable": true
+      },
+      "locked": [
+        "resettable"
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "id": "course.software-security",
+      "level": "course",
+      "courseId": "3839952",
+      "document": "courses/software-security/course.md"
+    },
+    {
+      "version": "1.2.0",
+      "id": "course.software-security.coding",
+      "level": "course-type",
+      "courseId": "3839952",
+      "questionType": "coding",
+      "document": "courses/software-security/coding.md",
+      "requirements": {
+        "courseDirectory": "software-security"
+      },
+      "locked": [
+        "courseDirectory"
+      ],
+      "defaults": {
+        "language": "C"
+      }
+    },
+    {
+      "id": "assignment.ollydbg-auth",
+      "version": "1.0.0",
+      "level": "assignment",
+      "courseId": "3839952",
+      "questionType": "practice",
+      "assignmentId": "ollydbg-auth",
+      "document": "assignments/ollydbg-auth.md",
+      "defaults": {
+        "courseDirectory": "software-security",
+        "assignmentDirectory": "lab01-auth-analysis",
+        "runtimeEnvironment": "windows2000"
+      }
+    },
+    {
+      "id": "assignment.lab03-shellcode",
+      "version": "1.0.0",
+      "level": "assignment",
+      "courseId": "3839952",
+      "questionType": "practice",
+      "assignmentId": "lab03-shellcode",
+      "document": "assignments/windows-lab-layout.md",
+      "requirements": {
+        "numberedWindowsWorkspace": true,
+        "materialsWorkSplit": true,
+        "graderOutsideWorkspace": true,
+        "rootManifest": true
+      },
+      "locked": [
+        "numberedWindowsWorkspace",
+        "materialsWorkSplit",
+        "graderOutsideWorkspace",
+        "rootManifest"
+      ],
+      "defaults": {
+        "courseDirectory": "software-security",
+        "workspaceRoot": "C:\\Courses\\software-security",
+        "runtimeEnvironment": "windows2000",
+        "assignmentDirectory": "lab03-shellcode"
+      }
+    },
+    {
+      "id": "assignment.lab04-fuzzing",
+      "version": "1.0.0",
+      "level": "assignment",
+      "courseId": "3839952",
+      "questionType": "practice",
+      "assignmentId": "lab04-fuzzing",
+      "document": "assignments/windows-lab-layout.md",
+      "requirements": {
+        "numberedWindowsWorkspace": true,
+        "materialsWorkSplit": true,
+        "graderOutsideWorkspace": true,
+        "rootManifest": true
+      },
+      "locked": [
+        "numberedWindowsWorkspace",
+        "materialsWorkSplit",
+        "graderOutsideWorkspace",
+        "rootManifest"
+      ],
+      "defaults": {
+        "courseDirectory": "software-security",
+        "workspaceRoot": "C:\\Courses\\software-security",
+        "runtimeEnvironment": "windows2000",
+        "assignmentDirectory": "lab04-fuzzing"
+      }
+    },
+    {
+      "id": "assignment.lab05-seh-virtual",
+      "version": "1.0.0",
+      "level": "assignment",
+      "courseId": "3839952",
+      "questionType": "practice",
+      "assignmentId": "lab05-seh-virtual",
+      "document": "assignments/windows-lab-layout.md",
+      "requirements": {
+        "numberedWindowsWorkspace": true,
+        "materialsWorkSplit": true,
+        "graderOutsideWorkspace": true,
+        "rootManifest": true
+      },
+      "locked": [
+        "numberedWindowsWorkspace",
+        "materialsWorkSplit",
+        "graderOutsideWorkspace",
+        "rootManifest"
+      ],
+      "defaults": {
+        "courseDirectory": "software-security",
+        "workspaceRoot": "C:\\Courses\\software-security",
+        "runtimeEnvironment": "windows2000",
+        "assignmentDirectory": "lab05-seh-virtual"
+      }
+    },
+    {
+      "id": "assignment.lab06-format-string",
+      "version": "1.0.0",
+      "level": "assignment",
+      "courseId": "3839952",
+      "questionType": "practice",
+      "assignmentId": "lab06-format-string",
+      "document": "assignments/windows-lab-layout.md",
+      "requirements": {
+        "numberedWindowsWorkspace": true,
+        "materialsWorkSplit": true,
+        "graderOutsideWorkspace": true,
+        "rootManifest": true
+      },
+      "locked": [
+        "numberedWindowsWorkspace",
+        "materialsWorkSplit",
+        "graderOutsideWorkspace",
+        "rootManifest"
+      ],
+      "defaults": {
+        "courseDirectory": "software-security",
+        "workspaceRoot": "C:\\Courses\\software-security",
+        "runtimeEnvironment": "windows2000",
+        "assignmentDirectory": "lab06-format-string"
+      }
+    },
+    {
+      "id": "assignment.lab07-webgoat",
+      "version": "1.0.0",
+      "level": "assignment",
+      "courseId": "3839952",
+      "questionType": "practice",
+      "assignmentId": "lab07-webgoat",
+      "document": "assignments/windows-lab-layout.md",
+      "requirements": {
+        "numberedWindowsWorkspace": true,
+        "materialsWorkSplit": true,
+        "graderOutsideWorkspace": true,
+        "rootManifest": true
+      },
+      "locked": [
+        "numberedWindowsWorkspace",
+        "materialsWorkSplit",
+        "graderOutsideWorkspace",
+        "rootManifest"
+      ],
+      "defaults": {
+        "courseDirectory": "software-security",
+        "workspaceRoot": "C:\\Courses\\software-security",
+        "runtimeEnvironment": "windows2000",
+        "assignmentDirectory": "lab07-webgoat"
+      }
+    },
+    {
+      "version": "3.3.0",
+      "id": "assignment.safe-copy",
+      "level": "assignment",
+      "courseId": "3839952",
+      "questionType": "coding",
+      "assignmentId": "safe-copy",
+      "document": "assignments/safe-copy.md",
+      "defaults": {
+        "assignmentDirectory": "hw01-safe-copy",
+        "mainSource": "strcpy_s.c"
+      }
+    }
+  ]
+}

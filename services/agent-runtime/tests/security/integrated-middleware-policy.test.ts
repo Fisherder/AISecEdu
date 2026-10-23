@@ -12,6 +12,8 @@ describe('玄甲 integrated browser API policy', () => {
     ['/api/lessons/artifact_123', 'GET'],
     ['/api/classroom', 'GET'],
     ['/api/chat', 'POST'],
+    ['/api/debates/artifact_123', 'GET'],
+    ['/api/debates/artifact_123', 'POST'],
     ['/api/chat/pi', 'POST'],
     ['/api/pbl/v2/instructor', 'POST'],
     ['/api/quiz-grade', 'POST'],
@@ -30,6 +32,7 @@ describe('玄甲 integrated browser API policy', () => {
     ['/api/storage/upload', 'POST'],
     ['/api/provider/probe-models', 'POST'],
     ['/api/usage', 'GET'],
+    ['/api/debates/artifact_123', 'DELETE'],
   ])('blocks gateway bypass %s %s', (path, method) => {
     expect(integratedSessionApiAllowed(path, method)).toBe(false);
   });
@@ -37,6 +40,7 @@ describe('玄甲 integrated browser API policy', () => {
   test.each([
     '/api/chat',
     '/api/chat/pi',
+    '/api/debates/artifact_123',
     '/api/pbl/chat',
     '/api/pbl/v2/instructor',
     '/api/quiz-grade',

@@ -87,6 +87,7 @@ const ZERO_USAGE: NormalizedUsage = {
 // session dependency in the unified global Agent.
 const JOB_REPORTED_USAGE_SOURCES = new Set([
   'aisecedu-agent-plan',
+  'simulation-option-review',
   'aisecedu-integration-job',
   'aisecedu-agent-deliverable-closure',
   'aisecedu-material-segment-analysis',

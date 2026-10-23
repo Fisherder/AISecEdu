@@ -1,0 +1,1613 @@
+{
+  "id": "gold-buffer-verified-r77",
+  "source": "r77_full_20260924/gold_buffer, browser PASSED, quality 100",
+  "scene": {
+    "schemaVersion": "process-v1",
+    "title": "栈缓冲区逐字节观察",
+    "summary": "在一个 16 字节的栈内存里，输入或选择 ASCII 载荷，先装载栈帧，再逐字节复制。内存按偏移 0–7 的缓冲区、8–11 的保存 EBP、12–15 的返回地址连续排列。你可以单步、连续执行、暂停、撤销和重置，观察当前写入格怎样脉冲高亮，以及写到返回地址后 EIP 的十六进制值和程序状态怎样变化。",
+    "modelNote": "本模型把栈内存简化成 16 个字节：偏移 0–7 是缓冲区，8–11 保存 EBP，12–15 保存返回地址。复制从偏移 0 开始按字节向高地址写，不模拟真实 CPU 的对齐、保护页和操作系统异常处理。EIP 按返回地址四个字节的小端值显示为十六进制。",
+    "inputs": [
+      {
+        "id": "payload",
+        "label": "ASCII 载荷",
+        "type": "text",
+        "default": "AAAABBBB",
+        "maxLength": 16,
+        "ascii": true,
+        "presets": [
+          {
+            "label": "4 字符",
+            "value": "AAAA"
+          },
+          {
+            "label": "8 字符：正好填满缓冲区",
+            "value": "AAAABBBB"
+          },
+          {
+            "label": "12 字符：写满缓冲区和保存的EBP",
+            "value": "AAAABBBBCCCC"
+          },
+          {
+            "label": "16 字符：改写返回地址四个字节",
+            "value": "AAAABBBBCCCCDDDD"
+          },
+          {
+            "label": "16 字符：返回地址改成 Y",
+            "value": "AAAABBBBCCCCYYYY"
+          }
+        ]
+      }
+    ],
+    "initialState": {
+      "frameLoaded": false,
+      "sourceBytes": [],
+      "copyTotal": 0,
+      "copyIndex": 0,
+      "memory": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "writtenMask": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "originalEbp": [
+        32,
+        255,
+        24,
+        0
+      ],
+      "originalReturn": [
+        0,
+        16,
+        64,
+        0
+      ],
+      "crashed": false
+    },
+    "views": [
+      {
+        "id": "stackMemory",
+        "title": "连续栈内存（十六进制与字符）",
+        "kind": "array",
+        "value": {
+          "state": "memory"
+        },
+        "format": "byte",
+        "activeIndex": {
+          "op": "sub",
+          "args": [
+            {
+              "state": "copyIndex"
+            },
+            1
+          ]
+        },
+        "markedIndices": {
+          "op": "indicesOf",
+          "args": [
+            {
+              "state": "writtenMask"
+            },
+            1
+          ]
+        },
+        "regions": [
+          {
+            "start": 0,
+            "end": 7,
+            "label": "缓冲区 0–7"
+          },
+          {
+            "start": 8,
+            "end": 11,
+            "label": "保存的 EBP 8–11"
+          },
+          {
+            "start": 12,
+            "end": 15,
+            "label": "返回地址 12–15"
+          }
+        ]
+      },
+      {
+        "id": "sourceBytesView",
+        "title": "ASCII 载荷字节",
+        "kind": "array",
+        "value": {
+          "state": "sourceBytes"
+        },
+        "format": "byte",
+        "activeIndex": {
+          "op": "if",
+          "args": [
+            {
+              "op": "lt",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "sourceBytes"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "state": "copyIndex"
+            },
+            -1
+          ]
+        }
+      },
+      {
+        "id": "eipValue",
+        "title": "EIP（返回地址内容，十六进制）",
+        "kind": "value",
+        "value": {
+          "op": "if",
+          "args": [
+            {
+              "state": "crashed"
+            },
+            {
+              "op": "hex",
+              "args": [
+                {
+                  "op": "readLE",
+                  "args": [
+                    {
+                      "state": "memory"
+                    },
+                    12,
+                    4
+                  ]
+                },
+                8
+              ]
+            },
+            {
+              "op": "hex",
+              "args": [
+                {
+                  "op": "readLE",
+                  "args": [
+                    {
+                      "state": "originalReturn"
+                    },
+                    0,
+                    4
+                  ]
+                },
+                8
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "crashStatus",
+        "title": "程序状态",
+        "kind": "value",
+        "value": {
+          "op": "if",
+          "args": [
+            {
+              "state": "crashed"
+            },
+            "崩溃：返回地址已被改写",
+            "正常：返回地址未被改写"
+          ]
+        }
+      },
+      {
+        "id": "progressValue",
+        "title": "已写入字节数",
+        "kind": "value",
+        "value": {
+          "state": "copyIndex"
+        }
+      }
+    ],
+    "actions": [
+      {
+        "id": "loadFrame",
+        "label": "装载栈帧",
+        "description": "根据当前 ASCII 载荷建立连续栈内存：偏移 0–7 为缓冲区，偏移 8–11 为保存的 EBP，偏移 12–15 为返回地址。装载后可从偏移 0 开始逐字节复制载荷。",
+        "enabledWhen": true,
+        "locals": [
+          {
+            "id": "src",
+            "value": {
+              "op": "utf8",
+              "args": [
+                {
+                  "input": "payload"
+                }
+              ]
+            }
+          },
+          {
+            "id": "len",
+            "value": {
+              "op": "length",
+              "args": [
+                {
+                  "local": "src"
+                }
+              ]
+            }
+          }
+        ],
+        "feedback": {
+          "op": "concat",
+          "args": [
+            "栈帧已装载：偏移 0–7 是缓冲区，8–11 保存 EBP，12–15 保存返回地址。载荷共 ",
+            {
+              "local": "len"
+            },
+            " 个字节。按“复制一个字节”逐字节写入，或连续执行直到写满载荷。"
+          ]
+        },
+        "updates": [
+          {
+            "target": "sourceBytes",
+            "value": {
+              "local": "src"
+            }
+          },
+          {
+            "target": "memory",
+            "value": {
+              "op": "array",
+              "args": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                {
+                  "op": "at",
+                  "args": [
+                    {
+                      "state": "originalEbp"
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "at",
+                  "args": [
+                    {
+                      "state": "originalEbp"
+                    },
+                    1
+                  ]
+                },
+                {
+                  "op": "at",
+                  "args": [
+                    {
+                      "state": "originalEbp"
+                    },
+                    2
+                  ]
+                },
+                {
+                  "op": "at",
+                  "args": [
+                    {
+                      "state": "originalEbp"
+                    },
+                    3
+                  ]
+                },
+                {
+                  "op": "at",
+                  "args": [
+                    {
+                      "state": "originalReturn"
+                    },
+                    0
+                  ]
+                },
+                {
+                  "op": "at",
+                  "args": [
+                    {
+                      "state": "originalReturn"
+                    },
+                    1
+                  ]
+                },
+                {
+                  "op": "at",
+                  "args": [
+                    {
+                      "state": "originalReturn"
+                    },
+                    2
+                  ]
+                },
+                {
+                  "op": "at",
+                  "args": [
+                    {
+                      "state": "originalReturn"
+                    },
+                    3
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "target": "writtenMask",
+            "value": {
+              "op": "array",
+              "args": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          },
+          {
+            "target": "copyTotal",
+            "value": {
+              "local": "len"
+            }
+          },
+          {
+            "target": "copyIndex",
+            "value": 0
+          },
+          {
+            "target": "frameLoaded",
+            "value": true
+          },
+          {
+            "target": "crashed",
+            "value": false
+          }
+        ]
+      },
+      {
+        "id": "copyByte",
+        "label": "复制一个字节",
+        "description": "把载荷中下一个字节写入栈内存当前偏移。若写入位置落在偏移 12–15，返回地址会被改写，程序进入崩溃状态。",
+        "enabledWhen": {
+          "op": "and",
+          "args": [
+            {
+              "state": "frameLoaded"
+            },
+            {
+              "op": "lt",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "sourceBytes"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "op": "lt",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                16
+              ]
+            }
+          ]
+        },
+        "repeatWhile": {
+          "op": "and",
+          "args": [
+            {
+              "state": "frameLoaded"
+            },
+            {
+              "op": "lt",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "sourceBytes"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "op": "lt",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                16
+              ]
+            }
+          ]
+        },
+        "locals": [
+          {
+            "id": "idx",
+            "value": {
+              "state": "copyIndex"
+            }
+          },
+          {
+            "id": "byte",
+            "value": {
+              "op": "at",
+              "args": [
+                {
+                  "state": "sourceBytes"
+                },
+                {
+                  "local": "idx"
+                }
+              ]
+            }
+          },
+          {
+            "id": "willOverwriteReturn",
+            "value": {
+              "op": "gte",
+              "args": [
+                {
+                  "local": "idx"
+                },
+                12
+              ]
+            }
+          },
+          {
+            "id": "newCrashed",
+            "value": {
+              "op": "or",
+              "args": [
+                {
+                  "state": "crashed"
+                },
+                {
+                  "local": "willOverwriteReturn"
+                }
+              ]
+            }
+          }
+        ],
+        "feedback": {
+          "op": "concat",
+          "args": [
+            "已把偏移 ",
+            {
+              "local": "idx"
+            },
+            " 的字节写成 ",
+            {
+              "op": "hex",
+              "args": [
+                {
+                  "local": "byte"
+                }
+              ]
+            },
+            "。",
+            {
+              "op": "if",
+              "args": [
+                {
+                  "state": "crashed"
+                },
+                "返回地址已被改写，程序将跳到这个新地址，状态为崩溃。",
+                "当前还未改到返回地址。"
+              ]
+            },
+            "累计写入 ",
+            {
+              "state": "copyIndex"
+            },
+            " 字节。"
+          ]
+        },
+        "updates": [
+          {
+            "target": "memory",
+            "index": {
+              "local": "idx"
+            },
+            "value": {
+              "local": "byte"
+            }
+          },
+          {
+            "target": "writtenMask",
+            "index": {
+              "local": "idx"
+            },
+            "value": 1
+          },
+          {
+            "target": "copyIndex",
+            "value": {
+              "op": "add",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                1
+              ]
+            }
+          },
+          {
+            "target": "crashed",
+            "value": {
+              "local": "newCrashed"
+            }
+          }
+        ]
+      }
+    ],
+    "stages": [
+      {
+        "id": "idle",
+        "title": "尚未装载栈帧",
+        "when": {
+          "op": "not",
+          "args": [
+            {
+              "state": "frameLoaded"
+            }
+          ]
+        },
+        "explanation": "左边还没有栈内存。先在载荷框里输入或选择一个 ASCII 字符串，然后点“装载栈帧”，把缓冲区、保存的 EBP 和返回地址排成连续字节。"
+      },
+      {
+        "id": "ready",
+        "title": "栈帧已装载，等待写入",
+        "when": {
+          "op": "and",
+          "args": [
+            {
+              "state": "frameLoaded"
+            },
+            {
+              "op": "eq",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                0
+              ]
+            }
+          ]
+        },
+        "explanation": "偏移 0–7 是缓冲区，8–11 保存 EBP，12–15 保存返回地址。载荷字节还没有开始复制。点“复制一个字节”写入第一个字节，或连续执行一次写完全部。"
+      },
+      {
+        "id": "copying",
+        "title": "正在逐字节写入",
+        "when": {
+          "op": "and",
+          "args": [
+            {
+              "state": "frameLoaded"
+            },
+            {
+              "op": "not",
+              "args": [
+                {
+                  "state": "crashed"
+                }
+              ]
+            },
+            {
+              "op": "gt",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                0
+              ]
+            },
+            {
+              "op": "lt",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "sourceBytes"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "explanation": "每点一次“复制一个字节”，当前偏移写入一个载荷字节，然后偏移加一。橙色高亮指向刚写入的格，带底色的格表示已经写过的位置。继续观察写到偏移 8 和 12 时内存内容的变化。"
+      },
+      {
+        "id": "doneSafe",
+        "title": "复制完成，返回地址未被改写",
+        "when": {
+          "op": "and",
+          "args": [
+            {
+              "state": "frameLoaded"
+            },
+            {
+              "op": "not",
+              "args": [
+                {
+                  "state": "crashed"
+                }
+              ]
+            },
+            {
+              "op": "gt",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                0
+              ]
+            },
+            {
+              "op": "gte",
+              "args": [
+                {
+                  "state": "copyIndex"
+                },
+                {
+                  "op": "length",
+                  "args": [
+                    {
+                      "state": "sourceBytes"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "explanation": "载荷已经全部写入，并且没有写到偏移 12–15。返回地址保持原值，EIP 仍指向原来的返回位置，程序不会因为这次复制崩溃。"
+      },
+      {
+        "id": "crashed",
+        "title": "返回地址被覆盖，程序崩溃",
+        "when": {
+          "state": "crashed"
+        },
+        "explanation": "载荷长度超过 12，复制到偏移 12–15 时改写了返回地址。程序返回时会跳到这个被改写的新地址，EIP 显示当前返回地址的十六进制值，状态为崩溃。"
+      }
+    ],
+    "questions": [
+      {
+        "id": "q1",
+        "prompt": "当前已经写入了多少个载荷字节？看“已写入字节数”一栏，填入数字。",
+        "evidenceView": "progressValue"
+      },
+      {
+        "id": "q2",
+        "prompt": "当前 EIP 显示为哪个十六进制值？看“EIP（返回地址内容，十六进制）”一栏。",
+        "evidenceView": "eipValue"
+      }
+    ],
+    "coverage": [
+      {
+        "description": "输入或选择ASCII载荷",
+        "inputs": [
+          "payload"
+        ],
+        "actions": [],
+        "views": [
+          "sourceBytesView"
+        ]
+      },
+      {
+        "description": "装载栈帧，建立缓冲区、保存的EBP与返回地址的连续字节布局",
+        "inputs": [],
+        "actions": [
+          "loadFrame"
+        ],
+        "views": [
+          "stackMemory"
+        ]
+      },
+      {
+        "description": "连续执行逐字节复制，当前写入格脉冲高亮",
+        "inputs": [],
+        "actions": [
+          "copyByte"
+        ],
+        "views": [
+          "stackMemory"
+        ]
+      },
+      {
+        "description": "暂停连续写入",
+        "inputs": [],
+        "actions": [
+          "copyByte"
+        ],
+        "views": [
+          "stackMemory"
+        ]
+      },
+      {
+        "description": "单步执行一个字节写入",
+        "inputs": [],
+        "actions": [
+          "copyByte"
+        ],
+        "views": [
+          "stackMemory"
+        ]
+      },
+      {
+        "description": "撤销一步写入",
+        "inputs": [],
+        "actions": [
+          "copyByte"
+        ],
+        "views": [
+          "stackMemory"
+        ]
+      },
+      {
+        "description": "重置到初始状态",
+        "inputs": [],
+        "actions": [
+          "loadFrame"
+        ],
+        "views": [
+          "stackMemory"
+        ]
+      },
+      {
+        "description": "覆盖返回地址后显示EIP的十六进制值与崩溃状态",
+        "inputs": [],
+        "actions": [
+          "copyByte"
+        ],
+        "views": [
+          "eipValue",
+          "crashStatus"
+        ]
+      },
+      {
+        "description": "根据可见内存回答核对题",
+        "inputs": [],
+        "actions": [],
+        "views": [
+          "progressValue"
+        ]
+      }
+    ]
+  },
+  "tests": [
+    {
+      "name": "装载栈帧后的连续字节布局（ready）",
+      "inputs": {
+        "payload": "AAAABBBB"
+      },
+      "actions": [
+        {
+          "id": "loadFrame",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "frameLoaded"
+          },
+          "equals": true
+        },
+        {
+          "value": {
+            "state": "copyIndex"
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "state": "copyTotal"
+          },
+          "equals": 8
+        },
+        {
+          "value": {
+            "state": "sourceBytes"
+          },
+          "equals": [
+            65,
+            65,
+            65,
+            65,
+            66,
+            66,
+            66,
+            66
+          ]
+        },
+        {
+          "value": {
+            "state": "memory"
+          },
+          "equals": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            32,
+            255,
+            24,
+            0,
+            0,
+            16,
+            64,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "writtenMask"
+          },
+          "equals": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "crashed"
+          },
+          "equals": false
+        }
+      ]
+    },
+    {
+      "name": "单步写入两个字节的中间态（copying）",
+      "inputs": {
+        "payload": "AAAABBBB"
+      },
+      "actions": [
+        {
+          "id": "loadFrame",
+          "count": 1
+        },
+        {
+          "id": "copyByte",
+          "count": 2
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "copyIndex"
+          },
+          "equals": 2
+        },
+        {
+          "value": {
+            "state": "crashed"
+          },
+          "equals": false
+        },
+        {
+          "value": {
+            "state": "memory"
+          },
+          "equals": [
+            65,
+            65,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            32,
+            255,
+            24,
+            0,
+            0,
+            16,
+            64,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "writtenMask"
+          },
+          "equals": [
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "op": "at",
+            "args": [
+              {
+                "state": "memory"
+              },
+              1
+            ]
+          },
+          "equals": 65
+        }
+      ]
+    },
+    {
+      "name": "写满缓冲区与保存 EBP，共 12 字节不崩溃（doneSafe）",
+      "inputs": {
+        "payload": "AAAABBBBCCCC"
+      },
+      "actions": [
+        {
+          "id": "loadFrame",
+          "count": 1
+        },
+        {
+          "id": "copyByte",
+          "count": "untilDone"
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "copyIndex"
+          },
+          "equals": 12
+        },
+        {
+          "value": {
+            "state": "crashed"
+          },
+          "equals": false
+        },
+        {
+          "value": {
+            "state": "memory"
+          },
+          "equals": [
+            65,
+            65,
+            65,
+            65,
+            66,
+            66,
+            66,
+            66,
+            67,
+            67,
+            67,
+            67,
+            0,
+            16,
+            64,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "writtenMask"
+          },
+          "equals": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "op": "readLE",
+            "args": [
+              {
+                "state": "memory"
+              },
+              12,
+              4
+            ]
+          },
+          "equals": 4198400
+        }
+      ]
+    },
+    {
+      "name": "第 13 个字节触到返回地址最低位，EIP 改变并崩溃（crashed）",
+      "inputs": {
+        "payload": "AAAABBBBCCCCDDDD"
+      },
+      "actions": [
+        {
+          "id": "loadFrame",
+          "count": 1
+        },
+        {
+          "id": "copyByte",
+          "count": 13
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "copyIndex"
+          },
+          "equals": 13
+        },
+        {
+          "value": {
+            "state": "crashed"
+          },
+          "equals": true
+        },
+        {
+          "value": {
+            "state": "memory"
+          },
+          "equals": [
+            65,
+            65,
+            65,
+            65,
+            66,
+            66,
+            66,
+            66,
+            67,
+            67,
+            67,
+            67,
+            68,
+            16,
+            64,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "writtenMask"
+          },
+          "equals": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "op": "readLE",
+            "args": [
+              {
+                "state": "memory"
+              },
+              12,
+              4
+            ]
+          },
+          "equals": 4198468
+        }
+      ]
+    },
+    {
+      "name": "16 字节全部写入，返回地址变为 DDDD（crashed 终态）",
+      "inputs": {
+        "payload": "AAAABBBBCCCCDDDD"
+      },
+      "actions": [
+        {
+          "id": "loadFrame",
+          "count": 1
+        },
+        {
+          "id": "copyByte",
+          "count": "untilDone"
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "copyIndex"
+          },
+          "equals": 16
+        },
+        {
+          "value": {
+            "state": "crashed"
+          },
+          "equals": true
+        },
+        {
+          "value": {
+            "state": "memory"
+          },
+          "equals": [
+            65,
+            65,
+            65,
+            65,
+            66,
+            66,
+            66,
+            66,
+            67,
+            67,
+            67,
+            67,
+            68,
+            68,
+            68,
+            68
+          ]
+        },
+        {
+          "value": {
+            "op": "readLE",
+            "args": [
+              {
+                "state": "memory"
+              },
+              12,
+              4
+            ]
+          },
+          "equals": 1145324612
+        },
+        {
+          "value": {
+            "state": "writtenMask"
+          },
+          "equals": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "name": "返回地址四个字节改成 Y，EIP 为 59595959（不同字符输入）",
+      "inputs": {
+        "payload": "AAAABBBBCCCCYYYY"
+      },
+      "actions": [
+        {
+          "id": "loadFrame",
+          "count": 1
+        },
+        {
+          "id": "copyByte",
+          "count": "untilDone"
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "copyIndex"
+          },
+          "equals": 16
+        },
+        {
+          "value": {
+            "state": "crashed"
+          },
+          "equals": true
+        },
+        {
+          "value": {
+            "state": "memory"
+          },
+          "equals": [
+            65,
+            65,
+            65,
+            65,
+            66,
+            66,
+            66,
+            66,
+            67,
+            67,
+            67,
+            67,
+            89,
+            89,
+            89,
+            89
+          ]
+        },
+        {
+          "value": {
+            "op": "readLE",
+            "args": [
+              {
+                "state": "memory"
+              },
+              12,
+              4
+            ]
+          },
+          "equals": 1499027801
+        },
+        {
+          "value": {
+            "state": "frameLoaded"
+          },
+          "equals": true
+        }
+      ]
+    },
+    {
+      "name": "部分写入后重新装载栈帧回到基线（重置语义）",
+      "inputs": {
+        "payload": "AAAABBBBCCCCDDDD"
+      },
+      "actions": [
+        {
+          "id": "loadFrame",
+          "count": 1
+        },
+        {
+          "id": "copyByte",
+          "count": 5
+        },
+        {
+          "id": "loadFrame",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "copyIndex"
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "state": "crashed"
+          },
+          "equals": false
+        },
+        {
+          "value": {
+            "state": "memory"
+          },
+          "equals": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            32,
+            255,
+            24,
+            0,
+            0,
+            16,
+            64,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "writtenMask"
+          },
+          "equals": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "copyTotal"
+          },
+          "equals": 16
+        },
+        {
+          "value": {
+            "op": "readLE",
+            "args": [
+              {
+                "state": "memory"
+              },
+              12,
+              4
+            ]
+          },
+          "equals": 4198400
+        }
+      ]
+    }
+  ],
+  "review": {
+    "languageReview": {
+      "version": "plain-teaching-v1",
+      "checks": [
+        {
+          "unitId": "introduction",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "inputs",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-stackMemory",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-sourceBytesView",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-eipValue",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-crashStatus",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-progressValue",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "action-loadFrame",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "action-copyByte",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-idle",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-ready",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-copying",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-doneSafe",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-crashed",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "questions",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        }
+      ],
+      "issues": []
+    },
+    "faithful": true,
+    "scientificallySound": true,
+    "causalInteraction": true,
+    "issues": []
+  }
+}

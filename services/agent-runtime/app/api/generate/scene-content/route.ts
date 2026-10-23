@@ -27,12 +27,58 @@ import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 import { resolveVocationalActive } from '@/lib/config/feature-flags';
 import { sortDocumentImagesForVision } from '@/lib/document/bundle';
 import { buildDeterministicFallbackForOutline } from '@/lib/server/lesson-generation';
+import { createAgentRunNdjsonResponse } from '@/lib/agent-run/server';
+import { withServerAgentRunTrace } from '@/lib/agent-run/server-context';
 
 const log = createLogger('Scene Content API');
 
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
+  if (req.headers?.get?.('accept')?.includes('application/x-ndjson')) {
+    const bodyText = await req.text();
+    let parsed: { outline?: { title?: string } } = {};
+    try {
+      parsed = JSON.parse(bodyText) as typeof parsed;
+    } catch {
+      // The inner JSON route returns the canonical validation error through the stream.
+    }
+    const headers = new Headers(req.headers);
+    headers.set('accept', 'application/json');
+    const innerRequest = new NextRequest(req.url, {
+      method: 'POST',
+      headers,
+      body: bodyText,
+      signal: req.signal,
+    });
+    return createAgentRunNdjsonResponse({
+      label: `生成场景 · ${parsed.outline?.title ?? '未命名'}`,
+      signal: req.signal,
+      execute: (trace) =>
+        withServerAgentRunTrace(trace, async () => {
+          const toolId = trace.startItem(undefined, 'tool', '生成场景内容', {
+            subtitle: 'scene-content',
+            input: parsed.outline,
+          });
+          const response = await POST(innerRequest);
+          const payload = (await response.json()) as Record<string, unknown>;
+          if (!response.ok || payload.success === false) {
+            const message = String(
+              payload.details ?? payload.error ?? 'Scene content generation failed',
+            );
+            trace.completeItem(undefined, toolId, { status: 'failed', output: message });
+            const error = new Error(message) as Error & { errorCode?: string; statusCode?: number };
+            if (typeof payload.errorCode === 'string') error.errorCode = payload.errorCode;
+            error.statusCode = response.status;
+            throw error;
+          }
+          trace.completeItem(undefined, toolId, {
+            metadata: { generationFallback: payload.generationFallback === true },
+          });
+          return payload;
+        }),
+    });
+  }
   let outlineTitle: string | undefined;
   let resolvedModelString: string | undefined;
   try {
@@ -185,7 +231,9 @@ export async function POST(req: NextRequest) {
 
     if (!content) {
       const fallback = buildDeterministicFallbackForOutline(effectiveOutline);
-      log.warn(`Scene content was unusable for "${effectiveOutline.title}"; returning deterministic fallback`);
+      log.warn(
+        `Scene content was unusable for "${effectiveOutline.title}"; returning deterministic fallback`,
+      );
       return apiSuccess({
         content: fallback.content,
         effectiveOutline: fallback.outline,

@@ -47,3 +47,20 @@ ops/deployment.env
 ops/deployment.env.bak-*
 
 dojo/dojo-init.bak-*
+
+# Local deployment workspaces and backups
+/.cache/
+/.codex-backups/
+/.codex-stage/
+/.deploy-backups/
+/.release-stages/
+/.local-state/
+/.tmp-exp*/
+/core
+/workspace/*-20*/
+/windows2000-*-20*/
+**/.codegraph/
+._*
+*.bak*
+*.orig
+*.before-*

@@ -1,0 +1,141 @@
+.teaching-artifact-page > .product-navbar { display: none; }
+
+.teaching-artifact-page .artifact-detail-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 1035;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  gap: 0;
+  grid-template-rows: 48px minmax(0, 1fr);
+  background: var(--ui-surface);
+}
+
+.teaching-artifact-page .artifact-detail-header {
+  min-height: 0;
+  padding: 4px 10px;
+  gap: 10px;
+  border-bottom: 1px solid var(--ui-border-soft);
+  background: var(--ui-surface);
+}
+
+.teaching-artifact-page .artifact-detail-header h1 {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.teaching-artifact-page .artifact-back {
+  width: 34px;
+  height: 34px;
+  border-color: transparent;
+}
+
+.teaching-artifact-page .artifact-header-button { min-height: 34px; }
+.teaching-artifact-page .artifact-header-button[hidden] { display: none; }
+.teaching-artifact-page .artifact-detail-actions { gap: 6px; }
+
+.teaching-artifact-page .artifact-detail-grid,
+.teaching-artifact-page .artifact-detail-shell[data-inspector-open="true"] .artifact-detail-grid {
+  min-height: 0;
+  min-width: 0;
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr) 0;
+  transition: none;
+}
+
+.teaching-artifact-page .artifact-detail-shell[data-inspector-open="true"] .artifact-detail-grid {
+  grid-template-columns: minmax(0, 1fr) clamp(340px, 28vw, 430px);
+}
+
+.teaching-artifact-page .artifact-preview-panel,
+.teaching-artifact-page .artifact-revision-panel {
+  position: relative;
+  z-index: 2;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  min-height: 0;
+}
+
+.teaching-artifact-page .artifact-preview-panel,
+.teaching-artifact-page .artifact-preview-panel[data-job-blocking="true"] {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.teaching-artifact-page .artifact-preview-panel[data-job-blocking="true"] > .artifact-preview-placeholder {
+  display: grid !important;
+}
+
+.teaching-artifact-page .artifact-preview-panel[data-job-blocking="true"] > .artifact-preview-placeholder[hidden] {
+  display: none !important;
+}
+
+.teaching-artifact-page .artifact-revision-panel {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  border-left: 1px solid var(--ui-border-soft);
+  transform: none;
+  transition: none;
+}
+
+.teaching-artifact-page .artifact-detail-shell[data-inspector-open="true"] .artifact-revision-panel { transform: none; }
+
+.teaching-artifact-page .artifact-inspector-header { padding: 14px 16px 10px; min-height: 0; }
+.teaching-artifact-page .artifact-inspector-header h2 { font-size: 18px; }
+.teaching-artifact-page .artifact-inspector-header .artifact-breadcrumb { flex-wrap: wrap; white-space: normal; margin: 10px 0 6px; }
+.teaching-artifact-page .artifact-workspace-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.teaching-artifact-page .artifact-inspector-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.teaching-artifact-page .artifact-inspector-tabs button { min-width: 0; padding-inline: 4px; }
+.teaching-artifact-page .artifact-inspector-content { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.teaching-artifact-page .artifact-inspector-content .artifact-job-progress { padding: 0; border: 0; max-height: none; overflow: visible; }
+.teaching-artifact-page .artifact-job-columns { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.teaching-artifact-page .artifact-job-summary h2 { font-size: 17px; }
+.teaching-artifact-page .artifact-job-number { font-size: 25px; }
+.teaching-artifact-page .artifact-operation-status { position: static; width: auto; margin: 0 0 14px; max-width: none; transform: none; box-shadow: none; }
+.teaching-artifact-page .artifact-inspector-footer { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--ui-border-soft); background: var(--ui-surface); }
+.teaching-artifact-page .artifact-inspector-footer small,
+.teaching-artifact-page .artifact-inspector-footer > strong { color: var(--ui-text-muted); font-size: 11px; font-weight: 400; }
+.teaching-artifact-page .artifact-inspector-footer .artifact-preview-actions { flex-wrap: wrap; gap: 6px; }
+.teaching-artifact-page .artifact-inspector-footer [hidden] { display: none !important; }
+.teaching-artifact-page #artifact-placeholder-progress { margin-top: 12px; }
+.teaching-artifact-page .artifact-detail-shell:fullscreen { width: 100vw; height: 100dvh; }
+
+@media (max-width: 900px) {
+  .teaching-artifact-page .artifact-detail-shell[data-inspector-open="true"] .artifact-detail-grid { grid-template-columns: minmax(0, 1fr) 0; }
+  .teaching-artifact-page .artifact-revision-panel { position: fixed; inset: 0 0 0 auto; width: min(430px, 100vw); height: 100dvh; max-height: none; z-index: 12; }
+  .teaching-artifact-page .artifact-inspector-backdrop { position: fixed; inset: 0; z-index: 11; }
+}
+
+@media (max-width: 640px) {
+  .teaching-artifact-page .artifact-detail-header { padding: 4px 6px; gap: 6px; }
+  .teaching-artifact-page .artifact-detail-header h1 { font-size: 13px; }
+  .teaching-artifact-page .artifact-header-button { width: 34px; padding: 0; }
+  .teaching-artifact-page .artifact-header-button span { display: none; }
+  .teaching-artifact-page .artifact-progress-toggle { color: var(--brand-blue); }
+  .teaching-artifact-page #artifact-placeholder-progress { width: auto; padding: 0 12px; }
+  .teaching-artifact-page .artifact-preview-placeholder { padding: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .teaching-artifact-page .artifact-detail-grid,
+  .teaching-artifact-page .artifact-revision-panel { transition: none; }
+}
+.artifact-cocreation-embed #main-content { margin: 0; padding: 0; }
+.artifact-cocreation-embed .artifact-detail-shell { min-height: 100dvh; margin: 0; padding: 10px; }
+.artifact-cocreation-embed .artifact-back,
+.artifact-cocreation-embed .artifact-breadcrumb { display: none; }
+.artifact-cocreation-embed .artifact-detail-header { gap: 8px; }
+.artifact-cocreation-embed .artifact-heading-copy h1 { font-size: 15px; }
+.artifact-cocreation-embed .artifact-header-button { font-size: 11px; padding: 6px 8px; }
+.artifact-diff-row { padding: 10px 0; border-bottom: 1px solid var(--ui-border, #e7e9ed); }
+.artifact-diff-row > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; font-size: 12px; }
+.artifact-diff-row > summary code { overflow-wrap: anywhere; white-space: pre-wrap; font-size: 11px; }
+.artifact-diff-row.is-added > summary b { color: var(--theme-success); }
+.artifact-diff-row.is-removed > summary b { color: var(--theme-danger); }
+.artifact-diff-row.is-changed > summary b { color: var(--theme-primary); }
+.artifact-diff-summary { font-size: 12px; color: var(--ui-text-muted, #697586); }

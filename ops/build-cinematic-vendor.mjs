@@ -1,0 +1,12 @@
+import {createRequire} from 'node:module';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+const root=process.cwd(), require=createRequire(path.join(root,'services/agent-runtime/package.json'));
+const {build}=require(require.resolve('esbuild',{paths:[require.resolve('vitest/package.json')]}));
+const source=process.argv[2];
+const metadata=JSON.parse(fs.readFileSync(path.join(source,'package.json'),'utf8'));
+if(metadata.name!=='three'||metadata.version!=='0.150.1')throw Error('Verified Three.js 0.150.1 package required');
+const output='services/agent-runtime/public/vendor/cinematic-three-r150.min.js';
+await build({entryPoints:['services/agent-runtime/lib/cinematic/three-vendor-entry.js'],outfile:output,bundle:true,minify:true,format:'iife',platform:'browser',target:['es2020'],alias:{three:source},legalComments:'inline'});
+console.log(JSON.stringify({version:metadata.version,file:output,sha256:crypto.createHash('sha256').update(fs.readFileSync(output)).digest('hex')}));

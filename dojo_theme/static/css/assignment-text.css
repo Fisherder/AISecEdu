@@ -1,0 +1,31 @@
+.la-question-prompt { min-width: 0; overflow-wrap: anywhere; }
+.la-question-prompt p { white-space: normal; }
+.la-question-prompt code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.94em;
+  color: var(--cs-text);
+}
+.la-question-prompt p code {
+  padding: 0.08em 0.3em;
+  border-radius: 4px;
+  background: var(--cs-surface-raised);
+}
+.la-question-prompt pre {
+  display: block;
+  max-width: 100%;
+  margin: 14px 0;
+  padding: 16px 18px;
+  overflow-x: auto;
+  border: 1px solid var(--cs-line-strong);
+  border-radius: 10px;
+  color: var(--cs-text);
+  background: var(--cs-surface-raised);
+  font-size: 15px;
+  line-height: 1.65;
+  text-align: left;
+  white-space: pre;
+  overflow-wrap: normal;
+  tab-size: 4;
+}
+.la-question-prompt pre code { color: inherit; white-space: inherit; }
+.la-question-prompt pre:focus-visible { outline: 2px solid var(--cs-blue); outline-offset: 2px; }

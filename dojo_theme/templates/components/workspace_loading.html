@@ -1,15 +1,19 @@
-<div class="workspace-loading is-active" data-workspace-loading role="status" aria-live="polite" data-stage="queued">
-  <div class="workspace-loading-spinner" aria-hidden="true"></div>
-  <strong data-workspace-loading-title>已加入启动队列</strong>
-  <span data-workspace-loading-detail>正在确认当前题目与运行资源…</span>
-  <ol class="workspace-loading-stages" aria-label="实验环境启动进度">
-    <li data-workspace-stage="queued"><i class="fas fa-check" aria-hidden="true"></i><span>排队</span></li>
-    <li data-workspace-stage="container"><i class="fas fa-box" aria-hidden="true"></i><span>准备容器</span></li>
-    <li data-workspace-stage="service"><i class="fas fa-link" aria-hidden="true"></i><span>连接服务</span></li>
-    <li data-workspace-stage="interaction"><i class="fas fa-keyboard" aria-hidden="true"></i><span>准备交互</span></li>
-  </ol>
-  <div class="workspace-loading-actions">
-    <button type="button" data-workspace-loading-retry hidden><i class="fas fa-redo" aria-hidden="true"></i>重试连接</button>
-    <button type="button" data-workspace-loading-cancel><i class="fas fa-times" aria-hidden="true"></i>取消本次连接</button>
+<div class="workspace-loading workspace-launch-panel is-active" data-workspace-loading role="status" aria-live="polite" data-stage="queued">
+  <div class="workspace-launch-card">
+    <div class="workspace-launch-heading"><div class="workspace-launch-emblem" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><rect x="4" y="5" width="24" height="22" rx="5" stroke="currentColor" stroke-width="1.6"/><path d="M4 11h24M9 17l3 3-3 3m7 0h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><span data-workspace-loading-mode>实验环境</span><span class="workspace-launch-state" data-workspace-loading-state>准备连接</span></div>
+    <strong class="workspace-launch-title" data-workspace-loading-title>正在准备实验环境</strong>
+    <span class="workspace-launch-detail" data-workspace-loading-detail>正在确认当前题目与运行资源。</span>
+    <div class="workspace-loading-spinner" aria-hidden="true"></div>
+    <ol class="workspace-loading-stages" aria-label="实验环境连接状态">
+      <li data-workspace-stage="queued"><i class="fas fa-circle" aria-hidden="true"></i><span>确认环境</span></li>
+      <li data-workspace-stage="container"><i class="fas fa-circle" aria-hidden="true"></i><span>准备容器</span></li>
+      <li data-workspace-stage="service"><i class="fas fa-circle" aria-hidden="true"></i><span>连接服务</span></li>
+      <li data-workspace-stage="interaction"><i class="fas fa-circle" aria-hidden="true"></i><span>打开工作区</span></li>
+    </ol>
+    <div class="workspace-loading-actions">
+      <button type="button" data-workspace-loading-retry hidden>重试连接</button>
+      <button type="button" data-workspace-loading-cancel>取消连接</button>
+    </div>
+    <p class="workspace-launch-note">已保存的文件会保留；切换页面不会停止环境。</p>
   </div>
 </div>

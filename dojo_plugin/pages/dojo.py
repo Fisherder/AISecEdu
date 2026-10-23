@@ -8,6 +8,8 @@ import datetime
 import sys
 import re
 
+from ..learning.inquiry_service import published_projects as inquiry_published_projects
+
 from flask import Blueprint, render_template, abort, send_file, redirect, url_for, Response, stream_with_context, request, g
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import or_
@@ -29,6 +31,7 @@ from ..models import (
     DojoModules,
     DojoStudents,
     DojoUsers,
+    TeachingArtifacts,
 )
 from ..config import DOJOS_DIR
 
@@ -169,7 +172,7 @@ def listing(dojo):
 @dojo.route("/<dojo>/<path>/<subpath>/")
 @dojo_route
 def view_dojo_path(dojo, path, subpath=None):
-    module = DojoModules.query.filter_by(dojo=dojo, id=path).first()
+    module = DojoModules.from_id(dojo.reference_id, path).first()
     if module:
         if subpath:
             DojoChallenges.query.filter_by(
@@ -547,11 +550,7 @@ def view_module(dojo, module, scroll_to_challenge=None):
                     branch=branch
                 )
 
-    visible_challenges = {
-        challenge
-        for challenge in module.visible_challenges()
-        if challenge.exercise_mode not in {"SIMULATION", "HYBRID"}
-    }
+    visible_challenges = set(module.visible_challenges())
     visible_modules = [
         row for row in dojo.modules
         if row.visible() or dojo.is_admin(user)
@@ -566,6 +565,11 @@ def view_module(dojo, module, scroll_to_challenge=None):
 
     return render_template(
         "module.html",
+        inquiry_activities=inquiry_published_projects(user, dojo, module.module_index),
+        debate_activities=(TeachingArtifacts.query.filter_by(
+            dojo_id=dojo.dojo_id, module_index=module.module_index,
+            artifact_type="debate", status="PUBLISHED", self_workspace_id=None,
+        ).order_by(TeachingArtifacts.sort_order, TeachingArtifacts.updated.desc()).all() if user else []),
         dojo=dojo,
         module=module,
         visible_challenges=visible_challenges,

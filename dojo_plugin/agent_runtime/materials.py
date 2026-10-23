@@ -11,6 +11,7 @@ from ..models import (
 
 
 MATERIAL_ANALYSIS_VERSION = "complete-map-reduce-v1"
+MATERIAL_INDEX_VERSION = "source-index-v1"
 LEGACY_COMPLETE_ANALYSIS_LIMIT = 140_000
 DEFAULT_EXCERPT_BUDGET = 80_000
 
@@ -66,6 +67,18 @@ def course_material_grounding_requested(value):
     )
 
 
+def singular_material_reference_requested(value):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    material = r"(?:课件|资料|讲义|附件|教材|文档|文件|PPT|PDF)"
+    return bool(
+        re.search(rf"(?:这|那|该|此)(?:一)?(?:份|个|篇|套)?\s*{material}", text, re.IGNORECASE)
+        or re.search(rf"(?:刚才|刚刚|刚|上面|此前|之前).{{0,12}}(?:上传|发送|发给你).{{0,12}}{material}", text, re.IGNORECASE)
+        or re.search(rf"(?:本次|我|刚刚)?上传的\s*{material}", text, re.IGNORECASE)
+    )
+
+
 def _latest_revisions(material_ids):
     revisions = (
         TeachingMaterialRevisions.query.filter(
@@ -105,7 +118,10 @@ def _analysis_complete(analysis, total_characters, chunk_count):
     if isinstance(coverage, dict):
         try:
             extracted = int(coverage.get("extractedCharacters") or 0)
-            analyzed = int(coverage.get("analyzedCharacters") or 0)
+            analyzed = int(
+                (coverage.get("indexedCharacters") if coverage.get("analysisVersion") == MATERIAL_INDEX_VERSION
+                 else coverage.get("analyzedCharacters")) or 0
+            )
         except (TypeError, ValueError):
             return False
         return bool(
@@ -114,7 +130,7 @@ def _analysis_complete(analysis, total_characters, chunk_count):
             and analyzed >= extracted
             and analyzed >= total_characters
             and str(coverage.get("analysisVersion") or "")
-            == MATERIAL_ANALYSIS_VERSION
+            in {MATERIAL_ANALYSIS_VERSION, MATERIAL_INDEX_VERSION}
         )
     return total_characters <= LEGACY_COMPLETE_ANALYSIS_LIMIT
 
@@ -348,9 +364,10 @@ def build_course_material_context(
         )
         suffix = "等" if len(incomplete) > 5 else ""
         raise MaterialContextError(
-            "为避免脱离教师课程资料生成，本次任务已停止："
-            f"课程中有 {len(incomplete)} 份资料尚未完成全文解析（{labels}{suffix}）。"
-            "请等待资料分析完成；若资料分析已失败，请重新分析后再运行任务。"
+            "引用的课程资料尚不可读："
+            f"{len(incomplete)} 份文件仍在建立原文索引或提取失败（{labels}{suffix}）。"
+            "本轮不会跳过这些资料继续生成。请在原文索引完成后重试；"
+            "若文件无法提取，请重新上传可读取的版本。"
         )
     return {
         "sourceRefs": _material_refs(materials, revisions),

@@ -1111,7 +1111,7 @@ code {
     margin-top: 2px;
     margin-left: 4px;
     font-size: var(--ae-type-caption);
-    color: var(--dojo-text-color);
+    color: var(--theme-text-muted);
 }
 
 .legend-cells {
@@ -2072,6 +2072,10 @@ code {
     border-color: #444;
 }
 
+.learning-tutor-messages:empty {
+    display: none;
+}
+
 .learning-tutor-messages {
     flex: 1;
     min-height: 7rem;
@@ -2093,16 +2097,26 @@ code {
 
 .learning-tutor-message.is-user {
     margin-left: 1.5rem;
-    border-left: 2px solid var(--brand-blue);
+    background: #14384a;
+    border-left: 3px solid var(--brand-blue);
 }
 
 .learning-tutor-message.is-tutor {
     margin-right: 1.5rem;
-    border-left: 2px solid var(--brand-green);
+    background: #29381b;
+    border-left: 3px solid var(--brand-green);
 }
 
 .learning-tutor-message small {
     color: #999;
+}
+
+.learning-tutor-message.is-user small {
+    color: var(--brand-blue);
+}
+
+.learning-tutor-message.is-tutor small {
+    color: var(--brand-green);
 }
 
 .learning-tutor-field {
@@ -2164,34 +2178,6 @@ code {
 .learning-tutor-thinking small {
     display: block;
     margin-top: 0.35rem;
-}
-
-.learning-tutor-prompts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    margin: 0.55rem 0;
-}
-
-.learning-tutor-prompts button {
-    padding: 0.3rem 0.45rem;
-    color: #aaa;
-    background: transparent;
-    border: 1px solid #3b3b3b;
-    border-radius: 0.4rem;
-    font-size: var(--ae-type-caption);
-}
-
-.learning-tutor-prompts button:hover,
-.learning-tutor-prompts button:focus {
-    color: var(--brand-green);
-    border-color: var(--brand-green);
-    outline: 0;
-}
-
-.learning-tutor-prompts button:disabled {
-    cursor: not-allowed;
-    opacity: 0.45;
 }
 
 .learning-assessment-agent {
@@ -4259,6 +4245,24 @@ small,
     background: var(--ui-surface-raised);
 }
 
+:root[data-aisecedu-theme="light"] .learning-tutor-message.is-user {
+    background: #dceffa;
+    border-left-color: #0f7fb0;
+}
+
+:root[data-aisecedu-theme="light"] .learning-tutor-message.is-tutor {
+    background: #e9f4d8;
+    border-left-color: #5f9218;
+}
+
+:root[data-aisecedu-theme="light"] .learning-tutor-message.is-user small {
+    color: #0f7fb0;
+}
+
+:root[data-aisecedu-theme="light"] .learning-tutor-message.is-tutor small {
+    color: #5f9218;
+}
+
 @media (max-width: 575px) {
     #learning-active-attempt > .card .card-body {
         flex-direction: column;
@@ -4391,4 +4395,194 @@ samp {
 :root[data-aisecedu-theme="light"] .btn-outline-secondary:focus {
     color: #ffffff;
     background: #4d5964;
+}
+
+.teaching-skills-dialog[hidden] {
+    display: none;
+}
+
+.teaching-skills-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 1080;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.teaching-skills-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(8, 20, 32, 0.55);
+}
+
+.teaching-skills-panel {
+    position: relative;
+    width: min(760px, 92vw);
+    max-height: 86vh;
+    overflow: auto;
+    padding: 1.1rem 1.25rem;
+    border-radius: 0.9rem;
+    background: var(--ui-field, #fff);
+    color: var(--ui-text, #1c2b3a);
+    box-shadow: 0 24px 64px rgba(8, 20, 32, 0.35);
+}
+
+.teaching-skills-panel header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.teaching-skills-panel header small,
+.teaching-skills-panel footer small {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--ui-muted, #5b6b7b);
+}
+
+.teaching-skills-panel header button {
+    border: 0;
+    background: transparent;
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.teaching-skills-list {
+    margin: 0.8rem 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.teaching-skills-item {
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--ui-border, #d9dee6);
+    border-radius: 0.6rem;
+}
+
+.teaching-skills-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.teaching-skills-badge {
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.5rem;
+    font-size: 0.72rem;
+    background: #e8eef6;
+}
+
+.teaching-skills-badge.is-builtin {
+    background: #e6f4ef;
+}
+
+.teaching-skills-badge.is-off {
+    background: #fdecec;
+}
+
+.teaching-skills-item p {
+    margin: 0.35rem 0;
+    color: var(--ui-muted, #5b6b7b);
+}
+
+.teaching-skills-actions {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.teaching-skills-actions button,
+.teaching-skills-import-row button,
+.teaching-skills-draft-actions button {
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--ui-border, #d9dee6);
+    border-radius: 0.45rem;
+    background: var(--theme-surface);
+    color: var(--theme-text);
+    cursor: pointer;
+}
+
+.teaching-skills-actions button.is-danger {
+    color: #a32222;
+}
+
+.teaching-skills-import-row,
+.teaching-skills-draft-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.6rem;
+}
+
+.teaching-skills-draft label {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-weight: 600;
+}
+
+.teaching-skills-draft textarea {
+    width: 100%;
+    border: 1px solid var(--ui-border, #d9dee6);
+    border-radius: 0.45rem;
+    padding: 0.5rem;
+}
+
+.teaching-skills-draft pre {
+    margin-top: 0.6rem;
+    max-height: 240px;
+    overflow: auto;
+    padding: 0.6rem;
+    border-radius: 0.45rem;
+    background: #0f1a24;
+    color: #e6eef5;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+}
+
+.teaching-skills-message {
+    min-height: 1.2rem;
+    margin: 0.4rem 0 0;
+    color: var(--ui-muted, #5b6b7b);
+}
+
+.teaching-skills-message.is-success {
+    color: #0f7d5c;
+}
+
+.teaching-skills-message.is-error {
+    color: #a32222;
+}
+
+/* AISecEdu toast polish：系统内同一形式的提示统一为半透明、圆角、轻投影 */
+.alert:not(.alert-permanent) {
+    border-radius: 0.75rem;
+    border-width: 1px;
+    box-shadow: 0 8px 22px rgba(8, 20, 32, 0.14);
+    backdrop-filter: blur(8px) saturate(1.08);
+    -webkit-backdrop-filter: blur(8px) saturate(1.08);
+}
+
+.alert-info:not(.alert-permanent) {
+    background-color: rgba(0, 163, 224, 0.16);
+    border-color: rgba(0, 163, 224, 0.4);
+}
+
+.alert-success:not(.alert-permanent) {
+    background-color: rgba(28, 168, 118, 0.16);
+    border-color: rgba(28, 168, 118, 0.42);
+}
+
+.alert-warning:not(.alert-permanent) {
+    background-color: rgba(232, 163, 61, 0.18);
+    border-color: rgba(232, 163, 61, 0.45);
+}
+
+.alert-danger:not(.alert-permanent) {
+    background-color: rgba(214, 69, 82, 0.18);
+    border-color: rgba(214, 69, 82, 0.45);
 }

@@ -38,7 +38,8 @@ from .utils.feed import publish_challenge_solve
 from .utils.query_timer import init_query_timer
 from .utils.request_logging import get_trace_id, setup_logging, setup_trace_id_tracking, setup_uncaught_error_logging
 from .learning.student_experience import error_contract, student_ux_rollout
-from .product.capabilities import build_ui_bootstrap
+from .product.capabilities import build_ui_bootstrap, preferred_product_mode
+from .account_activation import require_account_activation
 from .product.metadata import page_metadata
 from .pages.dojos import dojos, dojos_override
 from .pages.dojo import dojo
@@ -259,6 +260,26 @@ def _reconcile_teaching_thread_schema():
                 )
             )
 
+    if "teaching_agent_skills" in table_names:
+        skill_columns = {
+            column["name"]
+            for column in inspector.get_columns("teaching_agent_skills")
+        }
+        if "model_invocable" not in skill_columns:
+            db.session.execute(
+                text(
+                    "ALTER TABLE teaching_agent_skills "
+                    "ADD COLUMN model_invocable BOOLEAN NOT NULL DEFAULT TRUE"
+                )
+            )
+        if "user_invocable" not in skill_columns:
+            db.session.execute(
+                text(
+                    "ALTER TABLE teaching_agent_skills "
+                    "ADD COLUMN user_invocable BOOLEAN NOT NULL DEFAULT TRUE"
+                )
+            )
+
 
 def create_database_schema():
     """Serialize plugin DDL across CTFd and every background worker.
@@ -291,6 +312,10 @@ def create_database_schema():
         # the same advisory lock used for the rest of the plugin schema.  This
         # keeps upgrades safe when CTFd and the teaching worker start together.
         _reconcile_teaching_thread_schema()
+        from .agent_runtime.session_events import install_session_event_capture
+        install_session_event_capture()
+        from .construction_guards import install_guards
+        install_guards()
         # A user deletion reaches model_invocations through two paths:
         # owner_id is SET NULL directly, while owned artifacts cascade through
         # revisions and then SET artifact_revision_id NULL. PostgreSQL may
@@ -344,6 +369,13 @@ class DojoChallenge(BaseChallenge):
                 logging.getLogger(__name__).exception(
                     "Failed to record deterministic learning assessment"
                 )
+            try:
+                from .lab_environments import collect_coding_evidence
+                collect_coding_evidence(user)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                logging.getLogger(__name__).exception("Failed to archive coding evidence")
             dojo = dojo_challenge.module.dojo
             if dojo.official or dojo.data.get("type") == "public":
                 module = dojo_challenge.module
@@ -406,6 +438,7 @@ def context_processor():
         trace_id,
         include_scopes=False,
         include_running=False,
+        preferred_mode=preferred_product_mode(user, request.cookies.get("aisecedu-mode")),
     )
     product_context = product_bootstrap["data"]
     preferences = product_context["preferences"]
@@ -541,6 +574,8 @@ def handle_authorization(default_handler):
 
 
 def load(app):
+    from .learning.prepared_drafts import register_trial_completion
+    register_trial_completion(app)
     submission_query_optimization.install()
     if DOJO_IP_MODE:
         app.config["SESSION_COOKIE_NAME"] = (
@@ -560,6 +595,8 @@ def load(app):
     setup_logging(app)
     setup_trace_id_tracking(app)
     setup_uncaught_error_logging(app)
+
+    app.before_request(require_account_activation)
 
     @app.after_request
     def publish_stat_events_after_request(response):

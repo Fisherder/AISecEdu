@@ -10,6 +10,8 @@ import pathlib
 import re
 import secrets
 import shutil
+import time
+import unicodedata
 import uuid
 import zipfile
 from urllib.parse import quote, urlencode
@@ -25,11 +27,28 @@ from werkzeug.utils import secure_filename
 from CTFd.cache import cache, clear_challenges, clear_standings
 from CTFd.models import Challenges, Solves, Users, db
 from CTFd.plugins import bypass_csrf_protection
+from CTFd.utils import get_config
 from CTFd.utils.decorators import authed_only
 from CTFd.utils.user import get_current_user
 
 from ... import config
 from ...runtime_profiles import RUNTIME_PROFILES
+from ...agent_runtime.conversation import (
+    HARNESS_VERSION, ConversationConflict, prepare_turn_submission,
+    submission_fingerprint, pending_turns, unreferenced_attachment_refs,
+)
+from ...agent_runtime.session_events import (
+    project_session_events, replay_session_messages, session_history_origin,
+    session_history_replayable,
+)
+from ...agent_runtime.approval_journal import (
+    ApprovalJournalError, action_request, decide as decide_approval,
+    message_approval_metadata, proposal_operation, proposal_request,
+    record_execution, recorded_decision, request_reference, require_approved,
+)
+from ...agent_runtime.commands import action_execution, admit_action, admit_teacher_tool
+from ...agent_runtime.approved_actions import ApprovedActionError, apply_action, prepare_action
+from ...coursework_observation import assignment_agent_observation
 from ...course_codes import (
     course_join_code,
     ensure_course_join_code,
@@ -68,7 +87,9 @@ from ...models import (
     SelfLearningWorkspaces,
     TeachingAgentActions,
     TeachingAgentApprovals,
+    TeachingAgentEventOutbox,
     TeachingAgentMessages,
+    TeachingAgentSessionEvents,
     TeachingAgentThreads,
     TeachingAssignments,
     TeachingArtifactCandidates,
@@ -77,6 +98,7 @@ from ...models import (
     TeachingCandidateSets,
     TeachingGenerationBatchItems,
     TeachingGenerationBatches,
+    TeachingJobEvents,
     TeachingJobs,
     TeachingMaterialChunks,
     TeachingMaterialRevisions,
@@ -91,12 +113,14 @@ from ...agent_runtime.artifacts import (
     artifact_capabilities,
     artifact_for_user,
     artifact_for_viewer,
+    artifact_revision_source_issue,
     artifact_view,
     candidate_request_prompt,
     candidate_set_view,
     content_hash,
     create_candidate_set,
     create_revision,
+    current_artifact_revision,
     materialize_candidate,
     revision_view,
     select_candidate,
@@ -110,6 +134,24 @@ from ...agent_runtime.auth import (
     verify_session_token,
 )
 from ...agent_runtime.files import agent_file_path, public_agent_file
+from ...agent_runtime.skills import (
+    builtin_catalog,
+    create_skill,
+    delete_skill,
+    import_builtin,
+    list_skills,
+    owned_skill,
+    parse_skill_text,
+    skill_invocation_from_markdown,
+    skill_summaries,
+    skill_view,
+    update_skill,
+)
+from ...agent_runtime.local_extract import locally_extractable
+from ...agent_runtime.generation_refinement import (
+    generation_refinement_prompt,
+    generation_refinement_request,
+)
 from ...agent_runtime.jobs import (
     AGENT_TOOL_SCHEMAS,
     _job_failure_message,
@@ -127,7 +169,11 @@ from ...agent_runtime.materials import (
     build_course_material_context,
     compact_material_grounding,
     course_material_grounding_requested,
+    singular_material_reference_requested,
 )
+from ...agent_runtime.model_journal import ModelJournalError, record_model_event
+from ...agent_runtime.project_collection import project_collection_view
+from ...agent_runtime.reliability import public_recovery
 from ...agent_runtime.scope import (
     ScopeError,
     assert_capability,
@@ -190,6 +236,8 @@ GENERATION_OPTION_ARTIFACT_TYPES = {
     "roleplay",
 }
 COURSE_DEMO_ARTIFACT_TYPES = {
+    "learning-flow",
+    "debate",
     "attack-defense-scene",
     "classroom-scenario",
     "simulation",
@@ -230,6 +278,7 @@ ALLOWED_MIME_PREFIXES = (
     "application/msword",
     "application/octet-stream",
     "application/vnd.openxmlformats-officedocument",
+    "application/vnd.ms-excel",
     "application/vnd.ms-powerpoint",
     "text/",
     "image/",
@@ -237,15 +286,20 @@ ALLOWED_MIME_PREFIXES = (
 ALLOWED_MATERIAL_SUFFIXES = {
     ".doc",
     ".docx",
+    ".gif",
+    ".bmp",
     ".jpeg",
     ".jpg",
     ".md",
+    ".markdown",
     ".pdf",
     ".png",
     ".ppt",
     ".pptx",
     ".txt",
     ".webp",
+    ".xls",
+    ".xlsx",
 }
 AGENT_RUNTIME_TARGETS = {
     "teacher": re.compile(
@@ -349,6 +403,64 @@ def _lock_material_digest(owner_id, digest):
     db.session.execute(
         text("SELECT pg_advisory_xact_lock(:lock_key)"),
         {"lock_key": lock_key},
+    )
+
+
+def _lock_agent_tool_request(idempotency_key):
+    """Serialize one tool key before checking or causing any side effects."""
+    if db.engine.dialect.name != "postgresql":
+        return True
+    lock_key = int.from_bytes(
+        hashlib.sha256(f"agent-tool:{idempotency_key}".encode()).digest()[:8],
+        "big",
+        signed=True,
+    )
+    return bool(db.session.execute(
+        text("SELECT pg_try_advisory_xact_lock(:lock_key)"),
+        {"lock_key": lock_key},
+    ).scalar())
+
+
+def _agent_tool_request_fingerprint(thread_id, tool, arguments, generation_plan, body):
+    raw_selection = body.get("generationSelection")
+    selection = (
+        {
+            "sourceMessageId": str(raw_selection.get("sourceMessageId") or ""),
+            "optionId": str(raw_selection.get("optionId") or ""),
+        }
+        if isinstance(raw_selection, dict)
+        else None
+    )
+    request_identity = {
+        "threadId": thread_id,
+        "tool": tool,
+        "arguments": arguments,
+        "generationPlan": generation_plan,
+        "generationSelection": selection,
+        "sourceJobId": str(body.get("sourceJobId") or "").strip(),
+    }
+    return hashlib.sha256(
+        json.dumps(
+            request_identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _same_agent_tool_request(action, thread_id, tool, arguments, generation_plan, fingerprint):
+    if action.thread_id != thread_id:
+        return False
+    stored = action.request_json or {}
+    if stored.get("requestFingerprint"):
+        return stored["requestFingerprint"] == fingerprint
+    # Historical actions predate the fingerprint. Match their recorded inputs;
+    # an ambiguous replay must not execute or return an unrelated old result.
+    return (
+        stored.get("tool") == tool
+        and stored.get("arguments") == arguments
+        and stored.get("generationPlan") == generation_plan
     )
 
 
@@ -734,11 +846,7 @@ def _agent_request_context(body, user, thread):
     if not isinstance(raw_refs_value, list):
         raise ValueError("Source references must be an array")
     raw_refs = list(raw_refs_value)
-    raw_refs.extend(
-        {"type": "material", "id": entry["id"]}
-        for entry in _thread_attachment_entries(thread)
-        if entry.get("status") in {"AWAITING_INTENT", "ACTIVE", "REFERENCED"}
-    )
+    raw_refs.extend(unreferenced_attachment_refs(_thread_attachment_entries(thread)))
     if len(raw_refs) > 100:
         raise ValueError("At most 100 source references are allowed")
     refs = []
@@ -768,6 +876,8 @@ def _agent_request_context(body, user, thread):
         }
         if owned != set(material_ids):
             raise ScopeError("Source material not found")
+    if not material_ids and singular_material_reference_requested(body.get("content")):
+        raise ValueError("请先在“引用资料”中选择所说的那份文件，或在本次消息重新上传。")
     if (
         _json_size({"constraints": constraints, "sourceRefs": refs})
         > MAX_AGENT_CONTEXT_BYTES
@@ -784,6 +894,7 @@ def _current_user():
 
 
 def _teacher_dojos(user, *, eager=False, include_modules=False):
+    hidden_ids = set(str(get_config(f"course_catalog_hidden_user_{user.id}", "") or "").split(","))
     query = Dojos.query
     if getattr(user, "type", None) != "admin":
         query = query.join(DojoAdmins).filter(DojoAdmins.user_id == user.id)
@@ -797,7 +908,10 @@ def _teacher_dojos(user, *, eager=False, include_modules=False):
         )
     elif include_modules:
         query = query.options(selectinload(Dojos.modules))
-    return query.order_by(Dojos.name, Dojos.dojo_id).all()
+    return [
+        dojo for dojo in query.order_by(Dojos.name, Dojos.dojo_id).all()
+        if str(dojo.dojo_id) not in hidden_ids
+    ]
 
 
 def _dojo_shell_view(dojo):
@@ -849,7 +963,7 @@ def _dojo_view(dojo, *, include_modules=True):
         1
         for module in dojo.modules
         for challenge in module.challenges
-        if is_supported_exercise(challenge)
+        if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT"
     )
     result = {
         "id": dojo.dojo_id,
@@ -881,7 +995,7 @@ def _dojo_view(dojo, *, include_modules=True):
                         "url": f"/{dojo.reference_id}/{module.id}/{challenge.id}",
                     }
                     for challenge in module.challenges
-                    if is_supported_exercise(challenge)
+                    if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT"
                 ],
             }
             for module in dojo.modules
@@ -899,7 +1013,7 @@ def _content_state(status, validation=None):
         if isinstance(validation, dict)
         else ""
     ).upper()
-    if validation_status in {"BLOCK", "FAILED", "FAIL"}:
+    if validation_status in {"BLOCK", "BLOCKED", "FAILED", "FAIL"}:
         return "failed"
     if normalized in CONTENT_STATE_ALIASES:
         return CONTENT_STATE_ALIASES[normalized]
@@ -921,7 +1035,7 @@ def _course_question_list_views(dojo):
     published = [
         challenge
         for challenge in DojoChallenges.query.filter_by(dojo_id=dojo.dojo_id).all()
-        if is_supported_exercise(challenge)
+        if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT"
     ]
     drafts = (
         LearningDrafts.query.filter_by(dojo_id=dojo.dojo_id)
@@ -1047,7 +1161,7 @@ def _course_content_snapshot(
             for challenge in DojoChallenges.query.filter_by(
                 dojo_id=dojo.dojo_id
             ).all()
-            if is_supported_exercise(challenge)
+            if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT"
         ]
     if drafts is None:
         drafts = (
@@ -1111,7 +1225,6 @@ def _course_content_snapshot(
     for artifact in artifacts:
         if (
             artifact.artifact_type in QUESTION_ARTIFACT_TYPES
-            or artifact.artifact_type == "debate"
         ):
             continue
         item = {
@@ -1297,7 +1410,7 @@ def _dojo_summary_views(dojos):
         )
     ).all()
     for challenge in challenge_rows:
-        if is_supported_exercise(challenge):
+        if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT":
             published_by_dojo[challenge.dojo_id].append(challenge)
     draft_by_dojo = {dojo_id: [] for dojo_id in dojo_ids}
     for draft in LearningDrafts.query.filter(
@@ -1634,6 +1747,7 @@ def _thread_view(
     include_messages=False,
     message_count=None,
     latest_message=None,
+    message_rows=None,
 ):
     result = {
         "id": thread.id,
@@ -1655,7 +1769,18 @@ def _thread_view(
             r"\s+", " ", str(latest_message or "")
         ).strip()[:120]
     if include_messages:
-        messages = (
+        result["historySource"] = (
+            "session-events" if message_rows is not None else "legacy-messages"
+        )
+        result["lastEventSequence"] = (
+            db.session.query(func.max(TeachingAgentSessionEvents.sequence))
+            .filter_by(thread_id=thread.id)
+            .scalar() or 0
+        )
+        result["pendingTurns"] = pending_turns(db.session, thread)
+        jobs = TeachingJobs.query.filter_by(owner_id=thread.user_id, thread_id=thread.id, kind="agent.chat").order_by(TeachingJobs.created.desc()).limit(100).all()
+        result["harnessJobs"] = [job_view(job) for job in jobs if (job.payload or {}).get("harnessVersion") and not (job.payload or {}).get("harnessInternal")]
+        messages = message_rows if message_rows is not None else (
             TeachingAgentMessages.query.filter_by(thread_id=thread.id)
             .order_by(TeachingAgentMessages.id)
             .all()
@@ -1673,12 +1798,13 @@ def _thread_view(
         by_message = {}
         for card, card_view in zip(cards, _thread_card_views(cards)):
             by_message.setdefault(card.message_id, []).append(card_view)
+        approval_metadata = message_approval_metadata(thread.id, messages)
         result["messages"] = [
             {
                 "id": message.id,
                 "role": message.role,
                 "content": message.content,
-                "metadata": message.metadata_json,
+                "metadata": approval_metadata[message.id],
                 "created": _timestamp(message.created),
                 "cards": by_message.get(message.id, []),
             }
@@ -2064,7 +2190,24 @@ def _require_workspace_capacity(workspace, resource, amount=1):
 
 def _action_view(action):
     approval = TeachingAgentApprovals.query.filter_by(action_id=action.id).first()
+    decision_event = recorded_decision(action.thread_id, f'action:{action.id}')
+    execution = action_execution(action)
+    execution_status = ({'SUCCEEDED': 'APPROVED', 'FAILED': 'EXECUTION_FAILED',
+                         'CANCELED': 'EXECUTION_CANCELED'}.get(execution['status'], 'EXECUTING')
+                        if execution else None)
     request_json = action.request_json or {}
+    result = execution['result'] if execution and execution['status'] == 'SUCCEEDED' else action.result
+    if execution and execution.get('kind') == 'teacher-tool' and execution['status'] == 'SUCCEEDED':
+        receipt = execution['result'] or {}
+        result = receipt.get('result') or {}
+        execution_status = receipt.get('actionStatus') or 'COMPLETED'
+        child_ids = receipt.get('childJobIds') or []
+        if child_ids:
+            children = TeachingJobs.query.filter(TeachingJobs.id.in_(child_ids), TeachingJobs.owner_id == action.actor_id).all()
+            states = [child.status for child in children]
+            execution_status = ('PENDING' if any(state in {'QUEUED', 'RUNNING', 'CANCEL_REQUESTED'} for state in states)
+                                else 'SUCCEEDED' if len(states) == len(child_ids) and all(state == 'SUCCEEDED' for state in states)
+                                else 'FAILED')
     return {
         "id": action.id,
         "threadId": action.thread_id,
@@ -2073,15 +2216,25 @@ def _action_view(action):
         "riskLevel": action.risk_level,
         "targetType": action.target_type,
         "targetId": action.target_id,
-        "status": action.status,
+        "status": execution_status or (decision_event['decision'] if decision_event else action.status),
         "request": request_json,
         "sourceJobId": request_json.get("sourceJobId"),
         "title": request_json.get("title"),
-        "result": action.result,
-        "error": action.error,
+        "result": result,
+        "error": execution['error'] if execution else action.error,
+        "execution": execution,
         "created": _timestamp(action.created),
         "completed": _timestamp(action.completed),
         "approval": (
+            {
+                "decision": decision_event['decision'],
+                "approverId": decision_event['actorId'],
+                "comment": decision_event['comment'],
+                "created": decision_event['decidedAt'],
+                "requestId": decision_event['requestId'],
+                "requestSha256": decision_event['requestSha256'],
+            }
+            if decision_event else
             {
                 "decision": approval.decision,
                 "approverId": approval.approver_id,
@@ -2091,6 +2244,7 @@ def _action_view(action):
             if approval
             else None
         ),
+        "approvalRequest": request_reference(action_request(action)),
     }
 
 
@@ -2354,7 +2508,11 @@ def _automatic_course_slug(name):
 
 
 def _unique_idempotency(user_id, prefix):
-    supplied = request.headers.get("Idempotency-Key", "").strip()
+    return _supplied_idempotency(user_id, prefix, request.headers.get("Idempotency-Key"))
+
+
+def _supplied_idempotency(user_id, prefix, supplied=None):
+    supplied = str(supplied or "").strip()
     if supplied:
         supplied = supplied[:96]
     else:
@@ -2362,12 +2520,20 @@ def _unique_idempotency(user_id, prefix):
     return f"{prefix}:{user_id}:{supplied}"
 
 
+def _safe_material_filename(value):
+    leaf = unicodedata.normalize("NFC", str(value or "")).replace("\\", "/").split("/")[-1]
+    leaf = re.sub(r'[\x00-\x1f\x7f<>:"|?*]', "_", leaf).strip(" .")
+    suffix = pathlib.Path(leaf).suffix.lower()
+    stem = leaf[: -len(suffix)] if suffix else leaf
+    return f"{stem[:180].strip(' .') or 'material'}{suffix}"
+
+
 def _valid_material_signature(suffix, raw):
     if suffix == ".pdf":
         return raw.startswith(b"%PDF-")
-    if suffix in {".docx", ".pptx"}:
+    if suffix in {".docx", ".pptx", ".xlsx"}:
         return raw.startswith(b"PK\x03\x04")
-    if suffix in {".doc", ".ppt"}:
+    if suffix in {".doc", ".ppt", ".xls"}:
         return raw.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
     if suffix == ".png":
         return raw.startswith(b"\x89PNG\r\n\x1a\n")
@@ -2375,7 +2541,11 @@ def _valid_material_signature(suffix, raw):
         return raw.startswith(b"\xff\xd8\xff")
     if suffix == ".webp":
         return len(raw) >= 12 and raw.startswith(b"RIFF") and raw[8:12] == b"WEBP"
-    if suffix in {".txt", ".md"}:
+    if suffix == ".gif":
+        return raw.startswith((b"GIF87a", b"GIF89a"))
+    if suffix == ".bmp":
+        return raw.startswith(b"BM")
+    if suffix in {".txt", ".md", ".markdown"}:
         return b"\x00" not in raw[:8192]
     return False
 
@@ -2387,12 +2557,12 @@ def _scan_material_security(suffix, raw):
         for marker in (b"/javascript", b"/launch", b"/embeddedfile", b"/openaction")
     ):
         raise ValueError("PDF active content is not allowed")
-    if suffix in {".doc", ".ppt"} and any(
+    if suffix in {".doc", ".ppt", ".xls"} and any(
         marker in lowered
         for marker in (b"vba", b"autoopen", b"document_open", b"shell.application")
     ):
         raise ValueError("Legacy Office active content is not allowed")
-    if suffix in {".docx", ".pptx"}:
+    if suffix in {".docx", ".pptx", ".xlsx"}:
         try:
             with zipfile.ZipFile(io.BytesIO(raw)) as archive:
                 entries = archive.infolist()
@@ -2404,7 +2574,7 @@ def _scan_material_security(suffix, raw):
                 for entry in entries:
                     normalized = pathlib.PurePosixPath(entry.filename)
                     if normalized.is_absolute() or ".." in normalized.parts:
-                        raise ValueError("Office archive contains an unsafe path")
+                        raise ValueError("Office 文件包含不安全的内部路径；请另存为新文件或导出 PDF 后重试。")
                     name = entry.filename.lower()
                     if any(
                         marker in name
@@ -2691,6 +2861,12 @@ def _material_analysis_view(value, *, detailed=True):
     }
 
 
+from ...authoring_standards import planner_context as authoring_standards_context
+
+
+from ...learning.inquiry import catalog as inquiry_pattern_catalog
+from ...learning.inquiry_service import selected_pattern_context as inquiry_selected_context
+
 def _teacher_agent_context(user, thread):
     available_courses = _teacher_dojos(user)[:200]
     snapshot = {
@@ -2721,12 +2897,24 @@ def _teacher_agent_context(user, thread):
         "assignments": {"statusCounts": {}, "recent": []},
         "runtimeEnvironments": [profile.public_context for profile in RUNTIME_PROFILES.values()],
         "nativeAuthoring": {"recentDrafts": [], "recentJobs": []},
+        "authoringStandards": authoring_standards_context(thread.dojo_id),
+        "learningPatterns": [inquiry_pattern_catalog()],
+        "selectedLearningPattern": inquiry_selected_context(thread.dojo_id, (thread.context or {}).get("learningPattern")),
         "jobs": {"statusCounts": {}, "recent": []},
         "classrooms": {"statusCounts": {}, "recent": []},
         "pendingApprovals": [],
         "verifiedProgress": None,
     }
     if thread.dojo_id is None:
+        projects = TeachingArtifacts.query.filter_by(
+            owner_id=user.id, dojo_id=None, self_workspace_id=None,
+        ).filter(TeachingArtifacts.status != "ARCHIVED").order_by(
+            TeachingArtifacts.updated.desc()
+        ).limit(20).all()
+        snapshot["artifacts"]["recent"] = [
+            artifact_view(row, include_content=False) for row in projects
+        ]
+        snapshot["generationCollection"] = "projects"
         return snapshot
 
     dojo = dojo_for_user(user, thread.dojo_id, teacher=True)
@@ -2764,7 +2952,7 @@ def _teacher_agent_context(user, thread):
                         "exerciseMode": challenge.exercise_mode,
                     }
                     for challenge in item.challenges[:100]
-                    if is_supported_exercise(challenge)
+                    if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT"
                 ],
             }
             for item in dojo.modules[:100]
@@ -2795,7 +2983,7 @@ def _teacher_agent_context(user, thread):
                         "exerciseMode": challenge.exercise_mode,
                     }
                     for challenge in module.challenges[:200]
-                    if is_supported_exercise(challenge)
+                    if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT"
                 ],
             }
             if module
@@ -2915,7 +3103,6 @@ def _teacher_agent_context(user, thread):
             "updated": _timestamp(row.updated),
             "currentConversation": artifact_thread_id(row) == thread.id,
             "publishedChallengeId": row.published_challenge_id,
-                "runtimeEnvironment": (row.spec or {}).get("runtimeEnvironment", "linux"),
         }
 
     snapshot["artifacts"] = {
@@ -3303,6 +3490,7 @@ def _job_collection_view(job, dojo, module, materialization_job):
     result = _job_collection_result(job)
     payload = job.payload if isinstance(job.payload, dict) else {}
     display_job = materialization_job or job
+    execution_payload = display_job.payload if isinstance(display_job.payload, dict) else {}
     status = display_job.status
     stage = display_job.stage
     updated = display_job.updated
@@ -3335,11 +3523,14 @@ def _job_collection_view(job, dojo, module, materialization_job):
         "stage": stage,
         "progress": progress,
         "traceId": job.trace_id,
+        "executionId": display_job.trace_id,
+        "executionStarted": execution_payload.get("manualRetryStartedAt") or _timestamp(job.created),
         "dojoId": job.dojo_id,
         "moduleIndex": job.module_index,
         "threadId": job.thread_id,
-        "attemptCount": job.attempt_count,
-        "maxAttempts": job.max_attempts,
+        "attemptCount": display_job.attempt_count,
+        "maxAttempts": display_job.max_attempts,
+        "recovery": public_recovery(display_job),
         "result": result,
         "error": _job_failure_message(display_job),
         "failureMessage": _job_failure_message(display_job),
@@ -3363,6 +3554,8 @@ def _job_collection_view(job, dojo, module, materialization_job):
             else None
         ),
     }
+    if payload.get("harnessVersion") and not payload.get("harnessInternal"):
+        view.update(job_view(job))
     if job.kind == "learning.authoring":
         try:
             batch_index = min(5, max(1, int(payload.get("batchIndex") or 1)))
@@ -3766,8 +3959,9 @@ class TeachingDashboard(Resource):
                 .all()
             )
             for message in recent_messages:
-                selection = (message.metadata_json or {}).get("generationSelection")
-                if not isinstance(selection, dict) or str(selection.get("status") or "").upper() != "SELECTED":
+                from ...agent_runtime.tool_plan import message_metadata
+                selection = message_metadata(message).get("generationSelection")
+                if not isinstance(selection, dict) or str(selection.get("status") or "").upper() != "SELECTED" or selection.get('commandJobId'):
                     continue
                 thread = message.thread
                 dojo = dojo_by_id.get(thread.dojo_id)
@@ -4086,7 +4280,7 @@ class TeachingContext(Resource):
                 "user": {
                     "id": user.id,
                     "name": user.name,
-                    "isTeacher": bool(teacher_dojos),
+                    "isTeacher": getattr(user, "type", None) == "admin" or bool(teacher_dojos),
                 },
                 "teacherDojos": (
                     [_dojo_shell_view(dojo) for dojo in teacher_dojos]
@@ -5075,6 +5269,223 @@ class ManagedCourseModule(Resource):
             )
 
 
+@teaching_namespace.route("/skills")
+class TeachingSkills(Resource):
+    @authed_only
+    def get(self):
+        try:
+            user = _current_user()
+            _require_teacher(user)
+            response = requests.get(
+                f"{config.AGENT_RUNTIME_INTERNAL_URL}/api/integration/skills",
+                params={"ownerId": user.id},
+                headers={"X-AISecEdu-Service-Token": config.AGENT_RUNTIME_SERVICE_SECRET},
+                timeout=(3, 8),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not payload.get("success") or not isinstance(payload.get("data"), dict):
+                raise ValueError("技能目录暂时不可用。")
+            return _ok(payload["data"])
+        except ScopeError as exc:
+            return _error(exc, 403, code="FORBIDDEN")
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning("Unable to read agent skill catalog: %s", exc)
+            return _error("技能目录暂时不可用，请稍后重试。", 503, code="SKILL_CATALOG_UNAVAILABLE")
+
+
+@teaching_namespace.route("/agent-skills/resolve")
+class TeachingAgentSkillsResolve(Resource):
+    def get(self):
+        from ...agent_runtime.auth import AgentRuntimeAuthError, require_service_auth
+        from ...agent_runtime.skills import (
+            resolve_for_runtime,
+            runtime_skill_body,
+            runtime_skill_catalog,
+            runtime_skill_resource,
+        )
+
+        try:
+            require_service_auth()
+        except AgentRuntimeAuthError as exc:
+            return _error(exc, 403, code="FORBIDDEN")
+        owner = str(request.args.get("ownerId") or "").strip()
+        if not owner.isdigit():
+            return _error("ownerId is required", 400)
+        owner_id = int(owner)
+        view = str(request.args.get("view") or "legacy").strip()
+        if view == "legacy":
+            return _ok({"ownerId": owner_id, "skills": resolve_for_runtime(owner_id)})
+        if view == "catalog":
+            return _ok({"ownerId": owner_id, "skills": runtime_skill_catalog(owner_id)})
+        try:
+            name = str(request.args.get("name") or "").strip()
+            audience = str(request.args.get("audience") or "model").strip()
+            if view == "body":
+                return _ok({"ownerId": owner_id, "skill": runtime_skill_body(owner_id, name, audience)})
+            if view == "resource":
+                path = str(request.args.get("path") or "").strip()
+                return _ok({"ownerId": owner_id, "resource": runtime_skill_resource(owner_id, name, path, audience)})
+        except LookupError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+        except ValueError as exc:
+            return _error(exc, 400, code="INVALID_REQUEST")
+        return _error("unknown skill view", 400, code="INVALID_REQUEST")
+
+
+@teaching_namespace.route("/agent-skills")
+class TeachingAgentSkillsIndex(Resource):
+    @authed_only
+    def get(self):
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            return _ok({
+                "skills": [skill_view(item, include_instructions=False) for item in list_skills(user)],
+                "builtinCatalog": builtin_catalog(),
+                "limits": {
+                    "maxInstructionsBytes": 96_000,
+                    "maxReferenceBytes": 64_000,
+                    "maxReferences": 12,
+                },
+            })
+        except ScopeError as exc:
+            return _error(exc, 403, code="FORBIDDEN")
+
+    @authed_only
+    def post(self):
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            body = _body()
+            markdown = str(body.get("skillMarkdown") or "").strip()
+            if markdown:
+                name, description, instructions = parse_skill_text(markdown)
+                model_invocable, user_invocable = skill_invocation_from_markdown(markdown)
+            else:
+                name = body.get("name")
+                description = body.get("description")
+                instructions = body.get("instructions")
+                model_invocable = body.get("modelInvocable", True)
+                user_invocable = body.get("userInvocable", True)
+            skill = create_skill(
+                user,
+                name=name,
+                description=description,
+                instructions=instructions,
+                references=body.get("references"),
+                model_invocable=model_invocable,
+                user_invocable=user_invocable,
+            )
+            return _ok({"skill": skill_view(skill)}, 201)
+        except ScopeError as exc:
+            return _error(exc, 403, code="FORBIDDEN")
+        except (ValueError, LookupError) as exc:
+            db.session.rollback()
+            return _error(exc, 400, code="INVALID_REQUEST")
+
+
+@teaching_namespace.route("/agent-skills/catalog")
+class TeachingAgentSkillsCatalog(Resource):
+    @authed_only
+    def get(self):
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            installed = {item.name for item in list_skills(user)}
+            return _ok({
+                "catalog": [
+                    {**item, "installed": item["name"] in installed}
+                    for item in builtin_catalog()
+                ]
+            })
+        except ScopeError as exc:
+            return _error(exc, 403, code="FORBIDDEN")
+
+
+@teaching_namespace.route("/agent-skills/import")
+class TeachingAgentSkillsImport(Resource):
+    @authed_only
+    def post(self):
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            skill = import_builtin(user, _body().get("name"))
+            return _ok({"skill": skill_view(skill, include_instructions=False)}, 201)
+        except ScopeError as exc:
+            return _error(exc, 403, code="FORBIDDEN")
+        except LookupError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+        except ValueError as exc:
+            return _error(exc, 400, code="INVALID_REQUEST")
+
+
+@teaching_namespace.route("/agent-skills/<string:name>")
+class TeachingAgentSkillsItem(Resource):
+    @authed_only
+    def get(self, name):
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            return _ok({"skill": skill_view(owned_skill(user, name))})
+        except ScopeError as exc:
+            return _error(exc, 403, code="FORBIDDEN")
+        except LookupError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+
+    @authed_only
+    def patch(self, name):
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            body = _body()
+            markdown = str(body.get("skillMarkdown") or "").strip()
+            if markdown:
+                parsed_name, description, instructions = parse_skill_text(markdown)
+                if parsed_name != name:
+                    raise ValueError("技能正文中的 name 必须与当前技能一致")
+                model_invocable, user_invocable = skill_invocation_from_markdown(markdown)
+                skill = update_skill(
+                    user,
+                    name,
+                    description=description,
+                    instructions=instructions,
+                    model_invocable=model_invocable,
+                    user_invocable=user_invocable,
+                )
+            else:
+                skill = update_skill(
+                    user,
+                    name,
+                    description=body.get("description"),
+                    instructions=body.get("instructions"),
+                    references=body.get("references"),
+                    enabled=body.get("enabled"),
+                    model_invocable=body.get("modelInvocable"),
+                    user_invocable=body.get("userInvocable"),
+                )
+            return _ok({"skill": skill_view(skill, include_instructions=False)})
+        except ScopeError as exc:
+            return _error(exc, 403, code="FORBIDDEN")
+        except LookupError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+        except ValueError as exc:
+            db.session.rollback()
+            return _error(exc, 400, code="INVALID_REQUEST")
+
+    @authed_only
+    def delete(self, name):
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            skill = delete_skill(user, name)
+            return _ok({"deleted": skill.name})
+        except ScopeError as exc:
+            return _error(exc, 403, code="FORBIDDEN")
+        except LookupError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+
+
 @teaching_namespace.route("/threads")
 class TeachingThreads(Resource):
     @authed_only
@@ -5160,15 +5571,68 @@ class TeachingThreads(Resource):
         return _ok({"thread": _thread_view(thread)}, 201)
 
 
+@teaching_namespace.route("/threads/<string:thread_id>/fork")
+class TeachingThreadFork(Resource):
+    @authed_only
+    def post(self, thread_id):
+        from ...agent_runtime.branch import branch_message_snapshot, completed_branch_boundary
+        import hashlib
+
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            source = _thread_for_owner(thread_id, user)
+            source = TeachingAgentThreads.query.filter_by(id=source.id, user_id=user.id).with_for_update().one()
+            body = _body()
+            requested = body.get("sourceMessageId")
+            if requested is not None and (type(requested) is not int or requested < 1):
+                raise ConversationConflict("请选择一条已完成的回复作为分支起点。")
+            key = _supplied_idempotency(user.id, "thread-fork", request.headers.get("Idempotency-Key"))
+            fork_id = "thread_fork_" + hashlib.sha256(f"{user.id}:{source.id}:{key}".encode()).hexdigest()[:32]
+            existing = TeachingAgentThreads.query.filter_by(id=fork_id, user_id=user.id).first()
+            if existing is not None:
+                if (existing.context or {}).get("branch", {}).get("requestedMessageId") != requested:
+                    raise ConversationConflict("同一分支请求的起点不同，请刷新后重试。")
+                db.session.commit()
+                return _ok({"thread": _thread_view(existing, include_messages=True), "deduplicated": True}, 201)
+            messages = TeachingAgentMessages.query.filter_by(thread_id=source.id, user_id=user.id).order_by(TeachingAgentMessages.id).all()
+            boundary = completed_branch_boundary(messages, requested)
+            if boundary is None:
+                raise ConversationConflict("当前没有可以继续的已完成回复，请等待本轮完成。")
+            fork = TeachingAgentThreads(id=fork_id, user_id=user.id, dojo_id=source.dojo_id,
+                module_index=source.module_index, phase=source.phase, title=(str(body.get("title") or f"{source.title} · 分支"))[:240],
+                context={**(source.context or {}), "branch": {"sourceThreadId": source.id, "sourceMessageId": boundary, "requestedMessageId": requested}})
+            db.session.add(fork)
+            db.session.flush()
+            for message in messages:
+                if message.id <= boundary and (message.metadata_json or {}).get("pending") is not True:
+                    db.session.add(TeachingAgentMessages(thread_id=fork.id, user_id=user.id, **branch_message_snapshot(message)))
+            db.session.commit()
+            return _ok({"thread": _thread_view(fork, include_messages=True), "deduplicated": False}, 201)
+        except (ScopeError, ConversationConflict) as exc:
+            db.session.rollback()
+            return _error(exc, 404 if isinstance(exc, ScopeError) else 409, code="NOT_FOUND" if isinstance(exc, ScopeError) else "BRANCH_CONFLICT")
+
+
 @teaching_namespace.route("/threads/<string:thread_id>")
 class TeachingThread(Resource):
     @authed_only
     def get(self, thread_id):
         try:
             thread = _thread_for_owner(thread_id, _current_user())
+            if session_history_replayable(thread.id):
+                messages = replay_session_messages(thread.id)
+                db.session.commit()
+                return _ok({"thread": _thread_view(
+                    thread, include_messages=True, message_rows=messages,
+                )})
             return _ok({"thread": _thread_view(thread, include_messages=True)})
         except ScopeError as exc:
             return _error(exc, 404, code="NOT_FOUND")
+        except Exception:
+            db.session.rollback()
+            logger.exception("Unable to replay teaching conversation history")
+            return _error("会话历史暂时不可用，请稍后重试。", 503, code="EVENT_STREAM_UNAVAILABLE")
 
     @authed_only
     def patch(self, thread_id):
@@ -5251,6 +5715,102 @@ class TeachingThread(Resource):
             return _error(exc, 404, code="NOT_FOUND")
 
 
+def _public_session_event_payload(event_type, payload):
+    hidden = set()
+    if event_type in {'model.input', 'model.prepared'}:
+        hidden = {'payload', 'modelRoute'}
+    elif event_type in {
+        'projection.checkpoint', 'runtime.dispatched', 'runtime.settled',
+        'model.requested', 'model.step', 'model.settled', 'model.failed', 'model.cancelled',
+        'tool.call', 'tool.result',
+        'provider.request', 'provider.response', 'provider.chunk', 'provider.finished',
+    }:
+        hidden = {'messages', 'body', 'response', 'detail'}
+    return scrub_payload({key: value for key, value in (payload or {}).items() if key not in hidden})
+
+
+@teaching_namespace.route("/threads/<string:thread_id>/events")
+class TeachingThreadEvents(Resource):
+    @authed_only
+    def get(self, thread_id):
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            thread = _thread_for_owner(thread_id, user)
+        except ScopeError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+        try:
+            cursor = int(request.args.get("after", "0"))
+            limit = int(request.args.get("limit", "100"))
+            wait_ms = int(request.args.get("waitMs", "0"))
+        except (TypeError, ValueError):
+            return _error("事件游标或页数不正确。", 400, code="INVALID_CURSOR")
+        if cursor < 0 or limit < 1 or limit > 200 or wait_ms < 0 or wait_ms > 15000:
+            return _error("事件游标或页数超出范围。", 400, code="INVALID_CURSOR")
+        try:
+            owned_thread_id = thread.id
+            owner_id = user.id
+            deadline = time.monotonic() + wait_ms / 1000
+            while True:
+                # Long polling must not retain a PostgreSQL transaction or a
+                # thread row lock while waiting for another writer to commit.
+                if not TeachingAgentThreads.query.filter_by(
+                    id=owned_thread_id, user_id=owner_id,
+                ).first():
+                    db.session.rollback()
+                    return _error("Conversation not found", 404, code="NOT_FOUND")
+                projection = project_session_events(owned_thread_id, limit=500)
+                if projection is None:
+                    db.session.rollback()
+                    return _error("Conversation not found", 404, code="NOT_FOUND")
+                db.session.commit()
+                last_sequence = projection["lastSequence"]
+                if cursor > last_sequence:
+                    db.session.rollback()
+                    return _error("事件游标已超过当前会话。", 400, code="INVALID_CURSOR")
+                rows = (
+                    TeachingAgentSessionEvents.query.filter_by(thread_id=owned_thread_id)
+                    .filter(TeachingAgentSessionEvents.sequence > cursor)
+                    .order_by(TeachingAgentSessionEvents.sequence)
+                    .limit(limit + 1)
+                    .all()
+                )
+                visible = rows[:limit]
+                pending_outbox = (
+                    db.session.query(TeachingAgentEventOutbox.id)
+                    .filter_by(thread_id=owned_thread_id, projected_sequence=None)
+                    .first() is not None
+                )
+                if visible or pending_outbox or wait_ms == 0 or time.monotonic() >= deadline:
+                    history_origin = session_history_origin(owned_thread_id)
+                    result = _ok({
+                        "threadId": owned_thread_id,
+                        "eventVersion": 1,
+                        "completeHistory": history_origin == 'captured',
+                        "historyOrigin": history_origin,
+                        "events": [
+                            {
+                                "sequence": row.sequence,
+                                "type": row.event_type,
+                                "payload": _public_session_event_payload(row.event_type, row.payload),
+                                "created": _timestamp(row.created),
+                            }
+                            for row in visible
+                        ],
+                        "nextCursor": visible[-1].sequence if visible else cursor,
+                        "lastSequence": max(last_sequence, visible[-1].sequence if visible else 0),
+                        "hasMore": len(rows) > limit or pending_outbox,
+                    })
+                    db.session.rollback()
+                    return result
+                db.session.rollback()
+                time.sleep(min(0.75, max(0, deadline - time.monotonic())))
+        except Exception:
+            db.session.rollback()
+            logger.exception("Unable to project teaching conversation events")
+            return _error("会话事件暂时不可用，请稍后重试。", 503, code="EVENT_STREAM_UNAVAILABLE")
+
+
 @teaching_namespace.route(
     "/threads/<string:thread_id>/messages/<int:message_id>/tool-proposals/"
     "<int:proposal_index>/decision"
@@ -5273,7 +5833,11 @@ class TeachingToolProposalDecision(Resource):
             )
         try:
             _require_teacher(user)
-            thread = _thread_for_owner(thread_id, user)
+            thread = TeachingAgentThreads.query.filter_by(
+                id=thread_id, user_id=user.id,
+            ).with_for_update().populate_existing().first()
+            if thread is None:
+                raise ScopeError("Conversation not found")
             if thread.status != "ACTIVE":
                 return _error(
                     "请先恢复这个对话，再处理批准请求。",
@@ -5288,12 +5852,14 @@ class TeachingToolProposalDecision(Resource):
                     role="assistant",
                 )
                 .with_for_update()
+                .populate_existing()
                 .first()
             )
             if source_message is None:
                 return _error("Approval request not found", 404, code="NOT_FOUND")
 
-            metadata = dict(source_message.metadata_json or {})
+            from ...agent_runtime.tool_plan import message_metadata
+            metadata = message_metadata(source_message)
             if metadata.get("pending") is not False:
                 return _error(
                     "智能体尚未完成这项请求，请稍后再决定。",
@@ -5317,42 +5883,138 @@ class TeachingToolProposalDecision(Resource):
             decisions = metadata.get("toolProposalDecisions")
             decisions = dict(decisions) if isinstance(decisions, dict) else {}
             decision_key = str(proposal_index)
-            existing = decisions.get(decision_key)
+            envelope = proposal_request(thread.id, source_message.id, proposal_index, proposal)
+            existing = recorded_decision(thread.id, envelope['id']) or decisions.get(decision_key)
             if isinstance(existing, dict):
-                if str(existing.get("decision") or "").upper() == decision:
-                    return _ok(
-                        {
-                            "thread": _thread_view(thread, include_messages=True),
-                            "decision": existing,
-                            "deduplicated": True,
-                        }
-                    )
-                return _error(
-                    "This approval request was already decided",
-                    409,
-                    code="PROPOSAL_ALREADY_DECIDED",
-                )
-
-            recorded = {
-                "decision": decision,
-                "decidedAt": _timestamp(datetime.datetime.utcnow()),
-                "actorId": user.id,
-            }
+                if str(existing.get("decision") or "").upper() != decision:
+                    raise ApprovalJournalError("这项请求已有决定。", "ALREADY_DECIDED")
+                if existing.get('version') != 1:
+                    return _ok({"thread": _thread_view(thread, include_messages=True),
+                                "decision": existing, "deduplicated": True, "legacy": True})
+            recorded, duplicate = decide_approval(
+                envelope, body.get('approvalRequest'), decision, user.id,
+            )
             decisions[decision_key] = recorded
             metadata["toolProposalDecisions"] = decisions
             source_message.metadata_json = metadata
             thread.updated = datetime.datetime.utcnow()
             db.session.commit()
+            publish_pending_outbox()
             return _ok(
                 {
                     "thread": _thread_view(thread, include_messages=True),
                     "decision": recorded,
-                    "deduplicated": False,
+                    "deduplicated": duplicate,
                 }
             )
         except ScopeError as exc:
             db.session.rollback()
             return _error(exc, 404, code="NOT_FOUND")
+        except ApprovalJournalError as exc:
+            return _error(exc, exc.status, code=exc.code)
+        finally:
+            db.session.rollback()
+
+
+def _serialize_teacher_agent_history(messages, bundles, current_message_id=None, limit=48000):
+    conversation = []
+    sources = []
+    option_sources = {}
+    for bundle in bundles:
+        for option in bundle["options"]:
+            selection = bundle.get("selection") or {}
+            source = {
+                "ref": f'option:{bundle["sourceMessageId"]}:{option["id"]}',
+                "kind": "generation-option",
+                "authorship": "model",
+                "sourceMessageId": bundle["sourceMessageId"],
+                "sourceJobId": bundle["sourceJobId"],
+                "optionId": option["id"],
+                "title": option["title"],
+                "content": option["rewrittenPrompt"],
+                "originalRequest": bundle["originalRequest"],
+                "selected": selection.get("optionId") == option["id"],
+                "selectionMessageId": selection.get("selectionMessageId")
+                if selection.get("optionId") == option["id"] else None,
+            }
+            option_sources[(str(bundle["sourceMessageId"]), option["id"])] = source
+            sources.append(source)
+    remaining = limit
+    for message in sorted(messages, key=lambda item: item["id"], reverse=True):
+        if message["id"] == current_message_id:
+            continue
+        metadata = message.get("metadata") or {}
+        role = message["role"]
+        origin = "teacher-authored" if role == "user" else "model-authored"
+        text = str(message.get("content") or "")
+        source_ref = f'message:{message["id"]}'
+        selection_event = role == "user" and metadata.get("client") == "generation-option-selection"
+        if selection_event:
+            source = option_sources.get((str(metadata.get("sourceMessageId")), str(metadata.get("optionId"))))
+            verified = source is not None and source["selectionMessageId"] == message["id"]
+            role = "assistant"
+            origin = "model-draft-selection" if verified else "unverified-selection-event"
+            source_ref = source["ref"] if verified else None
+            text = "教师当时选择了模型方案；方案正文不是教师原创要求。" if verified else "旧方案选择的来源无法验证，不能作为新需求。"
+        if len(text) > remaining:
+            continue
+        remaining -= len(text)
+        conversation.append({
+            "id": message["id"], "role": role, "origin": origin,
+            "sourceRef": source_ref, "content": text,
+            **({"selectionEvent": {"authorship": "teacher", "sourceRef": source_ref}}
+               if origin == "model-draft-selection" else {}),
+        })
+        if not selection_event:
+            sources.append({
+                "ref": source_ref,
+                "kind": "teacher-message" if role == "user" else "assistant-message",
+                "authorship": "teacher" if role == "user" else "model",
+                "messageId": message["id"],
+                "content": text,
+            })
+    conversation.reverse()
+    return {
+        "conversation": conversation,
+        "requestProvenance": {
+            "version": "teacher-request-v1",
+            "currentMessageId": current_message_id,
+            "sources": sources,
+        },
+    }
+
+
+def _teacher_agent_history_context(user, thread, recent_messages, current_message_id=None):
+    from ...agent_runtime.tool_plan import message_metadata
+    messages = [{
+        "id": message.id, "role": message.role, "content": message.content,
+        "metadata": message_metadata(message, thread_id=thread.id),
+    } for message in recent_messages]
+    bundles = []
+    for message in messages:
+        metadata = message["metadata"]
+        options = metadata.get("generationOptions")
+        if message["role"] != "assistant" or not isinstance(options, dict):
+            continue
+        options = options.get("options")
+        if not isinstance(options, list) or not options or not isinstance(options[0], dict):
+            continue
+        try:
+            verified = _generation_option_context(user, thread, message["id"], options[0].get("id"))
+        except ValueError:
+            continue
+        bundles.append({
+            "sourceMessageId": message["id"],
+            "sourceJobId": verified["sourceJob"].id,
+            "originalRequest": str(verified['sourcePayload'].get("prompt") or ""),
+            "options": verified["bundle"]["options"],
+            "selection": verified["selection"],
+        })
+    from ...agent_runtime.workbench import attach_generated_file_sources
+    return attach_generated_file_sources(
+        _serialize_teacher_agent_history(messages, bundles, current_message_id),
+        messages, user.id, thread.id,
+    )
 
 
 def _generation_option_context(
@@ -5362,21 +6024,31 @@ def _generation_option_context(
     option_id,
     *,
     require_selected=False,
+    require_current=False,
+    lock=False,
 ):
+    from ...agent_runtime.tool_plan import freeze_plan, message_metadata, source_plan
     try:
         source_message_id = int(source_message_id)
     except (TypeError, ValueError) as exc:
         raise ValueError("请选择当前对话中有效的生成方案。") from exc
     normalized_option_id = str(option_id or "").strip()
-    source_message = TeachingAgentMessages.query.filter_by(
+    source_query = TeachingAgentMessages.query.filter_by(
         id=source_message_id,
         thread_id=thread.id,
         user_id=user.id,
         role="assistant",
-    ).first()
+    )
+    if lock:
+        TeachingAgentThreads.query.filter_by(id=thread.id, user_id=user.id).with_for_update().populate_existing().one()
+        source_query = source_query.populate_existing().with_for_update()
+    source_message = source_query.first()
     if source_message is None:
         raise ValueError("没有找到这组生成方案，请刷新对话后重试。")
-    metadata = source_message.metadata_json or {}
+    plan = source_plan(source_message)
+    metadata = message_metadata(source_message, plan)
+    if require_current and metadata.get("generationRefinement"):
+        raise GenerationOptionConflict("这一轮方案已提交修改，请等待并选择后续的新方案。")
     if metadata.get("pending") is not False:
         raise ValueError("生成方案仍在准备中，请稍后再选择。")
     source_job = TeachingJobs.query.filter_by(
@@ -5388,12 +6060,17 @@ def _generation_option_context(
     ).first()
     if source_job is None:
         raise ValueError("生成方案的来源任务尚未完成。")
-    bundle = validated_generation_options(
-        source_job,
-        {"generationOptions": metadata.get("generationOptions")},
+    bundle = metadata.get('generationOptions') if plan else validated_generation_options(
+        source_job, {"generationOptions": metadata.get("generationOptions")},
     )
     if bundle is None:
         raise ValueError("这组生成方案未通过完整性校验，请重新提出生成要求。")
+    if lock and plan is None:
+        plan = freeze_plan(source_message, source_job=source_job, generation_options=bundle)
+        metadata = message_metadata(source_message, plan)
+    scope = metadata.get('generationScope')
+    if require_current and scope and (scope['dojoId'] != thread.dojo_id or scope['moduleIndex'] != thread.module_index):
+        raise GenerationOptionConflict('这组方案的目标课程或章节已变化，请回到原范围或重新提出要求。')
     option = next(
         (item for item in bundle["options"] if item["id"] == normalized_option_id),
         None,
@@ -5415,6 +6092,9 @@ def _generation_option_context(
         "bundle": bundle,
         "option": option,
         "selection": selection,
+        'metadata': metadata,
+        'plan': plan,
+        'sourcePayload': metadata.get('generationRequest') or source_job.payload or {},
     }
 
 
@@ -5422,8 +6102,8 @@ def _generation_option_proposal(user, thread, context):
     bundle = context["bundle"]
     option = context["option"]
     target_tool = bundle["targetTool"]
-    if thread.dojo_id is None:
-        raise ValueError("正式生成前需要先在当前对话中选择目标课程。")
+    if thread.dojo_id is None and target_tool != "candidate.generate":
+        raise ValueError("实践题需要目标课程；课件与演示可保存到生成项目合集。")
 
     if target_tool == "candidate.generate":
         arguments = {
@@ -5551,10 +6231,12 @@ class TeachingGenerationOptionSelection(Resource):
                 thread,
                 message_id,
                 option_id,
+                require_current=True,
+                lock=True,
             )
             source_message = context["sourceMessage"]
             option = context["option"]
-            metadata = dict(source_message.metadata_json or {})
+            metadata = dict(context['metadata'])
             existing = metadata.get("generationSelection")
             existing = existing if isinstance(existing, dict) else None
             if existing is not None:
@@ -5598,6 +6280,8 @@ class TeachingGenerationOptionSelection(Resource):
                 "selectedAt": _timestamp(datetime.datetime.utcnow()),
             }
             metadata["generationSelection"] = selection
+            from ...agent_runtime.generation_events import record_generation
+            record_generation(context, 'selected', selection)
             source_message.metadata_json = metadata
             thread.updated = datetime.datetime.utcnow()
             db.session.commit()
@@ -5621,7 +6305,108 @@ class TeachingGenerationOptionSelection(Resource):
             return _error(exc, 400, code="INVALID_GENERATION_OPTION")
 
 
+@teaching_namespace.route(
+    "/threads/<string:thread_id>/messages/<int:message_id>/generation-options/refine"
+)
+class TeachingGenerationOptionsRefinement(Resource):
+    @authed_only
+    def post(self, thread_id, message_id):
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            thread = _thread_for_owner(thread_id, user)
+            if thread.status != "ACTIVE":
+                return _error("请先恢复这个对话，再修改方案。", 409, code="THREAD_ARCHIVED")
+            body = _body()
+            context = _generation_option_context(user, thread, message_id, "option-1", lock=True)
+            source = context["sourceMessage"]
+            metadata = dict(context['metadata'])
+            request_key = _unique_idempotency(user.id, "generation-refinement")
+            existing = TeachingJobs.query.filter_by(idempotency_key=request_key, owner_id=user.id).first()
+            if existing is not None:
+                recorded = metadata.get('generationRefinement') or {}
+                saved = recorded.get('request') or (existing.payload or {}).get("generationRefinement") or {}
+                if (existing.kind != "agent.chat" or existing.thread_id != thread.id
+                        or (recorded.get('jobId') and recorded['jobId'] != existing.id)
+                        or saved.get("sourceMessageId") != source.id
+                        or str(body.get("content") or "").replace("\x00", "").strip() != saved.get("feedback", [None])[-1]):
+                    raise GenerationOptionConflict("同一发送请求的来源或修改内容不一致，请刷新后重试。")
+                return _ok({"thread": _thread_view(thread, include_messages=True),
+                            "job": job_view(existing), "deduplicated": True}, 202)
+            previous = metadata.get("generationRefinement") or {}
+            if previous:
+                raise GenerationOptionConflict("这一轮已提交修改，请使用后续的新方案；失败任务可以重试。")
+            if context["selection"]:
+                raise GenerationOptionConflict("这一轮已经选定，请在生成结果上继续修改，或新建对话。")
+            source_payload = context['sourcePayload']
+            refinement = generation_refinement_request(source_payload, source.id, context["bundle"], body.get("content"))
+            constraints, incoming_refs = _agent_request_context(body, user, thread)
+            constraints = {**scrub_payload(source_payload.get("constraints") or {}), **constraints}
+            source_refs = list(context["bundle"]["sourceRefs"])
+            for ref in incoming_refs:
+                if ref not in source_refs:
+                    source_refs.append(ref)
+            user_message = TeachingAgentMessages(
+                thread_id=thread.id, user_id=user.id, role="user",
+                content=refinement["feedback"][-1],
+                metadata_json={"client": "generation-options-refinement", "sourceMessageId": source.id,
+                               "generationRound": refinement["round"]},
+            )
+            db.session.add(user_message)
+            db.session.flush()
+            attachments = _message_attachment_views(user, source_refs)
+            if attachments:
+                user_message.metadata_json = {**user_message.metadata_json, "attachments": attachments}
+                _mark_thread_attachments_referenced(thread, [item["id"] for item in attachments], user_message.id)
+            payload = {
+                "prompt": generation_refinement_prompt(refinement),
+                "phase": thread.phase, "constraints": constraints, "sourceRefs": source_refs,
+                "allowDegraded": False, "generationRefinement": refinement,
+                "context": {
+                    "thread": scrub_payload(thread.context or {}),
+                    "platformFacts": _teacher_agent_context(user, thread),
+                    "conversation": [],
+                    "requestProvenance": {"version": "teacher-request-v1", "currentMessageId": user_message.id, "sources": []},
+                    "agentLoop": {"depth": 0, "maxDepth": MAX_AGENT_LOOP_STEPS, "trace": []},
+                },
+            }
+            dependencies = _material_dependency_ids(user.id, source_refs)
+            if dependencies:
+                payload["dependsOnJobIds"] = dependencies
+            job, _ = enqueue_job(owner_id=user.id, kind="agent.chat", idempotency_key=request_key,
+                                 payload=payload, dojo_id=thread.dojo_id, module_index=thread.module_index,
+                                 thread_id=thread.id, priority=80, publish=False, commit=False)
+            assistant = TeachingAgentMessages(
+                thread_id=thread.id, user_id=user.id, role="assistant",
+                content=f"正在结合原始要求和 {len(refinement['feedback'])} 次修改，准备第 {refinement['round']} 轮的三个新方案；不会开始正式生成…",
+                metadata_json={"pending": True, "presentation": "activity", "jobId": job.id,
+                               "jobKind": job.kind, "jobStatus": job.status, "agentRootJobId": job.id,
+                               "generationRound": refinement["round"], "refinementSourceMessageId": source.id},
+            )
+            db.session.add(assistant)
+            metadata["generationRefinement"] = {"status": "SUPERSEDED", "jobId": job.id,
+                                                "feedbackMessageId": user_message.id, "nextRound": refinement["round"],
+                                                'request': refinement, 'requestKey': request_key}
+            from ...agent_runtime.generation_events import record_generation
+            record_generation(context, 'refined', metadata['generationRefinement'])
+            source.metadata_json = metadata
+            thread.updated = datetime.datetime.utcnow()
+            db.session.commit()
+            publish_pending_outbox(job_id=job.id)
+            return _ok({"thread": _thread_view(thread, include_messages=True), "job": job_view(job),
+                        "deduplicated": False}, 202)
+        except IntegrityError:
+            db.session.rollback()
+            return _error("并发提交已被拦截，请刷新对话查看任务，避免重复发送。", 409, code="GENERATION_OPTION_CONFLICT")
+        except (ScopeError, ValueError) as exc:
+            db.session.rollback()
+            conflict = isinstance(exc, GenerationOptionConflict)
+            return _error(exc, 404 if isinstance(exc, ScopeError) else 409 if conflict else 400,
+                          code="NOT_FOUND" if isinstance(exc, ScopeError) else "GENERATION_OPTION_CONFLICT" if conflict else "INVALID_REQUEST")
+
+
 def _agent_continuation_context(user, thread, body):
+    from ...agent_runtime.tool_plan import message_metadata, source_plan, progress
     try:
         source_message_id = int(body.get("sourceMessageId"))
     except (TypeError, ValueError) as exc:
@@ -5634,7 +6419,8 @@ def _agent_continuation_context(user, thread, body):
     ).first()
     if source_message is None:
         raise ValueError("Agent continuation source was not found")
-    metadata = source_message.metadata_json or {}
+    plan = source_plan(source_message)
+    metadata = message_metadata(source_message, plan)
     if metadata.get("pending") is not False:
         raise ValueError("Agent continuation source is not complete")
     source_job = TeachingJobs.query.filter_by(
@@ -5646,6 +6432,9 @@ def _agent_continuation_context(user, thread, body):
     ).first()
     if source_job is None:
         raise ValueError("Agent continuation source job is not complete")
+    from ...agent_runtime.workbench import require_execution_mode
+    from ...agent_runtime.model_inputs import request_payload
+    require_execution_mode(request_payload(source_job))
 
     proposals = metadata.get("toolProposals")
     proposals = proposals if isinstance(proposals, list) else []
@@ -5687,7 +6476,23 @@ def _agent_continuation_context(user, thread, body):
             "status": "context-refreshed",
             "reason": str(proposal.get("reason") or "")[:500],
         }
-        if tool in COURSE_TOOL_NAMES:
+        recorded = (metadata.get('toolExecutionResults') or {}).get(str(index)) or {}
+        if plan and not recorded:
+            phase = progress(plan) or {}
+            first_unobserved = next((i for i in range(len(proposals)) if not (
+                metadata.get('toolExecutionResults') or {}
+            ).get(str(i))), None)
+            if phase.get('state') != 'awaiting-action' or index != first_unobserved:
+                raise ValueError(f'No completed tool observation is available for {tool}')
+        if plan and recorded:
+            if recorded.get('status') not in {'SUCCEEDED', 'REJECTED'}:
+                raise ValueError(f'No completed tool observation is available for {tool}')
+            observation['status'] = 'rejected' if recorded['status'] == 'REJECTED' else 'verified'
+            observation['observation'] = _bounded_agent_fact(
+                recorded.get('observations') or recorded.get('receipt') or recorded,
+                text_limit=500, item_limit=12,
+            )
+        elif tool in COURSE_TOOL_NAMES:
             idempotency_prefix = (
                 f"agent-tool:{user.id}:agent-proposal:{source_message.id}:{index}"
             )
@@ -5714,7 +6519,9 @@ def _agent_continuation_context(user, thread, body):
                     "status": "verified",
                     "actionId": action.id,
                     "actionStatus": action.status,
-                    "observation": _bounded_agent_fact(
+                    "observation": assignment_agent_observation(action.result or {})
+                    if tool in {"assignment.read", "assignment.generate", "assignment.update"}
+                    else _bounded_agent_fact(
                         action.result or {},
                         text_limit=500,
                         item_limit=12,
@@ -5760,6 +6567,8 @@ def _agent_continuation_context(user, thread, body):
         raise ValueError("Original teacher request is no longer available")
     return {
         "prompt": prompt,
+        "requestProvenance": (root_payload.get("context") or {}).get("requestProvenance"),
+        "questionReply": (root_payload.get("context") or {}).get("questionReply"),
         "constraints": scrub_payload(root_payload.get("constraints") or {}),
         "sourceRefs": scrub_payload(root_payload.get("sourceRefs") or []),
         "allowDegraded": bool(root_payload.get("allowDegraded")),
@@ -5777,397 +6586,541 @@ def _agent_continuation_context(user, thread, body):
 class TeachingThreadMessages(Resource):
     @authed_only
     def post(self, thread_id):
-        user = _current_user()
-        try:
-            _require_teacher(user)
-            thread = _thread_for_owner(thread_id, user)
-            if thread.status != "ACTIVE":
-                return _error(
-                    "Restore this conversation before sending another message",
-                    409,
-                    code="THREAD_ARCHIVED",
+        return submit_teacher_message(_current_user(), thread_id, _body(), request.headers.get("Idempotency-Key"))
+
+
+def submit_teacher_message(user, thread_id, body, request_key=None):
+    try:
+        from ...agent_runtime.workbench import execution_mode, require_execution_mode
+        mode = execution_mode(body)
+        _require_teacher(user)
+        thread = _thread_for_owner(thread_id, user)
+        thread = TeachingAgentThreads.query.filter_by(id=thread.id, user_id=user.id).with_for_update().populate_existing().one()
+        if thread.status != "ACTIVE":
+            return _error(
+                "Restore this conversation before sending another message",
+                409,
+                code="THREAD_ARCHIVED",
+            )
+        requested_action = str(body.get("action") or "").strip().lower()
+        continuation = body.get("agentContinuation") is True
+        if continuation:
+            require_execution_mode(body)
+        submission_key = _supplied_idempotency(user.id, "thread-message", request_key)
+        wait_for_job_ids = []
+        if not continuation:
+            existing, wait_for_job_ids = prepare_turn_submission(db.session, thread, body, submission_key)
+            if existing is not None:
+                response = _ok({"thread": _thread_view(thread, include_messages=True),
+                                "job": job_view(existing), "candidateSetId": None,
+                                "deduplicated": True}, 202)
+                db.session.commit()
+                return response
+        continuation_context = None
+        question_source = None
+        question_context = None
+        if body.get("questionReply") is not None:
+            from ...agent_runtime.conversation import validated_question_answers, question_reply_context
+            reply = body["questionReply"]
+            if not isinstance(reply, dict) or continuation:
+                raise ConversationConflict("问题回答格式不正确。")
+            try:
+                source_id = int(reply.get("sourceMessageId"))
+            except (ValueError, TypeError) as exc:
+                raise ConversationConflict("问题编号不正确，请刷新对话后再回答。") from exc
+            question_source = TeachingAgentMessages.query.filter_by(
+                id=source_id, thread_id=thread.id, user_id=user.id, role="assistant",
+            ).first()
+            if question_source is None or (question_source.metadata_json or {}).get("questionReplyJobId"):
+                raise ConversationConflict("这组问题已回答或不属于当前对话。")
+            question_meta = question_source.metadata_json or {}
+            source_job = TeachingJobs.query.filter_by(id=str(question_meta.get("jobId") or ""), owner_id=user.id,
+                                                      thread_id=thread.id, kind="agent.chat", status="SUCCEEDED").first()
+            if source_job is None or question_meta.get("pending") is not False:
+                raise ConversationConflict("问题尚未准备完成，请稍后再试。")
+            answers = validated_question_answers(question_meta.get("questions"), reply)
+            question_context = question_reply_context(source_job.payload or {}, question_meta["questions"], answers)
+            mode = execution_mode(source_job.payload or {})
+        selected_generation = None
+        if continuation:
+            if requested_action == "continue":
+                continuation_context = _agent_continuation_context(
+                    user, thread, body
                 )
-            body = _body()
-            requested_action = str(body.get("action") or "").strip().lower()
-            continuation = body.get("agentContinuation") is True
-            continuation_context = None
-            selected_generation = None
-            if continuation:
-                if requested_action == "continue":
-                    continuation_context = _agent_continuation_context(
-                        user, thread, body
+                content = continuation_context["prompt"]
+                question_context = continuation_context.get("questionReply")
+            elif requested_action == "generate":
+                raw_selection = body.get("generationSelection")
+                if isinstance(raw_selection, dict):
+                    selected_generation = _generation_option_context(
+                        user,
+                        thread,
+                        raw_selection.get("sourceMessageId"),
+                        raw_selection.get("optionId"),
+                        require_selected=True,
+                        require_current=True,
+                        lock=True,
                     )
-                    content = continuation_context["prompt"]
-                elif requested_action == "generate":
-                    raw_selection = body.get("generationSelection")
-                    if isinstance(raw_selection, dict):
-                        selected_generation = _generation_option_context(
-                            user,
-                            thread,
-                            raw_selection.get("sourceMessageId"),
-                            raw_selection.get("optionId"),
-                            require_selected=True,
-                        )
-                        content = selected_generation["option"]["rewrittenPrompt"]
-                    else:
-                        content = str(body.get("content") or "").strip()
+                    prior = selected_generation["selection"] or {}
+                    if prior.get("status") == "STARTED":
+                        existing = TeachingJobs.query.filter_by(
+                            id=prior.get("formalJobId"), owner_id=user.id,
+                            thread_id=thread.id, kind="candidate.generate",
+                        ).first()
+                        if existing is None:
+                            raise GenerationOptionConflict("已选方案的生成任务不存在，请联系管理员。")
+                        return _ok({"thread": _thread_view(thread, include_messages=True),
+                                    "job": job_view(existing), "candidateSetId": prior.get("candidateSetId"),
+                                    "deduplicated": True}, 202)
+                    content = selected_generation["option"]["rewrittenPrompt"]
                 else:
-                    raise ValueError("Agent continuation must name an explicit action")
+                    content = str(body.get("content") or "").strip()
             else:
-                content = str(body.get("content") or "").strip()
-            if not content:
-                return _error("Message content is required")
-            if len(content) > MAX_MESSAGE_CHARS:
-                return _error(f"Message exceeds {MAX_MESSAGE_CHARS} characters", 413)
+                raise ValueError("Agent continuation must name an explicit action")
+        else:
+            content = str(body.get("content") or "").strip()
+        if not content:
+            return _error("Message content is required")
+        if len(content) > MAX_MESSAGE_CHARS:
+            return _error(f"Message exceeds {MAX_MESSAGE_CHARS} characters", 413)
 
-            continuation_idempotency = None
-            if continuation_context is not None:
-                continuation_idempotency = _unique_idempotency(
-                    user.id,
-                    "agent-loop",
-                )
-                existing = TeachingJobs.query.filter_by(
-                    idempotency_key=continuation_idempotency,
-                    owner_id=user.id,
-                    thread_id=thread.id,
-                    kind="agent.chat",
-                ).first()
-                if existing is not None:
-                    return _ok(
-                        {
-                            "thread": _thread_view(thread, include_messages=True),
-                            "job": job_view(existing),
-                            "candidateSetId": None,
-                            "deduplicated": True,
-                        },
-                        202,
-                    )
+        plan_context = None
+        if body.get("planSourceMessageId") is not None:
+            if continuation or mode != "execute":
+                raise ConversationConflict("执行计划需要明确选择执行模式。")
+            try:
+                plan_message_id = int(body["planSourceMessageId"])
+            except (ValueError, TypeError) as exc:
+                raise ConversationConflict("计划编号不正确。") from exc
+            plan_source = TeachingAgentMessages.query.filter_by(
+                id=plan_message_id, thread_id=thread.id,
+                user_id=user.id, role="assistant",
+            ).first()
+            plan_meta = (plan_source.metadata_json or {}) if plan_source else {}
+            plan_job = TeachingJobs.query.filter_by(
+                id=plan_meta.get("jobId"), owner_id=user.id, thread_id=thread.id,
+                kind="agent.chat", status="SUCCEEDED",
+            ).first() if plan_source else None
+            if plan_job is None or execution_mode(plan_job.payload or {}) != "plan" or plan_meta.get("pending") is not False:
+                raise ConversationConflict("这份计划尚未完成或不属于当前会话。")
+            plan_context = {"messageId": plan_source.id, "answer": plan_source.content,
+                            "plan": plan_meta.get("plan") or []}
 
-            if body.get("dojoId") is not None:
-                scope = build_scope(
-                    user,
-                    role="teacher",
-                    dojo_id=body.get("dojoId"),
-                    module_index=body.get("moduleIndex"),
-                )
-                thread.dojo_id = scope.dojo_id
-                thread.module_index = scope.module_index
-            if thread.dojo_id is not None:
-                build_scope(
-                    user,
-                    role="teacher",
-                    dojo_id=thread.dojo_id,
-                    module_index=thread.module_index,
+        continuation_idempotency = None
+        if continuation_context is not None:
+            continuation_idempotency = _supplied_idempotency(user.id, "agent-loop", request_key)
+            existing = TeachingJobs.query.filter_by(
+                idempotency_key=continuation_idempotency,
+                owner_id=user.id,
+                thread_id=thread.id,
+                kind="agent.chat",
+            ).first()
+            if existing is not None:
+                return _ok(
+                    {
+                        "thread": _thread_view(thread, include_messages=True),
+                        "job": job_view(existing),
+                        "candidateSetId": None,
+                        "deduplicated": True,
+                    },
+                    202,
                 )
 
-            user_message = None
-            if not continuation:
-                user_message = TeachingAgentMessages(
-                    thread_id=thread.id,
-                    user_id=user.id,
-                    role="user",
-                    content=content,
-                    metadata_json={"client": body.get("client") or "teacher-global"},
-                )
-                db.session.add(user_message)
-                db.session.flush()
-                if thread.title in DEFAULT_THREAD_TITLES:
-                    thread.title = _thread_title_from_message(content)
+        if body.get("dojoId") is not None:
+            scope = build_scope(
+                user,
+                role="teacher",
+                dojo_id=body.get("dojoId"),
+                module_index=body.get("moduleIndex"),
+            )
+            thread.dojo_id = scope.dojo_id
+            thread.module_index = scope.module_index
+        if thread.dojo_id is not None:
+            build_scope(
+                user,
+                role="teacher",
+                dojo_id=thread.dojo_id,
+                module_index=thread.module_index,
+            )
 
+        user_message = None
+        if not continuation:
+            user_message = TeachingAgentMessages(
+                thread_id=thread.id,
+                user_id=user.id,
+                role="user",
+                content=content,
+                metadata_json={"client": body.get("client") or "teacher-global"},
+            )
+            db.session.add(user_message)
+            db.session.flush()
+            if thread.title in DEFAULT_THREAD_TITLES:
+                thread.title = _thread_title_from_message(content)
+
+        if session_history_replayable(thread.id):
+            # New conversations derive the model-visible history from the
+            # same durable message events used to reconstruct the page.
+            recent_messages = replay_session_messages(thread.id)[-30:]
+        else:
             recent_messages = (
                 TeachingAgentMessages.query.filter_by(thread_id=thread.id)
                 .order_by(TeachingAgentMessages.id.desc())
                 .limit(30)
                 .all()
             )
-            conversation = []
-            remaining_history = 48000
-            for message in reversed(recent_messages):
-                if remaining_history <= 0:
-                    break
-                text = str(message.content or "")[:remaining_history]
-                conversation.append({"role": message.role, "content": text})
-                remaining_history -= len(text)
-            platform_context = _teacher_agent_context(user, thread)
+        history_context = _teacher_agent_history_context(
+            user, thread, recent_messages,
+            user_message.id if user_message is not None else None,
+        )
+        conversation = history_context["conversation"]
+        if continuation_context and isinstance(continuation_context.get("requestProvenance"), dict):
+            history_context["requestProvenance"] = continuation_context["requestProvenance"]
+        if "learningPattern" in body:
+            pattern_id = body["learningPattern"]
+            if pattern_id not in ("", "process-inquiry"):
+                raise ValueError("请选择有效的学习模式。")
+            thread.context = {**(thread.context or {}), "learningPattern": inquiry_pattern_catalog() if pattern_id else None}
+        platform_context = _teacher_agent_context(user, thread)
 
-            generate = continuation and requested_action == "generate"
-            if generate and thread.dojo_id is None:
+        generate = continuation and requested_action == "generate"
+        if continuation_context is not None:
+            constraints = continuation_context["constraints"]
+            source_refs = continuation_context["sourceRefs"]
+            allow_degraded = continuation_context["allowDegraded"]
+            agent_loop = continuation_context["agentLoop"]
+        elif selected_generation is not None:
+            source_payload = selected_generation['sourcePayload']
+            constraints = scrub_payload(source_payload.get("constraints") or {})
+            source_refs = selected_generation["bundle"]["sourceRefs"]
+            allow_degraded = bool(source_payload.get("allowDegraded"))
+            agent_loop = {
+                "depth": 0,
+                "maxDepth": MAX_AGENT_LOOP_STEPS,
+                "trace": [],
+            }
+        else:
+            constraints, source_refs = _agent_request_context(body, user, thread)
+            allow_degraded = bool(body.get("allowDegraded"))
+            agent_loop = {
+                "depth": 0,
+                "maxDepth": MAX_AGENT_LOOP_STEPS,
+                "trace": [],
+            }
+        if user_message is not None:
+            if question_context:
+                user_message.metadata_json = {**(user_message.metadata_json or {}), "questionReply": question_context}
+            attachments = _message_attachment_views(user, source_refs)
+            if attachments:
+                known_ids = {str(item["id"]) for item in _thread_attachment_entries(thread)}
+                new_ids = [str(item["id"]) for item in attachments if str(item["id"]) not in known_ids]
+                if new_ids:
+                    new_materials = {
+                        row.id: row for row in TeachingMaterials.query.filter(
+                            TeachingMaterials.id.in_(new_ids),
+                            TeachingMaterials.owner_id == user.id,
+                        ).all()
+                    }
+                    analysis_jobs = _material_jobs(user.id, new_ids)
+                    for material_id in new_ids:
+                        material = new_materials.get(material_id)
+                        if material is not None:
+                            _remember_thread_attachment(
+                                thread, material, analysis_jobs.get(material_id), status="ACTIVE",
+                            )
+                user_message.metadata_json = {
+                    **(user_message.metadata_json or {}),
+                    "attachments": attachments,
+                }
+                _mark_thread_attachments_referenced(
+                    thread,
+                    [item["id"] for item in attachments],
+                    user_message.id,
+                )
+        dependency_ids = _material_dependency_ids(user.id, source_refs)
+        candidate_set = None
+        if generate:
+            artifact_type = str(body.get("artifactType") or "").strip().lower()
+            if selected_generation is not None:
+                artifact_type = selected_generation["bundle"]["artifactType"]
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", artifact_type):
                 raise ValueError(
-                    "A model-selected generation tool needs a target course"
+                    "Model-planned generation requires a valid artifact type"
                 )
-
-            if continuation_context is not None:
-                constraints = continuation_context["constraints"]
-                source_refs = continuation_context["sourceRefs"]
-                allow_degraded = continuation_context["allowDegraded"]
-                agent_loop = continuation_context["agentLoop"]
-            elif selected_generation is not None:
-                source_payload = selected_generation["sourceJob"].payload or {}
-                constraints = scrub_payload(source_payload.get("constraints") or {})
-                source_refs = selected_generation["bundle"]["sourceRefs"]
-                allow_degraded = bool(source_payload.get("allowDegraded"))
-                agent_loop = {
-                    "depth": 0,
-                    "maxDepth": MAX_AGENT_LOOP_STEPS,
-                    "trace": [],
-                }
-            else:
-                constraints, source_refs = _agent_request_context(body, user, thread)
-                allow_degraded = bool(body.get("allowDegraded"))
-                agent_loop = {
-                    "depth": 0,
-                    "maxDepth": MAX_AGENT_LOOP_STEPS,
-                    "trace": [],
-                }
-            if user_message is not None:
-                attachments = _message_attachment_views(user, source_refs)
-                if attachments:
-                    user_message.metadata_json = {
-                        **(user_message.metadata_json or {}),
-                        "attachments": attachments,
-                    }
-                    _mark_thread_attachments_referenced(
-                        thread,
-                        [item["id"] for item in attachments],
-                        user_message.id,
-                    )
-            dependency_ids = _material_dependency_ids(user.id, source_refs)
-            candidate_set = None
-            if generate:
-                artifact_type = str(body.get("artifactType") or "").strip().lower()
-                if selected_generation is not None:
-                    artifact_type = selected_generation["bundle"]["artifactType"]
-                if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", artifact_type):
-                    raise ValueError(
-                        "Model-planned generation requires a valid artifact type"
-                    )
-                if (
-                    artifact_type in GENERATION_OPTION_ARTIFACT_TYPES
-                    and selected_generation is None
-                ):
-                    raise ValueError(
-                        "请先在智能体给出的三套候选方案中选择一套，再开始正式生成。"
-                    )
-                try:
-                    count = (
-                        1
-                        if selected_generation is not None
-                        else int(body.get("candidateCount") or 1)
-                    )
-                except (TypeError, ValueError) as exc:
-                    raise ValueError("Candidate count must be an integer") from exc
-                if count not in {1, 2, 3, 4}:
-                    raise ValueError("Candidate count must be between 1 and 4")
-                generation_mode = "multiple" if count > 1 else "single"
-                generation_reason = (
-                    "teacher_selected_prompt_option"
+            if (
+                artifact_type in GENERATION_OPTION_ARTIFACT_TYPES
+                and selected_generation is None
+            ):
+                raise ValueError(
+                    "请先在智能体给出的三套候选方案中选择一套，再开始正式生成。"
+                )
+            try:
+                count = (
+                    1
                     if selected_generation is not None
-                    else "model_planned"
+                    else int(body.get("candidateCount") or 1)
                 )
-                selection_provenance = (
-                    {
-                        "sourceMessageId": selected_generation["sourceMessage"].id,
-                        "sourceJobId": selected_generation["sourceJob"].id,
-                        "optionId": selected_generation["option"]["id"],
-                        "optionTitle": selected_generation["option"]["title"],
-                    }
-                    if selected_generation is not None
-                    else None
-                )
-                candidate_set = create_candidate_set(
-                    owner_id=user.id,
-                    dojo_id=thread.dojo_id,
-                    module_index=thread.module_index,
-                    thread_id=thread.id,
-                    kind=artifact_type,
-                    request_json={
-                        "prompt": content,
-                        "candidateCount": count,
-                        "generationMode": generation_mode,
-                        "generationReason": generation_reason,
-                        "phase": thread.phase,
-                        "constraints": constraints,
-                        "generationSelection": selection_provenance,
-                    },
-                    source_refs=source_refs,
-                )
-                payload = {
-                    "candidateSetId": candidate_set.id,
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Candidate count must be an integer") from exc
+            if count not in {1, 2, 3, 4}:
+                raise ValueError("Candidate count must be between 1 and 4")
+            generation_mode = "multiple" if count > 1 else "single"
+            generation_reason = (
+                "teacher_selected_prompt_option"
+                if selected_generation is not None
+                else "model_planned"
+            )
+            selection_provenance = (
+                {
+                    "sourceMessageId": selected_generation["sourceMessage"].id,
+                    "sourceJobId": selected_generation["sourceJob"].id,
+                    "optionId": selected_generation["option"]["id"],
+                    "optionTitle": selected_generation["option"]["title"],
+                }
+                if selected_generation is not None
+                else None
+            )
+            candidate_set = create_candidate_set(
+                owner_id=user.id,
+                dojo_id=thread.dojo_id,
+                module_index=thread.module_index,
+                thread_id=thread.id,
+                kind=artifact_type,
+                request_json={
                     "prompt": content,
-                    "artifactType": artifact_type,
                     "candidateCount": count,
                     "generationMode": generation_mode,
                     "generationReason": generation_reason,
                     "phase": thread.phase,
                     "constraints": constraints,
-                    "sourceRefs": source_refs,
-                    "conversation": conversation,
-                    "courseContext": platform_context,
-                    "allowDegraded": allow_degraded,
                     "generationSelection": selection_provenance,
-                }
-                if dependency_ids:
-                    payload["dependsOnJobIds"] = dependency_ids
-                job_kind = "candidate.generate"
-                assistant_text = (
-                    f"正在按你的要求准备 {count} 种实质不同的方案，完成后会在当前对话中给出可比较的结果。"
-                    if generation_mode == "multiple"
-                    else (
-                        f"正在按已选择的“{selected_generation['option']['title']}”正式生成，"
-                        "完成后会在当前对话中直接给出可预览、可继续修改的结果。"
-                        if selected_generation is not None
-                        else "正在按你的要求制作这项教学内容，完成后会在当前对话中直接给出可预览、可继续修改的结果。"
-                    )
-                )
-            else:
-                payload = {
-                    "prompt": content,
-                    "phase": thread.phase,
-                    "constraints": constraints,
-                    "sourceRefs": source_refs,
-                    "context": {
-                        "thread": scrub_payload(thread.context or {}),
-                        "platformFacts": platform_context,
-                        "conversation": conversation,
-                        "agentLoop": agent_loop,
-                    },
-                    "allowDegraded": allow_degraded,
-                }
-                if dependency_ids:
-                    payload["dependsOnJobIds"] = dependency_ids
-                job_kind = "agent.chat"
-                assistant_text = "正在理解完整要求、选择相关技能并规划下一步…"
-
-            assistant = TeachingAgentMessages(
-                thread_id=thread.id,
-                user_id=user.id,
-                role="assistant",
-                content=assistant_text,
-                metadata_json={
-                    "pending": True,
-                    "presentation": "activity",
-                    "jobKind": job_kind,
-                    "jobStatus": "QUEUED",
-                    "agentLoopDepth": int(agent_loop.get("depth") or 0),
-                    "agentLoopTrace": agent_loop.get("trace") or [],
-                    "agentRootJobId": agent_loop.get("rootJobId"),
                 },
+                source_refs=source_refs,
             )
-            db.session.add(assistant)
-            db.session.flush()
-            candidate_card = None
-            if candidate_set:
-                candidate_card = add_card(
-                    assistant,
-                    card_type="candidate_set",
-                    object_type="candidate_set",
-                    object_id=candidate_set.id,
-                    state={
-                        "status": "GENERATING",
-                        "kind": artifact_type,
-                        "candidateCount": count,
-                        "generationMode": generation_mode,
-                        "generationReason": generation_reason,
-                    },
-                    actions=["open", "regenerate", "cancel"],
+            payload = {
+                "candidateSetId": candidate_set.id,
+                "prompt": content,
+                "artifactType": artifact_type,
+                "candidateCount": count,
+                "generationMode": generation_mode,
+                "generationReason": generation_reason,
+                "phase": thread.phase,
+                "constraints": constraints,
+                "sourceRefs": source_refs,
+                "conversation": conversation,
+                "courseContext": platform_context,
+                "allowDegraded": allow_degraded,
+                "generationSelection": selection_provenance,
+            }
+            if dependency_ids:
+                payload["dependsOnJobIds"] = dependency_ids
+            job_kind = "candidate.generate"
+            assistant_text = (
+                f"正在按你的要求准备 {count} 种实质不同的方案，完成后会在当前对话中给出可比较的结果。"
+                if generation_mode == "multiple"
+                else (
+                    f"正在按已选择的“{selected_generation['option']['title']}”正式生成，"
+                    "完成后会在当前对话中直接给出可预览、可继续修改的结果。"
+                    if selected_generation is not None
+                    else "正在按你的要求制作这项教学内容，完成后会在当前对话中直接给出可预览、可继续修改的结果。"
                 )
-            db.session.commit()
-
-            job, _ = enqueue_job(
-                owner_id=user.id,
-                kind=job_kind,
-                idempotency_key=(
-                    continuation_idempotency
-                    or _unique_idempotency(user.id, "thread-message")
-                ),
-                payload=payload,
-                dojo_id=thread.dojo_id,
-                module_index=thread.module_index,
-                thread_id=thread.id,
-                priority=30 if generate else 80,
-                publish=False,
             )
-            if candidate_card is not None:
-                candidate_card.state = {
-                    **(candidate_card.state or {}),
-                    "jobId": job.id,
+        else:
+            payload = {
+                "prompt": content,
+                "executionMode": mode,
+                "phase": thread.phase,
+                "constraints": constraints,
+                "sourceRefs": source_refs,
+                "context": {
+                    "thread": scrub_payload(thread.context or {}),
+                    "platformFacts": platform_context,
+                    "conversation": conversation,
+                    "requestProvenance": history_context["requestProvenance"],
+                    "agentLoop": agent_loop,
+                    "questionReply": question_context,
+                    "approvedPlan": plan_context,
+                },
+                "allowDegraded": allow_degraded,
+            }
+            if dependency_ids:
+                payload["dependsOnJobIds"] = dependency_ids
+            job_kind = "agent.chat"
+            if question_context:
+                from ...agent_runtime.conversation import question_reply_prompt
+                # Persist the complete teacher brief too, so later selection,
+                # refinement and materialization keep the same original intent.
+                payload["prompt"] = question_reply_prompt(question_context)
+            assistant_text = "正在理解完整要求、选择相关技能并规划下一步…"
+
+        if job_kind == "agent.chat":
+            payload["harnessVersion"] = HARNESS_VERSION
+            if not continuation:
+                payload["submissionFingerprint"] = submission_fingerprint(body)
+                payload["userMessageId"] = user_message.id
+            if wait_for_job_ids:
+                payload["waitForJobIds"] = wait_for_job_ids
+                payload["inputDelivery"] = body.get("delivery") or "after-current"
+                payload["inputRevision"] = 0
+                if body.get("delivery") == "next-step":
+                    target = TeachingJobs.query.filter_by(id=body.get("expectedJobId"), owner_id=user.id, thread_id=thread.id).first()
+                    if target is None:
+                        raise ConversationConflict("运行中的任务已变化，请查看最新状态后再补充。")
+                    payload["steeringRootJobId"] = str((target.payload or {}).get("harnessRootJobId") or target.id)
+                    assistant_text = "已收到补充，将在当前操作结束后的下一个执行边界处理；你可以编辑或撤回。"
+                else:
+                    assistant_text = "已排队，前面的任务处理完后会继续；你可以编辑或撤回这条要求。"
+
+        assistant = TeachingAgentMessages(
+            thread_id=thread.id,
+            user_id=user.id,
+            role="assistant",
+            content=assistant_text,
+            metadata_json={
+                "pending": True,
+                "presentation": "activity",
+                "jobKind": job_kind,
+                "jobStatus": "QUEUED",
+                "executionMode": mode,
+                "agentLoopDepth": int(agent_loop.get("depth") or 0),
+                "agentLoopTrace": agent_loop.get("trace") or [],
+                "agentRootJobId": agent_loop.get("rootJobId"),
+            },
+        )
+        db.session.add(assistant)
+        db.session.flush()
+        candidate_card = None
+        if candidate_set:
+            candidate_card = add_card(
+                assistant,
+                card_type="candidate_set",
+                object_type="candidate_set",
+                object_id=candidate_set.id,
+                state={
+                    "status": "GENERATING",
+                    "kind": artifact_type,
+                    "candidateCount": count,
+                    "generationMode": generation_mode,
+                    "generationReason": generation_reason,
+                },
+                actions=["open", "regenerate", "cancel"],
+            )
+        db.session.flush()
+
+        job, _ = enqueue_job(
+            owner_id=user.id,
+            kind=job_kind,
+            idempotency_key=(
+                continuation_idempotency
+                or submission_key
+            ),
+            payload=payload,
+            dojo_id=thread.dojo_id,
+            module_index=thread.module_index,
+            thread_id=thread.id,
+            priority=30 if generate else 80,
+            publish=False,
+            commit=False,
+        )
+        if job_kind == "agent.chat":
+            root_id = str(agent_loop.get("rootJobId") or job.id)
+            job.payload = {**(job.payload or {}), "harnessRootJobId": root_id,
+                           "harnessInternal": root_id != job.id, "taskListHidden": root_id != job.id}
+            if payload.get("inputDelivery") == "next-step":
+                queued = TeachingJobs.query.filter_by(owner_id=user.id, thread_id=thread.id, kind="agent.chat", status="QUEUED").all()
+                for row in queued:
+                    from ...agent_runtime.model_inputs import request_payload, revise_pending_input
+                    row_payload = request_payload(row)
+                    if row.id != job.id and row_payload.get("waitForJobIds") and not row_payload.get("harnessInternal") and row_payload.get("inputDelivery") != "next-step":
+                        revise_pending_input(row, {**row_payload, "waitForJobIds": list(dict.fromkeys([*row_payload["waitForJobIds"], job.id]))}, reason="steering-order")
+        if question_source is not None:
+            question_source.metadata_json = {**(question_source.metadata_json or {}), "questionReplyJobId": job.id,
+                                            "questionAnswers": question_context["answers"]}
+        if candidate_card is not None:
+            candidate_card.state = {
+                **(candidate_card.state or {}),
+                "jobId": job.id,
+                "status": job.status,
+                "stage": job.stage,
+                "progress": job.progress,
+            }
+        elif job_kind != "agent.chat":
+            add_card(
+                assistant,
+                card_type="job",
+                object_type="job",
+                object_id=job.id,
+                state={
                     "status": job.status,
                     "stage": job.stage,
                     "progress": job.progress,
-                }
-            elif job_kind != "agent.chat":
-                add_card(
-                    assistant,
-                    card_type="job",
-                    object_type="job",
-                    object_id=job.id,
-                    state={
-                        "status": job.status,
-                        "stage": job.stage,
-                        "progress": job.progress,
-                        "kind": job.kind,
-                        "artifactType": payload.get("artifactType"),
-                    },
-                    actions=["cancel", "retry"],
-                )
-            assistant.metadata_json = {
-                "pending": True,
-                "presentation": "activity",
-                "jobId": job.id,
-                "jobKind": job.kind,
-                "jobStatus": job.status,
-                "generationSelection": (
-                    selection_provenance if selected_generation is not None else None
-                ),
-                "agentLoopDepth": int(agent_loop.get("depth") or 0),
-                "agentLoopTrace": agent_loop.get("trace") or [],
-                "agentRootJobId": agent_loop.get("rootJobId") or job.id,
-            }
-            if selected_generation is not None:
-                source_message = selected_generation["sourceMessage"]
-                source_metadata = dict(source_message.metadata_json or {})
-                source_selection = dict(
-                    source_metadata.get("generationSelection") or {}
-                )
-                source_selection.update(
-                    {
-                        "status": "STARTED",
-                        "formalJobId": job.id,
-                        "candidateSetId": candidate_set.id,
-                        "startedAt": _timestamp(datetime.datetime.utcnow()),
-                    }
-                )
-                source_metadata["generationSelection"] = source_selection
-                source_message.metadata_json = source_metadata
-            if generate:
-                _mark_thread_attachments_consumed(
-                    thread,
-                    [
-                        ref.get("id")
-                        for ref in source_refs
-                        if isinstance(ref, dict) and ref.get("type") == "material"
-                    ],
-                    operation=f"generate:{artifact_type}",
-                    job_id=job.id,
-                )
-            thread.updated = datetime.datetime.utcnow()
-            db.session.commit()
-            publish_pending_outbox(job_id=job.id)
-            return _ok(
-                {
-                    "thread": _thread_view(thread, include_messages=True),
-                    "job": job_view(job),
-                    "candidateSetId": candidate_set.id if candidate_set else None,
+                    "kind": job.kind,
+                    "artifactType": payload.get("artifactType"),
                 },
-                202,
+                actions=["cancel", "retry"],
             )
-        except (ScopeError, ValueError) as exc:
-            db.session.rollback()
-            return _error(
-                exc,
-                404 if isinstance(exc, ScopeError) else 400,
-                code="NOT_FOUND" if isinstance(exc, ScopeError) else "INVALID_REQUEST",
+        assistant.metadata_json = {
+            "pending": True,
+            "presentation": "activity",
+            "jobId": job.id,
+            "jobKind": job.kind,
+            "jobStatus": job.status,
+            "generationSelection": (
+                selection_provenance if selected_generation is not None else None
+            ),
+            "agentLoopDepth": int(agent_loop.get("depth") or 0),
+            "agentLoopTrace": agent_loop.get("trace") or [],
+            "agentRootJobId": agent_loop.get("rootJobId") or job.id,
+        }
+        if selected_generation is not None:
+            source_message = selected_generation["sourceMessage"]
+            source_metadata = dict(selected_generation['metadata'])
+            source_selection = dict(
+                selected_generation['selection'] or {}
             )
+            source_selection.update(
+                {
+                    "status": "STARTED",
+                    "formalJobId": job.id,
+                    "candidateSetId": candidate_set.id,
+                    "startedAt": _timestamp(datetime.datetime.utcnow()),
+                }
+            )
+            source_metadata["generationSelection"] = source_selection
+            from ...agent_runtime.generation_events import record_generation
+            record_generation(selected_generation, 'started', source_selection)
+            source_message.metadata_json = source_metadata
+        if generate:
+            _mark_thread_attachments_consumed(
+                thread,
+                [
+                    ref.get("id")
+                    for ref in source_refs
+                    if isinstance(ref, dict) and ref.get("type") == "material"
+                ],
+                operation=f"generate:{artifact_type}",
+                job_id=job.id,
+            )
+        thread.updated = datetime.datetime.utcnow()
+        db.session.commit()
+        publish_pending_outbox(job_id=job.id)
+        return _ok(
+            {
+                "thread": _thread_view(thread, include_messages=True),
+                "job": job_view(job),
+                "candidateSetId": candidate_set.id if candidate_set else None,
+            },
+            202,
+        )
+    except ConversationConflict as exc:
+        db.session.rollback()
+        return _error(exc, 409, code="TURN_CONFLICT")
+    except (ScopeError, ValueError) as exc:
+        db.session.rollback()
+        return _error(
+            exc,
+            404 if isinstance(exc, ScopeError) else 400,
+            code="NOT_FOUND" if isinstance(exc, ScopeError) else "INVALID_REQUEST",
+        )
 
 
 COURSE_TOOL_NAMES = {
@@ -6353,7 +7306,7 @@ def _course_tool_snapshot(dojo, *, include_members=False):
                         "url": (f"/{dojo.reference_id}/{module.id}/{challenge.id}"),
                     }
                     for challenge in module.challenges[:200]
-                    if is_supported_exercise(challenge)
+                    if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT"
                 ],
             }
             for module in dojo.modules[:200]
@@ -6370,6 +7323,21 @@ def _course_tool_message(tool, result):
     challenge = result.get("challenge") or {}
     assignment = result.get("assignment") or {}
     material = result.get("material") or {}
+    skill = result.get("skill") or {}
+    if tool == "skill.list":
+        return f"你的账号有 {len(result.get('skills') or [])} 项已启用技能。"
+    if tool == "skill.read":
+        return f"已读取技能“{skill.get('name')}”。"
+    if tool == "skill.create":
+        return f"已创建技能“{skill.get('name')}”，下次对话即可使用。"
+    if tool == "skill.update":
+        return f"已更新技能“{skill.get('name')}”。"
+    if tool == "skill.toggle":
+        return f"技能“{skill.get('name')}”已{'启用' if skill.get('enabled') else '停用'}。"
+    if tool == "skill.import":
+        return f"已将内置技能“{skill.get('name')}”加入你的账号。"
+    if tool == "skill.delete":
+        return f"已删除技能“{result.get('deleted')}”。"
     if tool == "course.list":
         courses = result.get("courses") or []
         names = "、".join(
@@ -6410,6 +7378,8 @@ def _course_tool_message(tool, result):
         return f"已将 {member.get('username')} 加入课程，角色为 {member.get('role')}。"
     if tool == "course.member.remove":
         return f"已将 {result.get('removedUsername')} 从课程成员中移除。"
+    if tool == "module.inquiry":
+        return f"已创建流程探究式学习草稿“{(result.get('artifact') or {}).get('title')}”。请预览并审核后发布。"
     if tool == "module.create":
         return f"已在课程中创建章节“{module.get('name')}”。"
     if tool == "module.update":
@@ -6477,6 +7447,10 @@ def _course_tool_message(tool, result):
 
 
 def _course_tool_destination_label(tool):
+    if tool == "module.inquiry":
+        return "预览学习项目"
+    if tool.startswith("skill."):
+        return "返回 AI 共创"
     if tool == "material.add_to_module":
         return "打开章节资料"
     if tool.startswith("assignment."):
@@ -6545,1553 +7519,395 @@ def _record_failed_course_tool(
 class GlobalAgentToolExecution(Resource):
     @authed_only
     def post(self):
+        return execute_teacher_tool(_current_user(), _body(), request.headers.get("Idempotency-Key"))
+
+
+SKILL_TOOL_NAMES = {
+    "skill.list",
+    "skill.read",
+    "skill.create",
+    "skill.update",
+    "skill.toggle",
+    "skill.import",
+    "skill.delete",
+}
+
+
+def _skill_tool_argument_schema(tool, raw_arguments):
+    schema = AGENT_TOOL_SCHEMAS.get(tool)
+    if tool not in SKILL_TOOL_NAMES or schema is None:
+        raise ValueError("Unsupported skill tool")
+    risk, allowed_keys = schema
+    raw_arguments = raw_arguments if isinstance(raw_arguments, dict) else {}
+    arguments = {
+        key: scrub_payload(raw_arguments[key], key)
+        for key in allowed_keys
+        if key in raw_arguments
+    }
+    if _json_size(arguments) > MAX_AGENT_CONTEXT_BYTES:
+        raise ValueError("Skill tool arguments exceed 64 KiB")
+    if tool != "skill.list":
+        arguments = _skill_tool_arguments(arguments, require_name=True)
+    return risk, arguments
+
+
+def _skill_tool_arguments(arguments, *, require_name=False):
+    arguments = arguments if isinstance(arguments, dict) else {}
+    payload = {}
+    markdown = str(arguments.get("skillMarkdown") or "").strip()
+    if markdown:
+        name, description, instructions = parse_skill_text(markdown)
+        model_invocable, user_invocable = skill_invocation_from_markdown(markdown)
+        payload.update({
+            "name": name,
+            "description": description,
+            "instructions": instructions,
+            "model_invocable": model_invocable,
+            "user_invocable": user_invocable,
+        })
+    if arguments.get("name"):
+        payload["name"] = arguments.get("name")
+    for key in ("description", "instructions", "references", "enabled"):
+        if arguments.get(key) is not None:
+            payload[key] = arguments.get(key)
+    for public_key, internal_key in (
+        ("modelInvocable", "model_invocable"),
+        ("userInvocable", "user_invocable"),
+    ):
+        if internal_key in arguments:
+            payload[internal_key] = arguments[internal_key]
+        if public_key in arguments:
+            payload[internal_key] = arguments[public_key]
+    if require_name and not payload.get("name"):
+        raise ValueError("技能需要 name（或完整 SKILL.md 正文）")
+    return payload
+
+
+def teacher_tool_receipt(action, thread, *, deduplicated=False, accepted=False):
+    view = _action_view(action)
+    execution = view.get('execution') or {}
+    data = {'action': view, 'result': view.get('result') or {},
+            'thread': _thread_view(thread, include_messages=True), 'deduplicated': deduplicated}
+    if execution.get('jobId'):
+        job = TeachingJobs.query.filter_by(id=execution['jobId'], owner_id=action.actor_id).first()
+        if job:
+            data['job'] = job_view(job)
+    receipt = execution.get('result') or {}
+    data['message'] = receipt.get('message') or ('操作已提交，正在后台执行。' if view['status'] == 'EXECUTING'
+                                               else _course_tool_message((action.request_json or {}).get('tool'), data['result']))
+    return _ok(data, 202 if accepted or view['status'] == 'EXECUTING' else 200)
+
+
+@teaching_namespace.route('/agent-tools/actions/<string:action_id>')
+class TeacherToolCommand(Resource):
+    @authed_only
+    def get(self, action_id):
         user = _current_user()
-        body = _body()
-        tool = str(body.get("tool") or "")
-        thread = None
-        risk = "R0"
-        arguments = {}
-        idempotency_key = None
-        selected_generation = None
-        confirmed_generation_plan = None
-        if tool in COURSE_NAVIGATION_TOOLS:
-            return _error("Navigation tools must be opened from the conversation card")
         try:
             _require_teacher(user)
-            thread = _thread_for_owner(str(body.get("threadId") or ""), user)
-            raw_arguments = body.get("arguments")
-            proposal_source_refs = []
-            if tool == "challenge.generate":
-                source_job_id = str(body.get("sourceJobId") or "").strip()
-                if source_job_id:
-                    source_job = TeachingJobs.query.filter_by(
-                        id=source_job_id,
-                        owner_id=user.id,
-                        thread_id=thread.id,
-                        kind="agent.chat",
-                        status="SUCCEEDED",
-                    ).first()
-                    if source_job is None:
-                        raise ValueError("出题请求的来源任务不存在或尚未完成。")
-                    raw_source_refs = (source_job.payload or {}).get("sourceRefs")
-                    if isinstance(raw_source_refs, list):
-                        proposal_source_refs = scrub_payload(raw_source_refs)
-                raw_selection = body.get("generationSelection")
-                if not isinstance(raw_selection, dict):
-                    raise ValueError(
-                        "请先在智能体给出的三套 CTF 方案中选择一套，再开始正式生成。"
-                    )
-                if isinstance(raw_selection, dict):
-                    selected_generation = _generation_option_context(
-                        user,
-                        thread,
-                        raw_selection.get("sourceMessageId"),
-                        raw_selection.get("optionId"),
-                        require_selected=True,
-                    )
-                    trusted_proposal = _generation_option_proposal(
-                        user,
-                        thread,
-                        selected_generation,
-                    )
-                    if trusted_proposal["tool"] != tool:
-                        raise ValueError("所选方案不是 CTF 实践题生成方案。")
-                    raw_arguments = trusted_proposal["arguments"]
-                raw_arguments, confirmed_generation_plan = (
-                    _confirmed_challenge_generation_plan(
-                        raw_arguments,
-                        body.get("generationPlan"),
-                    )
-                )
-            risk, arguments = _course_tool_arguments(tool, raw_arguments)
-            if risk == "R3" and body.get("confirmed") is not True:
-                return _error(
-                    "Explicit confirmation is required for this course change",
-                    409,
-                    code="CONFIRMATION_REQUIRED",
-                )
+            action = TeachingAgentActions.query.filter_by(id=action_id, actor_id=user.id).first()
+            if action is None or not (action.request_json or {}).get('tool'):
+                raise ScopeError('Operation not found')
+            thread = _thread_for_owner(action.thread_id, user)
+            return teacher_tool_receipt(action, thread)
+        except ScopeError as exc:
+            return _error(exc, 404, code='NOT_FOUND')
 
-            idempotency_key = _unique_idempotency(user.id, "agent-tool")
-            existing = TeachingAgentActions.query.filter_by(
-                idempotency_key=idempotency_key,
-                actor_id=user.id,
-            ).first()
-            if existing is not None:
-                if existing.status not in {
-                    "APPROVED",
-                    "COMPLETED",
-                    "PENDING",
-                    "SUCCEEDED",
-                }:
-                    return _error(
-                        existing.error or "上一次操作未完成，请修正后重试。",
-                        409,
-                        code="PREVIOUS_ATTEMPT_FAILED",
-                    )
-                return _ok(
-                    {
-                        "action": _action_view(existing),
-                        "result": existing.result or {},
-                        "thread": _thread_view(thread, include_messages=True),
-                        "deduplicated": True,
-                        "message": _course_tool_message(
-                            tool,
-                            existing.result or {},
-                        ),
-                    },
-                )
 
-            dojo = None
-            if tool not in {"course.list", "course.create"}:
-                placement_reference = (
-                    str(arguments.get("referenceId") or "").strip()
-                    if tool == "material.add_to_module"
-                    else ""
+def execute_teacher_tool(user, body, request_key=None):
+    tool = str(body.get("tool") or "")
+    thread = None
+    risk = "R0"
+    arguments = {}
+    idempotency_key = None
+    selected_generation = None
+    confirmed_generation_plan = None
+    approval_reference = None
+    if tool in COURSE_NAVIGATION_TOOLS:
+        return _error("Navigation tools must be opened from the conversation card")
+    try:
+        _require_teacher(user)
+        thread = _thread_for_owner(str(body.get("threadId") or ""), user)
+        raw_arguments = body.get("arguments")
+        proposal_source_refs = []
+        if tool == "module.inquiry" and body.get("sourceJobId"):
+            source_job = TeachingJobs.query.filter_by(id=str(body["sourceJobId"]), owner_id=user.id, thread_id=thread.id, kind="agent.chat", status="SUCCEEDED").first()
+            if source_job is None:
+                raise ScopeError("创作来源任务不存在或尚未完成。")
+            proposal_source_refs = (source_job.payload or {}).get("sourceRefs") or []
+        if tool == "challenge.generate":
+            source_job_id = str(body.get("sourceJobId") or "").strip()
+            if source_job_id:
+                source_job = TeachingJobs.query.filter_by(
+                    id=source_job_id,
+                    owner_id=user.id,
+                    thread_id=thread.id,
+                    kind="agent.chat",
+                    status="SUCCEEDED",
+                ).first()
+                if source_job is None:
+                    raise ValueError("出题请求的来源任务不存在或尚未完成。")
+                raw_source_refs = (source_job.payload or {}).get("sourceRefs")
+                if isinstance(raw_source_refs, list):
+                    proposal_source_refs = scrub_payload(raw_source_refs)
+            raw_selection = body.get("generationSelection")
+            if not isinstance(raw_selection, dict):
+                raise ValueError(
+                    "请先在智能体给出的三套 CTF 方案中选择一套，再开始正式生成。"
                 )
-                if placement_reference:
-                    # File placement is intentionally atomic: an unscoped global
-                    # conversation may name any course the teacher can manage, and
-                    # this operation both places the original file and moves the
-                    # conversation into that trusted course/module scope.
-                    dojo = dojo_for_user(user, placement_reference, teacher=True)
-                    arguments["referenceId"] = dojo.reference_id
-                else:
-                    if thread.dojo_id is None:
-                        raise ValueError("Please select a target course first")
-                    dojo = dojo_for_user(user, thread.dojo_id, teacher=True)
-
-            action = TeachingAgentActions(
-                thread_id=thread.id,
-                actor_id=user.id,
-                action_type=f"agent-{tool}"[:80],
-                risk_level=risk,
-                target_type=(
-                    "course"
-                    if tool.startswith("course.")
-                    else "module"
-                    if tool.startswith("module.")
-                    else "challenge"
-                    if tool.startswith("challenge.")
-                    else "material"
-                    if tool.startswith("material.")
-                    else "assignment"
-                ),
-                target_id=(dojo.reference_id if dojo is not None else None),
-                status="RUNNING",
-                idempotency_key=idempotency_key,
-                request_json={
-                    "dojoId": dojo.dojo_id if dojo is not None else None,
-                    "tool": tool,
-                    "arguments": arguments,
-                    **(
-                        {"generationPlan": confirmed_generation_plan}
-                        if confirmed_generation_plan is not None
-                        else {}
-                    ),
-                },
-                result={},
-            )
-            db.session.add(action)
-            db.session.flush()
-
-            cleanup_packages = []
-            cleanup_workspaces = []
-            cleanup_course_path = None
-            published_challenge = None
-            queued_job = None
-            queued_jobs = []
-            authoring_job = None
-            authoring_jobs = []
-            result = {}
-            href = None
-            card_title = "课程操作"
-
-            if tool == "course.list":
-                courses = [_course_tool_snapshot(item) for item in _teacher_dojos(user)]
-                result = {"courses": courses}
-                href = "/teacher/courses?tab=overview"
-                card_title = "可管理课程"
-            elif tool == "course.read":
-                result = {"course": _course_tool_snapshot(dojo, include_members=True)}
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=overview"
-                card_title = "课程详情"
-            elif tool == "course.members":
-                members = _course_tool_members(dojo)
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "members": members,
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=overview"
-                card_title = "课程成员"
-            elif tool == "material.add_to_module":
-                source_material = _material_for_teacher(
-                    str(arguments.get("materialId") or ""), user, lock=True
-                )
-                if source_material.dojo_id not in {None, dojo.dojo_id}:
-                    raise ValueError("这份文件已归属于另一门课程，不能跨课程重复写入。")
-                dojo = (
-                    Dojos.query.filter_by(dojo_id=dojo.dojo_id)
-                    .with_for_update()
-                    .first()
-                )
-                if dojo is None:
-                    raise ValueError("目标课程已不存在。")
-                module = _course_tool_module(
-                    dojo,
-                    arguments,
-                    fallback_index=thread.module_index,
+            if isinstance(raw_selection, dict):
+                selected_generation = _generation_option_context(
+                    user,
+                    thread,
+                    raw_selection.get("sourceMessageId"),
+                    raw_selection.get("optionId"),
+                    require_selected=True,
+                    require_current=True,
                     lock=True,
                 )
-                material = source_material
-                if source_material.dojo_id is None:
-                    existing_material = TeachingMaterials.query.filter(
-                        TeachingMaterials.owner_id == user.id,
-                        TeachingMaterials.dojo_id == dojo.dojo_id,
-                        TeachingMaterials.sha256 == source_material.sha256,
-                        TeachingMaterials.id != source_material.id,
-                        TeachingMaterials.status != "ARCHIVED",
-                    ).first()
-                    if existing_material is not None:
-                        material = existing_material
-                resource_name = str(
-                    arguments.get("name")
-                    or source_material.title
-                    or source_material.filename
-                ).strip()[:128]
-                if not resource_name:
-                    resource_name = "课程资料"
-                resource = next(
-                    (
-                        item
-                        for item in module.resources
-                        if str((item.data or {}).get("materialId") or "")
-                        == material.id
-                    ),
-                    None,
-                )
-                if resource is None:
-                    maximum = (
-                        db.session.query(func.max(DojoResources.resource_index))
-                        .filter_by(
-                            dojo_id=dojo.dojo_id,
-                            module_index=module.module_index,
-                        )
-                        .scalar()
-                    )
-                    resource_index = (maximum + 1) if maximum is not None else 0
-                    link_text = resource_name.replace("[", "（").replace("]", "）")
-                    download_url = (
-                        "/pwncollege_api/v1/teaching/materials/"
-                        f"{material.id}/download"
-                    )
-                    resource = DojoResources(
-                        dojo_id=dojo.dojo_id,
-                        module_index=module.module_index,
-                        resource_index=resource_index,
-                        type="markdown",
-                        name=resource_name,
-                        data={
-                            "content": (
-                                f"[下载《{link_text}》]({download_url})\n\n"
-                                f"文件类型：{material.mime_type} · "
-                                f"大小：{material.size} 字节"
-                            ),
-                            "expandable": True,
-                            "materialId": material.id,
-                            "filename": _material_original_filename(material),
-                            "mimeType": material.mime_type,
-                            "size": material.size,
-                        },
-                    )
-                    db.session.add(resource)
-                    db.session.flush()
-                else:
-                    resource.name = resource_name
-                if material.id == source_material.id:
-                    material.dojo_id = dojo.dojo_id
-                placement = {
-                    "dojoId": dojo.dojo_id,
-                    "courseReferenceId": dojo.reference_id,
-                    "moduleIndex": module.module_index,
-                    "moduleId": module.id,
-                    "moduleName": module.name or module.id,
-                    "resourceIndex": resource.resource_index,
-                    "addedAt": _timestamp(datetime.datetime.utcnow()),
-                }
-                metadata = dict(material.metadata_json or {})
-                placements = [
-                    item
-                    for item in (metadata.get("placements") or [])
-                    if isinstance(item, dict)
-                    and not (
-                        item.get("dojoId") == dojo.dojo_id
-                        and item.get("moduleIndex") == module.module_index
-                    )
-                ]
-                placements.append(placement)
-                metadata["placements"] = placements[-50:]
-                material.metadata_json = metadata
-                if material.id != source_material.id:
-                    source_metadata = dict(source_material.metadata_json or {})
-                    source_metadata["mergedIntoMaterialId"] = material.id
-                    source_metadata["placements"] = [
-                        *[
-                            item
-                            for item in (source_metadata.get("placements") or [])
-                            if isinstance(item, dict)
-                            and not (
-                                item.get("dojoId") == dojo.dojo_id
-                                and item.get("moduleIndex") == module.module_index
-                            )
-                        ],
-                        placement,
-                    ][-50:]
-                    source_material.metadata_json = source_metadata
-                else:
-                    for analysis_job in _material_jobs(
-                        user.id, [material.id], active_only=True
-                    ).values():
-                        analysis_job.dojo_id = dojo.dojo_id
-                        analysis_job.module_index = module.module_index
-                _mark_thread_attachment_placed(
-                    thread, source_material.id, placement
-                )
-                thread.dojo_id = dojo.dojo_id
-                thread.module_index = module.module_index
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "module": {
-                        "index": module.module_index,
-                        "id": module.id,
-                        "name": module.name or module.id,
-                        "url": f"/{dojo.reference_id}/{module.id}",
-                    },
-                    "material": _material_attachment_view(material),
-                    "resource": {
-                        "index": resource.resource_index,
-                        "name": resource.name,
-                        "url": f"/{dojo.reference_id}/{module.id}#module-content",
-                    },
-                }
-                href = f"/{dojo.reference_id}/{module.id}#module-content"
-                card_title = "章节资料已添加"
-                action.target_id = material.id
-            elif tool == "assignment.list":
-                assignments = (
-                    TeachingAssignments.query.filter_by(
-                        dojo_id=dojo.dojo_id,
-                    )
-                    .order_by(TeachingAssignments.updated.desc())
-                    .limit(300)
-                    .all()
-                )
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "assignments": [
-                        assignment_view(
-                            item, user=user, teacher=True, include_items=False
-                        )
-                        for item in assignments
-                    ],
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions"
-                card_title = "课程作业"
-            elif tool in {"assignment.read", "assignment.submissions"}:
-                assignment = _course_tool_assignment(dojo, arguments)
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "assignment": assignment_view(assignment, user=user, teacher=True),
-                }
-                if tool == "assignment.submissions":
-                    result["students"] = roster_submissions(assignment)
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions&assignment={assignment.id}"
-                card_title = "作业详情" if tool == "assignment.read" else "提交与批改"
-                action.target_id = assignment.id
-            elif tool == "assignment.generate":
-                generation_request = dict(arguments)
-                if (
-                    generation_request.get("moduleIndex") is None
-                    and thread.module_index is not None
-                ):
-                    generation_request["moduleIndex"] = thread.module_index
-                payload = generate_assignment_payload(generation_request, dojo)
-                generation_meta = (
-                    ((payload.get("settings") or {}).get("generation") or {})
-                    if isinstance(payload.get("settings"), dict)
-                    else {}
-                )
-                requested_question_count = int(
-                    generation_meta.get("requestedQuestionCount") or 0
-                )
-                generated_question_count = sum(
-                    1
-                    for item in payload.get("items") or []
-                    if isinstance(item, dict) and item.get("type") != "CHALLENGE"
-                )
-                if (
-                    requested_question_count < 1
-                    or generated_question_count != requested_question_count
-                ):
-                    raise RuntimeError(
-                        "Assignment generation did not satisfy the requested question count"
-                    )
-                assignment = create_assignment(user, dojo, payload)
-                db.session.flush()
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "assignment": assignment_view(assignment, user=user, teacher=True),
-                    "requestedQuestionCount": requested_question_count,
-                    "questionCount": generated_question_count,
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions&assignment={assignment.id}"
-                card_title = "作业草稿已生成"
-                action.target_id = assignment.id
-            elif tool == "assignment.update":
-                assignment = _course_tool_assignment(dojo, arguments)
-                update_assignment(
-                    assignment,
-                    {
-                        key: value
-                        for key, value in arguments.items()
-                        if key != "assignmentId"
-                    },
+                trusted_proposal = _generation_option_proposal(
                     user,
-                )
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "assignment": assignment_view(assignment, user=user, teacher=True),
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions&assignment={assignment.id}"
-                card_title = "作业已更新"
-                action.target_id = assignment.id
-            elif tool in {"assignment.publish", "assignment.close"}:
-                assignment = _course_tool_assignment(dojo, arguments)
-                if tool == "assignment.publish":
-                    publish_assignment(assignment, user)
-                    card_title = "作业已发布"
-                else:
-                    close_assignment(assignment, user)
-                    card_title = "作业已关闭"
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "assignment": assignment_view(assignment, user=user, teacher=True),
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions&assignment={assignment.id}"
-                action.target_id = assignment.id
-            elif tool == "assignment.delete":
-                assignment = _course_tool_assignment(dojo, arguments)
-                deleted_id = assignment.id
-                deleted_title = assignment.title
-                delete_assignment(assignment, user)
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "deletedAssignmentId": deleted_id,
-                    "deletedAssignmentTitle": deleted_title,
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions"
-                card_title = "作业已删除"
-                action.target_id = deleted_id
-            elif tool == "assignment.grade.override":
-                assignment = _course_tool_assignment(dojo, arguments)
-                submission = override_submission_grade(
-                    assignment,
-                    arguments.get("submissionId"),
-                    user,
-                    arguments.get("score"),
-                    arguments.get("feedback") if "feedback" in arguments else None,
-                )
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "assignment": assignment_view(assignment, user=user, teacher=True),
-                    "submissionId": submission.id,
-                    "students": roster_submissions(assignment),
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions&assignment={assignment.id}"
-                card_title = "成绩已复核"
-                action.target_id = submission.id
-            elif tool == "course.create":
-                name = str(arguments.get("name") or "").strip()
-                if not 1 <= len(name) <= 128:
-                    raise ValueError("Course name must contain 1-128 characters")
-                description = str(arguments.get("description") or "").strip()
-                if len(description) > 24000:
-                    raise ValueError("Course description exceeds 24,000 characters")
-                slug = _module_slug(
-                    arguments.get("slug") or name,
-                    f"course-{secrets.token_hex(4)}",
-                )
-                if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?", slug):
-                    raise ValueError(
-                        "Course slug must use lowercase letters, digits, or hyphens"
-                    )
-                access = str(arguments.get("access") or "private").lower()
-                if access not in {"private", "public"}:
-                    raise ValueError("Course access must be private or public")
-                dojo = Dojos(
-                    id=slug,
-                    name=name,
-                    description=description or None,
-                    type="public" if access == "public" else "course",
-                    private_key=secrets.token_hex(32),
-                )
-                ensure_course_join_code(dojo)
-                dojo.admins = [DojoAdmins(user=user)]
-                db.session.add(dojo)
-                db.session.flush()
-                thread.dojo_id = dojo.dojo_id
-                thread.module_index = None
-                initial_module = None
-                initial_module_name = str(
-                    arguments.get("initialModuleName") or ""
-                ).strip()
-                if initial_module_name:
-                    if len(initial_module_name) > 128:
-                        raise ValueError("Initial module name exceeds 128 characters")
-                    initial_module_id = _module_slug(
-                        arguments.get("initialModuleId") or initial_module_name,
-                        "course-content",
-                    )
-                    initial_module = DojoModules(
-                        dojo=dojo,
-                        module_index=0,
-                        id=initial_module_id,
-                        name=initial_module_name,
-                        description="由全局教学智能体为本次内容生成自动建立。",
-                        show_scoreboard=True,
-                        show_challenges=True,
-                    )
-                    db.session.add(initial_module)
-                    db.session.flush()
-                    thread.module_index = initial_module.module_index
-                action.target_id = dojo.reference_id
-                action.request_json = {
-                    **action.request_json,
-                    "dojoId": dojo.dojo_id,
-                }
-                result = {"course": _course_tool_snapshot(dojo)}
-                if initial_module is not None:
-                    result["module"] = {
-                        "index": initial_module.module_index,
-                        "id": initial_module.id,
-                        "name": initial_module.name,
-                        "description": initial_module.description,
-                        "url": f"/{dojo.reference_id}/{initial_module.id}",
-                    }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=overview"
-                card_title = "课程已创建"
-            elif tool == "course.update":
-                if "name" in arguments:
-                    name = str(arguments.get("name") or "").strip()
-                    if not 1 <= len(name) <= 128:
-                        raise ValueError("Course name must contain 1-128 characters")
-                    dojo.name = name
-                if "description" in arguments:
-                    description = str(arguments.get("description") or "").strip()
-                    if len(description) > 24000:
-                        raise ValueError("Course description exceeds 24,000 characters")
-                    dojo.description = description or None
-                if "access" in arguments:
-                    access = str(arguments.get("access") or "").lower()
-                    if access not in {"private", "public"}:
-                        raise ValueError("Course access must be private or public")
-                    dojo.type = "public" if access == "public" else "course"
-                if "showScoreboard" in arguments:
-                    dojo.show_scoreboard = bool(arguments["showScoreboard"])
-                result = {"course": _course_tool_snapshot(dojo)}
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=overview"
-                card_title = "课程已更新"
-            elif tool == "course.sync":
-                if not dojo.repository:
-                    raise ValueError(
-                        "This native course is not backed by a Git repository"
-                    )
-                from ...utils.dojo import dojo_update
-                from ...utils.image_pulls import enqueue_dojo_image_pulls
-
-                dojo_update(dojo)
-                enqueue_dojo_image_pulls(dojo)
-                result = {"course": _course_tool_snapshot(dojo)}
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=overview"
-                card_title = "课程已同步"
-            elif tool == "course.promote":
-                if getattr(user, "type", None) != "admin":
-                    raise ScopeError("Platform administrator permission required")
-                conflict = Dojos.query.filter(
-                    Dojos.id == dojo.id,
-                    Dojos.official.is_(True),
-                    Dojos.dojo_id != dojo.dojo_id,
-                ).first()
-                if conflict is not None:
-                    raise ValueError(
-                        "Another recommended course already uses this slug"
-                    )
-                dojo.official = True
-                action.target_id = dojo.reference_id
-                result = {"course": _course_tool_snapshot(dojo)}
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=overview"
-                card_title = "推荐课程已更新"
-            elif tool == "course.delete":
-                if getattr(user, "type", None) != "admin":
-                    raise ScopeError("Platform administrator permission required")
-                if TeachingSessions.query.filter_by(
-                    dojo_id=dojo.dojo_id,
-                    status="LIVE",
-                ).first():
-                    raise ValueError(
-                        "End the live classroom before deleting this course"
-                    )
-                active_teaching_job = TeachingJobs.query.filter(
-                    TeachingJobs.dojo_id == dojo.dojo_id,
-                    TeachingJobs.status.in_(["QUEUED", "RUNNING", "CANCEL_REQUESTED"]),
-                ).first()
-                active_authoring_job = LearningAuthoringJobs.query.filter(
-                    LearningAuthoringJobs.dojo_id == dojo.dojo_id,
-                    LearningAuthoringJobs.status.in_(["QUEUED", "RUNNING"]),
-                ).first()
-                if active_teaching_job is not None or active_authoring_job is not None:
-                    raise ValueError(
-                        "Course has active generation or validation tasks; wait for them to finish before deletion"
-                    )
-                deleted_name = dojo.name
-                deleted_reference = dojo.reference_id
-                dojo_id = dojo.dojo_id
-                challenge_ids = [
-                    row.challenge_id
-                    for row in DojoChallenges.query.filter_by(dojo_id=dojo_id).all()
-                    if row.challenge_id is not None
-                ]
-                cleanup_course_path = (
-                    pathlib.Path(config.DOJOS_DIR) / ".learning" / dojo.hex_dojo_id
-                )
-                try:
-                    from ...utils import get_all_containers
-
-                    cleanup_workspaces = list(get_all_containers(dojo))
-                except Exception:
-                    logger.warning(
-                        "Unable to enumerate course workspaces before Agent deletion",
-                        exc_info=True,
-                    )
-                thread.dojo_id = None
-                thread.module_index = None
-                DojoUsers.query.filter_by(dojo_id=dojo_id).delete(
-                    synchronize_session=False
-                )
-                Dojos.query.filter_by(dojo_id=dojo_id).delete(synchronize_session=False)
-                db.session.flush()
-                if challenge_ids:
-                    referenced = {
-                        challenge_id
-                        for (challenge_id,) in db.session.query(
-                            DojoChallenges.challenge_id
-                        )
-                        .filter(DojoChallenges.challenge_id.in_(challenge_ids))
-                        .all()
-                    }
-                    orphan_ids = set(challenge_ids) - referenced
-                    if orphan_ids:
-                        Challenges.query.filter(Challenges.id.in_(orphan_ids)).delete(
-                            synchronize_session=False
-                        )
-                result = {
-                    "deletedCourseName": deleted_name,
-                    "deletedReferenceId": deleted_reference,
-                }
-                href = "/teacher/courses?tab=overview"
-                card_title = "课程已删除"
-            elif tool in {"course.member.add", "course.member.remove"}:
-                username = str(arguments.get("username") or "").strip()
-                target_user = Users.query.filter_by(name=username).first()
-                if target_user is None:
-                    raise ValueError("Target username was not found")
-                membership = DojoUsers.query.filter_by(
-                    dojo_id=dojo.dojo_id,
-                    user_id=target_user.id,
-                ).first()
-                if tool == "course.member.add":
-                    role = str(arguments.get("role") or "student").lower()
-                    if role not in {"student", "teacher"}:
-                        raise ValueError("Member role must be student or teacher")
-                    target_type = "admin" if role == "teacher" else "member"
-                    if membership is None:
-                        membership = (
-                            DojoAdmins(dojo=dojo, user=target_user)
-                            if target_type == "admin"
-                            else DojoMembers(dojo=dojo, user=target_user)
-                        )
-                        db.session.add(membership)
-                    else:
-                        membership.type = target_type
-                    result = {
-                        "course": _course_tool_snapshot(dojo),
-                        "member": {"username": target_user.name, "role": role},
-                    }
-                    card_title = "课程成员已添加"
-                else:
-                    if membership is None:
-                        raise ValueError("Target user is not a course member")
-                    if target_user.id == user.id:
-                        raise ValueError(
-                            "You cannot remove yourself from the current course"
-                        )
-                    if (
-                        membership.type == "admin"
-                        and getattr(user, "type", None) != "admin"
-                    ):
-                        raise ScopeError(
-                            "Only a platform administrator can remove another teacher"
-                        )
-                    db.session.delete(membership)
-                    result = {
-                        "course": _course_tool_snapshot(dojo),
-                        "removedUsername": target_user.name,
-                    }
-                    card_title = "课程成员已移除"
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=overview"
-            elif tool == "module.create":
-                name = str(arguments.get("name") or "").strip()
-                if not 1 <= len(name) <= 128:
-                    raise ValueError("Module name must contain 1-128 characters")
-                module_id = _module_slug(
-                    arguments.get("id") or name,
-                    f"module-{secrets.token_hex(3)}",
-                )
-                if DojoModules.query.filter_by(
-                    dojo_id=dojo.dojo_id, id=module_id
-                ).first():
-                    raise ValueError("A module with this id already exists")
-                description = str(arguments.get("description") or "").strip()
-                if len(description) > 24000:
-                    raise ValueError("Module description exceeds 24,000 characters")
-                maximum = (
-                    db.session.query(func.max(DojoModules.module_index))
-                    .filter_by(dojo_id=dojo.dojo_id)
-                    .scalar()
-                )
-                module = DojoModules(
-                    dojo=dojo,
-                    module_index=(maximum + 1) if maximum is not None else 0,
-                    id=module_id,
-                    name=name,
-                    description=description or None,
-                    show_scoreboard=True,
-                    show_challenges=True,
-                )
-                db.session.add(module)
-                db.session.flush()
-                thread.module_index = module.module_index
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "module": next(
-                        item
-                        for item in _course_tool_snapshot(dojo)["modules"]
-                        if item["index"] == module.module_index
-                    ),
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions&module={module.module_index}"
-                card_title = "章节已创建"
-                action.target_id = f"{dojo.reference_id}/{module.id}"
-            elif tool == "module.update":
-                module = _course_tool_module(dojo, arguments)
-                if "name" in arguments:
-                    name = str(arguments.get("name") or "").strip()
-                    if not 1 <= len(name) <= 128:
-                        raise ValueError("Module name must contain 1-128 characters")
-                    module.name = name
-                if "id" in arguments:
-                    module_id = _module_slug(arguments.get("id"), "")
-                    if not module_id:
-                        raise ValueError("Module id is required")
-                    conflict = DojoModules.query.filter(
-                        DojoModules.dojo_id == dojo.dojo_id,
-                        DojoModules.id == module_id,
-                        DojoModules.module_index != module.module_index,
-                    ).first()
-                    if conflict is not None:
-                        raise ValueError("A module with this id already exists")
-                    module.id = module_id
-                if "description" in arguments:
-                    description = str(arguments.get("description") or "").strip()
-                    if len(description) > 24000:
-                        raise ValueError("Module description exceeds 24,000 characters")
-                    module.description = description or None
-                if "showChallenges" in arguments:
-                    module.show_challenges = bool(arguments["showChallenges"])
-                if "showScoreboard" in arguments:
-                    module.show_scoreboard = bool(arguments["showScoreboard"])
-                module_view = {
-                    "index": module.module_index,
-                    "id": module.id,
-                    "name": module.name,
-                    "description": module.description,
-                    "url": f"/{dojo.reference_id}/{module.id}",
-                }
-                result = {"course": _course_tool_snapshot(dojo), "module": module_view}
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions&module={module.module_index}"
-                card_title = "章节已更新"
-                action.target_id = f"{dojo.reference_id}/{module.id}"
-            elif tool == "module.delete":
-                module = _course_tool_module(dojo, arguments)
-                deleted_name = module.name
-                deleted_count = len(module.challenges)
-                affected_users = set()
-                for challenge in list(module.challenges):
-                    module_id = module.id
-                    challenge_id = challenge.id
-                    from ...learning.authoring import delete_published_challenge
-
-                    deletion = delete_published_challenge(challenge, user)
-                    affected_users.update(deletion.pop("_affectedUserIds", []))
-                    package_root = deletion.pop("_packageRoot", None)
-                    if package_root:
-                        cleanup_packages.append(package_root)
-                    cleanup_workspaces.append((dojo, module_id, challenge_id))
-                if affected_users:
-                    from ...learning.assessment import rebuild_skill_states
-
-                    rebuild_skill_states(dojo.dojo_id, sorted(affected_users))
-                db.session.delete(module)
-                if thread.module_index == module.module_index:
-                    thread.module_index = None
-                db.session.flush()
-                db.session.expire(dojo, ["_modules"])
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "deletedModuleName": deleted_name,
-                    "deletedChallengeCount": deleted_count,
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions"
-                card_title = "章节已删除"
-            elif tool == "challenge.generate":
-                module = _course_tool_module(
-                    dojo,
-                    arguments,
-                    fallback_index=thread.module_index,
-                )
-                brief = str(arguments.get("brief") or "").strip()
-                if len(brief) < 12 or len(brief) > 24000:
-                    raise ValueError("CTF 实践题要求需包含 12 到 24,000 个字符。")
-                raw_challenge_count = arguments.get("challengeCount")
-                if raw_challenge_count is None:
-                    raw_challenge_count = 1
-                try:
-                    if isinstance(raw_challenge_count, bool):
-                        raise ValueError
-                    challenge_count = int(raw_challenge_count)
-                    if (
-                        isinstance(raw_challenge_count, float)
-                        and not raw_challenge_count.is_integer()
-                    ):
-                        raise ValueError
-                    if isinstance(
-                        raw_challenge_count, str
-                    ) and not raw_challenge_count.strip().isdigit():
-                        raise ValueError
-                except (TypeError, ValueError) as exc:
-                    raise ValueError("一次生成的 CTF 数量必须是 1 到 5。") from exc
-                if challenge_count < 1 or challenge_count > 5:
-                    raise ValueError("一次生成的 CTF 数量必须是 1 到 5。")
-                constraints = _practice_challenge_constraints(
-                    brief,
-                    arguments.get("constraints"),
-                )
-                raw_batch_topics = constraints.get("batchTopics")
-                batch_topics = []
-                if isinstance(raw_batch_topics, list):
-                    batch_topics = [
-                        str(item or "").strip()[:80] for item in raw_batch_topics
-                    ]
-                    if (
-                        len(batch_topics) != challenge_count
-                        or any(len(item) < 2 for item in batch_topics)
-                        or len(set(batch_topics)) != challenge_count
-                    ):
-                        batch_topics = []
-                if batch_topics:
-                    constraints["batchTopics"] = batch_topics
-                else:
-                    constraints.pop("batchTopics", None)
-                if arguments.get("difficulty") is not None:
-                    constraints = {
-                        **constraints,
-                        "difficulty": str(arguments["difficulty"])[:80],
-                    }
-                explicit_source_refs = (
-                    selected_generation["bundle"].get("sourceRefs") or []
-                    if selected_generation is not None
-                    else proposal_source_refs
-                )
-                # Keep ordinary conversation payloads lean, but once the
-                # teacher confirms formal authoring, pin the complete current
-                # course dossier.  This preserves revision/hash provenance
-                # without re-attaching every handout to every chat turn.
-                material_context = build_course_material_context(
-                    owner_id=user.id,
-                    dojo_id=dojo.dojo_id,
-                    prompt=brief,
-                    source_refs=explicit_source_refs,
-                    require_complete=True,
-                )
-                constraints["sourceMaterialGrounding"] = compact_material_grounding(
-                    material_context
-                )
-                from .learning import _authoring_job_view, _queue_authoring_job
-
-                authoring_request = {
-                    "brief": brief,
-                    "constraints": scrub_payload(constraints),
-                    "sourceRefs": material_context["sourceRefs"],
-                    "source": "teacher-global-agent",
-                }
-                batch_id = f"practice_batch_{uuid.uuid4().hex}"
-                confirmed_items = (
-                    confirmed_generation_plan.get("items")
-                    if isinstance(confirmed_generation_plan, dict)
-                    else []
-                )
-                item_specs = [
-                    {
-                        "itemIndex": batch_index,
-                        "title": (
-                            str(confirmed_items[batch_index - 1].get("title") or "").strip()
-                            if len(confirmed_items) == challenge_count
-                            else batch_topics[batch_index - 1]
-                            if len(batch_topics) == challenge_count
-                            else f"独立 CTF 题目 {batch_index}"
-                        ),
-                        "difficulty": (
-                            str(
-                                confirmed_items[batch_index - 1].get("difficulty")
-                                or arguments.get("difficulty")
-                                or "按要求递进"
-                            )[:80]
-                            if len(confirmed_items) == challenge_count
-                            else str(arguments.get("difficulty") or "按要求递进")[:80]
-                        ),
-                    }
-                    for batch_index in range(1, challenge_count + 1)
-                ]
-                generation_batch = TeachingGenerationBatches(
-                    id=batch_id,
-                    owner_id=user.id,
-                    dojo_id=dojo.dojo_id,
-                    module_index=module.module_index,
-                    thread_id=thread.id,
-                    action_id=action.id,
-                    operation="challenge.batch.generate",
-                    status="QUEUED",
-                    requested_count=challenge_count,
-                    independence="independent_challenges",
-                    exercise_mode="CTF",
-                    publish_mode="draft",
-                    difficulty_strategy={
-                        "mode": str(arguments.get("difficulty") or "")[:80],
-                        "perItem": [item["difficulty"] for item in item_specs],
-                    },
-                    plan={
-                        "brief": brief,
-                        "items": item_specs,
-                        "sourceRefs": material_context["sourceRefs"],
-                    },
-                    counts={
-                        "requested": challenge_count,
-                        "created": 0,
-                        "validated": 0,
-                        "failed": 0,
-                    },
-                    idempotency_key=f"{action.id}:challenge-batch",
-                    confirmed=datetime.datetime.utcnow(),
-                )
-                db.session.add(generation_batch)
-                batch_items = []
-                for item_spec in item_specs:
-                    batch_item = TeachingGenerationBatchItems(
-                        batch_id=batch_id,
-                        item_index=item_spec["itemIndex"],
-                        status="PLANNED",
-                        spec=item_spec,
-                    )
-                    db.session.add(batch_item)
-                    batch_items.append(batch_item)
-                db.session.flush()
-                base_title = next(
-                    (line.strip() for line in brief.splitlines() if line.strip()),
-                    "题目生成",
-                )
-                for batch_index in range(1, challenge_count + 1):
-                    batch_constraints = dict(constraints)
-                    item_spec = item_specs[batch_index - 1]
-                    item_difficulty = str(item_spec.get("difficulty") or "").strip()
-                    if item_difficulty:
-                        batch_constraints["difficulty"] = item_difficulty
-                    batch_topic = (
-                        batch_topics[batch_index - 1] if batch_topics else None
-                    )
-                    batch_brief = _challenge_batch_item_brief(
-                        brief,
-                        batch_id,
-                        batch_index,
-                        challenge_count,
-                        batch_topic,
-                    )
-                    if challenge_count > 1:
-                        batch_constraints.update(
-                            {
-                                "batchId": batch_id,
-                                "batchIndex": batch_index,
-                                "batchCount": challenge_count,
-                                "independentChallenge": True,
-                                "batchContract": {
-                                    "requestedCount": challenge_count,
-                                    "itemIndex": batch_index,
-                                    "oneDraftPerItem": True,
-                                    "oneEnvironmentPerItem": True,
-                                    "oneDynamicFlagPerItem": True,
-                                },
-                                **({"batchTopic": batch_topic} if batch_topic else {}),
-                            }
-                        )
-                    current_request = {
-                        **authoring_request,
-                        "brief": batch_brief,
-                        "constraints": scrub_payload(batch_constraints),
-                        "batch": {
-                            "id": batch_id,
-                            "index": batch_index,
-                            "count": challenge_count,
-                            "sourceBrief": brief,
-                        },
-                    }
-                    current_authoring_job, error = _queue_authoring_job(
-                        dojo=dojo,
-                        module=module,
-                        author=user,
-                        title=(
-                            f"{batch_topic}（{batch_index}/{challenge_count}）"
-                            if batch_topic
-                            else f"CTF 实践题 {batch_index}/{challenge_count}"
-                            if challenge_count > 1
-                            else base_title
-                        ),
-                        request_json=current_request,
-                        durable_payload={
-                            "sourceRefs": material_context["sourceRefs"],
-                            "materialContext": material_context["coverage"],
-                            "batchId": batch_id,
-                            "batchIndex": batch_index,
-                            "batchCount": challenge_count,
-                            **({"batchTopic": batch_topic} if batch_topic else {}),
-                        },
-                        action_id=action.id,
-                        thread_id=thread.id,
-                        publish=False,
-                        commit=False,
-                    )
-                    if error:
-                        raise RuntimeError(
-                            "Unable to start every native challenge authoring job"
-                        )
-                    current_queued_job = TeachingJobs.query.filter_by(
-                        idempotency_key=(
-                            f"learning-authoring:{current_authoring_job.id}"
-                        )
-                    ).first()
-                    if current_queued_job is None:
-                        raise RuntimeError(
-                            "Unable to locate a queued challenge authoring job"
-                        )
-                    batch_item = batch_items[batch_index - 1]
-                    batch_item.status = "QUEUED"
-                    batch_item.task_id = current_queued_job.id
-                    batch_item.authoring_job_id = current_authoring_job.id
-                    authoring_jobs.append(current_authoring_job)
-                    queued_jobs.append(current_queued_job)
-                if (
-                    len(authoring_jobs) != challenge_count
-                    or len(queued_jobs) != challenge_count
-                    or len({item.id for item in queued_jobs}) != challenge_count
-                ):
-                    raise RuntimeError(
-                        "CTF batch did not create one durable job per requested challenge"
-                    )
-                authoring_job = authoring_jobs[0]
-                queued_job = queued_jobs[0]
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "module": {
-                        "index": module.module_index,
-                        "id": module.id,
-                        "name": module.name,
-                    },
-                    "authoringJob": _authoring_job_view(authoring_job),
-                    "job": job_view(queued_job),
-                    "authoringJobs": [
-                        _authoring_job_view(item) for item in authoring_jobs
-                    ],
-                    "jobs": [job_view(item) for item in queued_jobs],
-                    "authoringJobIds": [item.id for item in authoring_jobs],
-                    "formalJobIds": [item.id for item in queued_jobs],
-                    "challengeCount": challenge_count,
-                    "batchId": batch_id,
-                    "batchTopics": batch_topics,
-                    "generationBatch": {
-                        "id": batch_id,
-                        "status": "queued",
-                        "requestedCount": challenge_count,
-                        "createdCount": 0,
-                        "validatedCount": 0,
-                        "failedCount": 0,
-                        "items": [
-                            {
-                                "itemIndex": item.item_index,
-                                "taskId": item.task_id,
-                                "authoringJobId": item.authoring_job_id,
-                                "draftId": None,
-                                "status": "queued",
-                                "spec": item.spec,
-                            }
-                            for item in batch_items
-                        ],
-                    },
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions&module={module.module_index}"
-                card_title = (
-                    f"{challenge_count} 道题目生成已启动"
-                    if challenge_count > 1
-                    else "题目生成已启动"
-                )
-                action.target_id = batch_id if challenge_count > 1 else str(authoring_job.id)
-                _mark_thread_attachments_consumed(
                     thread,
-                    [
-                        ref.get("id")
-                        for ref in material_context.get("sourceRefs", [])
-                        if isinstance(ref, dict) and ref.get("type") == "material"
-                    ],
-                    operation="generate:ctf-challenge",
-                    job_id=queued_job.id,
+                    selected_generation,
                 )
-            elif tool == "challenge.revise":
-                from .learning import _authoring_job_view, _queue_authoring_job
-
-                raw_draft_ids = arguments.get("draftIds")
-                if not isinstance(raw_draft_ids, list):
-                    raise ValueError("需要提供要修订的题目草稿列表。")
-                draft_ids = []
-                for raw_draft_id in raw_draft_ids:
-                    draft_id = str(raw_draft_id or "").strip()
-                    if draft_id and draft_id not in draft_ids:
-                        draft_ids.append(draft_id)
-                if not 1 <= len(draft_ids) <= 5:
-                    raise ValueError("一次可以统一修订 1 到 5 道 CTF 实践题。")
-                instruction = str(arguments.get("instruction") or "").strip()
-                if not 3 <= len(instruction) <= 12000:
-                    raise ValueError("修订要求需包含 3 到 12,000 个字符。")
-                drafts_by_id = {
-                    item.id: item
-                    for item in LearningDrafts.query.filter(
-                        LearningDrafts.id.in_(draft_ids),
-                        LearningDrafts.dojo_id == dojo.dojo_id,
-                        LearningDrafts.author_id == user.id,
-                    ).all()
-                }
-                if set(drafts_by_id) != set(draft_ids):
-                    raise ValueError("一个或多个目标题目草稿不存在或不属于当前课程。")
-                drafts = [drafts_by_id[draft_id] for draft_id in draft_ids]
-                active_draft_ids = {
-                    row[0]
-                    for row in db.session.query(LearningAuthoringJobs.draft_id)
-                    .filter(
-                        LearningAuthoringJobs.draft_id.in_(draft_ids),
-                        LearningAuthoringJobs.status.in_(("QUEUED", "RUNNING")),
-                    )
-                    .all()
-                }
-                if active_draft_ids:
-                    raise ValueError("一个或多个题目已有生成或修订任务正在进行。")
-                batch_id = f"ctf_revision_{uuid.uuid4().hex}"
-                for batch_index, draft in enumerate(drafts, start=1):
-                    module = DojoModules.query.filter_by(
-                        dojo_id=dojo.dojo_id,
-                        module_index=draft.module_index,
-                    ).first()
-                    if module is None:
-                        raise ValueError("题目草稿所属章节已不存在。")
-                    draft.status = "BUILDING"
-                    draft.validation = {}
-                    current_authoring_job, error = _queue_authoring_job(
-                        dojo=dojo,
-                        module=module,
-                        author=user,
-                        title=(
-                            "修订："
-                            + str((draft.spec or {}).get("name") or draft.brief)[:220]
-                        ),
-                        kind="REVISE",
-                        draft_id=draft.id,
-                        request_json={"message": instruction},
-                        durable_payload={
-                            "draftId": draft.id,
-                            "batchId": batch_id,
-                            "batchIndex": batch_index,
-                            "batchCount": len(drafts),
-                        },
-                        action_id=action.id,
-                        thread_id=thread.id,
-                        publish=False,
-                        commit=False,
-                    )
-                    if error:
-                        raise RuntimeError(
-                            "Unable to start every native challenge revision job"
-                        )
-                    current_queued_job = TeachingJobs.query.filter_by(
-                        idempotency_key=(
-                            f"learning-authoring:{current_authoring_job.id}"
-                        )
-                    ).first()
-                    if current_queued_job is None:
-                        raise RuntimeError(
-                            "Unable to locate a queued challenge revision job"
-                        )
-                    authoring_jobs.append(current_authoring_job)
-                    queued_jobs.append(current_queued_job)
-                authoring_job = authoring_jobs[0]
-                queued_job = queued_jobs[0]
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "authoringJob": _authoring_job_view(authoring_job),
-                    "job": job_view(queued_job),
-                    "authoringJobs": [
-                        _authoring_job_view(item) for item in authoring_jobs
-                    ],
-                    "jobs": [job_view(item) for item in queued_jobs],
-                    "authoringJobIds": [item.id for item in authoring_jobs],
-                    "formalJobIds": [item.id for item in queued_jobs],
-                    "draftIds": draft_ids,
-                    "challengeCount": len(drafts),
-                    "batchId": batch_id,
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions"
-                card_title = f"{len(drafts)} 道题目修订已启动"
-                action.target_id = batch_id
-            elif tool == "challenge.publish":
-                draft = LearningDrafts.query.filter_by(
-                    id=str(arguments.get("draftId") or ""),
-                    dojo_id=dojo.dojo_id,
-                    author_id=user.id,
-                ).first()
-                if draft is None:
-                    raise ValueError("Target native challenge draft was not found")
-                module = DojoModules.query.filter_by(
-                    dojo_id=dojo.dojo_id,
-                    module_index=draft.module_index,
-                ).first()
-                if module is None:
-                    raise ValueError("Draft module no longer exists")
-                from ...learning.authoring import publish_draft
-
-                published_challenge = publish_draft(draft, user)
-                db.session.flush()
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "module": {
-                        "index": module.module_index,
-                        "id": module.id,
-                        "name": module.name,
-                    },
-                    "challenge": {
-                        "id": published_challenge.id,
-                        "name": published_challenge.name,
-                        "referenceId": published_challenge.reference_id,
-                        "moduleId": module.id,
-                        "exerciseMode": published_challenge.exercise_mode,
-                    },
-                    "draftId": draft.id,
-                }
-                href = (
-                    f"/teacher/courses?dojo={dojo.reference_id}"
-                    f"&tab=questions&module={module.module_index}"
+                if trusted_proposal["tool"] != tool:
+                    raise ValueError("所选方案不是 CTF 实践题生成方案。")
+                raw_arguments = trusted_proposal["arguments"]
+                proposal_source_refs = selected_generation['bundle']['sourceRefs']
+            raw_arguments, confirmed_generation_plan = (
+                _confirmed_challenge_generation_plan(
+                    raw_arguments,
+                    body.get("generationPlan"),
                 )
-                card_title = "CTF 实践题已发布"
-                action.target_id = published_challenge.reference_id
-            elif tool == "challenge.delete":
-                module = _course_tool_module(dojo, arguments)
-                challenge_id = str(arguments.get("challengeId") or "").strip()
-                challenge = next(
-                    (item for item in module.challenges if item.id == challenge_id),
-                    None,
-                )
-                if challenge is None:
-                    raise ValueError("Target challenge was not found")
-                challenge_name = challenge.name
-                from ...learning.assessment import rebuild_skill_states
-                from ...learning.authoring import delete_published_challenge
+            )
+        if tool in SKILL_TOOL_NAMES:
+            risk, arguments = _skill_tool_argument_schema(tool, raw_arguments)
+        else:
+            risk, arguments = _course_tool_arguments(tool, raw_arguments)
+        if risk == "R3" and body.get("confirmed") is not True:
+            return _error(
+                "Explicit confirmation is required for this course change",
+                409,
+                code="CONFIRMATION_REQUIRED",
+            )
 
-                deletion = delete_published_challenge(challenge, user)
-                rebuild_skill_states(
-                    dojo.dojo_id,
-                    deletion.pop("_affectedUserIds", []),
+        idempotency_key = _supplied_idempotency(user.id, "agent-tool", request_key)
+        request_fingerprint = _agent_tool_request_fingerprint(
+            thread.id, tool, arguments, confirmed_generation_plan, body,
+        )
+        if selected_generation and (selected_generation['selection'] or {}).get('commandActionId'):
+            original = TeachingAgentActions.query.filter_by(id=selected_generation['selection']['commandActionId'], actor_id=user.id, thread_id=thread.id).first()
+            if original is None or (original.request_json or {}).get('requestFingerprint') != request_fingerprint:
+                raise GenerationOptionConflict('这个方案已经接收另一份生成计划，请查看原任务或重新提出要求。')
+            response = teacher_tool_receipt(original, thread, deduplicated=True)
+            db.session.rollback()
+            return response
+        if not _lock_agent_tool_request(idempotency_key):
+            db.session.rollback()
+            return _error(
+                "同一操作仍在执行，请稍后用原编号重试。",
+                409,
+                code="OPERATION_IN_PROGRESS",
+            )
+        existing = TeachingAgentActions.query.filter_by(
+            idempotency_key=idempotency_key,
+            actor_id=user.id,
+        ).first()
+        if existing is not None:
+            if not _same_agent_tool_request(
+                existing, thread.id, tool, arguments,
+                confirmed_generation_plan, request_fingerprint,
+            ):
+                db.session.rollback()
+                return _error(
+                    "这条操作编号已用于不同的请求，请使用新的编号重试。",
+                    409,
+                    code="IDEMPOTENCY_CONFLICT",
                 )
-                package_root = deletion.pop("_packageRoot", None)
-                if package_root:
-                    cleanup_packages.append(package_root)
-                cleanup_workspaces.append((dojo, module.id, challenge_id))
-                db.session.expire(module, ["_challenges"])
-                result = {
-                    "course": _course_tool_snapshot(dojo),
-                    "module": {
-                        "index": module.module_index,
-                        "id": module.id,
-                        "name": module.name,
-                    },
-                    "challenge": {"id": challenge_id, "name": challenge_name},
-                    "deletion": deletion,
-                }
-                href = f"/teacher/courses?dojo={dojo.reference_id}&tab=questions&module={module.module_index}"
-                card_title = "题目已删除"
-                action.target_id = f"{dojo.reference_id}/{module.id}/{challenge_id}"
-            else:
-                raise ValueError("Unsupported executable course tool")
-
-            message_text = _course_tool_message(tool, result)
-            assistant = TeachingAgentMessages(
-                thread_id=thread.id,
-                user_id=user.id,
-                role="assistant",
-                content=message_text,
-                metadata_json={
-                    "courseTool": tool,
-                    "actionId": action.id,
-                    "riskLevel": risk,
-                    **(
-                        {
-                            "generationContract": {
-                                "kind": "independent-ctf-batch",
-                                "requestedCount": result.get("challengeCount"),
-                                "createdJobCount": len(queued_jobs),
-                                "batchId": result.get("batchId"),
-                            }
-                        }
-                        if tool == "challenge.generate"
-                        else {
-                            "generationContract": {
-                                "kind": "question-set",
-                                "requestedCount": result.get(
-                                    "requestedQuestionCount"
-                                ),
-                                "createdQuestionCount": result.get("questionCount"),
-                            }
-                        }
-                        if tool == "assignment.generate"
-                        else {}
+            if action_execution(existing):
+                response = teacher_tool_receipt(existing, thread, deduplicated=True)
+                db.session.rollback()
+                return response
+            if existing.status not in {
+                "APPROVED",
+                "COMPLETED",
+                "PENDING",
+                "SUCCEEDED",
+            }:
+                db.session.rollback()
+                return _error(
+                    existing.error or "上一次操作未完成，请修正后重试。",
+                    409,
+                    code="PREVIOUS_ATTEMPT_FAILED",
+                )
+            response = _ok(
+                {
+                    "action": _action_view(existing),
+                    "result": existing.result or {},
+                    "thread": _thread_view(thread, include_messages=True),
+                    "deduplicated": True,
+                    "message": _course_tool_message(
+                        tool,
+                        existing.result or {},
                     ),
                 },
             )
-            db.session.add(assistant)
-            db.session.flush()
-            if queued_jobs:
-                for current_queued_job, current_authoring_job in zip(
-                    queued_jobs, authoring_jobs
-                ):
-                    add_card(
-                        assistant,
-                        card_type="job",
-                        object_type="job",
-                        object_id=current_queued_job.id,
-                        state={
-                            **job_view(current_queued_job),
-                            "tool": tool,
-                            "title": current_authoring_job.title,
-                            "artifactType": "ctf-challenge",
-                            "batchId": result.get("batchId"),
-                            "batchCount": len(queued_jobs),
-                            "batchIndex": (
-                                current_queued_job.payload or {}
-                            ).get("batchIndex"),
-                            "batchTopic": (
-                                current_queued_job.payload or {}
-                            ).get("batchTopic"),
-                        },
-                        actions=["open", "cancel"],
-                    )
+            db.session.rollback()
+            return response
+
+        operation = proposal_operation(request_key)
+        if operation is not None:
+            thread = TeachingAgentThreads.query.filter_by(
+                id=thread.id, user_id=user.id,
+            ).with_for_update().populate_existing().one()
+            if thread.status != 'ACTIVE':
+                raise ApprovalJournalError('请先恢复这个对话。', 'THREAD_ARCHIVED')
+            message_id, proposal_index = operation
+            source = TeachingAgentMessages.query.filter_by(
+                id=message_id, thread_id=thread.id, user_id=user.id, role='assistant',
+            ).with_for_update().populate_existing().first()
+            from ...agent_runtime.tool_plan import message_metadata
+            metadata = message_metadata(source) if source else {}
+            raw_proposals = metadata.get('toolProposals')
+            proposals = raw_proposals if isinstance(raw_proposals, list) else []
+            if metadata.get('pending') is not False or proposal_index >= len(proposals):
+                raise ApprovalJournalError('操作提议不存在或尚未完成。', 'PROPOSAL_NOT_READY')
+            proposal = proposals[proposal_index]
+            if not isinstance(proposal, dict) or proposal.get('tool') != tool:
+                raise ApprovalJournalError('执行操作与提议不一致。', 'APPROVAL_REQUEST_CHANGED')
+            normalize = _skill_tool_argument_schema if tool in SKILL_TOOL_NAMES else _course_tool_arguments
+            _, proposed_arguments = normalize(tool, proposal.get('arguments'))
+            if proposed_arguments != arguments:
+                raise ApprovalJournalError('执行参数与批准请求不一致。', 'APPROVAL_REQUEST_CHANGED')
+            if proposal.get('requiresConfirmation') is True:
+                approval_reference = require_approved(
+                    proposal_request(thread.id, message_id, proposal_index, proposal),
+                    body.get('approvalRequest'),
+                )
+
+        dojo = None
+        if tool not in {"course.list", "course.create", "module.inquiry"} | SKILL_TOOL_NAMES:
+            placement_reference = (
+                str(arguments.get("referenceId") or "").strip()
+                if tool == "material.add_to_module"
+                else ""
+            )
+            if placement_reference:
+                # File placement is intentionally atomic: an unscoped global
+                # conversation may name any course the teacher can manage, and
+                # this operation both places the original file and moves the
+                # conversation into that trusted course/module scope.
+                dojo = dojo_for_user(user, placement_reference, teacher=True)
+                arguments["referenceId"] = dojo.reference_id
             else:
-                add_card(
-                    assistant,
-                    card_type="course_operation",
-                    object_type=action.target_type,
-                    object_id=action.id,
-                    state={
-                        "tool": tool,
-                        "status": "COMPLETED",
-                        "title": card_title,
-                        "summary": message_text,
-                        "href": href,
-                        "destinationLabel": _course_tool_destination_label(tool),
-                        "riskLevel": risk,
-                    },
-                    actions=["open"] if href else [],
-                )
-            if queued_jobs:
-                action.status = "PENDING"
-                action.completed = None
-            elif risk == "R3":
-                db.session.add(
-                    TeachingAgentApprovals(
-                        action_id=action.id,
-                        approver_id=user.id,
-                        decision="APPROVED",
-                        comment="教师在全局智能体对话中明确确认",
-                    )
-                )
-                action.status = "APPROVED"
-            else:
-                action.status = "COMPLETED"
-            action.result = scrub_payload(result)
-            action.error = None
-            if not queued_jobs:
-                action.completed = datetime.datetime.utcnow()
-            if selected_generation is not None:
-                source_message = selected_generation["sourceMessage"]
-                source_metadata = dict(source_message.metadata_json or {})
-                source_selection = dict(
-                    source_metadata.get("generationSelection") or {}
-                )
-                source_selection.update(
-                    {
-                        "status": "STARTED",
-                        "formalJobId": queued_job.id,
-                        "authoringJobId": str(authoring_job.id),
-                        "formalJobIds": [item.id for item in queued_jobs],
-                        "authoringJobIds": [item.id for item in authoring_jobs],
-                        "startedAt": _timestamp(datetime.datetime.utcnow()),
-                    }
-                )
-                source_metadata["generationSelection"] = source_selection
-                source_message.metadata_json = source_metadata
-            thread.updated = datetime.datetime.utcnow()
-            db.session.commit()
+                if thread.dojo_id is None:
+                    raise ValueError("Please select a target course first")
+                dojo = dojo_for_user(user, thread.dojo_id, teacher=True)
 
-            if queued_jobs:
-                # The whole batch is now durable (domain state, action,
-                # messages, cards, jobs and outbox rows).  Publish only after
-                # that atomic commit so a worker can never observe a partial
-                # five-challenge batch.
-                from ...agent_runtime.jobs import publish_pending_outbox
-
-                for current_queued_job in queued_jobs:
-                    publish_pending_outbox(job_id=current_queued_job.id)
-
-            if published_challenge is not None:
-                try:
-                    from ...learning.solution_agent import (
-                        enqueue_solution_run,
-                        solution_run_view,
-                    )
-                    from ...utils.image_pulls import publish_image_pull
-
-                    if not (published_challenge.image or "").startswith(
-                        (
-                            "mac:",
-                            "pwncollege-",
-                            "pwncollege/",
-                            "challenges.pwn.college/",
-                        )
-                    ):
-                        publish_image_pull(
-                            published_challenge.image,
-                            dojo_reference_id=published_challenge.dojo.reference_id,
-                        )
-                    if exercise_mode(published_challenge) != "SIMULATION":
-                        solution_run = enqueue_solution_run(published_challenge, user)
-                        result["solutionRunId"] = solution_run.id
-                        result["solutionRun"] = solution_run_view(solution_run)
-                        action.result = scrub_payload(result)
-                        db.session.commit()
-                except Exception:
-                    db.session.rollback()
-                    logger.exception(
-                        "Native challenge was published but post-publication validation could not be queued"
-                    )
-
-            if cleanup_packages or cleanup_workspaces or cleanup_course_path:
-                from ...learning.authoring import remove_generated_package_assets
-
-                for package_root in cleanup_packages:
-                    try:
-                        remove_generated_package_assets(package_root)
-                    except (OSError, ValueError):
-                        logger.warning(
-                            "Course tool completed but generated assets were not removed",
-                            exc_info=True,
-                        )
-                if cleanup_workspaces:
-                    from .learning import _stop_deleted_challenge_workspaces
-
-                    for cleanup in cleanup_workspaces:
-                        if isinstance(cleanup, tuple):
-                            _stop_deleted_challenge_workspaces(*cleanup)
-                        else:
-                            try:
-                                cleanup.remove(force=True)
-                            except Exception:
-                                logger.warning(
-                                    "Course tool completed but a workspace was not stopped",
-                                    exc_info=True,
-                                )
-                if cleanup_course_path:
-                    shutil.rmtree(cleanup_course_path, ignore_errors=True)
-            clear_challenges()
-            clear_standings()
-            return _ok(
-                {
-                    "action": _action_view(action),
-                    "result": result,
-                    "thread": _thread_view(thread, include_messages=True),
-                    "message": message_text,
-                }
-            )
-        except (ScopeError, PermissionError) as exc:
-            db.session.rollback()
-            _record_failed_course_tool(
-                user=user,
-                thread=thread,
-                tool=tool,
-                risk=risk,
-                arguments=arguments,
-                idempotency_key=idempotency_key,
-                error=exc,
-            )
-            return _error(exc, 403, code="FORBIDDEN")
-        except (ValueError, IntegrityError) as exc:
-            db.session.rollback()
-            _record_failed_course_tool(
-                user=user,
-                thread=thread,
-                tool=tool,
-                risk=risk,
-                arguments=arguments,
-                idempotency_key=idempotency_key,
-                error=exc,
-            )
-            return _error(exc, 409, code="INVALID_REQUEST")
-        except Exception as exc:
-            db.session.rollback()
-            _record_failed_course_tool(
-                user=user,
-                thread=thread,
-                tool=tool,
-                risk=risk,
-                arguments=arguments,
-                idempotency_key=idempotency_key,
-                error=exc,
-            )
-            logger.exception("Global Agent course tool failed: %s", tool)
-            return _error(
-                "Course operation failed without changing the requested course",
-                500,
-                code="COURSE_TOOL_FAILED",
-            )
+        if tool == "module.inquiry" and thread.dojo_id is not None:
+            dojo = dojo_for_user(user, thread.dojo_id, teacher=True)
+        action = TeachingAgentActions(
+            thread_id=thread.id,
+            actor_id=user.id,
+            action_type=f"agent-{tool}"[:80],
+            risk_level=risk,
+            target_type=(
+                "course"
+                if tool.startswith("course.")
+                else "module"
+                if tool.startswith("module.")
+                else "challenge"
+                if tool.startswith("challenge.")
+                else "material"
+                if tool.startswith("material.")
+                else "skill"
+                if tool.startswith("skill.")
+                else "assignment"
+            ),
+            target_id=(dojo.reference_id if dojo is not None else None),
+            status="RUNNING",
+            idempotency_key=idempotency_key,
+            request_json={
+                "dojoId": dojo.dojo_id if dojo is not None else None,
+                "tool": tool,
+                "arguments": arguments,
+                "requestFingerprint": request_fingerprint,
+                **(
+                    {"generationPlan": confirmed_generation_plan}
+                    if confirmed_generation_plan is not None
+                    else {}
+                ),
+            },
+            result={},
+        )
+        db.session.add(action)
+        db.session.flush()
+        job = admit_teacher_tool(action, user, {
+            'kind': 'teacher-tool', 'tool': tool, 'arguments': arguments, 'risk': risk,
+            'request': action.request_json, 'approvalRequest': approval_reference,
+            'scope': {'dojoId': dojo.dojo_id if dojo else None,
+                      'threadDojoId': thread.dojo_id, 'moduleIndex': thread.module_index},
+            'sourceRefs': proposal_source_refs,
+            'generationPlan': confirmed_generation_plan,
+            'generationSelection': ({'sourceMessageId': selected_generation['sourceMessage'].id,
+                                     'optionId': body['generationSelection']['optionId']}
+                                    if selected_generation else None),
+        })
+        if selected_generation:
+            from ...agent_runtime.generation_events import record_generation
+            admitted = {**selected_generation['selection'], 'commandActionId': action.id, 'commandJobId': job.id}
+            record_generation(selected_generation, 'admitted', admitted)
+        action.status = 'EXECUTING'
+        db.session.commit()
+        try:
+            publish_pending_outbox(job_id=job.id)
+        except Exception:
+            logger.exception('Durable tool delivery will be retried from its saved outbox')
+        return teacher_tool_receipt(action, thread, deduplicated=False, accepted=True)
+    except ApprovalJournalError as exc:
+        db.session.rollback()
+        return _error(exc, exc.status, code=exc.code)
+    except (ScopeError, PermissionError) as exc:
+        db.session.rollback()
+        _record_failed_course_tool(
+            user=user,
+            thread=thread,
+            tool=tool,
+            risk=risk,
+            arguments=arguments,
+            idempotency_key=idempotency_key,
+            error=exc,
+        )
+        return _error(exc, 403, code="FORBIDDEN")
+    except (ValueError, IntegrityError) as exc:
+        db.session.rollback()
+        _record_failed_course_tool(
+            user=user,
+            thread=thread,
+            tool=tool,
+            risk=risk,
+            arguments=arguments,
+            idempotency_key=idempotency_key,
+            error=exc,
+        )
+        return _error(exc, 409, code="INVALID_REQUEST")
+    except Exception as exc:
+        db.session.rollback()
+        _record_failed_course_tool(
+            user=user,
+            thread=thread,
+            tool=tool,
+            risk=risk,
+            arguments=arguments,
+            idempotency_key=idempotency_key,
+            error=exc,
+        )
+        logger.exception("Global Agent course tool failed: %s", tool)
+        return _error(
+            "Course operation failed without changing the requested course",
+            500,
+            code="COURSE_TOOL_FAILED",
+        )
 
 
 @teaching_namespace.route("/candidate-sets/<string:candidate_set_id>")
@@ -8293,10 +8109,58 @@ class Artifacts(Resource):
         if dojo_id is not None:
             dojo_for_user(user, dojo_id, teacher=True)
             query = query.filter(TeachingArtifacts.dojo_id == dojo_id)
+        if request.args.get("scope") == "projects":
+            _require_teacher(user)
+            try:
+                return _ok(project_collection_view(
+                    query, user.id,
+                    search=request.args.get("q", ""),
+                    artifact_type=request.args.get("type", ""),
+                    generation_status=request.args.get("status", ""),
+                    limit=request.args.get("limit", default=200, type=int),
+                    offset=request.args.get("offset", default=0, type=int),
+                ))
+            except ValueError as exc:
+                return _error(exc, 400, code="INVALID_FILTER")
         rows = query.order_by(TeachingArtifacts.updated.desc()).limit(200).all()
         return _ok(
             {"artifacts": [artifact_view(row, include_content=False) for row in rows]}
         )
+
+
+@teaching_namespace.route("/artifacts/<string:artifact_id>/course")
+class ArtifactCourseBinding(Resource):
+    @authed_only
+    def post(self, artifact_id):
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            artifact = artifact_for_user(artifact_id, user)
+            body = _body()
+            if artifact.self_workspace_id is not None or artifact.dojo_id is not None:
+                raise ValueError("只有生成项目合集中的独立作品可以关联课程。")
+            if artifact.status in {"ARCHIVED", "DELETED", "GENERATING", "PUBLISHED"}:
+                raise ValueError("请等待作品生成完成后再关联课程。")
+            if body.get("expectedRevision") != artifact.current_revision:
+                return _error("版本已经变化，请刷新后重试。", 409, code="REVISION_CONFLICT")
+            dojo = dojo_for_user(user, body.get("dojoId"), teacher=True)
+            module_index = body.get("moduleIndex")
+            module = next((item for item in dojo.modules if item.module_index == module_index), None)
+            if module is None:
+                raise ValueError("请选择该课程中真实存在的章节。")
+            artifact.dojo_id = dojo.dojo_id
+            artifact.module_index = module.module_index
+            artifact.updated = datetime.datetime.utcnow()
+            _management_audit(user, "artifact.bind_course", "teaching_artifact", artifact.id,
+                              {"dojoId": dojo.dojo_id, "moduleIndex": module.module_index})
+            db.session.commit()
+            return _ok({"artifact": artifact_view(artifact, include_content=False)})
+        except ScopeError as exc:
+            db.session.rollback()
+            return _error(exc, 404, code="NOT_FOUND")
+        except (ValueError, TypeError) as exc:
+            db.session.rollback()
+            return _error(exc, 400, code="INVALID_REQUEST")
 
 
 @teaching_namespace.route("/artifacts/bulk-delete")
@@ -8307,14 +8171,19 @@ class ArtifactBulkDelete(Resource):
         try:
             _require_teacher(user)
             body = _body()
-            try:
-                dojo_id = int(body.get("dojoId"))
-            except (TypeError, ValueError) as exc:
-                raise ArtifactBulkDeleteError("课程标识无效，请刷新页面后重试。") from exc
-            dojo = dojo_for_user(user, dojo_id, teacher=True)
+            project_scope = body.get("scope") == "projects"
+            dojo = None
+            if body.get("scope") not in (None, "projects"):
+                raise ArtifactBulkDeleteError("管理范围无效。")
+            if not project_scope:
+                try:
+                    dojo_id = int(body.get("dojoId"))
+                except (TypeError, ValueError) as exc:
+                    raise ArtifactBulkDeleteError("课程标识无效，请刷新页面后重试。") from exc
+                dojo = dojo_for_user(user, dojo_id, teacher=True)
             requested_ids = body.get("artifactIds")
             if not isinstance(requested_ids, list) or not 1 <= len(requested_ids) <= 100:
-                raise ArtifactBulkDeleteError("请选择 1 至 100 份未发布课件。")
+                raise ArtifactBulkDeleteError("请选择 1 至 100 项未发布内容。")
             artifact_ids = []
             seen_ids = set()
             for value in requested_ids:
@@ -8329,36 +8198,40 @@ class ArtifactBulkDelete(Resource):
                 TeachingArtifacts.query.filter(
                     TeachingArtifacts.id.in_(artifact_ids),
                     TeachingArtifacts.owner_id == user.id,
-                    TeachingArtifacts.dojo_id == dojo.dojo_id,
+                    TeachingArtifacts.dojo_id.is_(None) if project_scope else TeachingArtifacts.dojo_id == dojo.dojo_id,
                     TeachingArtifacts.self_workspace_id.is_(None),
-                    TeachingArtifacts.status != "ARCHIVED",
+                    TeachingArtifacts.status.notin_(("ARCHIVED", "DELETED")),
                 )
+                .order_by(TeachingArtifacts.id)
                 .with_for_update()
                 .all()
             )
             if len(artifacts) != len(artifact_ids):
                 raise ArtifactBulkDeleteError(
-                    "课件列表已变化或包含不可管理的内容，请刷新后重新选择。",
+                    "列表已变化或包含不可管理的内容，请刷新后重新选择。",
                     409,
                 )
             non_courseware_types = COURSEWARE_EXCLUDED_ARTIFACT_TYPES
-            if any(row.artifact_type in non_courseware_types for row in artifacts):
+            if not project_scope and any(row.artifact_type in non_courseware_types for row in artifacts):
                 raise ArtifactBulkDeleteError("批量删除仅适用于课程课件与教案。", 409)
             if any(row.status == "PUBLISHED" for row in artifacts):
-                raise ArtifactBulkDeleteError("已发布课件不能混入未发布课件批量删除。", 409)
+                raise ArtifactBulkDeleteError("已发布内容不能混入未发布内容批量删除。", 409)
             if any(row.published_challenge_id is not None for row in artifacts):
                 raise ArtifactBulkDeleteError("选中的内容已发布为题目，请到题目管理中处理。", 409)
 
             active_artifact_ids = {
-                str((job.payload or {}).get("artifactId") or "")
-                for job in TeachingJobs.query.filter(
+                str(reference)
+                for references in TeachingJobs.query.filter(
                     TeachingJobs.owner_id == user.id,
-                    TeachingJobs.dojo_id == dojo.dojo_id,
-                    TeachingJobs.status.in_(["QUEUED", "RUNNING", "CANCEL_REQUESTED"]),
+                    TeachingJobs.status.in_(_ARTIFACT_ACTIVE_JOB_STATUSES),
+                    or_(
+                        TeachingJobs.payload["artifactId"].as_string().in_(artifact_ids),
+                        TeachingJobs.result["artifactId"].as_string().in_(artifact_ids),
+                    ),
                 )
-                .order_by(TeachingJobs.created.desc())
-                .limit(300)
+                .with_entities(TeachingJobs.payload["artifactId"].as_string(), TeachingJobs.result["artifactId"].as_string())
                 .all()
+                for reference in references if reference
             }
             if any(
                 row.status in {"GENERATING", "VALIDATING", "PUBLISHING"}
@@ -8366,7 +8239,7 @@ class ArtifactBulkDelete(Resource):
                 for row in artifacts
             ):
                 raise ArtifactBulkDeleteError(
-                    "有课件仍在生成或检查，请等待任务结束后再删除。",
+                    "有内容仍在生成或检查，请等待任务结束后再删除；本次未删除任何内容。",
                     409,
                 )
 
@@ -8377,10 +8250,10 @@ class ArtifactBulkDelete(Resource):
             _management_audit(
                 user,
                 "artifact.manage.bulk_delete",
-                "dojo",
-                dojo.reference_id,
+                "project_collection" if project_scope else "dojo",
+                str(user.id) if project_scope else dojo.reference_id,
                 {
-                    "dojoId": dojo.dojo_id,
+                    "dojoId": None if project_scope else dojo.dojo_id,
                     "deletedCount": len(artifacts),
                     "artifactIds": artifact_ids,
                 },
@@ -8405,7 +8278,7 @@ class ArtifactBulkDelete(Resource):
             db.session.rollback()
             logger.exception("Failed to bulk delete courseware artifacts")
             return _error(
-                "批量删除课件失败，列表未发生变化。",
+                "批量删除失败，列表未发生变化。",
                 500,
                 code="INTERNAL_ERROR",
             )
@@ -8554,6 +8427,161 @@ class ArtifactOrder(Resource):
             )
 
 
+_ARTIFACT_ACTIVE_JOB_STATUSES = ("QUEUED", "RUNNING", "CANCEL_REQUESTED")
+
+
+def _artifact_job_query(artifact_id, owner_id):
+    return TeachingJobs.query.filter(
+        TeachingJobs.owner_id == owner_id,
+        TeachingJobs.kind.in_(["artifact.materialize", "artifact.revise"]),
+        or_(
+            TeachingJobs.payload["artifactId"].astext == artifact_id,
+            TeachingJobs.result["artifactId"].astext == artifact_id,
+        ),
+    )
+
+
+def _job_activity_sources(job, view):
+    event_job = job
+    event_jobs = [job]
+    if (job.payload or {}).get("harnessVersion"):
+        seen = {job.id}
+        for _ in range(20):
+            next_id = (event_job.payload or {}).get("harnessNextJobId")
+            if not next_id or next_id in seen:
+                break
+            next_job = TeachingJobs.query.filter_by(
+                id=next_id, owner_id=job.owner_id, thread_id=job.thread_id,
+            ).first()
+            if next_job is None:
+                break
+            seen.add(next_id)
+            event_jobs.append(next_job)
+            event_job = next_job
+    child_id = (view.get("result") or {}).get("materializationJobId")
+    if child_id and job.kind in ("candidate.generate", "self.candidate.generate"):
+        child = TeachingJobs.query.filter_by(
+            id=child_id, owner_id=job.owner_id, kind="artifact.materialize"
+        ).first()
+        if child is not None:
+            event_jobs = [child]
+    if job.thread_id and (job.payload or {}).get("harnessVersion"):
+        known_ids = {source.id for source in event_jobs}
+        children = TeachingJobs.query.filter(
+            TeachingJobs.owner_id == job.owner_id,
+            TeachingJobs.thread_id == job.thread_id,
+            TeachingJobs.payload["harnessRootJobId"].astext == job.id,
+        ).order_by(TeachingJobs.created, TeachingJobs.id).all()
+        event_jobs.extend(child for child in children if child.id not in known_ids)
+    return event_jobs
+
+
+def _job_activity_view(job, *, after_sequence=None, event_stream_id=None):
+    view = job_view(job)
+    event_job = job
+    event_jobs = [job]
+    if (job.payload or {}).get("harnessVersion"):
+        seen = {job.id}
+        for _ in range(20):
+            next_id = (event_job.payload or {}).get("harnessNextJobId")
+            if not next_id or next_id in seen:
+                break
+            next_job = TeachingJobs.query.filter_by(
+                id=next_id, owner_id=job.owner_id, thread_id=job.thread_id,
+            ).first()
+            if next_job is None:
+                break
+            seen.add(next_id)
+            event_jobs.append(next_job)
+            event_job = next_job
+    child_id = (view.get("result") or {}).get("materializationJobId")
+    if child_id and job.kind in ("candidate.generate", "self.candidate.generate"):
+        child = TeachingJobs.query.filter_by(
+            id=child_id, owner_id=job.owner_id, kind="artifact.materialize"
+        ).first()
+        if child is not None:
+            event_jobs = [child]
+    messages = {
+        "任务已持久化，等待执行": "已加入队列，等待开始",
+        "Worker 已获取任务租约": "已分配执行资源，准备开始",
+        "保存候选与 revision": "正在保存生成结果和新版本",
+    }
+    stream_id = hashlib.sha256("|".join(source.id for source in event_jobs).encode()).hexdigest()[:24]
+    sequence_counts = [
+        db.session.query(func.max(TeachingJobEvents.sequence))
+        .filter(TeachingJobEvents.job_id == source.id)
+        .scalar() or 0
+        for source in event_jobs
+    ]
+    last_sequence = sum(sequence_counts)
+    reset = (
+        after_sequence is None
+        or event_stream_id != stream_id
+        or after_sequence > last_sequence
+    )
+    cursor = 0 if reset else after_sequence
+    events = []
+    offset = 0
+    for source, count in zip(event_jobs, sequence_counts):
+        if offset + count <= cursor:
+            offset += count
+            continue
+        for event in job_events_view(source.id, after_sequence=max(0, cursor - offset)):
+            events.append({
+                **event,
+                "id": f"{source.id}:{event['sequence']}",
+                "sourceJobId": source.id,
+                "sourceSequence": event["sequence"],
+                "sequence": offset + event["sequence"],
+                "message": messages.get(event["message"], event["message"]),
+            })
+        offset += count
+    return {
+        "job": view,
+        "events": events,
+        "eventStreamId": stream_id,
+        "lastSequence": last_sequence,
+        "reset": reset,
+    }
+
+
+def _artifact_progress_view(artifact, user):
+    job = _artifact_job_query(artifact.id, user.id).order_by(
+        case((TeachingJobs.status.in_(_ARTIFACT_ACTIVE_JOB_STATUSES), 0), else_=1),
+        TeachingJobs.updated.desc(),
+        TeachingJobs.created.desc(),
+        TeachingJobs.id.desc(),
+    ).first()
+    if job is not None and (job.payload or {}).get("taskListHidden"):
+        parent_id = (job.payload or {}).get("parentGenerationJobId")
+        parent = TeachingJobs.query.filter_by(id=parent_id, owner_id=user.id).first() if parent_id else None
+        if parent is not None and parent.kind in ("candidate.generate", "self.candidate.generate"):
+            result = job_view(parent).get("result") or {}
+            if result.get("materializationJobId") == job.id and result.get("artifactId") == artifact.id:
+                job = parent
+    activity = _job_activity_view(job) if job is not None else {"job": None, "events": []}
+    return {
+        "artifactId": artifact.id,
+        "artifactStatus": artifact.status,
+        "currentRevision": artifact.current_revision,
+        "job": {**activity["job"], "events": activity["events"]} if activity["job"] else None,
+    }
+
+
+@teaching_namespace.route("/artifacts/<string:artifact_id>/progress")
+class ArtifactProgress(Resource):
+    @authed_only
+    def get(self, artifact_id):
+        try:
+            user = _current_user()
+            artifact = artifact_for_viewer(artifact_id, user)
+            if _artifact_student_safe_for_user(artifact, user):
+                raise ScopeError("Artifact not found")
+            return _ok(_artifact_progress_view(artifact, user))
+        except ScopeError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+
+
 @teaching_namespace.route("/artifacts/<string:artifact_id>")
 class Artifact(Resource):
     @authed_only
@@ -8622,25 +8650,12 @@ class Artifact(Resource):
                 "publishedAt": _timestamp(artifact.published),
             }
             if not student_safe:
-                active_jobs = (
-                    TeachingJobs.query.filter(
-                        TeachingJobs.owner_id == user.id,
-                        TeachingJobs.kind.in_(["artifact.materialize", "artifact.revise"]),
-                        TeachingJobs.status.in_(["QUEUED", "RUNNING", "CANCEL_REQUESTED"]),
-                    )
-                    .order_by(TeachingJobs.created.desc())
-                    .limit(50)
-                    .all()
+                progress = _artifact_progress_view(artifact, user)
+                data["progressJob"] = progress["job"]
+                data["activeJob"] = (
+                    progress["job"] if progress["job"]
+                    and progress["job"]["status"] in _ARTIFACT_ACTIVE_JOB_STATUSES else None
                 )
-                active_job = next(
-                    (
-                        row
-                        for row in active_jobs
-                        if (row.payload or {}).get("artifactId") == artifact.id
-                    ),
-                    None,
-                )
-                data["activeJob"] = job_view(active_job) if active_job else None
             current_revision = revisions[0] if revisions else None
             source_details = []
             generation_job = None
@@ -8714,28 +8729,9 @@ class Artifact(Resource):
                     else:
                         source_details.append(scrub_payload(source))
 
-                recent_generation_jobs = (
-                    TeachingJobs.query.filter_by(owner_id=artifact.owner_id)
-                    .filter(
-                        TeachingJobs.kind.in_(
-                            ["artifact.materialize", "artifact.revise"]
-                        )
-                    )
-                    .order_by(TeachingJobs.created.desc())
-                    .limit(200)
-                    .all()
-                )
-                source_job = next(
-                    (
-                        row
-                        for row in recent_generation_jobs
-                        if str((row.result or {}).get("artifactId") or "")
-                        == artifact.id
-                        or str((row.payload or {}).get("artifactId") or "")
-                        == artifact.id
-                    ),
-                    None,
-                )
+                source_job = _artifact_job_query(artifact.id, artifact.owner_id).order_by(
+                    TeachingJobs.created.desc(), TeachingJobs.id.desc()
+                ).first()
                 if source_job is not None:
                     generation_job = {
                         "id": source_job.id,
@@ -8792,9 +8788,8 @@ class Artifact(Resource):
                 raise ScopeError("Artifact not found")
             if artifact.self_workspace_id is None:
                 _require_teacher(user)
-                if artifact.dojo_id is None:
-                    raise ScopeError("Artifact not found")
-                dojo_for_user(user, artifact.dojo_id, teacher=True)
+                if artifact.dojo_id is not None:
+                    dojo_for_user(user, artifact.dojo_id, teacher=True)
             title = str(_body().get("title") or "").strip()
             if not 1 <= len(title) <= 240:
                 raise ValueError("内容名称需包含 1-240 个字符。")
@@ -8826,20 +8821,22 @@ class Artifact(Resource):
                 raise ScopeError("Artifact not found")
             if artifact.self_workspace_id is None:
                 _require_teacher(user)
-                if artifact.dojo_id is None:
-                    raise ScopeError("Artifact not found")
-                dojo_for_user(user, artifact.dojo_id, teacher=True)
+                if artifact.dojo_id is not None:
+                    dojo_for_user(user, artifact.dojo_id, teacher=True)
             if artifact.published_challenge_id is not None:
                 raise ValueError("该内容已发布为 CTF 题目，请从实训题目列表删除。")
             if artifact.status in {
                 "GENERATING",
                 "VALIDATING",
                 "PUBLISHING",
-            } or _active_resource_job(
-                user,
-                resource_key="artifactId",
-                resource_id=artifact.id,
-            ):
+            } or TeachingJobs.query.filter(
+                TeachingJobs.owner_id == user.id,
+                TeachingJobs.status.in_(_ARTIFACT_ACTIVE_JOB_STATUSES),
+                or_(
+                    TeachingJobs.payload["artifactId"].as_string() == artifact.id,
+                    TeachingJobs.result["artifactId"].as_string() == artifact.id,
+                ),
+            ).with_entities(TeachingJobs.id).first():
                 raise ValueError("内容仍在生成或验证，请等待任务结束后再删除。")
             artifact.status = "ARCHIVED"
             artifact.updated = datetime.datetime.utcnow()
@@ -9003,8 +9000,10 @@ class ArtifactStudentPreview(Resource):
             _require_teacher(user)
             artifact = artifact_for_user(artifact_id, user)
             if artifact.dojo_id is None:
-                raise ScopeError("Artifact not found")
-            dojo_for_user(user, artifact.dojo_id, teacher=True)
+                if artifact.owner_id != user.id or artifact.self_workspace_id is not None:
+                    raise ScopeError("Artifact not found")
+            else:
+                dojo_for_user(user, artifact.dojo_id, teacher=True)
             data = artifact_view(artifact, student_safe=True)
             data.update(
                 {
@@ -9112,40 +9111,52 @@ class ArtifactRevisionRestore(Resource):
 class ArtifactRevise(Resource):
     @authed_only
     def post(self, artifact_id):
-        user = _current_user()
-        try:
-            artifact = artifact_for_user(artifact_id, user)
-            if artifact.owner_id != user.id:
-                raise ScopeError("Only the artifact owner may revise it")
-            body = _body()
-            instruction = str(body.get("instruction") or "").strip()
-            if not instruction:
-                return _error("Natural-language revision instruction is required")
-            expected = int(body.get("expectedRevision") or artifact.current_revision)
-            if expected != artifact.current_revision:
-                return _error(
-                    f"Artifact is now at revision {artifact.current_revision}",
-                    409,
-                    code="REVISION_CONFLICT",
-                )
-            job, _ = enqueue_job(
-                owner_id=user.id,
-                kind="artifact.revise",
-                idempotency_key=_unique_idempotency(user.id, "artifact-revise"),
-                payload={
-                    "artifactId": artifact.id,
-                    "expectedRevision": expected,
-                    "instruction": instruction,
-                    "currentContent": artifact_view(artifact)["revision"]["content"],
-                    "artifactType": artifact.artifact_type,
-                    "allowDegraded": bool(body.get("allowDegraded")),
-                },
-                dojo_id=artifact.dojo_id,
-                module_index=artifact.module_index,
+        return revise_teacher_artifact(_current_user(), artifact_id, _body(), request.headers.get("Idempotency-Key"))
+
+
+def revise_teacher_artifact(user, artifact_id, body, request_key=None):
+    try:
+        artifact = artifact_for_user(artifact_id, user)
+        if artifact.owner_id != user.id:
+            raise ScopeError("Only the artifact owner may revise it")
+        operation_key = _supplied_idempotency(user.id, "artifact-revise", request_key)
+        existing = TeachingJobs.query.filter_by(owner_id=user.id, idempotency_key=operation_key).first()
+        if existing is not None:
+            if (existing.payload or {}).get("artifactId") != artifact.id or (existing.payload or {}).get("instruction") != str(body.get("instruction") or "").strip():
+                return _error("这次操作的编号已用于不同的修改要求。", 409, code="REVISION_CONFLICT")
+            return _ok({"job": job_view(existing), "deduplicated": True}, 202)
+        instruction = str(body.get("instruction") or "").strip()
+        if not instruction:
+            return _error("Natural-language revision instruction is required")
+        expected = int(body.get("expectedRevision") or artifact.current_revision)
+        if expected != artifact.current_revision:
+            return _error(
+                f"Artifact is now at revision {artifact.current_revision}",
+                409,
+                code="REVISION_CONFLICT",
             )
-            return _ok({"job": job_view(job)}, 202)
-        except ScopeError as exc:
-            return _error(exc, 404, code="NOT_FOUND")
+        current_content = (artifact_view(artifact).get("revision") or {}).get("content")
+        source_issue = artifact_revision_source_issue(artifact.artifact_type, current_content)
+        if source_issue:
+            return _error(source_issue, 409, code="REVISION_SOURCE_NOT_READY")
+        job, _ = enqueue_job(
+            owner_id=user.id,
+            kind="artifact.revise",
+            idempotency_key=operation_key,
+            payload={
+                "artifactId": artifact.id,
+                "expectedRevision": expected,
+                "instruction": instruction,
+                "currentContent": current_content,
+                "artifactType": artifact.artifact_type,
+                "allowDegraded": bool(body.get("allowDegraded")),
+            },
+            dojo_id=artifact.dojo_id,
+            module_index=artifact.module_index,
+        )
+        return _ok({"job": job_view(job)}, 202)
+    except ScopeError as exc:
+        return _error(exc, 404, code="NOT_FOUND")
 
 
 @teaching_namespace.route("/artifacts/<string:artifact_id>/request-publish")
@@ -9159,6 +9170,7 @@ class ArtifactPublishRequest(Resource):
             _require_teacher(user)
             body = _body()
             artifact = artifact_for_user(artifact_id, user)
+            artifact = TeachingArtifacts.query.filter_by(id=artifact.id).with_for_update().populate_existing().one()
             if artifact.owner_id != user.id:
                 raise ScopeError("Only the artifact owner may request publication")
             if artifact.dojo_id is None:
@@ -9222,10 +9234,14 @@ class ArtifactPublishRequest(Resource):
                 TeachingAgentActions.action_type.in_(
                     ["publish-question-artifact", "publish-teaching-artifact"]
                 ),
-                TeachingAgentActions.status.in_(["VALIDATING", "AWAITING_APPROVAL"]),
+                TeachingAgentActions.status.in_(["VALIDATING", "AWAITING_APPROVAL", "EXECUTING", "APPROVED"]),
+                TeachingAgentActions.request_json["expectedRevision"].astext == str(expected_revision),
             ).first()
             if existing:
-                return _ok({"action": _action_view(existing)}, 202)
+                view = _action_view(existing)
+                return _ok({"action": view}, 200 if view['status'] == 'APPROVED' else 202)
+            if artifact.status == 'PUBLISHED':
+                return _error('这个项目版本已经发布。', 409, code='ALREADY_PUBLISHED')
 
             thread = _thread_for_artifact_action(artifact, user)
             source_job_id = str(body.get("sourceJobId") or "").strip() or None
@@ -9359,6 +9375,9 @@ class TeachingJobCollection(Resource):
             if view not in {"active", "attention", "history", "all"}:
                 raise ValueError("未知任务视图。")
             query = TeachingJobs.query.filter_by(owner_id=user.id)
+            query = query.filter(func.coalesce(TeachingJobs.payload["harnessInternal"].astext, "false") != "true")
+            query = query.filter(TeachingJobs.kind.notin_(("material.analyze", "material.enrich")))
+            effective_status = func.coalesce(TeachingJobs.payload["harnessStatus"].astext, TeachingJobs.status)
             dojo_value = str(request.args.get("dojoId") or "").strip()
             dojo = None
             if dojo_value:
@@ -9370,13 +9389,13 @@ class TeachingJobCollection(Resource):
                 query = query.filter_by(thread_id=thread_id)
             if view == "active":
                 query = query.filter(
-                    TeachingJobs.status.in_(("QUEUED", "RUNNING", "CANCEL_REQUESTED"))
+                    effective_status.in_(("QUEUED", "RUNNING", "CANCEL_REQUESTED"))
                 )
             elif view == "attention":
-                query = query.filter(TeachingJobs.status.in_(("FAILED", "CANCELED")))
+                query = query.filter(effective_status.in_(("FAILED", "CANCELED")))
             elif view == "history":
                 query = query.filter(
-                    TeachingJobs.status.in_(("SUCCEEDED", "FAILED", "CANCELED"))
+                    effective_status.in_(("SUCCEEDED", "FAILED", "CANCELED"))
                 )
             limit = request.args.get("limit", default=50, type=int) or 50
             limit = max(1, min(200, limit))
@@ -9529,7 +9548,17 @@ class TeachingJob(Resource):
     def get(self, job_id):
         try:
             job = _job_for_user(job_id, _current_user())
-            return _ok({"job": job_view(job), "events": job_events_view(job.id)})
+            raw_sequence = request.args.get("afterSequence")
+            after_sequence = None
+            if raw_sequence is not None:
+                if not raw_sequence.isdigit() or len(raw_sequence) > 12:
+                    return _error("invalid event cursor", 400, code="INVALID_CURSOR")
+                after_sequence = int(raw_sequence)
+            return _ok(_job_activity_view(
+                job,
+                after_sequence=after_sequence,
+                event_stream_id=str(request.args.get("eventStreamId") or ""),
+            ))
         except ScopeError as exc:
             return _error(exc, 404, code="NOT_FOUND")
 
@@ -9542,6 +9571,65 @@ class TeachingJob(Resource):
             return _ok({"job": job_view(job)})
         except (ScopeError, PermissionError) as exc:
             return _error(exc, 404, code="NOT_FOUND")
+
+
+@teaching_namespace.route("/jobs/<string:job_id>/input")
+class TeachingPendingInput(Resource):
+    @authed_only
+    def patch(self, job_id):
+        from ...agent_runtime.conversation import validated_pending_input
+        from ...agent_runtime.jobs import append_job_event
+        from ...agent_runtime.model_inputs import ModelInputError, request_payload, revise_pending_input
+
+        user = _current_user()
+        try:
+            _require_teacher(user)
+            owned = _job_for_user(job_id, user)
+            thread = TeachingAgentThreads.query.filter_by(id=owned.thread_id, user_id=user.id).with_for_update().one_or_none()
+            if thread is None or thread.status != "ACTIVE":
+                raise ScopeError("对话不可用。")
+            job = TeachingJobs.query.filter_by(id=job_id, owner_id=user.id, thread_id=thread.id).with_for_update().populate_existing().one()
+            if job.kind != "agent.chat":
+                raise ConversationConflict("此任务不是排队输入，不能编辑。")
+            body = _body()
+            payload = request_payload(job)
+            content, revision = validated_pending_input(payload, job.status, body.get("content"), body.get("revision"), MAX_MESSAGE_CHARS)
+            message = TeachingAgentMessages.query.filter_by(id=payload.get("userMessageId"), user_id=user.id, thread_id=thread.id, role="user").first()
+            if message is None:
+                raise ConversationConflict("原始输入已不存在，未修改任务。")
+            message.content = content
+            revise_pending_input(job, {**payload, "prompt": content, "inputRevision": revision}, reason="teacher-edit")
+            job.updated = thread.updated = datetime.datetime.utcnow()
+            append_job_event(job, "input-updated", job.status, "排队中的要求已修改", details={"revision": revision})
+            db.session.commit()
+            return _ok({"job": job_view(job), "thread": _thread_view(thread, include_messages=True)})
+        except (ScopeError, ConversationConflict, ModelInputError) as exc:
+            db.session.rollback()
+            return _error(exc, 404 if isinstance(exc, ScopeError) else 409, code="NOT_FOUND" if isinstance(exc, ScopeError) else "INPUT_CONFLICT")
+
+
+@teaching_namespace.route("/jobs/<string:job_id>/events")
+class TeachingJobActivity(Resource):
+    @authed_only
+    def get(self, job_id):
+        from ...agent_runtime.activity import activity_event_page, InvalidActivityCursor
+
+        try:
+            job = _job_for_user(job_id, _current_user())
+            view = job_view(job)
+            sources = _job_activity_sources(job, view)
+            page = activity_event_page(
+                job.id, [source.id for source in sources],
+                lambda source_id, after, limit: job_events_view(
+                    source_id, after_sequence=after, limit=limit),
+                cursor=request.args.get("cursor"),
+                page_size=request.args.get("limit", default=128, type=int) or 128,
+            )
+            return _ok({**page, "job": view})
+        except ScopeError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+        except InvalidActivityCursor as exc:
+            return _error(exc, 400, code="INVALID_ACTIVITY_CURSOR")
 
 
 @teaching_namespace.route("/generation-batches")
@@ -9886,444 +9974,55 @@ class TeachingActionDecision(Resource):
     @authed_only
     def post(self, action_id):
         user = _current_user()
-        published_challenge = None
         body = _body()
-        decision = str(body.get("decision") or "").upper()
-        if body.get("confirmed") is not True or decision not in {
-            "APPROVED",
-            "REJECTED",
-        }:
-            return _error("Explicit confirmed approval or rejection is required")
+        decision = str(body.get('decision') or '').upper()
+        if body.get('confirmed') is not True or decision not in {'APPROVED', 'REJECTED'}:
+            return _error('Explicit confirmed approval or rejection is required')
         try:
-            action = (
-                TeachingAgentActions.query.filter_by(id=action_id)
-                .with_for_update()
-                .first()
-            )
-            if action is None or action.status != "AWAITING_APPROVAL":
-                return _error("Action not found", 404, code="NOT_FOUND")
+            action = TeachingAgentActions.query.filter_by(id=action_id).with_for_update().populate_existing().first()
             _action_for_teacher(action, user)
-            dojo_id = (action.request_json or {}).get("dojoId")
-            if TeachingAgentApprovals.query.filter_by(action_id=action.id).first():
-                return _error("Action was already decided", 409, code="ALREADY_DECIDED")
-
-            artifact = None
-            if action.target_type == "artifact":
-                artifact = TeachingArtifacts.query.filter_by(
-                    id=action.target_id
-                ).first()
-                if (
-                    artifact is None
-                    or artifact.dojo_id != int(dojo_id)
-                    or artifact.owner_id != action.actor_id
-                ):
-                    raise ScopeError("Artifact not found")
-                expected = int(
-                    (action.request_json or {}).get("expectedRevision")
-                    or artifact.current_revision
-                )
-                if artifact.current_revision != expected:
-                    return _error(
-                        "Artifact changed after review was requested; request publication again",
-                        409,
-                        code="REVISION_CONFLICT",
-                    )
-
-            result = dict(action.result or {})
-            if (
-                decision == "APPROVED"
-                and action.action_type == "publish-question-artifact"
-            ):
-                draft = LearningDrafts.query.filter_by(id=result.get("draftId")).first()
-                if (
-                    draft is None
-                    or draft.author_id != action.actor_id
-                    or draft.dojo_id != int(dojo_id)
-                    or (draft.validation or {}).get("status") != "PASS"
-                ):
-                    return _error(
-                        "The executable question has not passed the native publication gate",
-                        409,
-                        code="VALIDATION_REQUIRED",
-                    )
-                from ...learning.authoring import publish_draft
-
-                challenge = publish_draft(draft, user)
-                published_challenge = challenge
-                artifact.published_challenge_id = challenge.challenge_id
-                artifact.status = "PUBLISHED"
-                artifact.published = datetime.datetime.utcnow()
-                current_revision = TeachingArtifactRevisions.query.filter_by(
-                    artifact_id=artifact.id,
-                    revision=artifact.current_revision,
-                ).first()
-                if current_revision:
-                    current_revision.validation = {
-                        **(current_revision.validation or {}),
-                        "status": "PASS",
-                        "publishedChallengeId": challenge.challenge_id,
-                    }
-
-                ObjectiveMappings.query.filter_by(
-                    dojo_id=artifact.dojo_id,
-                    module_index=artifact.module_index,
-                    target_type="challenge",
-                    target_id=str(challenge.challenge_id),
-                    active=True,
-                ).update({"active": False}, synchronize_session=False)
-                objectives = (draft.spec or {}).get("objectives") or []
-                for index, objective in enumerate(objectives, 1):
-                    if isinstance(objective, dict):
-                        objective_name = str(
-                            objective.get("name")
-                            or objective.get("title")
-                            or objective.get("objective")
-                            or f"目标 {index}"
-                        )[:240]
-                        objective_id = str(objective.get("id") or f"objective-{index}")[
-                            :128
-                        ]
-                        knowledge_point = objective.get("knowledgePointId")
-                        weight = float(objective.get("weight") or 1.0)
-                    else:
-                        objective_name = str(objective)[:240]
-                        objective_id = f"objective-{index}"
-                        knowledge_point = None
-                        weight = 1.0
-                    db.session.add(
-                        ObjectiveMappings(
-                            dojo_id=artifact.dojo_id,
-                            module_index=artifact.module_index,
-                            objective_id=objective_id,
-                            objective_name=objective_name,
-                            knowledge_point_id=(
-                                str(knowledge_point)[:128] if knowledge_point else None
-                            ),
-                            target_type="challenge",
-                            target_id=str(challenge.challenge_id),
-                            weight=weight,
-                            rule={"completion": "verified-solve"},
-                        )
-                    )
-                result.update(
-                    {
-                        "publishedChallengeId": challenge.challenge_id,
-                        "challengeReferenceId": challenge.reference_id,
-                    }
-                )
-            elif (
-                decision == "APPROVED"
-                and action.action_type == "publish-teaching-artifact"
-            ):
-                artifact.status = "PUBLISHED"
-                artifact.published = datetime.datetime.utcnow()
-                result["publishedArtifactId"] = artifact.id
-            elif action.action_type == "apply-material-chapters":
-                material = TeachingMaterials.query.filter_by(
-                    id=action.target_id,
-                    owner_id=action.actor_id,
-                    dojo_id=int(dojo_id),
-                ).first()
-                if material is None:
-                    raise ScopeError("Material not found")
-                material_revision = TeachingMaterialRevisions.query.filter_by(
-                    id=(action.request_json or {}).get("materialRevisionId"),
-                    material_id=material.id,
-                ).first()
-                selected = (action.request_json or {}).get("chapters") or []
-                if material_revision is None or content_hash(selected) != (
-                    action.request_json or {}
-                ).get("chaptersHash"):
-                    return _error(
-                        "Material analysis changed after review was requested",
-                        409,
-                        code="REVISION_CONFLICT",
-                    )
-                if decision == "APPROVED":
-                    maximum_index = (
-                        db.session.query(func.max(DojoModules.module_index))
-                        .filter_by(dojo_id=int(dojo_id))
-                        .scalar()
-                    )
-                    next_index = (
-                        maximum_index if maximum_index is not None else -1
-                    ) + 1
-                    existing_ids = {
-                        row.id
-                        for row in DojoModules.query.filter_by(
-                            dojo_id=int(dojo_id)
-                        ).all()
-                    }
-                    applied = []
-                    for offset, chapter in enumerate(selected):
-                        if not isinstance(chapter, dict):
-                            raise ValueError("Invalid chapter candidate")
-                        module_index = next_index + offset
-                        base_slug = _module_slug(
-                            chapter.get("title"),
-                            f"material-{material.id[-8:]}-{module_index}",
-                        )
-                        slug = base_slug
-                        suffix = 2
-                        while slug in existing_ids:
-                            slug = f"{base_slug[:27]}-{suffix}"[:32]
-                            suffix += 1
-                        existing_ids.add(slug)
-                        module = DojoModules(
-                            dojo_id=int(dojo_id),
-                            module_index=module_index,
-                            id=slug,
-                            name=str(chapter.get("title") or slug)[:128],
-                            description=str(chapter.get("description") or "")[:8000],
-                            data={
-                                "importable": True,
-                                "show_scoreboard": True,
-                                "show_challenges": True,
-                                "sourceMaterialId": material.id,
-                                "sourceMaterialRevisionId": material_revision.id,
-                                "sourceLocators": chapter.get("sourceLocators") or [],
-                            },
-                        )
-                        db.session.add(module)
-                        objectives = chapter.get("objectives") or []
-                        for objective_index, raw_objective in enumerate(
-                            objectives[:20], 1
-                        ):
-                            if isinstance(raw_objective, dict):
-                                name = str(
-                                    raw_objective.get("name")
-                                    or raw_objective.get("title")
-                                    or raw_objective.get("objective")
-                                    or f"目标 {objective_index}"
-                                )[:240]
-                                objective_id = str(
-                                    raw_objective.get("id")
-                                    or f"material-{chapter.get('sourceIndex', offset)}-{objective_index}"
-                                )[:128]
-                                knowledge_point_id = raw_objective.get(
-                                    "knowledgePointId"
-                                )
-                            else:
-                                name = str(raw_objective)[:240]
-                                objective_id = (
-                                    f"material-{chapter.get('sourceIndex', offset)}-{objective_index}"
-                                )[:128]
-                                knowledge_point_id = None
-                            db.session.add(
-                                ObjectiveMappings(
-                                    dojo_id=int(dojo_id),
-                                    module_index=module_index,
-                                    objective_id=objective_id,
-                                    objective_name=name,
-                                    knowledge_point_id=(
-                                        str(knowledge_point_id)[:128]
-                                        if knowledge_point_id
-                                        else None
-                                    ),
-                                    target_type="module",
-                                    target_id=slug,
-                                    rule={
-                                        "source": "material-analysis",
-                                        "materialId": material.id,
-                                        "materialRevisionId": material_revision.id,
-                                    },
-                                )
-                            )
-                        applied.append(
-                            {
-                                "moduleIndex": module_index,
-                                "moduleId": slug,
-                                "title": module.name,
-                            }
-                        )
-                    result["modules"] = applied
-            elif action.action_type == "control-teaching-session":
-                session = (
-                    TeachingSessions.query.filter_by(
-                        id=action.target_id,
-                        dojo_id=int(dojo_id),
-                    )
-                    .with_for_update()
-                    .first()
-                )
-                if session is None:
-                    raise ScopeError("Teaching session not found")
-                expected_status = (action.request_json or {}).get("expectedStatus")
-                command = (action.request_json or {}).get("command")
-                if session.status != expected_status:
-                    return _error(
-                        "Classroom state changed after review was requested",
-                        409,
-                        code="STATE_CONFLICT",
-                    )
-                if decision == "APPROVED":
-                    now = datetime.datetime.utcnow()
-                    if command == "start" and session.status in {"READY", "PAUSED"}:
-                        if not isinstance(
-                            (session.state or {}).get("stage"), dict
-                        ) or not ((session.state or {}).get("scenes") or []):
-                            return _error(
-                                "Classroom content is not ready",
-                                409,
-                                code="CLASSROOM_NOT_READY",
-                            )
-                        session.status = "LIVE"
-                        session.started = session.started or now
-                        event_type = "session.started"
-                    elif command == "end" and session.status == "LIVE":
-                        session.status = "ENDED"
-                        session.ended = now
-                        event_type = "session.ended"
-                    else:
-                        return _error(
-                            "Invalid classroom transition", 409, code="STATE_CONFLICT"
-                        )
-                    sequence = (
-                        db.session.query(func.max(TeachingSessionEvents.sequence))
-                        .filter_by(session_id=session.id)
-                        .scalar()
-                        or 0
-                    ) + 1
-                    db.session.add(
-                        TeachingSessionEvents(
-                            session_id=session.id,
-                            sequence=sequence,
-                            actor_id=user.id,
-                            event_type=event_type,
-                            idempotency_key=f"approved-action:{action.id}",
-                            payload={"command": command, "approvalActionId": action.id},
-                        )
-                    )
-                    result["sessionStatus"] = session.status
-            elif action.action_type == "review-self-artifact":
-                workspace = SelfLearningWorkspaces.query.filter_by(
-                    id=action.target_id,
-                    dojo_id=int(dojo_id),
-                    student_id=action.actor_id,
-                ).first()
-                if workspace is None:
-                    raise ScopeError("Self-learning workspace not found")
-                submitted = TeachingArtifacts.query.filter_by(
-                    id=workspace.submitted_artifact_id,
-                    self_workspace_id=workspace.id,
-                    owner_id=workspace.student_id,
-                    dojo_id=workspace.dojo_id,
-                ).first()
-                expected_revision = int(
-                    (action.request_json or {}).get("expectedRevision") or 0
-                )
-                if (
-                    submitted is None
-                    or submitted.id != (action.request_json or {}).get("artifactId")
-                    or submitted.current_revision != expected_revision
-                ):
-                    return _error(
-                        "Submitted artifact changed after review was requested",
-                        409,
-                        code="REVISION_CONFLICT",
-                    )
-                workspace.status = (
-                    "APPROVED" if decision == "APPROVED" else "CHANGES_REQUESTED"
-                )
-                submitted.status = (
-                    "APPROVED_PERSONAL"
-                    if decision == "APPROVED"
-                    else "CHANGES_REQUESTED"
-                )
-                now = datetime.datetime.utcnow()
-                workspace.updated = now
-                submitted.updated = now
-                if decision == "APPROVED":
-                    submitted_revision = TeachingArtifactRevisions.query.filter_by(
-                        artifact_id=submitted.id,
-                        revision=submitted.current_revision,
-                    ).first()
-                    if submitted_revision is None:
-                        return _error("Submitted artifact revision not found", 409)
-                    reviewed_artifact = TeachingArtifacts(
-                        owner_id=user.id,
-                        dojo_id=workspace.dojo_id,
-                        module_index=workspace.module_index,
-                        artifact_type=submitted.artifact_type,
-                        title=f"学生提案：{submitted.title}"[:240],
-                        status="DRAFT",
-                        current_revision=1,
-                    )
-                    db.session.add(reviewed_artifact)
-                    db.session.flush()
-                    reviewed_revision = TeachingArtifactRevisions(
-                        artifact_id=reviewed_artifact.id,
-                        revision=1,
-                        parent_revision=None,
-                        instruction="教师审核学生自主学习成果后转为课程草稿",
-                        content=submitted_revision.content,
-                        content_hash=submitted_revision.content_hash,
-                        source_refs=list(submitted_revision.source_refs or [])
-                        + [
-                            {
-                                "type": "self-learning-submission",
-                                "workspaceId": workspace.id,
-                                "artifactId": submitted.id,
-                                "revision": submitted.current_revision,
-                                "studentId": workspace.student_id,
-                            }
-                        ],
-                        validation={"status": "PENDING", "reviewActionId": action.id},
-                        created_by=user.id,
-                    )
-                    db.session.add(reviewed_revision)
-                    result["reviewedArtifactId"] = reviewed_artifact.id
-                result["workspaceStatus"] = workspace.status
-            elif decision == "REJECTED" and artifact is not None:
-                artifact.status = "DRAFT"
-
-            approval = TeachingAgentApprovals(
-                action_id=action.id,
-                approver_id=user.id,
-                decision=decision,
-                comment=str(body.get("comment") or "")[:8000],
-            )
-            db.session.add(approval)
-            action.status = decision
-            action.result = result
+            envelope = action_request(action)
+            prior = recorded_decision(action.thread_id, envelope['id'])
+            legacy = TeachingAgentApprovals.query.filter_by(action_id=action.id).first()
+            if prior is not None:
+                decide_approval(envelope, body.get('approvalRequest'), decision, user.id)
+                view = _action_view(action)
+                return _ok({'action': view, 'deduplicated': True},
+                           202 if view['status'] == 'EXECUTING' else 200)
+            if legacy is not None:
+                if legacy.decision != decision:
+                    raise ApprovalJournalError('这项请求已有决定。', 'ALREADY_DECIDED')
+                return _ok({'action': _action_view(action), 'deduplicated': True, 'legacy': True})
+            if action.status != 'AWAITING_APPROVAL':
+                return _error('操作尚未就绪或已经取消。', 409, code='ACTION_NOT_READY')
+            prepare_action(action, user, decision)
+            decide_approval(envelope, body.get('approvalRequest'), decision, user.id, body.get('comment'))
+            db.session.add(TeachingAgentApprovals(
+                action_id=action.id, approver_id=user.id, decision=decision,
+                comment=str(body.get('comment') or '')[:8000],
+            ))
+            if decision == 'REJECTED':
+                action.result, _ = apply_action(action, user, decision)
+                action.status = 'REJECTED'
+                action.error = None
+                action.completed = datetime.datetime.utcnow()
+                db.session.commit()
+                return _ok({'action': _action_view(action), 'deduplicated': False})
+            command = admit_action(action, user)
+            command_id = command.id
+            action.status = 'EXECUTING'
             action.error = None
-            action.completed = datetime.datetime.utcnow()
+            action.completed = None
             db.session.commit()
-            if published_challenge is not None:
-                from ...learning.solution_agent import enqueue_solution_run
-                from ...utils.image_pulls import publish_image_pull
-
-                if not (published_challenge.image or "").startswith(
-                    (
-                        "mac:",
-                        "pwncollege-",
-                        "pwncollege/",
-                        "challenges.pwn.college/",
-                    )
-                ):
-                    publish_image_pull(
-                        published_challenge.image,
-                        dojo_reference_id=published_challenge.dojo.reference_id,
-                    )
-                if exercise_mode(published_challenge) != "SIMULATION":
-                    solution_run = enqueue_solution_run(
-                        published_challenge,
-                        user,
-                    )
-                    action = TeachingAgentActions.query.filter_by(id=action.id).first()
-                    action.result = {
-                        **(action.result or {}),
-                        "solutionRunId": solution_run.id,
-                    }
-                    db.session.commit()
-            return _ok({"action": _action_view(action)})
+            publish_pending_outbox(job_id=command_id)
+            return _ok({'action': _action_view(action), 'deduplicated': False}, 202)
+        except (ApprovalJournalError, ApprovedActionError) as exc:
+            return _error(exc, exc.status, code=exc.code)
         except (ScopeError, ValueError) as exc:
+            return _error(exc, 404 if isinstance(exc, ScopeError) else 409,
+                          code='NOT_FOUND' if isinstance(exc, ScopeError) else 'INVALID_REQUEST')
+        finally:
             db.session.rollback()
-            return _error(
-                exc,
-                404 if isinstance(exc, ScopeError) else 409,
-                code="NOT_FOUND" if isinstance(exc, ScopeError) else "INVALID_REQUEST",
-            )
 
 
 def _record_conversation_upload(thread, user, material, job, *, ask_intent):
@@ -10452,6 +10151,9 @@ class Materials(Resource):
             conversation_upload = str(
                 request.form.get("conversationUpload") or ""
             ).lower() in {"1", "true", "yes"}
+            stage_only = conversation_upload and str(
+                request.form.get("stageOnly") or ""
+            ).lower() in {"1", "true", "yes"}
             ask_intent = conversation_upload and (
                 str(request.form.get("askIntent") or "").strip().lower()
                 not in {"0", "false", "no"}
@@ -10460,7 +10162,16 @@ class Materials(Resource):
                 return _error("请选择要上传的课程资料。")
             thread = _thread_for_owner(thread_id, user) if thread_id else None
             if conversation_upload and thread is None:
-                raise ValueError("Global-agent uploads require an active conversation")
+                thread = TeachingAgentThreads(
+                    user_id=user.id,
+                    title="新教学对话",
+                    phase="COURSE_SETUP",
+                    context={},
+                )
+                db.session.add(thread)
+                db.session.flush()
+            if thread is not None and thread.status != "ACTIVE":
+                return _error("请先恢复这个对话，再上传文件。", 409, code="THREAD_ARCHIVED")
             dojo = (
                 dojo_for_user(user, raw_dojo_id, teacher=True)
                 if raw_dojo_id
@@ -10535,7 +10246,9 @@ class Materials(Resource):
                             "materialId": existing.id,
                             "revisionId": revision.id,
                             "filename": existing.filename,
-                            "mimeType": existing.mime_type,
+                            "mimeType": "text/plain" if locally_extractable(existing.filename) else existing.mime_type,
+                            "sourceMimeType": existing.mime_type,
+                            "localExtraction": locally_extractable(existing.filename),
                             "size": existing.size,
                             "storageKey": existing.storage_key,
                         },
@@ -10545,10 +10258,10 @@ class Materials(Resource):
                             if thread is not None and existing.dojo_id is not None
                             else None
                         ),
-                        thread_id=thread.id if thread else None,
+                        thread_id=thread.id if thread and not stage_only else None,
                         priority=20,
                     )
-                if conversation_upload:
+                if conversation_upload and not stage_only:
                     _record_conversation_upload(
                         thread,
                         user,
@@ -10569,11 +10282,11 @@ class Materials(Resource):
                             if conversation_upload
                             else None
                         ),
-                        "questionAsked": bool(ask_intent),
+                        "questionAsked": bool(ask_intent and not stage_only),
                     }
                 )
 
-            filename = secure_filename(upload.filename) or "material.bin"
+            filename = _safe_material_filename(upload.filename)
             storage_root = pathlib.Path(config.AGENT_RUNTIME_STORAGE_ROOT)
             storage_user_dir = storage_root / str(user.id)
             scope_key = str(dojo.dojo_id) if dojo is not None else "unassigned"
@@ -10632,7 +10345,9 @@ class Materials(Resource):
                     "materialId": material.id,
                     "revisionId": revision.id,
                     "filename": filename,
-                    "mimeType": mime_type,
+                    "mimeType": "text/plain" if locally_extractable(filename) else mime_type,
+                    "sourceMimeType": mime_type,
+                    "localExtraction": locally_extractable(filename),
                     "size": len(raw),
                     "storageKey": storage_key,
                 },
@@ -10642,10 +10357,10 @@ class Materials(Resource):
                     if thread is not None and dojo is not None
                     else None
                 ),
-                thread_id=thread.id if thread else None,
+                thread_id=thread.id if thread and not stage_only else None,
                 priority=20,
             )
-            if conversation_upload:
+            if conversation_upload and not stage_only:
                 _record_conversation_upload(
                     thread,
                     user,
@@ -10653,6 +10368,8 @@ class Materials(Resource):
                     job,
                     ask_intent=ask_intent,
                 )
+            else:
+                db.session.commit()
             return _ok(
                 {
                     "materialId": material.id,
@@ -10662,7 +10379,7 @@ class Materials(Resource):
                         if conversation_upload
                         else None
                     ),
-                    "questionAsked": bool(ask_intent),
+                    "questionAsked": bool(ask_intent and not stage_only),
                 },
                 202,
             )
@@ -10945,120 +10662,131 @@ class MaterialAnalysis(Resource):
 
     @authed_only
     def post(self, material_id):
-        user = _current_user()
-        try:
-            _require_teacher(user)
-            material = _material_for_teacher(material_id, user, lock=True)
-            body = _body()
-            thread_id = str(body.get("threadId") or "").strip() or None
-            thread = _thread_for_owner(thread_id, user) if thread_id else None
-            if thread and thread.dojo_id not in {None, material.dojo_id}:
-                raise ScopeError("Thread and material course scopes differ")
+        return analyze_teacher_material(_current_user(), material_id, _body(), request.headers.get("Idempotency-Key"))
 
-            latest = (
-                TeachingMaterialRevisions.query.filter_by(material_id=material.id)
-                .order_by(TeachingMaterialRevisions.revision.desc())
-                .first()
-            )
-            if latest is not None and latest.status == "PENDING":
-                active_jobs = (
-                    TeachingJobs.query.filter(
-                        TeachingJobs.owner_id == user.id,
-                        TeachingJobs.kind == "material.analyze",
-                        TeachingJobs.status.in_(
-                            ["QUEUED", "RUNNING", "CANCEL_REQUESTED"]
-                        ),
-                    )
-                    .order_by(TeachingJobs.created.desc())
-                    .limit(100)
-                    .all()
-                )
-                active = next(
-                    (
-                        job
-                        for job in active_jobs
-                        if (job.payload or {}).get("revisionId") == latest.id
-                        and (job.payload or {}).get("materialId") == material.id
+
+def analyze_teacher_material(user, material_id, body, request_key=None):
+    try:
+        _require_teacher(user)
+        material = _material_for_teacher(material_id, user, lock=True)
+        thread_id = str(body.get("threadId") or "").strip() or None
+        thread = _thread_for_owner(thread_id, user) if thread_id else None
+        if thread and thread.dojo_id not in {None, material.dojo_id}:
+            raise ScopeError("Thread and material course scopes differ")
+        operation_key = _supplied_idempotency(user.id, "material-analyze", request_key) if request_key else None
+        if operation_key:
+            existing = TeachingJobs.query.filter_by(owner_id=user.id, idempotency_key=operation_key).first()
+            if existing is not None:
+                if (existing.payload or {}).get("materialId") != material.id:
+                    return _error("这次操作的编号已用于另一份材料。", 409)
+                return _ok({"materialId": material.id, "job": job_view(existing), "deduplicated": True}, 202)
+
+        latest = (
+            TeachingMaterialRevisions.query.filter_by(material_id=material.id)
+            .order_by(TeachingMaterialRevisions.revision.desc())
+            .first()
+        )
+        if latest is not None and latest.status == "PENDING":
+            active_jobs = (
+                TeachingJobs.query.filter(
+                    TeachingJobs.owner_id == user.id,
+                    TeachingJobs.kind == "material.analyze",
+                    TeachingJobs.status.in_(
+                        ["QUEUED", "RUNNING", "CANCEL_REQUESTED"]
                     ),
-                    None,
                 )
-                if active is not None:
-                    db.session.rollback()
-                    return _ok(
-                        {
-                            "materialId": material.id,
-                            "job": job_view(active),
-                            "deduplicated": True,
-                        },
-                        202,
-                    )
+                .order_by(TeachingJobs.created.desc())
+                .limit(100)
+                .all()
+            )
+            active = next(
+                (
+                    job
+                    for job in active_jobs
+                    if (job.payload or {}).get("revisionId") == latest.id
+                    and (job.payload or {}).get("materialId") == material.id
+                ),
+                None,
+            )
+            if active is not None:
+                db.session.rollback()
+                return _ok(
+                    {
+                        "materialId": material.id,
+                        "job": job_view(active),
+                        "deduplicated": True,
+                    },
+                    202,
+                )
 
-            source = _material_source_path(material)
-            with source.open("rb") as handle:
-                if os.fstat(handle.fileno()).st_size != material.size:
-                    db.session.rollback()
-                    return _error(
-                        "Material source size no longer matches the uploaded revision",
-                        409,
-                        code="MATERIAL_INTEGRITY_ERROR",
-                    )
-                digest = hashlib.file_digest(handle, "sha256").hexdigest()
-            if digest != material.sha256:
+        source = _material_source_path(material)
+        with source.open("rb") as handle:
+            if os.fstat(handle.fileno()).st_size != material.size:
                 db.session.rollback()
                 return _error(
-                    "Material source hash no longer matches the uploaded revision",
+                    "Material source size no longer matches the uploaded revision",
                     409,
                     code="MATERIAL_INTEGRITY_ERROR",
                 )
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        if digest != material.sha256:
+            db.session.rollback()
+            return _error(
+                "Material source hash no longer matches the uploaded revision",
+                409,
+                code="MATERIAL_INTEGRITY_ERROR",
+            )
 
-            revision_number = (latest.revision if latest is not None else 0) + 1
-            revision = TeachingMaterialRevisions(
-                material_id=material.id,
-                revision=revision_number,
-                storage_key=material.storage_key,
-                sha256=material.sha256,
-                status="PENDING",
-                metadata_json={
-                    "reprocessed": True,
-                    "reason": str(body.get("reason") or "")[:2000],
-                    "parentRevisionId": latest.id if latest is not None else None,
-                },
-            )
-            material.status = "UPLOADED"
-            db.session.add(revision)
-            db.session.flush()
-            job, _ = enqueue_job(
-                owner_id=user.id,
-                kind="material.analyze",
-                idempotency_key=f"material-analyze:{user.id}:{material.id}:{revision.id}",
-                payload={
-                    "materialId": material.id,
-                    "revisionId": revision.id,
-                    "filename": material.filename,
-                    "mimeType": material.mime_type,
-                    "size": material.size,
-                    "storageKey": material.storage_key,
-                },
-                dojo_id=material.dojo_id,
-                module_index=thread.module_index if thread else None,
-                thread_id=thread.id if thread else None,
-                priority=20,
-            )
-            return _ok(
-                {
-                    "materialId": material.id,
-                    "materialRevisionId": revision.id,
-                    "revision": revision.revision,
-                    "job": job_view(job),
-                },
-                202,
-            )
-        except ScopeError as exc:
-            db.session.rollback()
-            return _error(exc, 404, code="NOT_FOUND")
-        except (OSError, ValueError) as exc:
-            db.session.rollback()
-            return _error(exc, 409, code="MATERIAL_UNAVAILABLE")
+        revision_number = (latest.revision if latest is not None else 0) + 1
+        revision = TeachingMaterialRevisions(
+            material_id=material.id,
+            revision=revision_number,
+            storage_key=material.storage_key,
+            sha256=material.sha256,
+            status="PENDING",
+            metadata_json={
+                "reprocessed": True,
+                "reason": str(body.get("reason") or "")[:2000],
+                "parentRevisionId": latest.id if latest is not None else None,
+            },
+        )
+        material.status = "UPLOADED"
+        db.session.add(revision)
+        db.session.flush()
+        job, _ = enqueue_job(
+            owner_id=user.id,
+            kind="material.analyze",
+            idempotency_key=operation_key or f"material-analyze:{user.id}:{material.id}:{revision.id}",
+            payload={
+                "materialId": material.id,
+                "revisionId": revision.id,
+                "filename": material.filename,
+                "mimeType": "text/plain" if locally_extractable(material.filename) else material.mime_type,
+                "sourceMimeType": material.mime_type,
+                "localExtraction": locally_extractable(material.filename),
+                "size": material.size,
+                "storageKey": material.storage_key,
+            },
+            dojo_id=material.dojo_id,
+            module_index=thread.module_index if thread else None,
+            thread_id=thread.id if thread else None,
+            priority=20,
+        )
+        return _ok(
+            {
+                "materialId": material.id,
+                "materialRevisionId": revision.id,
+                "revision": revision.revision,
+                "job": job_view(job),
+            },
+            202,
+        )
+    except ScopeError as exc:
+        db.session.rollback()
+        return _error(exc, 404, code="NOT_FOUND")
+    except (OSError, ValueError) as exc:
+        db.session.rollback()
+        return _error(exc, 409, code="MATERIAL_UNAVAILABLE")
 
 
 def _material_chapter_title_key(value):
@@ -11230,9 +10958,9 @@ class TeachingSessionCollection(Resource):
     @authed_only
     def post(self):
         user = _current_user()
+        body = _body()
         try:
             _require_teacher(user)
-            body = _body()
             scope = build_scope(
                 user,
                 role="teacher",
@@ -11564,6 +11292,110 @@ def _learning_analytics_filters(dojo):
         if challenge_query.first() is None:
             raise ScopeError("所选题目不在当前课程中")
     return filters
+
+
+@teaching_namespace.route("/insights/<string:dojo_id>")
+class TeachingInsights(Resource):
+    @authed_only
+    def get(self, dojo_id):
+        from ...learning.insights import course_insights
+        try:
+            dojo = dojo_for_user(_current_user(), dojo_id, teacher=True)
+            return {"success": True, "data": course_insights(dojo, request.args)}, 200, {"Cache-Control": "private, no-store"}
+        except ScopeError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+        except ValueError as exc:
+            return _error(exc)
+
+
+@teaching_namespace.route("/insights/<string:dojo_id>/evidence/<int:student_id>")
+class TeachingInsightsEvidence(Resource):
+    @authed_only
+    def get(self, dojo_id, student_id):
+        from ...learning.insights import student_task_evidence
+        try:
+            dojo = dojo_for_user(_current_user(), dojo_id, teacher=True)
+            result = student_task_evidence(dojo, student_id, str(request.args.get("taskKey") or ""), before=request.args.get("before"), limit=request.args.get("limit", 30))
+            return {"success": True, "data": result}, 200, {"Cache-Control": "private, no-store"}
+        except ScopeError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+        except (TypeError, ValueError) as exc:
+            return _error(exc)
+
+
+@teaching_namespace.route("/insights/<string:dojo_id>/checks/<int:student_id>/<int:receipt_id>")
+class TeachingInsightsCodingChecks(Resource):
+    @authed_only
+    def get(self, dojo_id, student_id, receipt_id):
+        from ...learning.insights import coding_check_page
+        try:
+            dojo = dojo_for_user(_current_user(), dojo_id, teacher=True)
+            result = coding_check_page(dojo, student_id, str(request.args.get("taskKey") or ""), receipt_id, offset=request.args.get("offset", 0), result_filter=request.args.get("filter", "failed"))
+            return {"success": True, "data": result}, 200, {"Cache-Control": "private, no-store"}
+        except ScopeError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+        except (TypeError, ValueError) as exc:
+            return _error(exc)
+
+
+@teaching_namespace.route("/insights/<string:dojo_id>/followups")
+class TeachingInsightsFollowups(Resource):
+    @authed_only
+    def post(self, dojo_id):
+        from ...learning.insights import create_followup
+        try:
+            user = _current_user()
+            dojo = dojo_for_user(user, dojo_id, teacher=True)
+            return _ok(create_followup(dojo, user, _body()), 201)
+        except ScopeError as exc:
+            db.session.rollback()
+            return _error(exc, 404, code="NOT_FOUND")
+        except (TypeError, ValueError) as exc:
+            db.session.rollback()
+            return _error(exc)
+
+
+@teaching_namespace.route("/insights/<string:dojo_id>/followups/<string:identity>/review")
+class TeachingInsightsFollowupReview(Resource):
+    @authed_only
+    def post(self, dojo_id, identity):
+        from ...learning.insights import review_followup
+        try:
+            user = _current_user()
+            dojo = dojo_for_user(user, dojo_id, teacher=True)
+            return _ok(review_followup(dojo, user, identity, _body()))
+        except ScopeError as exc:
+            db.session.rollback()
+            return _error(exc, 404, code="NOT_FOUND")
+        except (TypeError, ValueError) as exc:
+            db.session.rollback()
+            return _error(exc)
+
+
+@teaching_namespace.route("/insights/<string:dojo_id>/export")
+class TeachingInsightsExport(Resource):
+    @authed_only
+    def get(self, dojo_id):
+        from ...learning.insights import course_insights
+        try:
+            dojo = dojo_for_user(_current_user(), dojo_id, teacher=True)
+            report = course_insights(dojo, request.args)
+        except ScopeError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+        except ValueError as exc:
+            return _error(exc)
+        output = io.StringIO(newline="")
+        writer = csv.writer(output)
+        writer.writerow(["玄甲学情", _learning_export_cell(dojo.name), report["asOf"]])
+        writer.writerow(["活动范围", report["scope"]["label"], "累计完成截至快照时间，不受活动时间筛选影响"])
+        writer.writerow(["学生ID", "学生", "学习状态", "累计完成必修", "必修总数", "期间活动记录", "最近学习记录"] + [_learning_export_cell(t["name"]) for t in report["tasks"]])
+        for student in report["students"]:
+            cells = {c["taskKey"]: c for c in student["cells"]}
+            writer.writerow([student["userId"], _learning_export_cell(student["name"]), student["statusLabel"], student["completed"], student["required"], student["periodRecords"], student["lastActivity"] or "暂无记录"] + [cells.get(t["key"], {}).get("statusLabel", "尚未开始") for t in report["tasks"]])
+        response = send_file(io.BytesIO(output.getvalue().encode("utf-8-sig")), mimetype="text/csv; charset=utf-8", as_attachment=True, download_name=f"learning-insights-{secure_filename(dojo.reference_id)}.csv", max_age=0)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Analytics-As-Of"] = report["asOf"]
+        return response
 
 
 @teaching_namespace.route("/progress/<string:dojo_id>")
@@ -12116,12 +11948,13 @@ class AgentRuntimeLaunch(Resource):
                 return _error("Unsupported preview target", 400, code="INVALID_TARGET")
             if role == "teacher":
                 _require_teacher(user)
-                if body.get("dojoId") is None:
-                    return _error(
-                        "Teacher preview sessions must be bound to a course",
-                        400,
-                        code="COURSE_SCOPE_REQUIRED",
-                    )
+                if dojo_id is None:
+                    if not target.startswith("/prep/"):
+                        return _error("请选择生成项目合集中的作品进行预览。", 400, code="PROJECT_REQUIRED")
+                    artifact = artifact_for_user(target.rstrip("/").rsplit("/", 1)[-1], user)
+                    if artifact.owner_id != user.id or artifact.dojo_id is not None or artifact.self_workspace_id is not None:
+                        raise ScopeError("Artifact not found")
+                    module_index = None
             elif target.rstrip("/") == "/security-learn" and not body.get(
                 "workspaceId"
             ):
@@ -12319,6 +12152,21 @@ class AgentRuntimeUsage(Resource):
             )
 
 
+@teaching_namespace.route("/runtime/jobs/<string:job_id>/model-events")
+class AgentRuntimeModelEvents(Resource):
+    @bypass_csrf_protection
+    def post(self, job_id):
+        try:
+            require_service_auth()
+            return _ok(record_model_event(job_id, _body()), 201)
+        except AgentRuntimeAuthError:
+            db.session.rollback()
+            return _error("Model job not found", 404, code="NOT_FOUND")
+        except ModelJournalError as exc:
+            db.session.rollback()
+            return _error(exc, exc.status, code="MODEL_EVENT_REJECTED")
+
+
 @teaching_namespace.route("/runtime/jobs/<string:job_id>/material")
 class AgentRuntimeJobMaterial(Resource):
     @bypass_csrf_protection
@@ -12326,8 +12174,8 @@ class AgentRuntimeJobMaterial(Resource):
         try:
             require_service_auth()
             job = TeachingJobs.query.filter_by(
-                id=job_id, kind="material.analyze"
-            ).first()
+                id=job_id
+            ).filter(TeachingJobs.kind.in_(("material.analyze", "material.enrich"))).first()
             if job is None or job.status not in {"RUNNING", "QUEUED"}:
                 raise ScopeError("Material job not found")
             material = TeachingMaterials.query.filter_by(
@@ -12338,6 +12186,40 @@ class AgentRuntimeJobMaterial(Resource):
                 "storageKey"
             ):
                 raise ScopeError("Material job not found")
+            if job.kind == "material.enrich":
+                revision = TeachingMaterialRevisions.query.filter_by(
+                    id=job.payload.get("revisionId"), material_id=material.id,
+                    status="READY",
+                ).first()
+                if revision is None:
+                    return _error("资料原文索引尚未就绪", 409, code="MATERIAL_INDEX_NOT_READY")
+                rows = (
+                    db.session.query(TeachingMaterialChunks.content)
+                    .filter_by(revision_id=revision.id)
+                    .order_by(TeachingMaterialChunks.ordinal)
+                    .all()
+                )
+                indexed_text = "".join(content for (content,) in rows)
+                coverage = ((revision.metadata_json or {}).get("analysis") or {}).get("coverage") or {}
+                extracted_chars = coverage.get("extractedCharacters")
+                if (
+                    not indexed_text.strip()
+                    or (isinstance(extracted_chars, int) and extracted_chars != len(indexed_text))
+                ):
+                    return _error("资料原文索引不完整", 409, code="MATERIAL_INDEX_INCOMPLETE")
+                return send_file(
+                    io.BytesIO(indexed_text.encode("utf-8")),
+                    mimetype="text/plain; charset=utf-8",
+                    as_attachment=True,
+                    download_name=material.filename + ".txt",
+                    conditional=False,
+                )
+            if job.payload.get("localExtraction"):
+                return _error(
+                    "资料原文仅由后台索引 Worker 处理。",
+                    409,
+                    code="MATERIAL_INDEX_WORKER_REQUIRED",
+                )
             try:
                 source = _material_source_path(material)
             except ValueError as exc:
@@ -12413,6 +12295,10 @@ def _lesson_artifact(
         raise ScopeError("Lesson not found")
     if scope.dojo_id is not None and artifact.dojo_id != scope.dojo_id:
         raise ScopeError("Lesson not found")
+    if scope.role == "teacher" and scope.dojo_id is None and (
+        artifact.owner_id != user.id or artifact.dojo_id is not None or artifact.self_workspace_id is not None
+    ):
+        raise ScopeError("Lesson not found")
     return artifact
 
 
@@ -12464,6 +12350,8 @@ class AgentRuntimeLessons(Resource):
                 query = query.filter_by(self_workspace_id=scope.workspace_id)
             elif scope.dojo_id is not None:
                 query = query.filter_by(dojo_id=scope.dojo_id)
+            elif scope.role == "teacher":
+                query = query.filter_by(dojo_id=None, self_workspace_id=None)
             rows = (
                 query.filter(TeachingArtifacts.status != "ARCHIVED")
                 .order_by(TeachingArtifacts.updated.desc())
@@ -12562,6 +12450,47 @@ class AgentRuntimeLessons(Resource):
                     else "INVALID_REQUEST"
                 ),
             )
+
+
+@teaching_namespace.route("/runtime/lessons/<string:artifact_id>/studio")
+class AgentRuntimeCoursewareStudio(Resource):
+    @bypass_csrf_protection
+    def get(self, artifact_id):
+        try:
+            user, scope, _ = _service_lesson_session()
+            if scope.role != "teacher":
+                raise ScopeError("Courseware studio not found")
+            artifact = _lesson_artifact(artifact_id, user, scope)
+            if artifact.owner_id != user.id or artifact.status == "ARCHIVED":
+                raise ScopeError("Courseware studio not found")
+            if request.args.get("authorize") == "1":
+                return _ok({"ownerId": user.id, "status": artifact.status})
+            lesson = _lesson_payload(artifact)
+            requested = request.args.get("revision", type=int)
+            if requested is not None:
+                revision = TeachingArtifactRevisions.query.filter_by(
+                    artifact_id=artifact.id, revision=requested,
+                ).first()
+                if revision is None:
+                    raise ScopeError("Revision not found")
+                content = revision.content
+                prior = content.get("lesson") if isinstance(content.get("lesson"), dict) else content
+                lesson = {**prior, "id": artifact.id, "__aiseceduRevision": requested}
+            rows = TeachingArtifactRevisions.query.filter_by(
+                artifact_id=artifact.id,
+            ).order_by(TeachingArtifactRevisions.revision.desc()).limit(100).all()
+            current = current_artifact_revision(artifact)
+            return _ok({
+                "lesson": lesson,
+                "ownerId": user.id,
+                "status": artifact.status,
+                "canPublish": artifact.dojo_id is not None and artifact.self_workspace_id is None,
+                "sourceRefs": current.source_refs if current else [],
+                "revisions": [{"revision": row.revision, "instruction": row.instruction,
+                               "created": row.created.isoformat() + "Z"} for row in rows],
+            })
+        except (AgentRuntimeAuthError, ScopeError) as exc:
+            return _error(exc, 404, code="NOT_FOUND")
 
 
 @teaching_namespace.route("/runtime/lessons/<string:artifact_id>")
@@ -13360,3 +13289,21 @@ class AgentRuntimeClientSelfSubmit(Resource):
         except SelfLearningReviewStateConflict as exc:
             db.session.rollback()
             return _error(exc, 409, code="REVIEW_STATE_CONFLICT")
+
+
+@teaching_namespace.route("/authoring-standards")
+class AuthoringStandards(Resource):
+    @authed_only
+    def get(self):
+        from ...authoring_standards import resolve, provenance, StandardsError
+        try:
+            user = get_current_user()
+            _require_teacher(user)
+            reference = request.args.get("dojo")
+            dojo = dojo_for_user(user, reference, teacher=True) if reference else None
+            bundle = resolve(course_id=dojo.dojo_id if dojo else None, question_type=request.args.get("type", "general"), assignment_id=request.args.get("assignment"))
+            return _ok({"standards": bundle, "provenance": provenance(bundle)})
+        except ScopeError as error:
+            return _error(str(error), 403)
+        except (StandardsError, ValueError) as error:
+            return _error(str(error), 400)

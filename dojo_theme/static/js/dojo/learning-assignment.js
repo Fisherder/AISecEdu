@@ -83,7 +83,7 @@
     const answer = state.answers[item.id];
     const name = `answer-${item.id}`;
     if (item.type === "CHALLENGE") {
-      const passed = Boolean(resultFor(item) && resultFor(item).score > 0);
+      const passed = hasAnswer(item);
       return item.challenge
         ? `<a class="cs-btn ${passed ? "cs-btn-primary" : ""}" href="${api.escapeHtml(item.challenge.url)}?returnTo=${encodeURIComponent(window.location.pathname)}"><i class="fas fa-terminal" aria-hidden="true"></i>${passed ? "查看已通过实验" : "打开实验环境"}</a>`
         : '<div class="la-recovery"><strong>关联实验当前不可用</strong><a href="/student">返回今天选择其他任务</a></div>';
@@ -121,12 +121,15 @@
 
   function renderQuestion(item, index, disabled) {
     const questionNumber = Number(item.position || 0) + 1;
-    return `<article class="la-question ${index === state.currentIndex ? "is-current" : ""}" data-item-id="${api.escapeHtml(item.id)}" data-question-index="${index}"><div class="la-question-head"><div><span>第 ${questionNumber} 题 · ${api.escapeHtml(typeLabel(item.type))}${item.required ? " · 必答" : " · 选答"}</span><h2>${api.escapeHtml(item.title || `题目 ${questionNumber}`)}</h2></div><span>${item.points} 分</span></div><p>${api.escapeHtml(item.prompt || "").replace(/\n/g, "<br>")}</p>${answerControl(item, disabled)}${resultMarkup(item)}</article>`;
+    const prompt = window.DojoAssignmentText
+      ? window.DojoAssignmentText.render(item.prompt)
+      : `<p>${api.escapeHtml(item.prompt || "").replace(/\n/g, "<br>")}</p>`;
+    return `<article class="la-question ${index === state.currentIndex ? "is-current" : ""}" data-item-id="${api.escapeHtml(item.id)}" data-question-index="${index}"><div class="la-question-head"><div><span>第 ${questionNumber} 题 · ${api.escapeHtml(typeLabel(item.type))}${item.required ? " · 必答" : " · 选答"}</span><h2>${api.escapeHtml(item.title || `题目 ${questionNumber}`)}</h2></div><span>${item.points} 分</span></div><div class="la-question-prompt">${prompt}</div>${answerControl(item, disabled)}${resultMarkup(item)}</article>`;
   }
 
   function hasAnswer(item) {
     if (item.type === "CHALLENGE") {
-      return Boolean(resultFor(item) && resultFor(item).score > 0);
+      return Boolean(item.challengeCompleted || resultFor(item) && resultFor(item).score > 0);
     }
     const value = state.answers[item.id];
     return Array.isArray(value)
@@ -143,7 +146,9 @@
     const nav = document.getElementById("la-question-nav");
     nav.innerHTML = items.map((item, index) => {
       const questionNumber = Number(item.position || 0) + 1;
-      return `<button type="button" class="${index === state.currentIndex ? "is-current" : ""} ${hasAnswer(item) ? "is-answered" : ""}" data-question-target="${index}" aria-label="打开第 ${questionNumber} 题${hasAnswer(item) ? "，已作答" : "，未作答"}" aria-current="${index === state.currentIndex ? "step" : "false"}">${questionNumber}</button>`;
+      const completedLabel = item.type === "CHALLENGE" ? "已通过实验" : "已作答";
+      const incompleteLabel = item.type === "CHALLENGE" ? "实验尚未通过" : "未作答";
+      return `<button type="button" class="${index === state.currentIndex ? "is-current" : ""} ${hasAnswer(item) ? "is-answered" : ""}" data-question-target="${index}" aria-label="打开第 ${questionNumber} 题，${hasAnswer(item) ? completedLabel : incompleteLabel}" aria-current="${index === state.currentIndex ? "step" : "false"}">${questionNumber}</button>`;
     }).join("");
     nav.querySelectorAll("[data-question-target]").forEach(button => {
       button.addEventListener("click", () => setCurrentQuestion(Number(button.dataset.questionTarget), true));
@@ -234,15 +239,17 @@
     const graded = assignment.assessmentState === "READY";
     const mayResubmit = Boolean(assignment.settings && assignment.settings.allowResubmit);
     const disabled = assignment.status !== "PUBLISHED" || graded && !mayResubmit;
+    const practiceOnly = (assignment.items || []).length > 0 && assignment.items.every(item => item.type === "CHALLENGE");
     document.getElementById("la-title").textContent = assignment.title;
     document.getElementById("la-meta").textContent = `${assignment.courseName} · ${assignment.itemCount} 道题 · ${assignment.maxScore} 分`;
     const status = document.getElementById("la-status");
     status.textContent = statusLabel();
+    if (practiceOnly && !submission && answeredCount() > 0) status.textContent = "待提交作业";
     status.className = `cs-status ${assignment.activityState === "COMPLETED" ? "is-published" : assignment.status === "CLOSED" ? "is-closed" : "is-draft"}`;
     document.getElementById("la-instructions").innerHTML = `<strong>任务说明</strong><br>${api.escapeHtml(assignment.instructions || assignment.description || "按顺序完成题目并提交；实验结果以平台真实判题为准。").replace(/\n/g, "<br>")}`;
     document.getElementById("la-form").innerHTML = (assignment.items || []).map((row, index) => renderQuestion(row, index, disabled)).join("");
     document.getElementById("la-points").textContent = `${assignment.maxScore} 分`;
-    document.getElementById("la-due").textContent = assignment.dueAt ? api.formatDate(assignment.dueAt) : "长期开放";
+    document.getElementById("la-due").textContent = assignment.dueAt ? new Intl.DateTimeFormat("zh-CN", {timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false}).format(new Date(assignment.dueAt)) : "长期开放";
     document.getElementById("la-answer-policy").textContent = assignment.answerPolicy && assignment.answerPolicy.label || "提交后公布";
     document.getElementById("la-save-status").textContent = submission
       ? graded && mayResubmit
@@ -255,6 +262,13 @@
         : "尚未修改";
     document.getElementById("la-save").hidden = disabled;
     document.getElementById("la-submit").hidden = disabled;
+    document.getElementById("la-submit").textContent = practiceOnly ? "提交作业" : "提交并智能批改";
+    document.getElementById("la-progress-label").textContent = practiceOnly ? "实验已通过" : "已作答";
+    if (practiceOnly) {
+      document.getElementById("la-save").hidden = true;
+      document.getElementById("la-save-status").textContent = graded ? "作业已提交并评分" : answeredCount() === assignment.itemCount ? "实验记录已保存，待提交作业" : "代码保存在个人实验目录";
+      document.querySelector(".la-policy").textContent = "完成编码和正式核验，在实验页面提交完成凭证后，再提交本作业。成绩依据本人真实实验完成记录确定，无需报告或文字答案。";
+    }
     const score = document.getElementById("la-score");
     score.hidden = !graded;
     if (graded) {
@@ -345,8 +359,22 @@
     return (state.assignment.items || []).filter(item => item.required && !hasAnswer(item));
   }
 
+  async function refreshChallengeProgress() {
+    if (!state.assignment || state.saving || !state.assignment.items.some(item => item.type === "CHALLENGE")) return;
+    const data = unwrap(await api.request(`/coursework/assignments/${encodeURIComponent(assignmentId)}/work`));
+    const latest = new Map((data.assignment.items || []).map(item => [item.id, item]));
+    state.assignment.items.forEach(item => {
+      if (item.type !== "CHALLENGE" || !latest.has(item.id)) return;
+      item.challengeCompleted = latest.get(item.id).challengeCompleted;
+      item.challengeSolvedAt = latest.get(item.id).challengeSolvedAt;
+    });
+    if (state.assignment.items.every(item => item.type === "CHALLENGE")) render();
+    else updateProgress();
+  }
+
   async function submit() {
     collectAnswers();
+    await refreshChallengeProgress();
     const missing = missingRequired();
     if (missing.length) {
       const first = state.assignment.items.indexOf(missing[0]);
@@ -355,9 +383,10 @@
       showNotice(`未完成的必答题：第 ${questionNumbers} 题。已定位到第一道，请完成后再提交。`, "warning");
       return;
     }
+    const practiceOnly = state.assignment.items.every(item => item.type === "CHALLENGE");
     const confirmed = await window.AISecEduUI.confirm(
       `确认提交全部 ${state.assignment.itemCount} 道题？${state.assignment.answerPolicy && state.assignment.answerPolicy.label ? ` ${state.assignment.answerPolicy.label}。` : ""}`,
-      {title: "提交评测", confirmLabel: "确认提交"},
+      {title: practiceOnly ? "提交编码作业" : "提交评测", confirmLabel: "确认提交"},
     );
     if (confirmed) await save(true);
   }
@@ -373,7 +402,7 @@
       state.serverUpdated = state.assignment.submission && state.assignment.submission.updated;
       prioritizeResults();
       const draft = localDraft();
-      if (draft && (!state.serverUpdated || new Date(draft.savedAt || 0) > new Date(state.serverUpdated))) {
+      if (draft && Object.keys(draft.answers).length && state.assignment.items.some(item => item.type !== "CHALLENGE") && (!state.serverUpdated || new Date(draft.savedAt || 0) > new Date(state.serverUpdated))) {
         state.answers = {...state.answers, ...draft.answers};
         state.dirty = true;
         showNotice("已恢复这台设备上尚未同步的草稿。", "success");
@@ -407,5 +436,9 @@
   });
   window.addEventListener("offline", () => showNotice("网络已断开，继续作答会保存在本机。", "warning"));
   window.addEventListener("beforeunload", persistLocal);
+  window.addEventListener("focus", () => refreshChallengeProgress().catch(showError));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshChallengeProgress().catch(showError);
+  });
   boot();
 })();

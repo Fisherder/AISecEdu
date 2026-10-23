@@ -25,7 +25,7 @@ from CTFd.utils.user import get_current_user, is_admin
 
 from ..models import DojoAdmins, Dojos, DojoModules, DojoChallenges, DojoResources, DojoChallengeVisibilities, DojoResourceVisibilities, DojoModuleVisibilities
 from ..config import DOJOS_DIR
-from ..runtime_profiles import runtime_profile
+from ..runtime_profiles import normalize_runtime_environment, runtime_profile
 from ..utils import get_current_container, sanitize_survey
 
 
@@ -38,6 +38,13 @@ NAME_REGEX = Regex(r"^[\S ]{1,128}$")
 IMAGE_REGEX = Regex(r"^[\S]{1,256}$")
 FILE_PATH_REGEX = Regex(r"^[A-Za-z0-9_][A-Za-z0-9-_./]*$")
 FILE_URL_REGEX = Regex(r"^https://www.dropbox.com/[a-zA-Z0-9]*/[a-zA-Z0-9]*/[a-zA-Z0-9]*/[a-zA-Z0-9.-_]*?rlkey=[a-zA-Z0-9]*&dl=1")
+
+
+def RUNTIME_ENVIRONMENT(value):
+    try:
+        return normalize_runtime_environment(value)
+    except ValueError as error:
+        raise SchemaError(str(error))
 INTERFACES_LIST = [
     Or(
         {
@@ -81,7 +88,7 @@ DOJO_SPEC = Schema({
     Optional("importable"): bool,
     Optional("interfaces"): INTERFACES_LIST,
     Optional("exercise_mode"): "CONTAINER",
-    Optional("runtime_environment"): Or("linux", "windows"),
+    Optional("runtime_environment"): RUNTIME_ENVIRONMENT,
 
     Optional("import"): {
         "dojo": UNIQUE_ID_REGEX,
@@ -109,7 +116,7 @@ DOJO_SPEC = Schema({
         Optional("importable"): bool,
         Optional("interfaces"): INTERFACES_LIST,
         Optional("exercise_mode"): "CONTAINER",
-        Optional("runtime_environment"): Or("linux", "windows"),
+        Optional("runtime_environment"): RUNTIME_ENVIRONMENT,
 
         Optional("import"): {
             Optional("dojo"): UNIQUE_ID_REGEX,
@@ -160,7 +167,15 @@ DOJO_SPEC = Schema({
                 Optional("auxiliary"): dict,
                 Optional("required", default=True): bool,
                 Optional("exercise_mode"): "CONTAINER",
-                Optional("runtime_environment"): Or("linux", "windows"),
+                Optional("runtime_environment"): RUNTIME_ENVIRONMENT,
+                Optional("workspace_layout"): dict,
+                Optional("coding_workspace"): {
+                    "course": Regex(r"^[a-z0-9][a-z0-9-]{0,79}$"),
+                    "assignment": Regex(r"^hw[0-9]{2,3}-[a-z0-9][a-z0-9-]*$"),
+                    "title": NAME_REGEX,
+                    "source": Regex(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$"),
+                    Optional("legacy_directory"): Regex(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$"),
+                },
                 Optional("import"): {
                     Optional("dojo"): UNIQUE_ID_REGEX,
                     Optional("module"): ID_REGEX,
@@ -498,6 +513,8 @@ def dojo_from_spec(data, *, dojo_dir=None, dojo=None):
                     importable=shadow("importable", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
                     interfaces=shadow("interfaces", dojo_data, module_data, challenge_data, default=runtime_profile(shadow("runtime_environment", dojo_data, module_data, challenge_data, default="linux")).interfaces),
                     runtime_environment=shadow("runtime_environment", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
+                    coding_workspace=challenge_data.get("coding_workspace"),
+                    workspace_layout=challenge_data.get("workspace_layout"),
                     exercise_mode=shadow("exercise_mode", dojo_data, module_data, challenge_data, default_dict=DojoChallenges.data_defaults),
                     challenge=challenge(
                         module_data.get("id"), challenge_data.get("id"), transfer=challenge_data.get("transfer", None)
@@ -776,7 +793,7 @@ def dojo_route(func):
         g.dojo = dojo
 
         if "module" in bound_args.arguments:
-            module = DojoModules.query.filter_by(dojo=dojo, id=bound_args.arguments["module"]).first()
+            module = DojoModules.from_id(dojo.reference_id, bound_args.arguments["module"]).first()
             if module is None:
                 abort(404)
             bound_args.arguments["module"] = module

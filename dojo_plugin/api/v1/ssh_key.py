@@ -22,9 +22,13 @@ ssh_key_namespace = Namespace(
 class UpdateKey(Resource):
     @authed_only
     def post(self):
-        data = request.get_json()
-        key_value = data.get("ssh_key", "")
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or not isinstance(data.get("ssh_key"), str):
+            return {"success": False, "error": "请提供有效的 SSH 公钥。"}, 400
+        key_value = data["ssh_key"].strip()
 
+        if not key_value or len(key_value) > 16384:
+            return {"success": False, "error": "公钥不能为空或超过 16 KB。请仅粘贴 .pub 文件中的一行。"}, 400
         if key_value:
             try:
                 key = SSHKey(key_value, strict=True)
@@ -56,8 +60,10 @@ class UpdateKey(Resource):
 
     @authed_only
     def delete(self):
-        data = request.get_json()
-        key_value = data.get("ssh_key", "")
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or not isinstance(data.get("ssh_key"), str):
+            return {"success": False, "error": "请提供有效的 SSH 公钥。"}, 400
+        key_value = data["ssh_key"].strip()
 
         user = get_current_user()
 

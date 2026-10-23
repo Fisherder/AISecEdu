@@ -28,6 +28,19 @@ import {
   withGenerationRetry,
   type GenerationRetryOptions,
 } from '@/lib/generation/generation-retry';
+import { readAgentRunNdjson } from '@/lib/agent-run/stream-client';
+import type { AgentRunEvent } from '@/lib/agent-run/protocol';
+import {
+  beginAgentRun,
+  cancelAgentRun,
+  completeAgentRun,
+  completeAgentRunItem,
+  failAgentRun,
+  ingestAgentRunEvent,
+  startAgentRunTurn,
+  startAgentRunItem,
+  transitionAgentWorkflow,
+} from '@/lib/agent-run/store';
 
 const log = createLogger('SceneGenerator');
 
@@ -61,6 +74,7 @@ function getApiHeaders(): HeadersInit {
 
   return {
     'Content-Type': 'application/json',
+    Accept: 'application/x-ndjson, application/json',
     'x-model': config.modelString || '',
     'x-api-key': config.apiKey || '',
     'x-base-url': config.baseUrl || '',
@@ -144,6 +158,7 @@ export async function fetchSceneContent(
   },
   signal?: AbortSignal,
   retryOptions?: ClientRetryOptions<SceneContentResult>,
+  onEvent?: (event: AgentRunEvent) => void,
 ): Promise<SceneContentResult> {
   try {
     return await withGenerationRetry(
@@ -155,7 +170,13 @@ export async function fetchSceneContent(
           signal,
         });
 
-        const data = await readJsonResponse(response);
+        const data = await readAgentRunNdjson<Record<string, unknown>>(response, onEvent).catch(
+          async (error) => {
+            if (response.headers?.get?.('content-type')?.includes('application/x-ndjson'))
+              throw error;
+            return readJsonResponse(response);
+          },
+        );
         if (!response.ok) {
           throw createHttpError(response, data, 'Scene content request failed');
         }
@@ -193,6 +214,7 @@ export async function fetchSceneActions(
   },
   signal?: AbortSignal,
   retryOptions?: ClientRetryOptions<SceneActionsResult>,
+  onEvent?: (event: AgentRunEvent) => void,
 ): Promise<SceneActionsResult> {
   try {
     return await withGenerationRetry(
@@ -204,7 +226,13 @@ export async function fetchSceneActions(
           signal,
         });
 
-        const data = await readJsonResponse(response);
+        const data = await readAgentRunNdjson<Record<string, unknown>>(response, onEvent).catch(
+          async (error) => {
+            if (response.headers?.get?.('content-type')?.includes('application/x-ndjson'))
+              throw error;
+            return readJsonResponse(response);
+          },
+        );
         if (!response.ok) {
           throw createHttpError(response, data, 'Scene actions request failed');
         }
@@ -450,7 +478,11 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         return;
       }
 
+      beginAgentRun('generation', '生成课程内容');
+      startAgentRunTurn('generation', '逐场景生成');
+
       store.getState().setGenerationStatus('generating');
+      transitionAgentWorkflow('generation', '分析剩余场景', `${outlines.length} 个场景`);
 
       // Determine pending outlines
       const completedOrders = new Set(scenes.map((s) => s.order));
@@ -462,6 +494,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         store.getState().setGenerationStatus('completed');
         store.getState().setGeneratingOutlines([]);
         store.getState().setGenerationComplete(true);
+        completeAgentRun('generation');
         options.onComplete?.();
         generatingRef.current = false;
         return;
@@ -520,6 +553,8 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
               languageDirective: params.languageDirective,
             },
             signal,
+            undefined,
+            (event) => ingestAgentRunEvent('generation', event),
           );
 
         // Pre-warm content fetches (<= parallelConcurrency in flight), keyed by
@@ -552,6 +587,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
 
         let pausedByFailureOrAbort = false;
         let hadContentFailure = false;
+        let failureMessage = '';
         for (const outline of pending) {
           if (abortRef.current || store.getState().generationEpoch !== startEpoch) {
             store.getState().setGenerationStatus('paused');
@@ -560,6 +596,11 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           }
 
           store.getState().setCurrentGeneratingOrder(outline.order);
+          transitionAgentWorkflow(
+            'generation',
+            `生成 ${outline.order}. ${outline.title}`,
+            '内容、讲解与交互',
+          );
 
           // Step 1: content — await this outline's pre-warmed fetch (parallel),
           // which usually resolved while the previous scene's actions/TTS ran; or
@@ -581,7 +622,8 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
               break;
             }
             store.getState().addFailedOutline(outline);
-            options.onSceneFailed?.(outline, contentResult.error || 'Content generation failed');
+            failureMessage = contentResult.error || 'Content generation failed';
+            options.onSceneFailed?.(outline, failureMessage);
             if (contentPromises) {
               // Parallel: surface the failure but keep going with the other scenes
               // (their content is already in flight).
@@ -615,6 +657,8 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
               languageDirective: params.languageDirective,
             },
             signal,
+            undefined,
+            (event) => ingestAgentRunEvent('generation', event),
           );
 
           if (actionsResult.success && actionsResult.scene) {
@@ -630,18 +674,28 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
                 settings.ttsProvidersConfig?.[settings.ttsProviderId],
               )
             ) {
+              const ttsItem = startAgentRunItem('generation', 'tool', '合成场景语音', {
+                subtitle: outline.title,
+                input: { sceneId: scene.id },
+              });
               const ttsResult = await generateTTSForScene(
                 scene,
                 params.languageDirective || params.stageInfo.language,
                 signal,
               );
+              completeAgentRunItem('generation', ttsItem, {
+                status: ttsResult.success ? 'completed' : 'failed',
+                metadata: { failedCount: ttsResult.failedCount },
+                ...(ttsResult.error ? { output: ttsResult.error } : {}),
+              });
               if (!ttsResult.success) {
                 if (abortRef.current || store.getState().generationEpoch !== startEpoch) {
                   pausedByFailureOrAbort = true;
                   break;
                 }
                 store.getState().addFailedOutline(outline);
-                options.onSceneFailed?.(outline, ttsResult.error || 'TTS generation failed');
+                failureMessage = ttsResult.error || 'TTS generation failed';
+                options.onSceneFailed?.(outline, failureMessage);
                 store.getState().setGenerationStatus('paused');
                 pausedByFailureOrAbort = true;
                 break;
@@ -657,6 +711,11 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             removeGeneratingOutline(outline.id);
             store.getState().addScene(scene);
             options.onSceneGenerated?.(scene, outline.order);
+            transitionAgentWorkflow(
+              'generation',
+              `完成 ${outline.title}`,
+              `${scene.actions?.length ?? 0} 个动作`,
+            );
             previousSpeeches = actionsResult.previousSpeeches || [];
           } else {
             if (abortRef.current || store.getState().generationEpoch !== startEpoch) {
@@ -664,7 +723,8 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
               break;
             }
             store.getState().addFailedOutline(outline);
-            options.onSceneFailed?.(outline, actionsResult.error || 'Actions generation failed');
+            failureMessage = actionsResult.error || 'Actions generation failed';
+            options.onSceneFailed?.(outline, failureMessage);
             store.getState().setGenerationStatus('paused');
             pausedByFailureOrAbort = true;
             break;
@@ -676,19 +736,27 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             // Parallel content phase left some outlines failed but kept going;
             // surface them for retry instead of signalling a clean completion.
             store.getState().setGenerationStatus('paused');
+            failAgentRun('generation', failureMessage || '部分场景内容生成失败');
           } else {
             store.getState().setGenerationStatus('completed');
             store.getState().setGeneratingOutlines([]);
             store.getState().setGenerationComplete(true);
+            completeAgentRun('generation');
             options.onComplete?.();
           }
+        } else if (abortRef.current) {
+          cancelAgentRun('generation', '用户停止生成');
+        } else if (pausedByFailureOrAbort && failureMessage) {
+          failAgentRun('generation', failureMessage);
         }
       } catch (err: unknown) {
         // AbortError is expected when stop() is called — don't treat as failure
         if (isAbortError(err)) {
           log.info('Generation aborted');
           store.getState().setGenerationStatus('paused');
+          cancelAgentRun('generation', '用户停止生成');
         } else {
+          failAgentRun('generation', err instanceof Error ? err.message : String(err));
           throw err;
         }
       } finally {
@@ -751,6 +819,9 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
 
       const abortController = new AbortController();
       const signal = abortController.signal;
+      beginAgentRun('generation', `重试 ${outline.title}`);
+      startAgentRunTurn('generation', '重新生成失败场景');
+      transitionAgentWorkflow('generation', `重试 ${outline.order}. ${outline.title}`);
 
       try {
         // Step 1: Content
@@ -766,10 +837,13 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             languageDirective: params.languageDirective,
           },
           signal,
+          undefined,
+          (event) => ingestAgentRunEvent('generation', event),
         );
 
         if (!contentResult.success || !contentResult.content) {
           store.getState().addFailedOutline(outline);
+          failAgentRun('generation', contentResult.error || 'Content generation failed');
           return;
         }
 
@@ -794,10 +868,13 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             languageDirective: params.languageDirective,
           },
           signal,
+          undefined,
+          (event) => ingestAgentRunEvent('generation', event),
         );
 
         if (!actionsResult.success || !actionsResult.scene) {
           store.getState().addFailedOutline(outline);
+          failAgentRun('generation', actionsResult.error || 'Actions generation failed');
           return;
         }
 
@@ -811,13 +888,23 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             settings.ttsProvidersConfig?.[settings.ttsProviderId],
           )
         ) {
+          const ttsItem = startAgentRunItem('generation', 'tool', '合成场景语音', {
+            subtitle: outline.title,
+            input: { sceneId: actionsResult.scene.id },
+          });
           const ttsResult = await generateTTSForScene(
             actionsResult.scene,
             params.languageDirective || params.stageInfo.language,
             signal,
           );
+          completeAgentRunItem('generation', ttsItem, {
+            status: ttsResult.success ? 'completed' : 'failed',
+            metadata: { failedCount: ttsResult.failedCount },
+            ...(ttsResult.error ? { output: ttsResult.error } : {}),
+          });
           if (!ttsResult.success) {
             store.getState().addFailedOutline(outline);
+            failAgentRun('generation', ttsResult.error || 'TTS generation failed');
             return;
           }
         }
@@ -827,6 +914,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
 
         // Resume remaining generation if there are pending outlines
         if (store.getState().generatingOutlines.length > 0 && lastParamsRef.current) {
+          completeAgentRun('generation');
           generateRemainingRef.current?.(lastParamsRef.current);
         } else {
           // This retry may have materialized the final outstanding slide. The
@@ -834,10 +922,14 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           // so mark completion here too — otherwise a later delete would treat
           // the orphaned outline as pending and regenerate it.
           store.getState().markGenerationCompleteIfDone();
+          completeAgentRun('generation');
         }
       } catch (err) {
         if (!isAbortError(err)) {
           store.getState().addFailedOutline(outline);
+          failAgentRun('generation', err instanceof Error ? err.message : String(err));
+        } else {
+          cancelAgentRun('generation', '用户停止生成');
         }
       }
     },

@@ -1,7 +1,57 @@
 import { describe, expect, it } from 'vitest';
 import { patchHtmlForIframe } from '@/lib/utils/iframe';
+import { compileCinematicScene } from '@/lib/cinematic/compile';
+import { extractCinematicScene } from '@/lib/cinematic/schema';
+import { sceneFixture } from '../../fixtures/cinematic';
+import { extractDiagramConfig } from '@/lib/widgets/diagram';
 
 describe('patchHtmlForIframe', () => {
+  it('refreshes an old diagram player from unchanged validated config and remains idempotent', () => {
+    const config={type:'diagram',diagramType:'flowchart',title:'学习流程',nodes:[{id:'learn',label:'学习',details:'查看材料'},{id:'submit',label:'提交',details:'提交结果'}],edges:[{from:'learn',to:'submit'}]};
+    const old='<html><head></head><body><main data-diagram="v1"></main><script type="application/json" id="widget-config">'+JSON.stringify(config)+'</script><script>window.legacyDiagram=true</script></body></html>';
+    const output=patchHtmlForIframe(old);
+    expect(output).not.toContain('legacyDiagram');
+    expect(output).toContain('diagram-reset');
+    expect(extractDiagramConfig(output)).toEqual(config);
+    expect(output).toContain("connect-src 'none'");
+    expect(output).not.toContain('data-aisecedu-library');
+    expect(patchHtmlForIframe(output)).toEqual(output);
+  });
+  it('does not execute stale diagram scripts when its config is invalid', () => {
+    const output=patchHtmlForIframe('<main data-diagram="v1"></main><script id="widget-config" type="application/json">{"nodes":[]}</script><script>window.staleDiagram=true</script>');
+    expect(output).toContain('交互图数据无法读取');
+    expect(output).toContain('role="alert"');
+    expect(output).not.toContain('staleDiagram');
+    expect(output).toContain("connect-src 'none'");
+  });
+  it('refreshes stored cinematic runtime without changing the scene or accumulating dependencies', () => {
+    const scene = sceneFixture();
+    const legacy = compileCinematicScene(scene).replace(/<script src="aisecedu:three">[\s\S]*<\/body>/, '<script>window.legacyBrokenPlayer=true</script></body>');
+    const output = patchHtmlForIframe(legacy);
+    expect(output).not.toContain('legacyBrokenPlayer');
+    expect(output).toContain('data-cinematic-runtime="2026-09-13.5"');
+    expect(output).toContain('data-aisecedu-library="cinematic-three-r150"');
+    expect(extractCinematicScene(output)).toEqual(scene);
+    expect(patchHtmlForIframe(output)).toEqual(output);
+  });
+
+  it('shows a recoverable error for invalid stored scenes and never executes their stale player', () => {
+    const output = patchHtmlForIframe('<main data-cinematic="v1"></main><script>window.stalePlayer=true</script><script type="application/json" id="cinematic-scene">{"schemaVersion":"bad"}</script>');
+    expect(output).toContain('三维场景数据无法读取');
+    expect(output).toContain('role="alert"');
+    expect(output).not.toContain('stalePlayer');
+    expect(output).not.toContain('data-aisecedu-library');
+    expect(output).toContain("connect-src 'none'");
+  });
+
+  it('bundles Three.js locally while keeping the no-network sandbox policy', () => {
+    const out = patchHtmlForIframe('<html><head></head><body><script src="./saved_files/three.min.js.下载"></script><script>new THREE.Scene()</script></body></html>');
+    expect(out).toContain('data-aisecedu-library="three-r150"');
+    expect(out).not.toContain('src="./saved_files/three.min.js.下载"');
+    expect(out.indexOf('data-aisecedu-library')).toBeLessThan(out.indexOf('new THREE.Scene()'));
+    expect(out).toContain("connect-src 'none'");
+    expect(out).not.toContain('allow-same-origin');
+  });
   it('injects the storage shim and sizing CSS after <head>', () => {
     const out = patchHtmlForIframe(
       '<!DOCTYPE html><html><head><title>t</title></head><body></body></html>',

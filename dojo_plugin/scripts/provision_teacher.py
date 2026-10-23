@@ -3,6 +3,7 @@ import os
 from CTFd.models import Users, db
 
 from CTFd.plugins.dojo_plugin.models import DojoAdmins, DojoUsers, Dojos
+from CTFd.plugins.dojo_plugin.account_activation import require_password_change
 
 
 username = os.environ.get("AISECEDU_TEACHER_USERNAME", "teacher").strip()
@@ -74,6 +75,7 @@ if membership and membership.type != "admin":
 if membership is None:
     db.session.add(DojoAdmins(dojo=course, user=user))
 
+require_password_change(user)
 db.session.commit()
 print(f"Teacher account: {user.name}")
 print(f"Teacher course: {course.reference_id} ({course.name})")

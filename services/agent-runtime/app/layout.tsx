@@ -12,6 +12,9 @@ import { Toaster } from '@/components/ui/sonner';
 import { ServerProvidersInit } from '@/components/server-providers-init';
 import { StorageHealthNotice } from '@/components/storage-health-notice';
 import { AccessCodeGuard } from '@/components/access-code-guard';
+import { IntegratedThemeBridge } from '@/components/integrated-theme-bridge';
+
+export const dynamic = 'force-dynamic';
 
 const inter = localFont({
   src: '../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2',
@@ -29,11 +32,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const integrated = process.env.AISECEDU_INTEGRATED === 'true';
+  const integrated = /^(1|true|yes)$/i.test(process.env.AISECEDU_INTEGRATED?.trim() || '');
   return (
-    <html lang="en" className={inter.variable} suppressHydrationWarning>
+    <html lang={integrated ? 'zh-CN' : 'en'} className={inter.variable} suppressHydrationWarning>
       <head>
-        {process.env.AISECEDU_INTEGRATED === 'true' && process.env.NEXT_PUBLIC_BASE_PATH ? (
+        {integrated && process.env.NEXT_PUBLIC_BASE_PATH ? (
           <script
             // The vendored renderer uses root-relative browser API calls. Add
             // the isolated base path before hydration so those calls stay scoped.
@@ -44,10 +47,12 @@ export default function RootLayout({
         ) : null}
       </head>
       <body
+        data-aisecedu-integrated={integrated ? 'true' : 'false'}
         className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
         suppressHydrationWarning
       >
         <ThemeProvider>
+          {integrated && <IntegratedThemeBridge />}
           <I18nProvider>
             {!integrated && <ServerProvidersInit />}
             {integrated ? children : <AccessCodeGuard>{children}</AccessCodeGuard>}

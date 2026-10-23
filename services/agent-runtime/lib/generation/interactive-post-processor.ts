@@ -17,8 +17,13 @@ export function postProcessInteractiveHtml(html: string): string {
   // Convert LaTeX delimiters while protecting script tags
   let processed = convertLatexDelimiters(html);
 
-  // Inject KaTeX resources if not already present
-  if (!processed.toLowerCase().includes('katex')) {
+  // Most interactive widgets contain no math. Loading KaTeX for every widget
+  // adds remote dependencies and can fail in an offline classroom browser.
+  const visibleMarkup = processed
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+  const hasMath = /\\\[[\s\S]+?\\\]|\\\([^\n]+?\\\)/.test(visibleMarkup);
+  if (hasMath && !processed.toLowerCase().includes('katex')) {
     processed = injectKatex(processed);
   }
 
@@ -88,13 +93,16 @@ document.addEventListener("DOMContentLoaded", function() {
 
     let renderTimeout;
     function safeRender() {
+        if (typeof renderMathInElement !== 'function') return;
         if (renderTimeout) clearTimeout(renderTimeout);
         renderTimeout = setTimeout(() => {
             renderMathInElement(document.body, katexOptions);
         }, 100);
     }
 
-    renderMathInElement(document.body, katexOptions);
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, katexOptions);
+    }
 
     const observer = new MutationObserver((mutations) => {
         let shouldRender = false;

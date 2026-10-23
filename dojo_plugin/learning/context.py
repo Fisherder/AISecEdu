@@ -465,6 +465,17 @@ def container_snapshot(user, expected_challenge=None):
     result["files"] = (
         scan_container_tree(container) if matches else {"available": False, "files": []}
     )
+    guest = _container_exec(
+        container,
+        "cat /var/lib/windows-lab/guest-progress.json 2>/dev/null || true",
+        limit=4000,
+    )
+    guest_output = (guest.get("output") or "").strip()
+    if guest_output:
+        try:
+            result["guestProgress"] = json.loads(guest_output)
+        except ValueError:
+            result["guestProgress"] = {"raw": guest_output[:2000]}
     return result
 
 
@@ -692,7 +703,11 @@ def attempt_agent_context(
             ),
         }
     if include_container:
-        result["liveContainer"] = container_snapshot(attempt.user, challenge)
+        from .container_progress import cached_live_progress
+
+        live = container_snapshot(attempt.user, challenge)
+        live["liveProgress"] = cached_live_progress(attempt)
+        result["liveContainer"] = live
     return result
 
 

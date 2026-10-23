@@ -10,6 +10,8 @@ from CTFd.utils import get_config
 from CTFd.utils.decorators import authed_only
 from CTFd.utils.user import get_current_user
 
+from ..runtime_profiles import runtime_environment_choices
+
 from ..models import (
     DojoAdmins,
     DojoChallenges,
@@ -39,6 +41,8 @@ from ..utils.dojo import dojo_admins_only, dojo_route
 
 
 learning = Blueprint("pwncollege_learning", __name__)
+from .inquiry import register_routes as register_inquiry_routes
+register_inquiry_routes(learning)
 
 
 def _metric_label(value):
@@ -508,10 +512,12 @@ def teacher_agent():
         user_id=user.id
     ).first():
         abort(403)
-    return render_template("teacher_agent.html", agent_role="teacher")
+    template = "teacher_agent.html" if request.args.get("view") == "dashboard" else "teacher_workbench.html"
+    return render_template(template, agent_role="teacher", agent_owner_id=user.id)
 
 
 @learning.route("/teacher/courses")
+@learning.route("/teacher/projects")
 @learning.route("/teacher/courses/")
 @authed_only
 def teacher_courses():
@@ -520,7 +526,16 @@ def teacher_courses():
         user_id=user.id
     ).first():
         abort(403)
-    return render_template("teacher_courses.html")
+    return render_template("teacher_projects.html" if request.path == "/teacher/projects" else "teacher_courses.html")
+
+
+@learning.route("/teacher/library")
+@authed_only
+def teacher_material_library():
+    user = get_current_user()
+    if getattr(user, "type", None) != "admin" and not DojoAdmins.query.filter_by(user_id=user.id).first():
+        abort(403)
+    return render_template("teacher_library.html")
 
 
 @learning.route("/teacher/courses/new")
@@ -566,6 +581,7 @@ def teacher_practice_create(dojo):
         create_kind="practice",
         dojo=dojo,
         selected_module_id=selected_module.id if selected_module else None,
+        runtime_environments=runtime_environment_choices(),
     )
 
 
@@ -573,17 +589,26 @@ def teacher_practice_create(dojo):
 @learning.route("/learning/artifacts/<artifact_id>")
 @authed_only
 def teaching_artifact(artifact_id):
+    if TeachingArtifacts.query.filter_by(id=artifact_id, artifact_type="learning-flow").first():
+        from .inquiry import render_inquiry
+        return render_inquiry(artifact_id)
     user = get_current_user()
     try:
         artifact = artifact_for_viewer(artifact_id, user)
     except ScopeError:
         abort(404)
     is_course_teacher = artifact_course_teacher(artifact, user)
+    from ..construction_guards import frozen_course
+    frozen_review = is_course_teacher and frozen_course(artifact.dojo_id)
     is_personal = bool(
         artifact.owner_id == user.id and artifact.self_workspace_id is not None
     )
     can_manage = bool(
-        artifact.owner_id == user.id and is_course_teacher and not is_personal
+        artifact.owner_id == user.id and not is_personal
+        and (is_course_teacher or (artifact.dojo_id is None and (
+            getattr(user, "type", None) == "admin"
+            or DojoAdmins.query.filter_by(user_id=user.id).first()
+        )))
     )
     teacher_context = bool(
         can_manage or (request.path.startswith("/teacher/") and is_course_teacher)
@@ -594,12 +619,12 @@ def teaching_artifact(artifact_id):
         artifact_tab = (
             "demos"
             if artifact_type
-            in {"simulation", "attack-defense-scene", "classroom-scenario"}
+            in {"simulation", "attack-defense-scene", "classroom-scenario", "debate"}
             else "questions"
             if artifact_type in {"question-set", "assessment", "challenge", "quiz"}
             else "courseware"
         )
-        fallback = "/teacher/courses"
+        fallback = "/teacher/projects" if artifact.dojo_id is None else "/teacher/courses"
         if artifact.dojo is not None:
             fallback = "/teacher/courses?" + urlencode(
                 {
@@ -619,10 +644,20 @@ def teaching_artifact(artifact_id):
             requested_return,
             fallback="/learning/extend" if is_personal else "/student",
         )
+    from ..agent_runtime.artifacts import current_artifact_revision
+    from ..construction_files import artifact_files
+    try:
+        submitted_files = artifact_files(artifact, current_artifact_revision(artifact), user)
+    except (ScopeError, ValueError):
+        abort(404)
+    template = 'construction_files.html' if submitted_files is not None else 'construction_artifact.html' if frozen_review else 'teaching_artifact.html'
     return render_template(
-        "teaching_artifact.html",
+        template,
         artifact=artifact,
-        artifact_viewer_role="teacher" if can_manage else "student",
+        artifact_embedded=teacher_context and request.args.get("embedded") == "co-creation",
+        submitted_files=submitted_files,
+        frozen_review=frozen_review,
+        artifact_viewer_role="teacher" if can_manage or frozen_review else "student",
         artifact_is_personal=is_personal,
         artifact_return_to=artifact_return_to,
         artifact_return_role=(
@@ -649,6 +684,17 @@ def learning_assignment(assignment_id):
         "learning_assignment.html",
         assignment_id=str(assignment_id),
     )
+
+
+@learning.route("/teacher/assignments/<assignment_id>")
+@authed_only
+def teacher_assignment(assignment_id):
+    from ..coursework import assignment_for_teacher
+    try:
+        assignment = assignment_for_teacher(assignment_id, get_current_user())
+    except ScopeError:
+        abort(404)
+    return render_template("teacher_assignment.html", assignment=assignment)
 
 
 @learning.route("/learning/dashboard")
@@ -880,3 +926,20 @@ def _legal_document(document, title):
             "如需了解账号、课程数据或使用边界，请联系课程教师或平台管理员。"
         )
     return render_template("legal.html", title=title, content=content)
+
+
+@learning.route("/teacher/construction")
+@authed_only
+def teacher_construction():
+    return render_template("teacher_construction.html")
+
+
+@learning.route("/activate-account")
+@authed_only
+def activate_account():
+    from ..account_activation import activation_required
+
+    if not activation_required(get_current_user()):
+        destination = request.args.get("next", "")
+        return redirect(destination if destination.startswith("/") and not destination.startswith("//") and not destination.startswith("/activate-account") else "/student")
+    return render_template("activate_account.html")

@@ -10,6 +10,9 @@ describe('teacher runtime environment', () => {
     ['Use Windows 11 for the exercise', 'windows'],
     ['Compare Windows and Linux', null],
     ['编写一个简单程序', null],
+    ['用 Windows 2000 出一道 OllyDbg 逆向题', 'windows2000'],
+    ['把这门课换成 win2000 环境', 'windows2000'],
+    ['使用 W2K 客户机做实验', 'windows2000'],
   ])('preserves the environment in %s', (prompt, expected) => {
     expect(requestedRuntimeEnvironment(prompt!)).toBe(expected);
   });

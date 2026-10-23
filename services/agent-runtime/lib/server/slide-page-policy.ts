@@ -70,6 +70,8 @@ function collectMatches(
   const matches: LocatedRequirement[] = [];
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
+    const numberOffset = match.index + match[0].indexOf(match[1]);
+    if (/第\s*(?:\d{1,3}\s*页?\s*(?:[-–—~～]|至|到)\s*)?$/.test(text.slice(Math.max(0, numberOffset - 20), numberOffset))) continue;
     const requirement = create(match);
     if (requirement) matches.push({ ...requirement, index: match.index });
   }
@@ -117,6 +119,8 @@ export function parseSlideDeckPageRequirement(text: string): SlideDeckPageRequir
     ),
   );
   const exactPatterns = [
+    /(?:保持|保留)(?:原有|原来的?|完整的?|全部|整套|共|总共|为|在|恰好|的|\s){0,12}(\d{1,3})\s*(?:页|个(?:完整)?教学页(?:面)?)/gi,
+    /(?:仍为|仍然为|仍然是|仍是)\s*(\d{1,3})\s*(?:页|个(?:完整)?教学页(?:面)?)/gi,
     /(?:生成|制作|创建|准备|做成|整理成|需要|要|共|总共|页数(?:为|是)?|总页数(?:保持(?:为|在)?|为|是)?|保持(?:总)?页数(?:为|是|在)?|控制在|保持在|压缩(?:到|为)|扩展(?:到|为))[^\d。；;\n]{0,12}(\d{1,3})\s*(?:页|个(?:完整)?教学页(?:面)?)/gi,
     /(\d{1,3})\s*页(?:的)?\s*(?:课件|PPT|幻灯片|演示文稿)/gi,
     /(?:make|create|generate|build|need|want)\s+(?:a\s+)?(\d{1,3})[ -]?(?:slide|page)s?\b/gi,

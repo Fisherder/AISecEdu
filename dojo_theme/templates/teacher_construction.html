@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block stylesheets %}<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/construction-center.css', v='frontend-restored-20261001-1') }}">{% endblock %}
+{% block content %}
+<main id="construction-center" class="cc-shell">
+  <header class="cc-header"><div><p class="cc-eyebrow">课程共建 · 从真实教学资料到可复用成果</p><h1>建设任务中心</h1><p id="cc-subtitle">正在读取团队和建设批次…</p></div><div class="cc-actions"><a href="/teacher/library">打开素材库 ↗</a><button type="button" id="cc-refresh">刷新</button></div></header>
+  <p id="cc-notice" class="cc-notice" role="status" aria-live="polite"></p>
+  <section id="cc-metrics" class="cc-metrics" aria-label="建设进度"></section>
+  <div class="cc-layout"><nav id="cc-nav" class="cc-nav" aria-label="任务中心页面"><button data-view="overview" aria-current="page">总览与下一步</button><button data-view="tasks">任务大厅</button><button data-view="mine">我的创作</button><button data-view="reviews">我的审核</button><button data-view="planning">课程规划</button><button data-view="members">团队与账号</button><button data-view="releases">入库与采用</button><button data-view="guide">操作指南</button></nav><section id="cc-panel" class="cc-panel" aria-live="polite"></section></div>
+  <dialog id="cc-detail" class="cc-dialog cc-wide" aria-labelledby="cc-detail-heading"><header><h2 id="cc-detail-heading">任务详情</h2><button data-close type="button" aria-label="关闭详情">×</button></header><div id="cc-detail-body"></div></dialog>
+  <dialog id="cc-form" class="cc-dialog" aria-labelledby="cc-form-heading"><form id="cc-form-content"><header><h2 id="cc-form-heading"></h2><button data-close type="button" aria-label="关闭表单">×</button></header><div id="cc-fields"></div><p id="cc-form-error" class="cc-error" role="alert"></p><footer><button data-close type="button">取消</button><button class="cc-primary" type="submit" id="cc-form-submit">保存</button></footer></form></dialog>
+</main>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script><script src="{{ url_for('views.themes_beta', path='js/dojo/construction-center.js', v='frontend-restored-20261001-1') }}"></script>{% endblock %}

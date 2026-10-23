@@ -6,19 +6,12 @@
 
 {% block stylesheets %}
 {{ super() }}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/unit-study.css', v='workspace-experience-20261012-11') }}">
 
 <style>
 .challenge-workspace {
   margin-bottom: 16px;
   margin-top: 16px;
-}
-
-.challenge-iframe {
-  display: block;
-  width: 100%;
-  min-height: 60vh;
-  aspect-ratio: 16/9;
-  border: 0;
 }
 
 .challenge-init {
@@ -34,6 +27,37 @@
 .challenge-hidden .workspace-ssh {
   display: none !important;
 }
+
+.workspace-dedicated-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--ui-border, #d9dee6);
+  border-radius: 0.75rem;
+  background: var(--ui-field, #f7f9fc);
+}
+
+.workspace-dedicated-hint[hidden] {
+  display: none !important;
+}
+
+.workspace-dedicated-hint h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.workspace-dedicated-hint p {
+  margin: 0;
+  color: var(--ui-muted, #5b6b7b);
+}
+
+.workspace-dedicated-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.35rem !important;
+}
 </style>
 
 
@@ -46,7 +70,7 @@
   <header class="unit-detail-header">
     <div class="unit-header-row">
       <div>
-        <span class="product-kicker">第 {{ course_outline.position }} / {{ course_outline.total }} 章 · {{ (visible_challenges | length) ~ ' 项实训' if visible_challenges else '阅读章节 · 无必修实践' }}</span>
+        <span class="product-kicker">第 {{ course_outline.position }} / {{ course_outline.total }} 章 · {% if visible_challenges %}{{ visible_challenges | length }} 项实训{% endif %}{% if inquiry_activities %}{{ ' · ' if visible_challenges else '' }}{{ inquiry_activities | length }} 项流程探究{% elif not visible_challenges %}阅读章节 · 无必修实践{% endif %}</span>
         <h1>{{ module.name or module.id }}</h1>
         <p>{{ (module.description | striptags | truncate(180)) if module.description else '阅读课程内容，在同一页面启动 CTF 实践题或模拟实训，并随时使用题目内 AI 助手。' }}</p>
       </div>
@@ -81,6 +105,23 @@
   </section>
   {% endif %}
 
+  {% if debate_activities %}
+  <section class="product-surface unit-content-intro" aria-label="AI 辩论学习活动">
+    <div class="product-section-heading"><div><span class="product-kicker">AI 辩论</span><h2>在交锋中深化理解</h2><p>选择立场，与 AI 分轮论证，最后完成反思并查看学习反馈。</p></div></div>
+    {% for activity in debate_activities %}
+    <p><a class="product-button" href="/learning/artifacts/{{ activity.id }}?returnTo={{ request.path | urlencode }}"><i class="fas fa-comments" aria-hidden="true"></i>{{ activity.title }} · 进入辩论</a></p>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if inquiry_activities %}
+  <section class="product-panel" aria-labelledby="inquiry-module-heading" data-inquiry-learning>
+    <h2 id="inquiry-module-heading">流程探究式学习</h2>
+    {% for activity in inquiry_activities %}
+    <article style="padding:16px 0;border-bottom:1px solid var(--theme-border)"><h3 style="font-size:18px">{{ activity.title }}</h3><p>约 {{ activity.minutes }} 分钟 · 第 {{ activity.revision }} 版 · {{ '已完成核验' if activity.completed else ('继续上次学习' if activity.started else '观察、实验与独立操作核验') }}</p><a class="product-button is-primary" href="{{ activity.href }}">{{ '继续学习' if activity.started else '开始学习' }}</a></article>
+    {% endfor %}
+  </section>
+  {% endif %}
   {% if module.resources or module.challenges %}
   {% if is_dojo_admin and not module.show_challenges %}
   <p><i>此单元的题目对学生隐藏，但课程教师仍可见。</i></p>
@@ -90,6 +131,7 @@
 
   <div class="unit-learning-layout">
     <div class="unit-outline-column">
+      <button type="button" class="unit-outline-backdrop" data-unit-outline-backdrop aria-label="关闭课程目录" hidden></button>
       <button id="unit-outline-toggle" class="unit-outline-toggle" type="button" aria-controls="unit-outline" aria-expanded="true" aria-label="收起本章目录" title="收起本章目录"><i class="fas fa-chevron-left" aria-hidden="true"></i><span>目录</span></button>
       <aside id="unit-outline" class="unit-outline" aria-label="本章学习路径">
         <div><span class="product-kicker">课程路径</span><h2>本章内容</h2><small>{{ module.unified_items | length }} 项混合内容</small></div>
@@ -257,22 +299,23 @@
                 <input class="challenge-input challenge-answer form-control" type="text" name="answer" placeholder="输入 Flag">
               </div>
             </div>
-            <div class="challenge-workspace {{ "challenge-hidden" if not active }}">
+            <div data-workspace-presentation="launcher" class="challenge-workspace workspace-embedded-dedicated {{ "challenge-hidden" if not active }}">
+              {% if challenge.exercise_mode == "SIMULATION" %}
+              <p><a class="btn btn-primary" href="/workspace">进入仿真实训</a></p>
+              {% else %}
               <div class="challenge-workspace-body">
                 <div class="challenge-workspace-surface">
-                  <div class="iframe-wrapper">
-                    {% if active %}
-                    <iframe id="workspace-iframe" class="challenge-iframe" src="about:blank" allow="clipboard-read *; clipboard-write *; fullscreen *" allowfullscreen></iframe>
-                    {% endif %}
-                  </div>
+                  <div data-workspace-state hidden></div>
                   {% include "components/workspace_loading.html" %}
-                  <div class="workspace-ssh" style="display: none;">
-                    <h3>通过 SSH 连接</h3>
-                    先绑定你的<a href="/settings#ssh-key" target="_blank"> SSH 密钥</a>，然后连接：<code>ssh hacker@{{ request.host.split(':')[0] }}</code>
+                  <div class="workspace-dedicated-hint" data-workspace-dedicated-hint hidden>
+                    {% set entrance = namespace(service='') %}
+                    {% for service in challenge.interfaces %}{% if service.port and not entrance.service %}{% set entrance.service = service.name | lower %}{% endif %}{% endfor %}
+                    <a class="btn btn-primary" href="/workspace{% if entrance.service %}?service={{ entrance.service }}{% endif %}" target="_blank" rel="noopener">进入实验环境 <i class="fas fa-external-link-alt" aria-hidden="true"></i></a>
                   </div>
+
                 </div>
-                {% include "components/learning_tutor.html" %}
               </div>
+              {% endif %}
               {% with popout=true %}
               {% include "components/actionbar.html" %}
               {% endwith %}
@@ -310,12 +353,13 @@
   {% endif %}
 
   {% if is_dojo_admin %}
+  {% if module.id == 'secure-coding' %}<a class="btn btn-outline-primary mb-3" href="/workspace/environment?dojo={{ dojo.reference_id | urlencode }}">查看编码核验证据</a>{% endif %}
   <a class="teacher-add-exercise" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}&amp;tab=author&amp;module={{ module.id | urlencode }}">
     <i class="fas fa-plus-circle" aria-hidden="true"></i>
     <span><strong>添加题目</strong><small>直接在此单元中创建并发布新题目。</small></span>
   </a>
   <br>
-  {% elif not module.resources and not module.challenges %}
+  {% elif not module.resources and not module.challenges and not inquiry_activities %}
   <p class="text-muted">此单元尚未发布题目。</p>
   {% endif %}
 
@@ -323,11 +367,12 @@
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/actionbar.js', v='aisecedu-20260726-score-short-web') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/challenges.js', v='aisecedu-20260726-score-short-web') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js', v='aisecedu-student-context-v2') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-module.js', v='aisecedu-course-outline-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/actionbar.js', v='course-launcher-20261014-6') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/coding-reset.js', v='coding-workspace-20261012-1') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/challenges.js', v='course-launcher-20261014-6') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='inquiry-20261019-5') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js', v='frontend-restored-20261001-1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-module.js', v='workspace-experience-20261012-11') }}"></script>
 {% if scroll_to_challenge %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {

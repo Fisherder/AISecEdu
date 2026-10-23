@@ -166,7 +166,7 @@ const grok43Effort = effortCapability('openai', ['none', 'low', 'medium', 'high'
 const deepseekEffort: ThinkingCapability = {
   control: 'effort',
   requestAdapter: 'deepseek',
-  effortValues: ['none', 'high', 'max'],
+  effortValues: ['none', 'low', 'high', 'max'],
   defaultEffort: 'high',
   defaultMode: 'enabled',
   toggleable: true,
@@ -363,6 +363,8 @@ const THINKING_CAPABILITIES: Record<string, ThinkingCapability> = {
   [getModelMetadataKey('qwen', 'qwen3-vl-plus')]: qwenBudgetDisabled,
 
   [getModelMetadataKey('deepseek', 'deepseek-v4-flash')]: deepseekEffort,
+  [getModelMetadataKey('deepseek', 'deepseek-chat')]: { ...deepseekEffort, defaultMode: 'disabled', defaultEnabled: false },
+  [getModelMetadataKey('deepseek', 'deepseek-v4.1-flash')]: { ...deepseekEffort, defaultMode: 'disabled', defaultEnabled: false },
 
   [getModelMetadataKey('kimi', 'kimi-k3')]: kimiK3Effort,
   [getModelMetadataKey('kimi', 'kimi-k2.7-code')]: fixedThinkingCapability,

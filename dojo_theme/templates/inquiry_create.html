@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block body_class %}inquiry-page{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+{% block stylesheets %}<link rel="stylesheet" href="{{ url_for('views.themes', path='css/inquiry-learning.css', v='inquiry-20261019-4') }}">{% endblock %}
+{% block content %}
+<main id="inquiry-create" class="inq-shell inq-create">
+  <a class="inq-back" href="/teacher/projects">返回我的项目</a>
+  <header class="inq-heading"><div><p class="inq-caption">项目模式</p><h1>流程探究式学习</h1><p>用同一组数据串起观察、实验与挑战，让每一步都有可核验的结果。</p></div></header>
+  <div class="inq-create-layout">
+    <form id="inq-create-form" class="inq-paper">
+      <div class="inq-form-grid">
+        <label>项目名称<input name="title" required maxlength="160" value="AES-128：追踪一个分组，完成一次加密"></label>
+        <label>计算组件<select name="engine"><option value="aes128">AES-128 · 真实字节计算</option></select></label>
+        <label>目标课程<select id="inq-course" name="courseId"><option value="">先保存到我的项目</option></select></label>
+        <label>目标章节<select id="inq-module" name="moduleIndex"><option value="">稍后选择</option></select></label>
+        <label>学生基础<input name="audience" maxlength="400" required value="已了解字节与十六进制，第一次学习分组密码的学生"></label>
+        <label>预计学习时长（分钟）<input name="minutes" type="number" min="10" max="120" value="30" required></label>
+      </div>
+      <label>情境说明<textarea name="intro" rows="3" maxlength="1200" required>你将看到同一组字节如何经过多轮变换成为密文，再用新条件独立完成末轮操作。</textarea></label>
+      <details class="inq-details"><summary>学习目标与环节说明</summary><div id="inq-create-objectives"></div><div id="inq-create-phases"></div></details>
+      <p class="inq-note">首期提供 AES-128 单分组组件。依据 NIST FIPS 197 生成草稿，检查通过并由教师预览确认后才能发布。其他算法需要先接入相应计算组件。</p>
+      <p id="inq-create-notice" role="status" aria-live="polite"></p>
+      <footer class="inq-actions"><a id="inq-create-ai" class="inq-button" href="/teacher?view=conversation&amp;inquiry=1">交给 AI 共创</a><button type="submit" class="inq-button is-primary">创建学习草稿</button></footer>
+    </form>
+    <aside class="inq-blueprint"><h2>学生将经历</h2><ol><li><strong>情境与目标</strong><span>知道要学会什么</span></li><li><strong>分步观察</strong><span>跟踪状态与原因</span></li><li><strong>动手探究</strong><span>改变一位，比较变化</span></li><li><strong>迁移挑战</strong><span>独立完成末轮操作</span></li><li><strong>反馈与归纳</strong><span>以操作证据检查目标</span></li></ol><p>一个完整项目，一个学习入口。无需提交报告。</p></aside>
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}<script defer src="{{ url_for('views.themes', path='js/dojo/inquiry-learning.js', v='inquiry-20261019-4') }}"></script>{% endblock %}

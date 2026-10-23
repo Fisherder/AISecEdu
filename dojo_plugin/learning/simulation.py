@@ -10,7 +10,7 @@ import re
 
 from CTFd.models import db
 
-from ..config import DOJO_AI_TUTOR_MODEL
+from ..config import DOJO_AI_SIMULATION_MODEL
 from ..models import (
     DojoChallenges,
     LearningChallengeProfiles,
@@ -3165,7 +3165,7 @@ def _semantic_transition(action, state, parameters, turn):
                 "observableContext": context,
                 "allowlistedPaths": semantic.get("allowedPaths") or [],
             },
-            model=DOJO_AI_TUTOR_MODEL,
+            model=DOJO_AI_SIMULATION_MODEL,
             thinking=False,
             max_tokens=1600,
             attempts=2,
@@ -3200,7 +3200,7 @@ def _semantic_transition(action, state, parameters, turn):
                 message = message.replace(literal, "[HIDDEN]")
         return {
             "provider": "MODEL",
-            "model": DOJO_AI_TUTOR_MODEL,
+            "model": DOJO_AI_SIMULATION_MODEL,
             "message": message,
             "patches": patches,
             "agentMeta": generated.get("_agentMeta") or {},

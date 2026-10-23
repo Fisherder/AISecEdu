@@ -7,7 +7,7 @@
 {% block entrypoint %}{% endblock %}
 
 {% block stylesheets %}
-<link rel="stylesheet" href="{{ url_for('views.themes', path='css/account-settings.css', v='aisecedu-account-settings-v2-readability-v1') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/account-settings.css', v='frontend-restored-20261001-1') }}">
 {% endblock %}
 
 {% block content %}
@@ -154,7 +154,7 @@
         </section>
 
         <section class="account-settings-subsection">
-          <div class="account-settings-subheading"><div><h3>SSH 公钥</h3><p>用于从本机终端安全连接题目工作区。</p></div></div>
+          <div class="account-settings-subheading"><div><h3 id="ssh-key">SSH 公钥</h3><p>用于从本机终端安全连接题目工作区。</p></div></div>
           {% if ssh_keys %}
           <div class="account-settings-credential-list" aria-label="当前 SSH 公钥">
             {% for key in ssh_keys %}
@@ -171,7 +171,7 @@
             <button class="account-settings-secondary" type="submit">添加公钥</button>
           </form>
           <div id="ssh-key-results" class="account-settings-inline-result" role="status" aria-live="polite"></div>
-          <details class="account-settings-details"><summary>查看连接方法</summary><p>在本机运行 <code>ssh-keygen -f key -N ''</code>，将 <code>key.pub</code> 的内容添加到这里，然后使用 <code>ssh -i key hacker@{{ request.host.split(':')[0] }}</code> 连接。</p></details>
+          {% include "components/workspace_ssh.html" %}
         </section>
 
         <section class="account-settings-subsection">
@@ -286,5 +286,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js', v='aisecedu-account-settings-v3') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/settings.js', v='frontend-restored-20261001-1') }}"></script>
 {% endblock %}

@@ -16,9 +16,16 @@ function setFullscreenIcon(active) {
         .toggleClass("fa-expand", !active);
 }
 
+function workspaceOwnsKeyboard() {
+    const active = document.activeElement;
+    if (!active || active === document.body || active === document.documentElement) return false;
+    if (active.id === "workspace-iframe") return false;
+    return true;
+}
+
 function focusWorkspaceKeyboard() {
     const iframe = document.getElementById("workspace-iframe");
-    if (iframe && iframe.contentWindow) {
+    if (iframe && iframe.contentWindow && !workspaceOwnsKeyboard()) {
         iframe.focus({preventScroll: true});
         iframe.contentWindow.postMessage({type: "aisecedu:focus-remote-keyboard"}, "*");
     }
@@ -260,6 +267,36 @@ function initializeWorkspaceMobilePanels() {
     const navigation = document.querySelector("[data-workspace-navigation]");
     const backdrop = document.querySelector("[data-workspace-mobile-backdrop]");
     const tutor = document.querySelector("[data-learning-tutor]");
+    const media = window.matchMedia("(max-width: 700px)");
+    const background = [document.querySelector(".challenge-workspace"), document.querySelector(".product-navbar")].filter(Boolean);
+    let previousFocus = null;
+    let priorInert = null;
+
+    function syncNavigationFocus() {
+        if (!navigation) return;
+        const open = media.matches && navigation.classList.contains("is-mobile-open");
+        navigation.inert = media.matches && !open;
+        if (open) {
+            navigation.setAttribute("role", "dialog");
+            navigation.setAttribute("aria-modal", "true");
+            navigation.setAttribute("aria-label", "课程导航");
+            if (!priorInert) {
+                previousFocus = document.activeElement;
+                priorInert = background.map(element => element.inert);
+                background.forEach(element => { element.inert = true; });
+                navigation.querySelector(".workspace-navigation-toggle")?.focus({preventScroll: true});
+            }
+        } else {
+            navigation.removeAttribute("role");
+            navigation.removeAttribute("aria-modal");
+            if (priorInert) {
+                background.forEach((element, index) => { element.inert = priorInert[index]; });
+                priorInert = null;
+                if (previousFocus?.isConnected && !previousFocus.closest("[inert]")) previousFocus.focus({preventScroll: true});
+                previousFocus = null;
+            }
+        }
+    }
 
     function mark(panel) {
         controls.forEach(button => {
@@ -267,6 +304,7 @@ function initializeWorkspaceMobilePanels() {
             button.classList.toggle("is-active", active);
             button.setAttribute("aria-pressed", active ? "true" : "false");
         });
+        syncNavigationFocus();
     }
 
     function closeTutor() {
@@ -302,8 +340,25 @@ function initializeWorkspaceMobilePanels() {
         mark(event.detail && event.detail.panel || "workspace");
     });
     document.addEventListener("keydown", event => {
-        if (event.key === "Escape" && window.matchMedia("(max-width: 700px)").matches) select("workspace");
+        if (!media.matches) return;
+        if (event.key === "Escape") {
+            event.preventDefault();
+            select("workspace");
+        } else if (event.key === "Tab" && priorInert) {
+            const focusable = [...navigation.querySelectorAll("button:not([disabled]),select:not([disabled]),a[href],[tabindex='0']")].filter(element => element.getClientRects().length);
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last?.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first?.focus();
+            }
+        }
     });
+    media.addEventListener("change", syncNavigationFocus);
+    syncNavigationFocus();
 }
 
 $(() => {

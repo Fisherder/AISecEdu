@@ -1,0 +1,963 @@
+{
+  "turbine": {
+    "kind": "turbine",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "blades": {
+        "type": "integer",
+        "default": 24,
+        "min": 12,
+        "max": 36
+      },
+      "rpm": {
+        "type": "number",
+        "default": 18,
+        "min": -120,
+        "max": 120
+      }
+    },
+    "roles": [
+      "rotating-machinery",
+      "sectioned-assembly"
+    ],
+    "representation": "Sectioned axial compressor/turbine; not a valve or a calibrated process simulation.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "blades": 24,
+        "rpm": 18
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "sectioned-pressure-casing",
+        "compressor-stage-1",
+        "compressor-stage-3",
+        "ball-bearing-0",
+        "ball-bearing-1"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "server-rack": {
+    "kind": "server-rack",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "units": {
+        "type": "integer",
+        "default": 8,
+        "min": 4,
+        "max": 12
+      }
+    },
+    "roles": [
+      "equipment-enclosure",
+      "rack-mounted-modules"
+    ],
+    "representation": "Rack with hot-swap trays and fans; not an instrument display or a fluid component.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "units": 8
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "hot-swap-server-1",
+        "hot-swap-server-2",
+        "hot-swap-server-3",
+        "hot-swap-server-4",
+        "hot-swap-server-5",
+        "hot-swap-server-6",
+        "hot-swap-server-7",
+        "hot-swap-server-8"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "processor": {
+    "kind": "processor",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "lid": {
+        "type": "boolean",
+        "default": false
+      }
+    },
+    "roles": [
+      "processor-package",
+      "layered-semiconductor"
+    ],
+    "representation": "Illustrative processor package with perimeter leads, not a bottom-contact LGA package or a pin-matched socket interface. Existing package layers separate together under global explode; decorative signals do not execute instructions.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "lid": false
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "ceramic-package",
+        "copper-interposer",
+        "silicon-die-and-gate-array",
+        "protective-window"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "memory-bank": {
+    "kind": "memory-bank",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "modules": {
+        "type": "integer",
+        "default": 4,
+        "min": 2,
+        "max": 6
+      }
+    },
+    "roles": [
+      "dimm-array",
+      "physical-memory-hardware"
+    ],
+    "representation": "Multi-DIMM assembly with its own base and sockets. Retaining clips are fixed geometry with no open/close motion. Global explode separates the DIMM boards, not individual clips or a single DIMM insertable into an arbitrary external slot. Not addressable memory cells, registers, or a logical call frame.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "modules": 4
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "dimm-1",
+        "dimm-2",
+        "dimm-3",
+        "dimm-4"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "dna": {
+    "kind": "dna",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "basePairs": {
+        "type": "integer",
+        "default": 28,
+        "min": 12,
+        "max": 40
+      },
+      "turns": {
+        "type": "number",
+        "default": 2.45,
+        "min": 1,
+        "max": 4
+      },
+      "separation": {
+        "type": "enum",
+        "default": "whole",
+        "values": [
+          "whole",
+          "local"
+        ]
+      },
+      "separationCenter": {
+        "type": "number",
+        "default": 0.5,
+        "min": 0.2,
+        "max": 0.8
+      },
+      "separationSpan": {
+        "type": "number",
+        "default": 0.4,
+        "min": 0.15,
+        "max": 0.6
+      }
+    },
+    "roles": [
+      "double-helix",
+      "molecular-context"
+    ],
+    "representation": "Right-handed symmetric teaching double helix with repeated base-pair rungs and two backbones. With separation=whole (default), explode separates the two whole strands. With separation=local, explode 0..1 smoothly opens only a bounded region around separationCenter (height fraction 0..1), of width separationSpan: both continuous helical backbones and their attached complementary base halves move radially apart there; outside this region stays paired and fixed. Animate explode 0→1→0 for local opening and re-pairing on the SAME molecule, without overlay copies. Set speed=0 for a stationary teaching view. This is qualitative local separation, not replication, enzymatic unwinding or a bond-energy simulation. Colors/beads are explanatory, not atoms or measured sequence; no calibrated groove widths or base-pairs-per-turn.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "basePairs": 28,
+        "turns": 2.45,
+        "separation": "whole",
+        "separationCenter": 0.5,
+        "separationSpan": 0.4
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "sugar-phosphate-strand-a",
+        "sugar-phosphate-strand-b"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "atom": {
+    "kind": "atom",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "electrons": {
+        "type": "integer",
+        "default": 5,
+        "min": 2,
+        "max": 8
+      },
+      "nucleons": {
+        "type": "integer",
+        "default": 25,
+        "min": 8,
+        "max": 48
+      }
+    },
+    "roles": [
+      "conceptual-atomic-structure"
+    ],
+    "representation": "Conceptual orbital guides, not electron trajectories or a quantum solution.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "electrons": 5,
+        "nucleons": 25
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "orbital-guide-1",
+        "orbital-guide-2",
+        "orbital-guide-3",
+        "orbital-guide-4",
+        "orbital-guide-5",
+        "nucleus"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "planet": {
+    "kind": "planet",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "seed": {
+        "type": "number",
+        "default": 3,
+        "min": -100,
+        "max": 100
+      },
+      "waterLevel": {
+        "type": "number",
+        "default": 0.035,
+        "min": -0.35,
+        "max": 0.35
+      },
+      "rings": {
+        "type": "boolean",
+        "default": true
+      }
+    },
+    "roles": [
+      "fictional-planet",
+      "planetary-surface-context"
+    ],
+    "representation": "Fictional procedural surface; not geographic imagery or an orbital solver.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "seed": 3,
+        "waterLevel": 0.035,
+        "rings": true
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "stratified-ice-rings",
+        "procedural-cloud-layer",
+        "limb-scattering"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "satellite": {
+    "kind": "satellite",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      }
+    },
+    "roles": [
+      "spacecraft-assembly",
+      "solar-array",
+      "antenna"
+    ],
+    "representation": "Illustrative spacecraft assembly, not engineering dimensions or a dynamics solver.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "port-solar-array",
+        "starboard-solar-array",
+        "high-gain-parabolic-antenna"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "optical-bench": {
+    "kind": "optical-bench",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "wavelength": {
+        "type": "number",
+        "default": 0.55,
+        "min": 0.2,
+        "max": 2
+      },
+      "slitSeparation": {
+        "type": "number",
+        "default": 0.21,
+        "min": 0.12,
+        "max": 0.45
+      },
+      "beam": {
+        "type": "boolean",
+        "default": true
+      }
+    },
+    "roles": [
+      "optical-experiment",
+      "double-slit"
+    ],
+    "representation": "Qualitative interference, not calibrated laboratory predictions.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "wavelength": 0.55,
+        "slitSeparation": 0.21,
+        "beam": true
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "collimated-laser-source",
+        "double-slit-aperture",
+        "interference-observation-screen"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "wave-surface": {
+    "kind": "wave-surface",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "amplitude": {
+        "type": "number",
+        "default": 0.18,
+        "min": 0.025,
+        "max": 0.34
+      },
+      "wavelength": {
+        "type": "number",
+        "default": 0.73,
+        "min": 0.28,
+        "max": 1.8
+      },
+      "frequency": {
+        "type": "number",
+        "default": 0.75,
+        "min": 0.1,
+        "max": 3
+      },
+      "separation": {
+        "type": "number",
+        "default": 1.15,
+        "min": 0.35,
+        "max": 2.3
+      },
+      "mode": {
+        "type": "enum",
+        "default": "double",
+        "values": [
+          "plane",
+          "single",
+          "double"
+        ]
+      }
+    },
+    "roles": [
+      "qualitative-wave-field"
+    ],
+    "representation": "Qualitative wave-height visualization; not a physical field solver.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "amplitude": 0.18,
+        "wavelength": 0.73,
+        "frequency": 0.75,
+        "separation": 1.15,
+        "mode": "double"
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "wave-field"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "valve": {
+    "kind": "valve",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "opening": {
+        "type": "number",
+        "default": 0.65,
+        "min": 0,
+        "max": 1
+      },
+      "actuator": {
+        "type": "enum",
+        "default": "electric",
+        "values": [
+          "electric",
+          "manual"
+        ]
+      }
+    },
+    "roles": [
+      "inline-flow-control",
+      "valve-body",
+      "actuator"
+    ],
+    "representation": "Sectioned valve with body, obturator, stem and actuator; opening is a geometric setting, not a flow calculation.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "opening": 0.65,
+        "actuator": "electric"
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "bonnet-and-packing",
+        "actuator"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "pipe-assembly": {
+    "kind": "pipe-assembly",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "layout": {
+        "type": "enum",
+        "default": "elbow",
+        "values": [
+          "straight",
+          "elbow",
+          "u"
+        ]
+      },
+      "length": {
+        "type": "number",
+        "default": 4,
+        "min": 2,
+        "max": 6
+      },
+      "radius": {
+        "type": "number",
+        "default": 0.14,
+        "min": 0.08,
+        "max": 0.24
+      }
+    },
+    "roles": [
+      "physical-fluid-conduit",
+      "flanged-connection",
+      "supported-pipe"
+    ],
+    "representation": "Hollow pipe with flange faces and supports; no implied fluid solver.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "layout": "elbow",
+        "length": 4,
+        "radius": 0.14
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "removable-pipe-clamp-1",
+        "removable-pipe-clamp-2"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "circuit-board": {
+    "kind": "circuit-board",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "width": {
+        "type": "number",
+        "default": 5.4,
+        "min": 3.8,
+        "max": 7
+      },
+      "depth": {
+        "type": "number",
+        "default": 3.6,
+        "min": 3,
+        "max": 5
+      },
+      "slots": {
+        "type": "integer",
+        "default": 3,
+        "min": 2,
+        "max": 5
+      }
+    },
+    "roles": [
+      "hardware-support",
+      "pcb-interconnect",
+      "component-sockets"
+    ],
+    "representation": "Illustrative PCB whose board, socket contacts, DIMM slots, retaining clips and copper traces form one fixed assembly. No internal layer separation, clip opening/closing or individually animated built-in trace segments; not a fabricated electrical design or a validated mating interface.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "width": 5.4,
+        "depth": 3.6,
+        "slots": 3
+      },
+      "supportsExplode": false,
+      "explodeParts": [],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "logic-stack": {
+    "kind": "logic-stack",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "layers": {
+        "type": "integer",
+        "default": 4,
+        "min": 2,
+        "max": 6
+      },
+      "columns": {
+        "type": "integer",
+        "default": 4,
+        "min": 2,
+        "max": 8
+      },
+      "rows": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 4
+      },
+      "activeLayer": {
+        "type": "integer",
+        "default": 1,
+        "min": 1,
+        "max": 6
+      },
+      "activeCell": {
+        "type": "integer",
+        "default": 1,
+        "min": 1,
+        "max": 32
+      }
+    },
+    "roles": [
+      "logical-layered-storage",
+      "partitioned-teaching-diagram",
+      "marker-slots"
+    ],
+    "representation": "Partitioned logical teaching layers; explicitly not physical RAM, DIMMs, or real memory addresses. layers/columns/rows/activeLayer/activeCell are static construction parameters. Global explode separates existing layers together; it does not push/pop call frames or change active cells. Changing logical markers require separate scene nodes and actual tracks.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "layers": 4,
+        "columns": 4,
+        "rows": 2,
+        "activeLayer": 1,
+        "activeCell": 1
+      },
+      "supportsExplode": true,
+      "explodeParts": [
+        "logical-layer-1",
+        "logical-layer-2",
+        "logical-layer-3",
+        "logical-layer-4"
+      ],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "usb-drive": {
+    "kind": "usb-drive",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      }
+    },
+    "roles": [
+      "removable-storage-device"
+    ],
+    "representation": "USB-shaped removable storage with molded body, metal plug, recessed tongue and contact details. No stored data or automatic transfer; animate the complete root for carrying/insertion and use separate conceptual signal entities. Connector port is the physical plug tip, not its center.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1
+      },
+      "supportsExplode": false,
+      "explodeParts": [],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "computer-workstation": {
+    "kind": "computer-workstation",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "tower": {
+        "type": "boolean",
+        "default": true
+      }
+    },
+    "roles": [
+      "desktop-computer",
+      "operator-workstation"
+    ],
+    "representation": "Detailed monitor, pedestal, keyboard, mouse and optional desktop tower. Screen faces +Z. Screen is a dark blank physical surface; add an explicitly authored surfaceText plane at display port for readable content. Never claim built-in live numbers, OS execution or changing screen content. USB port is on the front of the tower (tower=true) or monitor edge (tower=false).",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "tower": true
+      },
+      "supportsExplode": false,
+      "explodeParts": [],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "industrial-controller": {
+    "kind": "industrial-controller",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "modules": {
+        "type": "integer",
+        "default": 4,
+        "min": 2,
+        "max": 6
+      }
+    },
+    "roles": [
+      "modular-industrial-controller"
+    ],
+    "representation": "Generic modular industrial controller on a rail, with separate module shells, repeated terminal screws, socket and status lenses. Not a server rack, processor package, physical memory map or executable PLC. Hardware is fixed; conceptual control-logic changes must be separate visible scene entities in front of the controller, not hidden inside the closed module shells. No actual vendor, wiring specification or operating parameters.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "modules": 4
+      },
+      "supportsExplode": false,
+      "explodeParts": [],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "industrial-drive": {
+    "kind": "industrial-drive",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      }
+    },
+    "roles": [
+      "industrial-motor-drive"
+    ],
+    "representation": "Generic drive enclosure with heatsink fins, terminal block, keypad and static display scale. No actual operating parameters or built-in dynamic readings. Overlay explicitly generated surfaceText or a separate visible pointer at display port; changing emissive brightness does not change a reading.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1
+      },
+      "supportsExplode": false,
+      "explodeParts": [],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  },
+  "centrifuge-housing": {
+    "kind": "centrifuge-housing",
+    "parameters": {
+      "detail": {
+        "type": "integer",
+        "default": 2,
+        "min": 1,
+        "max": 3
+      },
+      "speed": {
+        "type": "number",
+        "default": 1,
+        "min": -5,
+        "max": 5
+      },
+      "cutaway": {
+        "type": "boolean",
+        "default": true
+      }
+    },
+    "roles": [
+      "vertical-rotor-machine-housing",
+      "centrifuge-teaching-enclosure"
+    ],
+    "representation": "Illustrative tall vertical rotor-machine casing, bearing collars, motor housing, fins, bolts and feet; not a turbine and not a calibrated industrial design. NO internal spinning rotor is included. Add a separate visible cylindrical rotor with an asymmetric longitudinal stripe and actual Y-rotation track, centered at rotor-center port. cutaway=true opens the front (+Z) half and corresponding collars for observation. Determine usable cavity from actual port positions and catalog bounds; do not infer physical dimensions, enrichment performance or operating speeds. All built-in parts remain fixed.",
+    "assemblyRecipe": "Required teaching assembly: create one primary cylinder as a direct child of the housing and fit it inside rotor-bottom/rotor-top/cavity-front. Give that cylinder a real Y-axis rotation track spanning at least two turns. Add a slender child stripe/marker on the rotor's +Z surface, slightly outside the cylinder so it is visible through the +Z cutaway at the establishing frame; do not bury it inside the rotor or start it on the hidden rear face. Add at least one learnerControls range with two or more feedback bands and a timeRange covering the rotor motion. When the request includes HMI deception, build separate visible HMI and physical-state pointers with independent position or rotation tracks; static surfaceText or emissive changes are not readings. When emergency stop is requested, add a distinct seek button to a controlled-stop chapter instead of relabeling pause. The player supplies reset, playback, orbit and zoom. Use cutaway=true and camera frames that reveal both rotor and shell. Treat values as conceptual states, not calibrated RPM or damage predictions.",
+    "defaultStructure": {
+      "params": {
+        "detail": 2,
+        "speed": 1,
+        "cutaway": true
+      },
+      "supportsExplode": false,
+      "explodeParts": [],
+      "internalPartsAddressable": false,
+      "parameterMode": "construction-only",
+      "assemblyValidation": "placement-only"
+    }
+  }
+}

@@ -12,12 +12,17 @@ from .models import (
     DojoChallenges,
     DojoUsers,
     LearningAuditEvents,
+    LearningDrafts,
+    TeachingArtifacts,
     TeachingAssignmentItems,
     TeachingAssignments,
     TeachingAssignmentSubmissions,
 )
 from .agent_runtime.scope import ScopeError, dojo_for_user, validate_module
 from .learning.student_experience import activity_state, assessment_state
+from .coursework_answers import resolve_boolean_answer, resolve_choice_answer
+from .coursework_quality import review_generated_assignment
+from .authoring_standards import resolve as resolve_standards, prompt as standards_prompt, provenance as standards_provenance
 
 
 ASSIGNMENT_KINDS = {"HOMEWORK", "QUIZ", "PRACTICE", "LAB", "DEBATE"}
@@ -150,6 +155,7 @@ def _item_view(
     teacher=False,
     result=None,
     expose_answer=False,
+    challenge_solved_at=None,
 ):
     config = dict(item.config or {})
     public_config = {
@@ -177,8 +183,14 @@ def _item_view(
         "artifactId": item.artifact_id,
         "config": public_config,
     }
+    if teacher:
+        view["editConfig"] = dict(config)
+        view["challengeId"] = item.challenge_id
     if result is not None:
         view["result"] = result
+    if item.item_type == "CHALLENGE":
+        view["challengeCompleted"] = challenge_solved_at is not None
+        view["challengeSolvedAt"] = timestamp(challenge_solved_at)
     return view
 
 
@@ -279,7 +291,7 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
         "status": assignment.status,
         "description": assignment.description,
         "instructions": assignment.instructions,
-        "settings": settings,
+        "settings": settings if teacher else {key: value for key, value in settings.items() if key not in {"librarySource", "authoringStandards"}},
         "answerPolicy": {
             "mode": answer_policy,
             "answersVisible": expose_answer,
@@ -313,6 +325,11 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
         "submissionCounts": counts if teacher else None,
     }
     if include_items:
+        challenge_ids = [item.challenge_id for item in assignment.items if item.item_type == "CHALLENGE" and item.challenge_id]
+        challenge_solves = {
+            row.challenge_id: row.date
+            for row in Solves.query.filter(Solves.user_id == user.id, Solves.challenge_id.in_(challenge_ids)).all()
+        } if user is not None and not teacher and challenge_ids else {}
         view["items"] = [
             _item_view(
                 assignment,
@@ -320,6 +337,7 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
                 teacher=teacher,
                 result=result_by_item.get(item.id) if submission and submission.status == "GRADED" else None,
                 expose_answer=expose_answer,
+                challenge_solved_at=challenge_solves.get(item.challenge_id),
             )
             for item in assignment.items
         ]
@@ -330,6 +348,16 @@ def validate_item(assignment, raw, position):
     if not isinstance(raw, dict):
         raise ValueError("Assignment items must be objects")
     item_type = normalize_item_type(raw.get("type") or raw.get("itemType"))
+    config = dict(raw.get("config")) if isinstance(raw.get("config"), dict) else {}
+    linked_draft = None
+    if config.get("libraryPracticeDraftId"):
+        linked_draft = LearningDrafts.query.filter_by(id=config["libraryPracticeDraftId"], dojo_id=assignment.dojo_id).first()
+        if linked_draft is None:
+            raise ValueError("配套实践题不属于当前课程。")
+    if config.get("libraryArtifactDependency"):
+        linked_artifact = TeachingArtifacts.query.filter_by(id=config["libraryArtifactDependency"], dojo_id=assignment.dojo_id).first()
+        if linked_artifact is None or str(raw.get("artifactId")) != linked_artifact.id:
+            raise ValueError("配套教学内容不属于当前课程或引用不一致。")
     challenge_id = raw.get("challengeId")
     if challenge_id not in {None, ""}:
         try:
@@ -341,21 +369,19 @@ def validate_item(assignment, raw, position):
             challenge_id=challenge_id,
         ).first():
             raise ValueError("Challenge does not belong to the assignment course")
-    elif item_type == "CHALLENGE":
+    elif item_type == "CHALLENGE" and linked_draft is None:
         raise ValueError("Challenge items require challengeId")
     points = float(raw.get("points") or 10)
     if not math.isfinite(points) or points <= 0 or points > 1000:
         raise ValueError("points must be between 0 and 1000")
-    config = dict(raw.get("config")) if isinstance(raw.get("config"), dict) else {}
     choices = config.get("choices")
     if item_type == "MULTIPLE_CHOICE":
         if not isinstance(choices, list) or not 2 <= len(choices) <= 12:
             raise ValueError("Multiple choice items require 2 to 12 choices")
         config["choices"] = [_bounded_text(choice, 1000, "choice") for choice in choices]
-        if config.get("correctAnswer") in {None, ""}:
-            raise ValueError("Multiple choice items require a correctAnswer")
-    if item_type == "TRUE_FALSE" and config.get("correctAnswer") is None:
-        raise ValueError("True/false items require a correctAnswer")
+        config["correctAnswer"] = resolve_choice_answer(config.get("correctAnswer"), config["choices"])
+    if item_type == "TRUE_FALSE":
+        config["correctAnswer"] = resolve_boolean_answer(config.get("correctAnswer"))
     return TeachingAssignmentItems(
         assignment_id=assignment.id,
         position=position,
@@ -383,6 +409,9 @@ def replace_items(assignment, raw_items):
 
 def create_assignment(user, dojo, body):
     module_index = validate_module(dojo, body.get("moduleIndex"))
+    body = dict(body)
+    standards = resolve_standards(course_id=dojo.dojo_id, question_type="quiz" if any(item.get("type") != "CHALLENGE" for item in body.get("items", []) if isinstance(item, dict)) else "practice")
+    body["settings"] = {**(body.get("settings") if isinstance(body.get("settings"), dict) else {}), "authoringStandards": standards}
     assignment = TeachingAssignments(
         dojo_id=dojo.dojo_id,
         module_index=module_index,
@@ -503,16 +532,10 @@ def _generated_item(raw, position):
         else:
             config["choices"] = choices
             answer = config.get("correctAnswer", raw.get("correctAnswer"))
-            if isinstance(answer, int) and 0 <= answer < len(choices):
-                answer = choices[answer]
-            if answer not in choices:
-                answer = choices[0]
-            config["correctAnswer"] = answer
+            config["correctAnswer"] = resolve_choice_answer(answer, choices)
     if item_type == "TRUE_FALSE":
         answer = config.get("correctAnswer", raw.get("correctAnswer"))
-        if isinstance(answer, str):
-            answer = answer.strip().casefold() in {"true", "1", "yes", "是", "正确", "对"}
-        config["correctAnswer"] = bool(answer)
+        config["correctAnswer"] = resolve_boolean_answer(answer)
     if item_type in {"SHORT_ANSWER", "DEBATE"}:
         keywords = config.get("keywords")
         if not isinstance(keywords, list):
@@ -566,6 +589,7 @@ def generate_assignment_payload(body, dojo):
             continue
         if DojoChallenges.query.filter_by(dojo_id=dojo.dojo_id, challenge_id=challenge_id).first():
             challenge_ids.append(challenge_id)
+    standards = resolve_standards(course_id=dojo.dojo_id, question_type="quiz")
     generated = None
     try:
         generated = model_json(
@@ -575,13 +599,20 @@ def generate_assignment_payload(body, dojo):
             "不得把多道题合并为一道含多个小问的综合题。"
             "type 只能是 MULTIPLE_CHOICE、TRUE_FALSE、SHORT_ANSWER 或 DEBATE；"
             "选择题 config 必须有 choices、correctAnswer、explanation；判断题必须有 correctAnswer、explanation；"
-            "简答和辩论必须有 referenceAnswer、keywords、rubric。不要输出 Markdown。",
+            "选择题 correctAnswer 必须与正确选项的完整字符串完全一致；判断题 correctAnswer 必须为 JSON 布尔值。"
+            "每题 points 必须等于题干各小问和 rubric 各得分点之和，解析必须与正确答案一致。"
+            "平台的单选与判断题只支持选择答案，不能要求另交文字理由或为理由单独计分；论证放在解析或简答题。"
+            "instructions只写学生如何作答，不包含给生成器的出题规则。明确每个算例的输入、单位和假设，"
+            "不要把某种模式或特定平台的条件说成普遍保证；题干、图示、答案和解析必须相互一致。"
+            "简答和辩论必须有 referenceAnswer、keywords、rubric。不要输出 Markdown。"
+            + "\n\n" + standards_prompt(standards),
             {
                 "course": dojo.name or dojo.id,
                 "moduleIndex": body.get("moduleIndex"),
                 "kind": kind,
                 "difficulty": body.get("difficulty") or "INTERMEDIATE",
                 "questionCount": count,
+                "authoringStandards": standards_provenance(standards),
                 "prompt": prompt[:12000],
             },
             model=DOJO_AI_AUTHORING_PLAN_MODEL,
@@ -599,6 +630,17 @@ def generate_assignment_payload(body, dojo):
         if (item := _generated_item(raw, index)) is not None
     ]
     model_generated_count = len(normalized)
+    quality_review = {"status": "NOT_REVIEWED", "humanReviewed": False}
+    if generated is not None and model_generated_count == count:
+        reviewed, quality_review = review_generated_assignment(
+            {"title": generated.get("title") or "", "description": generated.get("description") or "", "instructions": generated.get("instructions") or "", "items": normalized},
+            context={"course": dojo.name or dojo.id, "moduleIndex": body.get("moduleIndex"), "prompt": prompt[:12000]},
+            model=DOJO_AI_AUTHORING_PLAN_MODEL,
+            call_model=lambda system, payload, **kwargs: model_json(system + "\n\n" + standards_prompt(standards), payload, **kwargs),
+            normalize_item=_generated_item,
+        )
+        generated = {**generated, **reviewed}
+        normalized = reviewed["items"]
     if len(normalized) < count:
         fallbacks = _fallback_generated_items(prompt, count)
         normalized.extend(fallbacks[len(normalized):count])
@@ -643,6 +685,7 @@ def generate_assignment_payload(body, dojo):
             "allowLate": bool(body.get("allowLate", True)),
             "allowResubmit": bool(body.get("allowResubmit", True)),
             "passPercent": max(0, min(100, pass_percent)),
+            "authoringStandards": standards,
             "generation": {
                 "prompt": prompt[:4000],
                 "model": (meta or {}).get("model"),
@@ -651,6 +694,7 @@ def generate_assignment_payload(body, dojo):
                 "requestedQuestionCount": count,
                 "generatedQuestionCount": len(normalized),
                 "modelGeneratedQuestionCount": model_generated_count,
+                "qualityReview": quality_review,
             },
         },
         "items": items,
@@ -660,6 +704,22 @@ def generate_assignment_payload(body, dojo):
 def publish_assignment(assignment, user):
     if not assignment.items:
         raise ValueError("Cannot publish an empty assignment")
+    for item in assignment.items:
+        config = item.config or {}
+        if config.get("libraryPracticeDraftId"):
+            draft = LearningDrafts.query.filter_by(id=config["libraryPracticeDraftId"], dojo_id=assignment.dojo_id).first()
+            if draft is None or draft.status != "PUBLISHED" or not draft.published_challenge_id:
+                raise ValueError(f"请先检查并发布素材中配套的实践题：{item.title}")
+            linked = DojoChallenges.query.filter_by(dojo_id=assignment.dojo_id, challenge_id=draft.published_challenge_id).first()
+            if linked is None:
+                raise ValueError("配套实践题不属于当前课程，暂不能发布作业。")
+            item.challenge_id = linked.challenge_id
+        if config.get("libraryArtifactDependency"):
+            artifact = TeachingArtifacts.query.filter_by(id=config["libraryArtifactDependency"], dojo_id=assignment.dojo_id).first()
+            if artifact is None or artifact.status != "PUBLISHED":
+                raise ValueError(f"请先检查并发布素材中配套的教学内容：{item.title}")
+    standards = resolve_standards(course_id=assignment.dojo_id, question_type="quiz" if any(item.type != "CHALLENGE" for item in assignment.items) else "practice")
+    assignment.settings = {**(assignment.settings or {}), "publishedStandards": standards_provenance(standards)}
     assignment.status = "PUBLISHED"
     assignment.published_at = assignment.published_at or utcnow()
     assignment.closed_at = None
@@ -711,6 +771,8 @@ def delete_assignment(assignment, user):
 
 
 def update_assignment(assignment, body, user):
+    if "expectedUpdated" in body and body["expectedUpdated"] != timestamp(assignment.updated):
+        raise ValueError("内容已在其他页面更新，请刷新后再修改，避免覆盖他人的改动。")
     if "title" in body:
         title = str(body.get("title") or "").strip()
         if not title or len(title) > 240:
@@ -740,6 +802,7 @@ def update_assignment(assignment, body, user):
         if TeachingAssignmentSubmissions.query.filter_by(assignment_id=assignment.id).count():
             raise ValueError("Items cannot be replaced after students have started the assignment")
         replace_items(assignment, body.get("items"))
+    assignment.updated = utcnow()
     db.session.add(
         LearningAuditEvents(
             actor_id=user.id,

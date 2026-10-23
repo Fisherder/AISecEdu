@@ -25,10 +25,11 @@ type SessionScope = {
 };
 
 export function isModelBilledIntegratedApi(pathname: string): boolean {
-  return /^\/api\/(?:chat(?:\/pi)?$|pbl\/|quiz-grade$)/.test(pathname);
+  return /^\/api\/(?:chat(?:\/pi)?$|pbl\/|quiz-grade$|debates\/[A-Za-z0-9_-]+$)/.test(pathname);
 }
 
 const INTEGRATED_SESSION_API = [
+  { pattern: /^\/api\/lessons\/[A-Za-z0-9_-]+\/studio(?:\/agent(?:\/[A-Za-z0-9_-]+)?)?$/, methods: new Set(['GET', 'POST', 'PUT', 'DELETE']) },
   { pattern: /^\/api\/integration\/aisecedu(?:\/|$)/, methods: new Set(['GET', 'POST', 'DELETE']) },
   { pattern: /^\/api\/lessons(?:\/[A-Za-z0-9_-]+)?$/, methods: new Set(['GET']) },
   { pattern: /^\/api\/classroom$/, methods: new Set(['GET']) },
@@ -37,6 +38,7 @@ const INTEGRATED_SESSION_API = [
   { pattern: /^\/api\/pbl\//, methods: new Set(['POST']) },
   { pattern: /^\/api\/quiz-grade$/, methods: new Set(['POST']) },
   { pattern: /^\/api\/generate\/tts$/, methods: new Set(['POST']) },
+  { pattern: /^\/api\/debates\/[A-Za-z0-9_-]+$/, methods: new Set(['GET', 'POST']) },
   { pattern: /^\/api\/(?:transcription|parse-pdf)$/, methods: new Set(['POST']) },
 ];
 
@@ -53,7 +55,7 @@ export function integratedSessionPageAllowed(
   const classroom = /^\/classroom\/[A-Za-z0-9_-]+\/?$/.test(pathname);
   if (classroom) return true;
   if (role === 'teacher') {
-    return /^\/prep\/[A-Za-z0-9_-]+\/?$/.test(pathname);
+    return /^\/prep\/[A-Za-z0-9_-]+\/?$/.test(pathname) || pathname === '/internal/library-preview';
   }
   return /^(?:\/security-learn\/?|\/prep\/[A-Za-z0-9_-]+\/?)$/.test(pathname);
 }
@@ -143,6 +145,7 @@ export async function middleware(request: NextRequest) {
       }
       if (
         scope.role === 'student' &&
+        request.method === 'POST' &&
         isModelBilledIntegratedApi(pathname) &&
         !scope.modelQuotaAvailable
       ) {

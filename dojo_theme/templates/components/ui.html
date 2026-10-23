@@ -1,0 +1,49 @@
+{% macro icon(name, label='') -%}
+{% set paths = {
+  'th-large':'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
+  'layer-group':'m12 3 9 5-9 5-9-5z M3 12l9 5 9-5 M3 16l9 5 9-5',
+  'book':'M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H4z M13 7a3 3 0 0 1 3-3h5v15h-4a4 4 0 0 0-4 2',
+  'clipboard-check':'M9 4H5v17h14V4h-4 M9 2h6v4H9z m-1 11 3 3 5-6',
+  'magic':'m4 20 11-11 3 3L7 23z M15 2v4 M13 4h4 M21 7v4 M19 9h4 M6 4v4 M4 6h4',
+  'home':'m3 10 9-7 9 7 M5 9v12h5v-7h4v7h5V9',
+  'calendar-day':'M4 5h16v16H4z M8 2v6 M16 2v6 M4 10h16 M8 14h3v3H8z',
+  'tachometer-alt':'M3 17a9 9 0 1 1 18 0 M12 5v2 M5 10l2 1 M19 10l-2 1 M12 16l4-6 M4 21h16',
+  'user-shield':'M12 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M2 21v-3a6 6 0 0 1 8-5 M17 11l5 2v4c0 3-2 5-5 6-3-1-5-3-5-6v-4z',
+  'route':'M7 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0 M23 19a3 3 0 1 1-6 0 3 3 0 0 1 6 0 M4 8v7a4 4 0 0 0 4 4h3 M20 16V9a4 4 0 0 0-4-4h-3',
+  'info-circle':'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 11v6 M12 7h.01',
+  'book-open':'M4 4h5a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H4z M12 7a3 3 0 0 1 3-3h5v15h-4a4 4 0 0 0-4 2',
+  'comment-dots':'M3 4h18v13H9l-6 4z M7 10h.1 M12 10h.1 M17 10h.1',
+  'brain':'M12 4c-4-4-8 1-6 4-5 2-3 8 0 8 0 4 6 5 6 1 M12 4c4-4 8 1 6 4 5 2 3 8 0 8 0 4-6 5-6 1 M12 4v15',
+  'compass':'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M16 8l-3 5-5 3 3-5z',
+  'graduation-cap':'m2 9 10-5 10 5-10 5z M6 11v6c4 3 8 3 12 0v-6 M22 9v8',
+  'cubes':'m12 2 8 5v10l-8 5-8-5V7z M4 7l8 5 8-5 M12 12v10',
+  'folder-open':'M3 7h7l2 3h9l-3 10H3z M3 7V4h6l3 3h7v3',
+  'chart-line':'M4 3v17h17 M7 14l4-5 4 3 5-7',
+  'shield-alt':'M12 2l9 4v6c0 5-4 8-9 10-5-2-9-5-9-10V6z m-4 10 3 3 5-6',
+  'users':'M16 21v-3c0-3-3-5-6-5s-6 2-6 5v3 M14 6a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M17 3a4 4 0 0 1 0 8 M20 21v-3c0-2-1-4-3-4',
+  'server':'M3 3h18v7H3z M3 14h18v7H3z M7 6v1 M7 17v1',
+  'tasks':'M9 5h12 M9 12h12 M9 19h12 M3 5h1 M3 12h1 M3 19h1',
+  'history':'M3 11a9 9 0 1 1 3 8 M3 3v8h8 M12 7v6l4 2',
+  'cog':'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3-1 2 4-2 2v3l2 2-2 4-3-1-3 1-1 3h-4l-1-3-3-1-3 1-2-4 2-2v-3L1 9l2-4 3 1 3-1z',
+  'terminal':'m4 5 6 6-6 6 M12 18h8',
+  'search':'M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0 m-2 5 6 6',
+  'menu':'M4 6h16 M4 12h16 M4 18h16',
+  'sidebar':'M3 3h18v18H3z M9 3v18',
+  'plus':'M12 4v16 M4 12h16',
+  'close':'m6 6 12 12 M6 18 18 6',
+  'chevron-right':'m9 5 7 7-7 7',
+  'grid':'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
+  'list':'M8 5h13 M8 12h13 M8 19h13 M3 5h1 M3 12h1 M3 19h1',
+  'help':'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M9 8a3 3 0 1 1 5 2l-2 2v2 M12 17h.01',
+  'user':'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M4 21v-2a8 8 0 0 1 16 0v2'
+} %}
+<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"{% if label %} role="img" aria-label="{{ label }}"{% else %} aria-hidden="true"{% endif %}><path d="{{ paths.get(name, paths['grid']) }}"/></svg>
+{%- endmacro %}
+
+{% macro page_header(title, description='', id='', class_name='') -%}
+<header class="ui-page-header {{ class_name }}"><div class="ui-page-heading"><h1{% if id %} id="{{ id }}"{% endif %}>{{ title }}</h1>{% if description %}<p>{{ description }}</p>{% endif %}</div>{% if caller is defined %}<div class="ui-page-actions">{{ caller() }}</div>{% endif %}</header>
+{%- endmacro %}
+
+{% macro view_switch(prefix) -%}
+<div class="ui-view-switch" role="group" aria-label="显示方式"><button type="button" id="{{ prefix }}-view-grid" data-resource-view="grid" aria-pressed="true" aria-label="网格显示" title="网格显示">{{ icon('grid') }}</button><button type="button" id="{{ prefix }}-view-list" data-resource-view="list" aria-pressed="false" aria-label="列表显示" title="列表显示">{{ icon('list') }}</button></div>
+{%- endmacro %}

@@ -35,3 +35,20 @@ sensai/
 
 # Upstream documentation media is not used by the integrated runtime image
 services/agent-runtime/assets/
+
+# Local deployment workspaces and backups
+.cache/
+.codex-backups/
+.codex-stage/
+.deploy-backups/
+.release-stages/
+.local-state/
+.tmp-exp*/
+core
+workspace/*-20*/
+windows2000-*-20*/
+**/.codegraph/
+**/._*
+**/*.bak*
+**/*.orig
+**/*.before-*

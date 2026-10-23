@@ -261,6 +261,61 @@ describe('LLM thinking provider options', () => {
     ]);
   });
 
+  it('falls back to raw JSON text when structured output parsing fails', async () => {
+    const parseError = Object.assign(
+      new Error('No object generated: could not parse the response.'),
+      { name: 'AI_NoObjectGeneratedError' },
+    );
+    aiMock.generateText
+      .mockRejectedValueOnce(parseError)
+      .mockImplementationOnce(async (params: unknown) => ({
+        text: '{"status":"ok"}',
+        params,
+      }));
+
+    const result = await callLLM(
+      {
+        model: {
+          provider: 'deepseek.chat',
+          modelId: 'deepseek-v4-flash',
+        },
+        prompt: 'return JSON',
+        output: { type: 'json' },
+      } as Parameters<typeof callLLM>[0],
+      'test',
+      { retries: 1 },
+      { mode: 'enabled', effort: 'high' },
+    );
+
+    expect(result.text).toBe('{"status":"ok"}');
+    expect(aiMock.generateText.mock.calls[0]?.[0]).toHaveProperty('output');
+    expect(aiMock.generateText.mock.calls[1]?.[0]).not.toHaveProperty('output');
+  });
+
+  it('extends retries with bounded backoff for a temporary provider overload', async () => {
+    vi.useFakeTimers();
+    const busy = Object.assign(new Error('Service is too busy. Try again later.'), {
+      name: 'AI_APICallError',
+      statusCode: 503,
+    });
+    aiMock.generateText
+      .mockRejectedValueOnce(busy)
+      .mockRejectedValueOnce(busy)
+      .mockImplementationOnce(async (params: unknown) => ({ text: 'ok', params }));
+
+    const resultPromise = callLLM(
+      {
+        model: { provider: 'deepseek.chat', modelId: 'deepseek-v4-flash' },
+        prompt: 'return a compact answer',
+      } as Parameters<typeof callLLM>[0],
+      'test',
+    );
+    await vi.runAllTimersAsync();
+    await expect(resultPromise).resolves.toMatchObject({ text: 'ok' });
+    expect(aiMock.generateText).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
   // Defensive: ai@6's GenerateTextResult always carries `totalUsage`, so this
   // shape is not one the current SDK produces — the fallback exists so a future
   // result shape without the aggregate degrades to the final step instead of

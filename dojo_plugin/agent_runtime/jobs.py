@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -12,7 +13,7 @@ from urllib.parse import quote, urlencode
 import redis
 import requests
 from flask import current_app
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
 from CTFd.models import Users, db
@@ -28,6 +29,7 @@ from ..models import (
     LearningSolutionRuns,
     ModelInvocations,
     TeachingAgentActions,
+    TeachingAgentEventOutbox,
     TeachingAgentMessages,
     TeachingAgentThreads,
     TeachingAssignments,
@@ -45,7 +47,7 @@ from ..models import (
     TeachingMaterials,
     TeachingSessions,
 )
-from ..learning.evidence import redact_text, scrub_payload
+from ..learning.evidence import redact_text, scrub_payload, SENSITIVE_KEYS
 from ..utils.request_logging import (
     clear_background_trace_context,
     get_trace_id,
@@ -60,11 +62,21 @@ from .artifacts import (
 )
 from .files import persist_agent_deliverables, public_agent_file
 from .model_router import route_model, validate_actual_model
+from .model_journal import close_canceled_model_calls
+from .model_inputs import ModelInputError, accepted_input, freeze_input, freeze_prepared, prepared_input, request_payload, restore_input_cache
+from .conversation import turn_wait_state, execution_chain
+from .session_events import record_step_lifecycle, record_turn_lifecycle
+from .harness import TurnDeferred, advance_turn
+from .commands import COMMAND_JOB_KINDS, execute_command, finish_command_job, reopen_command_job, recover_command_job
+from .local_extract import index_verified_local_source, locally_extractable
+from .reliability import RuntimeJobError, recovery_decision, recovery_due, public_recovery
 from .materials import (
     MATERIAL_ANALYSIS_VERSION,
+    MATERIAL_INDEX_VERSION,
     build_course_material_context,
     compact_material_grounding,
     course_material_grounding_requested,
+    singular_material_reference_requested,
 )
 
 
@@ -79,9 +91,12 @@ logger = logging.getLogger(__name__)
 # native work is published to ``AUTHORING_STREAM`` and consumed by its own
 # worker pool.
 STREAM = "teaching:jobs"
+CODING_STREAM = "teaching:coding-review"
 AUTHORING_STREAM = "teaching:authoring"
+MATERIAL_INDEX_STREAM = "teaching:material-index"
+MATERIAL_STREAM = "teaching:materials"
 GROUP = "teaching-workers"
-AUTHORING_JOB_KINDS = frozenset({"learning.authoring", "learning.solution"})
+AUTHORING_JOB_KINDS = frozenset({"learning.authoring", "learning.solution", "agent.command.publish", "agent.command.image-pull", "agent.command.tool-authoring", "agent.command.cleanup"})
 LEASE_SECONDS = max(300, int(os.getenv("TEACHING_JOB_LEASE_SECONDS") or "900"))
 AUTHORING_LEASE_SECONDS = max(
     LEASE_SECONDS,
@@ -103,18 +118,24 @@ WORKER_LIVENESS_TTL_SECONDS = max(
 # Keep this bounded and local to one leased job rather than immediately
 # republishing the job until its durable attempt budget is exhausted.
 AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS = (1, 2, 4, 8)
-AGENT_RUNTIME_RETRYABLE_STATUS_CODES = frozenset({502, 503, 504})
 
 
 def _stream_for_job_kind(kind):
     """Return the queue that can make progress without starving other work."""
 
+    if kind == "coding.review":
+        return CODING_STREAM
+    if kind == "material.analyze":
+        return MATERIAL_INDEX_STREAM
+    if kind == "material.enrich":
+        return MATERIAL_STREAM
     return AUTHORING_STREAM if str(kind or "") in AUTHORING_JOB_KINDS else STREAM
 
 
 def _stream_for_job(job):
     return _stream_for_job_kind(getattr(job, "kind", None))
 AGENT_TOOL_SCHEMAS = {
+    "module.inquiry": ("R1", {"moduleIndex", "spec"}),
     "dojo.select": ("R0", {"referenceId", "moduleIndex"}),
     "course.list": ("R0", set()),
     "course.read": ("R0", set()),
@@ -205,6 +226,7 @@ AGENT_TOOL_SCHEMAS = {
             "availableFrom",
             "dueAt",
             "settings",
+            "items",
         },
     ),
     "assignment.publish": ("R3", {"assignmentId"}),
@@ -216,7 +238,6 @@ AGENT_TOOL_SCHEMAS = {
     ),
     "progress.read": ("R0", set()),
     "material.list": ("R0", set()),
-    "material.analyze": ("R1", {"materialId"}),
     "material.add_to_module": (
         "R2",
         {"materialId", "referenceId", "moduleIndex", "name"},
@@ -244,11 +265,28 @@ AGENT_TOOL_SCHEMAS = {
     "classroom.prepare": ("R1", {"artifactId", "title"}),
     "classroom.request_start": ("R3", {"sessionId"}),
     "classroom.request_end": ("R3", {"sessionId"}),
+    "skill.list": ("R0", set()),
+    "skill.read": ("R0", {"name"}),
+    "skill.create": (
+        "R1",
+        {"name", "description", "instructions", "references", "skillMarkdown", "modelInvocable", "userInvocable"},
+    ),
+    "skill.update": (
+        "R1",
+        {"name", "description", "instructions", "references", "enabled", "skillMarkdown", "modelInvocable", "userInvocable"},
+    ),
+    "skill.toggle": ("R1", {"name", "enabled"}),
+    "skill.import": ("R1", {"name"}),
+    "skill.delete": ("R2", {"name"}),
 }
 
 
 class JobCanceled(RuntimeError):
     pass
+
+
+class JobLeaseLost(RuntimeError):
+    """A superseded worker must leave the new execution untouched."""
 
 
 class PermanentJobError(RuntimeError):
@@ -324,7 +362,12 @@ def _job_failure_message(job):
     if str(job.status or "").upper() != "FAILED":
         return None
     error = str(job.error or "").lower()
-    if any(token in error for token in ("timeout", "timed out", "lease expired")):
+    category = public_recovery(job).get("category")
+    if category == "quality":
+        reason = "内容经过多轮修复仍未通过检查，已保留草稿和具体检查记录。"
+    elif category == "service":
+        reason = "生成服务多次未能响应，已保留进度；可在服务恢复后继续。"
+    elif any(token in error for token in ("timeout", "timed out", "lease expired")):
         reason = "处理超时，系统没有产生可用结果。"
     elif any(
         token in error for token in ("permission", "forbidden", "scope", "not found")
@@ -565,6 +608,15 @@ def _validated_generation_scope(job, source, artifact_type):
         }
 
     raw_scope = source.get("boundScope")
+    project_scope = raw_scope is None or (
+        isinstance(raw_scope, dict)
+        and raw_scope.get("collection") == "projects"
+        and raw_scope.get("dojoId") is None
+        and raw_scope.get("moduleIndex") is None
+        and not raw_scope.get("referenceId")
+    )
+    if project_scope and artifact_type != "ctf-challenge":
+        return {"dojoId": None, "moduleIndex": None, "collection": "projects"}
     if not isinstance(raw_scope, dict):
         return None
     reference_id = str(raw_scope.get("referenceId") or "").strip()
@@ -836,6 +888,57 @@ def append_job_event(job, stage, status, message, details=None):
         details=details or {},
     )
     db.session.add(event)
+    payload = job.payload or {}
+    root_id = payload.get("harnessRootJobId")
+    is_harness_root = bool(payload.get("harnessVersion") and not payload.get("harnessInternal"))
+    # Model chunks already belong to the running turn. Re-projecting the
+    # turn/step lifecycle for every chunk creates redundant session events and
+    # can make the conversation event cursor race ahead of the actual answer.
+    if stage != "agent_run" and (root_id or is_harness_root):
+        root = (
+            job if str(root_id or job.id) == job.id else
+            TeachingJobs.query.filter_by(
+                id=root_id, owner_id=job.owner_id, thread_id=job.thread_id,
+            ).with_for_update().populate_existing().first()
+        )
+        if root is not None:
+            execution = execution_chain(db.session, root)
+            root.payload = {**(root.payload or {}), "harnessStatus": execution.status}
+            root.updated = datetime.datetime.utcnow()
+            if (root.payload or {}).get("harnessVersion") and not (root.payload or {}).get("harnessInternal"):
+                record_turn_lifecycle(
+                    root, execution,
+                    source_job_id=job.id,
+                    job_event_sequence=event.sequence,
+                )
+                step = None
+                step_execution = None
+                if job.kind == "agent.chat":
+                    step = job
+                    driver_id = (job.payload or {}).get("harnessNextJobId")
+                    if driver_id:
+                        driver = TeachingJobs.query.filter_by(
+                            id=driver_id, owner_id=job.owner_id,
+                            thread_id=job.thread_id, kind="agent.advance",
+                        ).populate_existing().first()
+                        if driver is not None and (driver.payload or {}).get("harnessStepJobId") == job.id:
+                            step_execution = driver
+                    step_execution = step_execution or job
+                elif job.kind == "agent.advance":
+                    step_id = (job.payload or {}).get("harnessStepJobId")
+                    if step_id:
+                        step = TeachingJobs.query.filter_by(
+                            id=step_id, owner_id=job.owner_id,
+                            thread_id=job.thread_id, kind="agent.chat",
+                        ).populate_existing().first()
+                        if step is not None and step.status == "SUCCEEDED":
+                            step_execution = job
+                if step is not None and step_execution is not None:
+                    record_step_lifecycle(
+                        root, step, step_execution,
+                        source_job_id=job.id,
+                        job_event_sequence=event.sequence,
+                    )
     return event
 
 
@@ -964,6 +1067,7 @@ def _single_candidate_materialization(job, raw_result):
     if job.kind not in {"candidate.generate", "self.candidate.generate"}:
         return None, None
     raw_result = raw_result if isinstance(raw_result, dict) else {}
+    raw_result = {key: value for key, value in raw_result.items() if key != "_executionRecovery"}
     candidate_set_id = raw_result.get("candidateSetId") or (job.payload or {}).get(
         "candidateSetId"
     )
@@ -1088,6 +1192,14 @@ def job_view(job, *, include_payload=False):
             stage = "finalizing"
 
     payload = job.payload if isinstance(job.payload, dict) else {}
+    execution = materialization_job or job
+    if payload.get("harnessVersion") and not payload.get("harnessInternal"):
+        execution = execution_chain(db.session, job)
+        if execution.id != job.id:
+            status, stage, progress = execution.status, execution.stage, execution.progress
+            updated, completed = execution.updated, execution.completed
+            failure_message = _job_failure_message(execution)
+    execution_payload = execution.payload if isinstance(execution.payload, dict) else {}
     display_title = str(
         raw_result.get("title")
         or payload.get("title")
@@ -1101,15 +1213,20 @@ def job_view(job, *, include_payload=False):
         "title": display_title or None,
         "artifactType": (job.payload or {}).get("artifactType"),
         "taskListHidden": bool((job.payload or {}).get("taskListHidden")),
+        "harnessRootJobId": payload.get("harnessRootJobId"),
+        "harnessInternal": bool(payload.get("harnessInternal")),
         "status": status,
         "stage": stage,
         "progress": progress,
         "traceId": job.trace_id,
+        "executionId": execution.trace_id,
+        "executionStarted": execution_payload.get("manualRetryStartedAt") or job.created.isoformat() + "Z",
         "dojoId": job.dojo_id,
         "moduleIndex": job.module_index,
         "threadId": job.thread_id,
-        "attemptCount": job.attempt_count,
-        "maxAttempts": job.max_attempts,
+        "attemptCount": execution.attempt_count,
+        "maxAttempts": execution.max_attempts,
+        "recovery": public_recovery(execution),
         "result": public_result,
         "error": failure_message,
         "failureMessage": failure_message,
@@ -1166,6 +1283,8 @@ def job_view(job, *, include_payload=False):
             "provider": invocation.provider if invocation else predicted["provider"],
             "degraded": bool(invocation.degraded if invocation else False),
             "invocationStatus": invocation.status if invocation else None,
+            "usage": invocation.usage if invocation else None,
+            "latencyMs": invocation.latency_ms if invocation else None,
         }
     if include_payload:
         result["payload"] = job.payload
@@ -1346,7 +1465,7 @@ def _sync_parent_generation_state(materialization_job):
             }
 
 
-def job_events_view(job_id):
+def job_events_view(job_id, after_sequence=0, *, limit=None):
     hidden_detail_keys = {
         "error",
         "exception",
@@ -1361,17 +1480,18 @@ def job_events_view(job_id):
         "traceid",
     }
 
-    def public_details(value):
+    def public_details(value, path=()):
         if isinstance(value, dict):
             return {
-                key: public_details(item)
+                key: "[REDACTED]" if any(part in str(key).lower() for part in SENSITIVE_KEYS) else public_details(item, (*path, key))
                 for key, item in value.items()
                 if str(key).replace("_", "").lower() not in hidden_detail_keys
             }
         if isinstance(value, list):
-            return [public_details(item) for item in value]
+            return [public_details(item, path) for item in value]
         if isinstance(value, str):
-            return redact_text(value, limit=1000)
+            live_text = bool(path) and path[0] == "agentRun"
+            return redact_text(value, limit=len(value) if live_text else 1000)
         return value
 
     def public_message(event):
@@ -1392,6 +1512,11 @@ def job_events_view(job_id):
             .replace("Studio", "内容管理")
         )
 
+    query = TeachingJobEvents.query.filter_by(job_id=job_id).filter(
+        TeachingJobEvents.sequence > after_sequence,
+    ).order_by(TeachingJobEvents.sequence)
+    if limit is not None:
+        query = query.limit(max(1, int(limit)))
     return [
         {
             "sequence": event.sequence,
@@ -1401,9 +1526,7 @@ def job_events_view(job_id):
             "details": public_details(event.details or {}),
             "created": event.created.isoformat() + "Z",
         }
-        for event in TeachingJobEvents.query.filter_by(job_id=job_id)
-        .order_by(TeachingJobEvents.sequence)
-        .all()
+        for event in query.all()
     ]
 
 
@@ -1423,6 +1546,8 @@ def enqueue_job(
     publish=True,
     commit=True,
 ):
+    if kind in {"material.analyze", "material.enrich"}:
+        payload = {**payload, "taskListHidden": True}
     existing = TeachingJobs.query.filter_by(idempotency_key=idempotency_key).first()
     if existing:
         if existing.owner_id != owner_id:
@@ -1451,6 +1576,12 @@ def enqueue_job(
     )
     db.session.add(job)
     db.session.flush()
+    if kind == "agent.chat":
+        if payload.get("harnessVersion"):
+            root_id = str(payload.get("harnessRootJobId") or (payload.get("context") or {}).get("agentLoop", {}).get("rootJobId") or job.id)
+            job.payload = {**payload, "harnessRootJobId": root_id,
+                           "harnessInternal": root_id != job.id, "taskListHidden": root_id != job.id}
+        freeze_input(job)
     append_job_event(job, "queued", "QUEUED", "任务已持久化，等待执行")
     db.session.add(
         TeachingJobOutbox(
@@ -1479,22 +1610,39 @@ def enqueue_job(
     return job, True
 
 
+def _pending_outbox_rows(query, batch_size=100):
+    last_id = 0
+    while True:
+        rows = query.filter(TeachingJobOutbox.id > last_id).order_by(TeachingJobOutbox.id).limit(batch_size).all()
+        if not rows:
+            return
+        last_id = rows[-1].id
+        yield from rows
+
+
 def publish_pending_outbox(*, job_id=None, limit=100):
     query = TeachingJobOutbox.query.filter(TeachingJobOutbox.published.is_(None))
     if job_id:
         query = query.filter_by(job_id=job_id)
-    rows = query.order_by(TeachingJobOutbox.id).limit(limit).all()
     published = 0
-    for row in rows:
+    # Waiting follow-ups must not occupy the whole first page and starve the
+    # tool jobs that unblock them. Keyset paging remains safe across commits.
+    for row in _pending_outbox_rows(query):
+        if published >= limit:
+            break
         job = TeachingJobs.query.filter_by(id=row.job_id).first()
         if job is None or job.status != "QUEUED":
             row.published = datetime.datetime.utcnow()
             row.last_error = None
             db.session.commit()
             continue
+        if not recovery_due(job, datetime.datetime.utcnow()):
+            continue
+        if turn_wait_state(db.session, job) == "waiting":
+            continue
         dependency_ids = [
             str(item)
-            for item in ((job.payload or {}).get("dependsOnJobIds") or [])
+            for item in ((request_payload(job) if job.kind == "agent.chat" else (job.payload or {})).get("dependsOnJobIds") or [])
             if str(item or "").strip() and str(item) != job.id
         ][:100]
         if dependency_ids:
@@ -1510,14 +1658,14 @@ def publish_pending_outbox(*, job_id=None, limit=100):
                 or str(by_id[dependency_id].status or "").upper()
                 in {"FAILED", "CANCELED"}
             ]
-            if failed:
+            if failed and job.kind != "agent.chat":
                 now = datetime.datetime.utcnow()
                 job.status = "FAILED"
                 job.stage = "failed"
                 job.progress = 0
                 job.error = (
-                    "Source attachment analysis did not complete; the request was not "
-                    "executed. Reanalyze the attachment and retry."
+                    "附件正文未能提取，无法依据该文件完成本次生成。"
+                    "请上传可读取的版本后重试。"
                 )
                 job.completed = now
                 job.updated = now
@@ -1528,7 +1676,7 @@ def publish_pending_outbox(*, job_id=None, limit=100):
                     job,
                     "dependency-failed",
                     "FAILED",
-                    "附件解析未完成，后续任务未执行",
+                    "附件正文未能提取，后续生成未执行",
                     {"dependencyJobIds": failed},
                 )
                 db.session.commit()
@@ -1536,6 +1684,7 @@ def publish_pending_outbox(*, job_id=None, limit=100):
             if any(
                 str(by_id[dependency_id].status or "").upper() != "SUCCEEDED"
                 for dependency_id in dependency_ids
+                if dependency_id not in failed
             ):
                 continue
         try:
@@ -1664,10 +1813,22 @@ def _reset_native_solution_compatibility_run(run):
     return True
 
 
-def cancel_job(job, user_id):
-    job = TeachingJobs.query.filter_by(id=job.id).with_for_update().first()
+def cancel_job(job, user_id, *, cascade=True):
+    job = TeachingJobs.query.filter_by(id=job.id).with_for_update().populate_existing().first()
     if job is None or job.owner_id != user_id:
         raise PermissionError("Job not found")
+    if cascade and (job.payload or {}).get("harnessRootJobId"):
+        root_id = (job.payload or {})["harnessRootJobId"]
+        root = TeachingJobs.query.filter_by(id=root_id, owner_id=user_id, thread_id=job.thread_id).with_for_update().populate_existing().first()
+        if root is not None:
+            root.payload = {**(root.payload or {}), "harnessCanceled": True}
+            db.session.commit()
+            descendants = TeachingJobs.query.filter_by(owner_id=user_id, thread_id=job.thread_id).filter(
+                TeachingJobs.status.in_({"QUEUED", "RUNNING", "CANCEL_REQUESTED"}), TeachingJobs.id != job.id,
+            ).all()
+            for child in descendants:
+                if (child.payload or {}).get("harnessRootJobId") == root.id:
+                    cancel_job(child, user_id, cascade=False)
     if job.status in {"SUCCEEDED", "FAILED", "CANCELED"}:
         _, materialization_job = _single_candidate_materialization(
             job,
@@ -1681,11 +1842,18 @@ def cancel_job(job, user_id):
             cancel_job(materialization_job, user_id)
         return job
     now = datetime.datetime.utcnow()
+    if job.status == "CANCEL_REQUESTED" and job.lease_owner is None:
+        job.canceled = job.canceled or now
+        _finalize_canceled_job(job, "任务已取消")
+        db.session.commit()
+        return job
     job.status = "CANCELED" if job.status == "QUEUED" else "CANCEL_REQUESTED"
     job.canceled = now
     job.updated = now
     append_job_event(job, job.stage, job.status, "用户已请求取消任务")
     if job.status == "CANCELED":
+        close_canceled_model_calls(job)
+        finish_command_job(job, 'CANCELED')
         _set_material_job_state(job, "CANCELED")
         _cancel_native_authoring_compatibility_job(job)
     for card in ConversationCards.query.filter_by(
@@ -1708,7 +1876,7 @@ def cancel_job(job, user_id):
 def dismiss_job_from_task_list(job, user_id):
     """Hide a terminal task from the drawer without deleting its conversation."""
 
-    job = TeachingJobs.query.filter_by(id=job.id).with_for_update().first()
+    job = TeachingJobs.query.filter_by(id=job.id).with_for_update().populate_existing().first()
     if job is None or job.owner_id != user_id:
         raise PermissionError("Job not found")
     _, materialization_job = _single_candidate_materialization(job, job.result)
@@ -1830,12 +1998,26 @@ def _replace_legacy_retry_surfaces(job, superseded_job_ids):
 
 
 def retry_job(job, user_id, idempotency_token):
-    job = TeachingJobs.query.filter_by(id=job.id).with_for_update().first()
+    job = TeachingJobs.query.filter_by(id=job.id).with_for_update().populate_existing().first()
     if job is None or job.owner_id != user_id:
         raise PermissionError("Job not found")
     token = str(idempotency_token or "").strip()
     if not token or len(token) > 80:
         raise ValueError("A retry idempotency key is required")
+    if (job.payload or {}).get("harnessVersion") and not (job.payload or {}).get("harnessInternal"):
+        execution = execution_chain(db.session, job)
+        if execution.id != job.id:
+            if str((execution.payload or {}).get("manualRetryToken") or "") == token:
+                return job, False
+            if execution.status not in {"FAILED", "CANCELED"}:
+                raise ValueError("Only failed or canceled jobs can be retried")
+            job.payload = {**(job.payload or {}), "harnessCanceled": False}
+            for child_id in (execution.payload or {}).get("waitForJobIds") or []:
+                child = TeachingJobs.query.filter_by(id=child_id, owner_id=user_id, thread_id=job.thread_id).first()
+                if child is not None and child.status in {"FAILED", "CANCELED"}:
+                    retry_job(child, user_id, token)
+            _, created = retry_job(execution, user_id, token)
+            return job, created
     if str((job.payload or {}).get("manualRetryToken") or "") == token:
         return job, False
     if job.status == "SUCCEEDED":
@@ -1843,6 +2025,8 @@ def retry_job(job, user_id, idempotency_token):
             job,
             job.result,
         )
+        if materialization_job and str((materialization_job.payload or {}).get("manualRetryToken") or "") == token:
+            return job, False
         if materialization_job and materialization_job.status in {
             "FAILED",
             "CANCELED",
@@ -1858,8 +2042,16 @@ def retry_job(job, user_id, idempotency_token):
     if job.status not in {"FAILED", "CANCELED"}:
         raise ValueError("Only failed or canceled jobs can be retried")
     payload = _retry_payload(job, user_id)
+    if payload.get("harnessVersion") and not payload.get("harnessInternal"):
+        # A root canceled before it produced any child is its own execution.
+        # Re-arming only the SQL status leaves the lineage cancel latch set,
+        # causing the very next worker checkpoint to cancel this new attempt.
+        payload["harnessCanceled"] = False
     superseded_job_ids = payload.pop("_supersededRetryJobIds", [])
-    payload.pop("taskListHidden", None)
+    # Internal execution steps stay behind their original conversation task,
+    # including after a retry, instead of leaking duplicate task-list entries.
+    if not payload.get("harnessInternal") and job.kind not in COMMAND_JOB_KINDS and job.kind != "coding.review":
+        payload.pop("taskListHidden", None)
     _replace_legacy_retry_surfaces(job, superseded_job_ids)
     payload["manualRetryToken"] = token
     payload["manualRetryAttempt"] = max(
@@ -1867,7 +2059,11 @@ def retry_job(job, user_id, idempotency_token):
         int((job.payload or {}).get("manualRetryAttempt") or 0) + 1,
     )
     now = datetime.datetime.utcnow()
+    payload["manualRetryStartedAt"] = now.isoformat() + "Z"
     job.payload = payload
+    recovery = (job.result or {}).get("_executionRecovery", {})
+    if isinstance(recovery, dict) and isinstance(recovery.get("baseMaxAttempts"), int):
+        job.max_attempts = max(1, recovery["baseMaxAttempts"])
     job.result = {}
     job.status = "QUEUED"
     job.stage = "queued"
@@ -1888,6 +2084,7 @@ def retry_job(job, user_id, idempotency_token):
         synchronize_session=False
     )
     db.session.flush()
+    reopen_command_job(job)
     append_job_event(job, "queued", "QUEUED", "任务已按失败反馈重新排队")
     outbox = TeachingJobOutbox.query.filter_by(job_id=job.id).first()
     if outbox is None:
@@ -1981,7 +2178,7 @@ def retry_job(job, user_id, idempotency_token):
             "jobKind": job.kind,
             "jobStatus": "QUEUED",
             "failed": False,
-            "taskListHidden": False,
+            "taskListHidden": bool(payload.get("harnessInternal")),
             "manualRetryAttempt": payload["manualRetryAttempt"],
         }
     if job.kind in {"candidate.generate", "self.candidate.generate"}:
@@ -2094,13 +2291,55 @@ def _retry_payload(job, user_id):
     return payload
 
 
+def _is_courseware_runtime_job(job, payload=None):
+    source = payload if isinstance(payload, dict) else (job.payload or {})
+    return job.kind in {"artifact.materialize", "artifact.revise"} and str(
+        source.get("artifactType") or ""
+    ).strip().lower() == "slide-deck"
+
+
+def _is_simulation_runtime_job(job, payload=None):
+    source = payload if isinstance(payload, dict) else (job.payload or {})
+    return job.kind in {"artifact.materialize", "artifact.revise"} and str(
+        source.get("artifactType") or ""
+    ).strip().lower() in {"simulation", "attack-defense-scene"}
+
+
+def _runtime_read_timeout(job, payload=None):
+    configured = max(60, int(config.DOJO_AI_TIMEOUT_SECONDS) * 4)
+    # Full-deck rendering and independent content repair are longer than a chat turn.
+    if _is_courseware_runtime_job(job, payload):
+        return max(configured, 2400)
+    if _is_simulation_runtime_job(job, payload):
+        return max(configured, 2100)
+    return configured
+
+
+def _runtime_job_lease_seconds(job):
+    if _is_courseware_runtime_job(job) or _is_simulation_runtime_job(job):
+        return max(LEASE_SECONDS, _runtime_read_timeout(job) + 120)
+    return LEASE_SECONDS
+
+
 def _acquire_job(job_id, worker_id):
     now = datetime.datetime.utcnow()
-    job = TeachingJobs.query.filter_by(id=job_id).with_for_update().first()
+    observed = TeachingJobs.query.filter_by(id=job_id).first()
+    if observed is not None and observed.kind in {"agent.chat", "agent.advance"} and observed.thread_id:
+        db.session.query(TeachingAgentThreads).filter_by(id=observed.thread_id, user_id=observed.owner_id).with_for_update().first()
+    job = TeachingJobs.query.filter_by(id=job_id).with_for_update().populate_existing().first()
     if job is None or job.status in {"SUCCEEDED", "FAILED", "CANCELED"}:
         db.session.rollback()
         return None
-    if job.status == "CANCEL_REQUESTED":
+    try:
+        restore_input_cache(job, bootstrap=True)
+    except ModelInputError as exc:
+        job.status, job.stage, job.error = "FAILED", "failed", str(exc)
+        job.completed = now
+        job.lease_owner = job.lease_expires = None
+        append_job_event(job, "failed", "FAILED", str(exc))
+        db.session.commit()
+        return None
+    if _job_cancellation_requested(job):
         job.status = "CANCELED"
         job.completed = now
         _set_material_job_state(job, "CANCELED")
@@ -2118,16 +2357,23 @@ def _acquire_job(job_id, worker_id):
             card.actions = ["open", "retry"]
         _sync_candidate_generation_card(job)
         _sync_agent_message_status(job)
+        finish_command_job(job, 'CANCELED')
         db.session.commit()
         return None
     if job.status == "RUNNING" and job.lease_expires and job.lease_expires > now:
+        db.session.rollback()
+        return None
+    if not recovery_due(job, now):
+        db.session.rollback()
+        return None
+    if turn_wait_state(db.session, job) == "waiting":
         db.session.rollback()
         return None
     job.status = "RUNNING"
     job.stage = "routing"
     job.progress = max(job.progress, 5)
     job.lease_owner = worker_id
-    job.lease_expires = now + datetime.timedelta(seconds=LEASE_SECONDS)
+    job.lease_expires = now + datetime.timedelta(seconds=_runtime_job_lease_seconds(job))
     job.heartbeat = now
     job.attempt_count += 1
     job.error = None
@@ -2137,15 +2383,32 @@ def _acquire_job(job_id, worker_id):
     return job
 
 
+def _owned_job_attempt(job_id, identity, *, required=True):
+    job = TeachingJobs.query.filter_by(id=job_id).with_for_update().populate_existing().first()
+    if job is None or (identity is not None and (
+        (job.lease_owner, job.trace_id, job.attempt_count) != identity
+        or job.status not in {"RUNNING", "CANCEL_REQUESTED"}
+    )):
+        if required:
+            raise JobLeaseLost("Task is now owned by another execution")
+        return None
+    job._execution_identity = identity
+    return job
+
+
+def assert_job_lease(job):
+    return _owned_job_attempt(job.id, getattr(job, "_execution_identity", None))
+
+
 def heartbeat(job, *, stage, progress, message):
-    refreshed = TeachingJobs.query.filter_by(id=job.id).with_for_update().first()
-    if refreshed.status == "CANCEL_REQUESTED":
+    refreshed = assert_job_lease(job)
+    if _job_cancellation_requested(refreshed):
         raise JobCanceled("Task cancellation requested")
     now = datetime.datetime.utcnow()
     refreshed.stage = stage
     refreshed.progress = progress
     refreshed.heartbeat = now
-    refreshed.lease_expires = now + datetime.timedelta(seconds=LEASE_SECONDS)
+    refreshed.lease_expires = now + datetime.timedelta(seconds=_runtime_job_lease_seconds(refreshed))
     refreshed.updated = now
     append_job_event(refreshed, stage, "RUNNING", message)
     _sync_candidate_generation_card(refreshed)
@@ -2153,23 +2416,15 @@ def heartbeat(job, *, stage, progress, message):
     return refreshed
 
 
-MATERIAL_GROUNDED_ARTIFACT_TYPES = {
-    "attack-defense-scene",
-    "simulation",
-    "slide-deck",
-}
-
-
 def _job_material_grounding_required(job, payload):
-    if job.kind not in {
-        "candidate.generate",
-        "self.candidate.generate",
-        "artifact.materialize",
-    }:
-        return False
-    return (
-        str(payload.get("artifactType") or "").strip().lower()
-        in MATERIAL_GROUNDED_ARTIFACT_TYPES
+    # A requested file is required for this turn; the artifact format alone
+    # does not authorize attaching every historical file in the course.
+    refs = payload.get("sourceRefs") or []
+    return any(
+        isinstance(ref, dict) and ref.get("type") == "material"
+        for ref in refs
+    ) or course_material_grounding_requested(
+        payload.get("prompt") or payload.get("instruction")
     )
 
 
@@ -2269,8 +2524,110 @@ def _student_material_snapshot(payload):
     }
 
 
+def _teacher_learning_request(job, payload):
+    supported = payload.get("artifactType") == "simulation" or (
+        job.kind == "artifact.materialize" and payload.get("artifactType") == "slide-deck"
+    )
+    if job.kind not in {"artifact.materialize", "artifact.revise"} or not supported:
+        return None
+    set_id = payload.get("candidateSetId")
+    if not set_id and payload.get("artifactId"):
+        artifact = TeachingArtifacts.query.filter_by(id=payload["artifactId"], owner_id=job.owner_id).first()
+        candidate = TeachingArtifactCandidates.query.filter_by(id=artifact.candidate_id).first() if artifact and artifact.candidate_id else None
+        set_id = candidate.candidate_set_id if candidate else None
+    candidate_set = TeachingCandidateSets.query.filter_by(id=set_id, owner_id=job.owner_id).first() if set_id else None
+    if candidate_set is None:
+        return None
+    selection = (candidate_set.request_json or {}).get("generationSelection")
+    if not isinstance(selection, dict):
+        return None
+    source = TeachingJobs.query.filter_by(id=selection.get("sourceJobId"), owner_id=job.owner_id,
+        thread_id=candidate_set.thread_id, kind="agent.chat", status="SUCCEEDED").first()
+    message = TeachingAgentMessages.query.filter_by(id=selection.get("sourceMessageId"), user_id=job.owner_id,
+        thread_id=candidate_set.thread_id, role="assistant").first()
+    if source is None or message is None:
+        raise PermanentJobError("Cannot verify the teacher learning request source")
+    from .tool_plan import message_metadata
+    metadata = message_metadata(message)
+    if metadata.get('jobId') != source.id:
+        raise PermanentJobError("Cannot verify the teacher learning request source")
+    source_payload = metadata.get('generationRequest') or source.payload or {}
+    refinement = source_payload.get("generationRefinement")
+    if isinstance(refinement, dict):
+        if refinement.get("version") != "generation-refinement-v1":
+            raise PermanentJobError("Unsupported teacher learning request history")
+        original, feedback = refinement.get("originalRequest"), refinement.get("feedback")
+    else:
+        original, feedback = source_payload.get("prompt"), []
+    if not isinstance(original, str) or not original.strip() or not isinstance(feedback, list) or any(not isinstance(item, str) for item in feedback):
+        raise PermanentJobError("Incomplete teacher learning request history")
+    if len(original) + sum(map(len, feedback)) > 48000 or len(feedback) > 100:
+        raise PermanentJobError("Teacher learning request history is too large; not truncated")
+    return {"version": "teacher-learning-request-v1", "originalRequest": original, "feedback": feedback,
+        "sourceJobId": source.id, "sourceMessageId": message.id}
+
+
+def _prepare_model_request(job):
+    saved = prepared_input(job) if job.kind == "agent.chat" and job.thread_id else None
+    if saved:
+        restore_input_cache(job)
+        return saved["payload"], saved["modelRoute"]
+    payload = _runtime_payload(job)
+    route = route_model(job.kind, prompt=str(payload.get("prompt") or payload.get("instruction") or ""),
+                        payload=payload, allow_degraded=bool(payload.get("allowDegraded")))
+    if job.kind == "agent.chat" and job.thread_id:
+        job = assert_job_lease(job)
+        frozen = freeze_prepared(job, payload, route)
+        db.session.commit()
+        return frozen["payload"], frozen["modelRoute"]
+    return payload, route
+
+
 def _runtime_payload(job):
-    payload = dict(job.payload or {})
+    admitted = accepted_input(job) if job.kind == "agent.chat" and job.thread_id else None
+    payload = dict(admitted["payload"] if admitted else (job.payload or {}))
+    if job.kind == "agent.chat" and payload.get("waitForJobIds"):
+        from ..api.v1.teaching import _teacher_agent_context, _teacher_agent_history_context
+        from .session_events import (
+            messages_at_turn, replay_session_messages, session_history_replayable,
+        )
+
+        owner = Users.query.filter_by(id=job.owner_id).first()
+        thread = TeachingAgentThreads.query.filter_by(id=job.thread_id, user_id=job.owner_id).first()
+        if owner is None or thread is None or thread.status != "ACTIVE":
+            raise PermanentJobError("对话已归档或不可用，这条排队要求未执行。")
+        current_message_id = int(payload.get("userMessageId") or 0)
+        if current_message_id < 1:
+            raise PermanentJobError("排队对话缺少原始用户消息编号。")
+        if session_history_replayable(thread.id):
+            # The predecessor has settled before this queued turn is claimed.
+            # Replaying now sees its final answer, but excludes every later
+            # turn, including future assistant placeholders from other tabs.
+            messages = messages_at_turn(
+                replay_session_messages(thread.id), current_message_id,
+            )
+            db.session.commit()  # Release the session writer before model I/O.
+        else:
+            messages = TeachingAgentMessages.query.filter_by(thread_id=thread.id).filter(
+                TeachingAgentMessages.id <= current_message_id
+            ).order_by(TeachingAgentMessages.id.desc()).limit(30).all()
+        history = _teacher_agent_history_context(owner, thread, messages, payload.get("userMessageId"))
+        payload["context"] = {**(payload.get("context") or {}), **history,
+                              "platformFacts": _teacher_agent_context(owner, thread)}
+    if job.kind == "agent.chat":
+        steering_root = payload.get("steeringRootJobId")
+        if steering_root:
+            original = TeachingJobs.query.filter_by(id=steering_root, owner_id=job.owner_id, thread_id=job.thread_id).first()
+            if original is None:
+                raise PermanentJobError("补充要求对应的原任务已不存在，未执行。")
+            payload["context"]["steering"] = {"originalRequest": request_payload(original).get("prompt"),
+                "instruction": payload.get("prompt"), "boundaryJobId": (job.payload or {}).get("steeringBoundaryJobId"),
+                "mode": "next-step" if (job.payload or {}).get("steeringBoundaryJobId") else "after-completion"}
+    # Derive authorship from the owned selection record, never from the expanded prompt or a client field.
+    payload.pop("teacherLearningRequest", None)
+    teacher_request = _teacher_learning_request(job, payload)
+    if teacher_request is not None:
+        payload["teacherLearningRequest"] = teacher_request
     if job.kind not in {
         "agent.chat",
         "candidate.generate",
@@ -2286,19 +2643,36 @@ def _runtime_payload(job):
     required = _job_material_grounding_required(job, payload)
     prompt = str(payload.get("prompt") or payload.get("instruction") or "")
     source_refs = payload.get("sourceRefs") or []
-    include_course_materials = (
-        job.kind != "agent.chat"
-        or bool(source_refs)
-        or course_material_grounding_requested(prompt)
-    )
+    material_refs = [
+        ref for ref in source_refs
+        if isinstance(ref, dict) and ref.get("type") == "material"
+    ]
+    if (
+        job.kind != "self.candidate.generate"
+        and not material_refs
+        and singular_material_reference_requested(prompt)
+    ):
+        raise PermanentJobError("这条要求没有指定所说的那份文件。请先选择引用资料或重新上传。")
+    include_course_materials = bool(material_refs) or course_material_grounding_requested(prompt)
     material_context = student_snapshot or build_course_material_context(
         owner_id=job.owner_id,
         dojo_id=job.dojo_id if include_course_materials else None,
         prompt=prompt,
-        source_refs=source_refs,
+        source_refs=material_refs,
         require_complete=required,
     )
-    payload["sourceRefs"] = material_context["sourceRefs"]
+    resolved_source_refs = (
+        material_context["sourceRefs"]
+        if student_snapshot is not None
+        else [
+            *(
+                ref for ref in source_refs
+                if not isinstance(ref, dict) or ref.get("type") != "material"
+            ),
+            *material_context["sourceRefs"],
+        ]
+    )
+    payload["sourceRefs"] = resolved_source_refs
     payload["sourceMaterials"] = material_context["sourceMaterials"]
     payload["materialContext"] = material_context["coverage"]
     if student_snapshot is not None:
@@ -2312,7 +2686,8 @@ def _runtime_payload(job):
         if student_snapshot is not None
         else {
             **(job.payload or {}),
-            "sourceRefs": material_context["sourceRefs"],
+            "context": payload.get("context") or {},
+            "sourceRefs": resolved_source_refs,
             "materialContext": material_context["coverage"],
         }
     )
@@ -2325,7 +2700,7 @@ def _runtime_payload(job):
             owner_id=job.owner_id,
         ).first()
         if candidate_set is not None and student_snapshot is None:
-            candidate_set.source_refs = material_context["sourceRefs"]
+            candidate_set.source_refs = resolved_source_refs
     return payload
 
 
@@ -2341,9 +2716,314 @@ def _agent_runtime_startup_connection_error(exc):
     )
 
 
+def _index_material_on_worker(job, payload):
+    """Keep CPU-heavy document conversion off the interactive CTFd workers."""
+
+    material = TeachingMaterials.query.filter_by(
+        id=payload.get("materialId"), owner_id=job.owner_id,
+    ).first()
+    revision = TeachingMaterialRevisions.query.filter_by(
+        id=payload.get("revisionId"),
+        material_id=material.id if material else None,
+    ).first()
+    if (
+        material is None or revision is None
+        or material.status == "ARCHIVED"
+        or material.storage_key != payload.get("storageKey")
+        or revision.storage_key != material.storage_key
+        or revision.sha256 != material.sha256
+        or not locally_extractable(material.filename)
+    ):
+        raise PermanentJobError("Material source or revision no longer matches the queued index job")
+    return index_verified_local_source(
+        root=config.AGENT_RUNTIME_STORAGE_ROOT,
+        storage_key=material.storage_key,
+        filename=material.filename,
+        mime_type=str(payload.get("mimeType") or "text/plain"),
+        size=material.size,
+        sha256=revision.sha256,
+    )
+
+
+def _runtime_request_body(job, route, payload):
+    return {
+        "jobId": job.id,
+        "kind": job.kind,
+        "scope": {
+            "ownerId": job.owner_id,
+            "dojoId": job.dojo_id,
+            "moduleIndex": job.module_index,
+        },
+        "payload": payload,
+        "modelRoute": route,
+    }
+
+
+def _runtime_json_bytes(value):
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _runtime_event_row(job, event_type, *, request_id=None, request_digest=None):
+    query = TeachingAgentEventOutbox.query.filter_by(
+        thread_id=job.thread_id, event_type=event_type,
+    ).filter(TeachingAgentEventOutbox.payload["jobId"].astext == job.id)
+    if request_id is not None:
+        query = query.filter(
+            TeachingAgentEventOutbox.payload["requestId"].astext == request_id
+        )
+    if request_digest is not None:
+        query = query.filter(
+            TeachingAgentEventOutbox.payload["requestSha256"].astext == request_digest
+        )
+    return query.order_by(TeachingAgentEventOutbox.id.desc()).first()
+
+
+def _runtime_request_digest(job, route, payload):
+    return hashlib.sha256(_runtime_json_bytes(
+        _runtime_request_body(job, route, payload)
+    )).hexdigest()
+
+
+def _recover_runtime_response(job, route, payload):
+    """Replay a committed same-input service response after a worker crash."""
+
+    if job.kind != "agent.chat" or not job.thread_id:
+        return None
+    request_digest = _runtime_request_digest(job, route, payload)
+    event = _runtime_event_row(
+        job, "runtime.settled", request_digest=request_digest,
+    )
+    if event is not None:
+        recorded = event.payload or {}
+        response = recorded.get("response")
+        if not isinstance(response, dict) or (
+            hashlib.sha256(_runtime_json_bytes(response)).hexdigest()
+            != recorded.get("responseSha256")
+        ):
+            raise PermanentJobError("Saved runtime response failed integrity verification")
+        if response.get("success") is not True or not isinstance(response.get("result"), dict):
+            raise PermanentJobError("Saved runtime response is incomplete")
+        return response
+    return None
+
+
+def _record_runtime_dispatch(job, body, encoded):
+    """Commit the exact outbound JSON body before the external request."""
+
+    assert_job_lease(job)
+    if encoded != _runtime_json_bytes(body):
+        raise PermanentJobError("Runtime body does not match its encoded request")
+    saved_input = prepared_input(job)
+    if saved_input and encoded != _runtime_json_bytes(_runtime_request_body(job, saved_input["modelRoute"], saved_input["payload"])):
+        raise PermanentJobError("Runtime dispatch changed the prepared model input")
+    request_id = f"{job.id}:{job.attempt_count}"
+    digest = hashlib.sha256(encoded).hexdigest()
+    event = _runtime_event_row(job, "runtime.dispatched", request_id=request_id)
+    if event is not None:
+        recorded = event.payload or {}
+        if recorded.get("requestSha256") != digest:
+            raise PermanentJobError("One runtime attempt changed its request body")
+        db.session.commit()
+        return digest
+    if len(encoded) > 8 * 1024 * 1024:
+        raise PermanentJobError("Runtime request exceeds the durable event limit")
+    db.session.add(TeachingAgentEventOutbox(
+        thread_id=job.thread_id,
+        event_type="runtime.dispatched",
+        payload={
+            "schemaVersion": 1,
+            "jobId": job.id,
+            "requestId": request_id,
+            "attemptCount": job.attempt_count,
+            "traceId": job.trace_id,
+            "requestSha256": digest,
+            "body": body,
+        },
+    ))
+    db.session.commit()
+    return digest
+
+
+def _record_runtime_response(job, request_digest, response):
+    """Settle the service boundary before validation or answer persistence."""
+
+    assert_job_lease(job)
+    request_id = f"{job.id}:{job.attempt_count}"
+    encoded = _runtime_json_bytes(response)
+    digest = hashlib.sha256(encoded).hexdigest()
+    event = _runtime_event_row(job, "runtime.settled", request_id=request_id)
+    if event is not None:
+        recorded = event.payload or {}
+        if (recorded.get("requestSha256") != request_digest
+                or recorded.get("responseSha256") != digest):
+            raise PermanentJobError("One runtime attempt changed its settled response")
+        db.session.commit()
+        return
+    if len(encoded) > 8 * 1024 * 1024:
+        raise PermanentJobError("Runtime response exceeds the durable event limit")
+    db.session.add(TeachingAgentEventOutbox(
+        thread_id=job.thread_id,
+        event_type="runtime.settled",
+        payload={
+            "schemaVersion": 1,
+            "jobId": job.id,
+            "requestId": request_id,
+            "attemptCount": job.attempt_count,
+            "requestSha256": request_digest,
+            "responseSha256": digest,
+            "response": response,
+        },
+    ))
+    db.session.commit()
+
+
+AGENT_RUN_PROTOCOL = "aisecedu.agent-run.v1"
+AGENT_RUN_EVENT_TYPES = frozenset({
+    "run.started", "run.heartbeat", "turn.started", "item.started", "item.delta",
+    "item.updated", "item.completed", "turn.completed", "run.completed",
+    "run.failed", "run.cancelled",
+})
+
+
+def _agent_run_event_lines(response):
+    """Validate one runtime stream before a worker treats it as progress."""
+    max_line_bytes = 8 * 1024 * 1024
+
+    def bounded_lines():
+        pending = bytearray()
+        for chunk in response.iter_content(chunk_size=4096):
+            if not isinstance(chunk, bytes):
+                raise RuntimeJobError("Invalid agent execution bytes", category="internal")
+            start = 0
+            while start < len(chunk):
+                end = chunk.find(b"\n", start)
+                fragment = chunk[start:end if end >= 0 else len(chunk)]
+                if len(pending) + len(fragment) > max_line_bytes:
+                    raise RuntimeJobError("Agent execution event exceeds size limit", category="internal")
+                pending.extend(fragment)
+                if end < 0:
+                    break
+                yield bytes(pending)
+                pending.clear()
+                start = end + 1
+        if pending:
+            yield bytes(pending)
+
+    run_id = None
+    next_sequence = 0
+    terminal = False
+    for raw in bounded_lines():
+        if not raw.strip():
+            continue
+        if next_sequence >= 3000 or terminal:
+            raise RuntimeJobError("Invalid agent execution stream", category="internal")
+        try:
+            envelope = json.loads(raw)
+            event = envelope["event"]
+        except (ValueError, TypeError, KeyError) as exc:
+            raise RuntimeJobError("Invalid agent execution event", category="internal") from exc
+        if (not isinstance(envelope, dict) or envelope.get("protocol") != AGENT_RUN_PROTOCOL
+                or not isinstance(event, dict) or event.get("protocol") != AGENT_RUN_PROTOCOL
+                or event.get("type") not in AGENT_RUN_EVENT_TYPES
+                or not isinstance(event.get("runId"), str)
+                or not isinstance(event.get("time"), (int, float))
+                or type(event.get("seq")) is not int or event["seq"] != next_sequence
+                or (run_id is not None and event["runId"] != run_id)):
+            raise RuntimeJobError("Invalid agent execution event order", category="internal")
+        run_id = event["runId"]
+        next_sequence += 1
+        terminal = event["type"] in {"run.completed", "run.failed", "run.cancelled"}
+        yield event
+    if not terminal:
+        raise RuntimeJobError("Agent execution stream ended before a result", category="service")
+
+
+def _record_agent_run_progress(job, event):
+    """Project bounded live activity into the existing owner-scoped job log."""
+    kind = event["type"]
+    detail = {key: value for key, value in event.items()
+              if key not in {"result", "error", "reason"}}
+    item = detail.get("item") if isinstance(detail.get("item"), dict) else None
+    if item and item.get("kind") == "reasoning":
+        detail["item"] = {key: value for key, value in item.items()
+                          if key not in {"content", "output", "input"}}
+    if kind == "item.updated":
+        patch = detail.get("patch")
+        if isinstance(patch, dict) and patch.get("kind") == "reasoning":
+            detail["patch"] = {key: value for key, value in patch.items()
+                               if key not in {"content", "output", "input"}}
+    message = {
+        "run.started": "开始执行",
+        "turn.started": "正在调用模型",
+        "item.started": str((item or {}).get("title") or "正在处理"),
+        "item.delta": "正在输出",
+        "item.updated": "步骤已更新",
+        "item.completed": "步骤已完成",
+        "turn.completed": "模型步骤结束",
+        "run.completed": "执行结果已返回",
+        "run.failed": "执行未完成",
+        "run.cancelled": "执行已停止",
+    }[kind]
+    refreshed = assert_job_lease(job)
+    if _job_cancellation_requested(refreshed):
+        raise JobCanceled("Task cancellation requested")
+    append_job_event(refreshed, "agent_run", "RUNNING", message,
+                     {"agentRun": detail})
+    db.session.commit()
+
+
+def _refresh_agent_run_control(job):
+    refreshed = assert_job_lease(job)
+    if _job_cancellation_requested(refreshed):
+        raise JobCanceled("Task cancellation requested")
+    now = datetime.datetime.utcnow()
+    if refreshed.heartbeat is None or (now - refreshed.heartbeat).total_seconds() >= 30:
+        refreshed.heartbeat = now
+        refreshed.lease_expires = now + datetime.timedelta(seconds=_runtime_job_lease_seconds(refreshed))
+    db.session.commit()
+
+
+def _consume_agent_run_stream(response, job, *, deadline=None):
+    result = None
+    hidden_reasoning_items = set()
+    for event in _agent_run_event_lines(response):
+        if deadline is not None and time.monotonic() >= deadline:
+            raise RuntimeJobError("Agent execution exceeded its time limit", category="service",
+                                  code="EXECUTION_DEADLINE_EXCEEDED")
+        if event["type"] == "run.heartbeat":
+            _refresh_agent_run_control(job)
+            continue
+        if event["type"] == "item.started" and isinstance(event.get("item"), dict):
+            if (event["item"].get("kind") == "reasoning"
+                    and isinstance(event["item"].get("id"), str)):
+                hidden_reasoning_items.add(event["item"]["id"])
+        if event.get("itemId") not in hidden_reasoning_items and not (
+                event["type"] == "item.started"
+                and isinstance(event.get("item"), dict)
+                and event["item"].get("kind") == "reasoning"):
+            _record_agent_run_progress(job, event)
+        if event["type"] == "run.completed":
+            result = event.get("result")
+        elif event["type"] == "run.failed":
+            raise RuntimeJobError(
+                _safe_error(event.get("error") or "Agent execution failed", limit=6000),
+                category=event.get("failureCategory") if event.get("failureCategory") in {
+                    "service", "quality", "permanent", "internal",
+                } else "internal",
+                code=event.get("code") or "EXECUTION_FAILED",
+            )
+        elif event["type"] == "run.cancelled":
+            raise JobCanceled("Task cancellation requested")
+    if not isinstance(result, dict) or result.get("success") is not True or not isinstance(result.get("result"), dict):
+        raise RuntimeJobError("Agent runtime returned an invalid result", category="internal")
+    return result
+
+
 def _invoke_agent_runtime(job, route, payload=None):
     payload = dict(payload or job.payload or {})
-
+    body = _runtime_request_body(job, route, payload)
     url = f"{config.AGENT_RUNTIME_INTERNAL_URL}/api/integration/jobs/execute"
     request_kwargs = {
         "headers": {
@@ -2351,20 +3031,20 @@ def _invoke_agent_runtime(job, route, payload=None):
             "X-Trace-ID": job.trace_id or "",
             "Content-Type": "application/json",
         },
-        "json": {
-            "jobId": job.id,
-            "kind": job.kind,
-            "scope": {
-                "ownerId": job.owner_id,
-                "dojoId": job.dojo_id,
-                "moduleIndex": job.module_index,
-            },
-            "payload": payload,
-            "modelRoute": route,
-        },
-        "timeout": (10, max(60, int(config.DOJO_AI_TIMEOUT_SECONDS) * 4)),
+        "timeout": (10, _runtime_read_timeout(job, payload)),
     }
+    if job.kind == "agent.chat" and job.thread_id:
+        encoded = _runtime_json_bytes(body)
+        _record_runtime_dispatch(job, body, encoded)
+        request_kwargs["headers"]["X-AISecEdu-Job-Attempt"] = str(job.attempt_count)
+        request_kwargs["headers"]["X-AISecEdu-Event-Journal-Version"] = "1"
+        request_kwargs["headers"]["Accept"] = "application/x-ndjson"
+        request_kwargs["stream"] = True
+        request_kwargs["data"] = encoded
+    else:
+        request_kwargs["json"] = body
     retry_delays = AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS
+    execution_deadline = time.monotonic() + request_kwargs["timeout"][1]
     for attempt in range(len(retry_delays) + 1):
         try:
             response = requests.post(url, **request_kwargs)
@@ -2385,29 +3065,35 @@ def _invoke_agent_runtime(job, route, payload=None):
             )
             time.sleep(retry_delay)
             continue
-        if (
-            response.status_code in AGENT_RUNTIME_RETRYABLE_STATUS_CODES
-            and attempt < len(retry_delays)
-        ):
-            retry_delay = retry_delays[attempt]
-            logger.warning(
-                "Agent runtime returned HTTP %s for teaching job %s; "
-                "retrying in %ss (%s/%s)",
-                response.status_code,
-                job.id,
-                retry_delay,
-                attempt + 1,
-                len(retry_delays),
-            )
-            time.sleep(retry_delay)
-            continue
+        # An HTTP response means execution may have started. Recovery belongs
+        # to the durable scheduler, never another untracked immediate POST.
         break
-    if response.status_code in {400, 401, 403, 404, 409, 422}:
-        raise PermanentJobError(
-            f"Global agent runtime rejected job (HTTP {response.status_code})"
-        )
-    response.raise_for_status()
-    body = response.json()
+    try:
+        if response.status_code >= 400:
+            try:
+                failure = response.json()
+            except ValueError:
+                failure = {}
+            category = failure.get("failureCategory") if isinstance(failure, dict) else None
+            code = str(failure.get("errorCode") or "EXECUTION_FAILED") if isinstance(failure, dict) else "EXECUTION_FAILED"
+            if category in {"service", "quality", "permanent", "internal"}:
+                raise RuntimeJobError(
+                    _safe_error(f"{code}: {failure.get('error') or 'Generation did not complete'}", limit=6000),
+                    category=category, code=code, retry_after=failure.get("retryAfterSeconds", 0),
+                )
+            if response.status_code in {429, 502, 503, 504}:
+                raise RuntimeJobError(f"Generation service unavailable (HTTP {response.status_code})", category="service", retry_after=response.headers.get("Retry-After", 0))
+        if response.status_code in {400, 401, 403, 404, 409, 422}:
+            raise PermanentJobError(
+                f"Global agent runtime rejected job (HTTP {response.status_code})"
+            )
+        response.raise_for_status()
+        if (job.kind == "agent.chat" and job.thread_id
+                and "application/x-ndjson" in response.headers.get("Content-Type", "")):
+            return _consume_agent_run_stream(response, job, deadline=execution_deadline)
+        body = response.json()
+    finally:
+        response.close()
     if not body.get("success") or not isinstance(body.get("result"), dict):
         raise RuntimeError(
             "Global agent runtime returned an invalid integration result"
@@ -2505,6 +3191,8 @@ def _bind_generation_scope(job, generation_options):
     bound_scope = generation_options.get("boundScope") or {}
     target_dojo_id = bound_scope.get("dojoId")
     target_module_index = bound_scope.get("moduleIndex")
+    if target_dojo_id is None and bound_scope.get("collection") == "projects":
+        return bool(job.thread_id)
     if target_dojo_id is None or not job.thread_id:
         return False
     thread = (
@@ -2532,6 +3220,11 @@ def _bind_generation_scope(job, generation_options):
 
 def _persist_result(job, result):
     if job.kind == "agent.chat":
+
+        restore_input_cache(job, bootstrap=True)
+        from .workbench import execution_mode, project_mode_result
+        mode = execution_mode(job.payload or {})
+        result = project_mode_result(job.payload or {}, result)
         context = (job.payload or {}).get("context")
         context = context if isinstance(context, dict) else {}
         agent_loop = context.get("agentLoop")
@@ -2541,19 +3234,29 @@ def _persist_result(job, result):
         if generation_options and not _bind_generation_scope(job, generation_options):
             generation_options = None
         tool_proposals = _validated_tool_proposals(job, result)
+        refinement = (job.payload or {}).get("generationRefinement")
+        if refinement:
+            if not generation_options:
+                raise PermanentJobError("本轮未返回三个完整方案，未启动正式生成；请重试方案任务。")
+            tool_proposals = []
         if generation_options:
             tool_proposals = [
                 proposal
                 for proposal in tool_proposals
                 if proposal.get("tool") not in GENERATION_OPTION_TOOLS
             ]
-        stored_files = persist_agent_deliverables(job, result.get("deliverables"))
+        stored_files = persist_agent_deliverables(job, [] if refinement else result.get("deliverables"))
         public_files = [
             public
             for item in stored_files
             if (public := public_agent_file(item)) is not None
         ]
-        answer = _agent_answer(result)[:32000]
+        answer = _agent_answer(result)
+        if refinement:
+            answer = (
+                f"已结合原始要求和 {len(refinement['feedback'])} 次修改，准备第 {refinement['round']} 轮的三个新方案。"
+                "可以查看每个方案的详细提示词，选择后正式生成；也可以继续补充修改要求，再由你决定。"
+            )
         if raw_generation_options and generation_options is None and job.dojo_id is None:
             answer = (
                 "我还不能安全地开始生成，因为目标课程或章节没有通过权限与存在性校验。"
@@ -2580,25 +3283,52 @@ def _persist_result(job, result):
                 "jobId": job.id,
                 "jobKind": job.kind,
                 "jobStatus": "SUCCEEDED",
+                "executionMode": mode,
                 "suggestions": result.get("suggestions") or [],
                 "selectedSkills": result.get("selectedSkills") or [],
                 "plan": result.get("plan") or [],
+                "interaction": result.get("interaction") or {},
+                "questions": result.get("questions") or [],
+                "promptManifest": result.get("promptManifest") or [],
                 "files": public_files,
                 "requiresAction": bool(
                     result.get("requiresAction") or tool_proposals or generation_options
                 ),
                 "toolProposals": tool_proposals,
                 "generationOptions": generation_options,
+                "generationRound": int(refinement["round"]) if refinement else 1,
+                "refinementSourceMessageId": refinement["sourceMessageId"] if refinement else None,
                 "agentLoopDepth": int(agent_loop.get("depth") or 0),
                 "agentLoopTrace": agent_loop.get("trace") or [],
                 "agentRootJobId": str(agent_loop.get("rootJobId") or job.id),
+                "harnessManaged": bool((job.payload or {}).get("harnessVersion")),
+                "taskListHidden": bool((job.payload or {}).get("harnessInternal")),
             }
+            if (job.payload or {}).get("harnessVersion") and tool_proposals and not generation_options and not result.get("questions"):
+                driver, _ = enqueue_job(
+                    owner_id=job.owner_id, thread_id=job.thread_id, dojo_id=job.dojo_id,
+                    module_index=job.module_index, kind="agent.advance",
+                    idempotency_key=f"agent-advance:{job.id}",
+                    payload={"sourceMessageId": message.id, "harnessInternal": True, "taskListHidden": True,
+                             "harnessRootJobId": str(agent_loop.get("rootJobId") or job.id),
+                             "harnessStepJobId": job.id,
+                             "waitForJobIds": [job.id]},
+                    priority=70, commit=False, publish=False,
+                )
+                job.payload = {**(job.payload or {}), "harnessNextJobId": driver.id}
+                message.metadata_json = {**message.metadata_json, "harnessExecution": {"state": "queued", "jobId": driver.id}}
+                from .tool_plan import freeze_plan
+                freeze_plan(message, source_job=job, driver=driver)
+            elif generation_options:
+                from .tool_plan import freeze_plan
+                freeze_plan(message, source_job=job)
         for card in ConversationCards.query.filter_by(
             object_type="job", object_id=job.id
         ).all():
             db.session.delete(card)
         return {
             "answer": answer,
+            "executionMode": mode,
             "suggestions": result.get("suggestions") or [],
             "requiresAction": bool(
                 result.get("requiresAction") or tool_proposals or generation_options
@@ -2609,6 +3339,9 @@ def _persist_result(job, result):
             "plan": result.get("plan") or [],
             "files": stored_files,
             "agentLoop": agent_loop,
+            "interaction": result.get("interaction") or {},
+            "questions": result.get("questions") or [],
+            "promptManifest": result.get("promptManifest") or [],
         }
 
     if job.kind in {"candidate.generate", "self.candidate.generate"}:
@@ -2895,10 +3628,12 @@ def _persist_result(job, result):
             or not chunks
             or not isinstance(coverage, dict)
             or coverage.get("complete") is not True
-            or coverage.get("analysisVersion") != MATERIAL_ANALYSIS_VERSION
-            or int(coverage.get("analyzedCharacters") or 0) < total_characters
+            or coverage.get("analysisVersion") not in {
+                MATERIAL_INDEX_VERSION, MATERIAL_ANALYSIS_VERSION
+            }
+            or int(coverage.get("indexedCharacters") if coverage.get("analysisVersion") == MATERIAL_INDEX_VERSION else coverage.get("analyzedCharacters") or 0) < total_characters
             or int(coverage.get("extractedCharacters") or 0) > int(
-                coverage.get("analyzedCharacters") or 0
+                coverage.get("indexedCharacters") if coverage.get("analysisVersion") == MATERIAL_INDEX_VERSION else coverage.get("analyzedCharacters") or 0
             )
         ):
             raise PermanentJobError(
@@ -2930,45 +3665,19 @@ def _persist_result(job, result):
         )
         if latest_revision_id == revision.id:
             material.status = "READY"
-        if job.thread_id:
-            message = TeachingAgentMessages(
-                thread_id=job.thread_id,
-                user_id=job.owner_id,
-                role="assistant",
-                content=(
-                    f"“{material.title}”分析完成：已提取功能点、知识图谱和章节候选。"
-                    "后续候选生成可直接引用这份材料。"
+        if coverage.get("analysisVersion") == MATERIAL_INDEX_VERSION:
+            enqueue_job(
+                owner_id=job.owner_id,
+                kind="material.enrich",
+                idempotency_key=(
+                    f"material-enrich:{job.owner_id}:{material.id}:{revision.id}"
                 ),
-                metadata_json={
-                    "jobId": job.id,
-                    "jobKind": job.kind,
-                    "jobStatus": "SUCCEEDED",
-                    "pending": False,
-                    "presentation": "answer",
-                    "materialId": material.id,
-                },
-            )
-            db.session.add(message)
-            db.session.flush()
-            db.session.add(
-                ConversationCards(
-                    message_id=message.id,
-                    card_type="material",
-                    object_type="material",
-                    object_id=material.id,
-                    revision_id=revision.id,
-                    state={
-                        "status": "READY",
-                        "dojoId": material.dojo_id,
-                        "chapterCount": len(
-                            (
-                                (result.get("analysis") or {}).get("chapterCandidates")
-                                or []
-                            )
-                        ),
-                    },
-                    actions=["inspect", "apply-chapters", "generate"],
-                )
+                payload={**(job.payload or {}), "taskListHidden": True},
+                dojo_id=job.dojo_id,
+                priority=150,
+                max_attempts=2,
+                publish=False,
+                commit=False,
             )
         return {
             "materialId": material.id,
@@ -2976,6 +3685,27 @@ def _persist_result(job, result):
             "chunkCount": len(chunks),
             "analysis": result.get("analysis") or {},
         }
+
+    if job.kind == "material.enrich":
+        material = TeachingMaterials.query.filter_by(
+            id=job.payload.get("materialId"), owner_id=job.owner_id
+        ).first()
+        revision = TeachingMaterialRevisions.query.filter_by(
+            id=job.payload.get("revisionId"),
+            material_id=material.id if material else None,
+        ).first()
+        if material is None or revision is None:
+            raise PermanentJobError("Material revision no longer exists")
+        analysis = result.get("analysis") or {}
+        coverage = analysis.get("coverage") if isinstance(analysis, dict) else None
+        if not isinstance(coverage, dict) or coverage.get("complete") is not True or coverage.get("analysisVersion") != MATERIAL_ANALYSIS_VERSION:
+            raise PermanentJobError("Background material enrichment is incomplete")
+        if revision.status == "READY":
+            revision.metadata_json = {
+                **(revision.metadata_json or {}), "analysis": analysis
+            }
+        return {"materialId": material.id, "revisionId": revision.id,
+                "enriched": revision.status == "READY"}
 
     # Session/scenario pre-generation results are durable in the job until an
     # explicit teacher action materializes or publishes them.
@@ -3460,6 +4190,11 @@ def _sync_native_authoring_batch_action(job):
 
 
 def _job_cancellation_requested(job):
+    root_id = (getattr(job, "payload", None) or {}).get("harnessRootJobId")
+    if root_id:
+        root = TeachingJobs.query.filter_by(id=root_id, owner_id=job.owner_id, thread_id=job.thread_id).populate_existing().first()
+        if root is not None and (root.payload or {}).get("harnessCanceled"):
+            return True
     return bool(
         job is not None
         and (
@@ -3495,6 +4230,8 @@ def _finalize_canceled_job(job, message):
     job.error = None
     job.lease_owner = None
     job.lease_expires = None
+    close_canceled_model_calls(job)
+    finish_command_job(job, 'CANCELED')
     _set_material_job_state(job, "CANCELED")
     _cancel_native_authoring_compatibility_job(job)
     append_job_event(job, "canceled", "CANCELED", message)
@@ -3521,9 +4258,21 @@ def process_job(job_id, *, worker_id=None):
     job = _acquire_job(job_id, worker_id)
     if job is None:
         return False
+    # Capture immutable values before any ORM refresh can observe a replacement
+    # worker or retry. The attempt count also fences automatic same-trace retries.
+    identity = (worker_id, job.trace_id, job.attempt_count)
+    job._execution_identity = identity
     route = None
     try:
-        if job.kind in {"learning.authoring", "learning.solution"}:
+        if job.kind == 'coding.review':
+            from ..coding_grading import execute_review
+            job = heartbeat(job, stage='reviewing', progress=30, message='依据固定源码与核验量规评价代码')
+            compact_result = execute_review(job)
+        elif job.kind in COMMAND_JOB_KINDS:
+            compact_result = execute_command(job)
+        elif job.kind == "agent.advance":
+            compact_result = advance_turn(job)
+        elif job.kind in {"learning.authoring", "learning.solution"}:
             job = heartbeat(
                 job,
                 stage="native-authoring",
@@ -3536,17 +4285,7 @@ def process_job(job_id, *, worker_id=None):
             )
             compact_result = _execute_local_job(job)
         else:
-            runtime_payload = _runtime_payload(job)
-            route = route_model(
-                job.kind,
-                prompt=str(
-                    runtime_payload.get("prompt")
-                    or runtime_payload.get("instruction")
-                    or ""
-                ),
-                payload=runtime_payload,
-                allow_degraded=bool(runtime_payload.get("allowDegraded")),
-            )
+            runtime_payload, route = _prepare_model_request(job)
             checkpoint = (
                 (job.result or {}).get("_generationCheckpoint")
                 if isinstance(job.result, dict)
@@ -3569,27 +4308,44 @@ def process_job(job_id, *, worker_id=None):
                     message="恢复已完成的模型生成检查点",
                 )
             else:
-                job = heartbeat(
-                    job,
-                    stage="planning" if job.kind == "agent.chat" else "generating",
-                    progress=20,
-                    message=(
-                        "模型正在理解原始指令并从技能目录选择所需能力"
-                        if job.kind == "agent.chat"
-                        else "正在生成教学内容"
-                    ),
-                )
-                started = time.monotonic()
-                response = _invoke_agent_runtime(job, route, runtime_payload)
+                started = None
+                response = _recover_runtime_response(job, route, runtime_payload)
+                if response is not None:
+                    job = heartbeat(
+                        job, stage="persisting", progress=70,
+                        message="从会话事件恢复已收到的模型服务结果",
+                    )
+                else:
+                    job = heartbeat(
+                        job,
+                        stage="planning" if job.kind == "agent.chat" else "generating",
+                        progress=20,
+                        message=(
+                            "模型正在理解原始指令并从技能目录选择所需能力"
+                            if job.kind == "agent.chat"
+                            else "正在生成教学内容"
+                        ),
+                    )
+                    started = time.monotonic()
+                    response = (
+                        _index_material_on_worker(job, runtime_payload)
+                        if job.kind == "material.analyze" and runtime_payload.get("localExtraction")
+                        else _invoke_agent_runtime(job, route, runtime_payload)
+                    )
+                    if job.kind == "agent.chat" and job.thread_id:
+                        _record_runtime_response(
+                            job, _runtime_request_digest(job, route, runtime_payload), response,
+                        )
+                job = _owned_job_attempt(job_id, identity)
                 model_meta = response.get("model") or {}
-                model_meta.setdefault(
-                    "latencyMs", int((time.monotonic() - started) * 1000)
-                )
+                if started is not None:
+                    model_meta.setdefault(
+                        "latencyMs", int((time.monotonic() - started) * 1000)
+                    )
                 _record_invocation(job, route, model_meta, status="SUCCEEDED")
-                checkpoint_job = (
-                    TeachingJobs.query.filter_by(id=job.id).with_for_update().first()
-                )
+                checkpoint_job = _owned_job_attempt(job_id, identity)
                 checkpoint_job.result = {
+                    **(checkpoint_job.result or {}),
                     "_generationCheckpoint": {
                         "requestHash": route["request_hash"],
                         "result": response["result"],
@@ -3609,10 +4365,11 @@ def process_job(job_id, *, worker_id=None):
                 ),
             )
             compact_result = _persist_result(job, response["result"])
-        job = TeachingJobs.query.filter_by(id=job_id).first()
-        if job.status == "CANCEL_REQUESTED":
+        job = _owned_job_attempt(job_id, identity)
+        if _job_cancellation_requested(job):
             raise JobCanceled("Task canceled before persistence completion")
         now = datetime.datetime.utcnow()
+        finish_command_job(job, 'SUCCEEDED', result=compact_result)
         job.result = compact_result
         job.status = "SUCCEEDED"
         job.stage = "complete"
@@ -3649,10 +4406,36 @@ def process_job(job_id, *, worker_id=None):
         db.session.commit()
         publish_pending_outbox()
         return True
+    except JobLeaseLost:
+        db.session.rollback()
+        logger.info("Ignoring superseded execution of teaching job %s", job_id)
+        return True
+    except TurnDeferred:
+        # Waiting for a tool is normal scheduling, not a failed attempt. Its
+        # result is checked before the model is allowed to report completion.
+        job = _owned_job_attempt(job_id, identity, required=False)
+        if job is None:
+            db.session.rollback()
+            return True
+        if _job_cancellation_requested(job):
+            _finalize_canceled_job(job, "任务已停止")
+        else:
+            waiting_approval = bool((job.payload or {}).get('waitForApproval'))
+            job.status, job.stage = "QUEUED", "awaiting-approval" if waiting_approval else "waiting-tool"
+            job.attempt_count = max(0, job.attempt_count - 1)
+            job.lease_owner = job.lease_expires = None
+            outbox = TeachingJobOutbox.query.filter_by(job_id=job.id).first()
+            if outbox:
+                outbox.published = None
+            append_job_event(job, job.stage, "QUEUED", "等待批准" if waiting_approval else "等待操作结果")
+        db.session.commit()
+        publish_pending_outbox()
+        return True
     except JobCanceled as exc:
         db.session.rollback()
-        job = TeachingJobs.query.filter_by(id=job_id).first()
+        job = _owned_job_attempt(job_id, identity, required=False)
         if job is None:
+            db.session.rollback()
             return True
         _finalize_canceled_job(job, _safe_error(exc))
         db.session.commit()
@@ -3660,10 +4443,11 @@ def process_job(job_id, *, worker_id=None):
         return True
     except Exception as exc:
         db.session.rollback()
-        job = TeachingJobs.query.filter_by(id=job_id).first()
+        job = _owned_job_attempt(job_id, identity, required=False)
         if job is None:
+            db.session.rollback()
             logger.info(
-                "Teaching job %s was removed while executing; no terminal state remains to update",
+                "Teaching job %s was removed or superseded; this execution cannot update it",
                 job_id,
             )
             return True
@@ -3673,24 +4457,34 @@ def process_job(job_id, *, worker_id=None):
             publish_pending_outbox()
             return True
         permanent = isinstance(exc, (PermanentJobError, ValueError))
-        retry = (
-            not permanent and job.attempt_count < job.max_attempts and not job.canceled
+        category = "permanent" if permanent else (
+            exc.category if isinstance(exc, RuntimeJobError) else
+            "service" if isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError, RetryableJobError)) else "internal"
         )
+        retry, recovery = recovery_decision(job, category, now=datetime.datetime.utcnow(), retry_after=getattr(exc, "retry_after", 0))
+        retry = retry and not job.canceled
+        finish_command_job(job, 'FAILED', error=_safe_error(exc),
+                           error_code=getattr(exc, 'code', category.upper()), retry=retry)
+        job.result = {**(job.result or {}), "_executionRecovery": recovery}
+        if retry:
+            job.max_attempts = max(job.max_attempts, job.attempt_count + 1)
         job.error = _safe_error(exc, limit=16000)
         job.lease_owner = None
         job.lease_expires = None
         job.updated = datetime.datetime.utcnow()
         if retry:
             job.status = "QUEUED"
-            job.stage = "retrying"
+            job.stage = "waiting-service" if category == "service" else "repairing-content" if category == "quality" else "retrying"
             append_job_event(
                 job,
-                "retrying",
+                job.stage,
                 "QUEUED",
-                "执行失败，等待幂等重试",
+                "生成服务暂时未响应，保留进度并等待自动恢复" if category == "service" else "内容检查发现问题，保留原要求并继续修复" if category == "quality" else "执行中断，稍后继续",
                 {
                     "error": job.error,
                     "retryable": isinstance(exc, RetryableJobError),
+                    "category": category,
+                    "nextAttemptAt": recovery["nextAttemptAt"],
                 },
             )
             outbox = TeachingJobOutbox.query.filter_by(job_id=job.id).first()
@@ -3703,7 +4497,7 @@ def process_job(job_id, *, worker_id=None):
                 card.state = {
                     **(card.state or {}),
                     "status": "QUEUED",
-                    "stage": "retrying",
+                    "stage": job.stage,
                     "progress": job.progress,
                     "error": None,
                     "failureMessage": None,
@@ -3757,7 +4551,7 @@ def recover_expired_jobs(client=None):
     now = datetime.datetime.utcnow()
     stale_after = now - datetime.timedelta(seconds=WORKER_LIVENESS_TTL_SECONDS)
     query = TeachingJobs.query.filter(
-        TeachingJobs.status == "RUNNING",
+        TeachingJobs.status.in_(("RUNNING", "CANCEL_REQUESTED")),
         TeachingJobs.lease_expires.isnot(None),
     )
     if client is None:
@@ -3771,7 +4565,7 @@ def recover_expired_jobs(client=None):
             (TeachingJobs.lease_expires < now)
             | (TeachingJobs.heartbeat.isnot(None) & (TeachingJobs.heartbeat < stale_after))
         )
-    jobs = query.with_for_update(skip_locked=True).all()
+    jobs = query.with_for_update(skip_locked=True).populate_existing().all()
     recovered = []
     for job in jobs:
         recovery_reason = _running_job_recovery_reason(
@@ -3780,6 +4574,9 @@ def recover_expired_jobs(client=None):
             owner_alive=_worker_liveness_state(client, job.lease_owner),
         )
         if recovery_reason is None:
+            continue
+        if _job_cancellation_requested(job):
+            _finalize_canceled_job(job, "执行进程已结束；任务停止请求已收束")
             continue
         recovery_message = (
             "执行该任务的 Worker 已失活，任务已恢复"
@@ -3799,6 +4596,7 @@ def recover_expired_jobs(client=None):
             job.updated = now
             job.lease_owner = None
             job.lease_expires = None
+            finish_command_job(job, 'FAILED', error=job.error, error_code='WORKER_INTERRUPTED')
             _set_material_job_state(job, "FAILED")
             _persist_agent_failure_message(job)
             append_job_event(
@@ -3851,6 +4649,7 @@ def recover_expired_jobs(client=None):
             continue
         job.status = "QUEUED"
         job.stage = "recovering"
+        recover_command_job(job, recovery_reason)
         job.lease_owner = None
         job.lease_expires = None
         job.updated = now

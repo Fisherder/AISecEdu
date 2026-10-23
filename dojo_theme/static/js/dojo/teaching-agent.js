@@ -35,8 +35,27 @@
     title: document.getElementById("teaching-thread-title"),
     notice: document.getElementById("teaching-notice"),
     messages: document.getElementById("teaching-messages"),
+    trajectory: document.getElementById("teaching-trajectory"),
+    viewButtons: Array.from(document.querySelectorAll("[data-teaching-view]")),
+    questionDialog: document.getElementById("teaching-question-dialog"),
+    questionForm: document.getElementById("teaching-question-form"),
+    questionContent: document.getElementById("teaching-question-content"),
+    questionError: document.getElementById("teaching-question-error"),
+    questionProgress: document.getElementById("teaching-question-progress"),
+    questionBack: document.getElementById("teaching-question-back"),
+    questionSubmit: document.getElementById("teaching-question-submit"),
+    questionLater: document.getElementById("teaching-question-later"),
     input: document.getElementById("teaching-input"),
     send: document.getElementById("teaching-send"),
+    stop: document.getElementById("teaching-stop"),
+    pendingTurns: document.getElementById("teaching-pending-turns"),
+    artifactReview: document.getElementById("teaching-artifact-review"),
+    artifactReviewFrame: document.getElementById("teaching-artifact-review-frame"),
+    artifactReviewTitle: document.getElementById("teaching-artifact-review-title"),
+    artifactReviewFull: document.getElementById("teaching-artifact-review-full"),
+    artifactReviewClose: document.getElementById("teaching-artifact-review-close"),
+    inputDelivery: document.getElementById("teaching-input-delivery"),
+    deliveryControl: document.getElementById("teaching-delivery-control"),
     jumpLatest: document.getElementById("teaching-jump-latest"),
     taskCount: document.getElementById("teaching-task-count"),
     type: document.getElementById("teaching-artifact-type"),
@@ -46,6 +65,14 @@
     upload: document.getElementById("teaching-upload"),
     uploadTrigger: document.getElementById("teaching-upload-trigger"),
     uploadStatus: document.getElementById("teaching-upload-status"),
+    sourceTrigger: document.getElementById("teaching-source-trigger"),
+    sourceMenu: document.getElementById("teaching-source-menu"),
+    skillsTrigger: document.getElementById("teaching-skills-trigger"),
+    skillMenu: document.getElementById("teaching-skill-menu"),
+    skillMenuClose: document.getElementById("teaching-skill-menu-close"),
+    skillSearch: document.getElementById("teaching-skill-search"),
+    skillList: document.getElementById("teaching-skill-list"),
+    composer: root.querySelector(".teaching-composer"),
     jobList: document.getElementById("teaching-job-list"),
     drawerTitle: document.getElementById("teaching-drawer-title"),
     drawerSubtitle: document.getElementById("teaching-drawer-subtitle"),
@@ -197,22 +224,31 @@
     },
     taskFilters: { course: "", type: "", status: "" },
     selectedJobId: null,
+    pendingJobFocus: null,
     expandedJobIds: new Set(),
+    openAgentTraceItemIds: new Set(),
     candidateSet: null,
     activeSession: null,
     sourceMaterialIds: new Set(),
     pendingMaterialIds: new Set(),
+    sourceSelectionThreadId: null,
+    sourceMenuOpen: false,
     material: null,
     pollTimer: null,
     polling: false,
     pollDelayMs: 1800,
     lastActivePollSignature: "",
+    sessionEventsBacklog: false,
+    threadEventWatch: null,
     appliedActionProposals: new Set(),
     executingProposalKeys: new Set(),
     proposalFailures: new Map(),
     selectingGenerationOptions: new Set(),
     pendingGenerationConfirmation: null,
     generationOptionViews: new Map(),
+    generationRefinementDrafts: new Map(),
+    generationRefinementExpanded: new Set(),
+    generationPromptExpanded: new Set(),
     autoExecuteJobIds: new Set(),
     continuationRequests: new Set(),
     actions: [],
@@ -225,7 +261,15 @@
     quickScopeTrigger: null,
     uploadFlow: null,
     uploadFlowSequence: 0,
-    uploadStatusTimer: null,
+    uploadProcessing: false,
+    skillCatalog: [],
+    skillCatalogLoaded: false,
+    skillCatalogLoadedAt: 0,
+    skillCatalogRequest: null,
+    skillMenuOpen: false,
+    skillMenuViaInput: false,
+    skillMenuIndex: 0,
+    viewMode: "chat",
     progressClockTimer: null,
     lastJobListSignature: "",
     renderedJobProgress: new Map(),
@@ -239,31 +283,165 @@
     dashboardLearningLoadedAt: 0,
     dashboardQuickExpanded: false,
     overlayReturnFocus: null,
+    activeQuestionMessageId: null,
+    questionIndex: 0,
+    questionSubmitting: false,
+    dismissedQuestionKeys: new Set(),
   };
 
   const uploadLimitBytes = 50 * 1024 * 1024;
+
+  function skillMatches() {
+    const query = String(elements.skillSearch?.value || "").trim().toLowerCase();
+    return state.skillCatalog.filter((skill) =>
+      !query || `${skill.name} ${skill.description}`.toLowerCase().includes(query),
+    );
+  }
+
+  function renderSkillMenu() {
+    if (!elements.skillList) return;
+    if (!state.skillCatalogLoaded) {
+      elements.skillList.innerHTML = "<p>正在读取技能目录…</p>";
+      return;
+    }
+    const matches = skillMatches();
+    state.skillMenuIndex = Math.min(state.skillMenuIndex, Math.max(0, matches.length - 1));
+    elements.skillList.innerHTML = matches.length
+      ? matches.map((skill, index) => `<button type="button" role="option" data-select-skill="${api.escapeHtml(skill.name)}" aria-selected="${index === state.skillMenuIndex}" class="${index === state.skillMenuIndex ? "is-active" : ""}"><i class="fas fa-magic" aria-hidden="true"></i><span><strong>/${api.escapeHtml(skill.name)}</strong><small>${api.escapeHtml(skill.description)}</small></span></button>`).join("")
+      : '<p>没有匹配的技能。可以直接描述任务，让 AI 自行判断。</p>';
+  }
+
+  function closeSkillMenu(returnFocus = false) {
+    if (!elements.skillMenu) return;
+    state.skillMenuOpen = false;
+    state.skillMenuViaInput = false;
+    elements.skillMenu.hidden = true;
+    elements.skillsTrigger?.setAttribute("aria-expanded", "false");
+    if (returnFocus) elements.input.focus();
+  }
+
+  async function openSkillMenu(query = "", viaInput = false) {
+    if (!elements.skillMenu) return;
+    state.skillMenuOpen = true;
+    state.skillMenuViaInput = viaInput;
+    state.skillMenuIndex = 0;
+    elements.skillMenu.hidden = false;
+    elements.skillsTrigger?.setAttribute("aria-expanded", "true");
+    elements.skillSearch.value = query;
+    renderSkillMenu();
+    if (!viaInput) elements.skillSearch.focus();
+    if (viaInput && state.skillCatalogLoaded && Date.now() - state.skillCatalogLoadedAt < 30_000) return;
+    try {
+      if (!state.skillCatalogRequest) {
+        state.skillCatalogRequest = api.request("/teaching/skills", { cacheTtlMs: 0 })
+          .then(unwrap)
+          .finally(() => { state.skillCatalogRequest = null; });
+      }
+      const data = await state.skillCatalogRequest;
+      if (data.complete !== true) throw new Error("技能目录暂时不可用");
+      state.skillCatalog = Array.isArray(data.skills) ? data.skills : [];
+      state.skillCatalogLoaded = true;
+      state.skillCatalogLoadedAt = Date.now();
+      if (state.skillMenuOpen) renderSkillMenu();
+    } catch (error) {
+      state.skillCatalog = [];
+      state.skillCatalogLoaded = false;
+      state.skillCatalogLoadedAt = 0;
+      if (state.skillMenuOpen) {
+        elements.skillList.innerHTML = '<p>技能目录暂时不可用，请稍后重试。</p>';
+      }
+    }
+  }
+
+  function selectSkill(name) {
+    if (!state.skillCatalog.some((skill) => skill.name === name)) return;
+    const input = elements.input;
+    const cursor = input.selectionStart ?? input.value.length;
+    const preceding = input.value.slice(0, cursor);
+    const typedCommand = preceding.match(/(^|\s)\/[a-z0-9-]*$/);
+    const replacement = `/${name} `;
+    if (typedCommand) {
+      const begin = cursor - typedCommand[0].length + typedCommand[1].length;
+      input.setRangeText(replacement, begin, cursor, "end");
+    } else {
+      const needsSpace = preceding && !/\s$/.test(preceding) ? " " : "";
+      input.setRangeText(`${needsSpace}${replacement}`, cursor, cursor, "end");
+    }
+    closeSkillMenu(true);
+    resizeComposer();
+    syncComposerState();
+  }
+
+  function moveSkillSelection(direction) {
+    const matches = skillMatches();
+    if (!matches.length) return;
+    state.skillMenuIndex = (state.skillMenuIndex + direction + matches.length) % matches.length;
+    renderSkillMenu();
+    elements.skillList.querySelector(".is-active")?.scrollIntoView({ block: "nearest" });
+  }
+
+  function handleSkillMenuKey(event) {
+    if (!state.skillMenuOpen) return false;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSkillMenu(true);
+      return true;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      moveSkillSelection(event.key === "ArrowDown" ? 1 : -1);
+      return true;
+    }
+    if (event.key === "Enter" && !event.isComposing) {
+      const selected = skillMatches()[state.skillMenuIndex];
+      event.preventDefault();
+      if (selected) {
+        selectSkill(selected.name);
+      }
+      return true;
+    }
+    return false;
+  }
+
   const uploadSuffixes = new Set([
     ".doc",
     ".docx",
+    ".gif",
+    ".bmp",
     ".jpeg",
     ".jpg",
     ".md",
+    ".markdown",
     ".pdf",
     ".png",
     ".ppt",
     ".pptx",
     ".txt",
     ".webp",
+    ".xls",
+    ".xlsx",
   ]);
+
+  function isBackgroundMaterialJob(job) {
+    return ["material.analyze", "material.enrich"].includes(String(job?.kind || ""));
+  }
 
   function unwrap(payload) {
     if (!payload || payload.success !== true) {
-      throw new Error(api.errorMessage(payload, "请求失败"));
+      const error = new Error(api.errorMessage(payload, "请求失败"));
+      error.code = payload?.errorCode;
+      throw error;
     }
     return payload.data || {};
   }
 
   function syncAttachmentSources(thread) {
+    const threadId = String(thread?.id || "");
+    if (state.sourceSelectionThreadId !== threadId) {
+      state.sourceSelectionThreadId = threadId;
+      state.sourceMaterialIds.clear();
+      state.sourceMenuOpen = false;
+    }
     const context = (thread && thread.context) || {};
     const attachments = Array.isArray(context.pendingAttachments)
       ? context.pendingAttachments
@@ -273,11 +451,57 @@
         .filter((item) =>
           ["AWAITING_INTENT", "ACTIVE", "REFERENCED"].includes(
             String((item && item.status) || "").toUpperCase(),
-          ),
+          ) && !item.messageId,
         )
         .map((item) => String(item.id || ""))
         .filter(Boolean),
     );
+    renderSourceMenu();
+  }
+
+  function sourcePickerOptions(thread) {
+    const entries = Array.isArray(thread?.context?.pendingAttachments)
+      ? thread.context.pendingAttachments : [];
+    const names = new Map();
+    for (const message of thread?.messages || []) {
+      for (const attachment of (Array.isArray(message?.metadata?.attachments)
+        ? message.metadata.attachments : [])) {
+        if (attachment?.id) names.set(String(attachment.id),
+          String(attachment.filename || attachment.title || attachment.id));
+      }
+    }
+    return entries.filter((entry) => entry?.id).map((entry) => ({
+      id: String(entry.id),
+      name: names.get(String(entry.id)) || String(entry.title || entry.filename || entry.id),
+    }));
+  }
+
+  function renderSourceMenu() {
+    if (!elements.sourceTrigger || !elements.sourceMenu) return;
+    const options = sourcePickerOptions(state.thread);
+    const available = new Set(options.map((item) => item.id));
+    for (const id of state.sourceMaterialIds) {
+      if (!available.has(id)) state.sourceMaterialIds.delete(id);
+    }
+    elements.sourceTrigger.hidden = !options.length;
+    const selected = state.sourceMaterialIds.size;
+    elements.sourceTrigger.innerHTML = `<i class="fas fa-book-open" aria-hidden="true"></i><span>引用资料${selected ? ` · ${selected}` : ""}</span>`;
+    elements.sourceTrigger.setAttribute("aria-expanded", String(state.sourceMenuOpen && options.length > 0));
+    elements.sourceMenu.hidden = !state.sourceMenuOpen || !options.length;
+    if (elements.sourceMenu.hidden) return;
+    elements.sourceMenu.innerHTML = `<div class="teaching-source-menu-heading"><strong>本轮引用已上传资料</strong><button type="button" data-close-sources aria-label="关闭资料列表"><i class="fas fa-times" aria-hidden="true"></i></button></div><p>仅勾选的资料会随本轮消息发送。若原文索引尚未完成，只等待这条消息。</p><div class="teaching-source-menu-list">${options.map((item) => `<label><input type="checkbox" data-source-id="${api.escapeHtml(item.id)}" ${state.sourceMaterialIds.has(item.id) ? "checked" : ""}><span>${api.escapeHtml(item.name)}</span></label>`).join("")}</div>`;
+    elements.sourceMenu.querySelector("[data-close-sources]")?.addEventListener("click", () => {
+      state.sourceMenuOpen = false;
+      renderSourceMenu();
+      elements.sourceTrigger.focus();
+    });
+    elements.sourceMenu.querySelectorAll("[data-source-id]").forEach((input) => {
+      input.addEventListener("change", () => {
+        if (input.checked) state.sourceMaterialIds.add(input.dataset.sourceId);
+        else state.sourceMaterialIds.delete(input.dataset.sourceId);
+        renderSourceMenu();
+      });
+    });
   }
 
   function uploadFileSizeLabel(size) {
@@ -287,11 +511,87 @@
     return `${bytes} B`;
   }
 
+  function uploadContentState(item) {
+    if (item.phase !== "ready") return { detail: "", failed: false, retry: false };
+    const jobId = String(item.analysisJob?.id || "");
+    const job = (jobId && state.trackedJobs.get(jobId)) || item.analysisJob;
+    const status = String(job?.status || "").toUpperCase();
+    if (["FAILED", "CANCELED"].includes(status)) {
+      return {
+        detail: "文件已保存；内容读取未完成。可继续聊天，引用此文件前请重试。",
+        failed: true,
+        retry: Boolean(jobId),
+      };
+    }
+    if (status === "SUCCEEDED")
+      return { detail: "文件已保存，内容已就绪", failed: false, retry: false };
+    if (jobId)
+      return { detail: "文件已保存，后台正在读取内容；可先发送消息", failed: false, retry: false };
+    return { detail: "文件已保存，可随消息发送", failed: false, retry: false };
+  }
+
   function uploadFlowBusy() {
     return Boolean(
       state.uploadFlow &&
-      ["uploading", "sending"].includes(state.uploadFlow.phase),
+      state.uploadFlow.files.some((item) =>
+        ["queued", "uploading"].includes(item.phase),
+      ),
     );
+  }
+
+  function uploadDraftStorageKey(threadId) {
+    const userId = state.context?.user?.id;
+    return userId && threadId ? `aisecedu-upload-drafts-v1:${userId}:${threadId}` : null;
+  }
+
+  function persistReadyUploadDrafts(flow = state.uploadFlow) {
+    const key = uploadDraftStorageKey(flow?.threadId);
+    if (!key) return;
+    try {
+      const files = flow.files.filter((item) => item.phase === "ready" && item.materialId)
+        .map((item) => ({
+          materialId: String(item.materialId),
+          name: String(item.file.name || "附件"),
+          size: Number(item.file.size || 0),
+          analysisJobId: item.analysisJob?.id || null,
+        }));
+      if (files.length) window.sessionStorage.setItem(key, JSON.stringify({ saved: Date.now(), files }));
+      else window.sessionStorage.removeItem(key);
+    } catch (error) {
+      // Uploads remain usable when browser storage is unavailable.
+    }
+  }
+
+  function restoreReadyUploadDrafts(threadId) {
+    const key = uploadDraftStorageKey(threadId);
+    if (!key) return null;
+    try {
+      const stored = JSON.parse(window.sessionStorage.getItem(key) || "null");
+      if (!stored || Date.now() - Number(stored.saved || 0) > 7 * 86400000 ||
+          !Array.isArray(stored.files)) {
+        window.sessionStorage.removeItem(key);
+        return null;
+      }
+      const files = stored.files.slice(0, 50).filter((item) =>
+        item && item.materialId && item.name,
+      ).map((item) => ({
+        id: `file-${++state.uploadFlowSequence}`,
+        file: { name: String(item.name), size: Number(item.size || 0) },
+        phase: "ready",
+        progress: 100,
+        error: "",
+        materialId: String(item.materialId),
+        analysisJob: item.analysisJobId ? { id: String(item.analysisJobId) } : null,
+        controller: null,
+      }));
+      return files.length ? {
+        id: `upload-${++state.uploadFlowSequence}`,
+        threadId,
+        files,
+      } : null;
+    } catch (error) {
+      return null;
+    }
   }
 
   function validateUploadFile(file) {
@@ -303,13 +603,14 @@
     const dot = name.lastIndexOf(".");
     const suffix = dot >= 0 ? name.slice(dot).toLowerCase() : "";
     if (!uploadSuffixes.has(suffix))
-      return "不支持这种文件格式。请选择 PDF、Office 文档、文本或常见图片文件。";
+      return "不支持这种文件格式。请选择 PDF、Office 文档、Markdown、文本或常见图片文件。";
     return "";
   }
 
   function renderUploadStatus() {
     const flow = state.uploadFlow;
-    if (!flow) {
+    if (!flow || !flow.files.length ||
+        (flow.threadId && state.thread?.id && String(flow.threadId) !== String(state.thread.id))) {
       elements.uploadStatus.hidden = true;
       elements.uploadStatus.innerHTML = "";
       elements.uploadStatus.className = "teaching-upload-status";
@@ -317,61 +618,53 @@
       elements.uploadStatus.setAttribute("aria-live", "polite");
       return;
     }
-    const phases = {
-      uploading: {
-        title: "正在上传文件",
-        detail: "正在安全保存原文件，请稍候…",
-        icon: "fa-circle-notch fa-spin",
-      },
-      sending: {
-        title: "文件已上传",
-        detail: "正在结合输入的命令继续处理…",
-        icon: "fa-circle-notch fa-spin",
-      },
-      ready: {
-        title: "文件已上传",
-        detail: "请在对话中选择添加位置或要创建的内容。",
-        icon: "fa-check",
-      },
-      "upload-error": {
-        title: "文件上传失败",
-        detail: flow.error || "请检查网络后重试。",
-        icon: "fa-exclamation-circle",
-      },
-      "send-error": {
-        title: "文件已上传，但命令尚未发出",
-        detail: flow.error || "可以只重新发送命令，无需重复上传文件。",
-        icon: "fa-exclamation-circle",
-      },
-    };
-    const presentation = phases[flow.phase] || phases.uploading;
-    const failed = ["upload-error", "send-error"].includes(flow.phase);
-    const retryLabel =
-      flow.phase === "send-error" ? "重新发送命令" : "重新上传";
+    const failed = flow.files.some((item) => item.phase === "upload-error" || uploadContentState(item).failed);
     elements.uploadStatus.hidden = false;
-    elements.uploadStatus.className = `teaching-upload-status is-${flow.phase}`;
+    elements.uploadStatus.className = `teaching-upload-status is-draft${failed ? " has-error" : ""}`;
     elements.uploadStatus.setAttribute("role", failed ? "alert" : "status");
     elements.uploadStatus.setAttribute(
       "aria-live",
       failed ? "assertive" : "polite",
     );
-    elements.uploadStatus.innerHTML = `<span class="teaching-upload-status-icon"><i class="fas ${presentation.icon}" aria-hidden="true"></i></span>
-      <span class="teaching-upload-status-copy"><strong>${api.escapeHtml(presentation.title)}</strong><small>${api.escapeHtml(flow.file.name)} · ${api.escapeHtml(uploadFileSizeLabel(flow.file.size))}</small><span>${api.escapeHtml(presentation.detail)}</span></span>
-      ${failed ? `<span class="teaching-upload-status-actions"><button type="button" data-upload-retry>${api.escapeHtml(retryLabel)}</button><button type="button" data-upload-dismiss aria-label="移除这条上传提示">移除</button></span>` : ""}
-      ${flow.phase === "uploading" ? '<span class="teaching-upload-progress" role="progressbar" aria-label="文件正在上传"><span></span></span>' : ""}`;
-    const retry = elements.uploadStatus.querySelector("[data-upload-retry]");
-    if (retry)
-      retry.addEventListener("click", () => retryUploadFlow().catch(showError));
-    const dismiss = elements.uploadStatus.querySelector(
-      "[data-upload-dismiss]",
+    const inProgress = flow.files.some((item) => ["queued", "uploading"].includes(item.phase));
+    const canCollapse = flow.files.length > 3 && !failed && !inProgress;
+    const collapsed = canCollapse && !flow.expanded;
+    const visibleFiles = collapsed ? flow.files.slice(0, 2) : flow.files;
+    const hiddenCount = flow.files.length - visibleFiles.length;
+    elements.uploadStatus.innerHTML = `<div class="teaching-upload-draft-heading"><strong>本次消息的附件 · ${flow.files.length} 份</strong><span>发送消息时一并引用</span>${canCollapse ? `<button type="button" data-upload-toggle aria-expanded="${!collapsed}">${collapsed ? `展开其余 ${hiddenCount} 份` : "收起列表"}</button>` : ""}</div>${visibleFiles.map((item) => {
+      const percent = Math.min(100, Math.max(0, Number(item.progress || 0)));
+      const contentState = uploadContentState(item);
+      const detail = item.phase === "queued" ? "等待上传"
+        : item.phase === "uploading" ? `正在上传 ${percent ? `${percent}%` : "…"}`
+        : item.phase === "upload-error" ? item.error || "上传失败，可以重试"
+        : contentState.detail;
+      const icon = item.phase === "upload-error" || contentState.failed ? "fa-exclamation-circle"
+        : item.phase === "ready" ? "fa-check" : "fa-circle-notch fa-spin";
+      return `<div class="teaching-upload-draft-item is-${item.phase}" data-upload-id="${api.escapeHtml(item.id)}">
+        <span class="teaching-upload-status-icon"><i class="fas ${icon}" aria-hidden="true"></i></span>
+        <span class="teaching-upload-status-copy"><strong>${api.escapeHtml(item.file.name)}</strong><small>${api.escapeHtml(uploadFileSizeLabel(item.file.size))}</small>${detail ? `<span>${api.escapeHtml(detail)}</span>` : ""}</span>
+        <span class="teaching-upload-status-actions">${item.phase === "upload-error" ? `<button type="button" data-upload-retry="${api.escapeHtml(item.id)}">重试上传</button>` : ""}${contentState.retry ? `<button type="button" data-content-retry="${api.escapeHtml(item.id)}" ${item.contentRetrying ? "disabled" : ""}>${item.contentRetrying ? "正在重试" : "重试读取"}</button>` : ""}<button type="button" data-upload-remove="${api.escapeHtml(item.id)}" aria-label="${item.phase === "uploading" ? "取消上传" : "从本次消息移除"}">${item.phase === "uploading" ? "取消" : "移除"}</button></span>
+        ${item.phase === "uploading" ? `<span class="teaching-upload-progress" role="progressbar" aria-label="${api.escapeHtml(item.file.name)} 上传进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span style="width:${percent}%"></span></span>` : ""}
+      </div>`;
+    }).join("")}`;
+    elements.uploadStatus.querySelector("[data-upload-toggle]")?.addEventListener("click", () => {
+      flow.expanded = collapsed;
+      renderUploadStatus();
+    });
+    elements.uploadStatus.querySelectorAll("[data-upload-retry]").forEach((button) =>
+      button.addEventListener("click", () => retryUploadItem(button.dataset.uploadRetry)),
     );
-    if (dismiss) dismiss.addEventListener("click", () => clearUploadFlow());
+    elements.uploadStatus.querySelectorAll("[data-content-retry]").forEach((button) =>
+      button.addEventListener("click", () => retryUploadContent(button.dataset.contentRetry).catch(showError)),
+    );
+    elements.uploadStatus.querySelectorAll("[data-upload-remove]").forEach((button) =>
+      button.addEventListener("click", () => removeUploadItem(button.dataset.uploadRemove)),
+    );
   }
 
   function setUploadFlow(flow) {
-    window.clearTimeout(state.uploadStatusTimer);
-    state.uploadStatusTimer = null;
     state.uploadFlow = flow;
+    persistReadyUploadDrafts(flow);
     renderUploadStatus();
     syncComposerState();
   }
@@ -383,25 +676,51 @@
       String(state.uploadFlow.id) !== String(expectedId)
     )
       return;
-    window.clearTimeout(state.uploadStatusTimer);
-    state.uploadStatusTimer = null;
+    for (const item of state.uploadFlow?.files || []) item.controller?.abort();
+    persistReadyUploadDrafts({ ...state.uploadFlow, files: [] });
     state.uploadFlow = null;
     renderUploadStatus();
     syncComposerState();
   }
 
-  function dismissSuccessfulUpload(flowId) {
-    window.clearTimeout(state.uploadStatusTimer);
-    state.uploadStatusTimer = window.setTimeout(
-      () => clearUploadFlow(flowId),
-      2400,
-    );
+  async function hydrateUploadDraftJobs() {
+    const flow = state.uploadFlow;
+    if (!flow) return;
+    await Promise.all(flow.files.map(async (item) => {
+      const id = item.analysisJob?.id;
+      if (!id) return;
+      try {
+        const data = unwrap(await api.request(`/teaching/jobs/${encodeURIComponent(id)}`));
+        if (state.uploadFlow !== flow) return;
+        state.trackedJobs.set(String(id), data.job);
+      } catch (error) {
+        console.warn("Unable to refresh uploaded material analysis", error);
+      }
+    }));
+    if (state.uploadFlow !== flow) return;
+    renderUploadStatus();
+    renderJobs();
+    schedulePoll();
   }
 
   function setBusy(value) {
     state.busy = value;
     syncComposerState();
     updateAgentChrome();
+  }
+
+  function threadActionCurrent(action) {
+    return Boolean(action && state.thread &&
+      state.thread.id === action.threadId &&
+      (state.threadLoadEpoch || 0) === action.epoch);
+  }
+
+  function syncGenerationOptionControls(archived) {
+    elements.messages.querySelectorAll("[data-generation-option-message], [data-generation-refine-message]").forEach((button) => {
+      button.disabled = Boolean(state.busy || archived || button.dataset.generationBlocked === "true");
+      button.setAttribute("aria-disabled", String(button.disabled));
+      button.title = state.busy ? "当前操作准备完成后可继续选择" : "";
+    });
   }
 
   function syncComposerState() {
@@ -415,12 +734,25 @@
         String(activeJob.status || "").toUpperCase() === "CANCEL_REQUESTED"),
     );
     const uploading = uploadFlowBusy();
-    const uploadDisabled =
-      state.busy || archived || Boolean(activeJob) || uploading;
+    const uploadDisabled = state.busy || archived;
+    const uploadFailed = Boolean(state.uploadFlow?.files.some(
+      (item) => item.phase === "upload-error",
+    ));
+    const readyAttachments = Boolean(state.uploadFlow?.files.some(
+      (item) => item.phase === "ready",
+    ));
     elements.archivedBanner.hidden = !archived;
-    elements.input.disabled = archived || uploading;
+    elements.input.disabled = archived;
+    syncGenerationOptionControls(archived);
     elements.upload.disabled = uploadDisabled;
     elements.uploadTrigger.disabled = uploadDisabled;
+    if (elements.sourceTrigger) elements.sourceTrigger.disabled = uploadDisabled;
+    if (uploadDisabled && state.sourceMenuOpen) {
+      state.sourceMenuOpen = false;
+      renderSourceMenu();
+    }
+    if (elements.skillsTrigger) elements.skillsTrigger.disabled = uploadDisabled;
+    if (uploadDisabled && state.skillMenuOpen) closeSkillMenu();
     elements.uploadTrigger.classList.toggle("is-disabled", uploadDisabled);
     elements.uploadTrigger.setAttribute(
       "aria-disabled",
@@ -436,38 +768,52 @@
     elements.quickButtons.forEach((button) => {
       button.disabled = state.busy || archived;
     });
-    elements.send.disabled =
-      state.busy ||
-      archived ||
-      (activeJob ? stopping : !elements.input.value.trim());
-    elements.send.classList.toggle("is-stop", Boolean(activeJob));
-    elements.send.setAttribute(
-      "aria-label",
-      activeJob ? "停止当前任务" : "发送消息",
-    );
-    elements.send.title = activeJob ? "停止当前任务" : "发送消息";
-    elements.send.innerHTML = activeJob
-      ? `<i class="fas ${stopping ? "fa-circle-notch fa-spin" : "fa-stop"}" aria-hidden="true"></i>`
-      : '<i class="fas fa-arrow-up" aria-hidden="true"></i>';
+    elements.send.disabled = state.busy || archived || uploading || uploadFailed ||
+      (!elements.input.value.trim() && !readyAttachments);
+    elements.send.classList.remove("is-stop");
+    const steering = activeJob && elements.inputDelivery?.value === "next-step";
+    const sendLabel = activeJob ? steering ? "在下一执行边界补充要求" : "排队发送下一条要求" : "发送消息";
+    elements.send.setAttribute("aria-label", sendLabel);
+    elements.send.title = sendLabel;
+    if (elements.deliveryControl) elements.deliveryControl.hidden = !activeJob;
+    elements.send.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+    if (elements.stop) {
+      elements.stop.hidden = !activeJob;
+      elements.stop.disabled = state.busy || stopping;
+      elements.stop.innerHTML = stopping
+        ? '<svg class="fa-spin" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9"/></svg>'
+        : '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
+    }
+    renderPendingTurns();
     elements.input.placeholder = archived
       ? "此对话已归档"
       : uploading
-        ? state.uploadFlow.phase === "sending"
-          ? "文件已上传，正在发送命令…"
-          : "文件上传中…"
+        ? "文件上传中，可继续填写要求…"
         : activeJob
-          ? "当前任务执行中；可以先在这里准备下一条要求…"
+          ? steering ? "补充要求，当前操作结束后优先处理…" : "补充下一条要求，发送后会排队处理…"
           : "告诉智能体你要完成什么教学工作…";
     root.classList.toggle("is-thread-archived", archived);
     root.classList.toggle("has-active-run", Boolean(activeJob));
     elements.messages.setAttribute("aria-busy", String(Boolean(activeJob)));
   }
 
+  function renderPendingTurns() {
+    if (!elements.pendingTurns) return;
+    const rows = (state.thread?.pendingTurns || []).filter(item => item.status === "QUEUED");
+    elements.pendingTurns.hidden = rows.length === 0;
+    const markup = rows.map((item, index) => `<div class="teaching-pending-turn"><span><small>${item.delivery === "next-step" ? item.acknowledgedAtBoundary ? "已接收补充" : "下一步补充" : `排队 ${index + 1}`}</small>${api.escapeHtml(item.content)}</span><button type="button" class="teaching-icon-button" data-edit-turn="${api.escapeHtml(item.jobId)}" aria-label="编辑第 ${index + 1} 条要求" title="编辑"><i class="fas fa-pen" aria-hidden="true"></i></button><button type="button" class="teaching-icon-button" data-withdraw-turn="${api.escapeHtml(item.jobId)}" aria-label="撤回第 ${index + 1} 条排队要求" title="撤回"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>`).join("");
+    if (elements.pendingTurns.agentMarkup !== markup) {
+      elements.pendingTurns.innerHTML = markup;
+      elements.pendingTurns.agentMarkup = markup;
+    }
+  }
+
   function showError(error) {
+    if (error && error.name === "AbortError") return;
     api.showNotice(
       elements.notice,
       error instanceof Error ? error.message : String(error),
-      "danger",
+      error && error.commandPending ? "progress" : "danger",
     );
   }
 
@@ -568,7 +914,7 @@
   function populateQuickScopeCourses(selectedDojo, selectedModule) {
     const rows = (state.context && state.context.teacherDojos) || [];
     elements.quickScopeCourse.innerHTML =
-      '<option value="">不限定课程（自由描述）</option>' +
+      '<option value="">生成项目合集（无需课程）</option>' +
       rows
         .map(
           (dojo) =>
@@ -702,6 +1048,10 @@
     READY: "可以使用",
     SELECTED: "已经选择",
     MATERIALIZED: "已经生成",
+    GENERATED: "已生成",
+    SUCCEEDED: "已完成",
+    DRAFT: "草稿",
+    VALIDATED: "已检查",
     FAILED: "处理失败",
     CANCELED: "已经取消",
     GENERATING: "正在生成",
@@ -718,6 +1068,26 @@
     return statusLabels[status] || value || "准备就绪";
   }
 
+  function syncThreadLocation({ keepLaunchIntent = false } = {}) {
+    const url = new URL(window.location.href);
+    if (state.thread?.id) {
+      url.searchParams.set("thread", state.thread.id);
+      url.searchParams.delete("newProject");
+    } else {
+      url.searchParams.delete("thread");
+      url.searchParams.set("newProject", "1");
+    }
+    url.searchParams.set("view", "conversation");
+    if (!keepLaunchIntent) {
+      for (const key of ["prompt", "dojo", "dojoId", "module", "moduleIndex", "artifactType", "candidateMode", "tasks", "job"]) {
+        url.searchParams.delete(key);
+      }
+    }
+    // The server owns the conversation; refresh and artifact return links must
+    // refer to that identity, not to the ephemeral launch URL.
+    if (url.href !== window.location.href) window.history.replaceState(window.history.state, "", url);
+  }
+
   function teacherReturnPath() {
     const pathname = window.location.pathname;
     const path = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -730,6 +1100,52 @@
     const search = new URLSearchParams(parameters || {});
     search.set("return", teacherReturnPath());
     return `/teacher/artifacts/${encodeURIComponent(artifactId)}?${search.toString()}`;
+  }
+
+  let artifactReviewReturnFocus = null;
+  function syncArtifactReviewMode() {
+    const modal = !elements.artifactReview.hidden && window.matchMedia("(max-width: 1100px)").matches;
+    const drawerOpen = elements.drawer.classList.contains("is-open");
+    const mobile = window.innerWidth <= 820;
+    const sidebarOpen = root.classList.contains("is-sidebar-open");
+    elements.artifactReview.setAttribute("role", modal ? "dialog" : "complementary");
+    if (modal) elements.artifactReview.setAttribute("aria-modal", "true");
+    else elements.artifactReview.removeAttribute("aria-modal");
+    elements.conversation.inert = modal || drawerOpen || state.dashboardMode || (mobile && sidebarOpen);
+    elements.conversation.setAttribute("aria-hidden", String(elements.conversation.inert));
+    elements.sidebar.inert = modal || drawerOpen || state.dashboardMode || (mobile && !sidebarOpen);
+    elements.sidebar.setAttribute("aria-hidden", String(elements.sidebar.inert));
+    elements.drawer.inert = modal || !drawerOpen;
+    const navigation = document.querySelector(".product-navbar");
+    if (navigation) {
+      navigation.inert = modal || drawerOpen;
+      if (navigation.inert) navigation.setAttribute("aria-hidden", "true");
+      else navigation.removeAttribute("aria-hidden");
+    }
+  }
+
+  function closeArtifactReview() {
+    if (elements.artifactReview.hidden) return;
+    elements.artifactReview.hidden = true;
+    root.classList.remove("has-artifact-review");
+    elements.artifactReviewFrame.removeAttribute("src");
+    syncArtifactReviewMode();
+    if (artifactReviewReturnFocus?.isConnected) artifactReviewReturnFocus.focus({ preventScroll: true });
+  }
+
+  function openArtifactReview(id, href) {
+    artifactReviewReturnFocus = document.activeElement;
+    const target = new URL(href || teacherArtifactHref(id), window.location.origin);
+    elements.artifactReviewFull.href = target.href;
+    target.searchParams.set("embedded", "co-creation");
+    if (elements.artifactReviewFrame.getAttribute("src") !== target.pathname + target.search)
+      elements.artifactReviewFrame.src = target.pathname + target.search;
+    const card = artifactCardForId(id);
+    elements.artifactReviewTitle.textContent = card?.state?.title || "教学内容";
+    elements.artifactReview.hidden = false;
+    root.classList.add("has-artifact-review");
+    syncArtifactReviewMode();
+    elements.artifactReviewClose.focus({ preventScroll: true });
   }
 
   function internalHref(value, fallback) {
@@ -947,6 +1363,7 @@
     if (!elements.dashboard) return;
     const enabled = Boolean(open);
     state.dashboardMode = enabled;
+    if (enabled) stopThreadEventWatch();
     root.classList.toggle("is-dashboard", enabled);
     elements.dashboard.hidden = !enabled;
     elements.dashboard.inert = !enabled;
@@ -1139,6 +1556,7 @@
     "slide-deck": "课件",
     "attack-defense-scene": "攻防演示",
     simulation: "模拟实训",
+    debate: "AI 辩论",
     "question-set": "CTF 实践题",
     assessment: "评测内容",
   };
@@ -1149,7 +1567,7 @@
     "self.candidate.generate": "生成教学内容",
     "artifact.materialize": "创建可用内容",
     "artifact.revise": "修改教学内容",
-    "material.analyze": "分析课件",
+    "material.analyze": "准备资料",
     "learning.authoring": "生成 CTF 实践题",
     "learning.solution": "验证实训题目",
     "generation.batch": "批量生成独立 CTF 题目",
@@ -1183,337 +1601,49 @@
     return jobKindLabels[job.kind] || "处理教学任务";
   }
 
-  const artifactProgressProfiles = {
-    "lesson-plan": [
-      {
-        label: "解析教学目标",
-        detail: "识别授课对象、教学目标、重点与素材约束",
-      },
-      { label: "编排教学流程", detail: "组织导入、讲解、活动、练习与总结环节" },
-      { label: "保存并检查", detail: "生成可编辑版本并检查结构与内容完整性" },
-      { label: "教案可预览", detail: "生成完成，可直接打开预览并继续修改" },
-    ],
-    "slide-deck": [
-      { label: "解析教学目标", detail: "识别课程主题、受众、重点与素材约束" },
-      {
-        label: "生成课件页面",
-        detail: "规划页面结构并生成标题、要点与讲解内容",
-      },
-      { label: "整理可编辑版本", detail: "保存页面顺序并检查内容与版式完整性" },
-      { label: "课件可预览", detail: "生成完成，可直接打开预览并继续修改" },
-    ],
-    "attack-defense-scene": [
-      { label: "确认攻防目标", detail: "识别漏洞主题、演示对象与预期教学效果" },
-      { label: "编排演示流程", detail: "生成攻击、防御、讲解和关键观察节点" },
-      { label: "检查交互链路", detail: "核对场景步骤、操作反馈与演示连贯性" },
-      { label: "演示可预览", detail: "生成完成，可直接打开演示并继续调整" },
-    ],
-    simulation: [
-      { label: "确认实训目标", detail: "识别训练目标、参与角色与操作边界" },
-      { label: "生成场景与交互", detail: "编排环境、操作步骤、反馈与教学提示" },
-      { label: "检查操作路径", detail: "核对关键操作、分支结果与完成条件" },
-      { label: "实训可预览", detail: "生成完成，可直接打开场景并继续调整" },
-    ],
-    "question-set": [
-      { label: "解析题目要求", detail: "识别知识点、漏洞目标、难度与运行约束" },
-      { label: "生成题面与环境", detail: "构建题目说明、隔离环境与解题路径" },
-      {
-        label: "验证动态 Flag",
-        detail: "运行标准解法并核验动态 Flag 提交链路",
-      },
-      { label: "题目可用", detail: "验证通过，可进入独立题目管理页审阅并发布" },
-    ],
-    assessment: [
-      { label: "解析评测目标", detail: "识别考查范围、难度与评分要求" },
-      { label: "生成题目与规则", detail: "组织题目、答案、评分点与反馈规则" },
-      { label: "核验答案与评分", detail: "检查参考答案、评分逻辑与内容完整性" },
-      { label: "评测可预览", detail: "生成完成，可直接打开预览并继续修改" },
-    ],
-  };
-
-  const jobProgressProfiles = {
-    "material.analyze": [
-      { label: "读取课件", detail: "读取文件内容、页面结构与可用素材" },
-      { label: "提取知识结构", detail: "识别功能点、知识点及其关联关系" },
-      { label: "生成章节建议", detail: "整理章节候选、来源依据与课程映射" },
-      { label: "分析完成", detail: "分析结果已保存，可在课件管理中查看" },
-    ],
-    "artifact.revise": [
-      { label: "解析修改要求", detail: "定位需要调整的内容、范围与版本" },
-      { label: "生成新版本", detail: "按自然语言要求修改对应教学内容" },
-      { label: "校验并保存", detail: "检查修改结果并保存为可追溯的新版本" },
-      { label: "修改完成", detail: "新版本已生成，可直接打开查看" },
-    ],
-    "artifact.materialize": [
-      { label: "确认选定内容", detail: "读取已选方案及其课程上下文" },
-      {
-        label: "创建可编辑成品",
-        detail: "将方案转换为可预览、可继续修改的内容",
-      },
-      { label: "检查内容完整性", detail: "核对结构、字段、引用与打开路径" },
-      { label: "成品可预览", detail: "创建完成，可直接打开结果" },
-    ],
-    "learning.authoring": [
-      {
-        label: "分析要求与题库",
-        detail: "识别漏洞类型、难度与运行约束，并检索可复用题目",
-      },
-      {
-        label: "规划出题策略",
-        detail: "综合教师要求和题库匹配，确定复用、改编或新建策略",
-      },
-      {
-        label: "构建题包与环境",
-        detail: "生成题面、隔离服务、私有解法与动态 Flag 链路",
-      },
-      {
-        label: "红队审查与修复",
-        detail: "独立审查完整题包，并逐项修复中高风险问题",
-      },
-      {
-        label: "保存可追溯草稿",
-        detail: "保存题包、来源依据和每轮审查记录",
-      },
-      {
-        label: "独立验证与复验",
-        detail: "运行标准解法、确定性发布门和动态 Flag 提交验证",
-      },
-      {
-        label: "生成题目入口",
-        detail: "确认验证结果并写入独立题目管理入口",
-      },
-    ],
-    "learning.solution": [
-      { label: "读取题目环境", detail: "加载题面、隔离服务与验证规则" },
-      { label: "执行标准解法", detail: "在隔离环境中运行完整解题过程" },
-      { label: "核验 Flag", detail: "提交动态 Flag 并确认判题结果" },
-      { label: "验证完成", detail: "标准解法与判题链路均已通过" },
-    ],
-    "agent.chat": [
-      {
-        label: "理解原始要求",
-        detail: "保留教师完整原意，解析组合目标、指代与交付形式",
-      },
-      {
-        label: "选择技能并规划",
-        detail: "从技能目录选择本轮能力，形成可执行计划",
-      },
-      {
-        label: "结合事实执行",
-        detail: "使用课程记忆、材料原文与可信数据完成分析或内容",
-      },
-      {
-        label: "准备真实交付",
-        detail: "生成工具提案，或把请求的内容渲染为可下载文件",
-      },
-      { label: "核验并回复", detail: "检查结果与教师原意一致后写入当前对话" },
-    ],
-  };
-
   function jobSteps(job) {
-    if (["candidate.generate", "self.candidate.generate"].includes(job.kind)) {
-      return (
-        artifactProgressProfiles[job.artifactType] || [
-          { label: "解析教学要求", detail: "识别教学目标、内容范围与生成约束" },
-          {
-            label: "生成内容草稿",
-            detail: "组织结构并生成可直接使用的教学内容",
-          },
-          { label: "保存并检查", detail: "保存可编辑版本并检查内容完整性" },
-          { label: "内容可预览", detail: "生成完成，可直接打开预览并继续修改" },
-        ]
-      );
-    }
-    return (
-      jobProgressProfiles[job.kind] || [
-        { label: "解析任务要求", detail: "读取目标、上下文与执行约束" },
-        { label: "执行任务", detail: "按要求生成并处理目标内容" },
-        { label: "保存并检查", detail: "保存结果并检查内容完整性" },
-        { label: "任务完成", detail: "处理完成，可直接查看结果" },
-      ]
-    );
+    return window.AISecEdu.jobProgress.jobSteps(job);
   }
 
   function currentJobStage(job) {
-    const events = Array.isArray(job.events) ? job.events : [];
-    const latest = events.length ? events[events.length - 1] : null;
-    return String(
-      job.stage || (latest && latest.stage) || "queued",
-    ).toLowerCase();
+    return window.AISecEdu.jobProgress.currentJobStage(job);
   }
 
   function normalizedJobStage(job) {
-    return currentJobStage(job).replace(/^native-/, "");
+    return window.AISecEdu.jobProgress.normalizedJobStage(job);
   }
 
-  const genericStagePresentations = {
-    queued: { label: "等待开始", detail: "任务已加入队列，等待可用执行资源" },
-    routing: { label: "准备执行", detail: "正在加载任务上下文并确认所需能力" },
-    planning: {
-      label: "理解要求并规划",
-      detail: "正在保留原始要求并组织可执行步骤",
-    },
-    generating: {
-      label: "生成核心内容",
-      detail: "正在根据要求和上下文生成内容",
-    },
-    persisting: {
-      label: "保存并检查结果",
-      detail: "正在检查结构完整性并保存可编辑版本",
-    },
-    delivering: {
-      label: "准备交付",
-      detail: "正在核验回答并准备可下载文件或工具操作",
-    },
-    materializing: {
-      label: "生成可预览内容",
-      detail: "正在把已选方案转换为可编辑成品",
-    },
-    retrying: {
-      label: "自动重试",
-      detail: "上一次执行未完成，正在保留进度并重新排队",
-    },
-    recovering: {
-      label: "恢复执行",
-      detail: "检测到执行中断，正在从最近状态继续",
-    },
-    complete: { label: "任务完成", detail: "结果已经检查并保存" },
-    completed: { label: "任务完成", detail: "结果已经检查并保存" },
-    finalizing: {
-      label: "正在保存结果",
-      detail: "核心处理已经结束，正在写入结果并生成可打开的入口",
-    },
-    failed: { label: "任务未完成", detail: "可以展开查看失败阶段并重新运行" },
-    canceled: { label: "任务已取消", detail: "任务已经停止，不会继续执行" },
-  };
-
   function authoringStagePresentation(stage) {
-    const validationRepair = stage.match(/^validation-repair-(\d+)$/);
-    if (validationRepair) {
-      return {
-        label: `第 ${validationRepair[1]} 轮自主修复`,
-        detail: "正在修复发布门发现的问题，完成后将由独立检查再次验证",
-      };
-    }
-    const validation = stage.match(/^validate-(\d+)$/);
-    if (validation) {
-      return {
-        label: `第 ${validation[1]} 轮独立验证`,
-        detail: "正在运行标准解法、确定性发布门与动态 Flag 提交验证",
-      };
-    }
-    const stages = {
-      authoring: {
-        label: "启动题目构建与验证",
-        detail: "正在准备题库检索、题包构建和独立验证流程",
-      },
-      catalog: {
-        label: "检索并比较题库",
-        detail: "正在查找可安全复用或改编的候选题",
-      },
-      strategy: {
-        label: "选择出题策略",
-        detail: "正在综合教师要求、题库匹配和运行约束决定出题方式",
-      },
-      plan: {
-        label: "规划教学与实现方案",
-        detail: "正在细化教学目标、实现约束和验证方案",
-      },
-      build: {
-        label: "构建题包与运行环境",
-        detail: "正在生成题面、运行产物、私有解法与动态 Flag 链路",
-      },
-      review: {
-        label: "独立红队审查",
-        detail: "独立审查智能体正在检查完整题包和潜在缺陷",
-      },
-      "preflight-repair": {
-        label: "修复预审问题",
-        detail: "正在逐项关闭审查问题，并复验修改后的题包",
-      },
-      draft: {
-        label: "保存可追溯草稿",
-        detail: "正在保存题包、来源依据和每轮审查记录",
-      },
-      ready: {
-        label: "汇总验证结果",
-        detail: "正在确认所有发布门均已通过并准备独立题目管理入口",
-      },
-    };
-    return stages[stage] || null;
+    return window.AISecEdu.jobProgress.authoringStagePresentation(stage);
   }
 
   function jobStagePresentation(job) {
-    const stage = normalizedJobStage(job);
-    const status = String(job.status || "QUEUED").toUpperCase();
-    if (
-      activeJobStatuses.has(status) &&
-      /^(complete|completed|finalizing)$/.test(stage)
-    ) {
-      return genericStagePresentations.finalizing;
-    }
-    if (String(job.kind || "") === "learning.authoring") {
-      const authoring = authoringStagePresentation(stage);
-      if (authoring) return authoring;
-    }
-    return genericStagePresentations[stage] || null;
+    return window.AISecEdu.jobProgress.jobStagePresentation(job);
   }
 
   function jobTimestamp(value) {
-    const parsed = Date.parse(String(value || ""));
-    return Number.isFinite(parsed) ? parsed : null;
+    return window.AISecEdu.jobProgress.jobTimestamp(value);
   }
 
   function formatJobDuration(seconds) {
-    const safe = Math.max(0, Math.floor(Number(seconds) || 0));
-    if (safe < 60) return `${safe} 秒`;
-    const minutes = Math.floor(safe / 60);
-    const remainder = safe % 60;
-    if (minutes < 60)
-      return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分`;
-    const hours = Math.floor(minutes / 60);
-    const minuteRemainder = minutes % 60;
-    return minuteRemainder
-      ? `${hours} 小时 ${minuteRemainder} 分`
-      : `${hours} 小时`;
+    return window.AISecEdu.jobProgress.formatJobDuration(seconds);
   }
 
   function jobDurationSeconds(job, now) {
-    const started = jobTimestamp(job.created);
-    if (started === null) return null;
-    const terminal = ["SUCCEEDED", "FAILED", "CANCELED"].includes(
-      String(job.status || "").toUpperCase(),
-    );
-    const ended = terminal
-      ? jobTimestamp(job.completed || job.updated) || Number(now || Date.now())
-      : Number(now || Date.now());
-    return Math.max(0, Math.floor((ended - started) / 1000));
+    return window.AISecEdu.jobProgress.jobDurationSeconds(job, now);
   }
 
   function jobDurationMarkup(job, compact) {
-    const started = jobTimestamp(job.created);
-    if (started === null) return "";
-    const status = String(job.status || "").toUpperCase();
-    const terminal = ["SUCCEEDED", "FAILED", "CANCELED"].includes(status);
-    const ended = terminal ? jobTimestamp(job.completed || job.updated) : null;
-    const prefix = terminal ? "耗时 " : "已用时 ";
-    return `<span class="job-live-duration${compact ? " is-compact" : ""}" data-job-start-ms="${started}"${ended === null ? "" : ` data-job-end-ms="${ended}"`} data-job-duration-prefix="${prefix}">${prefix}${formatJobDuration(jobDurationSeconds(job, Date.now()))}</span>`;
+    return window.AISecEdu.jobProgress.jobDurationMarkup(job, compact);
   }
 
   function updateJobDurations(container) {
-    const scope = container || root;
-    const now = Date.now();
-    scope.querySelectorAll("[data-job-start-ms]").forEach((node) => {
-      const started = Number(node.dataset.jobStartMs);
-      const ended = node.dataset.jobEndMs ? Number(node.dataset.jobEndMs) : now;
-      if (!Number.isFinite(started) || !Number.isFinite(ended)) return;
-      node.textContent = `${node.dataset.jobDurationPrefix || "已用时 "}${formatJobDuration((ended - started) / 1000)}`;
-    });
+    return window.AISecEdu.jobProgress.updateJobDurations(container || root);
   }
 
   function syncProgressClock() {
     const active = Array.from(state.trackedJobs.values()).some((job) =>
-      activeJobStatuses.has(String((job && job.status) || "").toUpperCase()),
+      ["RUNNING", "CANCEL_REQUESTED"].includes(String((job && job.status) || "").toUpperCase()),
     );
     updateJobDurations(root);
     if (active && state.progressClockTimer === null) {
@@ -1528,130 +1658,23 @@
   }
 
   function jobProgressValue(job) {
-    const status = String(job.status || "").toUpperCase();
-    if (status === "SUCCEEDED") return 100;
-    const value = Number(job.progress || 0);
-    if (!Number.isFinite(value)) return 0;
-    const upperBound = activeJobStatuses.has(status) ? 99 : 100;
-    return Math.max(0, Math.min(upperBound, Math.round(value)));
+    return window.AISecEdu.jobProgress.jobProgressValue(job);
   }
 
   function jobStepIndex(job) {
-    const steps = jobSteps(job);
-    const lastIndex = steps.length - 1;
-    const status = String(job.status || "QUEUED").toUpperCase();
-    const stage = normalizedJobStage(job);
-    if (status === "SUCCEEDED") return lastIndex;
-    if (/^(complete|completed|finalizing)$/.test(stage)) {
-      return activeJobStatuses.has(status)
-        ? Math.max(0, lastIndex - 1)
-        : lastIndex;
-    }
-    if (job.kind === "learning.authoring") {
-      if (/(queue|routing|recover|retry|authoring)/.test(stage)) return 0;
-      if (/^(catalog)$/.test(stage)) return 0;
-      if (/^(strategy|plan)$/.test(stage)) return Math.min(1, lastIndex);
-      if (/^(build)$/.test(stage)) return Math.min(2, lastIndex);
-      if (/^(review|preflight-repair)$/.test(stage))
-        return Math.min(3, lastIndex);
-      if (/^(draft)$/.test(stage)) return Math.min(4, lastIndex);
-      if (/^(validate-\d+|validation-repair-\d+)$/.test(stage))
-        return Math.min(5, lastIndex);
-      if (/^(ready)$/.test(stage)) return lastIndex;
-    }
-    if (job.kind === "agent.chat") {
-      if (/(queue|routing|recover|retry|receiv)/.test(stage)) return 0;
-      if (/(plan|skill)/.test(stage)) return Math.min(1, lastIndex);
-      if (/(generat|analy|execut|reason|compose)/.test(stage))
-        return Math.min(2, lastIndex);
-      if (/(deliver|persist|render|document|check|validat)/.test(stage))
-        return Math.max(0, lastIndex - 1);
-    }
-    if (/(queue|routing|recover|retry|receiv)/.test(stage)) return 0;
-    if (
-      /(persist|validat|preflight|review|repair|materializ|check|document|ready)/.test(
-        stage,
-      )
-    )
-      return Math.max(0, lastIndex - 1);
-    if (/(generat|analy|author|solv|build|render|compose|extract)/.test(stage))
-      return Math.min(1, lastIndex);
-    const progress = jobProgressValue(job);
-    if (progress >= 75) return Math.max(0, lastIndex - 1);
-    if (progress >= 10 || !["QUEUED", "CANCELED"].includes(status))
-      return Math.min(1, lastIndex);
-    return 0;
+    return window.AISecEdu.jobProgress.jobStepIndex(job);
   }
 
   function jobCurrentDetail(job) {
-    const events = Array.isArray(job.events) ? job.events : [];
-    const latest = events.length ? events[events.length - 1] : null;
-    const stagePresentation = jobStagePresentation(job);
-    const latestStage = String((latest && latest.stage) || "")
-      .toLowerCase()
-      .replace(/^native-/, "");
-    const stage = normalizedJobStage(job);
-    if (stagePresentation && latestStage !== stage) {
-      return stagePresentation.detail;
-    }
-    if (
-      latest &&
-      latest.message &&
-      String(job.status || "").toUpperCase() !== "SUCCEEDED"
-    ) {
-      return String(latest.message);
-    }
-    const steps = jobSteps(job);
-    const current = steps[jobStepIndex(job)] || steps[0];
-    return (current && current.detail) || "正在处理任务";
+    return window.AISecEdu.jobProgress.jobCurrentDetail(job);
   }
 
   function jobCurrentStepLabel(job) {
-    const stagePresentation = jobStagePresentation(job);
-    if (stagePresentation) return stagePresentation.label;
-    const steps = jobSteps(job);
-    const current = steps[jobStepIndex(job)] || steps[0];
-    return (current && current.label) || "正在处理";
+    return window.AISecEdu.jobProgress.jobCurrentStepLabel(job);
   }
 
   function jobTimelineMarkup(job, compact) {
-    const steps = jobSteps(job);
-    const activeIndex = jobStepIndex(job);
-    const status = String(job.status || "QUEUED").toUpperCase();
-    return `<ol class="job-step-list ${compact ? "is-compact" : ""}" style="--job-step-count:${steps.length}" aria-label="任务步骤">
-      ${steps
-        .map((step, index) => {
-          let stepState =
-            index < activeIndex || status === "SUCCEEDED"
-              ? "complete"
-              : index === activeIndex
-                ? "current"
-                : "pending";
-          if (index === activeIndex && status === "FAILED")
-            stepState = "failed";
-          if (
-            index === activeIndex &&
-            ["CANCELED", "CANCEL_REQUESTED"].includes(status)
-          )
-            stepState = "canceled";
-          const icon =
-            stepState === "complete"
-              ? "fa-check"
-              : stepState === "failed"
-                ? "fa-times"
-                : stepState === "canceled"
-                  ? "fa-minus"
-                  : stepState === "current"
-                    ? status === "QUEUED"
-                      ? "fa-clock"
-                      : "fa-circle-notch"
-                    : "fa-circle";
-          const currentAttribute =
-            stepState === "current" ? ' aria-current="step"' : "";
-          return `<li class="is-${stepState}"${currentAttribute}><span class="job-step-icon"><i class="${stepState === "pending" ? "far" : "fas"} ${icon}${stepState === "current" && status !== "QUEUED" ? " fa-spin" : ""}"></i></span><span class="job-step-copy"><strong>${api.escapeHtml(step.label)}</strong>${compact ? "" : `<small>${api.escapeHtml(step.detail)}</small>`}</span></li>`;
-        })
-        .join("")}
-    </ol>`;
+    return window.AISecEdu.jobProgress.jobTimelineMarkup(job, compact);
   }
 
   function jobDisclosureElementId(prefix, jobId) {
@@ -1659,18 +1682,12 @@
   }
 
   function jobDisclosureExpanded(jobId) {
-    return state.expandedJobIds.has(String(jobId));
+    const id = String(jobId);
+    return state.expandedJobIds.has(id);
   }
 
   function jobAttemptLabel(job) {
-    const attempt = Math.max(0, Number(job.attemptCount || 0));
-    const maximum = Math.max(attempt, Number(job.maxAttempts || 0));
-    if (!attempt && !maximum) return "";
-    if (!attempt)
-      return maximum > 1 ? `最多自动尝试 ${maximum} 次` : "尚未开始执行";
-    return maximum > 1
-      ? `第 ${attempt}/${maximum} 次执行`
-      : `第 ${attempt} 次执行`;
+    return window.AISecEdu.jobProgress.jobAttemptLabel(job);
   }
 
   function jobProgressBarMarkup(job, className, key) {
@@ -1698,6 +1715,118 @@
     });
   }
 
+  const activityStore = window.AISecEduAgentActivity.createActivityStore();
+  let draftStorage;
+  try { draftStorage = window.sessionStorage; } catch (_) {}
+  const composerDrafts = window.AISecEduAgentActivity.createDraftStore(
+    draftStorage, `aisecedu-teacher-draft:${root.dataset.ownerId}`,
+  );
+
+  function saveComposerDraft() {
+    if (!state.thread) return;
+    composerDrafts.write(state.thread?.id, {
+      content: elements.input.value, artifactType: elements.type.value,
+    });
+  }
+
+  function restoreComposerDraft(id) {
+    const draft = composerDrafts.read(id);
+    elements.input.value = draft.content;
+    elements.type.value = draft.artifactType;
+    resizeComposer();
+  }
+
+  function agentRunRecords(job) {
+    return activityStore.runs(job);
+  }
+
+  function agentJobState(job) {
+    const status = String(job?.status || "QUEUED").toUpperCase();
+    const stage = String(job?.stage || "").toLowerCase();
+    const recovery = job?.recovery && typeof job.recovery === "object" ? job.recovery : {};
+    if (status === "FAILED") return {key: "failed", label: "执行失败", icon: "fa-exclamation-circle", live: false};
+    if (status === "CANCELED") return {key: "canceled", label: "已停止", icon: "fa-stop-circle", live: false};
+    if (status === "SUCCEEDED") return {key: "completed", label: "已完成", icon: "fa-check-circle", live: false};
+    if (status === "CANCEL_REQUESTED") return {key: "stopping", label: "正在停止", icon: "fa-circle-notch fa-spin", live: true};
+    if (status === "RUNNING") return {key: "running", label: "正在执行", icon: "fa-circle-notch fa-spin", live: true};
+    if (recovery.automaticRecovery || /^(repairing-content|waiting-service|retrying|recovering)$/.test(stage))
+      return {key: "waiting-retry", label: stage === "repairing-content" ? "等待自动修复" : "等待重新尝试", icon: "fa-clock", live: false};
+    return {key: "queued", label: "排队中", icon: "fa-clock", live: false};
+  }
+
+  function agentJobActivityLabel(job) {
+    const state = agentJobState(job);
+    if (state.key === "waiting-retry") return "已保存检查结果，准备再次尝试";
+    if (state.key === "queued") return "等待执行资源";
+    if (state.key === "stopping") return "正在停止任务";
+    return agentRunCurrentLabel(job);
+  }
+
+  function agentJobRetryMeta(job) {
+    const recovery = job?.recovery && typeof job.recovery === "object" ? job.recovery : {};
+    const due = jobTimestamp(recovery.nextAttemptAt);
+    if (due === null) return "检查结果已保存，等待下一次尝试";
+    return `检查结果已保存 · 预计 ${new Date(due).toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", hour12: false})} 再次尝试`;
+  }
+
+  function agentRunCurrentLabel(job) {
+    const status = String(job.status || "QUEUED").toUpperCase();
+    if (status === "SUCCEEDED") return "执行完成，可以查看结果";
+    if (status === "FAILED") return "执行未完成，可查看失败记录";
+    if (status === "CANCELED") return "执行已停止";
+    const visual = agentJobState(job);
+    if (visual.key === "waiting-retry") return visual.label;
+    if (visual.key === "queued") return "已排队，等待执行";
+    const runs = agentRunRecords(job);
+    const current = runs[runs.length - 1];
+    const item = current?.status === "running" ? current.items.findLast((entry) => entry.status === "running" && entry.kind !== "reasoning") ||
+      current.items.findLast((entry) => entry.status === "running") : null;
+    if (item) return item.title || "正在执行";
+    const events = Array.isArray(job.events) ? job.events : [];
+    const latest = [...events].reverse().find((entry) => entry.stage !== "agent_run");
+    if (latest?.message) return latest.message;
+    if (current?.status === "running" && current.items.length) return current.items[current.items.length - 1].title || "正在执行";
+    return "正在连接执行记录";
+  }
+
+  function agentRunMarkup(job) {
+    const runs = agentRunRecords(job);
+    const visual = agentJobState(job);
+    if (!runs.length) {
+      const events = (Array.isArray(job.events) ? job.events : []).filter((event) => event.message && event.stage !== "agent_run");
+      const visible = events.slice(-8);
+      return `<section class="agent-run-trace is-audit" aria-label="任务审计记录"><div class="agent-run-trace-head"><strong>执行记录</strong><span>${api.escapeHtml(visual.label)}</span></div>${visible.length ? `<ol class="agent-run-audit">${visible.map((event) => {
+        const time = jobTimestamp(event.created);
+        const label = time === null ? "" : new Date(time).toLocaleTimeString("zh-CN", { hour12: false });
+        const stage = String(event.stage || "");
+        return `<li class="is-${api.escapeHtml(stage.replace(/[^a-z0-9-]/gi, ""))}"><time>${api.escapeHtml(label)}</time><span>${api.escapeHtml(event.message)}</span></li>`;
+      }).join("")}</ol>` : '<p class="agent-run-empty">当前还没有可回放的执行事件。</p>'}</section>`;
+    }
+    return window.AISecEduAgentActivityView.runMarkup(runs, {
+      escape: api.escapeHtml, openItems: state.openAgentTraceItemIds,
+      live: visual.live, label: visual.label,
+    });
+  }
+
+  function bindAgentTraceDetails(container) {
+    window.AISecEduAgentTranscript.freshElements(container, "[data-agent-record-copy]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const value = button.closest("details")?.querySelector("pre")?.textContent || "";
+        try {
+          await window.navigator.clipboard.writeText(value);
+          button.textContent = "已复制";
+        } catch (_) { button.textContent = "请选中记录复制"; }
+      });
+    });
+    window.AISecEduAgentTranscript.freshElements(container, "[data-agent-trace-item]").forEach((details) => {
+      details.addEventListener("toggle", () => {
+        const id = details.dataset.agentTraceItem;
+        if (details.open) state.openAgentTraceItemIds.add(id);
+        else state.openAgentTraceItemIds.delete(id);
+      });
+    });
+  }
+
   function jobDisclosureDetailsMarkup(job, prefix) {
     const status = String(job.status || "QUEUED").toUpperCase();
     const expanded = jobDisclosureExpanded(job.id);
@@ -1707,7 +1836,7 @@
         ? `<p class="job-disclosure-failure"><i class="fas fa-exclamation-circle"></i><span>${api.escapeHtml(job.failureMessage || job.error)}</span></p>`
         : "";
     return `<div id="${api.escapeHtml(detailId)}" class="job-disclosure-details" data-job-disclosure-details="${api.escapeHtml(job.id)}" role="region" aria-label="${api.escapeHtml(jobTitle(job))}详细步骤"${expanded ? "" : " hidden"}>
-      ${jobTimelineMarkup(job, false)}
+      ${agentRunMarkup(job)}
       ${failure}
     </div>`;
   }
@@ -1746,10 +1875,52 @@
     if (expanded) state.expandedJobIds.add(id);
     else state.expandedJobIds.delete(id);
     syncJobDisclosure(id, expanded);
+    if (expanded) refreshJobDetails(id).catch(() => {});
+  }
+
+  const pendingJobDetails = new Set();
+  async function readActivityPages(jobId, observedThreadId) {
+    let data;
+    for (let page = 0; page < 4; page++) {
+      const cursor = activityStore.cursor(jobId);
+      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+      try {
+        data = unwrap(await api.request(`/teaching/jobs/${encodeURIComponent(jobId)}/events${query}`));
+      } catch (error) {
+        if ((error.code || error.payload?.errorCode) === "INVALID_ACTIVITY_CURSOR") activityStore.resetCursor(jobId);
+        throw error;
+      }
+      if (state.thread?.id !== observedThreadId) return null;
+      storeTaskCenterJob({
+        ...data.job, events: data.events || [], eventCursor: data.eventCursor,
+        activityHasMore: data.hasMore, activityLoaded: true,
+      });
+      if (!data.hasMore) break;
+    }
+    return data;
+  }
+
+  async function refreshJobDetails(jobId) {
+    const id = String(jobId);
+    if (pendingJobDetails.has(id)) return;
+    pendingJobDetails.add(id);
+    try {
+      const observedThreadId = state.thread?.id;
+      let data;
+      do {
+        data = await readActivityPages(id, observedThreadId);
+        if (!data) return;
+        renderJobs();
+        renderMessages();
+      } while (data.hasMore);
+      focusPendingJob();
+    } finally {
+      pendingJobDetails.delete(id);
+    }
   }
 
   function bindJobDisclosureButtons(container, selectJob) {
-    container.querySelectorAll("[data-job-toggle]").forEach((button) => {
+    window.AISecEduAgentTranscript.freshElements(container, "[data-job-toggle]").forEach((button) => {
       button.addEventListener("click", () => {
         const jobId = String(button.dataset.jobToggle || "");
         if (!jobId) return;
@@ -1770,6 +1941,8 @@
 
   function jobStatusSummary(job) {
     const status = String(job.status || "QUEUED").toUpperCase();
+    if (["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(status))
+      return agentRunCurrentLabel(job);
     if (status === "SUCCEEDED") return "已完成，可以直接查看结果";
     if (status === "FAILED")
       return job.failureMessage || "任务未完成，可以重新运行";
@@ -1786,6 +1959,7 @@
   function activeThreadJobs() {
     return Array.from(state.trackedJobs.values())
       .filter((job) =>
+        !isBackgroundMaterialJob(job) &&
         activeJobStatuses.has(String((job && job.status) || "").toUpperCase()),
       )
       .sort((left, right) => {
@@ -1800,16 +1974,15 @@
 
   function primaryActiveJob() {
     return (
-      activeThreadJobs().find(
-        (job) => String((job && job.kind) || "") !== "material.analyze",
-      ) || null
+      activeThreadJobs().find(job => job.status === "RUNNING" || job.status === "CANCEL_REQUESTED") ||
+      activeThreadJobs()[0] || null
     );
   }
 
   function updateAgentChrome() {
     const globalRows = state.taskCenterLoadedAt
       ? taskCenterRows()
-      : Array.from(state.trackedJobs.values());
+      : Array.from(state.trackedJobs.values()).filter((job) => !isBackgroundMaterialJob(job));
     const activeCount = globalRows.filter((job) =>
       activeJobStatuses.has(String((job && job.status) || "").toUpperCase()),
     ).length;
@@ -1829,6 +2002,19 @@
         ? `查看任务，${activeCount} 项运行中，${failedCount} 项需处理，${approvalCount} 项待确认`
         : "查看任务",
     );
+    const runStatus = document.getElementById("teaching-run-status");
+    if (runStatus) {
+      const latestAssistant = [...(state.thread?.messages || [])].reverse().find(message => message.role === "assistant" && messageJob(message));
+      const lastJob = latestAssistant ? messageJob(latestAssistant) : null;
+      const job = primaryActiveJob() || (["FAILED", "CANCELED"].includes(String(lastJob?.status || "").toUpperCase()) ? lastJob : null);
+      const visual = job ? agentJobState(job) : null;
+      runStatus.dataset.state = state.busy ? "running" : visual?.key || "idle";
+      runStatus.innerHTML = state.busy
+        ? `<i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span>${root.dataset.ready === "true" ? "正在提交" : "正在准备对话"}</span>`
+        : visual
+        ? `<i class="fas ${visual.icon}" aria-hidden="true"></i><span>${api.escapeHtml(visual.label)}</span>`
+        : '<i class="fas fa-circle" aria-hidden="true"></i><span>准备就绪</span>';
+    }
     renderApprovalTray();
     syncComposerState();
   }
@@ -1927,9 +2113,8 @@
 
   function jobForCandidateCard(card) {
     const stateData = card.state || {};
-    if (stateData.jobId && state.trackedJobs.has(String(stateData.jobId))) {
-      return state.trackedJobs.get(String(stateData.jobId));
-    }
+    const canonical = stateData.jobId && taskById(stateData.jobId);
+    if (canonical) return canonical;
     return (
       Array.from(state.trackedJobs.values()).find((job) => {
         const result =
@@ -2092,7 +2277,7 @@
     const detailId = jobDisclosureElementId("job-card-details", job.id);
     return `<article class="conversation-card job-card is-${api.escapeHtml(status.toLowerCase())}${expanded ? " is-expanded" : ""}" data-job-card-shell="${api.escapeHtml(job.id)}" data-job-disclosure="${api.escapeHtml(job.id)}">
       <button class="job-card-open" type="button" data-job-toggle="${api.escapeHtml(job.id)}" data-job-expand-label="${api.escapeHtml(`展开${title}${active ? "的生成步骤" : "的任务步骤"}`)}" data-job-collapse-label="${api.escapeHtml(`收起${title}${active ? "的生成步骤" : "的任务步骤"}`)}" aria-expanded="${expanded}" aria-controls="${api.escapeHtml(detailId)}" aria-label="${expanded ? "收起" : "展开"}${api.escapeHtml(title)}${active ? "的生成步骤" : "的任务步骤"}">
-        <span class="job-card-heading"><span class="teaching-card-icon"><i class="fas ${icon}${iconAnimation}"></i></span><span><span class="card-kicker">${kicker}</span><strong>${api.escapeHtml(title)}</strong><small>${api.escapeHtml(jobStatusSummary(job))}</small><span class="job-card-facts"><span>${jobProgressValue(job)}%</span>${jobDurationMarkup(job, true)}${jobAttemptLabel(job) ? `<span>${api.escapeHtml(jobAttemptLabel(job))}</span>` : ""}</span></span><i class="fas fa-chevron-right job-disclosure-chevron"></i></span>
+        <span class="job-card-heading"><span class="teaching-card-icon"><i class="fas ${icon}${iconAnimation}"></i></span><span><span class="card-kicker">${kicker}</span><strong>${api.escapeHtml(title)}</strong><small>${api.escapeHtml(jobStatusSummary(job))}</small><span class="job-card-facts">${jobDurationMarkup(job, true)}${jobAttemptLabel(job) ? `<span>${api.escapeHtml(jobAttemptLabel(job))}</span>` : ""}</span></span><i class="fas fa-chevron-right job-disclosure-chevron"></i></span>
       </button>
       ${jobDisclosureDetailsMarkup(job, "job-card-details")}
     </article>`;
@@ -2177,6 +2362,11 @@
       const single = stateData.generationMode === "single" || count === 1;
       const job = jobForCandidateCard(card);
       const jobStatus = String((job && job.status) || "").toUpperCase();
+      if (["FAILED", "CANCELED"].includes(jobStatus)) {
+        const draftId = artifactIdForResult(card, job);
+        if (!draftId) return "";
+        return `<a class="conversation-card failed-draft-card" href="${api.escapeHtml(teacherArtifactHref(draftId))}"><i class="fas fa-file-alt" aria-hidden="true"></i><span><strong>查看保留草稿</strong><small>可查看已生成内容和检查记录，继续修改</small></span><i class="fas fa-arrow-right" aria-hidden="true"></i></a>`;
+      }
       if (job && jobStatus !== "SUCCEEDED") {
         return taskLifecycleCardMarkup(job, {
           title: artifactTypeLabels[stateData.kind] || "教学内容",
@@ -2207,8 +2397,8 @@
         {
           icon: "fa-file-alt",
           kicker: "生成结果",
-          title: stateData.title || stateData.artifactType || "内容详情",
-          summary: `版本 ${stateData.revision || 1} · ${stateData.qualityCheck || statusLabel(stateData.status) || "待检查"}`,
+          title: stateData.title || artifactTypeLabels[stateData.artifactType] || "内容详情",
+          summary: `版本 ${stateData.revision || 1} · ${statusLabel(stateData.qualityCheck || stateData.status || "NEEDS_REVIEW")}`,
           action: "打开详情",
         },
       )}</a>`;
@@ -2267,7 +2457,7 @@
 
   function jobCardView(card) {
     const stateData = card.state || {};
-    const tracked = state.trackedJobs.get(String(card.objectId)) || {};
+    const tracked = taskById(card.objectId) || {};
     return { id: String(card.objectId), ...stateData, ...tracked };
   }
 
@@ -2312,6 +2502,7 @@
     "course.member.add": "添加课程成员",
     "course.member.remove": "移除课程成员",
     "module.open": "打开章节",
+    "module.inquiry": "创建流程探究式学习草稿",
     "module.create": "创建章节",
     "module.update": "更新章节",
     "module.delete": "删除章节",
@@ -2330,7 +2521,7 @@
     "assignment.grade.override": "教师复核成绩",
     "progress.read": "刷新真实进度",
     "material.list": "查看课件",
-    "material.analyze": "重新分析课件",
+    "material.analyze": "更新资料索引",
     "material.add_to_module": "添加到章节资料",
     "material.apply_chapters": "将分析章节写入课程",
     "candidate.generate": "生成候选",
@@ -2517,11 +2708,16 @@
       (selection && selection.status) || "",
     ).toUpperCase();
     const started = selectionStatus === "STARTED";
+    const superseded = Boolean(metadata.generationRefinement);
+    const round = Math.max(1, Number(metadata.generationRound || 1));
+    const messageKey = String(message.id);
+    const messageSelecting = [...state.selectingGenerationOptions].some((key) => key.startsWith(`${messageKey}:`));
     const artifactLabels = {
       "slide-deck": "课件",
       "ctf-challenge": "CTF 实践题",
       "attack-defense-scene": "实训演示",
       simulation: "模拟实训",
+    debate: "AI 辩论",
     };
     const baseArguments =
       bundle.baseArguments && typeof bundle.baseArguments === "object"
@@ -2550,7 +2746,7 @@
         : `逐个比较方案；选择前不会开始正式生成${artifactLabels[bundle.artifactType] ? ` ${artifactLabels[bundle.artifactType]}` : ""}。`;
     return `<section class="teaching-generation-options teaching-plan-picker" aria-label="正式生成方案" data-generation-option-picker-message="${api.escapeHtml(message.id)}" data-current-option-id="${api.escapeHtml(activeOptionId)}" data-generation-requested-count="${challengeCount}">
       <header class="teaching-generation-options-header">
-        <div><span class="teaching-eyebrow">生成前确认</span><h3>选择一套方案</h3><p>${api.escapeHtml(pickerDescription)}</p></div>
+        <div><span class="teaching-eyebrow">第 ${round} 轮 · 生成前确认</span><h3>选择一套方案</h3><p>${api.escapeHtml(pickerDescription)}</p></div>
         <span class="teaching-generation-count" data-generation-option-counter>${challengeCount > 1 ? `${challengeCount} 道题 · ` : ""}${activeIndex + 1} / ${bundle.options.length}</span>
       </header>
       <div class="teaching-generation-option-switcher">
@@ -2569,9 +2765,12 @@
           const selected = selection && selection.optionId === option.id;
           const selectingKey = `${message.id}:${option.id}`;
           const selecting = state.selectingGenerationOptions.has(selectingKey);
-          const disabled =
-            selecting || started || Boolean(selection && !selected);
-          const buttonLabel = selecting
+          const blocked =
+            messageSelecting || started || superseded || Boolean(selection && !selected);
+          const disabled = blocked || state.busy || state.thread?.status === "ARCHIVED";
+          const buttonLabel = superseded
+            ? "已提交修改，请选择新一轮方案"
+            : selecting
             ? "正在锁定方案…"
             : started && selected
               ? "已选择并开始生成"
@@ -2584,13 +2783,25 @@
           </div>
           <p class="teaching-generation-option-description">${api.escapeHtml(option.description)}</p>
           <ul class="teaching-generation-option-highlights">${option.highlights.map((item) => `<li><i class="fas fa-check" aria-hidden="true"></i><span>${api.escapeHtml(String(item))}</span></li>`).join("")}</ul>
-          <button type="button" class="teaching-generation-option-select" data-generation-option-message="${api.escapeHtml(message.id)}" data-generation-option-id="${api.escapeHtml(option.id)}" ${disabled ? "disabled" : ""}>
+          <details class="teaching-generation-prompt" data-generation-prompt="${api.escapeHtml(selectingKey)}" ${state.generationPromptExpanded.has(selectingKey) ? "open" : ""}>
+            <summary>查看正式生成的详细提示词</summary>
+            <p>选择后会将这份完整提示词发送给智能体正式生成。</p>
+            <pre>${api.escapeHtml(option.rewrittenPrompt)}</pre>
+          </details>
+          <button type="button" class="teaching-generation-option-select" data-generation-option-message="${api.escapeHtml(message.id)}" data-generation-blocked="${blocked}" data-generation-option-id="${api.escapeHtml(option.id)}" ${disabled ? "disabled" : ""}>
             ${selecting ? '<i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i>' : selected ? '<i class="fas fa-check" aria-hidden="true"></i>' : '<i class="fas fa-arrow-right" aria-hidden="true"></i>'}
             <span>${api.escapeHtml(buttonLabel)}</span>
           </button>
         </article>`;
         })
         .join("")}</div>
+      ${superseded ? '<p class="teaching-generation-round-notice" role="status">此轮已保留为历史记录。修改要求已提交，请在后续消息中选择新方案；若方案任务失败，可在任务卡中重试。</p>' : !selection ? `<details class="teaching-generation-refinement" data-generation-refinement="${api.escapeHtml(messageKey)}" ${state.generationRefinementExpanded.has(messageKey) ? "open" : ""}>
+        <summary>这三个方案都不满意，补充修改要求</summary>
+        <p>会保留原始要求并结合历次修改，重新给出三个方案，等待你选择。不会直接生成成品。</p>
+        <label for="generation-feedback-${api.escapeHtml(messageKey)}">你希望怎样修改？</label>
+        <textarea id="generation-feedback-${api.escapeHtml(messageKey)}" data-generation-feedback="${api.escapeHtml(messageKey)}" rows="3" maxlength="4000" placeholder="例如：面向零基础学生，减少文字，增加可旋转的模型；保留原来的时长。">${api.escapeHtml(state.generationRefinementDrafts.get(messageKey) || "")}</textarea>
+        <button type="button" class="teaching-generation-option-select" data-generation-refine-message="${api.escapeHtml(messageKey)}" data-generation-blocked="${messageSelecting}" ${messageSelecting || state.busy || state.thread?.status === "ARCHIVED" ? "disabled" : ""}><i class="fas fa-sync-alt" aria-hidden="true"></i><span>结合修改要求，重新给出三个方案</span></button>
+      </details>` : ""}
     </section>`;
   }
 
@@ -2763,6 +2974,8 @@
       bundle,
       selectionData,
       count,
+      threadId: state.thread.id,
+      epoch: state.threadLoadEpoch || 0,
     };
     elements.generationConfirmContext.innerHTML = `<span><i class="fas fa-book" aria-hidden="true"></i>${api.escapeHtml(scope.course)}</span><i class="fas fa-chevron-right" aria-hidden="true"></i><span><i class="fas fa-layer-group" aria-hidden="true"></i>${api.escapeHtml(scope.module)}</span><span><i class="fas fa-flag" aria-hidden="true"></i>CTF 实践题</span><span><i class="fas fa-signal" aria-hidden="true"></i><b data-generation-difficulty-summary>难度分布：${api.escapeHtml(generationDifficultySummary(items))}</b></span><span class="is-contract"><i class="fas fa-shield-alt" aria-hidden="true"></i>${count} 道彼此独立 · 草稿 · 独立环境与动态 Flag</span>`;
     elements.generationConfirmSummary.textContent = `请逐项核对或修改标题与难度。确认前不会创建题目、环境或学生可见内容；确认后将启动 ${count} 个可独立重试的任务。`;
@@ -2831,6 +3044,11 @@
     event.preventDefault();
     const pending = state.pendingGenerationConfirmation;
     if (!pending) return;
+    if (!threadActionCurrent(pending)) {
+      closeGenerationConfirmation();
+      api.showNotice(elements.notice, "请返回原对话，再确认这份生成计划。", "info");
+      return;
+    }
     let generationPlan;
     try {
       generationPlan = readConfirmedGenerationPlan();
@@ -2861,6 +3079,7 @@
       if (result && result.executed === false) {
         throw new Error("正式生成尚未启动，请再次确认生成计划。");
       }
+      if (!threadActionCurrent(pending) || state.pendingGenerationConfirmation !== pending) return;
       closeGenerationConfirmation();
       api.showNotice(
         elements.notice,
@@ -2870,6 +3089,7 @@
       await loadThreads();
       schedulePoll();
     } catch (error) {
+      if (!threadActionCurrent(pending) || state.pendingGenerationConfirmation !== pending) return;
       elements.generationConfirmError.textContent =
         error instanceof Error ? error.message : String(error);
       elements.generationConfirmError.hidden = false;
@@ -2880,6 +3100,11 @@
 
   async function selectGenerationOption(message, optionId) {
     if (!message || !state.thread) return;
+    if (state.busy) {
+      api.showNotice(elements.notice, "当前操作正在提交，请稍后选择方案。", "info");
+      return;
+    }
+    const action = { threadId: state.thread.id, epoch: state.threadLoadEpoch || 0 };
     const bundle = generationOptionsForMessage(message);
     const option =
       bundle && bundle.options.find((item) => item.id === optionId);
@@ -2892,7 +3117,7 @@
     try {
       const data = unwrap(
         await api.request(
-          `/teaching/threads/${encodeURIComponent(state.thread.id)}/messages/${encodeURIComponent(message.id)}/generation-options/${encodeURIComponent(option.id)}/select`,
+          `/teaching/threads/${encodeURIComponent(action.threadId)}/messages/${encodeURIComponent(message.id)}/generation-options/${encodeURIComponent(option.id)}/select`,
           {
             method: "POST",
             headers: {
@@ -2904,6 +3129,11 @@
           },
         ),
       );
+      if (!threadActionCurrent(action)) {
+        loadThreads().catch(showError);
+        return;
+      }
+      if (data.thread && data.thread.id !== action.threadId) throw new Error("方案结果不属于当前对话，请刷新后重试。");
       state.thread = data.thread || state.thread;
       syncAttachmentSources(state.thread);
       populateDojos(state.thread.dojoId);
@@ -2926,6 +3156,7 @@
         },
         approvalGranted: true,
       });
+      if (!threadActionCurrent(action)) return;
       if (result && result.executed === false) {
         throw new Error("正式生成尚未启动，请再次点击已选择的方案重试。");
       }
@@ -2936,9 +3167,12 @@
       );
       await loadThreads();
       schedulePoll();
+    } catch (error) {
+      if (threadActionCurrent(action)) throw error;
+      loadThreads().catch(showError);
     } finally {
       state.selectingGenerationOptions.delete(key);
-      renderMessages();
+      if (threadActionCurrent(action)) renderMessages();
     }
   }
 
@@ -3020,6 +3254,9 @@
 
   function renderAgentActions(message) {
     const metadata = message.metadata || {};
+    if (metadata.harnessManaged && ["queued", "executing", "waiting-tool"].includes(metadata.harnessExecution?.state)) {
+      return '<p class="teaching-harness-status" role="status">正在执行操作；可以离开页面，回来后继续查看。</p>';
+    }
     const proposals = Array.isArray(metadata.toolProposals)
       ? metadata.toolProposals
       : [];
@@ -3030,9 +3267,7 @@
           proposal.tool !== "dojo.select" &&
           proposal.requiresConfirmation !== true &&
           !proposalDecision(message, index) &&
-          !state.appliedActionProposals.has(
-            `${message.id}:${index}:${proposal.tool}`,
-          ) &&
+          !proposalWasApplied(message, index, proposal) &&
           !state.executingProposalKeys.has(
             `${message.id}:${index}:${proposal.tool}`,
           ),
@@ -3089,10 +3324,10 @@
   ]);
 
   const automaticActionTools = new Set([
+    "module.inquiry",
     "candidate.generate",
     "challenge.generate",
     "assignment.generate",
-    "material.analyze",
     "material.add_to_module",
     "artifact.revise",
     "classroom.prepare",
@@ -3269,7 +3504,7 @@
 
   function proposalWasApplied(message, index, proposal) {
     const key = proposalKey(message, index, proposal);
-    return state.appliedActionProposals.has(key);
+    return message.metadata?.toolExecutionResults?.[String(index)]?.status === "SUCCEEDED" || state.appliedActionProposals.has(key);
   }
 
   async function preflightDestructiveProposal(proposal) {
@@ -3295,6 +3530,7 @@
         {
           decision,
           confirmed: true,
+          approvalRequest: item.message.metadata?.toolProposalApprovalRequests?.[String(item.index)],
         },
       ),
     );
@@ -3332,6 +3568,12 @@
     try {
       await persistProposalDecision(item, decision);
       renderMessages();
+      if (item.message.metadata?.harnessManaged && ['queued', 'executing', 'waiting-tool', 'awaiting-approval'].includes(item.message.metadata?.harnessExecution?.state)) {
+        await loadThread(state.thread.id);
+        api.showNotice(elements.notice, decision === 'REJECTED' ? '已拒绝这项操作，智能体将继续处理。' : '已批准，智能体正在后台继续执行。', 'progress');
+        schedulePoll();
+        return;
+      }
       if (decision === "REJECTED") {
         api.showNotice(elements.notice, "已拒绝这项操作。", "warning");
         return;
@@ -3467,19 +3709,18 @@
       )
         break;
       if (!automatic && index > startIndex) break;
-      const retryingFailedProposal =
-        !automatic && state.proposalFailures.has(key);
       if (!automatic) state.proposalFailures.delete(key);
       state.executingProposalKeys.add(key);
       renderMessages();
       try {
         const result = await handleAgentTool(proposal, {
-          idempotencyKey: retryingFailedProposal
-            ? `agent-proposal:${message.id}:${index}:retry:${Date.now()}`
-            : `agent-proposal:${message.id}:${index}`,
+          // A lost response must replay the same operation identity. A new
+          // attempt needs a newly proposed action, not a timestamp suffix.
+          idempotencyKey: `agent-proposal:${message.id}:${index}`,
           agentContinuation: proposal.tool === "candidate.generate",
           sourceJobId: message.metadata && message.metadata.jobId,
           approvalGranted: Boolean(options && options.approvalGranted),
+          approvalRequest: message.metadata?.toolProposalApprovalRequests?.[String(index)],
         });
         if (result && result.executed === false) {
           state.executingProposalKeys.delete(key);
@@ -3514,6 +3755,7 @@
           state.autoExecuteJobIds.has(String(item.metadata.jobId || "")),
       );
     if (!message) return;
+    if (message.metadata.harnessManaged) return;
     const proposals = Array.isArray(message.metadata.toolProposals)
       ? message.metadata.toolProposals
       : [];
@@ -3536,6 +3778,13 @@
     }
   }
 
+  const inquiryModeSelect = document.getElementById("teaching-learning-pattern");
+  if (inquiryModeSelect) {
+    inquiryModeSelect.value = new URLSearchParams(location.search).has("inquiry") ? "process-inquiry" : "";
+    inquiryModeSelect.addEventListener("change", () => {
+      if (inquiryModeSelect.value && !elements.input.value.trim()) elements.input.value = "请为我创建 AES-128 流程探究式学习项目，先保存草稿。";
+    });
+  }
   const courseTools = new Set(
     Object.keys(toolLabels).filter(
       (name) =>
@@ -3621,16 +3870,18 @@
       navigateCourseTool(proposal.tool, proposal.arguments || {});
       return { executed: true };
     }
+    const action = { threadId: state.thread.id, epoch: state.threadLoadEpoch || 0 };
     if (!(await confirmCourseTool(proposal, options)))
       return { executed: false };
+    if (!threadActionCurrent(action)) return { executed: false, reason: "navigation-changed" };
     const idempotencyKey =
       (options && options.idempotencyKey) ||
       (window.crypto && window.crypto.randomUUID
         ? window.crypto.randomUUID()
         : `${Date.now()}-${Math.random()}`);
-    setBusy(true);
+    const submittedThreadId = action.threadId;
     try {
-      const data = unwrap(
+      let data = unwrap(
         await api.request("/teaching/agent-tools/execute", {
           method: "POST",
           headers: {
@@ -3639,10 +3890,11 @@
             "Idempotency-Key": idempotencyKey,
           },
           body: JSON.stringify({
-            threadId: state.thread.id,
+            threadId: submittedThreadId,
             tool: proposal.tool,
             arguments: proposal.arguments || {},
             confirmed: Boolean(proposal.requiresConfirmation),
+            approvalRequest: options && options.approvalRequest,
             sourceJobId: (options && options.sourceJobId) || undefined,
             generationSelection:
               (options && options.generationSelection) || undefined,
@@ -3650,9 +3902,19 @@
           }),
         }),
       );
-      state.context = unwrap(
+      const completedAction = await window.AISecEduCommands.waitForAction(data.action, {
+        read: async (id) => unwrap(await api.request(`/teaching/agent-tools/actions/${encodeURIComponent(id)}`)).action,
+        onProgress: () => { if (threadActionCurrent(action)) api.showNotice(elements.notice, '操作已提交，正在后台执行；你可以继续输入。', 'progress'); },
+      });
+      if (completedAction?.execution) {
+        data = unwrap(await api.request(`/teaching/agent-tools/actions/${encodeURIComponent(completedAction.id)}`));
+      }
+      if (!threadActionCurrent(action)) return { executed: true, data };
+      const context = unwrap(
         await api.request("/teaching/context?view=teacher"),
       );
+      if (!threadActionCurrent(action)) return { executed: true, data };
+      state.context = context;
       state.thread = data.thread || state.thread;
       syncAttachmentSources(state.thread);
       populateDojos(state.thread.dojoId);
@@ -3667,8 +3929,15 @@
       );
       return { executed: true, data };
     } finally {
-      setBusy(false);
+      schedulePoll();
     }
+  }
+
+  async function waitForApprovedAction(action) {
+    return window.AISecEduCommands.waitForAction(action, {
+      read: async (id) => unwrap(await api.request(`/teaching/actions/${encodeURIComponent(id)}/decision`)).action,
+      onProgress: () => api.showNotice(elements.notice, "操作已提交，正在执行；你可以继续使用页面。", "progress"),
+    });
   }
 
   async function completeArtifactPublication(initialAction) {
@@ -3694,11 +3963,13 @@
             decision: "APPROVED",
             confirmed: true,
             comment: "教师在全局智能体中要求发布",
+            approvalRequest: action.approvalRequest,
           },
         ),
       );
       action = data.action;
     }
+    action = await waitForApprovedAction(action);
     if (action.status !== "APPROVED") {
       throw new Error(
         action.error ||
@@ -3747,7 +4018,7 @@
         ),
       );
       if (!staged.action) throw new Error("章节写入审批未建立。");
-      unwrap(
+      const accepted = unwrap(
         await api.json(
           "POST",
           `/teaching/actions/${encodeURIComponent(staged.action.id)}/decision`,
@@ -3755,9 +4026,11 @@
             decision: "APPROVED",
             confirmed: true,
             comment: "教师在 AI 共创工作台中明确确认写入课件分析章节",
+            approvalRequest: staged.action.approvalRequest,
           },
         ),
       );
+      await waitForApprovedAction(accepted.action);
       state.context = unwrap(
         await api.request("/teaching/context?view=teacher"),
       );
@@ -3779,6 +4052,9 @@
     ) {
       const decision =
         proposal.tool === "approval.approve" ? "APPROVED" : "REJECTED";
+      const reviewed = unwrap(await api.request(
+        `/teaching/actions/${encodeURIComponent(args.actionId)}/decision`,
+      ));
       const data = unwrap(
         await api.json(
           "POST",
@@ -3787,9 +4063,11 @@
             decision,
             confirmed: true,
             comment: "教师已在全局智能体对话中明确表达决定",
+            approvalRequest: reviewed.action.approvalRequest,
           },
         ),
       );
+      data.action = await waitForApprovedAction(data.action);
       await loadActions();
       renderJobs();
       const publishing =
@@ -3814,7 +4092,7 @@
     if (proposal.tool === "candidate.compare" && args.candidateSetId)
       return openCandidateSet(args.candidateSetId);
     if (proposal.tool === "artifact.open" && args.artifactId) {
-      window.location.href = teacherArtifactHref(args.artifactId);
+      openArtifactReview(args.artifactId);
       return;
     }
     if (
@@ -3952,8 +4230,8 @@
   function messageJob(message) {
     const metadata = (message && message.metadata) || {};
     const metadataJobId = metadata.jobId && String(metadata.jobId);
-    if (metadataJobId && state.trackedJobs.has(metadataJobId))
-      return state.trackedJobs.get(metadataJobId);
+    const canonical = metadataJobId && taskById(metadataJobId);
+    if (canonical) return canonical;
     const candidateCard = (message.cards || []).find(
       (card) => card.type === "candidate_set",
     );
@@ -3992,8 +4270,8 @@
           : "queued",
       progress: metadata.pending === false ? 100 : 0,
       failureMessage: metadata.failed ? message.content : null,
-      created: message.created,
-      updated: message.created,
+      created: null,
+      updated: null,
     };
   }
 
@@ -4072,8 +4350,12 @@
   function messageMetaMarkup(message, options) {
     const copy = options && options.copy !== false;
     const reuse = options && options.reuse;
+    const date = message.created ? new Date(message.created) : null;
+    const time = date && !Number.isNaN(date.getTime())
+      ? new Intl.DateTimeFormat("zh-CN", {month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false}).format(date)
+      : api.formatDate(message.created);
     return `<div class="teaching-message-meta">
-      <time>${api.escapeHtml(api.formatDate(message.created))}</time>
+      <time datetime="${api.escapeHtml(message.created || "")}">${api.escapeHtml(time)}</time>
       <span class="teaching-message-tools">
         ${copy ? `<button type="button" data-message-copy="${api.escapeHtml(message.id)}" title="复制内容" aria-label="复制内容"><i class="far fa-copy"></i></button>` : ""}
         ${reuse ? `<button type="button" data-message-reuse="${api.escapeHtml(message.id)}" title="再次编辑" aria-label="再次编辑这条要求"><i class="fas fa-pen"></i></button>` : ""}
@@ -4129,23 +4411,37 @@
       progress: 0,
       created: message.created,
     };
-    const status = String(job.status || "QUEUED").toUpperCase();
-    const stopping = status === "CANCEL_REQUESTED";
-    const step = stopping ? "正在停止" : jobCurrentStepLabel(job);
-    const detail = jobCurrentDetail(job);
-    const progress = jobProgressValue(job);
+    const visual = agentJobState(job);
+    const step = agentJobActivityLabel(job);
+    const detail = visual.key === "waiting-retry"
+      ? agentJobRetryMeta(job)
+      : visual.key === "queued" ? "任务已进入队列，开始执行后将显示实时步骤"
+      : "模型调用、工具操作与结果检查";
+    const facts = visual.live ? jobDurationMarkup(job, true) : "";
     const expanded = jobDisclosureExpanded(job.id);
     const detailId = jobDisclosureElementId(
       `activity-details-${message.id}`,
       job.id,
     );
-    return `<article class="teaching-message is-assistant is-activity${expanded ? " is-expanded" : ""}" data-message-id="${api.escapeHtml(message.id)}" data-job-disclosure="${api.escapeHtml(job.id)}">
-      <div class="teaching-message-avatar" aria-hidden="true"><i class="fas fa-circle-notch fa-spin"></i></div>
+    const liveRun = agentRunRecords(job).at(-1);
+    const draft = [...(liveRun?.items || [])].reverse().find((item) =>
+      item.kind === "message" && item.content &&
+      /^回答草稿|^回答草稿已校验/.test(String(item.title || "")) &&
+      item.status !== "failed" && item.status !== "cancelled",
+    );
+    const draftText = draft ? String(draft.content) : "";
+    const streamedAnswer = draftText || window.AISecEduAgentStreamText.streamedAnswer(agentRunRecords(job));
+    return `<article class="teaching-message is-assistant is-activity${expanded ? " is-expanded" : ""}" data-run-state="${visual.key}" data-message-id="${api.escapeHtml(message.id)}" data-job-disclosure="${api.escapeHtml(job.id)}">
+      <div class="teaching-message-avatar" aria-hidden="true"><i class="fas ${visual.icon}"></i></div>
       <div class="teaching-message-body">
         <button class="teaching-activity-line" type="button" data-job-toggle="${api.escapeHtml(job.id)}" data-job-expand-label="${api.escapeHtml(`${step}，展开详细步骤`)}" data-job-collapse-label="${api.escapeHtml(`${step}，收起详细步骤`)}" aria-expanded="${expanded}" aria-controls="${api.escapeHtml(detailId)}" aria-label="${api.escapeHtml(step)}，${expanded ? "收起" : "展开"}详细步骤">
-          <span class="teaching-activity-copy"><strong aria-live="polite">${api.escapeHtml(step)}</strong>${detail && detail !== step ? `<small>${api.escapeHtml(detail)}</small>` : ""}<span class="teaching-activity-facts"><span>${progress}%</span>${jobDurationMarkup(job, true)}</span></span>
+          <span class="teaching-activity-copy"><span class="teaching-activity-state">${api.escapeHtml(visual.label)}</span><strong aria-live="polite">${api.escapeHtml(step)}</strong>${detail && detail !== step ? `<small>${api.escapeHtml(detail)}</small>` : ""}${facts ? `<span class="teaching-activity-facts">${facts}</span>` : ""}</span>
           <i class="fas fa-chevron-right teaching-activity-open job-disclosure-chevron" aria-hidden="true"></i>
         </button>
+        ${visual.live ? window.AISecEduAgentActivityView.liveMarkup(agentRunRecords(job), {
+          escape: api.escapeHtml, openItems: state.openAgentTraceItemIds, live: true,
+        }) : ""}
+        ${streamedAnswer ? `<div class="teaching-answer-content teaching-streamed-answer" aria-label="正在生成的回复">${richAnswerMarkup(streamedAnswer)}</div>` : ""}
         ${jobDisclosureDetailsMarkup(job, `activity-details-${message.id}`)}
       </div>
     </article>`;
@@ -4159,6 +4455,10 @@
     const failed = presentation === "error";
     const canceled = presentation === "canceled";
     const questionTasks = presentation === "question-tasks";
+    const showTrace = Boolean(
+      job && !questionTasks && !failed && !canceled &&
+      (job.kind === "agent.chat" || agentRunRecords(job).length),
+    );
     const expanded = Boolean(
       !questionTasks && job && jobDisclosureExpanded(job.id),
     );
@@ -4171,6 +4471,9 @@
       : failed
         ? '<div class="teaching-answer-content"><p>系统没有产生可用结果。可以查看执行详情后重新运行。</p></div>'
         : "";
+    const usedSkills = Array.isArray(message.metadata?.selectedSkills)
+      ? message.metadata.selectedSkills.filter((name) => typeof name === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)).slice(0, 8)
+      : [];
     const retry =
       (failed || canceled) && job
         ? `<div class="teaching-recovery-actions"><button type="button" data-run-retry="${api.escapeHtml(job.id)}"${retrying ? " disabled" : ""}><i class="fas ${retrying ? "fa-circle-notch fa-spin" : "fa-redo"}"></i>${retrying ? "正在重新运行" : "重新运行"}</button><button type="button" data-job-toggle="${api.escapeHtml(job.id)}" data-job-expand-label="查看失败步骤" data-job-collapse-label="收起失败步骤" data-job-expand-text="查看失败步骤" data-job-collapse-text="收起失败步骤" aria-expanded="${expanded}" aria-controls="${api.escapeHtml(detailId)}" aria-label="${expanded ? "收起失败步骤" : "查看失败步骤"}"><span data-job-toggle-copy>${expanded ? "收起失败步骤" : "查看失败步骤"}</span><i class="fas fa-chevron-right job-disclosure-chevron" aria-hidden="true"></i></button></div>`
@@ -4185,8 +4488,11 @@
         <section class="teaching-answer-surface">
           ${statusLine}
           ${content}
+          ${usedSkills.length ? `<div class="teaching-used-skills" aria-label="本轮使用的技能">${usedSkills.map((name) => `<span>/${api.escapeHtml(name)}</span>`).join("")}</div>` : ""}
+          ${showTrace ? `<button class="teaching-answer-trace-toggle" type="button" data-job-toggle="${api.escapeHtml(job.id)}" data-job-expand-label="查看执行过程" data-job-collapse-label="收起执行过程" data-job-expand-text="查看执行过程" data-job-collapse-text="收起执行过程" aria-expanded="${expanded}" aria-controls="${api.escapeHtml(detailId)}" aria-label="${expanded ? "收起执行过程" : "查看执行过程"}"><span><i class="fas fa-check-circle" aria-hidden="true"></i><strong data-job-toggle-copy>${expanded ? "收起执行过程" : "查看执行过程"}</strong><small>查看模型、工具和命令记录</small></span><i class="fas fa-chevron-right job-disclosure-chevron" aria-hidden="true"></i></button>${jobDisclosureDetailsMarkup(job, `answer-details-${message.id}`)}` : ""}
           ${renderGenerationOptions(message)}
-          ${resultCardsMarkup(message)}
+          ${renderAgentQuestions(message)}
+          ${failed && job?.kind === "agent.chat" ? "" : resultCardsMarkup(message)}
           ${renderAgentFiles(message)}
           ${renderAgentActions(message)}
           ${retry}
@@ -4195,6 +4501,163 @@
         ${messageMetaMarkup(message, { copy: Boolean(meaningfulCopy) })}
       </div>
     </article>`;
+  }
+
+  const questionDrafts = new Map();
+
+  function questionDraftKey(message, question) {
+    return `${message.id}:${question.id}`;
+  }
+
+  function questionDraftStorageKey(message, question) {
+    return `teaching-question-draft:${state.thread?.id || ""}:${message.id}:${question.id}`;
+  }
+
+  function questionDraftValue(message, question) {
+    const key = questionDraftKey(message, question);
+    if (questionDrafts.has(key)) return questionDrafts.get(key);
+    let saved = "";
+    try { saved = window.sessionStorage.getItem(questionDraftStorageKey(message, question)) || ""; } catch (_) { /* Storage can be disabled. */ }
+    questionDrafts.set(key, saved);
+    return saved;
+  }
+
+  function saveQuestionDraft(message, question, value) {
+    questionDrafts.set(questionDraftKey(message, question), value);
+    try { window.sessionStorage.setItem(questionDraftStorageKey(message, question), value); } catch (_) { /* Keep the in-memory draft. */ }
+  }
+
+  function pendingAgentQuestion(message) {
+    const metadata = message?.metadata || {};
+    return message?.role === "assistant" && metadata.pending === false &&
+      !metadata.questionReplyJobId && Array.isArray(metadata.questions) && metadata.questions.length;
+  }
+
+  function questionKey(message) {
+    return `${state.thread?.id || ""}:${message.id}`;
+  }
+
+  function activeQuestionMessage() {
+    return (state.thread?.messages || []).find(message =>
+      String(message.id) === String(state.activeQuestionMessageId) && pendingAgentQuestion(message));
+  }
+
+  function closeQuestionDialog(dismiss = false) {
+    const message = activeQuestionMessage();
+    if (dismiss && message) state.dismissedQuestionKeys.add(questionKey(message));
+    if (elements.questionDialog?.open) elements.questionDialog.close();
+    state.activeQuestionMessageId = null;
+    state.questionSubmitting = false;
+  }
+
+  function showQuestionError(message) {
+    elements.questionError.textContent = message;
+    elements.questionError.hidden = !message;
+  }
+
+  function renderQuestionDialog() {
+    const message = activeQuestionMessage();
+    if (!message || !elements.questionDialog) return;
+    const questions = message.metadata.questions;
+    const index = Math.min(state.questionIndex, questions.length - 1);
+    state.questionIndex = index;
+    const question = questions[index];
+    const value = questionDraftValue(message, question);
+    const choices = Array.isArray(question.choices) ? question.choices : [];
+    elements.questionContent.innerHTML = `<section class="teaching-question-step" aria-label="第 ${index + 1} 个问题">
+      <h3>${api.escapeHtml(question.text)}</h3>
+      ${choices.length ? `<div class="teaching-question-options" role="group" aria-label="建议选项">${choices.map((choice, choiceIndex) => `<button type="button" data-dialog-question-choice="${api.escapeHtml(choice)}" aria-pressed="${value === choice}"><span class="teaching-question-number">${choiceIndex + 1}</span><span>${api.escapeHtml(choice)}</span>${value === choice ? '<i class="fas fa-check" aria-hidden="true"></i>' : ""}</button>`).join("")}</div>` : ""}
+      <label for="teaching-question-custom">${choices.length ? "或者写下你的具体要求" : "你的回答"}</label>
+      <textarea id="teaching-question-custom" maxlength="2000" rows="2" placeholder="直接填写，也可以补充上方选项">${api.escapeHtml(value)}</textarea>
+    </section>`;
+    elements.questionContent.querySelectorAll("[data-dialog-question-choice]").forEach(button => button.addEventListener("click", () => {
+      saveQuestionDraft(message, question, button.dataset.dialogQuestionChoice);
+      renderQuestionDialog();
+      elements.questionSubmit.focus();
+    }));
+    elements.questionContent.querySelector("textarea").addEventListener("input", event => {
+      saveQuestionDraft(message, question, event.target.value);
+      elements.questionContent.querySelectorAll("[data-dialog-question-choice]").forEach(button => button.setAttribute("aria-pressed", "false"));
+      showQuestionError("");
+    });
+    elements.questionProgress.textContent = `${index + 1} / ${questions.length}`;
+    elements.questionBack.hidden = index === 0;
+    elements.questionSubmit.textContent = index === questions.length - 1 ? "提交并继续" : "下一题";
+    elements.questionSubmit.disabled = state.questionSubmitting;
+    elements.questionBack.disabled = state.questionSubmitting;
+    showQuestionError("");
+  }
+
+  function openQuestionDialog(message) {
+    if (!pendingAgentQuestion(message) || !elements.questionDialog) return;
+    state.activeQuestionMessageId = message.id;
+    state.questionIndex = 0;
+    state.dismissedQuestionKeys.delete(questionKey(message));
+    renderQuestionDialog();
+    if (!elements.questionDialog.open) elements.questionDialog.showModal();
+    elements.questionContent.querySelector("textarea")?.focus();
+  }
+
+  function syncPendingQuestionDialog(messages) {
+    if (!elements.questionDialog) return;
+    if (elements.questionDialog.open && !activeQuestionMessage()) closeQuestionDialog();
+    if (elements.questionDialog.open || state.dashboardMode) return;
+    const pending = [...messages].reverse().find(pendingAgentQuestion);
+    if (!pending || state.dismissedQuestionKeys.has(questionKey(pending))) return;
+    if (document.querySelector("dialog[open]")) return;
+    openQuestionDialog(pending);
+  }
+
+  async function submitQuestionDialog(event) {
+    event.preventDefault();
+    const message = activeQuestionMessage();
+    if (!message || state.questionSubmitting) return;
+    const questions = message.metadata.questions;
+    const current = questions[state.questionIndex];
+    const currentValue = questionDraftValue(message, current).trim();
+    if (!currentValue) {
+      showQuestionError("请先选择或填写一个回答。");
+      elements.questionContent.querySelector("textarea")?.focus();
+      return;
+    }
+    if (state.questionIndex < questions.length - 1) {
+      state.questionIndex += 1;
+      renderQuestionDialog();
+      elements.questionContent.querySelector("textarea")?.focus();
+      return;
+    }
+    const answers = Object.fromEntries(questions.map(question => [question.id, questionDraftValue(message, question).trim()]));
+    const missing = questions.findIndex(question => !answers[question.id]);
+    if (missing >= 0) {
+      state.questionIndex = missing;
+      renderQuestionDialog();
+      showQuestionError("请回答每个问题，也可以填写自己的要求。");
+      return;
+    }
+    state.questionSubmitting = true;
+    elements.questionSubmit.disabled = true;
+    elements.questionBack.disabled = true;
+    const result = await sendMessage(questions.map(question => `${question.text}：${answers[question.id]}`).join("\n"), null, {questionReply: {sourceMessageId: message.id, answers}});
+    if (result.executed) {
+      questions.forEach(question => {
+        questionDrafts.delete(questionDraftKey(message, question));
+        try { window.sessionStorage.removeItem(questionDraftStorageKey(message, question)); } catch (_) { /* Draft was already in memory. */ }
+      });
+      closeQuestionDialog();
+    } else {
+      state.questionSubmitting = false;
+      elements.questionSubmit.disabled = false;
+      elements.questionBack.disabled = false;
+      showQuestionError(result.error?.message || "提交失败，请重试。");
+    }
+  }
+
+  function renderAgentQuestions(message) {
+    const metadata = message.metadata || {};
+    const questions = metadata.questions;
+    if (!Array.isArray(questions) || !questions.length) return "";
+    if (metadata.questionReplyJobId) return '<p class="teaching-question-complete">已收到补充信息</p>';
+    return `<section class="teaching-question-pending" aria-label="等待补充信息"><i class="fas fa-comment-dots" aria-hidden="true"></i><div><strong>需要你补充 ${questions.length} 个关键细节</strong><span>智能体已暂停，回答后会继续当前任务。</span></div><button type="button" data-question-open="${api.escapeHtml(message.id)}">回答问题 <i class="fas fa-arrow-right" aria-hidden="true"></i></button></section>`;
   }
 
   function renderTranscriptMessage(message) {
@@ -4223,8 +4686,15 @@
       target.href || "",
       job.attemptCount,
       job.maxAttempts,
+      job.executionId || job.traceId || "",
+      job.executionStarted || "",
+      job.created || "",
+      job.updated || "",
+      job.completed || "",
       job.failureMessage || job.error || "",
-      latest.sequence || "",
+      job.activityRevision || "",
+      activityStore.revision(job.id),
+      latest.id || latest.sequence || "",
       latest.stage || "",
       latest.status || "",
       latest.message || "",
@@ -4259,14 +4729,67 @@
               .join(",")
           : "";
         const selection = metadata.generationSelection || {};
-        return `${message.id}:${content.length}:${content.slice(-72)}:${metadata.pending}:${metadata.failed}:${metadata.presentation || ""}:${cards}:${optionSignature}:${selection.optionId || ""}:${selection.status || ""}`;
+        return `${message.id}:${content.length}:${content.slice(-72)}:${metadata.pending}:${metadata.failed}:${metadata.presentation || ""}:${cards}:${optionSignature}:${selection.optionId || ""}:${selection.status || ""}:${metadata.generationRound || 1}:${metadata.generationRefinement?.jobId || ""}:${metadata.questionReplyJobId || ""}:${JSON.stringify(metadata.questions || [])}:${JSON.stringify(metadata.selectedSkills || [])}:${JSON.stringify(metadata.plan || [])}:${JSON.stringify(metadata.toolExecutionResults || {})}:${metadata.harnessExecution?.state || ""}`;
       })
       .join("|");
     const jobs = Array.from(state.trackedJobs.values())
       .map(jobUiSignature)
       .sort()
       .join("|");
-    return `${transcript}::${jobs}`;
+    const generationActions = [...(state.selectingGenerationOptions || [])].sort().join("|");
+    return `${state.viewMode}:${transcript}::${jobs}::${generationActions}`;
+  }
+
+  function renderTrajectory() {
+    if (!elements.trajectory || !state.thread || state.viewMode !== "trajectory") return;
+    const messages = state.thread.messages || [];
+    elements.trajectory.innerHTML = `<div class="teaching-trajectory-inner">
+      <header><span class="teaching-eyebrow">执行轨迹</span><h2>${api.escapeHtml(state.thread.title || "当前对话")}</h2><p>按时间查看本轮要求、规划、技能和实际执行动作。</p></header>
+      ${messages.length ? messages.map((message, index) => {
+        const metadata = message.metadata || {};
+        const job = message.role === "assistant" ? messageJob(message) : null;
+        const status = String(job?.status || metadata.jobStatus || "").toUpperCase();
+        const plan = Array.isArray(metadata.plan) ? metadata.plan.filter((item) => typeof item === "string").slice(0, 10) : [];
+        const skills = Array.isArray(metadata.selectedSkills) ? metadata.selectedSkills.filter((item) => typeof item === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item)).slice(0, 12) : [];
+        const content = String(message.content || "").trim();
+        const shortContent = content.length > 700 ? `${content.slice(0, 700)}…` : content;
+        const role = message.role === "assistant" ? "AI 共创" : "你的要求";
+        return `<article class="teaching-trajectory-item is-${message.role === "assistant" ? "assistant" : "user"}" data-trajectory-message="${api.escapeHtml(message.id)}">
+          <div class="teaching-trajectory-marker" aria-hidden="true">${index + 1}</div>
+          <div class="teaching-trajectory-card"><div class="teaching-trajectory-meta"><strong>${role}</strong><time>${api.escapeHtml(api.formatDate(message.created))}</time>${status ? `<span class="is-${api.escapeHtml(status.toLowerCase())}">${api.escapeHtml(statusLabel(status))}</span>` : ""}</div>
+          ${shortContent ? `<p class="teaching-trajectory-content">${api.escapeHtml(shortContent).replace(/\n/g, "<br>")}</p>` : ""}
+          ${content.length > 700 ? `<details><summary>查看完整内容</summary><div class="teaching-trajectory-full">${api.escapeHtml(content).replace(/\n/g, "<br>")}</div></details>` : ""}
+          ${plan.length ? `<section aria-label="本轮规划"><h3>规划</h3><ol>${plan.map((step) => `<li>${api.escapeHtml(step)}</li>`).join("")}</ol></section>` : ""}
+          ${skills.length ? `<section aria-label="本轮技能"><h3>技能</h3><div class="teaching-used-skills">${skills.map((name) => `<span>/${api.escapeHtml(name)}</span>`).join("")}</div></section>` : ""}
+          ${job ? `<section aria-label="真实执行记录"><h3>真实执行记录</h3>${agentRunMarkup(job)}<button type="button" data-trajectory-job="${api.escapeHtml(job.id)}">打开任务详情</button></section>` : ""}
+          </div></article>`;
+      }).join("") : '<p class="teaching-trajectory-muted">发送第一条要求后，这里会展示执行轨迹。</p>'}
+    </div>`;
+    bindAgentTraceDetails(elements.trajectory);
+  }
+
+  function setViewMode(mode) {
+    if (!elements.trajectory) return;
+    state.viewMode = mode === "trajectory" ? "trajectory" : "chat";
+    const isTrajectory = state.viewMode === "trajectory";
+    elements.messages.hidden = isTrajectory;
+    elements.trajectory.hidden = !isTrajectory;
+    elements.messages.inert = isTrajectory;
+    elements.trajectory.inert = !isTrajectory;
+    elements.jumpLatest.hidden = isTrajectory || !state.newContentAvailable;
+    elements.viewButtons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.teachingView === state.viewMode)));
+    root.classList.toggle("is-trajectory-view", isTrajectory);
+    try {
+      window.localStorage.setItem("aisecedu-agent-view-mode", state.viewMode);
+    } catch {
+    }
+    if (isTrajectory) {
+      renderTrajectory();
+      const jobs = [...new Set((state.thread?.messages || [])
+        .map((message) => message.role === "assistant" ? messageJob(message)?.id : null)
+        .filter(Boolean))].slice(-8);
+      Promise.allSettled(jobs.map((id) => refreshJobDetails(id))).then(() => renderTrajectory());
+    }
   }
 
   function isNearTranscriptBottom() {
@@ -4288,7 +4811,17 @@
     elements.jumpLatest.hidden = true;
   }
 
+  function transcriptElements(selector) {
+    return window.AISecEduAgentTranscript.freshElements(elements.messages, selector);
+  }
+
   function renderMessages() {
+    const selector = document.getElementById("teaching-learning-pattern");
+    const threadIdentity = String(state.thread?.id || "");
+    if (selector && selector.dataset.threadIdentity !== threadIdentity) {
+      selector.value = state.thread?.context?.learningPattern?.id || (new URLSearchParams(location.search).has("inquiry") ? "process-inquiry" : "");
+      selector.dataset.threadIdentity = threadIdentity;
+    }
     if (!state.thread) return;
     const messages = state.thread.messages || [];
     const previousTop = elements.messages.scrollTop;
@@ -4299,13 +4832,14 @@
       syncProgressClock();
       updateAgentChrome();
       syncComposerState();
+      syncPendingQuestionDialog(messages);
       return;
     }
     const contentChanged = Boolean(
       state.lastTranscriptSignature &&
       state.lastTranscriptSignature !== nextSignature,
     );
-    elements.messages.innerHTML = messages.length
+    const transcriptHtml = messages.length
       ? messages.map(renderTranscriptMessage).join("")
       : `<div class="teaching-empty">
         <span class="teaching-empty-eyebrow">全局教学智能体</span>
@@ -4313,21 +4847,25 @@
         <p>分析、写作、课程操作、CTF 实践题、数据判断或文件交付都可以在同一对话中完成；无需先选择机械流程。</p>
         <div class="teaching-empty-capabilities" aria-label="支持的工作"><span><i class="fas fa-check"></i>理解自然语言与上下文</span><span><i class="fas fa-check"></i>调用技能和工具</span><span><i class="fas fa-check"></i>返回可下载文件</span></div>
       </div>`;
-    state.lastTranscriptSignature = nextSignature;
-    elements.messages
-      .querySelectorAll("[data-candidate-set]")
+    const reconciliation = window.AISecEduAgentTranscript.reconcile(elements.messages, transcriptHtml);
+    state.lastTranscriptSignature = reconciliation.deferred ? `${nextSignature}::deferred` : nextSignature;
+    transcriptElements("[data-question-open]").forEach(button => button.addEventListener("click", () => {
+      const message = (state.thread?.messages || []).find(item => String(item.id) === button.dataset.questionOpen);
+      if (message) openQuestionDialog(message);
+    }));
+    transcriptElements("[data-candidate-set]")
       .forEach((button) => {
         button.addEventListener("click", () =>
           openCandidateSet(button.dataset.candidateSet),
         );
       });
     bindJobDisclosureButtons(elements.messages, false);
+    bindAgentTraceDetails(elements.messages);
     bindJobResultActions(elements.messages);
-    elements.messages
-      .querySelectorAll("[data-agent-tool-message]")
+    transcriptElements("[data-agent-tool-message]")
       .forEach((button) => {
         button.addEventListener("click", async () => {
-          const message = messages.find(
+          const message = (state.thread?.messages || []).find(
             (item) =>
               String(item.id) === String(button.dataset.agentToolMessage),
           );
@@ -4343,8 +4881,7 @@
           }
         });
       });
-    elements.messages
-      .querySelectorAll("[data-generation-option-view-id]")
+    transcriptElements("[data-generation-option-view-id]")
       .forEach((button) => {
         button.addEventListener("click", () =>
           showGenerationOption(
@@ -4381,8 +4918,7 @@
           );
         });
       });
-    elements.messages
-      .querySelectorAll("[data-generation-option-shift]")
+    transcriptElements("[data-generation-option-shift]")
       .forEach((button) => {
         button.addEventListener("click", () =>
           shiftGenerationOption(
@@ -4391,11 +4927,10 @@
           ),
         );
       });
-    elements.messages
-      .querySelectorAll("[data-generation-option-message]")
+    transcriptElements("[data-generation-option-message]")
       .forEach((button) => {
         button.addEventListener("click", async () => {
-          const message = messages.find(
+          const message = (state.thread?.messages || []).find(
             (item) =>
               String(item.id) ===
               String(button.dataset.generationOptionMessage),
@@ -4411,11 +4946,43 @@
           }
         });
       });
-    elements.messages
-      .querySelectorAll("[data-agent-suggestion-message]")
+    transcriptElements("[data-generation-prompt], [data-generation-refinement]")
+      .forEach((details) => {
+        details.addEventListener("toggle", () => {
+          const promptKey = details.dataset.generationPrompt;
+          const key = promptKey || details.dataset.generationRefinement;
+          const expanded = promptKey ? state.generationPromptExpanded : state.generationRefinementExpanded;
+          if (details.open) expanded.add(key);
+          else expanded.delete(key);
+        });
+      });
+    transcriptElements("[data-generation-feedback]")
+      .forEach((input) => {
+        input.addEventListener("input", () => {
+          state.generationRefinementDrafts.set(input.dataset.generationFeedback, input.value);
+        });
+      });
+    transcriptElements("[data-generation-refine-message]")
+      .forEach((button) => {
+        button.addEventListener("click", async () => {
+          const messageId = button.dataset.generationRefineMessage;
+          const feedback = String(state.generationRefinementDrafts.get(messageId) || "").trim();
+          if (!feedback) {
+            api.showNotice(elements.notice, "请先填写你希望修改的内容。", "info");
+            document.getElementById(`generation-feedback-${messageId}`)?.focus();
+            return;
+          }
+          const result = await sendMessage(feedback, null, { refinementSourceMessageId: messageId });
+          if (result.executed) {
+            state.generationRefinementDrafts.delete(messageId);
+            state.generationRefinementExpanded.delete(messageId);
+          }
+        });
+      });
+    transcriptElements("[data-agent-suggestion-message]")
       .forEach((button) => {
         button.addEventListener("click", () => {
-          const message = messages.find(
+          const message = (state.thread?.messages || []).find(
             (item) =>
               String(item.id) === String(button.dataset.agentSuggestionMessage),
           );
@@ -4434,8 +5001,7 @@
           }
         });
       });
-    elements.messages
-      .querySelectorAll("[data-empty-compose]")
+    transcriptElements("[data-empty-compose]")
       .forEach((button) => {
         button.addEventListener("click", () => {
           elements.input.value = button.dataset.emptyCompose || "";
@@ -4444,11 +5010,10 @@
           syncComposerState();
         });
       });
-    elements.messages
-      .querySelectorAll("[data-message-copy]")
+    transcriptElements("[data-message-copy]")
       .forEach((button) => {
         button.addEventListener("click", async () => {
-          const message = messages.find(
+          const message = (state.thread?.messages || []).find(
             (item) => String(item.id) === String(button.dataset.messageCopy),
           );
           if (!message) return;
@@ -4463,11 +5028,10 @@
           }
         });
       });
-    elements.messages
-      .querySelectorAll("[data-message-reuse]")
+    transcriptElements("[data-message-reuse]")
       .forEach((button) => {
         button.addEventListener("click", () => {
-          const message = messages.find(
+          const message = (state.thread?.messages || []).find(
             (item) => String(item.id) === String(button.dataset.messageReuse),
           );
           if (!message || state.thread.status === "ARCHIVED") return;
@@ -4477,7 +5041,7 @@
           syncComposerState();
         });
       });
-    elements.messages.querySelectorAll("[data-run-retry]").forEach((button) => {
+    transcriptElements("[data-run-retry]").forEach((button) => {
       button.addEventListener("click", () =>
         retryTrackedJob(button.dataset.runRetry).catch(showError),
       );
@@ -4492,7 +5056,7 @@
       elements.messages.scrollTop = previousTop;
       if (contentChanged) {
         state.newContentAvailable = true;
-        elements.jumpLatest.hidden = false;
+        elements.jumpLatest.hidden = state.viewMode === "trajectory";
       }
     }
     state.forceScrollToLatest = false;
@@ -4500,6 +5064,8 @@
     syncProgressClock();
     updateAgentChrome();
     syncComposerState();
+    syncPendingQuestionDialog(messages);
+    renderTrajectory();
     window.setTimeout(() => {
       applyAutomaticTools(messages).catch(showError);
     }, 0);
@@ -4507,8 +5073,7 @@
 
   function bindJobResultActions(container) {
     if (!container) return;
-    container
-      .querySelectorAll("[data-job-candidate-result]")
+    window.AISecEduAgentTranscript.freshElements(container, "[data-job-candidate-result]")
       .forEach((button) => {
         button.addEventListener("click", (event) => {
           event.stopPropagation();
@@ -4601,7 +5166,7 @@
           },
         ],
         activityLoaded: true,
-        updated: new Date().toISOString(),
+        updated: previousJob.updated,
       });
       state.selectedJobId = id;
       state.expandedJobIds.add(id);
@@ -4610,17 +5175,7 @@
     renderJobs();
     api.showNotice(elements.notice, "正在替换失败状态并重新执行…", "info");
     try {
-      const retryKey =
-        window.crypto && window.crypto.randomUUID
-          ? window.crypto.randomUUID()
-          : `${Date.now()}-${Math.random()}`;
-      const data = unwrap(
-        await api.json(
-          "POST",
-          `/teaching/jobs/${encodeURIComponent(id)}/retry`,
-          { idempotencyKey: retryKey },
-        ),
-      );
+      const data = await window.AISecEdu.jobProgress.retryJob(api, previousJob || { id });
       const retriedId = String(data.job.id);
       if (data.replacedInPlace !== true || retriedId !== id)
         throw new Error("系统未能原位重启该任务，请刷新后重试。");
@@ -4634,6 +5189,7 @@
       ) {
         await loadThread(state.thread.id);
       }
+      await refreshJobDetails(retriedId).catch(() => {});
       renderJobs();
       schedulePoll();
       const current = taskById(retriedId) || data.job;
@@ -4813,13 +5369,13 @@
     const merged = new Map(state.taskCenterJobs);
     state.trackedJobs.forEach((job, id) => {
       const server = merged.get(String(id)) || {};
-      merged.set(String(id), { ...server, ...job });
+      merged.set(String(id), window.AISecEdu.jobProgress.mergeJobUpdate(server, job));
     });
     state.taskCenterBatches.forEach((batch) => {
       const view = generationBatchTask(batch);
       merged.set(view.id, view);
     });
-    return Array.from(merged.values());
+    return Array.from(merged.values()).filter((job) => !isBackgroundMaterialJob(job));
   }
 
   function taskTypeGroup(job) {
@@ -4866,22 +5422,48 @@
       const batch = state.taskCenterBatches.get(id.slice(6));
       return batch ? generationBatchTask(batch) : null;
     }
-    return state.trackedJobs.get(id) || state.taskCenterJobs.get(id) || null;
+    const tracked = state.trackedJobs.get(id);
+    const server = state.taskCenterJobs.get(id);
+    return tracked && server
+      ? window.AISecEdu.jobProgress.mergeJobUpdate(server, tracked)
+      : tracked || server || null;
   }
 
   function storeTaskCenterJob(job) {
     if (!job || !job.id) return;
+    job = activityStore.merge(job, job.events, job.eventCursor);
     const id = String(job.id);
-    state.taskCenterJobs.set(id, {
-      ...(state.taskCenterJobs.get(id) || {}),
-      ...job,
-    });
+    state.taskCenterJobs.set(id, window.AISecEdu.jobProgress.mergeJobUpdate(state.taskCenterJobs.get(id), job));
     if (state.trackedJobs.has(id)) {
-      state.trackedJobs.set(id, {
-        ...state.trackedJobs.get(id),
-        ...job,
-      });
+      state.trackedJobs.set(id, window.AISecEdu.jobProgress.mergeJobUpdate(state.trackedJobs.get(id), job));
     }
+  }
+
+  async function hydrateThreadJobs(threadId, epoch, refresh = false) {
+    const ids = Array.from(state.trackedJobs.keys());
+    if (!ids.length || (!refresh && ids.every(id => taskById(id)?.executionId))) return;
+    const missing = new Set(ids);
+    let offset = 0;
+    // Reuse the owner-scoped, lightweight task-list projection. A direct
+    // conversation link must not depend on opening the global task drawer,
+    // nor fetch a full result/event payload separately for every old message.
+    while (offset <= 10000) {
+      const data = unwrap(await api.request(
+        `/teaching/jobs?view=all&threadId=${encodeURIComponent(threadId)}&limit=200&offset=${offset}`,
+      ));
+      if (state.thread?.id !== threadId || state.threadLoadEpoch !== epoch) return;
+      for (const job of data.jobs || []) {
+        if (String(job.threadId || "") !== String(threadId)) continue;
+        storeTaskCenterJob(job);
+        missing.delete(String(job.id));
+      }
+      const next = Number(data.pagination?.nextOffset);
+      if (!missing.size || !data.pagination?.hasNext || !Number.isInteger(next) || next <= offset) break;
+      offset = next;
+    }
+    renderJobs();
+    renderMessages();
+    schedulePoll();
   }
 
   async function loadTaskCenter(options = {}) {
@@ -4906,11 +5488,13 @@
       if (!append) state.taskCenterJobs = new Map();
       (data.jobs || []).forEach((job) => {
         const id = String(job.id);
-        state.taskCenterJobs.set(id, {
+        storeTaskCenterJob(window.AISecEdu.jobProgress.mergeJobUpdate({
           ...(previous.get(id) || {}),
           ...(state.taskCenterJobs.get(id) || {}),
-          ...job,
-        });
+        }, job));
+      });
+      state.expandedJobIds.forEach(id => {
+        if (!state.taskCenterJobs.has(id) && previous.has(id)) state.taskCenterJobs.set(id, previous.get(id));
       });
       if (!append) state.taskCenterBatches = new Map();
       (data.batches || []).forEach((batch) => {
@@ -4929,6 +5513,8 @@
       state.taskCenterLoadedAt = data.asOf || new Date().toISOString();
       state.lastJobListSignature = "";
       renderJobs();
+      renderMessages();
+      await Promise.all(Array.from(state.expandedJobIds).map(id => refreshJobDetails(id).catch(() => {})));
       document.dispatchEvent(new CustomEvent("aisecedu:teaching-task-state", {
         detail: {
           jobs: taskCenterRows().filter((job) =>
@@ -4940,6 +5526,7 @@
     } finally {
       state.taskCenterLoading = false;
       updateAgentChrome();
+      focusPendingJob();
     }
   }
 
@@ -4957,6 +5544,8 @@
 
   function compactTaskStatus(job) {
     const status = String(job.status || "QUEUED").toUpperCase();
+    if (["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(status) && !job.isGenerationBatch)
+      return agentRunCurrentLabel(job);
     if (job.isGenerationBatch) {
       if (status === "SUCCEEDED")
         return `${job.validatedCount}/${job.requestedCount} 已验证，可逐题审核`;
@@ -5090,12 +5679,12 @@
         <button type="button" class="teaching-task-disclosure" data-job-toggle="${api.escapeHtml(job.id)}" data-job-expand-label="${api.escapeHtml(`展开${compactTaskTitle(job)}的详细步骤`)}" data-job-collapse-label="${api.escapeHtml(`收起${compactTaskTitle(job)}的详细步骤`)}" aria-expanded="${expanded}" aria-controls="${api.escapeHtml(detailId)}" aria-label="${expanded ? "收起" : "展开"}${api.escapeHtml(compactTaskTitle(job))}的详细步骤">
           <span class="teaching-task-status" title="${presentation.label}" aria-label="${presentation.label}"><i class="fas ${presentation.icon}"></i></span>
           <span class="teaching-task-copy"><strong title="${api.escapeHtml(compactTaskTitle(job))}">${api.escapeHtml(compactTaskTitle(job))}</strong><small>${api.escapeHtml(compactTaskStatus(job))}</small><span class="teaching-task-facts">${taskContextLabel(job) ? `<span>${api.escapeHtml(taskContextLabel(job))}</span>` : ""}${jobDurationMarkup(job, true)}${jobAttemptLabel(job) ? `<span>${api.escapeHtml(jobAttemptLabel(job))}</span>` : ""}</span></span>
-          <span class="teaching-task-percent">${progress}%</span>
+          ${job.isGenerationBatch ? `<span class="teaching-task-percent">${progress}%</span>` : ""}
           <i class="fas fa-chevron-right teaching-task-chevron job-disclosure-chevron" aria-hidden="true"></i>
         </button>
         ${controls}
       </div>
-      ${jobProgressBarMarkup(job, "teaching-task-progress", "drawer:bar")}
+      ${job.isGenerationBatch ? jobProgressBarMarkup(job, "teaching-task-progress", "drawer:bar") : ""}
       ${job.isGenerationBatch ? generationBatchDetailsMarkup(job, detailId, expanded) : jobDisclosureDetailsMarkup(job, "drawer-task-details")}
     </li>`;
   }
@@ -5217,6 +5806,7 @@
   }
 
   function renderJobs() {
+    const drawerScrollTop = elements.drawer.scrollTop;
     const allRows = taskCenterRows()
       .filter((job) => job.taskListHidden !== true)
       .sort((left, right) =>
@@ -5259,8 +5849,10 @@
     elements.jobList.innerHTML = rows.length
       ? `${taskGroupMarkup("active", "进行中", active)}${taskGroupMarkup("attention", "需要处理", attention)}${taskGroupMarkup("completed", "已完成", completed)}${loadMore}`
       : `<div class="teaching-job-empty"><span><i class="far fa-check-circle"></i></span><h3>还没有任务</h3><p>发送要求后，任务会显示在这里。</p></div>`;
+    elements.drawer.scrollTop = drawerScrollTop;
     renderActionsForSelectedJob();
     bindJobDisclosureButtons(elements.jobList, true);
+    bindAgentTraceDetails(elements.jobList);
     elements.jobList.querySelectorAll("[data-cancel-job]").forEach((button) => {
       button.addEventListener("click", async () => {
         button.disabled = true;
@@ -5523,7 +6115,7 @@
           {
             threadId: state.thread && state.thread.id,
             reason:
-              "教师从 AI 共创工作台请求重新提取功能点、知识图谱和章节候选",
+              "教师请求在后台更新资料原文索引与结构摘要",
           },
         ),
       );
@@ -5531,8 +6123,8 @@
       api.showNotice(
         elements.notice,
         data.deduplicated
-          ? "该课件已有分析任务在运行。"
-          : "已建立新的课件分析任务。",
+          ? "资料正在后台更新，可继续对话。"
+          : "资料已排入后台更新，可继续对话。",
         "success",
       );
       closeDialog("material-modal");
@@ -5578,9 +6170,11 @@
           decision,
           confirmed: true,
           comment: "教师在 AI 共创工作台中明确确认",
+          approvalRequest: currentAction && currentAction.approvalRequest,
         },
       ),
     );
+    data.action = await waitForApprovedAction(data.action);
     api.showNotice(
       elements.notice,
       publishing
@@ -5613,7 +6207,9 @@
   }
 
   async function loadActions() {
-    if (!elements.dojo.value) {
+    const action = { threadId: state.thread?.id, epoch: state.threadLoadEpoch || 0 };
+    const dojoId = elements.dojo.value;
+    if (!dojoId) {
       state.actions = [];
       renderActionsForSelectedJob();
       renderMessages();
@@ -5621,9 +6217,10 @@
     }
     const data = unwrap(
       await api.request(
-        `/teaching/actions?status=AWAITING_APPROVAL&dojoId=${encodeURIComponent(elements.dojo.value)}`,
+        `/teaching/actions?status=AWAITING_APPROVAL&dojoId=${encodeURIComponent(dojoId)}`,
       ),
     );
+    if (!threadActionCurrent(action) || elements.dojo.value !== dojoId) return;
     state.actions = data.actions || [];
     renderActionsForSelectedJob();
     renderMessages();
@@ -5850,9 +6447,17 @@
 
   async function activateThread(id) {
     closeThreadActionMenu();
-    await loadThread(id);
-    await loadActions();
-    setSidebar(false);
+    const loading = loadThread(id);
+    const action = { threadId: id, epoch: state.threadLoadEpoch || 0 };
+    try {
+      await loading;
+      if (!threadActionCurrent(action)) return;
+      syncThreadLocation();
+      await loadActions();
+      if (threadActionCurrent(action)) setSidebar(false);
+    } catch (error) {
+      if ((state.threadLoadEpoch || 0) === action.epoch) throw error;
+    }
   }
 
   function targetThread(id) {
@@ -6004,7 +6609,23 @@
     const item = targetThread(state.threadActionTargetId);
     closeThreadActionMenu();
     if (!item) return;
-    if (action === "rename") await renameThread(item);
+    if (action === "fork") {
+      const storageKey = `aisecedu-fork:${root.dataset.ownerId}:${item.id}`;
+      let key = state.pendingFork?.threadId === item.id ? state.pendingFork.key : null;
+      try { key = key || window.sessionStorage.getItem(storageKey); } catch (_) {}
+      key = key || window.crypto.randomUUID();
+      state.pendingFork = { threadId: item.id, key };
+      try { window.sessionStorage.setItem(storageKey, key); } catch (_) {}
+      const data = unwrap(await api.request(`/teaching/threads/${encodeURIComponent(item.id)}/fork`, {
+        method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": key }, body: "{}",
+      }));
+      state.pendingFork = null;
+      try { window.sessionStorage.removeItem(storageKey); } catch (_) {}
+      await loadThreads();
+      await activateThread(data.thread.id);
+      api.showNotice(elements.notice, "已创建分支，可以从这里尝试另一种方向。", "success");
+    }
+    else if (action === "rename") await renameThread(item);
     else if (action === "pin") {
       unwrap(
         await api.json(
@@ -6020,11 +6641,24 @@
   }
 
   async function loadThread(id) {
+    if (state.threadEventWatch && state.threadEventWatch.threadId !== id)
+      stopThreadEventWatch();
+    const epoch = state.threadLoadEpoch = (state.threadLoadEpoch || 0) + 1;
     const changingThread = !state.thread || state.thread.id !== id;
+    if (changingThread) closeArtifactReview();
+    if (changingThread) saveComposerDraft();
+    if (changingThread) closeGenerationConfirmation();
     const data = unwrap(
       await api.request(`/teaching/threads/${encodeURIComponent(id)}`),
     );
+    if (epoch !== state.threadLoadEpoch) return;
+    if (changingThread) saveComposerDraft();
+    if (changingThread) persistReadyUploadDrafts();
     state.thread = data.thread;
+    if (changingThread) state.uploadFlow = restoreReadyUploadDrafts(state.thread.id);
+    renderUploadStatus();
+    if (changingThread) restoreComposerDraft(id);
+    syncThreadLocation({ keepLaunchIntent: true });
     syncAttachmentSources(state.thread);
     state.phase = navigationPhase || state.thread.phase || "COURSE_SETUP";
     if (navigationPhase && state.thread.phase !== navigationPhase) {
@@ -6033,6 +6667,7 @@
           phase: navigationPhase,
         }),
       );
+      if (epoch !== state.threadLoadEpoch) return;
       state.thread = { ...state.thread, ...updated.thread };
       syncAttachmentSources(state.thread);
     }
@@ -6050,6 +6685,7 @@
       state.resolvingApprovalKeys.clear();
       state.selectingGenerationOptions.clear();
       state.actions = [];
+      state.sessionEventsBacklog = false;
       state.lastTranscriptSignature = "";
       state.newContentAvailable = false;
       state.forceScrollToLatest = true;
@@ -6057,9 +6693,20 @@
     }
     populateDojos(state.thread.dojoId);
     collectJobs();
+    if (changingThread) hydrateUploadDraftJobs().catch(showError);
     renderMessages();
     renderThreads();
     syncComposerState();
+    await hydrateThreadJobs(id, epoch, changingThread).catch(error => {
+      console.warn("Unable to refresh conversation task records", error);
+    });
+    if (changingThread && epoch === state.threadLoadEpoch) {
+      const visibleActiveJobs = Array.from(state.trackedJobs.values())
+        .filter((job) => !isBackgroundMaterialJob(job) && (job.kind === "agent.chat" || activeJobStatuses.has(String(job.status || "").toUpperCase())))
+        .slice(-3);
+      await Promise.all(visibleActiveJobs.map((job) => refreshJobDetails(job.id).catch(() => {})));
+    }
+    if (epoch === state.threadLoadEpoch) startThreadEventWatch();
   }
 
   function collectJobs() {
@@ -6079,8 +6726,8 @@
                   cardStatus === "MATERIALIZED"
                 ? "SUCCEEDED"
                 : cardStatus;
-          const existing = state.trackedJobs.get(String(jobId)) || {};
-          state.trackedJobs.set(String(jobId), {
+          const existing = taskById(jobId) || {};
+          state.trackedJobs.set(String(jobId), window.AISecEdu.jobProgress.mergeJobUpdate(existing, {
             ...existing,
             id: String(jobId),
             kind:
@@ -6114,9 +6761,14 @@
                 : null),
             threadId: state.thread.id,
             created:
-              card.created || message.created || existing.created || null,
+              cardState.created || existing.created || card.created || null,
             updated: cardState.updated || null,
-          });
+            executionId: cardState.executionId || existing.executionId,
+            executionStarted: cardState.executionStarted || existing.executionStarted,
+            completed: cardState.completed || existing.completed || null,
+            attemptCount: cardState.attemptCount ?? existing.attemptCount,
+            maxAttempts: cardState.maxAttempts ?? existing.maxAttempts,
+          }));
         }
       }),
     );
@@ -6126,7 +6778,7 @@
       if (metadata.taskListHidden === true) return;
       if (!metadata.jobId) return;
       const id = String(metadata.jobId);
-      const existing = state.trackedJobs.get(id) || {};
+      const existing = taskById(id) || {};
       const existingStatus = String(existing.status || "").toUpperCase();
       const cardStatuses = (message.cards || [])
         .map((card) => String((card.state || {}).status || "").toUpperCase())
@@ -6183,7 +6835,7 @@
       ) {
         status = existingStatus;
       }
-      state.trackedJobs.set(id, {
+      state.trackedJobs.set(id, window.AISecEdu.jobProgress.mergeJobUpdate(existing, {
         ...existing,
         id,
         kind: existing.kind || metadata.jobKind || "agent.chat",
@@ -6205,15 +6857,24 @@
         failureMessage:
           existing.failureMessage || (metadata.failed ? message.content : null),
         threadId: state.thread.id,
-        created: existing.created || message.created,
-        updated: existing.updated || message.created,
-      });
+        created: existing.created || null,
+        // Message timestamps describe chat history, not job execution. This
+        // undated fallback must never replace a dated server task snapshot.
+        updated: null,
+      }));
     });
+    for (const job of state.thread.harnessJobs || []) storeTaskCenterJob(job);
     renderJobs();
     schedulePoll();
   }
 
   async function createThread(options = {}) {
+    closeGenerationConfirmation();
+    stopThreadEventWatch();
+    persistReadyUploadDrafts();
+    saveComposerDraft();
+    restoreComposerDraft(null);
+    state.threadLoadEpoch = (state.threadLoadEpoch || 0) + 1;
     state.threadQuery = "";
     elements.threadSearch.value = "";
     state.thread = {
@@ -6236,10 +6897,15 @@
       messages: [],
       ephemeral: true,
     };
+    syncAttachmentSources(state.thread);
+    state.uploadFlow = null;
+    renderUploadStatus();
+    syncThreadLocation({ keepLaunchIntent: true });
     state.trackedJobs.clear();
     state.selectedJobId = null;
     state.expandedJobIds.clear();
     state.actions = [];
+    state.sessionEventsBacklog = false;
     state.lastTranscriptSignature = "";
     state.newContentAvailable = false;
     state.forceScrollToLatest = true;
@@ -6257,28 +6923,38 @@
   async function persistThread() {
     if (!state.thread) await createThread();
     if (state.thread.id) return state.thread;
+    const draft = state.thread;
+    const epoch = state.threadLoadEpoch || 0;
     const data = unwrap(
       await api.json("POST", "/teaching/threads", {
-        phase: state.thread.phase || state.phase,
-        title: state.thread.title || "新教学对话",
-        dojoId: state.thread.dojoId,
-        moduleIndex: state.thread.moduleIndex,
-        context: state.thread.context || {},
+        phase: draft.phase || state.phase,
+        title: draft.title || "新教学对话",
+        dojoId: draft.dojoId,
+        moduleIndex: draft.moduleIndex,
+        context: draft.context || {},
       }),
     );
-    state.thread = {
-      ...state.thread,
+    const saved = {
+      ...draft,
       ...data.thread,
-      messages: state.thread.messages || [],
+      messages: draft.messages || [],
       ephemeral: false,
     };
+    if (state.thread !== draft || (state.threadLoadEpoch || 0) !== epoch) return saved;
+    saveComposerDraft();
+    composerDrafts.write(null, { content: "" });
+    state.thread = saved;
+    saveComposerDraft();
+    syncThreadLocation();
     elements.title.textContent = state.thread.title;
     await loadThreads();
-    return state.thread;
+    if (threadActionCurrent({ threadId: saved.id, epoch })) startThreadEventWatch();
+    return saved;
   }
 
   async function saveContext() {
     if (!state.thread) return;
+    const action = { threadId: state.thread.id, epoch: state.threadLoadEpoch || 0 };
     const dojoId = Number(elements.dojo.value || 0) || null;
     const moduleIndex =
       elements.module.value === "" ? null : Number(elements.module.value);
@@ -6291,12 +6967,13 @@
       };
     } else {
       const data = unwrap(
-        await api.json("PATCH", `/teaching/threads/${state.thread.id}`, {
+        await api.json("PATCH", `/teaching/threads/${action.threadId}`, {
           dojoId,
           moduleIndex,
           phase: state.phase,
         }),
       );
+      if (!threadActionCurrent(action)) return;
       state.thread = { ...state.thread, ...data.thread };
     }
     syncContextLinks();
@@ -6304,23 +6981,29 @@
     renderMessages();
   }
 
+  let pendingSubmission = null;
+
   async function sendMessage(prompt, artifactType, options) {
-    const content = (
+    const flow = state.uploadFlow;
+    const staged = flow && state.thread &&
+      String(flow.threadId) === String(state.thread.id) ? flow.files : [];
+    if (staged.some((item) => ["queued", "uploading", "upload-error"].includes(item.phase))) {
+      api.showNotice(elements.notice, "请先等待附件上传完成，或重试、移除失败的文件。", "warning");
+      return { executed: false, reason: "attachments-not-ready" };
+    }
+    const stagedIds = staged.filter((item) => item.phase === "ready")
+      .map((item) => String(item.materialId));
+    let content = (
       typeof prompt === "string" ? prompt : elements.input.value
     ).trim();
+    if (!content && stagedIds.length)
+      content = `我上传了${staged.map((item) => `《${item.file.name}》`).join("、")}。请确认收到，并询问我希望如何使用这些文件。`;
     if (!content) return { executed: false, reason: "empty" };
     const generationOptions = options || {};
     if (state.busy) return { executed: false, reason: "busy" };
+    if (!state.thread) await createThread();
+    const submissionEpoch = state.threadLoadEpoch || 0;
     const active = primaryActiveJob();
-    if (active && !generationOptions.agentContinuation) {
-      api.showNotice(
-        elements.notice,
-        "当前任务仍在执行。你可以先编辑下一条要求，待完成后再发送，或停止当前任务。",
-        "info",
-      );
-      updateAgentChrome();
-      return { executed: false, reason: "active-job" };
-    }
     const candidateMode =
       generationOptions.candidateMode || elements.candidateMode.value || "auto";
     const candidateCount = Number(
@@ -6329,43 +7012,73 @@
     setBusy(true);
     api.showNotice(elements.notice, "", "info");
     try {
-      await persistThread();
-      const submissionId =
-        window.crypto && window.crypto.randomUUID
-          ? window.crypto.randomUUID()
-          : `${Date.now()}-${Math.random()}`;
+      const persisted = await persistThread();
+      const submittedThreadId = persisted?.id || state.thread?.id;
+      if (!threadActionCurrent({ threadId: submittedThreadId, epoch: submissionEpoch }))
+        return { executed: false, reason: "navigation-changed" };
+      const delivery = generationOptions.delivery || elements.inputDelivery?.value || "after-current";
+      const signature = JSON.stringify([
+        submittedThreadId, content, artifactType || elements.type.value,
+        candidateMode, candidateCount, generationOptions, delivery, stagedIds,
+        [...state.sourceMaterialIds].sort(), [...state.pendingMaterialIds].sort(),
+      ]);
+      if (!pendingSubmission || pendingSubmission.signature !== signature) {
+        pendingSubmission = {
+          signature,
+          id: window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+          delivery: active && !generationOptions.agentContinuation ? delivery : undefined,
+          expectedJobId: active && !generationOptions.agentContinuation ? active.id : undefined,
+        };
+      }
+      const submission = pendingSubmission;
+      if (!submission.body) {
+        submission.body = JSON.stringify({
+          content,
+          questionReply: generationOptions.questionReply || undefined,
+          delivery: submission.delivery,
+          expectedJobId: submission.expectedJobId,
+          artifactType: artifactType || elements.type.value || "auto",
+          learningPattern: document.getElementById("teaching-learning-pattern")?.value || "",
+          candidateMode,
+          candidateCount,
+          agentContinuation: Boolean(generationOptions.agentContinuation),
+          action: generationOptions.agentContinuation ? "generate" : undefined,
+          sourceRefs: Array.from(new Set([
+            ...(Array.isArray(generationOptions.sourceRefs)
+              ? generationOptions.sourceRefs.map((ref) => String(ref.id || ""))
+              : []),
+            ...state.sourceMaterialIds,
+            ...state.pendingMaterialIds,
+            ...stagedIds,
+          ].filter(Boolean))).map((id) => ({ type: "material", id })),
+          generationSelection: generationOptions.generationSelection || undefined,
+        });
+      }
       const data = unwrap(
-        await api.request(`/teaching/threads/${state.thread.id}/messages`, {
+        await api.request(generationOptions.refinementSourceMessageId
+          ? `/teaching/threads/${submittedThreadId}/messages/${encodeURIComponent(generationOptions.refinementSourceMessageId)}/generation-options/refine`
+          : `/teaching/threads/${submittedThreadId}/messages`, {
           method: "POST",
           headers: {
             Accept: "application/json",
             "Content-Type": "application/json",
-            "Idempotency-Key": `agent-message-${state.thread.id}-${submissionId}`,
+            "Idempotency-Key": `agent-message-${submittedThreadId}-${submission.id}`,
           },
-          body: JSON.stringify({
-            content,
-            artifactType: artifactType || elements.type.value || "auto",
-            candidateMode,
-            candidateCount,
-            agentContinuation: Boolean(generationOptions.agentContinuation),
-            action: generationOptions.agentContinuation
-              ? "generate"
-              : undefined,
-            sourceRefs: Array.isArray(generationOptions.sourceRefs)
-              ? generationOptions.sourceRefs
-              : Array.from(
-                  new Set([
-                    ...state.sourceMaterialIds,
-                    ...state.pendingMaterialIds,
-                  ]),
-                ).map((id) => ({ type: "material", id })),
-            generationSelection:
-              generationOptions.generationSelection || undefined,
-          }),
+          body: submission.body,
         }),
       );
+      if (pendingSubmission === submission) pendingSubmission = null;
+      if (stagedIds.length && flow) clearUploadFlow(flow.id);
+      if (!threadActionCurrent({ threadId: submittedThreadId, epoch: submissionEpoch })) {
+        loadThreads().catch(showError);
+        return { executed: true, data };
+      }
+      if (data.thread.id !== submittedThreadId) throw new Error("消息结果不属于当前对话，请刷新后重试。");
       state.thread = data.thread;
       syncAttachmentSources(state.thread);
+      state.sourceMaterialIds.clear();
+      state.sourceMenuOpen = false;
+      renderSourceMenu();
       elements.title.textContent = state.thread.title;
       if (
         data.job &&
@@ -6379,8 +7092,11 @@
         state.trackedJobs.set(String(data.job.id), data.job);
         state.selectedJobId = String(data.job.id);
       }
-      elements.input.value = "";
-      elements.type.value = "auto";
+      if (!generationOptions.refinementSourceMessageId && elements.input.value.trim() === content) {
+        elements.input.value = "";
+        elements.type.value = "auto";
+        saveComposerDraft();
+      }
       state.forceScrollToLatest = true;
       renderMessages();
       renderJobs();
@@ -6389,6 +7105,11 @@
       schedulePoll();
       return { executed: true, data };
     } catch (error) {
+      if ((state.threadLoadEpoch || 0) !== submissionEpoch) return { executed: false, reason: "navigation-changed", error };
+      if ((error.code || error.payload?.errorCode) === "TURN_CONFLICT") {
+        pendingSubmission = null;
+        if (state.thread) loadThread(state.thread.id).catch(showError);
+      }
       showError(error);
       return { executed: false, reason: "request-failed", error };
     } finally {
@@ -6396,25 +7117,133 @@
     }
   }
 
+  function stopThreadEventWatch() {
+    const watch = state.threadEventWatch;
+    if (!watch) return;
+    watch.stopped = true;
+    watch.controller?.abort();
+    state.threadEventWatch = null;
+  }
+
+  function startThreadEventWatch() {
+    const threadId = state.thread?.id;
+    if (!threadId || document.hidden || state.dashboardMode) {
+      stopThreadEventWatch();
+      return;
+    }
+    if (state.threadEventWatch?.threadId === threadId) return;
+    stopThreadEventWatch();
+    const watch = { threadId, controller: null, stopped: false };
+    state.threadEventWatch = watch;
+    void watchThreadEvents(watch);
+  }
+
+  async function watchThreadEvents(watch) {
+    let failures = 0;
+    while (!watch.stopped && state.threadEventWatch === watch &&
+      state.thread?.id === watch.threadId && !document.hidden) {
+      let cursor = Number(state.thread.lastEventSequence || 0);
+      if (!Number.isSafeInteger(cursor) || cursor < 0) cursor = 0;
+      watch.controller = new AbortController();
+      try {
+        const data = unwrap(await api.request(
+          `/teaching/threads/${encodeURIComponent(watch.threadId)}/events?after=${cursor}&limit=200&waitMs=15000`,
+          { signal: watch.controller.signal, timeoutMs: 23000, retries: 0, dedupeKey: false },
+        ));
+        if (watch.stopped || state.threadEventWatch !== watch || state.thread?.id !== watch.threadId) break;
+        const next = Number(data.nextCursor);
+        if (!Number.isSafeInteger(next) || next < cursor) {
+          const invalidCursor = new Error("会话事件游标无效，请重新打开对话。");
+          invalidCursor.code = "INVALID_CURSOR";
+          throw invalidCursor;
+        }
+        const eventTypes = (data.events || []).map((event) => String(event.type || ""));
+        if (eventTypes.some((type) => /^(message|tool|approval|thread)\./.test(type))) {
+          await loadThread(watch.threadId);
+        }
+        if (eventTypes.some((type) => /^(tool|approval)\./.test(type))) await loadActions();
+        if (eventTypes.some((type) => type === "thread.updated")) await loadThreads();
+        if (state.thread?.id !== watch.threadId || watch.stopped) break;
+        state.thread.lastEventSequence = Math.max(
+          Number(state.thread.lastEventSequence || 0), next,
+        );
+        state.sessionEventsBacklog = Boolean(data.hasMore);
+        failures = 0;
+      } catch (error) {
+        if (watch.stopped || state.threadEventWatch !== watch || document.hidden) break;
+        if (error.code === "REQUEST_ABORTED") break;
+        if (error.code === "INVALID_CURSOR" || error.payload?.errorCode === "INVALID_CURSOR") {
+          try {
+            await loadThread(watch.threadId);
+            failures = 0;
+            continue;
+          } catch (loadError) {
+            error = loadError;
+          }
+        }
+        if (error.status === 404) {
+          await loadThreads().catch(() => {});
+          if (state.thread?.id === watch.threadId) {
+            try {
+              if (state.threads.length) await activateThread(state.threads[0].id);
+              else await createThread();
+            } catch (switchError) {
+              console.warn("Unable to switch away from a removed conversation", switchError);
+            }
+          }
+          break;
+        }
+        failures += 1;
+        if (failures === 1 || failures % 5 === 0)
+          console.warn("Unable to watch conversation events", error);
+        await new Promise((resolve) => window.setTimeout(resolve, Math.min(12000, 1000 * (2 ** Math.min(failures, 4)))));
+      } finally {
+        watch.controller = null;
+      }
+    }
+    if (state.threadEventWatch === watch) state.threadEventWatch = null;
+  }
+
+  async function pollThreadEvents() {
+    const threadId = state.thread && state.thread.id;
+    if (!threadId) return false;
+    let cursor = Number(state.thread.lastEventSequence || 0);
+    if (!Number.isSafeInteger(cursor) || cursor < 0) cursor = 0;
+    let changed = false;
+    let hasMore = false;
+    for (let batch = 0; batch < 3; batch += 1) {
+      const data = unwrap(await api.request(
+        `/teaching/threads/${encodeURIComponent(threadId)}/events?after=${cursor}&limit=200`,
+      ));
+      if (!state.thread || state.thread.id !== threadId) return false;
+      const next = Number(data.nextCursor);
+      if (!Number.isSafeInteger(next) || next < cursor)
+        throw new Error("会话事件游标无效，请刷新对话。");
+      changed = changed || Boolean((data.events || []).length);
+      cursor = next;
+      state.thread.lastEventSequence = cursor;
+      hasMore = Boolean(data.hasMore);
+      if (!hasMore || !(data.events || []).length) break;
+    }
+    state.sessionEventsBacklog = hasMore;
+    return changed;
+  }
+
   async function pollJobs() {
     if (state.polling) return;
     state.polling = true;
+    const observedThreadId = state.thread?.id;
     try {
     const active = Array.from(state.trackedJobs.values()).filter((job) =>
-      ["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(job.status),
+      ["QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(job.status) || job.activityHasMore,
     );
     let refreshThread = false;
     let refreshMaterials = false;
     await Promise.all(
       active.map(async (item) => {
         try {
-          const data = unwrap(await api.request(`/teaching/jobs/${item.id}`));
-          state.trackedJobs.set(String(item.id), {
-            ...item,
-            ...data.job,
-            events: data.events || [],
-            activityLoaded: true,
-          });
+          const data = await readActivityPages(item.id, observedThreadId);
+          if (!data) return;
           if (
             data.job.status === "SUCCEEDED" &&
             data.job.result &&
@@ -6432,7 +7261,8 @@
                 itemLabel.textContent = label;
               });
           }
-          if (["SUCCEEDED", "FAILED", "CANCELED"].includes(data.job.status))
+          if (data.job.executionId !== item.executionId || data.job.status !== item.status ||
+              (data.events || []).some(event => ["completed", "complete", "failed", "canceled", "input-updated", "input-boundary"].includes(event.stage)))
             refreshThread = true;
           if (
             data.job.status === "SUCCEEDED" &&
@@ -6444,7 +7274,14 @@
         }
       }),
     );
-    if (refreshThread && state.thread) await loadThread(state.thread.id);
+    if (state.thread?.id !== observedThreadId) return;
+    try {
+      if (!state.threadEventWatch && await pollThreadEvents()) refreshThread = true;
+    } catch (error) {
+      state.sessionEventsBacklog = false;
+      console.warn("Unable to resume conversation events", error);
+    }
+    if (refreshThread && observedThreadId) await loadThread(observedThreadId);
     if (refreshMaterials) await loadMaterials();
     if (
       elements.drawer.classList.contains("is-open") ||
@@ -6464,6 +7301,7 @@
       renderJobs();
       renderMessages();
     }
+    renderUploadStatus();
     } finally {
       state.polling = false;
       schedulePoll();
@@ -6472,20 +7310,30 @@
 
   function schedulePoll() {
     window.clearTimeout(state.pollTimer);
-    const activeRows = taskCenterRows().filter((job) =>
-      activeJobStatuses.has(String(job.status || "").toUpperCase()),
-    );
+    const activeRows = Array.from(new Map([
+      ...taskCenterRows(),
+      ...state.trackedJobs.values(),
+    ].filter((job) => activeJobStatuses.has(String(job.status || "").toUpperCase()))
+      .map((job) => [String(job.id), job])).values());
     const activeSignature = activeRows
       .map((job) => `${job.id || ""}:${job.status || ""}:${job.progress || 0}:${job.stage || ""}`)
       .sort()
       .join("|");
-    const hasActive = Boolean(activeRows.length);
+    const hasBacklog = Array.from(state.trackedJobs.values()).some(job => job.activityHasMore);
+    const hasActive = Boolean(activeRows.length) || hasBacklog;
     if (hasActive) {
       state.pollDelayMs = activeSignature !== state.lastActivePollSignature
         ? 1800
         : Math.min(10000, Math.round(state.pollDelayMs * 1.6));
       state.lastActivePollSignature = activeSignature;
-      const delay = document.hidden ? Math.max(20000, state.pollDelayMs) : state.pollDelayMs;
+      const delay = hasBacklog ? 250 : document.hidden ? Math.max(15000, state.pollDelayMs) : Math.min(2200, state.pollDelayMs);
+      state.pollTimer = window.setTimeout(pollJobs, delay);
+    } else if (state.thread && state.thread.id) {
+      state.pollDelayMs = 1800;
+      state.lastActivePollSignature = "";
+      const delay = state.sessionEventsBacklog
+        ? 1000
+        : document.hidden ? 30000 : 12000;
       state.pollTimer = window.setTimeout(pollJobs, delay);
     } else {
       state.pollDelayMs = 1800;
@@ -6587,7 +7435,7 @@
         ) &&
         !item.activeJob
       ) {
-        window.location.href = teacherArtifactHref(artifactId);
+        openArtifactReview(artifactId);
         return;
       }
       if (
@@ -6779,172 +7627,155 @@
     return value || fallback;
   }
 
-  async function sendUploadedInstruction(flow) {
-    if (!flow || !flow.materialId || !flow.instruction) return false;
-    if (!state.thread || String(state.thread.id) !== String(flow.threadId)) {
-      setUploadFlow({
-        ...flow,
-        phase: "send-error",
-        error: "请回到上传文件时所在的对话，再重新发送这条命令。",
-      });
-      return false;
-    }
-    setUploadFlow({ ...flow, phase: "sending", error: "" });
-    const result = await sendMessage(flow.instruction, null, {
-      sourceRefs: [{ type: "material", id: String(flow.materialId) }],
-    });
-    if (result && result.executed) {
-      clearUploadFlow(flow.id);
-      return true;
-    }
-    const reason =
-      result && result.reason === "active-job"
-        ? "当前任务仍在执行。停止或等待任务完成后，可以只重新发送命令。"
-        : uploadFailureMessage(
-            result && result.error,
-            "命令没有成功发出，可以直接重试，无需重新上传文件。",
-          );
-    setUploadFlow({ ...flow, phase: "send-error", error: reason });
-    return false;
+  function retryUploadItem(id) {
+    const item = state.uploadFlow?.files.find((entry) => entry.id === id);
+    if (!item || item.phase !== "upload-error") return;
+    item.phase = "queued";
+    item.error = "";
+    item.progress = 0;
+    renderUploadStatus();
+    syncComposerState();
+    processUploadQueue().catch(showError);
   }
 
-  async function retryUploadFlow() {
+  async function retryUploadContent(id) {
     const flow = state.uploadFlow;
-    if (!flow || uploadFlowBusy()) return false;
-    if (flow.phase === "upload-error") return uploadMaterial(flow.file);
-    if (flow.phase === "send-error") return sendUploadedInstruction(flow);
-    return false;
+    const item = flow?.files.find((entry) => entry.id === id);
+    const jobId = String(item?.analysisJob?.id || "");
+    if (!item || item.phase !== "ready" || !jobId || item.contentRetrying ||
+        !uploadContentState(item).failed) return;
+    item.contentRetrying = true;
+    renderUploadStatus();
+    try {
+      const job = state.trackedJobs.get(jobId) || item.analysisJob;
+      const data = await window.AISecEdu.jobProgress.retryJob(api, job);
+      if (state.uploadFlow !== flow || !flow.files.includes(item)) return;
+      item.analysisJob = data.job;
+      state.trackedJobs.set(jobId, data.job);
+      renderJobs();
+      schedulePoll();
+    } finally {
+      item.contentRetrying = false;
+      if (state.uploadFlow === flow) renderUploadStatus();
+    }
   }
 
-  async function uploadMaterial(file) {
-    if (!file || !state.thread || uploadFlowBusy()) return false;
-    const previous = state.uploadFlow;
-    const retryingUpload = Boolean(
-      previous && previous.phase === "upload-error" && previous.file === file,
-    );
-    const instruction = retryingUpload
-      ? previous.instruction
-      : elements.input.value.trim();
-    const flowId = retryingUpload
-      ? previous.id
-      : `upload-${++state.uploadFlowSequence}`;
-    const validationError = validateUploadFile(file);
-    if (validationError) {
-      setUploadFlow({
-        id: flowId,
-        file,
-        instruction,
-        threadId,
-        phase: "upload-error",
-        error: validationError,
-      });
-      elements.upload.value = "";
-      return false;
+  function removeUploadItem(id) {
+    const flow = state.uploadFlow;
+    if (!flow) return;
+    const item = flow.files.find((entry) => entry.id === id);
+    if (!item) return;
+    flow.files = flow.files.filter((entry) => entry !== item);
+    item.controller?.abort();
+    if (!flow.files.length) clearUploadFlow(flow.id);
+    else {
+      persistReadyUploadDrafts(flow);
+      renderUploadStatus();
+      syncComposerState();
+      processUploadQueue().catch(showError);
     }
-    if (!state.thread.id) {
-      try {
-        await persistThread();
-      } catch (error) {
-        showError(error);
-        elements.upload.value = "";
-        return false;
-      }
-    }
-    const threadId = retryingUpload ? previous.threadId : state.thread.id;
-    if (String(state.thread.id) !== String(threadId)) {
-      setUploadFlow({
-        id: flowId,
-        file,
-        instruction,
-        threadId,
-        phase: "upload-error",
-        error: "请回到最初选择文件的对话后重试。",
-      });
-      elements.upload.value = "";
-      return false;
-    }
-    const askIntent = !instruction;
-    const form = new FormData();
-    form.set("file", file);
-    form.set("threadId", threadId);
-    form.set("conversationUpload", "1");
-    form.set("askIntent", askIntent ? "1" : "0");
-    let uploadedMaterialId = null;
-    let analysisJob = null;
-    setUploadFlow({
-      id: flowId,
-      file,
-      instruction,
-      threadId,
-      phase: "uploading",
-      error: "",
-    });
-    setBusy(true);
-    api.showNotice(elements.notice, "", "info");
+  }
+
+  async function processUploadQueue() {
+    if (state.uploadProcessing || !state.uploadFlow) return;
+    const flow = state.uploadFlow;
+    state.uploadProcessing = true;
     try {
-      const data = unwrap(
-        await api.multipart(
-          "/teaching/materials",
-          form,
-          "文件上传失败，请稍后重试。",
-        ),
-      );
-      analysisJob = data.job || null;
-      uploadedMaterialId = data.materialId || null;
-      if (!uploadedMaterialId)
-        throw new Error(
-          "文件已经送达服务器，但没有返回可用的附件标识。请重试。",
-        );
-      const sameThread = String(state.thread.id) === String(threadId);
-      if (data.thread && sameThread) {
-        state.thread = data.thread;
-        elements.title.textContent = state.thread.title;
-        populateDojos(state.thread.dojoId);
-        syncAttachmentSources(state.thread);
-      } else if (sameThread) {
-        state.pendingMaterialIds.add(String(uploadedMaterialId));
+      if (!state.thread) throw new Error("请先打开一个对话再上传文件。");
+      if (!state.thread.id) await persistThread();
+      if (state.uploadFlow !== flow) return;
+      flow.threadId = flow.threadId || state.thread.id;
+      if (String(flow.threadId) !== String(state.thread.id))
+        throw new Error("请回到选择文件时所在的对话后重试。");
+      while (state.uploadFlow === flow) {
+        const item = flow.files.find((entry) => entry.phase === "queued");
+        if (!item) break;
+        const form = new FormData();
+        form.set("file", item.file);
+        form.set("threadId", flow.threadId);
+        form.set("conversationUpload", "1");
+        form.set("stageOnly", "1");
+        form.set("askIntent", "0");
+        item.phase = "uploading";
+        item.controller = new AbortController();
+        renderUploadStatus();
+        try {
+          const data = unwrap(await api.multipart(
+            "/teaching/materials", form, "文件上传失败，请稍后重试。",
+            {
+              signal: item.controller.signal,
+              onProgress: ({ loaded, total }) => {
+                if (state.uploadFlow !== flow || !flow.files.includes(item)) return;
+                const next = total ? Math.round(loaded / total * 100) : 0;
+                if (next !== item.progress) {
+                  item.progress = next;
+                  renderUploadStatus();
+                }
+              },
+            },
+          ));
+          if (state.uploadFlow !== flow || !flow.files.includes(item)) continue;
+          if (!data.materialId) throw new Error("服务器未返回附件标识，请重试。");
+          item.materialId = String(data.materialId);
+          item.analysisJob = data.job || null;
+          item.phase = "ready";
+          item.progress = 100;
+          persistReadyUploadDrafts(flow);
+          if (data.job) state.trackedJobs.set(String(data.job.id), data.job);
+          renderJobs();
+          schedulePoll();
+          loadMaterials().catch(showError);
+        } catch (error) {
+          if (state.uploadFlow !== flow || !flow.files.includes(item)) continue;
+          item.phase = "upload-error";
+          item.error = uploadFailureMessage(error, "文件上传失败，请稍后重试。");
+        } finally {
+          item.controller = null;
+          renderUploadStatus();
+          syncComposerState();
+        }
       }
-      if (analysisJob)
-        state.trackedJobs.set(String(analysisJob.id), analysisJob);
-      if (sameThread) {
-        state.forceScrollToLatest = true;
-        renderMessages();
-      }
-      renderJobs();
-      loadThreads().catch(showError);
-      schedulePoll();
     } catch (error) {
-      setUploadFlow({
-        id: flowId,
-        file,
-        instruction,
-        threadId,
-        phase: "upload-error",
-        error: uploadFailureMessage(error, "文件上传失败，请稍后重试。"),
-      });
-      return false;
+      for (const item of flow.files.filter((entry) => entry.phase === "queued")) {
+        item.phase = "upload-error";
+        item.error = uploadFailureMessage(error, "对话尚未准备好，请重试。");
+      }
+      renderUploadStatus();
     } finally {
-      setBusy(false);
-      elements.upload.value = "";
+      state.uploadProcessing = false;
+      syncComposerState();
+      if (state.uploadFlow?.files.some((entry) => entry.phase === "queued"))
+        processUploadQueue().catch(showError);
     }
-    const completedFlow = {
-      id: flowId,
-      file,
-      instruction,
-      threadId,
-      materialId: String(uploadedMaterialId),
-      analysisJob,
-      phase: askIntent ? "ready" : "sending",
-      error: "",
+  }
+
+  function uploadMaterials(files) {
+    if (!state.thread || state.thread.status === "ARCHIVED") return;
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    const current = state.uploadFlow;
+    const sameThread = current && (!current.threadId ||
+      String(current.threadId) === String(state.thread.id));
+    const flow = sameThread ? current : {
+      id: `upload-${++state.uploadFlowSequence}`,
+      threadId: state.thread.id || null,
+      files: [],
     };
-    if (askIntent) {
-      elements.input.value = "";
-      resizeComposer();
-      setUploadFlow(completedFlow);
-      dismissSuccessfulUpload(flowId);
-      return true;
+    for (const file of list) {
+      const error = validateUploadFile(file);
+      flow.files.push({
+        id: `file-${++state.uploadFlowSequence}`,
+        file,
+        phase: error ? "upload-error" : "queued",
+        progress: 0,
+        error,
+        materialId: null,
+        analysisJob: null,
+        controller: null,
+      });
     }
-    return sendUploadedInstruction(completedFlow);
+    setUploadFlow(flow);
+    processUploadQueue().catch(showError);
   }
 
   function resizeComposer() {
@@ -6983,6 +7814,7 @@
       state.overlayReturnFocus.focus({ preventScroll: true });
       state.overlayReturnFocus = null;
     }
+    syncArtifactReviewMode();
   }
 
   function setSidebarCollapsed(collapsed) {
@@ -7044,6 +7876,7 @@
       state.overlayReturnFocus.focus({ preventScroll: true });
       state.overlayReturnFocus = null;
     }
+    syncArtifactReviewMode();
   }
 
   function authoringManagementHref(job) {
@@ -7084,18 +7917,25 @@
     return `${canonical.pathname}${canonical.search}`;
   }
 
+  function focusPendingJob() {
+    const id = state.pendingJobFocus;
+    if (!id || state.taskCenterLoading || !elements.drawer.classList.contains("is-open")) return;
+    const target = Array.from(elements.jobList.querySelectorAll("[data-task-job]"))
+      .find(node => String(node.dataset.taskJob) === id);
+    if (!target) return;
+    elements.drawer.scrollTop += target.getBoundingClientRect().top - elements.drawer.getBoundingClientRect().top - 180;
+    state.pendingJobFocus = null;
+  }
+
   function openJob(jobId) {
     const id = String(jobId);
     state.selectedJobId = id;
     state.expandedJobIds.add(id);
     renderJobs();
     setDrawer(true);
-    window.requestAnimationFrame(() => {
-      const target = Array.from(
-        elements.jobList.querySelectorAll("[data-task-job]"),
-      ).find((node) => String(node.dataset.taskJob) === id);
-      if (target) target.scrollIntoView({ block: "nearest" });
-    });
+    state.pendingJobFocus = id;
+    refreshJobDetails(id).catch(() => {});
+    window.requestAnimationFrame(focusPendingJob);
   }
 
   async function applyLaunchIntent() {
@@ -7154,10 +7994,16 @@
       );
     }
     if (contextChanged) await saveContext();
+    syncThreadLocation();
   }
 
   async function boot() {
     try {
+      try {
+        setViewMode(window.localStorage.getItem("aisecedu-agent-view-mode"));
+      } catch {
+        setViewMode("chat");
+      }
       let collapsed = false;
       try {
         collapsed =
@@ -7174,6 +8020,7 @@
       const requestedThread = String(params.get("thread") || "").trim();
       const requestedConversation = params.get("view") === "conversation";
       const requestedTasks = params.get("tasks") === "1";
+      const requestedJob = String(params.get("job") || "").trim();
       const hasLaunchIntent = Boolean(
         params.get("prompt") ||
           params.get("dojo") ||
@@ -7184,6 +8031,7 @@
       );
       populateDojos(null);
       populateTaskCourseFilter();
+      const bootNavigationEpoch = state.threadLoadEpoch || 0;
       const threadsPromise = loadThreads();
       if (!requestedThread && !hasLaunchIntent && !requestedConversation && !requestedTasks) {
         state.thread = null;
@@ -7196,7 +8044,19 @@
         return;
       }
       await threadsPromise;
-      if (requestedThread) {
+      // The teacher can start a new conversation while the initial thread list
+      // is loading. Do not let the boot-time default selection replace it.
+      if ((state.threadLoadEpoch || 0) !== bootNavigationEpoch) {
+        setBusy(false);
+        resizeComposer();
+        root.dataset.ready = "true";
+        root.setAttribute("aria-busy", "false");
+        return;
+      }
+      if (params.get("newProject") === "1") {
+        await createThread({dojoId: null, moduleIndex: null});
+        await applyLaunchIntent();
+      } else if (requestedThread) {
         await loadThread(requestedThread);
         await loadActions();
         await applyLaunchIntent();
@@ -7206,7 +8066,13 @@
       } else if (requestedConversation || requestedTasks) {
         if (state.threads.length) await activateThread(state.threads[0].id);
         else await createThread();
-        if (requestedTasks) setDrawer(true);
+        if (requestedTasks) {
+          setDrawer(true);
+          if (requestedJob) {
+            await refreshJobDetails(requestedJob);
+            openJob(requestedJob);
+          }
+        }
       }
       setBusy(false);
       resizeComposer();
@@ -7217,23 +8083,128 @@
       setBusy(false);
       root.dataset.ready = "error";
       root.setAttribute("aria-busy", "false");
+      elements.messages.innerHTML = `<section class="teaching-message is-assistant" role="status"><div class="teaching-message-body"><h2>无法载入对话</h2><p>${api.escapeHtml(error instanceof Error ? error.message : String(error))}</p><button type="button" class="btn btn-outline-primary" data-agent-boot-retry>重新连接</button></div></section>`;
+      elements.messages.querySelector("[data-agent-boot-retry]").addEventListener("click", event => {
+        event.currentTarget.disabled = true;
+        root.dataset.ready = "loading";
+        boot();
+      });
     }
   }
 
-  elements.send.addEventListener("click", () => {
+  elements.send.addEventListener("click", () => sendMessage());
+  elements.viewButtons.forEach((button) => button.addEventListener("click", () => setViewMode(button.dataset.teachingView)));
+  elements.trajectory?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-trajectory-job]");
+    if (button) openJob(button.dataset.trajectoryJob);
+  });
+  elements.skillsTrigger?.addEventListener("click", () => {
+    if (state.skillMenuOpen) closeSkillMenu(true);
+    else openSkillMenu().catch(showError);
+  });
+  elements.sourceTrigger?.addEventListener("click", () => {
+    state.sourceMenuOpen = !state.sourceMenuOpen;
+    renderSourceMenu();
+  });
+  elements.skillMenuClose?.addEventListener("click", () => closeSkillMenu(true));
+  elements.skillSearch?.addEventListener("input", () => {
+    state.skillMenuIndex = 0;
+    renderSkillMenu();
+  });
+  elements.skillSearch?.addEventListener("keydown", handleSkillMenuKey);
+  elements.skillList?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-select-skill]");
+    if (button) selectSkill(button.dataset.selectSkill);
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (state.skillMenuOpen && !elements.skillMenu?.contains(event.target) &&
+      !elements.skillsTrigger?.contains(event.target) && !elements.input.contains(event.target))
+      closeSkillMenu();
+    if (state.sourceMenuOpen && !elements.sourceMenu?.contains(event.target) &&
+      !elements.sourceTrigger?.contains(event.target)) {
+      state.sourceMenuOpen = false;
+      renderSourceMenu();
+    }
+  });
+  elements.stop?.addEventListener("click", () => {
     const active = primaryActiveJob();
     if (active) cancelTrackedJob(active.id).catch(showError);
-    else sendMessage();
   });
+  elements.pendingTurns?.addEventListener("click", async event => {
+    const button = event.target.closest("[data-withdraw-turn], [data-edit-turn]");
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    try {
+      if (button.dataset.editTurn) {
+        const threadId = state.thread.id;
+        const item = state.thread.pendingTurns.find(row => row.jobId === button.dataset.editTurn);
+        if (!item) return;
+        const content = await window.AISecEduUI.prompt("修改排队中的要求", { title: "编辑要求", value: item.content, multiline: true, confirmLabel: "保存修改" });
+        if (content === null || content === undefined || content.trim() === item.content) return;
+        await api.json("PATCH", `/teaching/jobs/${encodeURIComponent(item.jobId)}/input`, { content, revision: item.revision });
+        if (state.thread?.id === threadId) await loadThread(threadId);
+        return;
+      }
+      await cancelTrackedJob(button.dataset.withdrawTurn);
+      if (state.thread?.id) await loadThread(state.thread.id);
+    } catch (error) {
+      showError(error);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  elements.inputDelivery?.addEventListener("change", syncComposerState);
+  elements.artifactReviewClose.addEventListener("click", closeArtifactReview);
+  root.addEventListener("click", event => {
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button) return;
+    const link = event.target.closest('a[href]');
+    if (!link || elements.artifactReview.contains(link)) return;
+    const target = new URL(link.href, window.location.origin);
+    const match = target.pathname.match(/^\/teacher\/artifacts\/([^/]+)$/);
+    if (target.origin !== window.location.origin || !match) return;
+    event.preventDefault();
+    openArtifactReview(decodeURIComponent(match[1]), target.pathname + target.search);
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !event.defaultPrevented && !elements.artifactReview.hidden) closeArtifactReview();
+  });
+  elements.artifactReviewFrame.addEventListener("load", () => {
+    try {
+      const frameDocument = elements.artifactReviewFrame.contentDocument;
+      frameDocument?.addEventListener("keydown", event => {
+        if (event.defaultPrevented) return;
+        if (event.key === "Escape") {
+          closeArtifactReview();
+          return;
+        }
+        if (event.key !== "Tab" || elements.artifactReview.getAttribute("aria-modal") !== "true") return;
+        const children = overlayFocusable(frameDocument.body);
+        const parent = overlayFocusable(elements.artifactReview).filter(node => node !== elements.artifactReviewFrame);
+        if ((!event.shiftKey && frameDocument.activeElement === children[children.length - 1]) ||
+            (event.shiftKey && frameDocument.activeElement === children[0])) {
+          event.preventDefault();
+          (event.shiftKey ? parent[parent.length - 1] : parent[0])?.focus();
+        }
+      });
+    } catch (_) {}
+  });
+  window.addEventListener("resize", syncArtifactReviewMode);
   elements.input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (state.skillMenuOpen && state.skillMenuViaInput && handleSkillMenuKey(event)) return;
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
       event.preventDefault();
       sendMessage();
     }
   });
   elements.input.addEventListener("input", () => {
+    saveComposerDraft();
     resizeComposer();
     syncComposerState();
+    if (!elements.skillMenu || elements.input.selectionStart !== elements.input.selectionEnd) return;
+    const cursor = elements.input.selectionStart;
+    const command = elements.input.value.slice(0, cursor).match(/(^|\s)\/([a-z0-9-]*)$/);
+    if (command) openSkillMenu(command[2], true).catch(showError);
+    else if (state.skillMenuViaInput) closeSkillMenu();
   });
   elements.dashboardSend?.addEventListener("click", () =>
     startDashboardTask().catch(showError),
@@ -7282,13 +8253,30 @@
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      stopThreadEventWatch();
       scheduleDashboardRefresh();
       schedulePoll();
       return;
     }
     if (state.dashboardMode) void loadDashboard();
+    startThreadEventWatch();
     schedulePoll();
   });
+  window.addEventListener("beforeunload", stopThreadEventWatch);
+  window.AISecEdu.jobProgress.subscribeJobRetries(async (id) => {
+    if (state.retryingJobIds.has(id)) return;
+    try {
+      const data = unwrap(await api.request(`/teaching/jobs/${encodeURIComponent(id)}`));
+      storeTaskCenterJob({ ...data.job, events: data.events || [], activityLoaded: true });
+      renderJobs();
+      renderMessages();
+      if (state.thread && data.job.threadId === state.thread.id) await loadThread(state.thread.id);
+      schedulePoll();
+    } catch (error) {
+      console.warn("Unable to refresh retried task", error);
+    }
+  });
+
   [elements.taskCourseFilter, elements.taskTypeFilter, elements.taskStatusFilter].forEach((control) => {
     control?.addEventListener("change", () => {
       state.taskFilters = {
@@ -7384,6 +8372,27 @@
       closeGenerationConfirmation();
     }
   });
+  elements.questionForm?.addEventListener("submit", (event) => {
+    submitQuestionDialog(event).catch(showError);
+  });
+  elements.questionBack?.addEventListener("click", () => {
+    state.questionIndex = Math.max(0, state.questionIndex - 1);
+    renderQuestionDialog();
+    elements.questionContent.querySelector("textarea")?.focus();
+  });
+  elements.questionLater?.addEventListener("click", () => closeQuestionDialog(true));
+  elements.questionDialog?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeQuestionDialog(true);
+  });
+  elements.questionDialog?.addEventListener("click", (event) => {
+    if (event.target === elements.questionDialog) closeQuestionDialog(true);
+  });
+  elements.questionContent?.addEventListener("keydown", (event) => {
+    if (event.target.tagName !== "TEXTAREA" || event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    elements.questionForm.requestSubmit();
+  });
   document
     .getElementById("teaching-new-thread")
     .addEventListener("click", () => createThread().catch(showError));
@@ -7451,9 +8460,30 @@
   elements.uploadTrigger.addEventListener("click", () => {
     if (!elements.uploadTrigger.disabled) elements.upload.click();
   });
-  elements.upload.addEventListener("change", () =>
-    uploadMaterial(elements.upload.files[0]).catch(showError),
-  );
+  elements.upload.addEventListener("change", () => {
+    uploadMaterials(elements.upload.files);
+    elements.upload.value = "";
+  });
+  elements.input.addEventListener("paste", (event) => {
+    const files = event.clipboardData?.files;
+    if (files?.length) uploadMaterials(files);
+  });
+  elements.composer?.addEventListener("dragover", (event) => {
+    if (!Array.from(event.dataTransfer?.types || []).includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    elements.composer.classList.add("is-file-dragover");
+  });
+  elements.composer?.addEventListener("dragleave", (event) => {
+    if (!elements.composer.contains(event.relatedTarget))
+      elements.composer.classList.remove("is-file-dragover");
+  });
+  elements.composer?.addEventListener("drop", (event) => {
+    if (!event.dataTransfer?.files?.length) return;
+    event.preventDefault();
+    elements.composer.classList.remove("is-file-dragover");
+    uploadMaterials(event.dataTransfer.files);
+  });
   elements.drawerOpen.addEventListener("click", () => {
     const latest =
       primaryActiveJob() ||
@@ -7468,29 +8498,55 @@
   });
   elements.drawerClose.addEventListener("click", () => setDrawer(false));
   elements.drawerOverlay.addEventListener("click", () => setDrawer(false));
-  function trapOverlayFocus(container, event) {
-    if (event.key !== "Tab" || !container || container.inert) return false;
-    const focusable = Array.from(
+  function overlayFocusable(container) {
+    return Array.from(
       container.querySelectorAll(
-        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])',
       ),
-    ).filter((node) => !node.hidden && node.offsetParent !== null);
+    ).filter(node => !node.hidden && !node.closest('[hidden], [inert]') && node.offsetParent !== null);
+  }
+  function focusOverlayEdge(node, end) {
+    if (node?.tagName === "IFRAME") {
+      try {
+        const children = overlayFocusable(node.contentDocument.body);
+        if (children.length) {
+          (end ? children[children.length - 1] : children[0]).focus();
+          return;
+        }
+      } catch (_) {}
+    }
+    node?.focus();
+  }
+  function trapOverlayFocus(container, event) {
+    if (event.defaultPrevented || event.key !== "Tab" || !container || container.inert) return false;
+    const focusable = overlayFocusable(container);
     if (!focusable.length) return false;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
-      last.focus();
+      focusOverlayEdge(last, true);
       return true;
     }
     if (!event.shiftKey && document.activeElement === last) {
       event.preventDefault();
-      first.focus();
+      focusOverlayEdge(first, false);
       return true;
     }
     return false;
   }
   document.addEventListener("keydown", (event) => {
+    if (!elements.artifactReview.hidden && elements.artifactReview.getAttribute("aria-modal") === "true") {
+      trapOverlayFocus(elements.artifactReview, event);
+      return;
+    }
+    if (elements.questionDialog?.open) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeQuestionDialog(true);
+      }
+      return;
+    }
     if (elements.drawer.classList.contains("is-open")) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -7511,7 +8567,7 @@
       return;
     }
     const commandKey = event.metaKey || event.ctrlKey;
-    if (commandKey && event.key.toLowerCase() === "k") {
+    if (commandKey && !event.shiftKey && event.key.toLowerCase() === "k") {
       event.preventDefault();
       setSidebar(true);
       elements.threadSearch.focus();

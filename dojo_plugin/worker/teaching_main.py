@@ -2,14 +2,14 @@ import logging
 import os
 import signal
 
-from ..agent_runtime.jobs import AUTHORING_STREAM, STREAM, consume_jobs
+from ..agent_runtime.jobs import CODING_STREAM, AUTHORING_STREAM, MATERIAL_INDEX_STREAM, MATERIAL_STREAM, STREAM, consume_jobs
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 shutdown_requested = False
 worker_stream = os.getenv("TEACHING_WORKER_STREAM") or STREAM
-if worker_stream not in {STREAM, AUTHORING_STREAM}:
+if worker_stream not in {STREAM, CODING_STREAM, AUTHORING_STREAM, MATERIAL_INDEX_STREAM, MATERIAL_STREAM}:
     raise RuntimeError("TEACHING_WORKER_STREAM must be a supported teaching stream")
 
 

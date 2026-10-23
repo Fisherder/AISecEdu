@@ -174,6 +174,52 @@ class TeachingAgentApprovals(db.Model):
     approver = db.relationship("Users")
 
 
+class TeachingAgentEventOutbox(db.Model):
+    """Source-row changes captured in the same transaction as their source."""
+
+    __tablename__ = "teaching_agent_event_outbox"
+    __table_args__ = (
+        db.Index("ix_agent_event_outbox_pending", "thread_id", "projected_sequence", "id"),
+    )
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    thread_id = db.Column(
+        db.String(48),
+        db.ForeignKey("teaching_agent_threads.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type = db.Column(db.String(64), nullable=False)
+    payload = db.Column(JSONB, default=dict, nullable=False)
+    projected_sequence = db.Column(db.BigInteger)
+    created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+
+class TeachingAgentSessionEvents(db.Model):
+    """Immutable, contiguous per-thread projection for resumable readers."""
+
+    __tablename__ = "teaching_agent_session_events"
+    __table_args__ = (db.UniqueConstraint("thread_id", "sequence"),)
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    thread_id = db.Column(
+        db.String(48),
+        db.ForeignKey("teaching_agent_threads.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sequence = db.Column(db.BigInteger, nullable=False)
+    source_outbox_id = db.Column(
+        db.BigInteger,
+        db.ForeignKey("teaching_agent_event_outbox.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    event_type = db.Column(db.String(64), nullable=False)
+    payload = db.Column(JSONB, default=dict, nullable=False)
+    created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+
 class TeachingJobs(db.Model):
     __tablename__ = "teaching_jobs"
     __table_args__ = (
@@ -933,3 +979,37 @@ class AgentRuntimeLaunchTickets(db.Model):
     created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
 
     user = db.relationship("Users")
+
+
+class TeachingAgentSkills(db.Model):
+    __tablename__ = "teaching_agent_skills"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "name", name="uq_teaching_agent_skill_owner_name"),
+    )
+
+    id = db.Column(db.String(48), primary_key=True, default=lambda: teaching_id("skill"))
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name = db.Column(db.String(64), nullable=False, index=True)
+    description = db.Column(db.String(1000), nullable=False)
+    instructions = db.Column(db.Text, nullable=False)
+    references = db.Column(JSONB, default=list, nullable=False)
+    source = db.Column(db.String(24), default="user", nullable=False)
+    origin = db.Column(db.String(120))
+    enabled = db.Column(db.Boolean, default=True, server_default=db.text("true"), nullable=False, index=True)
+    model_invocable = db.Column(db.Boolean, default=True, server_default=db.text("true"), nullable=False)
+    user_invocable = db.Column(db.Boolean, default=True, server_default=db.text("true"), nullable=False)
+    version = db.Column(db.Integer, default=1, nullable=False)
+    created = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated = db.Column(
+        db.DateTime,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow,
+        nullable=False,
+    )
+
+    owner = db.relationship("Users")

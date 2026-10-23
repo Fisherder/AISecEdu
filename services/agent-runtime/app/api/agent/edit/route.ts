@@ -6,7 +6,7 @@
  * editor flag.
  */
 import type { NextRequest } from 'next/server';
-import type { AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { isMaicEditorEnabled } from '@/lib/config/feature-flags';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 import type { LlmStage } from '@/lib/server/model-routes';
@@ -16,6 +16,7 @@ import { buildToolset } from '@/lib/agent/tools/registry';
 import { callLLM } from '@/lib/ai/llm';
 import { createLogger } from '@/lib/logger';
 import type { SceneContext } from '@/lib/agent/tools/regenerate-scene-actions';
+import { createPiAgentRunProjector } from '@/lib/agent-run/pi-projector';
 
 const log = createLogger('MAIC Agent');
 
@@ -167,9 +168,11 @@ export async function POST(req: NextRequest) {
   log.info(`agent edit turn [model=${modelString}] scene=${body.scene?.id ?? 'none'}`);
 
   const encoder = new TextEncoder();
+  const runId = crypto.randomUUID();
+  const projector = createPiAgentRunProjector(runId, `编辑 ${body.scene?.title ?? '当前内容'}`);
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (event: AgentEvent) => {
+      const send = (event: unknown) => {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         } catch {
@@ -178,6 +181,7 @@ export async function POST(req: NextRequest) {
       };
       const unsubscribe = agent.subscribe((event) => {
         send(event);
+        for (const envelope of projector.project(event)) send(envelope);
       });
       try {
         await agent.prompt(message);

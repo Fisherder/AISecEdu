@@ -23,6 +23,37 @@ workspace_node_ips = [f"192.168.42.{int(node_id) + 1}" for node_id in workspace_
 
 now = datetime.now(timezone.utc)
 
+GUEST_SHUTDOWN_COMMAND = ["python3", "-c", r'''
+import sys
+sys.path.insert(0, '/usr/local/lib/windows-lab')
+import start
+try:
+    start.qmp('query-status')
+except OSError:
+    sys.exit(0)
+start.shutdown_guest()
+try:
+    state = start.qmp('query-status')
+except OSError:
+    sys.exit(0)
+sys.exit(0 if state.get('status') == 'shutdown' else 1)
+''']
+
+
+def remove_workspace(container):
+    if (container.labels or {}).get('dojo.runtime_environment') == 'windows2000':
+        try:
+            code, _ = container.exec_run(GUEST_SHUTDOWN_COMMAND, user='0', demux=False)
+            if code:
+                logging.warning('Windows guest shutdown did not complete: %s', container.id)
+        except docker.errors.DockerException as error:
+            logging.warning('Windows guest shutdown unavailable: %s', type(error).__name__)
+        try:
+            container.stop(timeout=25)
+        except docker.errors.DockerException:
+            pass
+    container.remove(force=True)
+
 def human_size(n):
     for unit in ['B','KiB','MiB','GiB','TiB']:
         if abs(n) < 1024.0:
@@ -42,7 +73,7 @@ def remove_old_containers(docker_client_ip):
     for container in reversed(sorted(old_containers, key=container_age)):
         user_id = container.labels["dojo.user_id"]
         logging.info(f"Removing old docker container {container.id} (user {user_id}) on {docker_client.api.base_url}: {container_age(container).total_seconds() // 3600:.0f} hours")
-        container.remove(force=True)
+        remove_workspace(container)
 
     container_sizes = {
         container["Id"]: container.get("SizeRw", 0)
@@ -53,7 +84,7 @@ def remove_old_containers(docker_client_ip):
     for container in reversed(sorted(large_containers, key=container_size)):
         user_id = container.labels["dojo.user_id"]
         logging.info(f"Removing large docker container {container.id} (user {user_id}) on {docker_client.api.base_url}: {human_size(container_size(container))}")
-        container.remove(force=True)
+        remove_workspace(container)
 
     logging.info(f"Removed docker containers on {docker_client.api.base_url}")
 

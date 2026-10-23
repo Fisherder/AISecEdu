@@ -1,5 +1,7 @@
 import json
 
+from ..runtime_profiles import runtime_profile
+
 
 WINDOWS_GATE_TRANSPORT = '''
 def live_binding_value(binding):
@@ -36,8 +38,16 @@ def live_binding_value(binding):
 '''
 
 
+def windows_package_profile(spec):
+    profile = runtime_profile(spec.get("runtimeEnvironment", "linux"))
+    if not profile.is_windows or not profile.command_bridge:
+        return None
+    return profile
+
+
 def install_runtime_package(package_path, spec):
-    if spec.get("runtimeEnvironment", "linux") != "windows":
+    profile = windows_package_profile(spec)
+    if profile is None:
         return
     manifest = {
         "version": 1,
@@ -51,7 +61,8 @@ def install_runtime_package(package_path, spec):
     (package_path / "runtime-public.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
     launcher = package_path / "runtime-launcher.py"
     launcher.write_text(
-        '#!/usr/bin/python3\nimport subprocess\nsubprocess.run(["/usr/local/bin/windows-runtime-start"], check=True)\n',
+        "#!/usr/bin/python3\nimport subprocess\n"
+        f"subprocess.run([{profile.initializer!r}], check=True)\n",
         encoding="utf-8",
     )
     launcher.chmod(0o700)

@@ -64,7 +64,7 @@ export function lessonToScenes(
 ): { stageId: string; stage: Stage; scenes: Scene[] } {
   const stageId = requestedStageId || nanoid(10);
   const now = Date.now();
-  const debateAgents = lesson.artifacts.some((artifact) => artifact.type === 'debate')
+  const debateAgents = lesson.artifacts.some((artifact) => artifact.type === 'debate' && !('debate' in artifact.content))
     ? buildDebateAgentConfigs(stageId)
     : [];
   const stage: Stage = {
@@ -82,7 +82,7 @@ export function lessonToScenes(
   for (const artifact of lesson.artifacts) {
     const scene = buildCompleteScene(artifact.outline, artifact.content, [], stageId);
     if (!scene) continue;
-    if (artifact.type === 'debate') {
+    if (artifact.type === 'debate' && !('debate' in artifact.content)) {
       scene.multiAgent = {
         enabled: true,
         agentIds: debateAgents.map((agent) => agent.id),

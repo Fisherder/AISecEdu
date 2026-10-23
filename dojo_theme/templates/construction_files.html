@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block stylesheets %}<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/construction-center.css', v='frontend-restored-20261001-1') }}">{% endblock %}
+{% block content %}
+<main class="cc-shell" id="construction-file-preview">
+  <header class="cc-header"><div><p class="cc-eyebrow">文件成果{% if frozen_review %} · 固定审核版本{% endif %}</p><h1>{{ artifact.title }}</h1><p>提交文件供审核和教师复用，答案及评分附件只对有权限的教师开放。</p></div><div class="cc-actions"><a href="{{ artifact_return_to }}">返回</a></div></header>
+  {% if submitted_files %}
+  <section class="cc-card" aria-label="成果文件"><h2>成果文件 · {{ submitted_files|length }} 个</h2>
+    {% for entry in submitted_files %}
+    <article class="cc-submitted-file"><div><h3>{{ entry.filename }}</h3><p class="cc-muted">{{ '%.2f'|format(entry.size / 1024 / 1024) }} MB</p><details><summary>查看文件指纹</summary><p class="cc-file-hash">SHA-256：{{ entry.sha256 }}</p></details></div><div class="cc-actions">{% if entry.canPreview %}<a href="{{ entry.href }}" target="_blank" rel="noopener">预览 PDF ↗</a>{% endif %}<a href="{{ entry.href }}" download="{{ entry.filename }}">下载文件</a></div></article>
+    {% endfor %}
+  </section>
+  {% else %}<section class="cc-card"><p>这些文件是教师审核与复用资料，当前学生视图不显示附件。</p></section>{% endif %}
+</main>
+{% endblock %}

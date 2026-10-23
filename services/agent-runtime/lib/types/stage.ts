@@ -12,6 +12,7 @@
 // the same semantics (actions are `Action[]`, content spans all four kinds).
 import type { Scene as DslScene, SceneContent as DslSceneContent } from '@openmaic/dsl';
 import type { Action } from '@/lib/types/action';
+import type { CoursewareSlideData } from '@/lib/courseware/schema';
 import type { WidgetType, WidgetConfig } from '@/lib/types/widgets';
 import type { PBLProjectConfig } from '@/lib/pbl/types';
 import type { PBLProjectV2 } from '@/lib/pbl/v2/types';
@@ -25,7 +26,6 @@ export type {
   GeneratedAgentConfig,
   MultiAgentConfig,
   Stage,
-  SlideContent,
   QuizOption,
   QuizQuestion,
   QuizContent,
@@ -58,6 +58,8 @@ export type { Scene as SceneShape } from '@openmaic/dsl';
  * couples to Ultra-mode widget configs (`WidgetType` / `WidgetConfig`).
  */
 export interface InteractiveContent {
+  debate?: import('@/lib/debate/schema').DebateSpec;
+  debateArtifactId?: string;
   type: 'interactive';
   url: string; // URL of the interactive page
   // Optional: embedded HTML content
@@ -65,6 +67,14 @@ export interface InteractiveContent {
   // Ultra Mode widget fields
   widgetType?: WidgetType;
   widgetConfig?: WidgetConfig;
+  renderingMode?: import('./generation').GeneratedInteractiveContent['renderingMode'];
+  processScene?: import('./generation').GeneratedInteractiveContent['processScene'];
+  processIntent?: import('./generation').GeneratedInteractiveContent['processIntent'];
+  processValidation?: import('./generation').GeneratedInteractiveContent['processValidation'];
+  cinematicIntent?: import('./generation').GeneratedInteractiveContent['cinematicIntent'];
+  cinematicScene?: import('./generation').GeneratedInteractiveContent['cinematicScene'];
+  cinematicDirection?: import('./generation').GeneratedInteractiveContent['cinematicDirection'];
+  cinematicValidation?: import('./generation').GeneratedInteractiveContent['cinematicValidation'];
 }
 
 /**
@@ -85,7 +95,8 @@ export interface PBLContent {
  * app-only feature kinds. This is what `@/lib/types/stage` callers have always
  * known as `SceneContent` (all four cases).
  */
-export type AppSceneContent = DslSceneContent | InteractiveContent | PBLContent;
+export type SlideContent = import('@openmaic/dsl').SlideContent & { studio?: CoursewareSlideData };
+export type AppSceneContent = SlideContent | Exclude<DslSceneContent, { type: 'slide' }> | InteractiveContent | PBLContent;
 
 /**
  * The app's `SceneContent` — the full four-way union. Overrides the contract's

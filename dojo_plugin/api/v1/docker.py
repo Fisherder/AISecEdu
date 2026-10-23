@@ -40,8 +40,9 @@ from ...utils import (
     is_challenge_locked,
 )
 from ...utils.dojo import dojo_accessible, get_current_dojo_challenge
-from ...utils.workspace import exec_run, reset_home, workspace_start_slot
-from ...runtime_profiles import runtime_profile, container_runtime_profile
+from ...utils.workspace import exec_run, workspace_start_slot
+from ...runtime_profiles import runtime_profile, container_runtime_profile, profile_for_runtime_label
+from ...question_reset import selected_volume, switch_volume, windows_volume, coding_reset
 from ...utils.feed import publish_container_start
 from ...utils.background_stats import publish_stat_event
 from ...utils.request_logging import get_trace_id, log_generator_output
@@ -68,6 +69,18 @@ HOST_HOMES_MOUNTS = HOST_HOMES / "mounts"
 HOST_HOMES_OVERLAYS = HOST_HOMES / "overlays"
 
 
+def flush_guest_disk_before_stop(container):
+    try:
+        from ...agent_runtime.guest_input import flush_guest_disk, shutdown_guest
+
+        if flush_guest_disk(container):
+            logger.info("Flushed guest disk cache before stopping the container")
+        if shutdown_guest(container):
+            logger.info("Windows guest shut down before stopping the container")
+    except Exception as error:
+        logger.warning("Guest disk flush skipped: %s", error)
+
+
 def remove_container(user):
     # Just in case our container is still running on the other docker container, let's make sure we try to kill both
     known_image_name = cache.get(f"user_{user.id}-running-image")
@@ -76,6 +89,11 @@ def remove_container(user):
         docker_client = user_docker_client(user, image_name)
         try:
             container = docker_client.containers.get(container_name(user))
+            flush_guest_disk_before_stop(container)
+            try:
+                container.stop(timeout=25)
+            except (docker.errors.NotFound, docker.errors.APIError):
+                pass
             container.remove(force=True)
             container.wait(condition="removed")
         except (docker.errors.NotFound, docker.errors.APIError):
@@ -113,6 +131,34 @@ def get_available_devices(docker_client):
     cache.set(key, devices, timeout=timeout)
     return devices
 
+LAB_STATE_DIR = "/var/lib/windows-lab"
+
+
+def lab_state_volume(owner_id, namespace=None):
+    suffix = ""
+    if namespace:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", str(namespace)):
+            raise ValueError("Invalid lab state namespace")
+        suffix = f"-{namespace}"
+    return f"dojo-lab-state-{int(owner_id)}{suffix}"
+
+
+def image_lab_state_namespace(image_labels, challenge_id):
+    namespace = image_labels.get("org.aisecedu.lab-state-namespace")
+    return f"{namespace or 'question'}-{int(challenge_id)}"
+
+
+def remove_lab_state_volume(docker_client, owner_id, namespace=None):
+    volume = lab_state_volume(owner_id, namespace)
+    try:
+        docker_client.volumes.get(volume).remove(force=True)
+        logger.info("Removed persistent lab state volume %s", volume)
+    except docker.errors.NotFound:
+        return
+    except docker.errors.DockerException as error:
+        logger.warning("Could not remove lab state volume %s: %s", volume, error)
+
+
 def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, practice):
     resolved_dojo_challenge = dojo_challenge.resolve()
 
@@ -136,11 +182,17 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
 
     challenge_bin_path = "/run/challenge/bin"
     dojo_bin_path = "/run/dojo/bin"
-    image = docker_client.images.get(resolved_dojo_challenge.image)
+    try:
+        image = docker_client.images.get(resolved_dojo_challenge.image)
+    except docker.errors.ImageNotFound:
+        raise RuntimeError(
+            f"运行环境镜像未安装：{resolved_dojo_challenge.image}；"
+            f"请先在本节点导入该客户机系统镜像。"
+        )
     profile = runtime_profile(resolved_dojo_challenge.runtime_environment)
     image_labels = image.attrs["Config"].get("Labels") or {}
-    if not (resolved_dojo_challenge.data or {}).get("runtime_environment") and image_labels.get("org.aisecedu.runtime") == "windows-qemu":
-        profile = runtime_profile("windows")
+    if not (resolved_dojo_challenge.data or {}).get("runtime_environment"):
+        profile = profile_for_runtime_label(image_labels.get("org.aisecedu.runtime")) or profile
     image_env = image.attrs["Config"].get("Env") or []
     image_path = next((env_var[len("PATH="):].split(":") for env_var in image_env if env_var.startswith("PATH=")), [])
     env_path = ":".join([challenge_bin_path, dojo_bin_path, *image_path])
@@ -161,6 +213,15 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
         ),
         *user_mounts,
     ]
+    runtime_label = image_labels.get("org.aisecedu.runtime") or ""
+    if profile.id.startswith("windows") or runtime_label.startswith("windows"):
+        mounts.append(
+            docker.types.Mount(
+                LAB_STATE_DIR,
+                selected_volume(as_user.id, dojo_challenge, lab_state_volume(as_user.id, image_lab_state_namespace(image_labels, dojo_challenge.challenge_id))),
+                "volume",
+            )
+        )
 
     allowed_devices = ["/dev/kvm", "/dev/net/tun"]
     available_devices = set(get_available_devices(docker_client))
@@ -319,7 +380,21 @@ def start_challenge(user, dojo_challenge, practice, *, as_user=None):
         f"module={dojo_challenge.module.id} challenge={dojo_challenge.id} "
         f"{practice=} {as_user=} node_id={node_id + 1}"
     )
+    previous = optional_container(user)
+    old_volume = windows_volume(previous) if previous is not None else None
+    same_question = previous is not None and previous.labels.get('dojo.dojo_id') == dojo_challenge.dojo.reference_id and previous.labels.get('dojo.challenge_id') == dojo_challenge.id
     remove_container(user)
+    labels = docker_client.images.get(dojo_challenge.resolve().image).attrs['Config'].get('Labels') or {}
+    if same_question and old_volume:
+        owner = as_user or user
+        fallback = lab_state_volume(owner.id, image_lab_state_namespace(labels, dojo_challenge.challenge_id))
+        destination = selected_volume(owner.id, dojo_challenge, fallback)
+        try:
+            docker_client.volumes.get(destination)
+        except docker.errors.NotFound:
+            if old_volume != destination and destination == fallback:
+                docker_client.volumes.create(destination)
+                docker_client.containers.run('busybox:uclibc', ['sh','-c','cp -a /source/. /destination/'], remove=True, volumes={old_volume:{'bind':'/source','mode':'ro'},destination:{'bind':'/destination','mode':'rw'}})
 
     user_mounts = []
     if as_user is None:
@@ -390,7 +465,29 @@ def start_challenge(user, dojo_challenge, practice, *, as_user=None):
     return container
 
 
-def start_challenge_session(user, dojo_challenge, practice, *, as_user=None):
+def preserved_state():
+    try:
+        container = optional_container(get_current_user())
+    except Exception:
+        container = None
+    if container is None:
+        return {"kind": "none", "message": "重新启动后会从初始状态开始。"}
+    try:
+        profile = container_runtime_profile(container)
+    except Exception:
+        profile = None
+    if profile is not None and getattr(profile, "family", "") == "windows":
+        return {
+            "kind": "guest-disk",
+            "message": "虚拟机磁盘状态已保留：客户机里改过的文件、装过的东西都在，重新启动后可直接接着做。",
+        }
+    return {"kind": "home", "message": "/home/hacker 文件已保留。"}
+
+
+def start_challenge_session(user, dojo_challenge, practice, *, as_user=None, reset=False):
+    is_preview = (dojo_challenge.data or {}).get("publication_state") == "DRAFT"
+    if reset:
+        raise ValueError('请通过按题目重置接口恢复当前题目，不支持清空机器磁盘。')
     max_attempts = 3
     for attempt_number in range(1, max_attempts + 1):
         try:
@@ -410,13 +507,14 @@ def start_challenge_session(user, dojo_challenge, practice, *, as_user=None):
             learning_attempt = start_attempt(
                 actual_user,
                 dojo_challenge,
-                "PRACTICE" if practice else "ASSESSMENT",
+                "PRACTICE" if practice or is_preview else "ASSESSMENT",
                 {
                     "containerId": container.id[:12],
                     "image": dojo_challenge.image,
                     "nodeId": node_id + 1 if node_id is not None else 0,
                     "interfaces": dojo_challenge.interfaces,
                     "exerciseMode": challenge_exercise_mode(dojo_challenge),
+                    "draftPreview": is_preview,
                 },
             )
             db.session.commit()
@@ -431,7 +529,7 @@ def start_challenge_session(user, dojo_challenge, practice, *, as_user=None):
                     "dojo_id": dojo.reference_id,
                     "dojo_name": dojo.name,
                 }
-                mode = "practice" if practice else "assessment"
+                mode = "practice" if practice or is_preview else "assessment"
                 publish_container_start(actual_user, mode, challenge_data)
 
             publish_stat_event("container_stats_update", {})
@@ -630,7 +728,7 @@ class RunDocker(Resource):
                 db.session.commit()
         except RuntimeError as error:
             logger.error(str(error))
-            return {"success": False, "error": "工作区容器启动失败。"}
+            return {"success": False, "error": str(error) or "工作区容器启动失败。"}
         except Exception:
             db.session.rollback()
             logger.exception(
@@ -643,6 +741,7 @@ class RunDocker(Resource):
             "success": True,
             "exerciseMode": exercise_mode,
             "simulationRunId": simulation_run.id if simulation_run else None,
+            "statePreserved": preserved_state(),
         }
 
     @authed_only_cli
@@ -681,7 +780,12 @@ class RunDocker(Resource):
         simulation_run = active_simulation_run(user.id)
 
         if not container and not simulation_run:
-            return {"success": False, "error": "未找到活动题目运行环境。"}
+            return {
+                "success": True,
+                "alreadyStopped": True,
+                "message": "当前没有运行中的题目环境。",
+                "statePreserved": {"kind": "none", "message": "启动后会从初始状态开始。"},
+            }
 
         try:
             attempt = active_attempt(user.id)
@@ -698,6 +802,7 @@ class RunDocker(Resource):
                 attempt.status = "STOPPED"
                 attempt.completed = datetime.datetime.utcnow()
                 db.session.commit()
+            state = preserved_state() if container else {"kind": "none", "message": "启动后会从初始状态开始。"}
             if container:
                 remove_container(user)
                 publish_stat_event("container_stats_update", {})
@@ -709,6 +814,7 @@ class RunDocker(Resource):
                     if simulation_run and not container
                     else "题目运行环境已停止。"
                 ),
+                "statePreserved": state,
             }
         except Exception as e:
             logger.error(f"Failed to terminate container for user {user.id}: {e}")
@@ -716,98 +822,61 @@ class RunDocker(Resource):
             return {"success": False, "error": "停止题目运行环境失败。"}
 
 
-@docker_namespace.route("/reset")
+@docker_namespace.route('/reset')
 class ResetDocker(Resource):
+    @authed_only
+    def get(self):
+        user=get_current_user();container=optional_container(user);challenge=get_current_dojo_challenge(user)
+        if not challenge:return {'success':False,'error':'请先启动要重置的题目。'},409
+        simulation=current_simulation_run(user.id,challenge);mode=challenge_exercise_mode(challenge)
+        if not container and not simulation:return {'success':False,'error':'未找到当前题目的运行环境。'},409
+        coding=(challenge.data or {}).get('coding_workspace')
+        preview=coding_reset(container) if coding and container else {}
+        scope='question-code' if coding else 'question-state' if mode=='SIMULATION' else 'question-runtime'
+        return {'success':True,'challengeId':challenge.challenge_id,'dojoId':challenge.dojo.reference_id,'name':challenge.name,'scope':scope,'containerId':container.id if container else None,'files':preview.get('files',[]),'preservesHome':True,'preservesGrades':True}
+
     @authed_only
     @docker_locked
     def post(self):
-        user = get_current_user()
-        container = optional_container(user)
-        dojo_challenge = get_current_dojo_challenge(user)
-        simulation_run = current_simulation_run(user.id, dojo_challenge)
-        if not dojo_challenge or (not container and not simulation_run):
-            return {"success": False, "error": "未找到活动题目运行环境。"}
-
-        exercise_mode = challenge_exercise_mode(dojo_challenge)
-        practice = (
-            container.labels.get("dojo.mode") == "privileged"
-            if container
-            else False
-        )
-        as_user_id = (
-            int(container.labels.get("dojo.as_user_id", user.id))
-            if container
-            else user.id
-        )
-        as_user = Users.query.get(as_user_id) if as_user_id != user.id else None
-        attempt = active_attempt((as_user or user).id, dojo_challenge)
-        if attempt:
-            append_evidence(
-                attempt,
-                "lab.reset.requested",
-                {
-                    "scope": (
-                        "scenario-state"
-                        if exercise_mode == "SIMULATION"
-                        else "container-and-home"
-                    ),
-                    "homeErased": exercise_mode != "SIMULATION",
-                },
-                source="PLATFORM",
-                trust_level=3,
-            )
-            db.session.commit()
-
-        replacement_run = None
+        data=request.get_json(silent=True) or {};user=get_current_user();container=optional_container(user);challenge=get_current_dojo_challenge(user)
+        if not challenge or data.get('challengeId')!=challenge.challenge_id or data.get('dojoId')!=challenge.dojo.reference_id:
+            return {'success':False,'error':'当前题目已变化，请重新查看重置范围。'},409
+        simulation=current_simulation_run(user.id,challenge);mode=challenge_exercise_mode(challenge)
+        if not container and not simulation:return {'success':False,'error':'未找到当前题目运行环境。'},409
+        if data.get('containerId') != (container.id if container else None):return {'success':False,'error':'环境已变化，请重新查看重置范围。'},409
+        practice=container.labels.get('dojo.mode')=='privileged' if container else False
+        owner_id=int(container.labels.get('dojo.as_user_id',user.id)) if container else user.id
+        owner=Users.query.get(owner_id);as_user=owner if owner_id!=user.id else None
+        coding=(challenge.data or {}).get('coding_workspace');restore_id=data.get('restoreId');volume_event=None
+        scope='question-code' if coding else 'question-state' if mode=='SIMULATION' else 'question-runtime'
+        if data.get('scope')!=scope:return {'success':False,'error':'重置范围已变化，请重新确认。'},409
         try:
-            if exercise_mode == "SIMULATION":
-                if simulation_run:
-                    stop_simulation_run(simulation_run, reason="reset")
-                replacement_attempt = start_attempt(
-                    as_user or user,
-                    dojo_challenge,
-                    "PRACTICE" if practice else "ASSESSMENT",
-                    {
-                        "exerciseMode": exercise_mode,
-                        "reset": True,
-                        "interfaces": [{"name": "Simulation"}],
-                    },
-                )
-                replacement_run = start_simulation_run(
-                    user,
-                    dojo_challenge,
-                    replacement_attempt,
-                )
-                db.session.commit()
+            backup_id=None;restarted=False
+            if coding:
+                result=coding_reset(container,True,restore_id)
+                backup_id=result.get('backup',{}).get('id')
+            elif mode=='SIMULATION':
+                if restore_id:return {'success':False,'error':'情境题保留历史证据，但不支持把历史作答恢复为新作答。'},400
+                if simulation:stop_simulation_run(simulation,reason='question-reset')
+                attempt=start_attempt(owner,challenge,'PRACTICE' if practice else 'ASSESSMENT',{'exerciseMode':mode,'reset':True})
+                replacement=start_simulation_run(user,challenge,attempt);db.session.commit()
+                restarted=True
             else:
-                reset_home(user.id, backup=False)
-                _, replacement_attempt = start_challenge_session(
-                    user,
-                    dojo_challenge,
-                    practice,
-                    as_user=as_user,
-                )
-                if exercise_mode == "HYBRID":
-                    replacement_run = start_simulation_run(
-                        user,
-                        dojo_challenge,
-                        replacement_attempt,
-                    )
-                    db.session.commit()
-        except Exception as error:
+                previous=windows_volume(container)
+                if previous:
+                    volume_event=switch_volume(owner_id,challenge,previous,restore_id);backup_id=str(volume_event.id)
+                elif restore_id:return {'success':False,'error':'本题没有可恢复的客户机磁盘。'},400
+                _,attempt=start_challenge_session(user,challenge,practice,as_user=as_user)
+                restarted=True
+                if mode=='HYBRID':start_simulation_run(user,challenge,attempt)
+            current_attempt=active_attempt(owner_id,challenge)
+            if current_attempt:append_evidence(current_attempt,'lab.reset.completed',{'scope':scope,'homeErased':False,'backupId':backup_id,'restoredFrom':restore_id},source='PLATFORM',trust_level=3)
+            db.session.commit()
+            return {'success':True,'message':'已恢复本题的起始状态，其他题目文件和历史成绩保留。' if not restore_id else '已恢复本题上一次保存的状态。','exerciseMode':mode,'runtimeRestarted':restarted,'backupId':backup_id,'scope':scope}
+        except Exception:
             db.session.rollback()
-            logger.exception(
-                f"Failed to completely reset challenge for user {user.id}: {error}"
-            )
-            return {"success": False, "error": "无法完全重置题目。"}
-
-        return {
-            "success": True,
-            "message": (
-                "情境题已恢复到初始状态。"
-                if exercise_mode == "SIMULATION"
-                else "题目已恢复到初始状态。"
-            ),
-            "exerciseMode": exercise_mode,
-            "simulationRunId": replacement_run.id if replacement_run else None,
-        }
+            if volume_event is not None:
+                existing=db.session.get(type(volume_event),volume_event.id)
+                if existing:existing.outcome='ERROR';db.session.commit()
+            logger.exception('Question reset failed for user %s',user.id)
+            return {'success':False,'error':'本题重置未完成，原有个人文件和客户机恢复点保留。'},409

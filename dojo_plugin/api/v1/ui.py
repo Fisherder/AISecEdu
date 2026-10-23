@@ -13,6 +13,7 @@ from ...product import (
     resolve_resource,
     success_envelope,
 )
+from ...product.capabilities import preferred_product_mode
 from ...product.errors import ProductError
 from ...utils.request_logging import get_trace_id
 from ...product.telemetry import sanitize_event
@@ -41,6 +42,7 @@ class UIBootstrap(Resource):
             _request_id(),
             include_scopes=view != "navigation",
             include_running=True,
+            preferred_mode=preferred_product_mode(get_current_user(), request.cookies.get("aisecedu-mode")),
         )
 
 

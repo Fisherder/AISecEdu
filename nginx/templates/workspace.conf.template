@@ -29,6 +29,14 @@ location ~ "^/w/(?P<container_id>[0-9a-f]{12})/(?P<port>\d+)(?:/(?P<path>.*))?$"
         return 404;
     }
 
+    error_page 418 = @workspace_console_bootstrap;
+    error_page 419 = @workspace_console_code;
+    if ($path ~ "^app/(native-keyboard|aisecedu-workspace-bridge)\.js$") { return 418; }
+    if ($path = "console-compat.js") { return 419; }
+
+    proxy_set_header Accept-Encoding "";
+    sub_filter '<!-- Startup (do not modify order of script tags!) -->' '<script src="console-compat.js"></script><!-- Startup (do not modify order of script tags!) -->';
+
     proxy_http_version 1.1;
     proxy_buffering off;
     proxy_read_timeout 3600s;
@@ -62,6 +70,14 @@ location ~ ^/workspace/(?P<container_id>[^/:]+)/(?P<sig>[^/]+)/(?P<port>\d+)(?:/
         return 404;
     }
 
+    error_page 418 = @workspace_console_bootstrap;
+    error_page 419 = @workspace_console_code;
+    if ($path ~ "^app/(native-keyboard|aisecedu-workspace-bridge)\.js$") { return 418; }
+    if ($path = "console-compat.js") { return 419; }
+
+    proxy_set_header Accept-Encoding "";
+    sub_filter '<!-- Startup (do not modify order of script tags!) -->' '<script src="console-compat.js"></script><!-- Startup (do not modify order of script tags!) -->';
+
     proxy_http_version 1.1;
     proxy_buffering off;
     proxy_read_timeout 3600s;
@@ -82,7 +98,6 @@ location ~ ^/workspace/(?P<container_id>[^/:]+)/(?P<sig>[^/]+)/(?P<port>\d+)(?:/
     if ($port = 7681) {
         set $workspace_accept_encoding "";
     }
-    proxy_set_header Accept-Encoding $workspace_accept_encoding;
     gunzip on;
     sub_filter_once on;
     sub_filter '</head>' '<script id="aisecedu-terminal-keyboard-guard">(function(){if(location.pathname.indexOf("/7681/")===-1)return;var NativeWebSocket=window.WebSocket;var terminalSocket=null;window.WebSocket=new Proxy(NativeWebSocket,{construct:function(Target,args){var socket=new Target(...args);var protocols=args[1];if(protocols==="tty"||(Array.isArray(protocols)&&protocols.indexOf("tty")!==-1))terminalSocket=socket;return socket;}});function guardEscape(event){var target=event.target;if(event.key!=="Escape"||!target||!target.classList||!target.classList.contains("xterm-helper-textarea"))return;event.preventDefault();event.stopImmediatePropagation();if(event.type==="keydown"&&!event.repeat&&terminalSocket&&terminalSocket.readyState===NativeWebSocket.OPEN)terminalSocket.send(new Uint8Array([48,27]));setTimeout(function(){target.focus({preventScroll:true});},0);}window.addEventListener("keydown",guardEscape,true);window.addEventListener("keyup",guardEscape,true);})();</script></head>';
@@ -104,6 +119,14 @@ location ~ ^/workspace/(?P<container_id>[^/]+):(?P<target_host>[^/]+)/(?P<sig>[^
         return 404;
     }
 
+    error_page 418 = @workspace_console_bootstrap;
+    error_page 419 = @workspace_console_code;
+    if ($path ~ "^app/(native-keyboard|aisecedu-workspace-bridge)\.js$") { return 418; }
+    if ($path = "console-compat.js") { return 419; }
+
+    proxy_set_header Accept-Encoding "";
+    sub_filter '<!-- Startup (do not modify order of script tags!) -->' '<script src="console-compat.js"></script><!-- Startup (do not modify order of script tags!) -->';
+
     proxy_http_version 1.1;
     proxy_buffering off;
     proxy_read_timeout 3600s;
@@ -124,7 +147,6 @@ location ~ ^/workspace/(?P<container_id>[^/]+):(?P<target_host>[^/]+)/(?P<sig>[^
     if ($port = 7681) {
         set $workspace_accept_encoding "";
     }
-    proxy_set_header Accept-Encoding $workspace_accept_encoding;
     gunzip on;
     sub_filter_once on;
     sub_filter '</head>' '<script id="aisecedu-terminal-keyboard-guard">(function(){if(location.pathname.indexOf("/7681/")===-1)return;var NativeWebSocket=window.WebSocket;var terminalSocket=null;window.WebSocket=new Proxy(NativeWebSocket,{construct:function(Target,args){var socket=new Target(...args);var protocols=args[1];if(protocols==="tty"||(Array.isArray(protocols)&&protocols.indexOf("tty")!==-1))terminalSocket=socket;return socket;}});function guardEscape(event){var target=event.target;if(event.key!=="Escape"||!target||!target.classList||!target.classList.contains("xterm-helper-textarea"))return;event.preventDefault();event.stopImmediatePropagation();if(event.type==="keydown"&&!event.repeat&&terminalSocket&&terminalSocket.readyState===NativeWebSocket.OPEN)terminalSocket.send(new Uint8Array([48,27]));setTimeout(function(){target.focus({preventScroll:true});},0);}window.addEventListener("keydown",guardEscape,true);window.addEventListener("keyup",guardEscape,true);})();</script></head>';
@@ -141,4 +163,15 @@ location @workspace_not_found {
     default_type text/plain;
     add_header Content-Type text/plain;
     return 404 "Workspace not found\n";
+}
+
+location @workspace_console_bootstrap {
+    rewrite ^ /workspace/console-bootstrap.js break;
+    proxy_pass http://ctfd_upstream;
+    proxy_hide_header Set-Cookie;
+}
+location @workspace_console_code {
+    rewrite ^ /workspace/console-code.js break;
+    proxy_pass http://ctfd_upstream;
+    proxy_hide_header Set-Cookie;
 }

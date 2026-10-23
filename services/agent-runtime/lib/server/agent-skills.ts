@@ -6,17 +6,32 @@ export type AgentSkillSummary = {
   name: string;
   description: string;
   source: string;
+  invocation: { modelInvocable: boolean; userInvocable: boolean };
 };
 
 export type AgentSkill = AgentSkillSummary & {
   instructions: string;
+  resourceBase?: string;
+  resourcePaths?: string[];
 };
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const REFERENCE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
+const ACCOUNT_REFERENCE_PATH = /^references\/[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
 const MAX_SKILLS = 64;
 const MAX_SKILL_BYTES = 96_000;
+const MAX_FRONTMATTER_BYTES = 16_384;
 const MAX_REFERENCE_TOTAL_BYTES = 64_000;
+const RESOURCE_PATH = /^(?:references|scripts|assets)\/[a-zA-Z0-9][a-zA-Z0-9._/-]*$/;
+
+type BuiltinEntry = { summary: AgentSkillSummary; rootPath: string; skillPath: string };
+let lastCompleteBuiltinEntries: BuiltinEntry[] = [];
+
+export class SkillCatalogUnavailableError extends Error {
+  constructor() {
+    super('Skill catalog is unavailable or incomplete');
+    this.name = 'SkillCatalogUnavailableError';
+  }
+}
 
 function skillRoots(): string[] {
   const configured = String(process.env.AISECEDU_AGENT_SKILLS_DIR || '')
@@ -24,6 +39,10 @@ function skillRoots(): string[] {
     .map((value) => value.trim())
     .filter(Boolean);
   const defaults = [
+    path.resolve(process.cwd(), '.dsh/skills'),
+    path.resolve(process.cwd(), '.agents/skills'),
+    path.resolve(process.cwd(), '../../.dsh/skills'),
+    path.resolve(process.cwd(), '../../.agents/skills'),
     path.resolve(process.cwd(), 'agent-skills'),
     path.resolve(process.cwd(), '../../agent_skills'),
   ];
@@ -36,147 +55,322 @@ function skillRoots(): string[] {
   });
 }
 
-function parseSkill(skillPath: string, source: string): AgentSkill | null {
-  const raw = fs.readFileSync(skillPath, 'utf8').slice(0, MAX_SKILL_BYTES);
-  const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
-  if (!match) return null;
-  const metadata = yaml.load(match[1]);
+function summaryFromFrontmatter(frontmatter: string, source: string): AgentSkillSummary | null {
+  let metadata: unknown;
+  try {
+    metadata = yaml.load(frontmatter);
+  } catch {
+    return null;
+  }
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
   const values = metadata as Record<string, unknown>;
   const name = String(values.name || '').trim();
   const description = String(values.description || '').trim();
   if (!SKILL_NAME.test(name) || !description || description.length > 1_000) return null;
+  const disabledForModel = values['disable-model-invocation'];
+  const enabledForUser = values['user-invocable'];
+  if (disabledForModel !== undefined && typeof disabledForModel !== 'boolean') return null;
+  if (enabledForUser !== undefined && typeof enabledForUser !== 'boolean') return null;
   return {
     name,
     description,
     source,
-    instructions: match[2].trim().slice(0, MAX_SKILL_BYTES),
+    invocation: {
+      modelInvocable: disabledForModel !== true,
+      userInvocable: enabledForUser !== false,
+    },
   };
 }
 
-export function listAgentSkills(): AgentSkillSummary[] {
-  const skills = new Map<string, AgentSkill>();
+function readSkillFrontmatter(skillPath: string): string | null {
+  if (fs.statSync(skillPath).size > MAX_SKILL_BYTES) return null;
+  const descriptor = fs.openSync(skillPath, 'r');
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    while (total < MAX_FRONTMATTER_BYTES) {
+      const buffer = Buffer.alloc(Math.min(512, MAX_FRONTMATTER_BYTES - total));
+      const length = fs.readSync(descriptor, buffer, 0, buffer.length, total);
+      if (!length) break;
+      chunks.push(buffer.subarray(0, length));
+      total += length;
+      const header = Buffer.concat(chunks).toString('utf8');
+      const match = header.match(/^---\s*\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n/);
+      if (match) return match[1];
+    }
+    return null;
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function parseSkillSummary(skillPath: string, source: string): AgentSkillSummary | null {
+  const frontmatter = readSkillFrontmatter(skillPath);
+  return frontmatter === null ? null : summaryFromFrontmatter(frontmatter, source);
+}
+
+function parseSkill(skillPath: string, source: string): AgentSkill | null {
+  if (fs.statSync(skillPath).size > MAX_SKILL_BYTES) return null;
+  const raw = fs.readFileSync(skillPath, 'utf8');
+  const match = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n([\s\S]*)$/);
+  if (!match) return null;
+  const summary = summaryFromFrontmatter(match[1], source);
+  const instructions = match[2].trim();
+  if (!summary || !instructions || Buffer.byteLength(instructions, 'utf8') > MAX_SKILL_BYTES) return null;
+  return { ...summary, instructions, resourceBase: path.dirname(skillPath) };
+}
+
+type AccountSkillPayload = {
+  name?: unknown;
+  description?: unknown;
+  instructions?: unknown;
+  references?: unknown;
+  modelInvocable?: unknown;
+  userInvocable?: unknown;
+};
+
+function accountSkillRoot(): { base: string; secret: string } | null {
+  const base = String(process.env.AISECEDU_INTERNAL_URL || '').replace(/\/$/, '');
+  const secret = String(process.env.AISECEDU_SERVICE_SECRET || '');
+  if (!base || !secret) return null;
+  return { base, secret };
+}
+
+function accountSummaryFromPayload(value: AccountSkillPayload): AgentSkillSummary | null {
+  const name = String(value.name || '').trim();
+  const description = String(value.description || '').trim();
+  if (!SKILL_NAME.test(name) || !description) return null;
+  if (value.modelInvocable !== undefined && typeof value.modelInvocable !== 'boolean') return null;
+  if (value.userInvocable !== undefined && typeof value.userInvocable !== 'boolean') return null;
+  return {
+    name, description, source: 'account',
+    invocation: {
+      modelInvocable: value.modelInvocable !== false,
+      userInvocable: value.userInvocable !== false,
+    },
+  };
+}
+
+function accountSkillFromPayload(value: AccountSkillPayload): AgentSkill | null {
+  const summary = accountSummaryFromPayload(value);
+  const instructions = String(value.instructions || '').trim();
+  if (!summary || !instructions || Buffer.byteLength(instructions, 'utf8') > MAX_SKILL_BYTES) return null;
+  let text = instructions;
+  const references = Array.isArray(value.references) ? value.references : [];
+  const resourcePaths: string[] = [];
+  for (const item of references) {
+    const entry = item as { path?: unknown };
+    const referencePath = String(entry?.path || '').trim();
+    if (!ACCOUNT_REFERENCE_PATH.test(referencePath) || resourcePaths.includes(referencePath)) continue;
+    resourcePaths.push(referencePath);
+  }
+  if (resourcePaths.length) {
+    text = `${text}\n\nAvailable skill references (read with skill_resource({name,path}) when needed): ${resourcePaths.join(', ')}`;
+  }
+  return { ...summary, instructions: text, resourcePaths };
+}
+
+async function requestAccountSkill(
+  ownerId: number | undefined,
+  params: Record<string, string>,
+  required = false,
+): Promise<Record<string, unknown> | null> {
+  const target = accountSkillRoot();
+  if (!target || !ownerId) {
+    if (required) throw new SkillCatalogUnavailableError();
+    return null;
+  }
+  try {
+    const query = new URLSearchParams({ ownerId: String(ownerId), ...params });
+    const response = await fetch(
+      `${target.base}/pwncollege_api/v1/teaching/agent-skills/resolve?${query}`,
+      {
+        headers: { 'X-AISecEdu-Service-Token': target.secret, Accept: 'application/json' },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(4000),
+      },
+    );
+    if (!response.ok) {
+      if (required && response.status !== 400 && response.status !== 404)
+        throw new SkillCatalogUnavailableError();
+      return null;
+    }
+    const payload = (await response.json()) as { data?: Record<string, unknown> };
+    if (payload?.data && typeof payload.data === 'object') return payload.data;
+    if (required) throw new SkillCatalogUnavailableError();
+    return null;
+  } catch {
+    if (required) throw new SkillCatalogUnavailableError();
+    return null;
+  }
+}
+
+async function loadAccountSkillCatalog(ownerId?: number): Promise<{ skills: AgentSkillSummary[]; complete: boolean }> {
+  if (!ownerId) return { skills: [], complete: true };
+  // A scoped run cannot prove there are no owner skills without reaching the
+  // account catalog. Missing service configuration is an outage, not an empty
+  // catalog that may silently expose a same-named builtin instead.
+  if (!accountSkillRoot()) return { skills: [], complete: false };
+  const payload = await requestAccountSkill(ownerId, { view: 'catalog' });
+  if (!Array.isArray(payload?.skills)) return { skills: [], complete: false };
+  const skills = payload.skills
+    .map((row) => accountSummaryFromPayload(row as AccountSkillPayload))
+    .filter((row): row is AgentSkillSummary => row !== null)
+    .slice(0, MAX_SKILLS);
+  return { skills, complete: true };
+}
+
+async function loadAccountSkill(name: string, ownerId: number | undefined, audience: 'model' | 'user'): Promise<AgentSkill | null> {
+  const payload = await requestAccountSkill(ownerId, { view: 'body', name, audience }, true);
+  const skill = payload?.skill && typeof payload.skill === 'object'
+    ? accountSkillFromPayload(payload.skill as AccountSkillPayload) : null;
+  if (!skill || skill.name !== name || !skill.invocation[audience === 'model' ? 'modelInvocable' : 'userInvocable'])
+    throw new SkillCatalogUnavailableError();
+  return skill;
+}
+
+function discoverBuiltinSkillEntries(): { entries: BuiltinEntry[]; complete: boolean } {
+  const skills = new Map<string, BuiltinEntry>();
+  let complete = true;
   for (const root of skillRoots()) {
-    const realRoot = fs.realpathSync(root);
-    for (const entry of fs.readdirSync(realRoot, { withFileTypes: true }).slice(0, MAX_SKILLS)) {
-      if (!entry.isDirectory() || !SKILL_NAME.test(entry.name) || skills.has(entry.name)) continue;
-      const directory = path.join(realRoot, entry.name);
-      const realDirectory = fs.realpathSync(directory);
-      if (realDirectory !== realRoot && !realDirectory.startsWith(`${realRoot}${path.sep}`))
-        continue;
-      const skillPath = path.join(realDirectory, 'SKILL.md');
-      if (!fs.existsSync(skillPath)) continue;
-      const skill = parseSkill(skillPath, path.relative(process.cwd(), realDirectory));
-      if (!skill || skill.name !== entry.name) continue;
-      skills.set(skill.name, skill);
+    try {
+      const realRoot = fs.realpathSync(root);
+      for (const entry of fs.readdirSync(realRoot, { withFileTypes: true }).slice(0, MAX_SKILLS)) {
+        const bundle = entry.isDirectory() && SKILL_NAME.test(entry.name);
+        const flat = entry.isFile() && entry.name.endsWith('.md') && SKILL_NAME.test(entry.name.slice(0, -3));
+        if (!bundle && !flat) continue;
+        const expectedName = bundle ? entry.name : entry.name.slice(0, -3);
+        if (skills.has(expectedName)) continue;
+        const directory = bundle ? path.join(realRoot, entry.name) : realRoot;
+        const realDirectory = fs.realpathSync(directory);
+        if (realDirectory !== realRoot && !realDirectory.startsWith(`${realRoot}${path.sep}`)) continue;
+        const skillPath = path.join(realDirectory, bundle ? 'SKILL.md' : entry.name);
+        if (!fs.existsSync(skillPath)) continue;
+        const realSkillPath = fs.realpathSync(skillPath);
+        if (!realSkillPath.startsWith(`${realRoot}${path.sep}`)) continue;
+        const summary = parseSkillSummary(realSkillPath, path.relative(process.cwd(), realDirectory));
+        if (!summary || summary.name !== expectedName) continue;
+        skills.set(summary.name, { summary, rootPath: realRoot, skillPath: realSkillPath });
+      }
+    } catch {
+      complete = false;
     }
   }
-  return [...skills.values()]
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map(({ name, description, source }) => ({ name, description, source }));
+  const entries = [...skills.values()].sort((left, right) => left.summary.name.localeCompare(right.summary.name));
+  if (complete) lastCompleteBuiltinEntries = entries;
+  return { entries: complete ? entries : lastCompleteBuiltinEntries.length ? lastCompleteBuiltinEntries : entries, complete };
 }
 
-function requestedReferenceNames(skillName: string, context: string): string[] {
-  if (skillName === 'teaching-slide-deck') {
-    return ['production-workflow.md', 'speaker-script.md'];
-  }
-  if (skillName === 'ctf-flag-challenge') {
-    return ['challenge-production-workflow.md', 'category-patterns.md'];
-  }
-  if (skillName === 'cyber-lab-simulation') {
-    return ['simulation-production-workflow.md'];
-  }
-  if (skillName === 'jupyter-notebook') {
-    return [
-      'notebook-structure.md',
-      'quality-checklist.md',
-      'experiment-patterns.md',
-      'tutorial-patterns.md',
-    ];
-  }
-  if (skillName === 'playwright') return ['workflows.md', 'cli.md'];
-  if (skillName === 'security-threat-model') {
-    return ['security-controls-and-assets.md', 'prompt-template.md'];
-  }
-  if (skillName !== 'security-best-practices') return [];
-
-  const text = context.toLocaleLowerCase();
-  const references: string[] = [];
-  const add = (condition: boolean, filename: string) => {
-    if (condition && !references.includes(filename)) references.push(filename);
-  };
-  add(/\bflask\b|flask 项目|flask 应用/.test(text), 'python-flask-web-server-security.md');
-  add(/\bdjango\b/.test(text), 'python-django-web-server-security.md');
-  add(/\bfastapi\b/.test(text), 'python-fastapi-web-server-security.md');
-  add(/\bexpress(?:\.js)?\b/.test(text), 'javascript-express-web-server-security.md');
-  add(/\bnext(?:\.js|js)?\b/.test(text), 'javascript-typescript-nextjs-web-server-security.md');
-  add(/\breact(?:\.js|js)?\b/.test(text), 'javascript-typescript-react-web-frontend-security.md');
-  add(/\bvue(?:\.js|js)?\b/.test(text), 'javascript-typescript-vue-web-frontend-security.md');
-  add(/\bjquery\b/.test(text), 'javascript-jquery-web-frontend-security.md');
-  add(/\b(?:golang|go language|go 后端)\b/.test(text), 'golang-general-backend-security.md');
-  add(
-    references.length === 0 && /\b(?:javascript|typescript|frontend|前端)\b/.test(text),
-    'javascript-general-web-frontend-security.md',
-  );
-  return references.slice(0, 2);
+export async function listAgentSkills(ownerId?: number): Promise<AgentSkillSummary[]> {
+  const snapshot = await agentSkillCatalogSnapshot(ownerId);
+  if (!snapshot.complete) throw new SkillCatalogUnavailableError();
+  return snapshot.skills;
 }
 
-function loadSkillReferences(
-  directory: string,
-  skillName: string,
-  context: string,
-  remainingBytes: number,
-): { text: string; bytes: number } {
-  if (remainingBytes <= 0) return { text: '', bytes: 0 };
-  const referenceRoot = path.join(directory, 'references');
-  if (!fs.existsSync(referenceRoot)) return { text: '', bytes: 0 };
-  const realDirectory = fs.realpathSync(directory);
-  const realReferenceRoot = fs.realpathSync(referenceRoot);
-  if (!realReferenceRoot.startsWith(`${realDirectory}${path.sep}`)) {
-    return { text: '', bytes: 0 };
-  }
-  const blocks: string[] = [];
-  let bytes = 0;
-  for (const filename of requestedReferenceNames(skillName, context)) {
-    if (!REFERENCE_NAME.test(filename) || bytes >= remainingBytes) continue;
-    const candidate = path.join(realReferenceRoot, filename);
-    if (!fs.existsSync(candidate)) continue;
-    const realCandidate = fs.realpathSync(candidate);
-    if (!realCandidate.startsWith(`${realReferenceRoot}${path.sep}`)) continue;
-    const allowance = Math.min(remainingBytes - bytes, MAX_SKILL_BYTES);
-    const content = fs.readFileSync(realCandidate, 'utf8').slice(0, allowance).trim();
-    if (!content) continue;
-    const block = `<skill-reference file="references/${filename}">\n${content}\n</skill-reference>`;
-    blocks.push(block);
-    bytes += Buffer.byteLength(block, 'utf8');
-  }
-  return { text: blocks.join('\n\n'), bytes };
+export async function agentSkillCatalogSnapshot(ownerId?: number) {
+  const discovered = discoverBuiltinSkillEntries();
+  const builtin = discovered.entries.map(({ summary }) => summary);
+  const account = await loadAccountSkillCatalog(ownerId);
+  const accountNames = new Set(account.skills.map((skill) => skill.name));
+  const skills = [
+    ...account.skills,
+    ...builtin.filter((skill) => !accountNames.has(skill.name)),
+  ].sort((left, right) => left.name.localeCompare(right.name));
+  return { skills, complete: discovered.complete && account.complete };
 }
 
-export function loadAgentSkills(names: string[], context = ''): AgentSkill[] {
+export function invokedUserSkillNames(prompt: string, catalog: AgentSkillSummary[]): string[] {
+  const available = new Set(catalog.filter((skill) => skill.invocation.userInvocable).map((skill) => skill.name));
+  const seen = new Set<string>();
+  for (const match of prompt.matchAll(/(^|\s)\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/g)) {
+    if (available.has(match[2])) seen.add(match[2]);
+  }
+  return [...seen];
+}
+
+export async function getAgentSkill(
+  name: string,
+  ownerId?: number,
+  audience: 'model' | 'user' = 'model',
+): Promise<AgentSkill | null> {
+  if (!SKILL_NAME.test(name)) return null;
+  const catalog = await loadAccountSkillCatalog(ownerId);
+  if (!catalog.complete) throw new SkillCatalogUnavailableError();
+  const account = catalog.skills.find((skill) => skill.name === name);
+  if (account) {
+    if (!account.invocation[audience === 'model' ? 'modelInvocable' : 'userInvocable']) return null;
+    return loadAccountSkill(name, ownerId, audience);
+  }
+  const entry = discoverBuiltinSkillEntries().entries.find((item) => item.summary.name === name);
+  if (!entry || !entry.summary.invocation[audience === 'model' ? 'modelInvocable' : 'userInvocable']) return null;
+  try {
+    const currentPath = fs.realpathSync(entry.skillPath);
+    if (!currentPath.startsWith(`${entry.rootPath}${path.sep}`)) return null;
+    const skill = parseSkill(currentPath, entry.summary.source);
+    if (!skill || skill.name !== name || !skill.invocation[audience === 'model' ? 'modelInvocable' : 'userInvocable']) return null;
+    return skill;
+  } catch {
+    return null;
+  }
+}
+
+export async function readAgentSkillResource(
+  name: string,
+  resource: string,
+  ownerId?: number,
+  audience: 'model' | 'user' = 'model',
+): Promise<string | null> {
+  if (!SKILL_NAME.test(name) || !RESOURCE_PATH.test(resource) || resource.split('/').includes('..')) return null;
+  const catalog = await loadAccountSkillCatalog(ownerId);
+  if (!catalog.complete) throw new SkillCatalogUnavailableError();
+  const account = catalog.skills.find((skill) => skill.name === name);
+  if (account) {
+    if (!account.invocation[audience === 'model' ? 'modelInvocable' : 'userInvocable']
+      || !ACCOUNT_REFERENCE_PATH.test(resource)) return null;
+    const payload = await requestAccountSkill(ownerId, { view: 'resource', name, path: resource, audience }, true);
+    const result = payload?.resource && typeof payload.resource === 'object'
+      ? payload.resource as { name?: unknown; path?: unknown; content?: unknown }
+      : null;
+    if (result?.name !== name || result?.path !== resource || typeof result?.content !== 'string'
+      || Buffer.byteLength(result.content, 'utf8') > MAX_REFERENCE_TOTAL_BYTES) return null;
+    return result.content;
+  }
+  const entry = discoverBuiltinSkillEntries().entries.find((item) => item.summary.name === name);
+  if (!entry || !entry.summary.invocation[audience === 'model' ? 'modelInvocable' : 'userInvocable']) return null;
+  try {
+    const realDirectory = fs.realpathSync(path.dirname(entry.skillPath));
+    if (realDirectory !== entry.rootPath && !realDirectory.startsWith(`${entry.rootPath}${path.sep}`)) return null;
+    const realResource = fs.realpathSync(path.join(realDirectory, resource));
+    if (!realResource.startsWith(`${realDirectory}${path.sep}`) || !fs.statSync(realResource).isFile()) return null;
+    if (fs.statSync(realResource).size > MAX_SKILL_BYTES) return null;
+    return fs.readFileSync(realResource, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+export async function loadAgentSkills(
+  names: string[],
+  _context = '',
+  ownerId?: number,
+  audience: 'model' | 'user' = 'model',
+): Promise<AgentSkill[]> {
   const selected = new Set(names.filter((name) => SKILL_NAME.test(name)).slice(0, 6));
   if (!selected.size) return [];
   const loaded: AgentSkill[] = [];
-  let referenceBytes = 0;
-  for (const summary of listAgentSkills()) {
-    if (!selected.has(summary.name)) continue;
-    const root = skillRoots().find((candidate) =>
-      fs.existsSync(path.join(candidate, summary.name, 'SKILL.md')),
-    );
-    if (!root) continue;
-    const skill = parseSkill(
-      path.join(root, summary.name, 'SKILL.md'),
-      path.relative(process.cwd(), path.join(root, summary.name)),
-    );
-    if (skill && skill.name === summary.name) {
-      const references = loadSkillReferences(
-        path.join(root, summary.name),
-        summary.name,
-        context,
-        MAX_REFERENCE_TOTAL_BYTES - referenceBytes,
-      );
-      referenceBytes += references.bytes;
-      if (references.text) skill.instructions = `${skill.instructions}\n\n${references.text}`;
+  const catalog = await loadAccountSkillCatalog(ownerId);
+  if (!catalog.complete) throw new SkillCatalogUnavailableError();
+  const accountNames = new Set(catalog.skills.map((skill) => skill.name));
+  for (const summary of catalog.skills) {
+    if (!selected.has(summary.name) || !summary.invocation[audience === 'model' ? 'modelInvocable' : 'userInvocable']) continue;
+    const skill = await loadAccountSkill(summary.name, ownerId, audience);
+    if (skill) loaded.push(skill);
+  }
+  for (const entry of discoverBuiltinSkillEntries().entries) {
+    const name = entry.summary.name;
+    if (accountNames.has(name) || !selected.has(name)) continue;
+    const skill = await getAgentSkill(name, undefined, audience);
+    if (skill?.resourceBase) {
       loaded.push(skill);
     }
   }

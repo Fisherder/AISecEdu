@@ -56,6 +56,18 @@ import {
 } from './types';
 import { StepVisualizer } from './components/visualizers';
 import { resolveTaskEngineModeFromOutlineDoneEvent } from './vocational-mode';
+import { AgentRunTimeline } from '@/components/agent-run/agent-run-timeline';
+import {
+  beginAgentRun,
+  completeAgentRun,
+  completeAgentRunItem,
+  failAgentRun,
+  ingestAgentRunEvent,
+  startAgentRunTurn,
+  startAgentRunItem,
+  transitionAgentWorkflow,
+  useAgentRunStore,
+} from '@/lib/agent-run/store';
 
 const log = createLogger('GenerationPreview');
 const OUTLINE_REVIEW_AUTO_CONTINUE_MS = 2500;
@@ -150,11 +162,25 @@ function GenerationPreviewContent() {
   const agentRevealResolveRef = useRef<(() => void) | null>(null);
   const reviewOutlineEnabled = useSettingsStore((s) => s.reviewOutlineEnabled);
   const setReviewOutlineEnabled = useSettingsStore((s) => s.setReviewOutlineEnabled);
+  const generationRun = useAgentRunStore((state) => state.runs.generation);
+  const generationRunId = generationRun?.runId;
+  const generationRunStatus = generationRun?.status;
 
   // Compute active steps based on session state
   const activeSteps = getActiveSteps(session);
+  const trackedStep = activeSteps[Math.min(currentStepIndex, Math.max(0, activeSteps.length - 1))];
+  const trackedStepText = trackedStep ? getGenerationStepText(trackedStep, session) : undefined;
+  const trackedStepLabel = trackedStepText
+    ? t(trackedStepText.title, trackedStepText.titleValues)
+    : '';
   const isOutlineReady = session?.previewPhase === 'outline-ready';
   const isReviewingOutlines = session?.previewPhase === 'review';
+
+  useEffect(() => {
+    if (!generationRunId || generationRunStatus !== 'running') return;
+    if (!trackedStepLabel) return;
+    transitionAgentWorkflow('generation', trackedStepLabel);
+  }, [trackedStepLabel, generationRunId, generationRunStatus]);
 
   const sceneGenerationErrorMessage = (failure: SceneGenerationFailure): string => {
     if (
@@ -326,6 +352,9 @@ function GenerationPreviewContent() {
 
     // Use a local mutable copy so we can update it after document extraction
     let currentSession = generationSession;
+
+    beginAgentRun('generation', '一句话生成精美课程');
+    startAgentRunTurn('generation', '理解需求并生成内容');
 
     setError(null);
     setCurrentStepIndex(0);
@@ -644,6 +673,8 @@ function GenerationPreviewContent() {
                         } else if (evt.type === 'outline') {
                           collected.push(evt.data);
                           setStreamingOutlines([...collected]);
+                        } else if (evt.type === 'agentRun' && evt.event) {
+                          ingestAgentRunEvent('generation', evt.event);
                         } else if (evt.type === 'retry') {
                           collected.length = 0;
                           // Drop any directive/title latched from the failed
@@ -984,6 +1015,7 @@ function GenerationPreviewContent() {
         },
         signal,
         FOREGROUND_SCENE_RETRY_OPTIONS,
+        (event) => ingestAgentRunEvent('generation', event),
       );
 
       if (!contentData.success || !contentData.content) {
@@ -1007,6 +1039,7 @@ function GenerationPreviewContent() {
         },
         signal,
         FOREGROUND_SCENE_RETRY_OPTIONS,
+        (event) => ingestAgentRunEvent('generation', event),
       );
 
       if (!data.success || !data.scene) {
@@ -1037,6 +1070,10 @@ function GenerationPreviewContent() {
         );
 
         let ttsFailCount = 0;
+        const ttsRunItem = startAgentRunItem('generation', 'tool', '合成首屏语音', {
+          subtitle: firstOutline.title,
+          input: { clips: speechActions.length },
+        });
         for (const action of speechActions) {
           const audioId = `tts_${action.id}`;
           action.audioId = audioId;
@@ -1055,6 +1092,11 @@ function GenerationPreviewContent() {
             ttsFailCount++;
           }
         }
+
+        completeAgentRunItem('generation', ttsRunItem, {
+          status: ttsFailCount > 0 ? 'failed' : 'completed',
+          metadata: { clips: speechActions.length, failedCount: ttsFailCount },
+        });
 
         if (ttsFailCount > 0 && speechActions.length > 0) {
           throw new Error(t('generation.speechFailed'));
@@ -1082,6 +1124,7 @@ function GenerationPreviewContent() {
 
       sessionStorage.removeItem('generationSession');
       await store.saveToStorage();
+      completeAgentRun('generation');
       router.push(`/classroom/${stage.id}`);
     } catch (err) {
       setIsOutlineStreaming(false);
@@ -1091,7 +1134,9 @@ function GenerationPreviewContent() {
         return;
       }
       sessionStorage.removeItem('generationSession');
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      failAgentRun('generation', message);
+      setError(message);
     }
   };
 
@@ -1329,6 +1374,7 @@ function GenerationPreviewContent() {
               isStreaming={isOutlineStreaming}
               onCollapse={handleCollapseEditor}
             />
+            <AgentRunTimeline run={generationRun} className="mx-auto w-full max-w-2xl" />
           </motion.div>
         </div>
       </div>
@@ -1361,7 +1407,7 @@ function GenerationPreviewContent() {
         </Button>
       </motion.div>
 
-      <div className="z-10 w-full max-w-lg space-y-8 flex flex-col items-center">
+      <div className="z-10 grid w-full max-w-6xl items-start gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1519,8 +1565,10 @@ function GenerationPreviewContent() {
           </Card>
         </motion.div>
 
+        <AgentRunTimeline run={generationRun} className="w-full lg:sticky lg:top-6" />
+
         {/* Footer Action */}
-        <div className="h-16 flex items-center justify-center w-full">
+        <div className="flex h-16 w-full items-center justify-center lg:col-start-1">
           <AnimatePresence>
             {error ? (
               <motion.div

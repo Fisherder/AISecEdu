@@ -68,11 +68,11 @@
     <link rel="stylesheet" href="{{ url_for('views.themes', path='css/fonts.css') }}">
     <link rel="stylesheet" href="{{ url_for('views.themes', path='css/main.css') }}">
     <link rel="stylesheet" href="{{ url_for('views.themes', path='css/core.css') }}">
-    <link rel="preload" href="{{ url_for('views.themes_beta', path='font/SpaceGrotesk-VariableFont_wght.woff2', v='aisecedu-fonts-v2') }}" as="font" type="font/woff2" crossorigin="anonymous">
+    <link rel="preload" href="{{ url_for('views.themes_beta', path='font/SpaceGrotesk-VariableFont_wght.woff2', v='frontend-restored-20261001-1') }}" as="font" type="font/woff2" crossorigin="anonymous">
     <style>
       @font-face {
         font-family: 'Space Mono';
-        src: url("{{ url_for('views.themes_beta', path='font/SpaceMono-Regular.woff2', v='aisecedu-fonts-v2') }}") format('woff2');
+        src: url("{{ url_for('views.themes_beta', path='font/SpaceMono-Regular.woff2', v='frontend-restored-20261001-1') }}") format('woff2');
         font-weight: 400;
         font-style: normal;
         font-display: swap;
@@ -80,7 +80,7 @@
 
       @font-face {
         font-family: 'Space Mono';
-        src: url("{{ url_for('views.themes_beta', path='font/SpaceMono-Bold.woff2', v='aisecedu-fonts-v2') }}") format('woff2');
+        src: url("{{ url_for('views.themes_beta', path='font/SpaceMono-Bold.woff2', v='frontend-restored-20261001-1') }}") format('woff2');
         font-weight: 700;
         font-style: normal;
         font-display: swap;
@@ -88,21 +88,22 @@
 
       @font-face {
         font-family: 'Space Grotesk';
-        src: url("{{ url_for('views.themes_beta', path='font/SpaceGrotesk-VariableFont_wght.woff2', v='aisecedu-fonts-v2') }}") format('woff2');
+        src: url("{{ url_for('views.themes_beta', path='font/SpaceGrotesk-VariableFont_wght.woff2', v='frontend-restored-20261001-1') }}") format('woff2');
         font-weight: 100 900;
         font-style: normal;
         font-display: swap;
       }
     </style>
-    <link rel="stylesheet" href="{{ url_for('views.themes', path='css/custom.css', v='aisecedu-readability-v3') }}">
+    <link rel="stylesheet" href="{{ url_for('views.themes', path='css/custom.css', v='frontend-restored-20261001-1') }}">
     {% block stylesheets %}
     {% endblock %}
-    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/tokens.css', v='aisecedu-system-ux-v2') }}">
-    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/components.css', v='aisecedu-system-ux-v5') }}">
-    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/product-shell.css', v='aisecedu-product-shell-v11-readability') }}">
-    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/learning-themes.css', v='aisecedu-learning-themes-v5') }}">
+    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/tokens.css', v='frontend-restored-20261001-1') }}">
+    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/components.css', v='frontend-restored-20261001-1') }}">
+    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/product-shell.css', v='frontend-restored-20261001-1') }}">
+    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/learning-themes.css', v='frontend-restored-20261001-1') }}">
 
     {{ Plugins.styles }}
+    <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/ui-quality.css', v='quality-20261002-3') }}">
     <script type="text/javascript">
       var init = {
 	  'urlRoot': "{{ request.script_root }}",
@@ -146,6 +147,7 @@
       })();
     </script>
     {% endif %}
+    <link rel="stylesheet" href="{{ url_for('views.themes', path='css/workspace-launch.css', v='course-launcher-20261014-6') }}">
     {{ Configs.theme_header }}
   </head>
   <body class="{% block body_class %}{% endblock %}" data-product-role="{{ 'teacher' if is_course_teacher else 'learner' }}" data-product-mode="{{ shell_product.mode }}">
@@ -181,10 +183,10 @@
     <script defer src="{{ url_for('views.themes', path='js/pages/main.js') }}"></script>
     {% endblock %}
 
-    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/request-client.js', v='aisecedu-system-ux-v3') }}"></script>
-    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/url-state.js', v='aisecedu-system-ux-v1') }}"></script>
-    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/bootstrap.js', v='aisecedu-system-ux-v1') }}"></script>
-    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/telemetry.js', v='aisecedu-system-ux-v1') }}"></script>
+    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/request-client.js', v='frontend-restored-20261001-1') }}"></script>
+    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/url-state.js', v='frontend-restored-20261001-1') }}"></script>
+    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/bootstrap.js', v='frontend-restored-20261001-1') }}"></script>
+    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/core/telemetry.js', v='frontend-restored-20261001-1') }}"></script>
     <script>
       // State components are available system-wide, but only downloaded by
       // pages that render their corresponding contract markers.
@@ -196,26 +198,26 @@
           document.body.appendChild(script);
         }
         if (document.querySelector('[data-status-domain][data-status]')) {
-          load("{{ url_for('views.themes_beta', path='js/dojo/components/status-badge.js', v='aisecedu-system-ux-v2') }}", function () {
+          load("{{ url_for('views.themes_beta', path='js/dojo/components/status-badge.js', v='frontend-restored-20261001-1') }}", function () {
             window.AISecEdu && window.AISecEdu.statusBadge && window.AISecEdu.statusBadge.enhance(document);
             document.dispatchEvent(new CustomEvent('aisecedu:status-ready'));
           });
         }
         if (document.querySelector('[data-async-boundary]')) {
-          load("{{ url_for('views.themes_beta', path='js/dojo/components/recovery-panel.js', v='aisecedu-system-ux-v1') }}", function () {
-            load("{{ url_for('views.themes_beta', path='js/dojo/components/async-boundary.js', v='aisecedu-system-ux-v1') }}", function () {
+          load("{{ url_for('views.themes_beta', path='js/dojo/components/recovery-panel.js', v='frontend-restored-20261001-1') }}", function () {
+            load("{{ url_for('views.themes_beta', path='js/dojo/components/async-boundary.js', v='frontend-restored-20261001-1') }}", function () {
               window.AISecEdu && window.AISecEdu.asyncBoundary && window.AISecEdu.asyncBoundary.enhance(document);
             });
           });
         }
         [
-          ['[role="tablist"]', "{{ url_for('views.themes_beta', path='js/dojo/components/tabs.js', v='aisecedu-system-ux-v6') }}"],
-          ['[data-combobox]', "{{ url_for('views.themes_beta', path='js/dojo/components/combobox.js', v='aisecedu-system-ux-v6') }}"],
-          ['[data-data-table]', "{{ url_for('views.themes_beta', path='js/dojo/components/data-table.js', v='aisecedu-system-ux-v6') }}"],
-          ['[data-task-list]', "{{ url_for('views.themes_beta', path='js/dojo/components/task-list.js', v='aisecedu-system-ux-v6') }}"],
-          ['[data-resource-card]', "{{ url_for('views.themes_beta', path='js/dojo/components/resource-card.js', v='aisecedu-system-ux-v6') }}"],
-          ['[data-batch-progress]', "{{ url_for('views.themes_beta', path='js/dojo/components/batch-progress.js', v='aisecedu-system-ux-v6') }}"],
-          ['[data-workspace-state]', "{{ url_for('views.themes_beta', path='js/dojo/components/workspace-state.js', v='aisecedu-system-ux-v6') }}"]
+          ['[role="tablist"]', "{{ url_for('views.themes_beta', path='js/dojo/components/tabs.js', v='frontend-restored-20261001-1') }}"],
+          ['[data-combobox]', "{{ url_for('views.themes_beta', path='js/dojo/components/combobox.js', v='frontend-restored-20261001-1') }}"],
+          ['[data-data-table]', "{{ url_for('views.themes_beta', path='js/dojo/components/data-table.js', v='frontend-restored-20261001-1') }}"],
+          ['[data-task-list]', "{{ url_for('views.themes_beta', path='js/dojo/components/task-list.js', v='frontend-restored-20261001-1') }}"],
+          ['[data-resource-card]', "{{ url_for('views.themes_beta', path='js/dojo/components/resource-card.js', v='frontend-restored-20261001-1') }}"],
+          ['[data-batch-progress]', "{{ url_for('views.themes_beta', path='js/dojo/components/batch-progress.js', v='frontend-restored-20261001-1') }}"],
+          ['[data-workspace-state]', "{{ url_for('views.themes_beta', path='js/dojo/components/workspace-state.js', v='frontend-restored-20261001-1') }}"]
         ].forEach(function(entry) {
           if (document.querySelector(entry[0])) {
             load(entry[1]);
@@ -223,12 +225,14 @@
         });
       })();
     </script>
-    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/components/dialog.js', v='aisecedu-system-ux-v4') }}"></script>
-    <script defer src="{{ url_for('views.themes', path='js/dojo/navbar.js', v='aisecedu-navbar-v7') }}"></script>
-    <script defer src="{{ url_for('views.themes', path='js/dojo/ui.js', v='aisecedu-ui-v7-floating-menu') }}"></script>
-    {% if authed() %}<script defer src="{{ url_for('views.themes', path='js/dojo/popup.js', v='aisecedu-awards-v3') }}"></script>{% endif %}
+    <script defer src="{{ url_for('views.themes_beta', path='js/dojo/components/dialog.js', v='frontend-restored-20261001-1') }}"></script>
+    <script defer src="{{ url_for('views.themes', path='js/dojo/navbar.js', v='frontend-restored-20261001-1') }}"></script>
+    <script defer src="{{ url_for('views.themes', path='js/dojo/ui.js', v='cocreation-20261002-v2') }}"></script>
+    {% if authed() %}<script defer src="{{ url_for('views.themes', path='js/dojo/ssh-access.js', v='workspace-experience-20261012-11') }}"></script>{% endif %}
+  {% if authed() %}<script defer src="{{ url_for('views.themes', path='js/dojo/popup.js', v='frontend-restored-20261001-1') }}"></script>{% endif %}
 
     {% block scripts %}
+
     {% endblock %}
 
     <script>
@@ -304,5 +308,7 @@
     {{ current_dojo_custom_js | safe }}
     </script>
     {% endif %}
-  </body>
+  <script defer src="{{ url_for('views.themes', path='js/dojo/clipboard.js', v='frontend-restored-20261001-1') }}"></script>
+  {% if authed() %}<script defer src="{{ url_for('views.themes_beta', path='js/dojo/remote-console.js', v='console-fixed-toggle-20261023-1') }}"></script>{% endif %}
+</body>
 </html>

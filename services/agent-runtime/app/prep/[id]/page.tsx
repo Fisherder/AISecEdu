@@ -9,6 +9,10 @@ import {
 } from '@/components/integrated-lesson-preview';
 import type { Lesson, LessonArtifact } from '@/lib/types/lesson';
 import { patchHtmlForIframe } from '@/lib/utils/iframe';
+import { CinematicPreview, isCinematicContent } from '@/components/cinematic-preview';
+import { DebatePlayer } from '@/components/debate-player';
+import { CoursewareStudio } from '@/components/courseware-studio/courseware-studio';
+import { debateFromLesson } from '@/lib/debate/schema';
 
 const INTEGRATED = process.env.NEXT_PUBLIC_AISECEDU_INTEGRATED === 'true';
 
@@ -226,14 +230,16 @@ export default function LessonEditorPage() {
   const sorted = [...lesson.artifacts].sort((a, b) => a.order - b.order);
 
   if (INTEGRATED) {
-    return <IntegratedLessonPreview artifacts={sorted} title={lesson.title} />;
+    const debate = debateFromLesson(lesson);
+    if (debate) return <DebatePlayer artifactId={id} spec={debate} />;
+    return sorted.length > 0 && sorted.every(a => a.type === 'slide') ? <CoursewareStudio lesson={lesson} /> : <IntegratedLessonPreview artifacts={sorted} title={lesson.title} />;
   }
 
   return (
     <main
       data-aisecedu-preview-state="ready"
       style={{
-        maxWidth: 900,
+        maxWidth: sorted.some((artifact) => isCinematicContent(artifact.content)) ? 'none' : 900,
         minHeight: '100vh',
         margin: '0 auto',
         padding: 24,
@@ -434,6 +440,7 @@ function ArtifactCard({
   readOnly?: boolean;
 }) {
   const c = a.content as unknown as Record<string, unknown>;
+  const cinematic = isCinematicContent(c);
   const isSlide = 'elements' in c;
   const isWidget = 'html' in c;
   const isQuiz = 'questions' in c;
@@ -488,8 +495,13 @@ function ArtifactCard({
           </button>
         )}
       </div>
-      {isSlide && <LessonSlidePreview elements={c.elements} background={c.background} />}
-      {isWidget && typeof c.html === 'string' && (
+      {cinematic && (
+        <CinematicPreview title={a.title} html={typeof c.html === 'string' ? c.html : ''} />
+      )}
+      {!cinematic && isSlide && (
+        <LessonSlidePreview elements={c.elements} background={c.background} />
+      )}
+      {!cinematic && isWidget && typeof c.html === 'string' && (
         <div>
           <iframe
             ref={widgetFrame}
@@ -515,7 +527,7 @@ function ArtifactCard({
           </button>
         </div>
       )}
-      {isQuiz && Array.isArray(c.questions) && (
+      {!cinematic && isQuiz && Array.isArray(c.questions) && (
         <ol
           style={{
             fontSize: 12,

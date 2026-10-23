@@ -229,7 +229,7 @@ describe('thinking config normalization', () => {
     });
   });
 
-  it('normalizes DeepSeek V4 thinking as high/max effort levels', () => {
+  it('normalizes DeepSeek V4 thinking as low/high/max effort levels', () => {
     const thinking = getThinking('deepseek', 'deepseek-v4-flash');
 
     expect(getDefaultThinkingConfig(thinking)).toEqual({
@@ -239,6 +239,10 @@ describe('thinking config normalization', () => {
     expect(normalizeThinkingConfig(thinking, { effort: 'max' })).toEqual({
       mode: 'enabled',
       effort: 'max',
+    });
+    expect(normalizeThinkingConfig(thinking, { effort: 'low' })).toEqual({
+      mode: 'enabled',
+      effort: 'low',
     });
   });
 

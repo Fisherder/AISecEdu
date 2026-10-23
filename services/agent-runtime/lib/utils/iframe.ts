@@ -10,6 +10,14 @@
  * replaces both storages with an in-memory implementation when the real ones are
  * inaccessible, keeping the sandbox intact while letting storage-using pages run.
  */
+import threeSource from '../../public/vendor/three-r150.min.js?raw';
+import cinematicThreeSource from '../../public/vendor/cinematic-three-r150.min.js?raw';
+import { compileCinematicScene } from '../cinematic/compile';
+import { extractCinematicScene } from '../cinematic/schema';
+import { extractDiagramConfig, renderDiagramHtml } from '../widgets/diagram';
+import { compileProcessScene } from '../process/compile';
+import { extractProcessScene } from '../process/schema';
+
 const STORAGE_SHIM = `<script data-iframe-storage-shim>
 (function () {
   function makeStore() {
@@ -108,6 +116,33 @@ const ERROR_CAPTURE_SHIM = `<script data-iframe-error-shim>
  * it also observes the storage shim).
  */
 export function patchHtmlForIframe(html: string): string {
+  if (/<[^>]+\sdata-process\s*=\s*(?:"v[12]"|'v[12]'|v[12](?=[\s>]))/i.test(html)) {
+    const scene = extractProcessScene(html);
+    html = scene ? compileProcessScene(scene) : '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"></head><body><main role="alert"><h1>互动过程数据无法读取</h1><p>请检查版本记录，原作品未被修改。</p></main></body></html>';
+  }
+  const cinematic = /<[^>]+\sdata-cinematic\s*=\s*(?:"v[12]"|'v[12]'|v[12](?=[\s>]))/i.test(html);
+  if (cinematic) {
+    const scene = extractCinematicScene(html);
+    // Stored scenes carry an old inlined player; render their validated data with today's runtime without rewriting revision history.
+    html = scene
+      ? compileCinematicScene(scene)
+      : '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"></head><body><main role="alert"><h1>三维场景数据无法读取</h1><p>此版本缺少有效的场景数据，请返回版本记录检查或重新生成。原有内容未被修改。</p></main><script>throw new Error("三维场景数据无法读取：缺少或无效的 SceneIR")</script></body></html>';
+  } else if (/<[^>]+\sdata-diagram\s*=\s*(?:"v1"|'v1'|v1(?=[\s>]))/i.test(html)) {
+    const config = extractDiagramConfig(html);
+    // Reuse validated data, not the obsolete inline interaction code; history
+    // stays untouched and the same no-network iframe policy still applies.
+    html = config
+      ? renderDiagramHtml(config)
+      : '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"></head><body><main role="alert"><h1>交互图数据无法读取</h1><p>请检查原版本中的节点和关系数据。原有内容未被修改。</p></main><script>throw new Error("交互图数据无法读取：缺少或无效的配置")</script></body></html>';
+  }
+  const needsThree = /\bTHREE\s*[.\[]|src\s*=\s*["'][^"']*(?:three(?:\.min)?\.js|aisecedu:three)/i.test(html);
+  if (cinematic) html = html.replace(/<script\b[^>]*\bdata-cinematic-library\s*=\s*["']three-r150["'][^>]*>[\s\S]*?<\/script\s*>/gi, '');
+  if (needsThree) {
+    html = html.replace(/<script\b[^>]*\bsrc\s*=\s*(["'])[^"']*(?:three(?:\.min)?\.js(?:\.下载)?|aisecedu:three)(?:\?[^"']*)?\1[^>]*>\s*<\/script\s*>/gi, '');
+  }
+  const dependencies = needsThree
+    ? `<script data-aisecedu-library="${cinematic?'cinematic-three-r150':'three-r150'}">${(cinematic?cinematicThreeSource:threeSource).replace(/<\/script/gi, '<\\/script')}</script>`
+    : '';
   const contentSecurityPolicy = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">`;
   const iframeCss = `<style data-iframe-patch>
   html, body {
@@ -123,7 +158,7 @@ export function patchHtmlForIframe(html: string): string {
   body { min-height: 100vh; }
 </style>`;
 
-  const injection = '\n' + ERROR_CAPTURE_SHIM + '\n' + STORAGE_SHIM + '\n' + contentSecurityPolicy + '\n' + iframeCss;
+  const injection = '\n' + ERROR_CAPTURE_SHIM + '\n' + STORAGE_SHIM + '\n' + contentSecurityPolicy + '\n' + dependencies + '\n' + iframeCss;
 
   // Insert right after <head> or at the start of the document
   const headIdx = html.indexOf('<head>');

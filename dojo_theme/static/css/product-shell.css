@@ -351,7 +351,7 @@ body :focus-visible {
 .product-search-empty-actions a { display: inline-flex; min-height: 40px; padding: 7px 11px; border: 1px solid var(--product-border); border-radius: 8px; align-items: center; color: var(--product-text) !important; background: var(--product-surface); font-weight: 700; text-decoration: none; }
 
 .product-error-page { display: grid; min-height: calc(100vh - var(--product-nav-height, 64px)); padding: clamp(20px, 5vw, 64px); place-items: center; background: var(--product-bg); }
-.product-error-card { width: min(100%, 640px); padding: clamp(28px, 6vw, 56px); border: 1px solid var(--product-border); border-radius: 22px; color: var(--product-text); background: var(--product-surface); box-shadow: var(--product-shadow-lg); text-align: center; }
+.product-error-card { width: min(100%, 640px); padding: clamp(28px, 6vw, 56px); border: 1px solid var(--product-border); border-radius: 22px; color: var(--product-text); background: var(--product-surface); box-shadow: var(--theme-shadow); text-align: center; }
 .product-error-status { display: grid; width: 72px; height: 72px; margin: 0 auto 18px; border-radius: 20px; place-items: center; color: var(--product-accent); background: color-mix(in srgb, var(--product-accent) 12%, var(--product-surface)); font: 800 1var(--ae-type-caption) "Space Mono", monospace; }
 .product-error-kicker { margin: 0 0 6px; color: var(--product-accent); font-size: var(--product-type-small); font-weight: 800; letter-spacing: .08em; }
 .product-error-card h1 { margin: 0; color: var(--product-text); font-size: clamp(1.7rem, 4vw, 2.5rem); }

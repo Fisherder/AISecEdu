@@ -1,0 +1,546 @@
+:root {
+  --quality-edge: color-mix(in srgb, var(--theme-border) 76%, var(--theme-surface));
+  --quality-edge-soft: color-mix(in srgb, var(--theme-border-soft) 82%, var(--theme-surface));
+  --quality-ink-shadow: color-mix(in srgb, var(--theme-text) 5%, transparent);
+  --quality-card-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-surface) 75%, transparent), 0 1px 2px color-mix(in srgb, var(--theme-text) 3%, transparent), 0 4px 14px color-mix(in srgb, var(--theme-shadow) 26%, transparent);
+  --quality-popover-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-text) 3%, transparent), 0 4px 8px color-mix(in srgb, var(--theme-shadow) 65%, transparent), 0 20px 50px color-mix(in srgb, var(--theme-shadow) 100%, transparent);
+  --quality-focus: 0 0 0 1px var(--theme-surface), 0 0 0 4px color-mix(in srgb, var(--theme-primary) 22%, transparent);
+  --quality-ease: cubic-bezier(.2, .7, .3, 1);
+  --quality-feedback: 140ms;
+  --quality-control: color-mix(in srgb, var(--theme-surface) 98%, var(--theme-text));
+  --quality-control-hover: color-mix(in srgb, var(--theme-surface) 95%, var(--theme-primary));
+  --quality-control-pressed: color-mix(in srgb, var(--theme-surface) 90%, var(--theme-primary));
+  --quality-control-edge: color-mix(in srgb, var(--theme-border) 92%, var(--theme-text));
+  --quality-control-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-surface) 80%, transparent), 0 1px 2px color-mix(in srgb, var(--theme-text) 7%, transparent);
+  --quality-panel-highlight: inset 0 1px 0 color-mix(in srgb, var(--theme-surface) 90%, transparent);
+  --quality-press: 75ms;
+  --quality-reveal: 180ms;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body ::selection {
+  color: var(--theme-text);
+  background: color-mix(in srgb, var(--theme-primary) 20%, var(--theme-surface));
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .product-navbar {
+  border-bottom-color: var(--quality-edge-soft);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--theme-text) 3%, transparent), 0 6px 18px color-mix(in srgb, var(--theme-shadow) 28%, transparent);
+  background-color: color-mix(in srgb, var(--theme-surface) 92%, transparent) !important;
+  backdrop-filter: blur(20px) saturate(145%);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .product-brand img {
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--theme-text) 12%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(button, .btn, .nav-link, .dropdown-item, .hub-button, .cc-button, .library-actions a) {
+  transition-property: color, background-color, border-color, box-shadow, opacity, filter, transform;
+  transition-duration: var(--quality-feedback);
+  transition-timing-function: var(--quality-ease);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .product-primary-nav .nav-link.active::after,
+:root[data-aisecedu-palette][data-aisecedu-theme] body .cc-progress i {
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--theme-primary) 12%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.teaching-dashboard-command, .teaching-dashboard-card, .library-sidebar,
+  .library-card, .cc-card, .cc-metric, .hub-surface, .teacher-course-card,
+  .cs-analytics-card, .cs-surface, .account-auth-card, .account-settings-panel,
+  .profile-panel, .profile-side-card, .product-surface, .project-card:not(.is-selected),
+  .admin-overview-panel, .admin-config-panel, .admin-product-table-wrap) {
+  box-shadow: var(--quality-card-shadow);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-sidebar, .library-card:not(.is-selected), .cc-card,
+  .hub-surface:not(.hub-attention-surface), .teacher-course-card, .project-card:not(.is-selected),
+  .admin-overview-panel, .admin-product-table-wrap) {
+  border-color: var(--quality-edge-soft);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .teaching-dashboard-command {
+  border-color: var(--quality-edge);
+  background-image: none;
+  background-color: var(--theme-surface);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .teaching-dashboard-card:not(.is-attention) {
+  border-color: var(--quality-edge-soft);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-shell, .projects-shell, .cc-shell, .course-hub, .course-system-page, .account-auth-card, .account-settings-panel)
+  :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea, select),
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.form-control, .custom-select) {
+  border-color: var(--quality-edge);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--theme-text) 2%, transparent);
+  transition: border-color var(--quality-feedback) var(--quality-ease), box-shadow var(--quality-feedback) var(--quality-ease), background-color var(--quality-feedback) var(--quality-ease);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-shell, .projects-shell, .cc-shell, .course-hub, .course-system-page, .account-auth-card, .account-settings-panel)
+  :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea, select):focus,
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.form-control, .custom-select):focus {
+  border-color: var(--theme-primary);
+  box-shadow: var(--quality-focus);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-shell, .projects-shell, .cc-shell, .course-hub, .course-system-page, .account-auth-card, .account-settings-panel)
+  :is(input, textarea, select):is([aria-invalid="true"], .is-invalid),
+:root[data-aisecedu-palette][data-aisecedu-theme] body .form-control.is-invalid {
+  border-color: var(--theme-danger) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-danger) 12%, transparent) !important;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body.teacher-agent-page .teaching-composer-row {
+  border-color: var(--quality-edge);
+  border-radius: 11px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--theme-shadow) 30%, transparent);
+  transition: border-color var(--quality-feedback) var(--quality-ease), box-shadow var(--quality-feedback) var(--quality-ease);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body.teacher-agent-page .teaching-composer-row:focus-within {
+  border-color: var(--theme-primary);
+  box-shadow: var(--quality-focus), 0 2px 8px color-mix(in srgb, var(--theme-shadow) 30%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.btn-primary, .library-primary, .project-primary, .cc-primary, .cs-btn-primary, .account-auth-submit,
+  #teaching-send, #teaching-dashboard-send):not(:disabled):not([aria-disabled="true"]) {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-on-primary) 18%, transparent), 0 2px 4px color-mix(in srgb, var(--theme-primary) 14%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.btn-primary, .library-primary, .project-primary, .cc-primary, .cs-btn-primary, .account-auth-submit,
+  #teaching-send, #teaching-dashboard-send):not(:disabled):not([aria-disabled="true"]):active {
+  box-shadow: inset 0 1px 3px color-mix(in srgb, var(--theme-text) 15%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(button, a[href], input, textarea, select):focus-visible {
+  outline-color: var(--theme-primary);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .library-type-chip {
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--theme-secondary) 7%, var(--theme-surface));
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body.teacher-agent-page .teaching-thread {
+  transition: background-color var(--quality-feedback) var(--quality-ease), box-shadow var(--quality-feedback) var(--quality-ease);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.product-account-menu .dropdown-menu, .library-shell dialog, .projects-shell dialog, .project-management-menu,
+  .cc-dialog, .hub-modal-card, .admin-role-dialog) {
+  border-color: var(--quality-edge);
+  box-shadow: var(--quality-popover-shadow);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .aisecedu-floating-menu {
+  box-shadow: var(--quality-popover-shadow) !important;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.cc-table, .admin-product-table, .ae-data-table) :is(th, td) {
+  border-color: var(--quality-edge-soft);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  body :is(.product-account-menu .dropdown-menu.show, .aisecedu-floating-menu,
+    .teaching-skill-menu:not([hidden]), .teaching-thread-menu:not([hidden]),
+    .library-shell dialog[open], .projects-shell dialog[open], .cc-dialog[open], .admin-role-dialog[open]) {
+    animation: quality-surface-reveal var(--quality-reveal) var(--quality-ease);
+  }
+
+  body :is(.library-shell dialog[open], .projects-shell dialog[open], .cc-dialog[open], .admin-role-dialog[open])::backdrop {
+    animation: quality-surface-reveal var(--quality-reveal) var(--quality-ease);
+  }
+}
+
+@keyframes quality-surface-reveal {
+  from { opacity: .65; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --quality-feedback: 0ms; --quality-press: 0ms; --quality-reveal: 0ms; }
+}
+
+:root[data-aisecedu-motion="reduced"] {
+  --quality-feedback: 0ms;
+  --quality-press: 0ms;
+  --quality-reveal: 0ms;
+}
+
+:root[data-aisecedu-motion="reduced"] body :is(.product-account-menu .dropdown-menu.show,
+  .aisecedu-floating-menu, .teaching-skill-menu:not([hidden]), .teaching-thread-menu:not([hidden]),
+  .library-shell dialog[open], .projects-shell dialog[open], .cc-dialog[open], .admin-role-dialog[open]),
+:root[data-aisecedu-motion="reduced"] body :is(.library-shell dialog[open], .projects-shell dialog[open],
+  .cc-dialog[open], .admin-role-dialog[open])::backdrop {
+  animation: none;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-shell button, .library-actions a, .cc-button,
+  .cc-shell button, .hub-button, .cs-btn, .product-button, .projects-toolbar button,
+  .teaching-quick-prompts button, .teaching-dashboard-shortcuts button,
+  .teaching-dashboard-links a, .teaching-dashboard-links button, .teaching-new-button,
+  .projects-toolbar button:not([aria-pressed="true"]), .project-pagination button)
+  :where(svg, i) {
+  transition: color var(--quality-feedback) var(--quality-ease), opacity var(--quality-feedback) var(--quality-ease);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-shell button, .library-actions a, .cc-button,
+  .cc-shell button, .hub-button, .cs-btn, .product-button, .projects-toolbar button,
+  .teaching-quick-prompts button, .teaching-dashboard-shortcuts button,
+  .teaching-dashboard-links a, .teaching-dashboard-links button, .teaching-new-button,
+  .projects-toolbar button:not([aria-pressed="true"]), .project-pagination button)
+  :where(svg) {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-header button:not(.library-primary), .library-card button:not(.library-primary),
+  .library-actions a:not(.library-primary), .cc-actions button:not(.cc-primary), .cc-actions .cc-button:not(.cc-primary),
+  .hub-button:not(.is-primary):not(.is-danger), .cs-btn-secondary, .product-button:not(.is-primary):not(.is-danger),
+  .teaching-quick-prompts button, .teaching-dashboard-shortcuts button,
+  .teaching-dashboard-links a, .teaching-dashboard-links button, .teaching-new-button,
+  .projects-toolbar button:not([aria-pressed="true"]), .project-pagination button) {
+  border-color: var(--quality-control-edge);
+  border-radius: 9px;
+  color: var(--theme-text-muted);
+  background-color: var(--quality-control);
+  background-image: none;
+  box-shadow: var(--quality-control-shadow);
+}
+
+@media (hover: hover) {
+  :root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-header button:not(.library-primary), .library-card button:not(.library-primary),
+    .library-actions a:not(.library-primary), .cc-actions button:not(.cc-primary), .cc-actions .cc-button:not(.cc-primary),
+    .hub-button:not(.is-primary):not(.is-danger), .cs-btn-secondary, .product-button:not(.is-primary):not(.is-danger),
+    .teaching-quick-prompts button, .teaching-dashboard-shortcuts button,
+    .teaching-dashboard-links a, .teaching-dashboard-links button, .teaching-new-button,
+  .projects-toolbar button:not([aria-pressed="true"]), .project-pagination button):hover:not(:disabled):not([aria-disabled="true"]) {
+    border-color: color-mix(in srgb, var(--theme-primary) 42%, var(--theme-border));
+    color: var(--theme-text);
+    background-color: var(--quality-control-hover);
+    box-shadow: var(--quality-control-shadow), 0 2px 5px color-mix(in srgb, var(--theme-shadow) 35%, transparent);
+  }
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-header button:not(.library-primary), .library-card button:not(.library-primary),
+  .library-actions a:not(.library-primary), .cc-actions button:not(.cc-primary), .cc-actions .cc-button:not(.cc-primary),
+  .hub-button:not(.is-primary):not(.is-danger), .cs-btn-secondary, .product-button:not(.is-primary):not(.is-danger),
+  .teaching-quick-prompts button, .teaching-dashboard-shortcuts button,
+  .teaching-dashboard-links a, .teaching-dashboard-links button, .teaching-new-button,
+  .projects-toolbar button:not([aria-pressed="true"]), .project-pagination button):active:not(:disabled):not([aria-disabled="true"]) {
+  background-color: var(--quality-control-pressed);
+  box-shadow: inset 0 1px 3px color-mix(in srgb, var(--theme-text) 10%, transparent);
+  transition-duration: var(--quality-press);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.btn-primary, .library-primary, .project-primary, .cc-primary, .cs-btn-primary,
+  .hub-button.is-primary, .product-button.is-primary, .account-auth-submit,
+  #teaching-send, #teaching-dashboard-send):not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--theme-primary-strong) !important;
+  border-radius: 10px;
+  color: var(--theme-on-primary) !important;
+  background-color: var(--theme-primary) !important;
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--theme-on-primary) 8%, transparent), color-mix(in srgb, var(--theme-primary-strong) 18%, transparent)) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-on-primary) 18%, transparent), 0 1px 2px color-mix(in srgb, var(--theme-primary-strong) 22%, transparent), 0 3px 7px color-mix(in srgb, var(--theme-primary) 12%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.btn-primary, .library-primary, .project-primary, .cc-primary, .cs-btn-primary,
+  .hub-button.is-primary, .product-button.is-primary, .account-auth-submit,
+  #teaching-send, #teaching-dashboard-send):hover:not(:disabled):not([aria-disabled="true"]) {
+  background-color: var(--theme-primary-strong) !important;
+  filter: none;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-on-primary) 20%, transparent), 0 2px 4px color-mix(in srgb, var(--theme-primary-strong) 26%, transparent), 0 4px 10px color-mix(in srgb, var(--theme-primary) 16%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.btn-primary, .library-primary, .project-primary, .cc-primary, .cs-btn-primary,
+  .hub-button.is-primary, .product-button.is-primary, .account-auth-submit,
+  #teaching-send, #teaching-dashboard-send):active:not(:disabled):not([aria-disabled="true"]) {
+  background-color: var(--theme-primary-strong) !important;
+  box-shadow: inset 0 1px 4px color-mix(in srgb, var(--theme-text) 22%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--theme-on-primary) 10%, transparent);
+  transition-duration: var(--quality-press);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.btn, .library-shell button, .cc-shell button,
+  .hub-button, .cs-btn, .product-button, .account-auth-submit,
+  #teaching-send, #teaching-dashboard-send):is(:disabled, [aria-disabled="true"]) {
+  background-image: none !important;
+  box-shadow: none;
+  filter: none;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-shell, .projects-shell, .cc-shell, .course-hub, .course-system-page,
+  .account-auth-card, .account-settings-panel) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea, select),
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.form-control, .custom-select) {
+  border-color: var(--quality-control-edge);
+  border-radius: 10px;
+  color: var(--theme-text);
+  background-color: var(--theme-field);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--theme-text) 3%, transparent);
+}
+
+@media (hover: hover) {
+  :root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-shell, .projects-shell, .cc-shell, .course-hub, .course-system-page,
+    .account-auth-card, .account-settings-panel) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea, select):hover:not(:focus):not(:disabled):not([readonly]):not([aria-invalid="true"]):not(.is-invalid),
+  :root[data-aisecedu-palette][data-aisecedu-theme] body :is(.form-control, .custom-select):hover:not(:focus):not(:disabled):not([readonly]):not(.is-invalid) {
+    border-color: color-mix(in srgb, var(--theme-primary) 36%, var(--theme-border));
+  }
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-shell, .projects-shell, .cc-shell, .course-hub, .course-system-page,
+  .account-auth-card, .account-settings-panel) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]), textarea, select):focus,
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.form-control, .custom-select):focus {
+  border-color: var(--theme-primary);
+  background-color: var(--theme-field);
+  box-shadow: var(--quality-focus);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-shell, .projects-shell, .cc-shell, .course-system-page,
+  .account-auth-card, .account-settings-panel) :is(input, textarea, select):is([aria-invalid="true"], .is-invalid),
+:root[data-aisecedu-palette][data-aisecedu-theme] body .form-control.is-invalid {
+  border-color: var(--theme-danger) !important;
+  box-shadow: 0 0 0 1px var(--theme-surface), 0 0 0 4px color-mix(in srgb, var(--theme-danger) 16%, transparent) !important;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-shell, .projects-shell, .cc-shell, .course-system-page,
+  .account-auth-card, .account-settings-panel) :is(input, textarea, select):is(:disabled, [readonly]),
+:root[data-aisecedu-palette][data-aisecedu-theme] body .form-control:is(:disabled, [readonly]) {
+  background-color: var(--theme-surface-soft) !important;
+  color: var(--theme-text-muted) !important;
+  box-shadow: none !important;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(input, textarea)::placeholder {
+  color: var(--theme-text-muted);
+  opacity: 1;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(input[type="checkbox"], input[type="radio"], input[type="range"]) {
+  accent-color: var(--theme-primary);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.product-navbar .nav-link, .product-icon-button) {
+  transition: color var(--quality-feedback) var(--quality-ease), background-color var(--quality-feedback) var(--quality-ease), box-shadow var(--quality-feedback) var(--quality-ease);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .product-navbar .product-primary-nav .nav-link:hover {
+  background-color: color-mix(in srgb, var(--theme-primary) 5%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .product-navbar .product-primary-nav .nav-link.active {
+  color: var(--theme-primary) !important;
+  background-color: color-mix(in srgb, var(--theme-primary) 3%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .product-avatar {
+  border-color: var(--quality-control-edge) !important;
+  background-color: var(--quality-control) !important;
+  box-shadow: var(--quality-panel-highlight), 0 1px 3px color-mix(in srgb, var(--theme-shadow) 45%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.product-account-menu .dropdown-menu, .library-shell dialog, .projects-shell dialog, .project-management-menu,
+  .cc-dialog, .hub-modal-card, .teaching-skill-menu, .teaching-thread-menu,
+  .cs-drawer, .teaching-drawer, .admin-role-dialog) {
+  border-color: var(--quality-edge);
+  background-color: var(--theme-surface);
+  box-shadow: var(--quality-popover-shadow);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .aisecedu-floating-menu {
+  border-color: var(--quality-edge) !important;
+  background-color: var(--theme-surface) !important;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.product-account-menu .dropdown-item, .aisecedu-floating-menu .dropdown-item,
+  .teaching-thread-menu button, .teaching-skill-list button) {
+  border-radius: 7px;
+  box-shadow: none;
+  transition: background-color var(--quality-feedback) var(--quality-ease), color var(--quality-feedback) var(--quality-ease);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.product-account-menu .dropdown-item, .aisecedu-floating-menu .dropdown-item,
+  .teaching-thread-menu button, .teaching-skill-list button):is(:hover, :focus-visible) {
+  color: var(--theme-text);
+  background-color: var(--quality-control-hover);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.product-account-menu, .aisecedu-floating-menu) .dropdown-divider {
+  border-color: var(--quality-edge-soft);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-sidebar button, .cc-nav button, .cs-rail-nav button,
+  .cs-page-tabs button, .account-settings-nav button, .teaching-thread-item) {
+  transition: color var(--quality-feedback) var(--quality-ease), background-color var(--quality-feedback) var(--quality-ease), border-color var(--quality-feedback) var(--quality-ease), box-shadow var(--quality-feedback) var(--quality-ease);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-sidebar button[aria-pressed="true"], .cc-nav button[aria-current="page"],
+  .cs-rail-nav button.is-active, .cs-page-tabs button.is-active,
+  .account-settings-nav button.is-active, .teaching-thread-item.is-active) {
+  border-color: color-mix(in srgb, var(--theme-primary) 26%, var(--theme-border-soft));
+  color: var(--theme-primary);
+  background-color: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-surface));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-surface) 70%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.teaching-view-switch, .teaching-drawer-tabs) {
+  border-color: var(--quality-edge-soft);
+  background-color: var(--theme-surface-soft);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--theme-text) 3%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .teaching-view-switch button[aria-pressed="true"] {
+  color: var(--theme-text);
+  background-color: var(--theme-surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-text) 4%, transparent), 0 1px 3px color-mix(in srgb, var(--theme-shadow) 75%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-type-chip, .cc-chip, .project-tag) {
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 11%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .cc-chip.good,
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.project-status--succeeded, .cs-status.is-published, .cs-status.is-graded) {
+  color: var(--theme-success);
+  background-color: color-mix(in srgb, var(--theme-success) 7%, var(--theme-surface));
+  border-color: color-mix(in srgb, var(--theme-success) 20%, var(--theme-border-soft));
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .cc-chip.warn,
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.cs-status.is-draft, .cs-status.is-in_progress) {
+  color: var(--theme-warning);
+  background-color: color-mix(in srgb, var(--theme-warning) 8%, var(--theme-surface));
+  border-color: color-mix(in srgb, var(--theme-warning) 18%, var(--theme-border-soft));
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .project-status--failed {
+  color: var(--theme-danger);
+  background-color: color-mix(in srgb, var(--theme-danger) 8%, var(--theme-surface));
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.project-status--generating, .teaching-run-status[data-state="running"]) {
+  color: var(--theme-primary);
+  background-color: color-mix(in srgb, var(--theme-primary) 7%, var(--theme-surface));
+  border-color: color-mix(in srgb, var(--theme-primary) 22%, var(--theme-border-soft));
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.cc-table, .cs-table, .admin-product-table, .ae-data-table, .learning-analysis-table) th {
+  color: var(--theme-text-muted);
+  background-color: color-mix(in srgb, var(--theme-text) 2%, var(--theme-surface));
+  border-color: var(--quality-edge-soft);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.cc-table, .cs-table, .admin-product-table, .ae-data-table, .learning-analysis-table) td {
+  border-color: var(--quality-edge-soft);
+}
+
+@media (hover: hover) {
+  :root[data-aisecedu-palette][data-aisecedu-theme] body :is(.cc-table, .cs-table, .admin-product-table, .ae-data-table, .learning-analysis-table) tbody tr:has(a[href], button):hover {
+    background-color: color-mix(in srgb, var(--theme-primary) 3%, var(--theme-surface));
+  }
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.teaching-composer-hint, .account-settings-search, .teaching-thread-search) kbd {
+  color: var(--theme-text-muted);
+  background-color: var(--theme-surface);
+  border-color: var(--quality-edge);
+  border-radius: 4px;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--theme-text) 8%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.teaching-message pre, .course-system-page pre) {
+  border-color: var(--quality-edge);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--theme-text) 4%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.library-empty, .project-empty, .cc-empty, .teaching-dashboard-empty, .learning-analysis-empty) {
+  border-color: var(--quality-edge);
+  background-color: color-mix(in srgb, var(--theme-primary) 2%, var(--theme-surface));
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.teaching-dashboard-input-row, .teaching-composer-row) {
+  border-color: var(--quality-control-edge);
+  border-radius: 12px;
+  background-color: var(--theme-field);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--theme-text) 2%, transparent), 0 2px 6px color-mix(in srgb, var(--theme-shadow) 30%, transparent);
+  transition: border-color var(--quality-feedback) var(--quality-ease), box-shadow var(--quality-feedback) var(--quality-ease);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.teaching-dashboard-input-row, .teaching-composer-row):focus-within {
+  border-color: var(--theme-primary);
+  box-shadow: var(--quality-focus), 0 2px 6px color-mix(in srgb, var(--theme-shadow) 30%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.teaching-dashboard-input-row, .teaching-composer-row) textarea {
+  color: var(--theme-text);
+  background-color: transparent;
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .teaching-upload-status {
+  color: var(--theme-text);
+  background-color: var(--theme-surface);
+  border-color: var(--quality-edge);
+  box-shadow: var(--quality-card-shadow);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .teaching-upload-status.has-error {
+  border-color: color-mix(in srgb, var(--theme-danger) 44%, var(--theme-border));
+  background-color: color-mix(in srgb, var(--theme-danger) 3%, var(--theme-surface));
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.teaching-upload-draft-item, .teaching-upload-draft-heading) {
+  border-color: var(--quality-edge-soft);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.teaching-upload-status-copy small, .teaching-upload-status-copy > span,
+  .teaching-upload-draft-heading span) {
+  color: var(--theme-text-muted);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .teaching-upload-status-icon {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .teaching-upload-status-actions button {
+  color: var(--theme-text-muted);
+  background-color: var(--quality-control);
+  border-color: var(--quality-control-edge);
+  box-shadow: var(--quality-control-shadow);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .teaching-upload-status-actions button:hover:not(:disabled) {
+  color: var(--theme-primary);
+  background-color: var(--quality-control-hover);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body :is(.la-card, .la-kpis article) {
+  border-color: var(--quality-edge-soft);
+  box-shadow: var(--quality-card-shadow);
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .la-badge.is-high {
+  color: var(--theme-danger);
+  border-color: color-mix(in srgb, var(--theme-danger) 22%, var(--theme-border-soft));
+  background-color: color-mix(in srgb, var(--theme-danger) 8%, var(--theme-surface));
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .la-badge.is-medium {
+  color: var(--theme-warning);
+  border-color: color-mix(in srgb, var(--theme-warning) 22%, var(--theme-border-soft));
+  background-color: color-mix(in srgb, var(--theme-warning) 8%, var(--theme-surface));
+}
+
+:root[data-aisecedu-palette][data-aisecedu-theme] body .la-badge.is-low {
+  color: var(--theme-success);
+  border-color: color-mix(in srgb, var(--theme-success) 22%, var(--theme-border-soft));
+  background-color: color-mix(in srgb, var(--theme-success) 8%, var(--theme-surface));
+}
+
+@media (forced-colors: active) {
+  :root[data-aisecedu-palette][data-aisecedu-theme] body :is(button, a[href], input, textarea, select):focus-visible {
+    outline-color: Highlight;
+  }
+}

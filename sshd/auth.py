@@ -30,9 +30,12 @@ def main():
 
     connection = create_db_connection()
     with connection.cursor() as cursor:
-        cursor.execute("SELECT user_id, value FROM ssh_keys")
+        cursor.execute("SELECT ssh_keys.user_id, ssh_keys.value FROM ssh_keys JOIN users ON users.id = ssh_keys.user_id WHERE users.banned IS NOT TRUE")
         for user_id, key in cursor.fetchall():
-            print(f'command="{enter_path} user_{user_id}" {key}')
+            fields = str(key or "").split()
+            if len(fields) != 2 or not fields[0].startswith(("ssh-", "ecdsa-", "sk-")):
+                continue
+            print(f'no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc,command="{enter_path} user_{int(user_id)}" {fields[0]} {fields[1]}')
 
 if __name__ == "__main__":
     main()

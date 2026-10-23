@@ -144,15 +144,15 @@
     });
   }
 
-  function renderAssignments(rows) {
+  function renderAssignments(rows, inquiryProjects = []) {
     const list = document.getElementById("learning-assignment-list");
     const empty = document.getElementById("learning-assignment-empty");
-    const pending = rows
+    const pending = [...rows, ...inquiryProjects.map(item => ({...item, inquiry: true, status: "PUBLISHED", activityState: item.started ? "IN_PROGRESS" : "NOT_STARTED"}))]
       .filter(item => item.status === "PUBLISHED" && item.activityState !== "COMPLETED")
       .sort((a, b) => new Date(a.dueAt || "2999-12-31") - new Date(b.dueAt || "2999-12-31"));
     list.innerHTML = pending.slice(0, 3).map(item => {
-      const [label, icon] = kindMeta(item.kind);
-      return `<a class="sl-task-card" href="/learning/assignments/${encodeURIComponent(item.id)}">
+      const [label, icon] = item.inquiry ? ["流程探究", "fa-project-diagram"] : kindMeta(item.kind);
+      return `<a class="sl-task-card" href="${escape(item.inquiry ? item.href : `/learning/assignments/${encodeURIComponent(item.id)}`)}">
         <span class="sl-task-icon"><i class="fas ${icon}" aria-hidden="true"></i></span>
         <span><small>${escape(label)} · ${escape(item.courseName || "课程任务")}</small><strong>${escape(item.title || "未命名任务")}</strong><em>${escape(activityLabel(item.activityState))}</em></span>
         <span class="sl-task-due">${escape(dateLabel(item.dueAt))}<i class="fas fa-chevron-right" aria-hidden="true"></i></span>
@@ -252,7 +252,7 @@
     document.getElementById("learning-ready").hidden = false;
     document.getElementById("learning-today-date").textContent = new Intl.DateTimeFormat("zh-CN", {month: "long", day: "numeric", weekday: "long"}).format(new Date());
     renderNextAction(overview.nextAction || {});
-    renderAssignments(overview.assignments || []);
+    renderAssignments(overview.assignments || [], overview.inquiryProjects || []);
     renderCourses(overview.enrolledCourses || []);
     renderMastery(overview);
     const workspaceCount = Number(

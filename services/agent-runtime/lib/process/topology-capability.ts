@@ -1,0 +1,7 @@
+export const PROCESS_TOPOLOGY_BRIEF = `互动过程还支持真实的topology视图，用于网络、工作流或设备连接，不用文字箭头或普通数组冒充拓扑。
+固定的阶段文字用at读取一维文字数组，例如 {"op":"at","args":[["尚未开始","观察第一步","比较结果"],{"state":"stepIndex"}]}。不要为固定阶段说明展开五六层嵌套if；每个if必须恰好有条件、成立值、不成立值三个参数，条件必须是布尔值。
+动态状态数组可写成 {"op":"array","args":[{"state":"first"},{"op":"if","args":[{"state":"blocked"},"已阻断","可通行"]}]}，array接受0–16个会计算为标量的表达式。不要把表达式对象直接放在普通数组里，也不要用文本concat拼数组；一个动作可以原子更新最多32项状态或数组格，不需要增加无意义步骤来凑更新数量。
+views里的kind可取topology。此时value必须计算出与topology.labels等长的状态数组，每一项是该设备当前可见状态（建议短中文字符串）；topology:{labels:["设备A","设备B"],tones:[{value:"待机",tone:"neutral"},{value:"正在传递",tone:"active"},{value:"异常",tone:"danger"},{value:"已防护",tone:"success"}],edges:[{from:0,to:1,label:"可选短连接说明",activeWhen:布尔表达式,blockedWhen:布尔表达式}]}。
+labels为2–16个唯一名称，edges为1–32条连接，from/to是labels的从0开始的有效索引且不能相同；tones最多16种且value不能重复，tone仅neutral/active/danger/success/muted。activeWhen/blockedWhen用现有input/state/op表达式，省略视为false。blockedWhen=true时该连接显示阻断符号；未阻断且activeWhen=true显示传递方向。单步切换连接时短时绘制流动，连续执行时有效连接持续流动。各连接条件须由真实当前状态与输入算出，不能把始终亮着的装饰线说成传播。标签和状态均显示在图中，完整连接说明可展开读。
+单步执行时，新接通的箭头沿from→to方向流动，断开的箭头沿反方向流动；连续执行时有效连线持续流动。必须用真实状态条件控制连线，才能把装入/换出表现为对应方向的变化。严格写成view.topology.labels、view.topology.edges和view.value；不要写view.labels、view.edges、nodes、links或stateDrivenTopology字段，也不要省略value。
+拓扑自动排布，不填写HTML、SVG、坐标、图片URL或额外脚本；activeIndex/markedIndices可指向当前状态数组索引突出实际对象。还需保留独立value/text视图用于数值和questions。数值更新、选项变化、暂停、撤销、重置都沿用同一个过程引擎，不能另建一套静态假状态。`;

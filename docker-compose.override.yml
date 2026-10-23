@@ -1,21 +1,46 @@
 services:
+  ctfd:
+    image: pwncollege-ctfd:v2-ppt-source-20260930
+  teaching-material-index-worker:
+    image: pwncollege-ctfd:v2-ppt-source-20260930
   workspace-builder:
     entrypoint:
-      - /bin/sh
-      - -c
+    - /bin/sh
+    - -c
     command:
-      - |
-        set -eu
-        profile=/nix/var/nix/profiles/dojo-workspace
-        expected=/nix/store/0hs7db796vbhdnjfzpyq7h7aq3wr6wm6-dojo-workspace-full
-        actual=$$(readlink -f "$$profile")
-        test "$$actual" = "$$expected"
-        closure_count=$$(nix-store --store local -qR "$$actual" | wc -l)
-        test "$$closure_count" -eq 2366
-        suid_file="$$actual/suid"
-        test -f "$$suid_file"
-        while IFS= read -r path; do
-          test -e "$$path"
-          chmod u+s "$$path"
-        done < "$$suid_file"
-        echo "Reused verified migrated workspace profile: $$actual ($$closure_count paths)"
+    - "set -eu\nprofile=/nix/var/nix/profiles/dojo-workspace\nexpected=/nix/store/0hs7db796vbhdnjfzpyq7h7aq3wr6wm6-dojo-workspace-full\n\
+      actual=$$(readlink -f \"$$profile\")\ntest \"$$actual\" = \"$$expected\"\nclosure_count=$$(nix-store\
+      \ --store local -qR \"$$actual\" | wc -l)\ntest \"$$closure_count\" -eq 2366\n\
+      suid_file=\"$$actual/suid\"\ntest -f \"$$suid_file\"\nwhile IFS= read -r path;\
+      \ do\n  test -e \"$$path\"\n  chmod u+s \"$$path\"\ndone < \"$$suid_file\"\n\
+      echo \"Reused verified migrated workspace profile: $$actual ($$closure_count\
+      \ paths)\"\n"
+  agent-runtime:
+    image: aisecedu/agent-runtime:inquiry-20261019-r1
+    environment:
+      PARALLEL_SCENE_CONCURRENCY: '4'
+      COURSEWARE_GENERATOR: native-v2
+      COURSEWARE_INSPECTOR_URL: http://courseware-inspector:3015
+  courseware-inspector:
+    image: aisecedu/courseware-inspector:decision-interaction-20261001-r47
+    container_name: courseware-inspector
+    profiles:
+    - main
+    restart: always
+    init: true
+    environment:
+      AISECEDU_SERVICE_SECRET: ${GLOBAL_AGENT_RUNTIME_SERVICE_SECRET:?GLOBAL_AGENT_RUNTIME_SERVICE_SECRET
+        must be set by dojo init}
+      COURSEWARE_RENDER_ORIGIN: http://agent-runtime:3000/agent-runtime
+      HOSTNAME: 0.0.0.0
+    read_only: true
+    tmpfs:
+    - /tmp:rw,size=536870912
+    shm_size: 512m
+    mem_limit: 2g
+    cpus: 8
+    pids_limit: 256
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges

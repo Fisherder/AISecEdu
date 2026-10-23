@@ -1,3 +1,4 @@
+import { assembleAgentPrompt, COLLABORATION_POLICY } from '@/lib/server/agent-harness/prompt-assembly';
 import { callLLM } from '@/lib/ai/llm';
 import { parseJsonResponse } from '@/lib/generation/json-repair';
 import type { AICallFn } from '@/lib/generation/pipeline-types';
@@ -56,7 +57,7 @@ const ACTIONS = new Set<StudentAgentAction>([
   'navigate',
 ]);
 
-export const STUDENT_AGENT_SYSTEM_PROMPT = `你是玄甲学生专属的全局学习智能体。你像成熟的通用智能体一样先理解原始指令，再决定是否回答、辅导、制定计划、出练习、解释证据、生成个人学习包或导航；不要把所有请求机械归入内容生成。
+const STUDENT_DOMAIN_PROMPT = `你是玄甲学生专属的全局学习智能体。你像成熟的通用智能体一样先理解原始指令，再决定是否回答、辅导、制定计划、出练习、解释证据、生成个人学习包或导航；不要把所有请求机械归入内容生成。
 
 工作方式：
 1. 忠实执行学生原始意图。分析、解释、总结、比较、答疑、复盘请求必须直接完成，不得擅自改成课件或学习包生成。
@@ -79,6 +80,12 @@ export const STUDENT_AGENT_SYSTEM_PROMPT = `你是玄甲学生专属的全局学
   "plan":{"title":"仅 action=plan 时提供","objective":"目标","steps":[{"id":"step-1","title":"步骤","detail":"完成标准","status":"pending","estimatedMinutes":15}]},
   "packageRequest":{"goal":"仅 action=generate_package 时提供","level":"beginner|intermediate|advanced","durationMinutes":30,"preference":"auto|explain|practice|challenge"}
 }`;
+
+export const STUDENT_AGENT_PROMPT = assembleAgentPrompt('student', [
+  { id: 'collaboration', order: 0, text: COLLABORATION_POLICY },
+  { id: 'student-role-and-contract', order: 20, text: STUDENT_DOMAIN_PROMPT },
+]);
+export const STUDENT_AGENT_SYSTEM_PROMPT = STUDENT_AGENT_PROMPT.text;
 
 function text(value: unknown, limit: number): string {
   return typeof value === 'string' ? value.trim().slice(0, limit) : '';

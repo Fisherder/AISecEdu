@@ -517,14 +517,18 @@
 
   function updateRuntimeFields() {
     if (kind !== "practice") return;
-    const windows = document.getElementById("manual-runtime-environment").value === "windows";
+    const select = document.getElementById("manual-runtime-environment");
+    const option = select.options[select.selectedIndex];
+    const windows = (option?.dataset?.family || "linux") === "windows";
+    const description = document.getElementById("manual-runtime-description");
+    if (description && option?.dataset?.description) description.textContent = option.dataset.description;
     const web = form.querySelector('input[name="runtimeMode"]:checked').value === "web";
     document.getElementById("manual-port-field").hidden = !web;
-    document.getElementById("manual-native-label").textContent = windows ? "Windows 桌面" : "终端环境";
-    document.getElementById("manual-native-help").textContent = windows ? "学生在原生 Windows 桌面中编写、运行或调试程序" : "学生在隔离终端中完成目标并获取 Flag";
-    document.getElementById("manual-starter-path").placeholder = windows ? "例如：main.c 或 app.ps1" : "例如：app.py";
+    document.getElementById("manual-native-label").textContent = windows ? "客户机桌面" : "终端环境";
+    document.getElementById("manual-native-help").textContent = windows ? "学生在原生客户机桌面中编写、运行或调试程序" : "学生在隔离终端中完成目标并获取 Flag";
+    document.getElementById("manual-starter-path").placeholder = windows ? "例如：main.c 或 app.cmd" : "例如：app.py";
     document.getElementById("manual-runtime-hint").textContent = web
-      ? (windows ? "提供 .ps1 或 .cmd 入口，并使用上方端口；学生在 Windows 浏览器访问 localhost。" : "提供 .py、.js 或 .sh 入口文件，并在代码中使用上方端口。")
+      ? (windows ? "提供 .cmd 入口，并使用上方端口；学生在客户机浏览器访问 localhost。" : "提供 .py、.js 或 .sh 入口文件，并在代码中使用上方端口。")
       : (windows ? "文件将放入 C:\\Course，编译输出与可变数据请写入 C:\\CourseWork。" : "可不填写；如填写，路径和内容必须同时提供。");
   }
   form.querySelectorAll('input[name="runtimeMode"], #manual-runtime-environment').forEach(control => {

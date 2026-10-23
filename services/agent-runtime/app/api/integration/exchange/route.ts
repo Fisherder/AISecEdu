@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     );
     response.cookies.set(AISECEDU_SESSION_COOKIE, result.sessionToken, {
       httpOnly: true,
-      secure: req.nextUrl.protocol === 'https:' || process.env.NODE_ENV === 'production',
+      secure: new URL(redirectOrigin).protocol === 'https:',
       sameSite: 'strict',
       path: basePath || '/',
       maxAge: result.expiresIn,

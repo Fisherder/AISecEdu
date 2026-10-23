@@ -3,7 +3,8 @@
 {% block body_class %}course-system-page learning-assignment-page{% endblock %}
 
 {% block stylesheets %}
-<link rel="stylesheet" href="{{ url_for('views.themes', path='css/course-system.css', v='aisecedu-learning-themes-v2-readability-v1') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/course-system.css', v='frontend-restored-20261001-1') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/assignment-text.css', v='frontend-restored-20261001-1') }}">
 {% endblock %}
 
 {% block content %}
@@ -25,7 +26,7 @@
         <span class="cs-eyebrow">任务进度</span>
         <h2>完成情况</h2>
         <div id="la-score" class="la-score" hidden></div>
-        <div class="la-summary-row"><span>已作答</span><strong id="la-answered">正在读取</strong></div>
+        <div class="la-summary-row"><span id="la-progress-label">已作答</span><strong id="la-answered">正在读取</strong></div>
         <div class="la-summary-row"><span>总分</span><strong id="la-points">正在读取</strong></div>
         <div class="la-summary-row"><span>截止时间</span><strong id="la-due">正在读取</strong></div>
         <div class="la-summary-row"><span>保存状态</span><strong id="la-save-status" role="status" aria-live="polite" aria-atomic="true">正在读取</strong></div>
@@ -47,6 +48,7 @@
 {% block footer %}{% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-assignment.js', v='aisecedu-student-assignment-v3') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='frontend-restored-20261001-1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/assignment-text.js', v='frontend-restored-20261001-1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-assignment.js', v='coding-progress-20261011-2') }}"></script>
 {% endblock %}

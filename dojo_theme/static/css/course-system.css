@@ -200,7 +200,7 @@
   font-weight: 650;
   outline: none;
 }
-.cs-course-picker option { color: #172938; background: #fff; }
+.cs-course-picker option { color: var(--theme-text); background: var(--theme-field); }
 
 .cs-rail-nav { display: grid; gap: 4px; }
 .cs-rail-nav button {
@@ -598,7 +598,7 @@
 .cs-field input:focus,
 .cs-field select:focus,
 .cs-field textarea:focus { border-color: var(--cs-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--cs-accent) 8%, transparent); }
-.cs-field option { color: #182a38; background: #fff; }
+.cs-field option { color: var(--theme-text); background: var(--theme-field); }
 .cs-field textarea { resize: vertical; }
 .cs-field small { color: var(--cs-dim); font-size: var(--ae-type-caption); }
 .cs-input-suffix { position: relative; }
@@ -668,7 +668,7 @@
 }
 .cs-empty-action h3 { margin: 0 0 7px; color: var(--cs-text); font-size: 1.08rem; }
 .cs-empty-action p { max-width: 610px; margin: 0; line-height: 1.7; font-size: var(--ae-type-caption); }
-.cs-empty-action ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--cs-text-soft); }
+.cs-empty-action ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; color: var(--theme-text-muted); }
 .cs-empty-action li { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .cs-empty-action li strong { color: var(--cs-accent); font-size: var(--ae-type-caption); letter-spacing: 0.08em; }
 .cs-empty-action .cs-btn { grid-column: 2 / -1; justify-self: start; }

@@ -1,4 +1,5 @@
 import hmac
+import logging
 import os
 import hashlib
 import base64
@@ -9,10 +10,12 @@ import uuid
 import docker.errors
 
 from flask_restx import Namespace, Resource
-from flask import abort, request
+from flask import abort, request, session
 from CTFd.models import Users, db
 from CTFd.utils.user import get_current_user, is_admin
 from CTFd.utils.decorators import admins_only, authed_only
+
+logger = logging.getLogger(__name__)
 
 from ...models import LearningAttempts, LearningAuditEvents
 from ...product.contracts import error_envelope, success_envelope
@@ -23,6 +26,7 @@ from ...utils.workspace import start_on_demand_service, reset_home
 from ...pages.workspace import forward_workspace, forward_port, forward_short_port
 from ...config import WORKSPACE_SECRET, WORKSPACE_SESSION_SECONDS
 from ...runtime_profiles import container_runtime_profile
+from ...assignment_workspaces import coding_workspace_options
 
 
 workspace_namespace = Namespace(
@@ -99,6 +103,33 @@ def _workspace_expiration(container):
         0, int((expires_at - now).total_seconds())
     )
 
+@workspace_namespace.route("/ssh")
+class WorkspaceSSH(Resource):
+    @authed_only
+    def get(self):
+        from ...models import SSHKeys
+        from ...utils.workspace_ssh import connection_instructions
+        user = get_current_user()
+        container = get_current_container(user)
+        challenge = None
+        ready = False
+        if container is not None and container.status == "running":
+            challenge = {"dojo_id": container.labels.get("dojo.dojo_id"),
+                         "module_id": container.labels.get("dojo.module_id"),
+                         "challenge_id": container.labels.get("dojo.challenge_id")}
+            try:
+                container.get_archive("/run/dojo/var/ready")
+                ready = True
+            except docker.errors.NotFound:
+                pass
+        return {"success": True, **connection_instructions(user.id),
+                "key_count": SSHKeys.query.filter_by(user_id=user.id).count(),
+                "active": container is not None, "ready": ready,
+                "current_challenge": challenge,
+                "routing": "public-key-to-current-user-workspace",
+                "guest_type": container_runtime_profile(container).id if container else None}
+
+
 @workspace_namespace.route("")
 class view_desktop(Resource):
     @authed_only
@@ -149,6 +180,7 @@ class view_desktop(Resource):
 
         signature = base64.urlsafe_b64encode(digest).decode()
 
+        view_only = False
         iframe_src = None
         web_url = None
         if not service == "desktop":
@@ -193,12 +225,16 @@ class view_desktop(Resource):
                 }
                 iframe_src = forward_workspace(service=service_param, service_path="vnc.html", signature=signature, message=message, **vnc_params)
             elif service == "code":
+                try:
+                    launch_options = coding_workspace_options(container, fallback=coding_workspace_folder(user))
+                except ValueError as error:
+                    return {"success": False, "active": True, "error": str(error)}, 409
                 iframe_src = forward_workspace(
                     service=service,
                     service_path="",
                     signature=signature,
                     message=message,
-                    folder="/challenge",
+                    **launch_options,
                 )
             else:
                 iframe_src = forward_workspace(service=service, service_path="", signature=signature, message=message)
@@ -220,6 +256,10 @@ class view_desktop(Resource):
             "iframe_src": iframe_src,
             "web_url": web_url,
             "service": service,
+            "workspace_id": container_id,
+            "csrf_nonce": session.get("nonce"),
+            "runtime_environment": container_runtime_profile(container).id,
+            "view_only": view_only,
             "port": port,
             "setPort": os.getenv("DOJO_ENV") == "development",
             "current_challenge": challenge_info,
@@ -422,3 +462,128 @@ class ResetHome(Resource):
             return {"success": False, "error": f"重置失败：{e}"}
 
         return {"success": True, "message": "Home 目录已成功重置。"}
+
+
+@workspace_namespace.route("/type-text")
+class WorkspaceTypeText(Resource):
+    @authed_only
+    def post(self):
+        user = get_current_user()
+        body = request.get_json(silent=True) or {}
+        text = str(body.get("text") or "")
+        container = get_current_container(user)
+        if container is None:
+            return error_envelope(
+                "NO_WORKSPACE",
+                "当前没有运行中的实验环境。",
+                status=409,
+                recovery={"label": "返回今天", "href": "/student"},
+            ), 409
+        from ...agent_runtime.guest_input import type_text_in_guest
+
+        try:
+            result = type_text_in_guest(container, text)
+        except ValueError as exc:
+            return error_envelope(
+                "TYPE_TEXT_FAILED",
+                str(exc),
+                status=400,
+                recovery={"label": "打开实验环境", "href": "/workspace"},
+            ), 400
+        return success_envelope({"typed": len(text), "exitCode": result.get("exitCode")})
+
+
+def _clipboard_workspace_matches(container, body=None):
+    requested = (body or {}).get("workspaceId") or request.args.get("workspaceId")
+    return not requested or (isinstance(requested, str) and re.fullmatch(r"[0-9a-f]{12}",requested) and hmac.compare_digest(requested, container.id[:12]))
+
+
+@workspace_namespace.route("/clipboard")
+class WorkspaceClipboard(Resource):
+    @authed_only
+    def get(self):
+        user = get_current_user()
+        container = get_current_container(user)
+        if container is None:
+            return error_envelope(
+                "NO_WORKSPACE",
+                "当前没有运行中的实验环境。",
+                status=409,
+                recovery={"label": "返回今天", "href": "/student"},
+            ), 409
+        if not _clipboard_workspace_matches(container):
+            return error_envelope("WORKSPACE_CHANGED", "实验环境已变化，请重新连接后再复制。", status=409), 409
+        from ...agent_runtime.guest_clipboard import read_guest_clipboard, verified_flag, clipboard_capabilities, clipboard_keymap
+
+        if request.args.get("capabilities") == "1":
+            capabilities = clipboard_capabilities(container)
+            return success_envelope({**capabilities, **clipboard_keymap(container,capabilities.get("backend")), "workspaceId": container.id[:12]})
+        flag = verified_flag(container)
+        if str(request.args.get("flag_only") or "") in {"1", "true", "yes"}:
+            return success_envelope({"available": flag is not None, "flag": flag, "flagOnly": True})
+        try:
+            state = read_guest_clipboard(container)
+        except ValueError as error:
+            return error_envelope("CLIPBOARD_READ_FAILED", str(error), status=409), 409
+        return success_envelope(
+            {
+                "available": bool(state.get("available")),
+                "reason": state.get("reason"),
+                "text": state.get("text") or "",
+                "flag": flag,
+                "backend": state.get("backend"),
+                "maxBytes": 65536,
+                "workspaceId": container.id[:12],
+            }
+        )
+
+    @authed_only
+    def post(self):
+        user = get_current_user()
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return error_envelope("CLIPBOARD_INVALID_INPUT", "剪贴板请求格式无效", status=400), 400
+        text = body.get("text")
+        container = get_current_container(user)
+        if container is None:
+            return error_envelope(
+                "NO_WORKSPACE",
+                "当前没有运行中的实验环境。",
+                status=409,
+                recovery={"label": "返回今天", "href": "/student"},
+            ), 409
+        if not _clipboard_workspace_matches(container, body):
+            return error_envelope("WORKSPACE_CHANGED", "实验环境已变化，请重新连接后再粘贴。", status=409), 409
+        from ...agent_runtime.guest_clipboard import write_guest_clipboard
+
+        try:
+            result = write_guest_clipboard(container, text)
+        except ValueError as exc:
+            return error_envelope(
+                "CLIPBOARD_WRITE_FAILED",
+                str(exc),
+                status=400,
+                recovery={"label": "打开实验环境", "href": "/workspace"},
+            ), 400
+        return success_envelope({"characters": len(text), "bytes": result.get("bytes"), "backend": result.get("backend"), "pasteChord": result.get("pasteChord"), "workspaceId": container.id[:12], "exitCode": result.get("exitCode")})
+
+
+@workspace_namespace.route("/desktop-log")
+class WorkspaceDesktopLog(Resource):
+    @authed_only
+    def post(self):
+        user = get_current_user()
+        body = request.get_json(silent=True) or {}
+        logger.info(
+            "desktop diagnostic user=%s kind=%s elapsedMs=%s detail=%s href=%s",
+            user.id,
+            str(body.get("kind"))[:60],
+            body.get("elapsedMs"),
+            str(body.get("detail"))[:400],
+            str(body.get("href"))[:200],
+        )
+        return success_envelope({"recorded": True})
+
+
+from ...lab_environments import register_api, coding_workspace_folder
+register_api(workspace_namespace)

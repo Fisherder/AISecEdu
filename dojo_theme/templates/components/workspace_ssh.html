@@ -1,0 +1,17 @@
+<section class="workspace-ssh-access" data-workspace-ssh aria-label="本机 SSH 连接">
+  <div class="ssh-access-heading"><h3>从本机连接</h3><button type="button" data-ssh-refresh>刷新状态</button></div>
+  <p data-ssh-status role="status">正在确认你的密钥与当前题目环境…</p>
+  <p class="ssh-access-note">学生由公钥识别。连接后进入你当前运行的题目容器；更换题目后重新连接。</p>
+  <p data-ssh-guest-note hidden></p>
+  <label class="ssh-access-command"><span>连接命令</span><input data-ssh-command readonly aria-label="SSH 连接命令" value="" placeholder="正在读取连接地址"></label>
+  <div class="ssh-access-actions"><button type="button" data-ssh-copy-command disabled>复制连接命令</button><a href="/settings#ssh-key" target="_blank" rel="noopener">管理 SSH 公钥</a></div>
+  <details><summary>首次连接与客户端配置</summary>
+    <ol><li>在本机终端生成自己的密钥：<code>ssh-keygen -t ed25519 -f ~/.ssh/xuanjia_ed25519</code>。</li><li>将 <code>~/.ssh/xuanjia_ed25519.pub</code> 中的一整行公钥添加到账号设置。</li><li>在题目页启动环境，显示就绪后运行上面的连接命令。</li></ol>
+    <p>首次连接请核对服务器的 Ed25519 指纹：<code data-ssh-fingerprint></code>。</p>
+    <label class="ssh-access-command"><span>可加入本机 ~/.ssh/config 的配置</span><textarea data-ssh-config readonly rows="8" aria-label="SSH 客户端配置"></textarea></label>
+    <button type="button" data-ssh-copy-config disabled>复制客户端配置</button>
+    <p>文件传输使用 SFTP：<code data-ssh-sftp></code>。只在自己工作区权限范围内读取和写入文件。</p>
+    <p>连接失败时先核对端口、公钥和环境状态。私钥始终保留在本机，不上传到平台。</p>
+  </details>
+  <p data-ssh-result role="status" aria-live="polite"></p>
+</section>

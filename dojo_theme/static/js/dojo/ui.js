@@ -374,8 +374,9 @@
             const field = document.createElement("label");
             field.className = "aisecedu-dialog-input";
             field.textContent = inputConfig.label || "请输入";
-            input = document.createElement("input");
-            input.type = inputConfig.type || "text";
+            input = document.createElement(inputConfig.multiline ? "textarea" : "input");
+            if (inputConfig.multiline) input.rows = 5;
+            else input.type = inputConfig.type || "text";
             input.className = "form-control";
             input.value = inputConfig.value || "";
             input.placeholder = inputConfig.placeholder || "";
@@ -413,7 +414,13 @@
             if (activeDialog && activeDialog.layer === layer) {
                 layer.classList.add("is-visible");
                 const firstFocusable = input || layer.querySelector("button");
-                firstFocusable?.focus({preventScroll: true});
+                // visibility transitions are not focusable until the next paint.
+                // Do not steal focus after this dialog was closed or replaced.
+                requestAnimationFrame(() => {
+                    if (activeDialog?.layer === layer && !layer.contains(document.activeElement)) {
+                        firstFocusable?.focus({preventScroll: true});
+                    }
+                });
             }
         });
         const close = layer.querySelector(".aisecedu-dialog-close");
@@ -589,6 +596,7 @@
                 value: config.value || "",
                 maxLength: config.maxLength,
                 type: config.type || "text",
+                multiline: Boolean(config.multiline),
             },
             actions: [
                 {label: config.cancelLabel || "取消", value: "cancel"},

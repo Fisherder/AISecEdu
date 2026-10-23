@@ -2,14 +2,16 @@ import datetime
 import hmac
 import logging
 import os
+import json
+from pathlib import Path
 
-from flask import request, Blueprint, render_template, abort, redirect, url_for
+from flask import request, Blueprint, make_response, render_template, abort, redirect, url_for
 from CTFd.models import Users
 from CTFd.utils.user import get_current_user
 from CTFd.utils.decorators import admins_only, authed_only
 from urllib.parse import urlencode
 
-from ..models import Dojos, DojoUsers, LearningAttempts
+from ..models import DojoChallenges, Dojos, DojoUsers, LearningAttempts
 from ..learning.exercise_modes import exercise_mode
 from ..learning.simulation import (
     SimulationError,
@@ -190,23 +192,58 @@ def _recent_workspace_sessions(user):
     return result
 
 
+def _challenge_for_running_container(user):
+    container = get_current_container(user)
+    if container is None:
+        return None
+    labels = dict(getattr(container, "labels", None) or {})
+    try:
+        challenge = DojoChallenges.from_id(
+            labels.get("dojo.dojo_id"),
+            labels.get("dojo.module_id"),
+            labels.get("dojo.challenge_id"),
+        ).first()
+    except Exception:
+        return None
+    if challenge is None:
+        return None
+    dojo = challenge.dojo
+    try:
+        allowed = dojo.is_admin(user) or dojo.is_member(user.id)
+    except Exception:
+        allowed = False
+    return challenge if allowed else None
+
+
+def _uncached(response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
 @workspace.route("/workspace", methods=["GET"])
 @authed_only
 def view_workspace():
     current_challenge = get_current_dojo_challenge()
     if not current_challenge:
+        current_challenge = _challenge_for_running_container(get_current_user())
+    if not current_challenge:
         user = get_current_user()
         recent_sessions = _recent_workspace_sessions(user)
         recent_course = recent_sessions[0] if recent_sessions else None
-        return render_template(
-            "workspace_empty.html",
-            title="还没有启动实验",
-            description="从今天的下一项学习或课程章节中选择一道实践题，启动后可在这里继续。",
-            primary_href=recent_course["course_href"] if recent_course else "/student",
-            primary_label="返回最近课程" if recent_course else "查看今天的学习",
-            secondary_href="/dojos?tab=discover&type=CTF",
-            secondary_label="浏览实践课程",
-            recent_sessions=recent_sessions,
+        return _uncached(
+            make_response(
+                render_template(
+                    "workspace_empty.html",
+                    title="还没有启动实验",
+                    description="从今天的下一项学习或课程章节中选择一道实践题，启动后可在这里继续。",
+                    primary_href=recent_course["course_href"] if recent_course else "/student",
+                    primary_label="返回最近课程" if recent_course else "查看今天的学习",
+                    secondary_href="/dojos?tab=discover&type=CTF",
+                    secondary_label="浏览实践课程",
+                    recent_sessions=recent_sessions,
+                )
+            )
         )
 
     user = get_current_user()
@@ -377,3 +414,32 @@ def forward_short_port(port, signature, message, user, service_path="", **kwargs
         bootstrap = f"{bootstrap}?{args}"
         public = f"{public}?{args}"
     return bootstrap, public
+
+
+from ..lab_environments import register_pages
+register_pages(workspace)
+
+
+@workspace.route("/workspace/console-bootstrap.js")
+def console_bootstrap():
+    origin = os.environ.get("AISECEDU_PUBLIC_ORIGIN") or json.loads((Path(__file__).resolve().parents[1]/"agent_runtime/assets/console-origin.json").read_text())["publicOrigin"]
+    source = "window.XuanjiaConsoleParentOrigin=" + json.dumps(origin) + ";"
+    source += "if(!window.XuanjiaConsoleFrame){const s=document.createElement('script');s.src=window.XuanjiaConsoleParentOrigin+'/themes/dojo_theme/static/js/dojo/remote-console-frame.js?v=console-fixed-toggle-20261023-1';s.dataset.consoleFrame='1';document.head.append(s);}"
+    response = make_response(source)
+    response.headers["Content-Type"] = "application/javascript; charset=utf-8"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@workspace.route("/workspace/console-code.js")
+def console_code_bootstrap():
+    from flask import current_app
+    from pathlib import Path
+    import json
+    origin = os.environ.get("AISECEDU_PUBLIC_ORIGIN") or json.loads((Path(__file__).resolve().parents[1]/"agent_runtime/assets/console-origin.json").read_text())["publicOrigin"]
+    source = "window.XuanjiaConsoleKind='code';window.XuanjiaConsoleParentOrigin=" + json.dumps(origin) + ";"
+    source += (Path(current_app.root_path)/"themes/dojo_theme/static/js/dojo/remote-console-frame.js").read_text()
+    response = make_response(source)
+    response.headers["Content-Type"] = "application/javascript; charset=utf-8"
+    response.headers["Cache-Control"] = "no-cache"
+    return response

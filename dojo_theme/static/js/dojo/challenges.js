@@ -17,6 +17,9 @@ function submitChallenge(event) {
         return renderSubmissionResponse({"data": {"status": "practice", "message": message}}, item);
     }
 
+    if (/^pwn\.college\{hw01\.(basic|thinking)\./.test(submission)) {
+        return CTFd.fetch("/pwncollege_api/v1/workspace/environment/flags", {method:"POST",headers:{"Content-Type":"application/json","CSRF-Token":init.csrfNonce},body:JSON.stringify({challengeId:challenge_id,submission})}).then(r=>r.json()).then(value=>renderSubmissionResponse(value.success ? value : {data:{status:"incorrect",message:value.error}},item)).catch(()=>renderSubmissionResponse({data:{status:"incorrect",message:"连接失败，请重试"}},item));
+    }
     return CTFd.api.post_challenge_attempt({}, {"challenge_id": challenge_id, "submission": submission})
         .then(response => renderSubmissionResponse(response, item));
 };
@@ -54,6 +57,13 @@ function renderSubmissionResponse(response, item) {
             CTFd.config.urlRoot +
             window.location.pathname +
             window.location.hash;
+        return;
+    } else if (result.status === "stage_correct") {
+        result_notification.addClass("alert alert-success text-center");
+        answer_input.val("").prop("disabled",false);
+        $("<a>").addClass("btn btn-sm btn-outline-success").attr("href","/workspace/environment").text("查看分级成绩").appendTo(result_message);
+        window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
+        result_notification.slideDown();
         return;
     } else if (result.status === "incorrect") {
         result_notification.addClass(
@@ -195,20 +205,16 @@ async function startChallenge(event) {
         .prop("disabled", true);
 
     const workspace = item.find(".challenge-workspace");
-    let content = workspace.find("#workspace-iframe")[0];
-    if (!content) {
-        item.find(".iframe-wrapper").html('<iframe id="workspace-iframe" class="challenge-iframe" src="about:blank" allow="clipboard-read *; clipboard-write *; fullscreen *" allowfullscreen></iframe>');
-        content = workspace.find("#workspace-iframe")[0];
-    }
+    const content = workspace.find("#workspace-iframe, [data-workspace-state]")[0];
     if (item[0].workspaceStartController) item[0].workspaceStartController.abort();
     const startController = new AbortController();
     item[0].workspaceStartController = startController;
     if (content) {
         content.workspaceStartTrigger = event.currentTarget;
         content.dataset.workspaceService = "";
-        workspace.removeClass("challenge-hidden");
-        item.find(".challenge-init").addClass("challenge-hidden");
     }
+    workspace.removeClass("challenge-hidden");
+    item.find(".challenge-init").addClass("challenge-hidden");
     const startLoadId = content && typeof beginWorkspaceLoad === "function"
         ? beginWorkspaceLoad(content, "")
         : null;
@@ -288,14 +294,18 @@ async function startChallenge(event) {
                 window.location.hash;
         }
         return response.json();
-    }).then(function (result) {
+    }).then(async function (result) {
         var result_notification = item.find('.result-notification');
         var result_message = item.find('.result-message');
 
         result_notification.removeClass();
 
         if (result.success) {
-            var message = "题目已成功启动！";
+            if (result.exerciseMode === "SIMULATION") {
+                window.location.assign("/workspace");
+                return;
+            }
+            var message = "题目环境已启动，正在准备实验入口…";
             result_message.html(message);
             result_notification.addClass('alert alert-info alert-dismissable text-center');
 
@@ -307,13 +317,11 @@ async function startChallenge(event) {
                 .prop("disabled", false);
             $(".challenge-init").removeClass("challenge-hidden");
             $(".challenge-workspace").addClass("challenge-hidden");
-            $(".iframe-wrapper").html("");
-            item.find(".iframe-wrapper").html("<iframe id=\"workspace-iframe\" class=\"challenge-iframe\" src=\"about:blank\" allow=\"clipboard-read *; clipboard-write *; fullscreen *\" allowfullscreen></iframe>");
-            const startedContent = item.find("#workspace-iframe")[0];
-            if (startedContent) delete startedContent.workspaceStartTrigger;
-            loadWorkspace();
+            if (typeof setActionbarRunning === "function") setActionbarRunning(item.find(".workspace-controls"), true);
+            if (content) delete content.workspaceStartTrigger;
             item.find(".challenge-init").addClass("challenge-hidden");
             item.find(".challenge-workspace").removeClass("challenge-hidden");
+            const preparation = loadWorkspace(true, item.find(".workspace-controls"));
             item.find("#workspace-change-privilege")
                 .attr("data-privileged", practice)
                 .find("input")
@@ -321,6 +329,20 @@ async function startChallenge(event) {
             windowResizeCallback("");
             moduleStartChallenge(event, channel);
             window.dispatchEvent(new CustomEvent("dojo:attempt-changed"));
+            const waitsForEntry = preparation && typeof preparation.then === "function";
+            const ready = await preparation;
+            if (item[0].workspaceStartController !== startController || !actionbarIsRunning(item.find(".workspace-controls"))) return;
+            if (waitsForEntry && ready !== true && ready !== false) {
+                result_message.text("实验入口连接已取消，需要时可重新连接。");
+                return;
+            }
+            if (ready === false) {
+                result_notification.removeClass('alert-info').addClass('alert-warning');
+                result_message.text("题目容器已启动，实验入口准备失败。请重试连接。");
+            } else {
+                result_message.text("题目环境已准备好，可以开始实践。");
+                if (ready === true && item.find('[data-workspace-presentation="launcher"]').length) result_notification.hide();
+            }
         }
         else {
             showStartFailure("环境暂时无法启动。请重新启动；已有学习记录不会丢失。");
@@ -429,6 +451,7 @@ function moduleStartChallenge(event, channel) {
 $(() => {
     channel.addEventListener("message", (event) => {
         var challenge_id = event.data["challenge-id"];
+        if (!challenge_id) return;
         $(".workspace-controls").each((index, item) => {
             item_chal_id = $(item).find(".current-challenge-id").prop("value");
             if (item_chal_id == challenge_id) {
@@ -439,6 +462,9 @@ $(() => {
                 }
 
                 refreshWorkspace($(item));
+            } else if (isCourseLauncher($(item)) && !$(item).closest(".challenge-workspace").hasClass("challenge-hidden")) {
+                setActionbarRunning($(item), false);
+                showWorkspaceStopped($(item));
             }
         })
     });
@@ -477,7 +503,7 @@ $(() => {
     $(".challenge-init").find(".challenge-priv").click(startChallenge);
     $(document).on("click", "[data-workspace-loading-retry]", function (event) {
         const workspace = $(this).closest(".challenge-workspace");
-        const content = workspace.find("#workspace-iframe")[0];
+        const content = workspace.find("#workspace-iframe, [data-workspace-state]")[0];
         const trigger = content && content.workspaceStartTrigger;
         if (!trigger) return;
         event.preventDefault();
@@ -490,7 +516,7 @@ $(() => {
     $(document).on("click", "[data-workspace-loading-cancel]", function (event) {
         const workspace = $(this).closest(".challenge-workspace");
         const item = workspace.closest(".accordion-item");
-        const content = workspace.find("#workspace-iframe")[0];
+        const content = workspace.find("#workspace-iframe, [data-workspace-state]")[0];
         const trigger = content && content.workspaceStartTrigger;
         if (!trigger) return;
         event.preventDefault();
@@ -501,7 +527,6 @@ $(() => {
             .removeClass("challenge-hidden disabled-button")
             .prop("disabled", false);
         workspace.addClass("challenge-hidden");
-        item.find(".iframe-wrapper").html("");
         trigger.focus();
     });
 

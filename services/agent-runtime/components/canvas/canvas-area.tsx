@@ -56,6 +56,7 @@ export function CanvasArea({
   const showControls = mode === 'playback' && !whiteboardOpen;
   const showPlayHint =
     showControls &&
+    !(currentScene?.content.type === 'slide' && currentScene.content.studio) &&
     engineState !== 'playing' &&
     currentScene?.type === 'slide' &&
     !isLiveSession &&
@@ -64,6 +65,7 @@ export function CanvasArea({
   const handleSlideClick = useCallback(
     (e: React.MouseEvent) => {
       if (!showControls || isLiveSession || currentScene?.type !== 'slide') return;
+      if (e.target instanceof HTMLElement && e.target.closest('[data-courseware-player]')) return;
       // Don't trigger page play/pause when clicking inside a video element's visual area.
       // Video elements may be visually covered by other slide elements (e.g. text),
       // so we check click coordinates against all video element bounding rects.

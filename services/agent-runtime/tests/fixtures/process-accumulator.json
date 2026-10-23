@@ -1,0 +1,267 @@
+{
+  "scene": {
+    "schemaVersion": "process-v1",
+    "title": "逐次累加：从一步到总量",
+    "summary": "改变每次增加的数量与次数，自己计算再逐步核对累计结果。",
+    "modelNote": "有限次数的离散累加模型，每次只增加一次输入数量。",
+    "inputs": [
+      {
+        "id": "unit",
+        "label": "每次增加",
+        "type": "range",
+        "min": 1,
+        "max": 9,
+        "step": 1,
+        "default": 2
+      },
+      {
+        "id": "rounds",
+        "label": "增加次数",
+        "type": "number",
+        "min": 1,
+        "max": 8,
+        "step": 1,
+        "default": 4
+      }
+    ],
+    "initialState": {
+      "total": 0,
+      "count": 0,
+      "series": []
+    },
+    "views": [
+      {
+        "id": "sum",
+        "title": "当前总量",
+        "kind": "value",
+        "value": {
+          "state": "total"
+        }
+      },
+      {
+        "id": "series",
+        "title": "每一步的累计值",
+        "kind": "bars",
+        "value": {
+          "state": "series"
+        },
+        "activeIndex": {
+          "op": "sub",
+          "args": [
+            {
+              "state": "count"
+            },
+            1
+          ]
+        }
+      }
+    ],
+    "actions": [
+      {
+        "id": "add",
+        "label": "增加一次",
+        "description": "先预测新总量，再执行一步验证。",
+        "enabledWhen": {
+          "op": "lt",
+          "args": [
+            {
+              "state": "count"
+            },
+            {
+              "input": "rounds"
+            }
+          ]
+        },
+        "repeatWhile": {
+          "op": "lt",
+          "args": [
+            {
+              "state": "count"
+            },
+            {
+              "input": "rounds"
+            }
+          ]
+        },
+        "updates": [
+          {
+            "target": "total",
+            "value": {
+              "op": "add",
+              "args": [
+                {
+                  "state": "total"
+                },
+                {
+                  "input": "unit"
+                }
+              ]
+            }
+          },
+          {
+            "target": "series",
+            "value": {
+              "op": "append",
+              "args": [
+                {
+                  "state": "series"
+                },
+                {
+                  "op": "add",
+                  "args": [
+                    {
+                      "state": "total"
+                    },
+                    {
+                      "input": "unit"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "target": "count",
+            "value": {
+              "op": "add",
+              "args": [
+                {
+                  "state": "count"
+                },
+                1
+              ]
+            }
+          }
+        ],
+        "feedback": {
+          "op": "concat",
+          "args": [
+            "第 ",
+            {
+              "state": "count"
+            },
+            " 次后，总量为 ",
+            {
+              "state": "total"
+            },
+            "。"
+          ]
+        }
+      }
+    ],
+    "stages": [
+      {
+        "id": "start",
+        "title": "预测结果",
+        "when": {
+          "op": "eq",
+          "args": [
+            {
+              "state": "count"
+            },
+            0
+          ]
+        },
+        "explanation": "先用每次增加的数量与次数预测最后总量。"
+      },
+      {
+        "id": "adding",
+        "title": "逐步核对",
+        "when": {
+          "op": "and",
+          "args": [
+            {
+              "op": "gt",
+              "args": [
+                {
+                  "state": "count"
+                },
+                0
+              ]
+            },
+            {
+              "op": "lt",
+              "args": [
+                {
+                  "state": "count"
+                },
+                {
+                  "input": "rounds"
+                }
+              ]
+            }
+          ]
+        },
+        "explanation": "柱形图记录已经执行的每次累加，请比较相邻两次总量的差。"
+      },
+      {
+        "id": "done",
+        "title": "验证总量",
+        "when": {
+          "op": "eq",
+          "args": [
+            {
+              "state": "count"
+            },
+            {
+              "input": "rounds"
+            }
+          ]
+        },
+        "explanation": "比较实际总量与你的预测；修改条件可以重新实验。"
+      }
+    ],
+    "questions": [
+      {
+        "id": "prediction",
+        "prompt": "当前总量是多少？",
+        "evidenceView": "sum"
+      }
+    ],
+    "coverage": []
+  },
+  "tests": [
+    {
+      "name": "四次加二",
+      "inputs": {
+        "unit": 2,
+        "rounds": 4
+      },
+      "actions": [
+        {
+          "id": "add",
+          "count": "untilDone"
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "total"
+          },
+          "equals": 8
+        }
+      ]
+    },
+    {
+      "name": "两次加三",
+      "inputs": {
+        "unit": 3,
+        "rounds": 2
+      },
+      "actions": [
+        {
+          "id": "add",
+          "count": "untilDone"
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "total"
+          },
+          "equals": 6
+        }
+      ]
+    }
+  ]
+}

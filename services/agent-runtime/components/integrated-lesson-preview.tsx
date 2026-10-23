@@ -25,6 +25,9 @@ import type { PPTElement, Slide, SlideBackground, SlideTheme } from '@openmaic/d
 import { SlideCanvas } from '@openmaic/renderer';
 import type { LessonArtifact } from '@/lib/types/lesson';
 import { patchHtmlForIframe } from '@/lib/utils/iframe';
+import { CinematicPreview, isCinematicContent } from './cinematic-preview';
+import { CoursewareCanvas, CoursewareSlidePreview } from './courseware-slide-preview';
+import type { CoursewareSlideData } from '@/lib/courseware/schema';
 import styles from './integrated-lesson-preview.module.css';
 
 type IntegratedLessonPreviewProps = {
@@ -72,14 +75,15 @@ export function IntegratedLessonPreview({
   title = '教学内容预览',
 }: IntegratedLessonPreviewProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [notesExpanded, setNotesExpanded] = useState(true);
-  const [railOpen, setRailOpen] = useState(true);
+  const [notesExpanded, setNotesExpanded] = useState(false);
+  const [railOpen, setRailOpen] = useState(false);
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenControlsVisible, setFullscreenControlsVisible] = useState(true);
   const stageRef = useRef<HTMLElement>(null);
+  const shellRef = useRef<HTMLElement>(null);
   const activeThumbRef = useRef<HTMLButtonElement>(null);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const jumpDigitsRef = useRef('');
@@ -87,10 +91,67 @@ export function IntegratedLessonPreview({
   const fullscreenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeIndex = Math.min(selectedIndex, Math.max(artifacts.length - 1, 0));
   const activeArtifact = artifacts[activeIndex];
+  const cinematicActive = isCinematicContent(activeArtifact?.content);
+  const processActive = Boolean(activeArtifact && (
+    ('renderingMode' in activeArtifact.content && activeArtifact.content.renderingMode === 'process-v1') ||
+    ('html' in activeArtifact.content && typeof activeArtifact.content.html === 'string' &&
+      /<[^>]+\sdata-process\s*=\s*(?:"v1"|'v1'|v1(?=[\s>]))/i.test(activeArtifact.content.html))
+  ));
+  // A responsive, scrollable experiment is not a slide canvas. Even scale(1)
+  // adds a transformed compositing layer around the nested sandbox iframe,
+  // which can clip its painted surface and misroute focus/scroll hit targets.
+  const contentZoom = processActive ? 1 : zoom;
+  const coursewareActive = Boolean(activeArtifact && 'studio' in activeArtifact.content && activeArtifact.content.studio);
   const hasMultiple = artifacts.length > 1;
   const activeSpeakerNotes = activeArtifact ? speakerNotesForArtifact(activeArtifact) : '';
   const showSpeakerNotes = Boolean(activeSpeakerNotes && notesExpanded);
   const progress = artifacts.length ? ((activeIndex + 1) / artifacts.length) * 100 : 0;
+
+  useEffect(() => {
+    if (!overviewOpen && !helpOpen) return;
+    const shell = shellRef.current;
+    const modal = shell?.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
+    if (!shell || !modal) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const blocked: Array<[HTMLElement, boolean]> = [];
+    let branch: HTMLElement = modal;
+    while (branch !== shell && branch.parentElement) {
+      for (const sibling of Array.from(branch.parentElement.children)) {
+        if (sibling !== branch && sibling instanceof HTMLElement) {
+          blocked.push([sibling, sibling.inert]);
+          sibling.inert = true;
+        }
+      }
+      branch = branch.parentElement;
+    }
+    const focusable = () => Array.from(modal.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex="0"]')).filter((element) => element.getClientRects().length > 0);
+    focusable()[0]?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        setOverviewOpen(false);
+        setHelpOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const elements = focusable();
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (!first) { event.preventDefault(); return; }
+      if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKey, true);
+    return () => {
+      document.removeEventListener('keydown', handleKey, true);
+      blocked.forEach(([element, value]) => { element.inert = value; });
+      previous?.focus();
+    };
+  }, [overviewOpen, helpOpen]);
 
   const goTo = useCallback(
     (index: number) => {
@@ -100,8 +161,14 @@ export function IntegratedLessonPreview({
     [artifacts.length],
   );
 
-  const goPrevious = useCallback(() => goTo(activeIndex - 1), [activeIndex, goTo]);
-  const goNext = useCallback(() => goTo(activeIndex + 1), [activeIndex, goTo]);
+  const navigate = useCallback((direction: 'previous' | 'next') => {
+    const player = stageRef.current?.querySelector('[data-courseware-player]');
+    const event = new CustomEvent('courseware:navigate', { cancelable: true, detail: { direction } });
+    if (player && !player.dispatchEvent(event)) return;
+    goTo(activeIndex + (direction === 'next' ? 1 : -1));
+  }, [activeIndex, goTo]);
+  const goPrevious = useCallback(() => navigate('previous'), [navigate]);
+  const goNext = useCallback(() => navigate('next'), [navigate]);
 
   const showFullscreenControls = useCallback(() => {
     setFullscreenControlsVisible(true);
@@ -147,6 +214,7 @@ export function IntegratedLessonPreview({
   }, []);
 
   useEffect(() => {
+    if (cinematicActive || processActive) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
@@ -206,6 +274,8 @@ export function IntegratedLessonPreview({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    cinematicActive,
+    processActive,
     activeSpeakerNotes,
     artifacts.length,
     goNext,
@@ -240,8 +310,59 @@ export function IntegratedLessonPreview({
     else goPrevious();
   }
 
+  if (processActive && activeArtifact) {
+    return (
+      <main data-aisecedu-preview-state="ready" data-aisecedu-preview-surface="process" className={styles.processShell}>
+        {hasMultiple ? <nav className={styles.processCollection} aria-label="演示场景切换">
+          <label>切换作品<select aria-label="切换作品" value={activeIndex} onChange={event => goTo(Number(event.target.value))}>
+            {artifacts.map((artifact, index) => <option key={artifact.id} value={index}>{artifact.title}</option>)}
+          </select></label>
+        </nav> : null}
+        <section className={styles.processStage} data-process-viewport="true" aria-label="互动演示">
+          <IntegratedArtifactContent key={activeArtifact.id} artifact={activeArtifact} />
+        </section>
+      </main>
+    );
+  }
+
+  if (cinematicActive && activeArtifact) {
+    const content = activeArtifact.content as unknown as Record<string, unknown>;
+    return (
+      <main
+        data-aisecedu-preview-state="ready"
+        data-aisecedu-preview-surface="cinematic"
+        className={styles.cinematicShell}
+      >
+        <CinematicPreview
+          key={activeArtifact.id}
+          title={activeArtifact.title}
+          html={typeof content.html === 'string' ? content.html : ''}
+          navigation={
+            hasMultiple ? (
+              <label className={styles.cinematicCollection}>
+                <span>切换作品</span>
+                <select
+                  aria-label="切换作品"
+                  value={activeIndex}
+                  onChange={(event) => goTo(Number(event.target.value))}
+                >
+                  {artifacts.map((artifact, index) => (
+                    <option key={artifact.id} value={index}>
+                      {artifact.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : undefined
+          }
+        />
+      </main>
+    );
+  }
+
   return (
     <main
+      ref={shellRef}
       data-aisecedu-preview-state="ready"
       data-aisecedu-preview-surface="reader"
       data-notes-open={showSpeakerNotes ? 'true' : 'false'}
@@ -268,7 +389,7 @@ export function IntegratedLessonPreview({
             className={styles.iconButton}
             aria-label="上一个场景"
             title="上一页（←）"
-            disabled={activeIndex === 0}
+            disabled={!coursewareActive && activeIndex === 0}
             onClick={goPrevious}
           >
             <ChevronLeft size={18} aria-hidden="true" />
@@ -287,7 +408,7 @@ export function IntegratedLessonPreview({
             className={styles.iconButton}
             aria-label="下一个场景"
             title="下一页（→）"
-            disabled={!artifacts.length || activeIndex === artifacts.length - 1}
+            disabled={!artifacts.length || (!coursewareActive && activeIndex === artifacts.length - 1)}
             onClick={goNext}
           >
             <ChevronRight size={18} aria-hidden="true" />
@@ -353,6 +474,7 @@ export function IntegratedLessonPreview({
           className={`${styles.rail} ${railOpen ? styles.railOpen : ''}`}
           aria-label="内容导航"
           aria-hidden={!railOpen}
+          inert={!railOpen}
         >
           <div className={styles.railHeader}>
             <span>内容导航</span>
@@ -406,7 +528,7 @@ export function IntegratedLessonPreview({
                 className={`${styles.stageArrow} ${styles.stageArrowPrevious}`}
                 aria-label="上一个场景"
                 title="上一页"
-                disabled={activeIndex === 0}
+                disabled={!coursewareActive && activeIndex === 0}
                 onClick={goPrevious}
               >
                 <ChevronLeft size={28} aria-hidden="true" />
@@ -416,7 +538,7 @@ export function IntegratedLessonPreview({
                 className={`${styles.stageArrow} ${styles.stageArrowNext}`}
                 aria-label="下一个场景"
                 title="下一页"
-                disabled={activeIndex === artifacts.length - 1}
+                disabled={!coursewareActive && activeIndex === artifacts.length - 1}
                 onClick={goNext}
               >
                 <ChevronRight size={28} aria-hidden="true" />
@@ -427,10 +549,10 @@ export function IntegratedLessonPreview({
             <div
               className={styles.zoomPlane}
               style={
-                { '--preview-zoom': zoom, '--preview-zoom-inverse': 1 / zoom } as CSSProperties
+                { '--preview-zoom': contentZoom, '--preview-zoom-inverse': 1 / contentZoom } as CSSProperties
               }
             >
-              <div className={styles.zoomContent}>
+              <div className={styles.zoomContent} data-process-viewport={processActive || undefined}>
                 {activeArtifact ? (
                   <IntegratedArtifactContent key={activeArtifact.id} artifact={activeArtifact} />
                 ) : (
@@ -441,7 +563,7 @@ export function IntegratedLessonPreview({
               </div>
             </div>
           </div>
-          <div className={styles.stageControls} aria-label="画面控制">
+          {!processActive ? <div className={styles.stageControls} aria-label="画面控制">
             <button
               type="button"
               aria-label="缩小画面"
@@ -466,7 +588,7 @@ export function IntegratedLessonPreview({
             >
               <Plus size={15} aria-hidden="true" />
             </button>
-          </div>
+          </div> : null}
           <div className={styles.stageCaption}>
             <span>{String(activeIndex + 1).padStart(2, '0')}</span>
             <strong>{activeArtifact?.title || '暂无内容'}</strong>
@@ -477,7 +599,7 @@ export function IntegratedLessonPreview({
               <button
                 type="button"
                 aria-label="上一个场景"
-                disabled={activeIndex === 0}
+                disabled={!coursewareActive && activeIndex === 0}
                 onClick={goPrevious}
               >
                 <ChevronLeft size={18} aria-hidden="true" />
@@ -488,7 +610,7 @@ export function IntegratedLessonPreview({
               <button
                 type="button"
                 aria-label="下一个场景"
-                disabled={activeIndex === artifacts.length - 1}
+                disabled={!coursewareActive && activeIndex === artifacts.length - 1}
                 onClick={goNext}
               >
                 <ChevronRight size={18} aria-hidden="true" />
@@ -504,6 +626,7 @@ export function IntegratedLessonPreview({
               role="dialog"
               aria-modal="true"
               aria-labelledby="preview-overview-title"
+              onClick={(event) => { if (event.target === event.currentTarget) setOverviewOpen(false); }}
             >
               <div className={styles.overlayPanel}>
                 <header>
@@ -550,6 +673,7 @@ export function IntegratedLessonPreview({
               role="dialog"
               aria-modal="true"
               aria-labelledby="preview-help-title"
+              onClick={(event) => { if (event.target === event.currentTarget) setHelpOpen(false); }}
             >
               <div className={`${styles.overlayPanel} ${styles.helpPanel}`}>
                 <header>
@@ -642,6 +766,10 @@ export function IntegratedLessonPreview({
 
 function PreviewThumbnail({ artifact, index }: { artifact: LessonArtifact; index: number }) {
   const content = artifact.content as unknown as Record<string, unknown>;
+  const studio = content.studio as CoursewareSlideData | undefined;
+  if (studio?.page?.schema === 'courseware-page-v2') return <span className={styles.thumbnailVisual}>
+    <CoursewareCanvas data={studio} step={studio.page.beats.length - 1} thumbnail />
+  </span>;
   if (artifact.type === 'slide' && Array.isArray(content.elements)) {
     return (
       <span className={styles.thumbnailVisual}>
@@ -672,6 +800,8 @@ export function speakerNotesForArtifact(artifact: LessonArtifact): string {
 
 function IntegratedArtifactContent({ artifact }: { artifact: LessonArtifact }) {
   const content = artifact.content as unknown as Record<string, unknown>;
+  const studio = content.studio as CoursewareSlideData | undefined;
+  if (studio?.page?.schema === 'courseware-page-v2') return <CoursewareSlidePreview key={artifact.id} data={studio} />;
   if (artifact.type === 'quiz' && Array.isArray(content.questions)) {
     return (
       <QuizSelfCheckPreview

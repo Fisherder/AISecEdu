@@ -54,6 +54,7 @@ import {
 } from './thinking-config';
 import { createLogger } from '@/lib/logger';
 import { normalizeAzureBaseUrl } from './azure';
+import { providerFetch, registerTransportModel } from './provider-fetch';
 // NOTE: Do NOT import thinking-context.ts here — it uses node:async_hooks
 // which is server-only, and this file is also used on the client via
 // settings.ts. The thinking context is read from globalThis instead
@@ -791,6 +792,38 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     icon: '/logos/deepseek.svg',
     models: [
       {
+        id: 'deepseek-chat',
+        name: 'DeepSeek Chat',
+        contextWindow: 131072,
+        outputWindow: 32768,
+        capabilities: {
+          streaming: true,
+          tools: true,
+          vision: false,
+          thinking: {
+            toggleable: true,
+            budgetAdjustable: true,
+            defaultEnabled: false,
+          },
+        },
+      },
+      {
+        id: 'deepseek-v4.1-flash',
+        name: 'DeepSeek V4.1 Flash',
+        contextWindow: 131072,
+        outputWindow: 32768,
+        capabilities: {
+          streaming: true,
+          tools: true,
+          vision: false,
+          thinking: {
+            toggleable: true,
+            budgetAdjustable: true,
+            defaultEnabled: false,
+          },
+        },
+      },
+      {
         id: 'deepseek-v4-flash',
         name: 'DeepSeek V4 Flash',
         contextWindow: 1048576,
@@ -1504,7 +1537,12 @@ function getCompatThinkingBodyParams(
         return { thinking: { type: 'disabled' } };
       }
 
-      const effort = config.effort === 'max' || config.effort === 'xhigh' ? 'max' : 'high';
+      const effort =
+        config.effort === 'low'
+          ? 'low'
+          : config.effort === 'max' || config.effort === 'xhigh'
+            ? 'max'
+            : 'high';
       return {
         thinking: { type: 'enabled' },
         reasoning_effort: effort,
@@ -1663,6 +1701,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
     config.baseUrl || provider?.defaultBaseUrl || undefined,
   );
 
+  const transport = providerFetch({ providerId: config.providerId, providerType, modelId: config.modelId });
   let model: LanguageModel;
 
   switch (providerType) {
@@ -1670,6 +1709,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
       const azure = createAzure({
         apiKey: effectiveApiKey,
         baseURL: normalizeAzureBaseUrl(effectiveBaseUrl),
+        fetch: transport,
       });
       model = azure(config.modelId);
       break;
@@ -1680,6 +1720,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
         apiKey: effectiveApiKey,
         baseURL: effectiveBaseUrl,
         name: config.providerId,
+        fetch: transport,
       };
 
       // For OpenAI-compatible providers (not native OpenAI), add a fetch
@@ -1714,6 +1755,21 @@ export function getModel(config: ModelConfig): ModelWithInfo {
               }
             }
           }
+          if (providerId === 'deepseek' && config.modelId === 'deepseek-v4.1-flash') {
+            let body: Record<string, unknown> = {};
+            try {
+              if (typeof init?.body === 'string') body = JSON.parse(init.body);
+            } catch { /* Log only policy metadata, never request content. */ }
+            const setting = body.thinking;
+            log.info('DeepSeek request policy', {
+              modelId: config.modelId,
+              contextMode: thinking ? getThinkingMode(thinking) : 'missing',
+              sentThinking: setting && typeof setting === 'object' && 'type' in setting
+                ? (setting as {type: unknown}).type : 'absent',
+              bodyType: typeof init?.body,
+              maxTokens: body.max_tokens ?? body.max_completion_tokens ?? null,
+            });
+          }
 
           if (
             providerId === 'kimi' &&
@@ -1729,7 +1785,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
               /* leave body as-is */
             }
           }
-          const response = await globalThis.fetch(url, init);
+          const response = await transport(url, init);
 
           // Recover reasoning that @ai-sdk/openai's chat schema drops: rewrite
           // streamed `reasoning_content` deltas into an inline <think> block
@@ -1818,6 +1874,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
     case 'anthropic': {
       const anthropicOptions: Parameters<typeof createAnthropic>[0] = {
         baseURL: effectiveBaseUrl,
+        fetch: transport,
       };
       if (config.providerId === 'minimax' && effectiveApiKey.startsWith('sk-cp-')) {
         anthropicOptions.authToken = effectiveApiKey;
@@ -1848,7 +1905,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
             }
           }
 
-          return globalThis.fetch(url, init);
+          return transport(url, init);
         }) as typeof globalThis.fetch;
       }
 
@@ -1859,13 +1916,14 @@ export function getModel(config: ModelConfig): ModelWithInfo {
 
     case 'google': {
       const googleOptions: Parameters<typeof createGoogleGenerativeAI>[0] = {
+        fetch: transport,
         apiKey: effectiveApiKey,
         baseURL: effectiveBaseUrl,
       };
       if (config.proxy) {
         const proxy = config.proxy;
         let agent: unknown;
-        googleOptions.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        googleOptions.fetch = providerFetch({ providerId: config.providerId, providerType, modelId: config.modelId }, async (input: RequestInfo | URL, init?: RequestInit) => {
           const { ProxyAgent, fetch: undiciFetch } = (await import(
             /* webpackIgnore: true */ 'undici'
           )) as {
@@ -1895,7 +1953,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
   // Look up model info from the provider registry
   const modelInfo = findModelById(config.providerId, provider?.models, config.modelId) ?? null;
 
-  return { model, modelInfo };
+  return { model: registerTransportModel(model), modelInfo };
 }
 
 /**

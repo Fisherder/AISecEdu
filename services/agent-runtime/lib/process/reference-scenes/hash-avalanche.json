@@ -1,0 +1,3424 @@
+{
+  "id": "hash-avalanche-verified-r91",
+  "source": "r91_full_20260925/hash, browser PASSED, quality 100",
+  "scene": {
+    "schemaVersion": "process-v1",
+    "title": "哈希雪崩效应：一个字符的差别如何扩散",
+    "summary": "输入两段短文本，把它们各编码成 8 个字节，再按同一个固定规则分轮混合。每一轮结束后比较两个状态的差异位数，用字节格和柱状图显示变化。你可以逐步执行、连续执行、撤销和重置，并核对当前差异位数。这个混合过程是教学模型，不是真实哈希函数。",
+    "modelNote": "这是教学用确定性混合过程，不是真实哈希函数，也不能用于安全用途。规则固定、结果可复现，只用来观察输入只差一个字符时差异如何随轮次变化。",
+    "inputs": [
+      {
+        "id": "textA",
+        "label": "文本 A",
+        "type": "text",
+        "default": "CAT",
+        "maxLength": 8,
+        "ascii": true
+      },
+      {
+        "id": "textB",
+        "label": "文本 B",
+        "type": "text",
+        "default": "CAR",
+        "maxLength": 8,
+        "ascii": true
+      }
+    ],
+    "initialState": {
+      "stateA": [],
+      "stateB": [],
+      "round": 0,
+      "maxRounds": 5,
+      "diffBits": 0,
+      "mask": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "diffHistory": [],
+      "prepared": false
+    },
+    "views": [
+      {
+        "id": "bytesA",
+        "title": "状态 A 的字节（十六进制与字符）",
+        "kind": "array",
+        "value": {
+          "state": "stateA"
+        },
+        "format": "byte",
+        "markedIndices": {
+          "op": "indicesOf",
+          "args": [
+            {
+              "state": "mask"
+            },
+            1
+          ]
+        }
+      },
+      {
+        "id": "bytesB",
+        "title": "状态 B 的字节（十六进制与字符）",
+        "kind": "array",
+        "value": {
+          "state": "stateB"
+        },
+        "format": "byte",
+        "markedIndices": {
+          "op": "indicesOf",
+          "args": [
+            {
+              "state": "mask"
+            },
+            1
+          ]
+        }
+      },
+      {
+        "id": "diffValue",
+        "title": "当前差异位数",
+        "kind": "value",
+        "value": {
+          "state": "diffBits"
+        }
+      },
+      {
+        "id": "historyBars",
+        "title": "各轮差异位数（第 0 轮为准备后）",
+        "kind": "bars",
+        "value": {
+          "state": "diffHistory"
+        }
+      },
+      {
+        "id": "roundValue",
+        "title": "已完成混合轮数",
+        "kind": "value",
+        "value": {
+          "state": "round"
+        }
+      },
+      {
+        "id": "summaryText",
+        "title": "当前差异摘要",
+        "kind": "text",
+        "value": {
+          "op": "concat",
+          "args": [
+            "当前有 ",
+            {
+              "op": "sum",
+              "args": [
+                {
+                  "state": "mask"
+                }
+              ]
+            },
+            " 个字节不同；逐位比较 ",
+            {
+              "state": "diffBits"
+            },
+            " 位不同。"
+          ]
+        }
+      }
+    ],
+    "actions": [
+      {
+        "id": "prepare",
+        "label": "编码为字节",
+        "description": "把文本 A 和文本 B 各编码成 8 个字节，不足的位置补 0，再逐字节、逐位比较，得到两种状态最初的差异。",
+        "enabledWhen": true,
+        "locals": [
+          {
+            "id": "bytesA",
+            "value": {
+              "op": "utf8",
+              "args": [
+                {
+                  "input": "textA"
+                }
+              ]
+            }
+          },
+          {
+            "id": "bytesB",
+            "value": {
+              "op": "utf8",
+              "args": [
+                {
+                  "input": "textB"
+                }
+              ]
+            }
+          },
+          {
+            "id": "padA",
+            "value": {
+              "op": "concatArrays",
+              "args": [
+                {
+                  "local": "bytesA"
+                },
+                {
+                  "op": "slice",
+                  "args": [
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ],
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "local": "bytesA"
+                        }
+                      ]
+                    },
+                    8
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "padB",
+            "value": {
+              "op": "concatArrays",
+              "args": [
+                {
+                  "local": "bytesB"
+                },
+                {
+                  "op": "slice",
+                  "args": [
+                    [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ],
+                    {
+                      "op": "length",
+                      "args": [
+                        {
+                          "local": "bytesB"
+                        }
+                      ]
+                    },
+                    8
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "d0",
+            "value": {
+              "op": "bitDifference",
+              "args": [
+                {
+                  "local": "padA"
+                },
+                {
+                  "local": "padB"
+                }
+              ]
+            }
+          },
+          {
+            "id": "m0",
+            "value": {
+              "op": "array",
+              "args": [
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padA"
+                            },
+                            0
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padB"
+                            },
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padA"
+                            },
+                            1
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padB"
+                            },
+                            1
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padA"
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padB"
+                            },
+                            2
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padA"
+                            },
+                            3
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padB"
+                            },
+                            3
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padA"
+                            },
+                            4
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padB"
+                            },
+                            4
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padA"
+                            },
+                            5
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padB"
+                            },
+                            5
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padA"
+                            },
+                            6
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padB"
+                            },
+                            6
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padA"
+                            },
+                            7
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "padB"
+                            },
+                            7
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "feedback": {
+          "op": "concat",
+          "args": [
+            "文本 A 和文本 B 各编码为 8 个字节，不足的位置补 0。逐字节比较，有 ",
+            {
+              "op": "sum",
+              "args": [
+                {
+                  "local": "m0"
+                }
+              ]
+            },
+            " 个字节不同；逐位比较，共有 ",
+            {
+              "local": "d0"
+            },
+            " 位不同。接着执行“混合一轮”，看这点差异会不会扩散到更多字节。"
+          ]
+        },
+        "updates": [
+          {
+            "target": "stateA",
+            "value": {
+              "local": "padA"
+            }
+          },
+          {
+            "target": "stateB",
+            "value": {
+              "local": "padB"
+            }
+          },
+          {
+            "target": "round",
+            "value": 0
+          },
+          {
+            "target": "diffBits",
+            "value": {
+              "local": "d0"
+            }
+          },
+          {
+            "target": "mask",
+            "value": {
+              "local": "m0"
+            }
+          },
+          {
+            "target": "diffHistory",
+            "value": {
+              "op": "array",
+              "args": [
+                {
+                  "local": "d0"
+                }
+              ]
+            }
+          },
+          {
+            "target": "prepared",
+            "value": true
+          }
+        ]
+      },
+      {
+        "id": "mixRound",
+        "label": "混合一轮",
+        "description": "同一轮里，每个字节先取它前一个字节（位置 0 取位置 7）循环左移一位的结果，与本字节相加，再加本字节的位置序号，最后对 256 取余。文本 A 和文本 B 用同样的规则各算一遍，然后重新比较两者的差异。",
+        "enabledWhen": {
+          "op": "and",
+          "args": [
+            {
+              "state": "prepared"
+            },
+            {
+              "op": "lt",
+              "args": [
+                {
+                  "state": "round"
+                },
+                {
+                  "state": "maxRounds"
+                }
+              ]
+            }
+          ]
+        },
+        "repeatWhile": {
+          "op": "and",
+          "args": [
+            {
+              "state": "prepared"
+            },
+            {
+              "op": "lt",
+              "args": [
+                {
+                  "state": "round"
+                },
+                {
+                  "state": "maxRounds"
+                }
+              ]
+            }
+          ]
+        },
+        "locals": [
+          {
+            "id": "curA",
+            "value": {
+              "state": "stateA"
+            }
+          },
+          {
+            "id": "curB",
+            "value": {
+              "state": "stateB"
+            }
+          },
+          {
+            "id": "rotA",
+            "value": {
+              "op": "array",
+              "args": [
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                0
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curA"
+                                    },
+                                    0
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                1
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curA"
+                                    },
+                                    1
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                2
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curA"
+                                    },
+                                    2
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                3
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curA"
+                                    },
+                                    3
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                4
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curA"
+                                    },
+                                    4
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                5
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curA"
+                                    },
+                                    5
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                6
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curA"
+                                    },
+                                    6
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                7
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curA"
+                                    },
+                                    7
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "rotB",
+            "value": {
+              "op": "array",
+              "args": [
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                0
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curB"
+                                    },
+                                    0
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                1
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curB"
+                                    },
+                                    1
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                2
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curB"
+                                    },
+                                    2
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                3
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curB"
+                                    },
+                                    3
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                4
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curB"
+                                    },
+                                    4
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                5
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curB"
+                                    },
+                                    5
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                6
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curB"
+                                    },
+                                    6
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "mul",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                7
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "floor",
+                          "args": [
+                            {
+                              "op": "div",
+                              "args": [
+                                {
+                                  "op": "at",
+                                  "args": [
+                                    {
+                                      "local": "curB"
+                                    },
+                                    7
+                                  ]
+                                },
+                                128
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    256
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "nextA",
+            "value": {
+              "op": "array",
+              "args": [
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                0
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotA"
+                                },
+                                7
+                              ]
+                            }
+                          ]
+                        },
+                        0
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                1
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotA"
+                                },
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        1
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                2
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotA"
+                                },
+                                1
+                              ]
+                            }
+                          ]
+                        },
+                        2
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                3
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotA"
+                                },
+                                2
+                              ]
+                            }
+                          ]
+                        },
+                        3
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                4
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotA"
+                                },
+                                3
+                              ]
+                            }
+                          ]
+                        },
+                        4
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                5
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotA"
+                                },
+                                4
+                              ]
+                            }
+                          ]
+                        },
+                        5
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                6
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotA"
+                                },
+                                5
+                              ]
+                            }
+                          ]
+                        },
+                        6
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curA"
+                                },
+                                7
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotA"
+                                },
+                                6
+                              ]
+                            }
+                          ]
+                        },
+                        7
+                      ]
+                    },
+                    256
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "nextB",
+            "value": {
+              "op": "array",
+              "args": [
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                0
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotB"
+                                },
+                                7
+                              ]
+                            }
+                          ]
+                        },
+                        0
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                1
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotB"
+                                },
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        1
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                2
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotB"
+                                },
+                                1
+                              ]
+                            }
+                          ]
+                        },
+                        2
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                3
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotB"
+                                },
+                                2
+                              ]
+                            }
+                          ]
+                        },
+                        3
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                4
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotB"
+                                },
+                                3
+                              ]
+                            }
+                          ]
+                        },
+                        4
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                5
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotB"
+                                },
+                                4
+                              ]
+                            }
+                          ]
+                        },
+                        5
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                6
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotB"
+                                },
+                                5
+                              ]
+                            }
+                          ]
+                        },
+                        6
+                      ]
+                    },
+                    256
+                  ]
+                },
+                {
+                  "op": "mod",
+                  "args": [
+                    {
+                      "op": "add",
+                      "args": [
+                        {
+                          "op": "add",
+                          "args": [
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "curB"
+                                },
+                                7
+                              ]
+                            },
+                            {
+                              "op": "at",
+                              "args": [
+                                {
+                                  "local": "rotB"
+                                },
+                                6
+                              ]
+                            }
+                          ]
+                        },
+                        7
+                      ]
+                    },
+                    256
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "id": "nextRound",
+            "value": {
+              "op": "add",
+              "args": [
+                {
+                  "state": "round"
+                },
+                1
+              ]
+            }
+          },
+          {
+            "id": "nextDiff",
+            "value": {
+              "op": "bitDifference",
+              "args": [
+                {
+                  "local": "nextA"
+                },
+                {
+                  "local": "nextB"
+                }
+              ]
+            }
+          },
+          {
+            "id": "nextMask",
+            "value": {
+              "op": "array",
+              "args": [
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextA"
+                            },
+                            0
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextB"
+                            },
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextA"
+                            },
+                            1
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextB"
+                            },
+                            1
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextA"
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextB"
+                            },
+                            2
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextA"
+                            },
+                            3
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextB"
+                            },
+                            3
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextA"
+                            },
+                            4
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextB"
+                            },
+                            4
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextA"
+                            },
+                            5
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextB"
+                            },
+                            5
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextA"
+                            },
+                            6
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextB"
+                            },
+                            6
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                },
+                {
+                  "op": "if",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "args": [
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextA"
+                            },
+                            7
+                          ]
+                        },
+                        {
+                          "op": "at",
+                          "args": [
+                            {
+                              "local": "nextB"
+                            },
+                            7
+                          ]
+                        }
+                      ]
+                    },
+                    0,
+                    1
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "feedback": {
+          "op": "concat",
+          "args": [
+            "第 ",
+            {
+              "state": "round"
+            },
+            " 轮混合完成：两种状态有 ",
+            {
+              "op": "sum",
+              "args": [
+                {
+                  "local": "nextMask"
+                }
+              ]
+            },
+            " 个字节不同，逐位比较共 ",
+            {
+              "state": "diffBits"
+            },
+            " 位不同。",
+            {
+              "op": "if",
+              "args": [
+                {
+                  "op": "gte",
+                  "args": [
+                    {
+                      "state": "round"
+                    },
+                    {
+                      "state": "maxRounds"
+                    }
+                  ]
+                },
+                "五轮已经用完，看看柱状图里各轮差异位数的走势。",
+                "还可以继续混合一轮，注意差异是否扩散到更多字节。"
+              ]
+            }
+          ]
+        },
+        "updates": [
+          {
+            "target": "stateA",
+            "value": {
+              "local": "nextA"
+            }
+          },
+          {
+            "target": "stateB",
+            "value": {
+              "local": "nextB"
+            }
+          },
+          {
+            "target": "round",
+            "value": {
+              "local": "nextRound"
+            }
+          },
+          {
+            "target": "diffBits",
+            "value": {
+              "local": "nextDiff"
+            }
+          },
+          {
+            "target": "mask",
+            "value": {
+              "local": "nextMask"
+            }
+          },
+          {
+            "target": "diffHistory",
+            "value": {
+              "op": "append",
+              "args": [
+                {
+                  "state": "diffHistory"
+                },
+                {
+                  "local": "nextDiff"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "stages": [
+      {
+        "id": "stageNotPrepared",
+        "title": "准备：把两段文本变成字节",
+        "when": {
+          "op": "not",
+          "args": [
+            {
+              "state": "prepared"
+            }
+          ]
+        },
+        "explanation": "先在两个文本框里各写一段短文本。两段文本越接近，初始差异通常越小，但要看逐字节、逐位比较的结果。按“编码为字节”后，页面会把两段文本各变成 8 个字节，不足的位置补 0，并在下面的字节格里标出不同的字节。"
+      },
+      {
+        "id": "stageReady",
+        "title": "第 0 轮：看清初始差异",
+        "when": {
+          "op": "and",
+          "args": [
+            {
+              "state": "prepared"
+            },
+            {
+              "op": "eq",
+              "args": [
+                {
+                  "state": "round"
+                },
+                0
+              ]
+            }
+          ]
+        },
+        "explanation": "现在两个状态是刚编码好的字节。带底色的格表示两个状态在该位置的字节不同；差异位数显示逐位比较的结果。接着每按一次“混合一轮”，同一个位置的字节会用到前一个字节，所以一个位置的改变可能影响下一个位置。"
+      },
+      {
+        "id": "stageMixing",
+        "title": "混合进行中：差异往哪些字节扩散",
+        "when": {
+          "op": "and",
+          "args": [
+            {
+              "state": "prepared"
+            },
+            {
+              "op": "gt",
+              "args": [
+                {
+                  "state": "round"
+                },
+                0
+              ]
+            },
+            {
+              "op": "lt",
+              "args": [
+                {
+                  "state": "round"
+                },
+                {
+                  "state": "maxRounds"
+                }
+              ]
+            }
+          ]
+        },
+        "explanation": "每次混合都按同一规则更新 8 个字节：每个字节先取前一个字节循环左移一位的结果，再与本字节和位置序号相加，最后对 256 取余。比较更新后的两个状态，带底色的格就是当前仍然不同的字节。柱状图记录的是每一轮结束时的差异位数，不是累计值。"
+      },
+      {
+        "id": "stageDone",
+        "title": "五轮完成：比较差异位数的走势",
+        "when": {
+          "op": "and",
+          "args": [
+            {
+              "state": "prepared"
+            },
+            {
+              "op": "gte",
+              "args": [
+                {
+                  "state": "round"
+                },
+                {
+                  "state": "maxRounds"
+                }
+              ]
+            }
+          ]
+        },
+        "explanation": "五轮已经执行完。柱状图从左到右是准备后的第 0 轮到第 5 轮结束时的差异位数。教学混合过程不是真实哈希函数，它只是用可重复的规则演示：输入只差一个字符，经过多轮混合后，差异位数量可能上升、下降或波动。要判断雪崩效应是否明显，需要比较多个输入，而不是只看这一个例子。"
+      }
+    ],
+    "questions": [
+      {
+        "id": "qDiff",
+        "prompt": "当前状态 A 和状态 B 有多少个二进制位不同？",
+        "evidenceView": "diffValue"
+      }
+    ],
+    "coverage": [
+      {
+        "description": "输入两段仅相差一个字符的短文本",
+        "inputs": [
+          "textA",
+          "textB"
+        ],
+        "actions": [
+          "prepare"
+        ],
+        "views": [
+          "bytesA",
+          "bytesB"
+        ]
+      },
+      {
+        "description": "把两段文本编码为字节",
+        "inputs": [
+          "textA",
+          "textB"
+        ],
+        "actions": [
+          "prepare"
+        ],
+        "views": [
+          "bytesA",
+          "bytesB"
+        ]
+      },
+      {
+        "description": "逐步执行一轮混合过程",
+        "inputs": [],
+        "actions": [
+          "mixRound"
+        ],
+        "views": [
+          "bytesA",
+          "bytesB",
+          "diffValue",
+          "historyBars"
+        ]
+      },
+      {
+        "description": "连续执行多轮混合过程",
+        "inputs": [],
+        "actions": [
+          "mixRound"
+        ],
+        "views": [
+          "historyBars",
+          "diffValue"
+        ]
+      },
+      {
+        "description": "撤销上一步混合",
+        "inputs": [],
+        "actions": [
+          "mixRound"
+        ],
+        "views": [
+          "bytesA",
+          "bytesB",
+          "diffValue",
+          "historyBars"
+        ]
+      },
+      {
+        "description": "重置到初始输入与字节状态",
+        "inputs": [
+          "textA",
+          "textB"
+        ],
+        "actions": [
+          "prepare"
+        ],
+        "views": [
+          "bytesA",
+          "bytesB",
+          "diffValue",
+          "historyBars"
+        ]
+      },
+      {
+        "description": "观察并核对当前差异位数量",
+        "inputs": [],
+        "actions": [],
+        "views": [
+          "diffValue"
+        ]
+      },
+      {
+        "description": "查看输入字节、每轮状态和柱状变化",
+        "inputs": [],
+        "actions": [],
+        "views": [
+          "bytesA",
+          "bytesB",
+          "historyBars",
+          "roundValue"
+        ]
+      }
+    ]
+  },
+  "tests": [
+    {
+      "name": "CAT/CAR 准备后第0轮状态",
+      "inputs": {
+        "textA": "CAT",
+        "textB": "CAR"
+      },
+      "actions": [
+        {
+          "id": "prepare",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "prepared"
+          },
+          "equals": true
+        },
+        {
+          "value": {
+            "state": "round"
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "state": "diffBits"
+          },
+          "equals": 2
+        },
+        {
+          "value": {
+            "state": "mask"
+          },
+          "equals": [
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "diffHistory"
+          },
+          "equals": [
+            2
+          ]
+        },
+        {
+          "value": {
+            "state": "stateA"
+          },
+          "equals": [
+            67,
+            65,
+            84,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "stateB"
+          },
+          "equals": [
+            67,
+            65,
+            82,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "op": "sum",
+            "args": [
+              {
+                "state": "mask"
+              }
+            ]
+          },
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "name": "CAT/CAR 混合1轮",
+      "inputs": {
+        "textA": "CAT",
+        "textB": "CAR"
+      },
+      "actions": [
+        {
+          "id": "prepare",
+          "count": 1
+        },
+        {
+          "id": "mixRound",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "round"
+          },
+          "equals": 1
+        },
+        {
+          "value": {
+            "state": "diffBits"
+          },
+          "equals": 5
+        },
+        {
+          "value": {
+            "state": "mask"
+          },
+          "equals": [
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "diffHistory"
+          },
+          "equals": [
+            2,
+            5
+          ]
+        },
+        {
+          "value": {
+            "state": "stateA"
+          },
+          "equals": [
+            67,
+            200,
+            216,
+            171,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "value": {
+            "state": "stateB"
+          },
+          "equals": [
+            67,
+            200,
+            214,
+            167,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "value": {
+            "op": "sum",
+            "args": [
+              {
+                "state": "mask"
+              }
+            ]
+          },
+          "equals": 2
+        }
+      ]
+    },
+    {
+      "name": "CAT/CAR 混合2轮",
+      "inputs": {
+        "textA": "CAT",
+        "textB": "CAR"
+      },
+      "actions": [
+        {
+          "id": "prepare",
+          "count": 1
+        },
+        {
+          "id": "mixRound",
+          "count": 2
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "round"
+          },
+          "equals": 2
+        },
+        {
+          "value": {
+            "state": "diffBits"
+          },
+          "equals": 3
+        },
+        {
+          "value": {
+            "state": "mask"
+          },
+          "equals": [
+            0,
+            0,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "diffHistory"
+          },
+          "equals": [
+            2,
+            5,
+            3
+          ]
+        },
+        {
+          "value": {
+            "state": "stateA"
+          },
+          "equals": [
+            81,
+            79,
+            107,
+            95,
+            95,
+            18,
+            22,
+            26
+          ]
+        },
+        {
+          "value": {
+            "state": "stateB"
+          },
+          "equals": [
+            81,
+            79,
+            105,
+            87,
+            87,
+            18,
+            22,
+            26
+          ]
+        },
+        {
+          "value": {
+            "op": "sum",
+            "args": [
+              {
+                "state": "mask"
+              }
+            ]
+          },
+          "equals": 3
+        }
+      ]
+    },
+    {
+      "name": "CAT/CAR 连续混合到五轮",
+      "inputs": {
+        "textA": "CAT",
+        "textB": "CAR"
+      },
+      "actions": [
+        {
+          "id": "prepare",
+          "count": 1
+        },
+        {
+          "id": "mixRound",
+          "count": "untilDone"
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "round"
+          },
+          "equals": 5
+        },
+        {
+          "value": {
+            "state": "diffBits"
+          },
+          "equals": 25
+        },
+        {
+          "value": {
+            "state": "mask"
+          },
+          "equals": [
+            0,
+            0,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "value": {
+            "state": "diffHistory"
+          },
+          "equals": [
+            2,
+            5,
+            3,
+            6,
+            9,
+            25
+          ]
+        },
+        {
+          "value": {
+            "state": "stateA"
+          },
+          "equals": [
+            200,
+            61,
+            241,
+            57,
+            59,
+            76,
+            47,
+            190
+          ]
+        },
+        {
+          "value": {
+            "state": "stateB"
+          },
+          "equals": [
+            200,
+            61,
+            239,
+            37,
+            235,
+            171,
+            144,
+            126
+          ]
+        },
+        {
+          "value": {
+            "op": "sum",
+            "args": [
+              {
+                "state": "mask"
+              }
+            ]
+          },
+          "equals": 6
+        }
+      ]
+    },
+    {
+      "name": "空输入准备后第0轮状态",
+      "inputs": {
+        "textA": "",
+        "textB": ""
+      },
+      "actions": [
+        {
+          "id": "prepare",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "prepared"
+          },
+          "equals": true
+        },
+        {
+          "value": {
+            "state": "round"
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "state": "diffBits"
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "state": "mask"
+          },
+          "equals": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "diffHistory"
+          },
+          "equals": [
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "stateA"
+          },
+          "equals": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "stateB"
+          },
+          "equals": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "op": "sum",
+            "args": [
+              {
+                "state": "mask"
+              }
+            ]
+          },
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "name": "空输入连续混合到五轮",
+      "inputs": {
+        "textA": "",
+        "textB": ""
+      },
+      "actions": [
+        {
+          "id": "prepare",
+          "count": 1
+        },
+        {
+          "id": "mixRound",
+          "count": "untilDone"
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "round"
+          },
+          "equals": 5
+        },
+        {
+          "value": {
+            "state": "diffBits"
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "state": "mask"
+          },
+          "equals": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "diffHistory"
+          },
+          "equals": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "stateA"
+          },
+          "equals": [
+            133,
+            94,
+            151,
+            207,
+            200,
+            65,
+            187,
+            52
+          ]
+        },
+        {
+          "value": {
+            "state": "stateB"
+          },
+          "equals": [
+            133,
+            94,
+            151,
+            207,
+            200,
+            65,
+            187,
+            52
+          ]
+        },
+        {
+          "value": {
+            "op": "sum",
+            "args": [
+              {
+                "state": "mask"
+              }
+            ]
+          },
+          "equals": 0
+        }
+      ]
+    },
+    {
+      "name": "A/B 准备后第0轮状态",
+      "inputs": {
+        "textA": "A",
+        "textB": "B"
+      },
+      "actions": [
+        {
+          "id": "prepare",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "prepared"
+          },
+          "equals": true
+        },
+        {
+          "value": {
+            "state": "round"
+          },
+          "equals": 0
+        },
+        {
+          "value": {
+            "state": "diffBits"
+          },
+          "equals": 2
+        },
+        {
+          "value": {
+            "state": "mask"
+          },
+          "equals": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "diffHistory"
+          },
+          "equals": [
+            2
+          ]
+        },
+        {
+          "value": {
+            "state": "stateA"
+          },
+          "equals": [
+            65,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "stateB"
+          },
+          "equals": [
+            66,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "op": "sum",
+            "args": [
+              {
+                "state": "mask"
+              }
+            ]
+          },
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "name": "A/B 混合1轮",
+      "inputs": {
+        "textA": "A",
+        "textB": "B"
+      },
+      "actions": [
+        {
+          "id": "prepare",
+          "count": 1
+        },
+        {
+          "id": "mixRound",
+          "count": 1
+        }
+      ],
+      "expect": [
+        {
+          "value": {
+            "state": "round"
+          },
+          "equals": 1
+        },
+        {
+          "value": {
+            "state": "diffBits"
+          },
+          "equals": 4
+        },
+        {
+          "value": {
+            "state": "mask"
+          },
+          "equals": [
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "value": {
+            "state": "diffHistory"
+          },
+          "equals": [
+            2,
+            4
+          ]
+        },
+        {
+          "value": {
+            "state": "stateA"
+          },
+          "equals": [
+            65,
+            131,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "value": {
+            "state": "stateB"
+          },
+          "equals": [
+            66,
+            133,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "value": {
+            "op": "sum",
+            "args": [
+              {
+                "state": "mask"
+              }
+            ]
+          },
+          "equals": 2
+        }
+      ]
+    }
+  ],
+  "review": {
+    "languageReview": {
+      "version": "plain-teaching-v1",
+      "checks": [
+        {
+          "unitId": "introduction",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "inputs",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-bytesA",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-bytesB",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-diffValue",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-historyBars",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-roundValue",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "view-summaryText",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "action-prepare",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "action-mixRound",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-stageNotPrepared",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-stageReady",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-stageMixing",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "stage-stageDone",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        },
+        {
+          "unitId": "questions",
+          "direct": true,
+          "concrete": true,
+          "termsExplained": true,
+          "natural": true,
+          "faithful": true
+        }
+      ],
+      "issues": []
+    },
+    "faithful": true,
+    "scientificallySound": true,
+    "causalInteraction": true,
+    "issues": []
+  }
+}

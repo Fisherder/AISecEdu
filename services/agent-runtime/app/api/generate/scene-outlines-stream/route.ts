@@ -42,6 +42,8 @@ import { createLogger } from '@/lib/logger';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 import { sortDocumentImagesForVision } from '@/lib/document/bundle';
 import { resolveVocationalActive } from '@/lib/config/feature-flags';
+import { createAgentRunFactory } from '@/lib/agent-run/factory';
+import type { AgentRunEvent } from '@/lib/agent-run/protocol';
 const log = createLogger('Outlines Stream');
 
 export const maxDuration = 300;
@@ -402,6 +404,17 @@ export async function POST(req: NextRequest) {
     const HEARTBEAT_INTERVAL_MS = 15_000;
     const stream = new ReadableStream({
       async start(controller) {
+        const runFactory = createAgentRunFactory();
+        const emitRun = (event: AgentRunEvent) => {
+          const payload = JSON.stringify({ type: 'agentRun', event });
+          controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
+        };
+        emitRun(runFactory.event({ type: 'run.started', label: '设计课程大纲' }));
+        const outlineTool = runFactory.item('tool', '生成课程结构', {
+          subtitle: 'scene-outlines-stream',
+          input: { requirement: requirements.requirement },
+        });
+        emitRun(runFactory.event({ type: 'item.started', item: outlineTool }));
         // Heartbeat: periodically send SSE comments to keep the connection alive.
         let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
         const startHeartbeat = () => {
@@ -459,6 +472,32 @@ export async function POST(req: NextRequest) {
           let lastError: string | undefined;
 
           for (let attempt = 1; attempt <= MAX_STREAM_RETRIES + 1; attempt++) {
+            const turnId = `${runFactory.runId}:turn-${attempt}`;
+            emitRun(
+              runFactory.event({
+                type: 'turn.started',
+                turnId,
+                label: `生成大纲 · ${attempt}/${MAX_STREAM_RETRIES + 1}`,
+              }),
+            );
+            let reasoningItemId: string | undefined;
+            let reasoningCompleted = false;
+            let reasoningBuffer = '';
+            let reasoningLastFlush = Date.now();
+            const flushReasoning = () => {
+              if (!reasoningItemId || !reasoningBuffer) return;
+              emitRun(
+                runFactory.event({
+                  type: 'item.delta',
+                  turnId,
+                  itemId: reasoningItemId,
+                  channel: 'content',
+                  delta: reasoningBuffer,
+                }),
+              );
+              reasoningBuffer = '';
+              reasoningLastFlush = Date.now();
+            };
             try {
               let fullText = '';
               let scanFrom = 0;
@@ -466,19 +505,68 @@ export async function POST(req: NextRequest) {
               languageDirective = null;
               courseTitle = null;
               const usedOutlineIds = new Set<string>();
-              const textStream = streamLLM(
-                streamParams,
-                'scene-outlines-stream',
-                thinkingConfig,
-              ).textStream;
+              const modelStream = streamLLM(streamParams, 'scene-outlines-stream', thinkingConfig);
+              const modelParts: AsyncIterable<Record<string, unknown>> = modelStream.fullStream
+                ? (modelStream.fullStream as AsyncIterable<Record<string, unknown>>)
+                : (async function* () {
+                    for await (const text of modelStream.textStream) {
+                      yield { type: 'text-delta', text } as Record<string, unknown>;
+                    }
+                  })();
 
-              for await (const chunk of textStream) {
+              for await (const part of modelParts) {
                 // Stop doing work the moment the client goes away — otherwise
                 // generation keeps running and buffering for a dead connection.
                 if (req.signal?.aborted) {
                   stopHeartbeat();
                   return;
                 }
+
+                const partType = String(part.type ?? '');
+                if (partType === 'reasoning-start' && !reasoningItemId) {
+                  const reasoningItem = runFactory.item('reasoning', '规划课程结构', {
+                    subtitle: `attempt ${attempt}`,
+                  });
+                  reasoningItemId = reasoningItem.id;
+                  emitRun(runFactory.event({ type: 'item.started', turnId, item: reasoningItem }));
+                  continue;
+                }
+                if (partType === 'reasoning-delta' || partType === 'reasoning') {
+                  if (!reasoningItemId) {
+                    const reasoningItem = runFactory.item('reasoning', '规划课程结构', {
+                      subtitle: `attempt ${attempt}`,
+                    });
+                    reasoningItemId = reasoningItem.id;
+                    emitRun(
+                      runFactory.event({ type: 'item.started', turnId, item: reasoningItem }),
+                    );
+                  }
+                  reasoningBuffer += String(part.text ?? part.delta ?? '');
+                  if (reasoningBuffer.length >= 160 || Date.now() - reasoningLastFlush >= 80) {
+                    flushReasoning();
+                  }
+                  continue;
+                }
+                if (partType === 'reasoning-end') {
+                  flushReasoning();
+                  if (reasoningItemId && !reasoningCompleted) {
+                    emitRun(
+                      runFactory.event({
+                        type: 'item.completed',
+                        turnId,
+                        itemId: reasoningItemId,
+                      }),
+                    );
+                    reasoningCompleted = true;
+                  }
+                  continue;
+                }
+                if (partType === 'error') {
+                  throw part.error instanceof Error ? part.error : new Error(String(part.error));
+                }
+                if (partType !== 'text-delta' && partType !== 'text') continue;
+                const chunk = String(part.text ?? part.delta ?? part.textDelta ?? '');
+                if (!chunk) continue;
 
                 fullText += chunk;
 
@@ -541,6 +629,18 @@ export async function POST(req: NextRequest) {
                 }
               }
 
+              flushReasoning();
+              if (reasoningItemId && !reasoningCompleted) {
+                emitRun(
+                  runFactory.event({
+                    type: 'item.completed',
+                    turnId,
+                    itemId: reasoningItemId,
+                  }),
+                );
+                reasoningCompleted = true;
+              }
+
               // Validate: got outlines?
               if (parsedOutlines.length > 0) {
                 if (!courseTitle) {
@@ -549,6 +649,7 @@ export async function POST(req: NextRequest) {
                   // recover it from the now-complete response before finalizing.
                   courseTitle = extractCourseTitleFromComplete(fullText);
                 }
+                emitRun(runFactory.event({ type: 'turn.completed', turnId }));
                 break;
               }
 
@@ -559,6 +660,7 @@ export async function POST(req: NextRequest) {
               log.warn(
                 `Outlines attempt ${attempt} diagnostics: textLen=${fullText.length}, outlines=${parsedOutlines.length}, languageDirective=${languageDirective ? 'yes' : 'no'}, preview=${JSON.stringify(fullText.slice(0, 240))}`,
               );
+              emitRun(runFactory.event({ type: 'turn.completed', turnId, status: 'failed' }));
 
               if (attempt <= MAX_STREAM_RETRIES) {
                 log.warn(
@@ -580,6 +682,20 @@ export async function POST(req: NextRequest) {
                 return;
               }
               lastError = error instanceof Error ? error.message : String(error);
+              flushReasoning();
+              if (reasoningItemId && !reasoningCompleted) {
+                emitRun(
+                  runFactory.event({
+                    type: 'item.completed',
+                    turnId,
+                    itemId: reasoningItemId,
+                    status: 'failed',
+                    output: lastError,
+                  }),
+                );
+                reasoningCompleted = true;
+              }
+              emitRun(runFactory.event({ type: 'turn.completed', turnId, status: 'failed' }));
               log.warn(
                 `Outlines stream error detail (attempt ${attempt}/${MAX_STREAM_RETRIES + 1}): ${lastError}`,
               );
@@ -612,6 +728,14 @@ export async function POST(req: NextRequest) {
               taskEngineMode,
               generationFallback: false,
             });
+            emitRun(
+              runFactory.event({
+                type: 'item.completed',
+                itemId: outlineTool.id,
+                metadata: { outlineCount: uniquifiedOutlines.length },
+              }),
+            );
+            emitRun(runFactory.event({ type: 'run.completed' }));
             controller.enqueue(encoder.encode(`data: ${doneEvent}\n\n`));
           } else {
             const fallback = buildFallbackOutlines(requirements, {
@@ -644,6 +768,14 @@ export async function POST(req: NextRequest) {
               generationFallback: true,
               fallbackReason: lastError || 'empty model response',
             });
+            emitRun(
+              runFactory.event({
+                type: 'item.completed',
+                itemId: outlineTool.id,
+                metadata: { outlineCount: parsedOutlines.length, generationFallback: true },
+              }),
+            );
+            emitRun(runFactory.event({ type: 'run.completed' }));
             controller.enqueue(encoder.encode(`data: ${doneEvent}\n\n`));
           }
         } catch (error) {
@@ -652,6 +784,16 @@ export async function POST(req: NextRequest) {
             error: error instanceof Error ? error.message : String(error),
           });
           controller.enqueue(encoder.encode(`data: ${errorEvent}\n\n`));
+          const message = error instanceof Error ? error.message : String(error);
+          emitRun(
+            runFactory.event({
+              type: 'item.completed',
+              itemId: outlineTool.id,
+              status: 'failed',
+              output: message,
+            }),
+          );
+          emitRun(runFactory.event({ type: 'run.failed', error: message }));
         } finally {
           stopHeartbeat();
           // The controller may already be closed if the client disconnected.

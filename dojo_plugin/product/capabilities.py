@@ -1,7 +1,8 @@
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from .contracts import success_envelope
 from ..models import DojoAdmins, DojoUsers, UserAccountPreferences
+from ..models.construction import ConstructionMembers, ConstructionSpaces
 from ..models.global_agent import TeachingAgentActions, TeachingJobs
 
 
@@ -18,7 +19,7 @@ MODE_DEFINITIONS = {
         ),
     },
     "learning": {
-        "label": "学习",
+        "label": "学生",
         "homeHref": "/student",
         "capabilities": (
             "course.discover",
@@ -36,7 +37,7 @@ MODE_DEFINITIONS = {
         ),
     },
     "teaching": {
-        "label": "教学",
+        "label": "教师",
         "homeHref": "/teacher",
         "capabilities": (
             "course.create",
@@ -49,8 +50,9 @@ MODE_DEFINITIONS = {
             "workspace.preview.use",
         ),
         "navigation": (
-            ("工作台", "/teacher", "th-large"),
             ("课程中心", "/teacher/courses", "layer-group"),
+            ("素材库", "/teacher/library", "book"),
+            ("建设任务", "/teacher/construction", "clipboard-check"),
             ("AI 共创", "/teacher?view=conversation", "magic"),
         ),
     },
@@ -79,20 +81,42 @@ MODE_DEFINITIONS = {
 }
 
 
+def teacher_mode_available(user):
+    if user is None:
+        return False
+    if getattr(user, "type", None) == "admin":
+        return True
+    if ConstructionMembers.query.filter_by(user_id=user.id, active=True).filter(ConstructionMembers.role.in_(("author", "reviewer", "coordinator"))).first():
+        return True
+    for membership in DojoAdmins.query.filter_by(user_id=user.id).all():
+        if membership.dojo and membership.dojo.type != "construction" and ConstructionSpaces.query.filter_by(course_id=membership.dojo_id).first() is None:
+            return True
+    return False
+
+
+def construction_author(user):
+    return bool(user and ConstructionMembers.query.filter_by(user_id=user.id, active=True, role="author").first())
+
+
+def preferred_product_mode(user, cookie):
+    prefix = f"user_{user.id}:" if user else ""
+    value = unquote(str(cookie or ""))
+    return value[len(prefix):] if prefix and value.startswith(prefix) else None
+
+
 def _mode_ids(user):
     if user is None:
         return ["public"]
     mode_ids = ["learning"]
     is_admin = getattr(user, "type", None) == "admin"
-    is_teacher = is_admin or DojoAdmins.query.filter_by(user_id=user.id).first() is not None
-    if is_teacher:
+    if teacher_mode_available(user):
         mode_ids.append("teaching")
     if is_admin:
         mode_ids.append("admin")
     return mode_ids
 
 
-def current_product_mode(path, user=None, requested_mode=None, allowed_mode_ids=None):
+def current_product_mode(path, user=None, requested_mode=None, allowed_mode_ids=None, preferred_mode=None):
     allowed = set(allowed_mode_ids or _mode_ids(user))
     requested = str(requested_mode or "").strip().lower()
     if requested in allowed:
@@ -101,6 +125,14 @@ def current_product_mode(path, user=None, requested_mode=None, allowed_mode_ids=
     if normalized_path.startswith("/admin") and "admin" in allowed:
         return "admin"
     if normalized_path.startswith("/teacher") and "teaching" in allowed:
+        return "teaching"
+    if normalized_path.startswith(("/student", "/learning", "/guide")) and "learning" in allowed:
+        return "learning"
+    if preferred_mode in allowed:
+        return preferred_mode
+    if "admin" in allowed:
+        return "admin"
+    if "teaching" in allowed:
         return "teaching"
     if user is not None:
         return "learning"
@@ -138,6 +170,8 @@ def mode_navigation(user, mode, mode_ids=None, path="/"):
             return 1 if route_path == "/" else 0
         if route_path != target_path and not route_path.startswith(f"{target_path}/"):
             return 0
+        if target_path == route_path.rstrip("/") == "/teacher" and target_query == "view=conversation":
+            return len(target_path) * 10 + 1
         if not separator:
             if target_path == "/teacher" and "view=conversation" in full_path:
                 return 0
@@ -145,6 +179,8 @@ def mode_navigation(user, mode, mode_ids=None, path="/"):
         return len(target_path) * 10 + 1 if target_query in full_path else 0
 
     navigation = MODE_DEFINITIONS[mode]["navigation"]
+    if mode == "learning" and construction_author(user):
+        navigation += (("建设任务", "/teacher/construction", "clipboard-check"), ("AI 共创", "/teacher?view=conversation", "magic"))
     scores = [match_score(href) for _, href, _ in navigation]
     best_score = max(scores, default=0)
     return [
@@ -193,9 +229,10 @@ def build_ui_bootstrap(
     *,
     include_scopes=True,
     include_running=True,
+    preferred_mode=None,
 ):
     mode_ids = _mode_ids(user)
-    mode = current_product_mode(path, user, requested_mode, mode_ids)
+    mode = current_product_mode(path, user, requested_mode, mode_ids, preferred_mode)
     scope_ids = []
     if user is not None and include_scopes:
         scope_ids = [

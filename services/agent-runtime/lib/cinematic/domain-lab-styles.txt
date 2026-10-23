@@ -1,0 +1,47 @@
+#cinema.has-domain-lab{height:100dvh;min-height:600px;overflow:hidden}
+#cinema.has-domain-lab .cinema-stage{min-height:360px}
+.domain-lab{box-sizing:border-box;width:440px;max-width:42vw;padding:20px;background:#071828;color:#e8eff7;border-left:1px solid #31566c;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.domain-lab[hidden]{display:none!important}
+.domain-lab-controls{display:flex;flex-wrap:wrap;gap:12px}
+.domain-lab-controls label{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;min-width:0;width:100%;font-size:14px;line-height:1.5}
+.domain-lab-controls input,.domain-lab-controls select{max-width:100%;width:100%;accent-color:#49d6df}
+.domain-lab-controls input,.domain-lab-controls select{grid-column:1/-1}
+.domain-input-value{font-family:ui-monospace,monospace;color:#49d6df}
+.domain-lab-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
+.domain-lab button{font-family:inherit}
+.domain-lab-actions button{padding:8px 10px;white-space:normal}
+.domain-lab-evidence{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:16px}
+.domain-lab-evidence[hidden]{display:none}
+.domain-reading{min-width:0;padding:12px;border:1px solid #31566c;background:#0b2135;border-radius:6px}
+.domain-reading h3{font-size:13px;color:#b8c9d9;font-weight:500;margin:0 0 8px}
+.domain-reading output{display:block;color:#49d6df;font:600 22px/1.5 ui-monospace,monospace;overflow-wrap:anywhere}
+.domain-reading-text{grid-column:1/-1}
+.domain-reading-text output{color:#e8eff7;font-family:inherit;font-size:14px;font-weight:400;line-height:1.7;white-space:pre-wrap}
+.domain-reading-text summary{cursor:pointer;font-size:14px;line-height:1.5;color:#b8c9d9}
+.domain-reading-text[open] summary{margin-bottom:10px}
+.domain-lab .decision-panel{padding:16px;margin:0 0 16px}
+.domain-lab .decision-panel h2{font-size:18px;line-height:1.5;margin:8px 0 14px}
+.domain-lab .decision-choices{grid-template-columns:minmax(0,1fr)}
+.domain-lab .decision-choice{min-height:84px;padding:14px;gap:6px}
+.domain-lab .decision-choice strong{font-size:16px;line-height:1.5}
+.domain-lab .decision-choice span{font-size:13px;line-height:1.6}
+.domain-lab-feedback{display:block;padding:14px 0;line-height:1.7}
+.domain-lab-error{color:#ef7885}
+.domain-model-note{margin-bottom:14px;line-height:1.7;font-size:14px}
+.domain-lab-explanation{font-size:14px;line-height:1.7;padding-bottom:16px}
+.domain-lab-explanation h3{font-size:15px;margin:12px 0 6px}
+#cinema-mode-controls{display:flex;gap:8px;margin-top:8px}
+#cinema-mode-controls[hidden]{display:none}
+#cinema-mode-controls button{font:inherit;padding:8px 12px;background:#102d46;color:#e8eff7;border:1px solid #31566c;border-radius:6px}
+#cinema-mode-controls button[aria-pressed=true]{border-color:#49d6df;color:#49d6df}
+#cinema[data-interaction-mode=experiment] .cinema-aside,#cinema[data-interaction-mode=experiment] #learner-controls,#cinema[data-interaction-mode=experiment] #chapters,#cinema[data-interaction-mode=experiment] #animation-previous,#cinema[data-interaction-mode=experiment] #animation-next,#cinema[data-interaction-mode=experiment] #timeline-markers>span{display:none}
+#cinema[data-interaction-mode=experiment][data-domain-motion=false] #chapter-timeline-shell,#cinema[data-interaction-mode=experiment][data-domain-motion=false] .transport,#cinema[data-interaction-mode=experiment][data-domain-motion=false] #time-label{display:none}
+#cinema[data-interaction-mode=experiment] .timeline-rail{min-width:0;width:100%}
+.domain-motion-note{font-size:13px;line-height:1.7;color:#adbfce;margin:0 0 14px}
+@media(max-width:760px){
+  #cinema.has-domain-lab{height:auto;min-height:100dvh;overflow:visible}
+  #cinema.has-domain-lab .cinema-stage{display:flex;flex-direction:column;flex:none;min-height:0;overflow:visible}
+  #cinema.has-domain-lab .viewport{height:60vh;min-height:250px;flex:none}
+  #cinema.has-domain-lab[data-interaction-mode=experiment] .viewport{height:38vh;max-height:380px}
+  .domain-lab{width:100%;max-width:none;padding:16px;border-left:0;border-top:1px solid #31566c;overflow:visible}
+}

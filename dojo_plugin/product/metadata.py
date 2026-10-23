@@ -2,8 +2,13 @@ from urllib.parse import urlsplit
 
 
 PAGE_NAMES = (
+    ("/teacher/inquiry", "创建流程探究式学习"),
+    ("/learning/inquiry", "流程探究式学习"),
+    ("/teacher/assignments", "测验与作业编辑"),
+    ("/teacher/library", "教学素材库"),
+    ("/teacher/construction", "课程建设任务中心"),
     ("/teacher/courses", "课程中心"),
-    ("/teacher", "教学工作台"),
+    ("/teacher", "AI 共创"),
     ("/student", "今天"),
     ("/learning/assignments", "作业"),
     ("/learning/artifacts", "学习成果"),
@@ -48,7 +53,7 @@ def page_metadata(path, *, dojo=None, module=None):
         "网络安全学习平台": "通过结构化课程、隔离实验、AI 辅导与可核验学习证据掌握网络安全能力。",
         "今天": "查看此刻最值得继续的一项学习任务。",
         "课程目录": "发现、加入并继续玄甲网络安全课程。",
-        "教学工作台": "处理教学事项、跟踪生成任务并发起 AI 共创。",
+        "AI 共创": "与 AI 共创课程内容、查看生成任务并管理教学产物。",
         "课程中心": "组织课程、课件、实践题、演示与学情。",
         "平台管理": "查看平台健康、风险与需要处理的治理任务。",
     }

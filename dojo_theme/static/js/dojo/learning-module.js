@@ -4,11 +4,15 @@
   const toggle = document.getElementById("unit-outline-toggle");
   const outline = document.getElementById("unit-outline");
   const content = document.getElementById("module-content");
-  const layout = document.querySelector(".unit-learning-layout");
+  const layout = document.querySelector(".unit-detail-shell");
+  const backdrop = document.querySelector("[data-unit-outline-backdrop]");
   if (!toggle || !outline || !content || !layout) return;
 
+  if (outline.dataset.unitOutlineInitialized) return;
+  outline.dataset.unitOutlineInitialized = "true";
+
   const mobileViewport = window.matchMedia("(max-width: 760px)");
-  const preferenceKey = "aisecedu-unit-outline-collapsed";
+  const preferenceKey = "aisecedu-unit-outline-collapsed-v2";
   let desktopCollapsed = false;
   let mobileOpen = false;
   try {
@@ -25,11 +29,12 @@
     outline.setAttribute("aria-hidden", String(!open));
     outline.classList.toggle("is-open", mobile && open);
     document.body.classList.toggle("unit-outline-open", mobile && open);
+    if (backdrop) backdrop.hidden = !(mobile && open);
     toggle.setAttribute("aria-expanded", String(open));
     toggle.setAttribute("aria-label", label);
     toggle.title = label;
     toggle.querySelector("i").className = `fas ${mobile ? (open ? "fa-times" : "fa-list") : (open ? "fa-chevron-left" : "fa-chevron-right")}`;
-    toggle.querySelector("span").textContent = mobile ? label : "目录";
+    toggle.querySelector("span").textContent = mobile ? label : "本章目录";
   }
 
   function closeMobileOutline(restoreFocus) {
@@ -86,8 +91,15 @@
     mobileOpen = false;
     renderOutline();
   });
+  if (backdrop) backdrop.addEventListener("click", () => closeMobileOutline(true));
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") closeMobileOutline(true);
+    if (event.key === "Tab" && mobileViewport.matches && mobileOpen) {
+      const links = Array.from(outline.querySelectorAll("a[href],button:not([disabled])"));
+      const first = links[0], last = links[links.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === toggle)) {event.preventDefault();last?.focus();}
+      else if (!event.shiftKey && document.activeElement === last) {event.preventDefault();toggle.focus();}
+    }
   });
   document.addEventListener("click", event => {
     if (!mobileViewport.matches || !mobileOpen) return;

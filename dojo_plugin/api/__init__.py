@@ -22,7 +22,11 @@ from .v1.user import user_namespace
 from .v1.learning import learning_namespace
 from .v1.simulation import simulation_namespace
 from .v1.teaching import teaching_namespace
+from .v1.debate import debate_namespace
 from .v1.coursework import coursework_namespace
+from .v1.material_library import material_library_namespace
+from .v1.inquiry import inquiry_namespace
+from .v1.construction import construction_namespace
 from .v1.ui import ui_namespace
 from .v1.admin import admin_namespace
 
@@ -88,6 +92,14 @@ if enable_test_routes:
 api_v1.add_namespace(learning_namespace, "/learning")
 api_v1.add_namespace(simulation_namespace, "/simulations")
 api_v1.add_namespace(teaching_namespace, "/teaching")
+api_v1.add_namespace(debate_namespace, "/debates")
 api_v1.add_namespace(coursework_namespace, "/coursework")
+api_v1.add_namespace(material_library_namespace, "/material-library")
+api_v1.add_namespace(inquiry_namespace, "/inquiry")
 api_v1.add_namespace(ui_namespace, "/ui")
 api_v1.add_namespace(admin_namespace, "/admin")
+
+api_v1.add_namespace(construction_namespace, "/construction")
+
+from ..construction_guards import protect_request
+api.before_request(protect_request)

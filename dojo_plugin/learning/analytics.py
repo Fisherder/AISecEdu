@@ -1,7 +1,7 @@
 import datetime
 
 from sqlalchemy import func
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, load_only
 
 from CTFd.models import Solves, db
 
@@ -18,10 +18,18 @@ from ..models import (
     TeachingAssignments,
     TeachingAssignmentSubmissions,
 )
+from ..utils import get_all_containers
+from .container_progress import (
+    cached_live_progress,
+    live_progress_summary,
+    sync_live_progress,
+)
 from .standards import ABILITY_DIMENSIONS, ABILITY_LABELS
+from .analytics_contract import activity_timeline, assignment_snapshot, in_window, module_rollup, utc_naive, week_start
+from .analytics_queries import attempt_activity_window
 
 
-ANALYTICS_DEFINITION_VERSION = "2026-08-27.v1"
+ANALYTICS_DEFINITION_VERSION = "2026-09-15.v2"
 ANALYTICS_THRESHOLDS = {
     "minimumReliableClassSample": 3,
     "minimumReliableQuestionSample": 3,
@@ -38,6 +46,7 @@ ANALYTICS_THRESHOLDS = {
 
 
 EVENT_LABELS = {
+    "workspace.file.saved": "文件改动",
     "terminal.command.completed": "有效命令",
     "terminal.command.failed": "失败命令",
     "runtime.state.snapshot": "环境快照",
@@ -98,10 +107,7 @@ def _days_since(value, now):
 
 
 def _week_start(value):
-    if value.tzinfo is not None:
-        value = value.replace(tzinfo=None)
-    day = value.date() - datetime.timedelta(days=value.weekday())
-    return datetime.datetime.combine(day, datetime.time.min)
+    return week_start(value)
 
 
 def _parse_timestamp(value):
@@ -111,7 +117,7 @@ def _parse_timestamp(value):
         parsed = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return None
-    return parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+    return utc_naive(parsed)
 
 
 def _delta(current, baseline, digits=1):
@@ -171,6 +177,7 @@ def _metric(
 
 def learning_intervention_snapshot(student):
     return {
+        "analysisScope": student.get("analysisScope"),
         "verifiedCompletion": student.get("verifiedCompletion"),
         "requiredSolved": student.get("requiredSolved"),
         "requiredTotal": student.get("requiredTotal"),
@@ -431,6 +438,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
         .filter_by(dojo_id=dojo.dojo_id)
         .all()
     )
+    all_challenge_rows = list(challenge_rows)
     if module_index is not None:
         challenge_rows = [
             row for row in challenge_rows if row.module_index == int(module_index)
@@ -451,9 +459,10 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
         DojoUsers.dojo_id == dojo.dojo_id,
         DojoUsers.type != "admin",
     )
-    if student_id is not None:
-        student_query = student_query.filter(DojoUsers.user_id == int(student_id))
     student_memberships = student_query.options(joinedload(DojoUsers.user)).all()
+    all_student_memberships = list(student_memberships)
+    if student_id is not None:
+        student_memberships = [row for row in student_memberships if row.user_id == int(student_id)]
     student_ids = {row.user_id for row in student_memberships}
     modules = {
         row.module_index: {
@@ -484,6 +493,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
     ).filter(
         Solves.challenge_id.in_(challenge_ids or [-1]),
         Solves.user_id.in_(student_ids or [-1]),
+        Solves.date <= now,
     )
     if time_start is not None:
         solve_query = solve_query.filter(Solves.date >= time_start)
@@ -492,14 +502,15 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
         LearningAttempts.dojo_id == dojo.dojo_id,
         LearningAttempts.user_id.in_(student_ids or [-1]),
         LearningAttempts.challenge_id.in_(challenge_ids or [-1]),
+        attempt_activity_window(db.session, LearningAttempts, LearningAssessments, LearningEvidenceEvents, time_start, now),
     )
-    if time_start is not None:
-        attempt_query = attempt_query.filter(LearningAttempts.started >= time_start)
     attempts = attempt_query.all()
     attempts_by_id = {row.id: row for row in attempts}
     assessment_rows = (
         LearningAssessments.query.filter(
-            LearningAssessments.attempt_id.in_(list(attempts_by_id) or [""])
+            LearningAssessments.attempt_id.in_(list(attempts_by_id) or [""]),
+            LearningAssessments.created <= now,
+            LearningAssessments.created >= time_start if time_start else True,
         ).all()
         if attempts_by_id
         else []
@@ -524,6 +535,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
             LearningAttempts.dojo_id == dojo.dojo_id,
             LearningAttempts.user_id.in_(student_ids or [-1]),
             LearningAttempts.challenge_id.in_(challenge_ids or [-1]),
+            LearningEvidenceEvents.occurred <= now,
         )
     )
     if time_start is not None:
@@ -535,6 +547,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
         LearningAttempts.challenge_id,
         LearningEvidenceEvents.event_type,
     ).all()
+    first_evidence_at = evidence_query.with_entities(func.min(LearningEvidenceEvents.occurred)).scalar() if time_start is None and not summary_only else None
     skill_query = LearningSkillStates.query.filter(
         LearningSkillStates.dojo_id == dojo.dojo_id,
         LearningSkillStates.user_id.in_(student_ids or [-1]),
@@ -570,7 +583,8 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
     assignment_query = TeachingAssignments.query.filter(
         TeachingAssignments.dojo_id == dojo.dojo_id,
         TeachingAssignments.status.in_(("PUBLISHED", "CLOSED")),
-    )
+        TeachingAssignments.created <= now,
+    ).options(load_only(TeachingAssignments.id, TeachingAssignments.title, TeachingAssignments.due_at))
     if module_index is not None:
         assignment_query = assignment_query.filter(
             TeachingAssignments.module_index == int(module_index)
@@ -578,17 +592,20 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
     assignments = [] if challenge_filter else assignment_query.all()
     assignment_ids = [row.id for row in assignments]
     if assignment_ids:
-        submission_query = TeachingAssignmentSubmissions.query.filter(
+        submission_query = TeachingAssignmentSubmissions.query.options(load_only(
+            TeachingAssignmentSubmissions.assignment_id, TeachingAssignmentSubmissions.student_id,
+            TeachingAssignmentSubmissions.updated, TeachingAssignmentSubmissions.status,
+            TeachingAssignmentSubmissions.total_score, TeachingAssignmentSubmissions.max_score,
+            TeachingAssignmentSubmissions.trust_score,
+        )).filter(
             TeachingAssignmentSubmissions.assignment_id.in_(assignment_ids),
             TeachingAssignmentSubmissions.student_id.in_(student_ids or [-1]),
+            TeachingAssignmentSubmissions.updated <= now,
         )
-        if time_start is not None:
-            submission_query = submission_query.filter(
-                TeachingAssignmentSubmissions.updated >= time_start
-            )
-        submissions = submission_query.all()
+        submission_statuses = submission_query.all()
+        submissions = [row for row in submission_statuses if in_window(row.updated, time_start, now)]
     else:
-        submissions = []
+        submissions, submission_statuses = [], []
 
     student_data = {
         row.user_id: {
@@ -600,6 +617,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
             "events": [],
             "skills": {},
             "submissions": [],
+            "submissionStatuses": [],
         }
         for row in student_memberships
     }
@@ -625,7 +643,16 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
         student_data[skill.user_id]["skills"][skill.dimension] = skill
     for submission in submissions:
         student_data[submission.student_id]["submissions"].append(submission)
+    for submission in submission_statuses:
+        student_data[submission.student_id]["submissionStatuses"].append(submission)
 
+    live_containers = {
+        int(container.labels.get("dojo.user_id")): container
+        for container in get_all_containers(dojo)
+        if str(container.labels.get("dojo.user_id") or "").isdigit()
+    } if student_data else {}
+    live_sync_budget = [25]
+    live_students = []
     response_students = []
     for source in student_data.values():
         solved_ids = set(source["solves"])
@@ -647,7 +674,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
             activity_dates.append(assessment.created)
         activity_dates.extend(event["lastOccurred"] for event in user_events)
         activity_dates.extend(submission.updated for submission in user_submissions)
-        last_activity = _latest(*activity_dates)
+        last_activity = _latest(*[date for date in activity_dates if in_window(date, time_start, now)])
 
         skill_items = []
         for dimension in ABILITY_DIMENSIONS:
@@ -716,31 +743,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
         if average_trust is None and event_total:
             average_trust = round((event_trust_total / event_total) / 4, 4)
 
-        submission_by_assignment = {row.assignment_id: row for row in user_submissions}
-        assignment_items = []
-        overdue = 0
-        assignment_scores = []
-        for assignment in assignments:
-            submission = submission_by_assignment.get(assignment.id)
-            completed = bool(submission and submission.status in {"SUBMITTED", "GRADED"})
-            is_overdue = bool(assignment.due_at and assignment.due_at < now and not completed)
-            if is_overdue:
-                overdue += 1
-            score_percent = None
-            if submission and submission.max_score:
-                score_percent = round(100 * float(submission.total_score) / float(submission.max_score), 1)
-                assignment_scores.append(score_percent)
-            assignment_items.append(
-                {
-                    "id": assignment.id,
-                    "title": assignment.title,
-                    "status": submission.status if submission else "NOT_STARTED",
-                    "dueAt": _timestamp(assignment.due_at),
-                    "overdue": is_overdue,
-                    "scorePercent": score_percent,
-                    "updated": _timestamp(submission.updated) if submission else None,
-                }
-            )
+        current_assignments = assignment_snapshot(assignments, source["submissionStatuses"], now)
 
         attempts_by_challenge = {}
         for attempt in user_attempts:
@@ -873,6 +876,24 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
                 "moduleName": challenges.get(active.challenge_id, {}).get("moduleName", "未分章"),
                 "started": _timestamp(active.started),
             }
+            live_container = live_containers.get(source["userId"])
+            if live_container is not None and live_sync_budget[0] > 0:
+                live_sync_budget[0] -= 1
+                current_focus["liveProgress"] = sync_live_progress(active, live_container)
+            else:
+                current_focus["liveProgress"] = cached_live_progress(active)
+            summary = live_progress_summary(current_focus.get("liveProgress"))
+            if summary:
+                live_students.append(
+                    {
+                        "userId": source["userId"],
+                        "name": source["name"],
+                        "challengeName": current_focus["challengeName"],
+                        "summary": summary,
+                        "container": (current_focus["liveProgress"] or {}).get("container"),
+                        "guest": (current_focus["liveProgress"] or {}).get("guest"),
+                    }
+                )
         response_students.append(
             {
                 "userId": source["userId"],
@@ -913,18 +934,14 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
                     "reflections": sum(1 for item in user_attempts if str(item.reflection or "").strip()),
                     "assessments": len(user_assessments),
                 },
-                "assignmentSummary": {
-                    "assigned": len(assignments),
-                    "submitted": sum(1 for item in user_submissions if item.status in {"SUBMITTED", "GRADED"}),
-                    "overdue": overdue,
-                    "averageScore": _mean(assignment_scores, 1),
-                    "items": assignment_items,
-                },
+                "assignmentSummary": current_assignments,
                 "objectives": objective_status,
                 "challengePerformance": challenge_performance,
                 "currentFocus": current_focus,
                 "lastSolve": _timestamp(_latest(*source["solves"].values())),
                 "lastActivity": _timestamp(last_activity),
+                "hasActivity": last_activity is not None,
+                "analysisScope": {"moduleIndex": module_index, "challengeId": challenge_filter, "timeRange": time_key},
                 "daysInactive": freshness_days,
             }
         )
@@ -1040,7 +1057,13 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
             "evidenceCount": int(comparison.get("evidenceCount") or 0)
             - int(baseline.get("evidenceCount") or 0),
         }
-        trend, trend_label = _intervention_trend(changes)
+        default_scope = {"moduleIndex": None, "challengeId": None, "timeRange": "12w"}
+        comparable = (comparison.get("analysisScope") or default_scope) == (baseline.get("analysisScope") or default_scope)
+        if comparable:
+            trend, trend_label = _intervention_trend(changes)
+        else:
+            changes = {key: None for key in changes}
+            trend, trend_label = "scope_changed", "分析范围不同，请回到全课过去 12 周复查"
         follow_up_at = _parse_timestamp(details.get("followUpAt"))
         status = (
             "reviewed"
@@ -1063,6 +1086,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
             "current": current,
             "reviewSnapshot": review_snapshot,
             "changes": changes,
+            "comparable": comparable,
             "observedTrend": trend,
             "observedTrendLabel": trend_label,
             "teacherOutcome": teacher_outcome or None,
@@ -1116,7 +1140,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
                 "averageMastery": (
                     _mean([item["mastery"] for item in observed], 1)
                     if len(observed)
-                    >= ANALYTICS_THRESHOLDS["minimumReliableClassSample"]
+                    >= (1 if student_id is not None else ANALYTICS_THRESHOLDS["minimumReliableClassSample"])
                     else None
                 ),
                 "averageConfidence": _mean([item["confidence"] for item in observed], 4) or 0.0,
@@ -1153,8 +1177,8 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
     challenge_diagnostics = []
     for challenge_id, meta in challenges.items():
         challenge_attempts = attempts_by_challenge.get(challenge_id, [])
-        attempted_students = {item.user_id for item in challenge_attempts}
         solved_students = solves_by_challenge.get(challenge_id, set())
+        attempted_students = {item.user_id for item in challenge_attempts} | solved_students
         unsolved_active = {item.user_id for item in challenge_attempts if item.status == "ACTIVE" and item.user_id not in solved_students}
         struggling_students = set()
         for user_id in attempted_students:
@@ -1196,6 +1220,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
                     1,
                 ),
                 "averageAssessment": _mean([item.total_score for item in challenge_assessments], 1),
+                "assessmentCount": len(challenge_assessments),
                 "averageProcessScore": _mean([item.process_score for item in challenge_assessments], 1),
                 "commonGaps": [item for item in gaps if item["mastery"] < 70][:3],
                 "attentionScore": attention_score,
@@ -1218,108 +1243,34 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
         )
     )
 
-    module_diagnostics = []
-    for module_index, module in sorted(modules.items()):
-        rows = [item for item in challenge_diagnostics if item["moduleIndex"] == module_index]
-        required_rows = [item for item in rows if item["required"]]
-        observed = [item for item in rows if item["attemptedStudents"] > 0]
-        bottleneck = max(observed, key=lambda item: item["attentionScore"], default=None)
-        module_diagnostics.append(
-            {
-                **module,
-                "challengeCount": len(rows),
-                "requiredChallengeCount": len(required_rows),
-                "requiredCompletionRate": _mean([item["courseSolveRate"] for item in required_rows], 4) or 0.0,
-                "participationRate": _mean([item["participationRate"] for item in rows], 4) or 0.0,
-                "attemptSuccessRate": _mean([item["attemptSuccessRate"] for item in observed], 4),
-                "averageAssessment": _mean([item["averageAssessment"] for item in observed], 1),
-                "bottleneck": {
-                    "challengeId": bottleneck["id"],
-                    "name": bottleneck["name"],
-                    "attentionScore": bottleneck["attentionScore"],
-                } if bottleneck else None,
-            }
-        )
-
-    timeline_dates = [attempt.started for attempt in attempts]
-    timeline_dates.extend(row[2] for row in solve_rows if row[2])
-    timeline_dates.extend(assessment.created for assessment in assessments)
-    timeline_dates.extend(row[5] for row in evidence_groups if row[5])
-    earliest_timeline_date = min(timeline_dates) if timeline_dates else now
-    requested_timeline_start = time_start or earliest_timeline_date
-    current_week = _week_start(now)
-    timeline_start = _week_start(requested_timeline_start)
-    timeline_bucket_count = max(
-        1,
-        int((current_week - timeline_start).days / 7) + 1,
-    )
-    timeline_truncated = timeline_bucket_count > 52
-    if timeline_truncated:
-        timeline_bucket_count = 52
-        timeline_start = current_week - datetime.timedelta(weeks=51)
-    buckets = {
-        timeline_start + datetime.timedelta(weeks=index): {
-            "start": timeline_start + datetime.timedelta(weeks=index),
-            "students": set(),
-            "attempts": 0,
-            "solves": 0,
-            "assessments": 0,
-            "evidence": 0,
-        }
-        for index in range(timeline_bucket_count)
-    }
-    for attempt in attempts:
-        week = _week_start(attempt.started)
-        if week in buckets:
-            buckets[week]["attempts"] += 1
-            buckets[week]["students"].add(attempt.user_id)
-    for user_id, _challenge_id, solved_at in solve_rows:
-        week = _week_start(solved_at)
-        if week in buckets:
-            buckets[week]["solves"] += 1
-            buckets[week]["students"].add(user_id)
-    for assessment in assessments:
-        attempt = attempts_by_id.get(assessment.attempt_id)
-        week = _week_start(assessment.created)
-        if attempt and week in buckets:
-            buckets[week]["assessments"] += 1
-            buckets[week]["students"].add(attempt.user_id)
+    module_diagnostics = [
+        module_rollup(module, [row for row in challenge_diagnostics if row["moduleIndex"] == index], len(response_students))
+        for index, module in sorted(modules.items())
+        if (module_index is None or index == int(module_index))
+        and (not challenge_filter or any(row["moduleIndex"] == index for row in challenges.values()))
+    ]
+    evidence_week = func.date_trunc("week", LearningEvidenceEvents.occurred)
     weekly_evidence = (
-        []
-        if summary_only
-        else db.session.query(
-            func.date_trunc("week", LearningEvidenceEvents.occurred),
-            func.count(LearningEvidenceEvents.id),
-            func.count(func.distinct(LearningAttempts.user_id)),
-        )
-        .join(LearningAttempts, LearningAttempts.id == LearningEvidenceEvents.attempt_id)
+        [] if summary_only else db.session.query(
+            evidence_week, func.count(LearningEvidenceEvents.id), LearningAttempts.user_id,
+        ).join(LearningAttempts, LearningAttempts.id == LearningEvidenceEvents.attempt_id)
         .filter(
             LearningAttempts.dojo_id == dojo.dojo_id,
             LearningAttempts.user_id.in_(student_ids or [-1]),
             LearningAttempts.challenge_id.in_(challenge_ids or [-1]),
-            LearningEvidenceEvents.occurred >= timeline_start,
-        )
-        .group_by(func.date_trunc("week", LearningEvidenceEvents.occurred))
-        .all()
+            LearningEvidenceEvents.occurred >= max(time_start or now - datetime.timedelta(weeks=52), week_start(now) - datetime.timedelta(weeks=51)),
+            LearningEvidenceEvents.occurred <= now,
+        ).group_by(evidence_week, LearningAttempts.user_id).all()
     )
-    for week, count, active_students in weekly_evidence:
-        normalized = _week_start(week)
-        if normalized in buckets:
-            buckets[normalized]["evidence"] = int(count)
-            while len(buckets[normalized]["students"]) < int(active_students):
-                buckets[normalized]["students"].add(f"evidence-{len(buckets[normalized]['students'])}")
-    timeline = [
-        {
-            "start": _timestamp(bucket["start"]),
-            "label": f"{bucket['start'].month}/{bucket['start'].day}",
-            "activeStudents": len(bucket["students"]),
-            "attempts": bucket["attempts"],
-            "solves": bucket["solves"],
-            "assessments": bucket["assessments"],
-            "evidence": bucket["evidence"],
-        }
-        for bucket in buckets.values()
-    ]
+    timeline, timeline_meta = activity_timeline(
+        time_start, now,
+        [(attempt.started, attempt.user_id) for attempt in attempts],
+        [(date, user_id) for user_id, _challenge_id, date in solve_rows],
+        [(assessment.created, attempts_by_id[assessment.attempt_id].user_id) for assessment in assessments],
+        weekly_evidence,
+        [(submission.updated, submission.student_id) for submission in submissions],
+        first_activity=first_evidence_at,
+    )
 
     def intervention(identifier, title, reason, action, tone, predicate):
         matches = [item for item in response_students if predicate(item)]
@@ -1400,7 +1351,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
     ]
     summary = {
         "studentCount": len(response_students),
-        "activeStudents": sum(1 for item in response_students if item["attemptCount"] or item["solvedChallengeIds"]),
+        "activeStudents": sum(1 for item in response_students if item["hasActivity"]),
         "evidenceCoveredStudents": len(evidence_covered),
         "evidenceCoverage": _rate(len(evidence_covered), len(response_students)),
         "averageEvidenceConfidence": _mean([item["evidenceConfidence"] for item in response_students], 1),
@@ -1493,9 +1444,9 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
             sample_size=len(observed_mastery),
             coverage=_rate(len(observed_mastery), student_count) or 0,
             unavailable_reason=(
-                "至少需要 3 名学生形成能力评估后才展示班级平均掌握度。"
+                ("该学生尚无能力评估。" if student_id is not None else "至少需要 3 名学生形成能力评估后才展示班级平均掌握度。")
                 if len(observed_mastery)
-                < ANALYTICS_THRESHOLDS["minimumReliableClassSample"]
+                < (1 if student_id is not None else ANALYTICS_THRESHOLDS["minimumReliableClassSample"])
                 else None
             ),
         ),
@@ -1568,7 +1519,17 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
                 "timeRange": time_key,
             },
         },
+        "filterOptions": {} if summary_only else {
+            "students": [{"userId": row.user_id, "name": row.user.name if row.user else str(row.user_id)} for row in all_student_memberships],
+            "questions": [{"id": row.challenge_id, "name": row.name or (row.challenge.name if row.challenge else "未命名题目"), "moduleIndex": row.module_index, "moduleName": modules.get(row.module_index, {}).get("name", "未分章")} for row in all_challenge_rows],
+        },
         "evidenceCount": evidence_event_count,
+        "liveProgress": {
+            "asOf": _timestamp(now),
+            "activeGuests": len(live_students),
+            "students": live_students,
+            "definition": "正在运行的学生环境实时状态：容器内的文件改动、新命令、运行中的工具与端口，以及客户机（远程桌面）内部的工作副本改动，用于把学情分析落到学生当前真实进度。",
+        },
         "definitionVersion": ANALYTICS_DEFINITION_VERSION,
         "definition": "按当前学生、章节、题目和时间范围，从可核验判题、学习尝试、过程事件、评估与任务提交中生成的学情快照。",
         "challengeCount": len(challenge_ids),
@@ -1580,13 +1541,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
         "challengeDiagnostics": challenge_diagnostics,
         "moduleDiagnostics": module_diagnostics,
         "timeline": timeline,
-        "timelineMeta": {
-            "label": time_label,
-            "start": _timestamp(timeline_start),
-            "end": _timestamp(now),
-            "bucket": "week",
-            "truncated": timeline_truncated,
-        },
+        "timelineMeta": {**timeline_meta, "label": time_label},
         "interventions": interventions,
         "interventionTracking": intervention_tracking,
         "riskBands": {
@@ -1607,6 +1562,10 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
             "LearningEvidenceEvents",
             "LearningAssessments",
             "ObjectiveMappings",
+            "DojoUsers",
+            "TeachingAssignments",
+            "TeachingAssignmentSubmissions",
+            "LearningSkillStates",
         ],
         "interventionSourceOfTruth": ["LearningAuditEvents"],
         "analysisSources": [
@@ -1657,8 +1616,11 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
                 "干预前后变化只表示同期观测，不足以证明因果；应结合教师复查、任务难度和新增证据判断。",
             ],
             "definitions": [
-                {"metric": "真实完成率", "definition": "已通过判题的必修题数 ÷ 必修题总数。"},
-                {"metric": "能力掌握度", "definition": "最近多次评估按 70% 历史、30% 新证据更新的六维能力均值，仅统计已有证据的维度。"},
+                {"metric": "本期必修通过比例", "definition": "所选时间内通过的学生×必修题对数 ÷ 当前学生数与所选必修题数的乘积。无必修题时未配置。"},
+                {"metric": "能力掌握度", "definition": "指定时间或内容范围时，采用范围内每次尝试最新评估的六维均值；全课全部时间采用累积能力状态。只统计有证据的维度与学生。"},
+                {"metric": "周活跃学生", "definition": "UTC 周一分桶，将窗口内尝试启动、通过、最新评估、过程事件和任务最近更新的真实学生 ID 合并去重。边界周只含所选窗口内数据。"},
+                {"metric": "作业状态与逾期", "definition": "展示截至更新时间的当前状态，保留窗口之前已经提交的作业；活动趋势仅计本期更新，已评分均值仅统计完成评分的作业。"},
+                {"metric": "章节成功率", "definition": "章节通过学生×题目对数 ÷ 参与学生×题目对数；各题目先累加分子分母，再计算比例。通过记录也视作参与。"},
                 {"metric": "证据充分度", "definition": "综合来源覆盖、事件量、证据链可信度和活动新鲜度，用于表达结论可解释程度。"},
                 {"metric": "题目成功率", "definition": "已尝试学生中最终通过判题的人数占比，同时展示参与人数作为分母。"},
                 {"metric": "关注风险", "definition": "由停滞、反复试错、能力缺口、过程缺口、逾期和低可信度等可回溯信号叠加。"},

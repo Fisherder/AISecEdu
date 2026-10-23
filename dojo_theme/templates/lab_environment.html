@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="container py-4" id="lab-environment" data-teacher="{{ 'true' if environment_teacher else 'false' }}">
+  <header class="mb-4">
+    <a href="/workspace?service=code">返回编码环境</a>
+    <h1 class="mt-3">{{ '编码核验证据' if environment_teacher else '工程与核验' }}</h1>
+    <p class="text-muted">{{ '查看分级得分、两个阶段的达标情况、AI 代码评价和对应源码证据。' if environment_teacher else '使用 VSCode 编码，在这里检查环境、保存恢复点，并查看核验历史。无需提交报告。' }}</p>
+  </header>
+  <p id="lab-status" role="status" aria-live="polite">正在读取环境…</p>
+  {% if not environment_teacher %}
+  <section id="lab-controls" hidden aria-label="工程操作">
+    <p id="lab-meta" class="text-muted" style="overflow-wrap:anywhere"></p>
+    <div class="d-flex flex-wrap mb-3" style="gap:.6rem">
+      <button class="btn btn-outline-secondary" data-operation="health">环境检查</button>
+      <button class="btn btn-outline-secondary" data-operation="snapshot">保存代码快照</button>
+      <button class="btn btn-outline-secondary" data-operation="history">恢复代码</button>
+      <button class="btn btn-outline-primary" data-operation="check">公开自测</button>
+      <button class="btn btn-primary" data-operation="submit">提交核验</button>
+    </div>
+    <p class="small text-muted">核验读取当前已保存的文件；开始前请在 VSCode 中保存。恢复前会自动备份现有代码。</p>
+    <div id="lab-recovery" class="mb-3"></div>
+    <pre id="lab-result" class="border rounded p-3" style="max-height:24rem;overflow:auto;white-space:pre-wrap" hidden></pre>
+  </section>
+  {% endif %}
+  <section class="mt-4" aria-label="正式核验历史">
+    <div class="d-flex align-items-center justify-content-between mb-3"><h2 class="h4 mb-0">正式核验历史</h2><button class="btn btn-outline-secondary" id="lab-refresh">刷新记录</button></div>
+    <div class="table-responsive"><table class="table"><thead><tr><th>时间 / 学生</th><th>结果</th><th>分级得分</th><th>源码版本</th><th>环境 / 测试版本</th><th>详情</th></tr></thead><tbody id="lab-submissions"></tbody></table></div>
+    <p class="text-muted small">这里展示服务端验证过的检测记录。作业完成状态仍由课程的实验完成与提交规则确定。</p>
+    <section id="lab-grading" hidden aria-label="分级评分与 AI 评价"></section>
+    <section id="lab-detail" hidden tabindex="-1" aria-label="核验详情"><h3 class="h5">源码与分项反馈</h3><pre id="lab-source" class="border rounded p-3" style="max-height:32rem;overflow:auto;white-space:pre-wrap"></pre></section>
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}
+{{ super() }}
+<script defer src="{{ url_for('views.themes', path='js/dojo/lab-environment.js', v='coding-tiered-20261012-v31') }}"></script>
+{% endblock %}

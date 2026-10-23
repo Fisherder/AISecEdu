@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block stylesheets %}<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/teacher-assignment.css', v='frontend-restored-20261001-1') }}">{% endblock %}
+{% block content %}
+<main id="teacher-assignment" class="assignment-editor" data-assignment-id="{{ assignment.id }}">
+  <header><div><a id="assignment-course-link" href="/teacher/courses">返回课程题目</a><h1 id="assignment-heading">{{ assignment.title }}</h1><p id="assignment-meta">正在读取测验或作业…</p></div><a href="{{ url_for('pwncollege_learning.teacher_material_library', sourceKind='assignment', sourceId=assignment.id) }}">存入素材库</a></header>
+  <p id="assignment-notice" role="status" aria-live="polite"></p>
+  <form id="assignment-settings-form" class="assignment-panel" hidden>
+    <h2>任务说明与安排</h2>
+    <label>名称<input id="assignment-title" maxlength="240" required></label>
+    <label>简介<textarea id="assignment-description" rows="2" maxlength="16000"></textarea></label>
+    <label>给学生的作答说明<textarea id="assignment-instructions" rows="4" maxlength="16000"></textarea></label>
+    <div class="assignment-dates"><label>开始时间（本地时间，可留空）<input id="assignment-start" type="datetime-local"></label><label>截止时间（本地时间，可留空）<input id="assignment-due" type="datetime-local"></label></div>
+    <label>参考答案何时可见<select id="assignment-answer-policy"><option value="AFTER_SUBMISSION">提交后</option><option value="AFTER_DUE">截止后</option><option value="NEVER">不向学生公布</option><option value="IMMEDIATE">作答时即可查看</option></select></label>
+    <button type="submit">保存说明与安排</button>
+  </form>
+  <form id="assignment-items-form" class="assignment-panel" hidden>
+    <h2>题目与参考答案</h2><p id="assignment-edit-hint">修改副本不会改变素材库或原课程。学生开始作答后，题目与答案不可替换。</p>
+    <div id="assignment-items"></div><button id="assignment-items-save" type="submit">保存题目修改</button>
+  </form>
+  <section id="assignment-delivery" class="assignment-panel" hidden><h2>发布给当前课程</h2><p>从素材库加入的内容先保存为草稿。确认说明和题目无误，并先发布所有配套内容，再发布此任务。</p><div class="assignment-delivery-actions"><button id="assignment-publish" type="button">确认发布给学生</button><button id="assignment-close" type="button" hidden>结束本次任务</button><a id="assignment-student-link" hidden>打开学生页面</a></div></section>
+</main>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script><script src="{{ url_for('views.themes_beta', path='js/dojo/teacher-assignment.js', v='frontend-restored-20261001-1') }}"></script>{% endblock %}

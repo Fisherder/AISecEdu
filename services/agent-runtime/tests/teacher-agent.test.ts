@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import path from 'path';
-import { listAgentSkills, loadAgentSkills } from '@/lib/server/agent-skills';
+import { listAgentSkills, loadAgentSkills, readAgentSkillResource } from '@/lib/server/agent-skills';
 import {
   enforceTeacherGenerationOptions,
   enforceTeacherQuestionBatchContract,
@@ -21,8 +21,39 @@ import {
 process.env.AISECEDU_AGENT_SKILLS_DIR = path.resolve(process.cwd(), '../../agent_skills');
 
 describe('teacher agent skills', () => {
-  it('discovers vendored and project teaching skills with progressive disclosure', () => {
-    const catalog = listAgentSkills();
+  it('rejects an overlong proposal instead of silently losing trailing teacher requirements', async () => {
+    const original = '做个三维结构演示';
+    const plan = normalizeTeacherAgentPlan({ understanding: original, selectedSkills: [], plan: [], generationTarget: { targetTool: 'candidate.generate', artifactType: 'simulation', reason: '观察空间结构' } }, await listAgentSkills());
+    const proposed = fallbackTeacherGenerationOptions(original, plan, {})!;
+    expect(proposed.options.every(option => option.rewrittenPrompt.length < 8000)).toBe(true);
+    proposed.options[0].rewrittenPrompt = 'a'.repeat(14000) + '不能丢掉最后一条教师要求';
+    expect(() => normalizeTeacherGenerationOptions(proposed)).toThrow(/14000/);
+  });
+  it('does not relabel an old expanded tool prompt as the current teacher request', async () => {
+    const original='创建独立项目，观察主板与逻辑栈的结构，能旋转缩放。';
+    const plan=normalizeTeacherAgentPlan({understanding:original,selectedSkills:[],plan:[],generationTarget:{targetTool:'candidate.generate',artifactType:'simulation',reason:'创建可探索的结构演示'}},await listAgentSkills());
+    const options=fallbackTeacherGenerationOptions(original,plan,{toolProposals:[{tool:'candidate.generate',arguments:{artifactType:'simulation',prompt:'旧方案：CPU触点必须逐根一一对位压合，增加攻击与防护分支'}}]});
+    expect(options?.options).toHaveLength(3);
+    for(const option of options?.options||[]){
+      expect(option.rewrittenPrompt).toContain(original);
+      expect(option.rewrittenPrompt).not.toContain('旧方案：');
+      expect(option.rewrittenPrompt).not.toContain('逐根一一对位');
+      expect(option.title).not.toContain('攻击');
+      expect(option.rewrittenPrompt).toContain('不要给方案添加不存在的');
+    }
+  });
+  it('preserves valid model-authored simulation plans instead of overwriting them with a generic fallback', async () => {
+    const original='创建独立项目，生成可在平台内预览、编辑并发布到课堂的可操作结构模拟演示，连续展示过程并暂停观察。';
+    const plan=normalizeTeacherAgentPlan({understanding:original,selectedSkills:[],plan:[],generationTarget:{targetTool:'candidate.generate',artifactType:'simulation',reason:'创建结构模拟演示'},generationScope:{status:'unscoped',reason:'独立项目'}},await listAgentSkills());
+    const proposed=fallbackTeacherGenerationOptions(original,plan,{})!;
+    proposed.options=proposed.options.map((option,index)=>({...option,title:'来自模型的定制结构方案'+index,rewrittenPrompt:option.rewrittenPrompt+'\n保留模型针对当前主题设计的观察顺序。'}));
+    const result=enforceTeacherGenerationOptions(original,plan,{answer:'请选择方案',generationOptions:proposed,toolProposals:[]});
+    const retained=result.generationOptions as typeof proposed;
+    expect(retained.options.map(x=>x.title)).toEqual(proposed.options.map(x=>x.title));
+    expect(retained.options.every(x=>x.rewrittenPrompt.includes('保留模型针对当前主题设计的观察顺序'))).toBe(true);
+  });
+  it('discovers vendored and project teaching skills with progressive disclosure', async () => {
+    const catalog = await listAgentSkills();
     const names = catalog.map((skill) => skill.name);
     expect(names).toHaveLength(19);
     expect(names).not.toContain('openmaic');
@@ -40,7 +71,7 @@ describe('teacher agent skills', () => {
     expect(planningPrompt).toContain('lesson-plan-file');
     expect(planningPrompt).not.toContain('# Lesson plan file');
 
-    const selected = loadAgentSkills(['lesson-plan-file', 'downloadable-file-delivery']);
+    const selected = await loadAgentSkills(['lesson-plan-file', 'downloadable-file-delivery']);
     const executionPrompt = teacherAgentExecutionSystem(selected);
     expect(executionPrompt).toContain('# Lesson plan file');
     expect(executionPrompt).toContain('# Downloadable file delivery');
@@ -82,7 +113,7 @@ describe('teacher agent skills', () => {
     expect(executionPrompt).toContain('platformFacts.pendingAttachments');
     expect(executionPrompt).toContain('不得改成生成课件、创建章节或 material.apply_chapters');
     expect(executionPrompt).toContain('不要把它降级为若干 module.create');
-    expect(executionPrompt).toContain('分析、总结和建议可以直接完成');
+    expect(executionPrompt).toContain('不得把结构摘要缺失误当成正文不可读');
     expect(executionPrompt).toContain('点击后原样写入输入框');
     expect(executionPrompt).toContain('严格使用“帮我 + 动作 + 明确对象/结果”的结构');
     expect(executionPrompt).toContain('禁止使用“如果需要我”“如需我”“我可以”“我也可以”');
@@ -93,8 +124,8 @@ describe('teacher agent skills', () => {
     );
   });
 
-  it('keeps the model-selected plan instead of applying an intent classifier', () => {
-    const catalog = listAgentSkills();
+  it('keeps the model-selected plan instead of applying an intent classifier', async () => {
+    const catalog = await listAgentSkills();
     const plan = normalizeTeacherAgentPlan(
       {
         understanding: '分析指定 PDF，并交付一份可下载的教案文件。',
@@ -118,8 +149,8 @@ describe('teacher agent skills', () => {
     expect(plan.generationTarget).toBeNull();
   });
 
-  it('always loads the production skill implied by the semantic generation target', () => {
-    const catalog = listAgentSkills();
+  it('always loads the production skill implied by the semantic generation target', async () => {
+    const catalog = await listAgentSkills();
     const cases = [
       ['slide-deck', 'candidate.generate', 'teaching-slide-deck'],
       ['ctf-challenge', 'challenge.generate', 'ctf-flag-challenge'],
@@ -144,7 +175,7 @@ describe('teacher agent skills', () => {
     }
   });
 
-  it('keeps explicit AI debate and roleplay activities as distinct native artifacts', () => {
+  it('keeps explicit AI debate and roleplay activities as distinct native artifacts', async () => {
     const debatePrompt =
       '为当前章节设计一次漏洞披露边界 AI 交互与辩论，包含角色立场、三轮交锋和评价量规。';
     const driftedPlan = normalizeTeacherAgentPlan(
@@ -158,7 +189,7 @@ describe('teacher agent skills', () => {
           reason: '模型误判为模拟',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
     );
     const correctedDebate = enforceTeacherGenerationOptions(debatePrompt, driftedPlan, {});
     const debateOptions = correctedDebate.generationOptions as {
@@ -194,7 +225,7 @@ describe('teacher agent skills', () => {
     ).toBe(true);
   });
 
-  it('routes an automatically scored student simulation through three selectable challenge plans', () => {
+  it('routes an automatically scored student simulation through three selectable challenge plans', async () => {
     const prompt =
       '在当前章节生成一题可自动评分的无线网络异常模拟实训题，题目名称必须严格使用《无线接入异常诊断 8f31ad》：学生需要查看拓扑、扫描频谱、检查客户端、形成可证伪的同频干扰假设、调整信道并验证服务恢复；这是一道可完成和自动评分的情境题，不是普通展示课件。';
     const result = enforceTeacherGenerationOptions(
@@ -269,8 +300,8 @@ describe('teacher agent skills', () => {
     ).toBe(true);
   });
 
-  it('carries a uniquely resolved trusted course module into generation options', () => {
-    const catalog = listAgentSkills();
+  it('carries a uniquely resolved trusted course module into generation options', async () => {
+    const catalog = await listAgentSkills();
     const platformFacts = {
       scope: { dojoId: null, moduleIndex: null },
       availableCourses: [
@@ -341,7 +372,8 @@ describe('teacher agent skills', () => {
     );
   });
 
-  it('rejects invented generation scope identifiers before execution', () => {
+  it('rejects invented generation scope identifiers before execution', async () => {
+    const catalog = await listAgentSkills();
     const platformFacts = {
       availableCourses: [
         {
@@ -370,13 +402,23 @@ describe('teacher agent skills', () => {
             reason: '模型猜测的作用域',
           },
         },
-        listAgentSkills(),
+        catalog,
         platformFacts,
       ),
     ).toThrow('invalid scope resolution');
   });
 
-  it('asks for course scope instead of offering generation choices when scope is ambiguous', () => {
+  it('offers three independent project choices without inventing a course', async () => {
+    const result = enforceTeacherGenerationOptions('生成旋转机械的三维过程演示', {
+      understanding:'生成独立演示', selectedSkills:[], plan:[],
+      generationTarget:{targetTool:'candidate.generate',artifactType:'simulation',reason:'演示'},
+      generationScope:{status:'unscoped',boundScope:null,reason:'无需课程'},
+    }, {}, {scope:{dojoId:null,moduleIndex:null},availableCourses:[]});
+    expect(result.generationOptions).toMatchObject({boundScope:null});
+    expect((result.generationOptions as {options:unknown[]}).options).toHaveLength(3);
+  });
+
+  it('asks for course scope instead of offering generation choices when scope is ambiguous', async () => {
     const platformFacts = {
       scope: { dojoId: null, moduleIndex: null },
       availableCourses: [
@@ -399,7 +441,7 @@ describe('teacher agent skills', () => {
           reason: '同名课程无法唯一确定',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
       platformFacts,
     );
     const enforced = enforceTeacherGenerationOptions(
@@ -414,7 +456,7 @@ describe('teacher agent skills', () => {
     expect(enforced.answer).toContain('唯一确定目标课程或章节');
   });
 
-  it('uses the trusted thread course when the planner incorrectly marks a generic request unscoped', () => {
+  it('uses the trusted thread course when the planner incorrectly marks a generic request unscoped', async () => {
     const platformFacts = {
       scope: { dojoId: 42, moduleIndex: 1 },
       course: { referenceId: 'cryptography', name: '密码学' },
@@ -444,7 +486,7 @@ describe('teacher agent skills', () => {
           reason: '模型忽略了当前会话范围',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
       platformFacts,
     );
     const enforced = enforceTeacherGenerationOptions(
@@ -467,7 +509,7 @@ describe('teacher agent skills', () => {
     );
   });
 
-  it('does not let a generic ambiguous planner result override the trusted thread scope', () => {
+  it('does not let a generic ambiguous planner result override the trusted thread scope', async () => {
     const platformFacts = {
       scope: { dojoId: 42, moduleIndex: 0 },
       course: { referenceId: 'web-a', name: 'Web 安全' },
@@ -491,7 +533,7 @@ describe('teacher agent skills', () => {
           reason: '模型忽略了当前会话范围',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
       platformFacts,
     );
     const enforced = enforceTeacherGenerationOptions(
@@ -508,7 +550,7 @@ describe('teacher agent skills', () => {
     );
   });
 
-  it('keeps current scope protection when the teacher explicitly requests another course', () => {
+  it('keeps current scope protection when the teacher explicitly requests another course', async () => {
     const platformFacts = {
       scope: { dojoId: 42, moduleIndex: 0 },
       course: { referenceId: 'cryptography', name: '密码学' },
@@ -540,7 +582,7 @@ describe('teacher agent skills', () => {
           reason: '目标范围无法唯一确定',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
       platformFacts,
     );
     const enforced = enforceTeacherGenerationOptions(
@@ -554,7 +596,7 @@ describe('teacher agent skills', () => {
     expect(enforced.answer).toContain('唯一确定目标课程或章节');
   });
 
-  it('normalizes exactly three detailed and distinct pre-generation options', () => {
+  it('normalizes exactly three detailed and distinct pre-generation options', async () => {
     const normalized = normalizeTeacherGenerationOptions({
       targetTool: 'candidate.generate',
       artifactType: 'slide-deck',
@@ -593,7 +635,7 @@ describe('teacher agent skills', () => {
     expect(new Set(normalized?.options.map((option) => option.rewrittenPrompt)).size).toBe(3);
   });
 
-  it('replaces premature formal generation with three safe fallback choices', () => {
+  it('replaces premature formal generation with three safe fallback choices', async () => {
     const prompt = '在当前章节生成一道弱随机数攻击 CTF，最终拿到 Flag。';
     const plan = normalizeTeacherAgentPlan(
       {
@@ -606,7 +648,7 @@ describe('teacher agent skills', () => {
           reason: '教师要求新生成 CTF',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
     );
     const premature = {
       answer: '已经开始生成。',
@@ -633,7 +675,7 @@ describe('teacher agent skills', () => {
     expect(enforced.answer).toContain('选择后才会开始正式生成');
   });
 
-  it('repairs a topology-and-dual-role attack-defense request that a planner labels as simulation', () => {
+  it('repairs a topology-and-dual-role attack-defense request that a planner labels as simulation', async () => {
     const prompt =
       '为当前章节生成一个仅在隔离环境运行的 SQL 注入攻防演示实验，至少包含两个连续可操作阶段：攻击线索/漏洞实验和防守修复/验证模拟；每个阶段都有攻击者与防守者角色、拓扑、证据面板、重置方法和安全边界。';
     const plan = normalizeTeacherAgentPlan(
@@ -647,7 +689,7 @@ describe('teacher agent skills', () => {
           reason: '教师要求可操作模拟',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
     );
 
     const enforced = enforceTeacherGenerationOptions(prompt, plan, {});
@@ -665,7 +707,7 @@ describe('teacher agent skills', () => {
     }
   });
 
-  it('keeps a normal parameter simulation as simulation when no topology-and-role contract exists', () => {
+  it('keeps a normal parameter simulation as simulation when no topology-and-role contract exists', async () => {
     const prompt =
       '为当前章节生成 SQL 注入检测模拟练习，包含攻击强度滑杆、参数化查询开关、即时反馈、评分标准、复盘和一键重置。';
     const plan = normalizeTeacherAgentPlan(
@@ -679,7 +721,7 @@ describe('teacher agent skills', () => {
           reason: '教师要求参数化模拟',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
     );
 
     const enforced = enforceTeacherGenerationOptions(prompt, plan, {});
@@ -688,7 +730,7 @@ describe('teacher agent skills', () => {
     );
   });
 
-  it('recovers a previewable teacher simulation from downloadable-document drift', () => {
+  it('recovers a previewable teacher simulation from downloadable-document drift', async () => {
     const prompt =
       '为当前章节正式生成一项可在平台内预览、编辑并发布到课堂的SQL注入检测模拟练习；不要生成下载文件。至少包含两个连续可操作场景、三个判断/处置决策、即时反馈、评分标准、复盘以及一键重置。';
     const recovered = enforceTeacherGenerationOptions(prompt, null, {
@@ -709,7 +751,7 @@ describe('teacher agent skills', () => {
     expect(recovered.deliverables).toEqual([]);
   });
 
-  it('recovers the concise previewable simulation request used by the live teacher flow', () => {
+  it('recovers the concise previewable simulation request used by the live teacher flow', async () => {
     const prompt =
       '为当前章节生成一项可在平台内预览、编辑并发布到课堂的SQL注入检测模拟练习；不要生成下载文件；包含即时反馈、评分标准和复盘。';
     const driftedPlan = normalizeTeacherAgentPlan(
@@ -723,7 +765,7 @@ describe('teacher agent skills', () => {
           reason: '模型错误地将模拟练习改成课件文件。',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
     );
     const recovered = enforceTeacherGenerationOptions(prompt, null, {
       answer: '已按要求整理为可编辑 Word 源稿。',
@@ -747,7 +789,7 @@ describe('teacher agent skills', () => {
     expect(requiredTeacherAgentDeliverableFormats(prompt, driftedPlan)).toEqual([]);
   });
 
-  it('preserves a request for five independent CTFs through the option boundary', () => {
+  it('preserves a request for five independent CTFs through the option boundary', async () => {
     const prompt =
       '帮我为当前章节一次生成 5 道独立 CTF 实践题，分别围绕输入验证、会话权限、日志取证、配置错误和安全编码，每道题都要在隔离环境中取得动态 Flag。';
     const plan = normalizeTeacherAgentPlan(
@@ -761,7 +803,7 @@ describe('teacher agent skills', () => {
           reason: '教师要求批量生成 CTF',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
     );
     const enforced = enforceTeacherGenerationOptions(prompt, plan, {
       toolProposals: [
@@ -791,7 +833,7 @@ describe('teacher agent skills', () => {
     }
   });
 
-  it('recognizes natural-language question counts without treating ordinals as batch size', () => {
+  it('recognizes natural-language question counts without treating ordinals as batch size', async () => {
     expect(requestedQuestionCount('请一次生成五个题目')).toBe(5);
     expect(requestedQuestionCount('请再出五题')).toBe(5);
     expect(requestedQuestionCount('生成５道实践题')).toBe(5);
@@ -801,7 +843,7 @@ describe('teacher agent skills', () => {
     expect(requestedQuestionCount('题目难度为五级，满分 10 分')).toBeNull();
   });
 
-  it('overrides a model-shortened assignment count with the teacher requested count', () => {
+  it('overrides a model-shortened assignment count with the teacher requested count', async () => {
     const enforced = enforceTeacherQuestionBatchContract('请为本章一次生成五个题目。', {
       answer: '已准备题目。',
       toolProposals: [
@@ -822,7 +864,7 @@ describe('teacher agent skills', () => {
     expect(enforced.answer).toContain('已锁定题量为 5 道');
   });
 
-  it('refuses an oversized CTF batch instead of silently shrinking it', () => {
+  it('refuses an oversized CTF batch instead of silently shrinking it', async () => {
     const plan = normalizeTeacherAgentPlan(
       {
         understanding: '一次生成六道独立 CTF。',
@@ -834,7 +876,7 @@ describe('teacher agent skills', () => {
           reason: '教师要求批量生成 CTF',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
     );
     const enforced = enforceTeacherGenerationOptions('请一次生成六道独立 CTF 实践题。', plan, {
       toolProposals: [],
@@ -846,7 +888,7 @@ describe('teacher agent skills', () => {
     expect(enforced.answer).toContain('本次没有提供会缩水的方案');
   });
 
-  it('turns every fallback slide option into a long-form quality contract', () => {
+  it('turns every fallback slide option into a long-form quality contract', async () => {
     const prompt = '为当前章节生成一份 SQL 注入防御课件。';
     const plan = normalizeTeacherAgentPlan(
       {
@@ -859,7 +901,7 @@ describe('teacher agent skills', () => {
           reason: '教师要求新生成课件',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
     );
     const fallback = fallbackTeacherGenerationOptions(prompt, plan, {
       toolProposals: [
@@ -881,25 +923,27 @@ describe('teacher agent skills', () => {
     }
   });
 
-  it('loads production references for slide, CTF, and simulation skills', () => {
-    const selected = loadAgentSkills(
+  it('loads selected skill instructions and reads references only when requested', async () => {
+    const selected = await loadAgentSkills(
       ['teaching-slide-deck', 'ctf-flag-challenge', 'cyber-lab-simulation'],
       '生成课件、五道 CTF 和模拟演示',
     );
     const byName = new Map(selected.map((skill) => [skill.name, skill.instructions]));
 
-    expect(byName.get('teaching-slide-deck')).toContain(
-      '<skill-reference file="references/production-workflow.md">',
-    );
-    expect(byName.get('teaching-slide-deck')).toContain(
-      '<skill-reference file="references/speaker-script.md">',
-    );
-    expect(byName.get('ctf-flag-challenge')).toContain('Instance isolation');
-    expect(byName.get('ctf-flag-challenge')).toContain('Binary exploitation');
-    expect(byName.get('cyber-lab-simulation')).toContain('reset repeated twice');
+    for (const instructions of byName.values()) {
+      expect(instructions).not.toContain('<skill-reference file=');
+    }
+    expect(await readAgentSkillResource('teaching-slide-deck', 'references/production-workflow.md'))
+      .toContain('Production slide workflow');
+    expect(await readAgentSkillResource('teaching-slide-deck', 'references/speaker-script.md'))
+      .toBeTruthy();
+    expect(await readAgentSkillResource('ctf-flag-challenge', 'references/challenge-production-workflow.md'))
+      .toContain('Instance isolation');
+    expect(await readAgentSkillResource('cyber-lab-simulation', 'references/simulation-production-workflow.md'))
+      .toContain('reset repeated twice');
   });
 
-  it('preserves an explicit teacher page count in every generated option', () => {
+  it('preserves an explicit teacher page count in every generated option', async () => {
     const prompt = '帮我生成一份恰好 9 页的 SQL 注入防御课件。';
     const plan = normalizeTeacherAgentPlan(
       {
@@ -912,7 +956,7 @@ describe('teacher agent skills', () => {
           reason: '教师要求生成课件',
         },
       },
-      listAgentSkills(),
+      await listAgentSkills(),
     );
     const enforced = enforceTeacherGenerationOptions(prompt, plan, {
       generationOptions: {
@@ -957,28 +1001,27 @@ describe('teacher agent skills', () => {
     }
   });
 
-  it('loads only task-relevant skill references within the selected skill', () => {
-    const [flaskSkill] = loadAgentSkills(
+  it('keeps references out of the initial skill context', async () => {
+    const [flaskSkill] = await loadAgentSkills(
       ['security-best-practices'],
       '请审查这个 Python Flask 教学平台的服务端安全边界',
     );
-    expect(flaskSkill.instructions).toContain(
-      '<skill-reference file="references/python-flask-web-server-security.md">',
-    );
+    expect(flaskSkill.instructions).not.toContain('<skill-reference file=');
+    expect(await readAgentSkillResource('security-best-practices', 'references/python-flask-web-server-security.md'))
+      .toBeTruthy();
     expect(flaskSkill.instructions).not.toContain(
       'references/javascript-typescript-react-web-frontend-security.md',
     );
 
-    const [notebookSkill] = loadAgentSkills(['jupyter-notebook'], '生成实验 notebook');
-    expect(notebookSkill.instructions).toContain(
-      '<skill-reference file="references/notebook-structure.md">',
-    );
-    expect(notebookSkill.instructions).toContain(
-      '<skill-reference file="references/quality-checklist.md">',
-    );
+    const [notebookSkill] = await loadAgentSkills(['jupyter-notebook'], '生成实验 notebook');
+    expect(notebookSkill.instructions).not.toContain('<skill-reference file=');
+    expect(await readAgentSkillResource('jupyter-notebook', 'references/notebook-structure.md'))
+      .toBeTruthy();
+    expect(await readAgentSkillResource('jupyter-notebook', 'references/quality-checklist.md'))
+      .toBeTruthy();
   });
 
-  it('preserves real file deliverables and only allowlisted platform tools', () => {
+  it('preserves real file deliverables and only allowlisted platform tools', async () => {
     const result = normalizeTeacherAgentResult(
       {
         answer: '分析与教案均已完成，文件可直接下载。',
@@ -1009,7 +1052,7 @@ describe('teacher agent skills', () => {
     expect((result.deliverables as Array<Record<string, unknown>>)[0].format).toBe('docx');
   });
 
-  it('binds artifact operations to the trusted current revision instead of a predicted next one', () => {
+  it('binds artifact operations to the trusted current revision instead of a predicted next one', async () => {
     const result = normalizeTeacherAgentResult(
       {
         answer: '将按四项要求修改刚才生成的模拟演示。',
@@ -1050,7 +1093,7 @@ describe('teacher agent skills', () => {
     ]);
   });
 
-  it('atomically binds an uploaded material to the uniquely named trusted course and module', () => {
+  it('atomically binds an uploaded material to the uniquely named trusted course and module', async () => {
     const result = normalizeTeacherAgentResult(
       {
         answer: '将把刚上传的文件加入教师指定的章节资料。',
@@ -1100,7 +1143,7 @@ describe('teacher agent skills', () => {
     ]);
   });
 
-  it('turns follow-up suggestions into commands that can be sent verbatim', () => {
+  it('turns follow-up suggestions into commands that can be sent verbatim', async () => {
     const result = normalizeTeacherAgentResult(
       {
         answer: '教案已经生成。',
@@ -1132,7 +1175,7 @@ describe('teacher agent skills', () => {
     ]);
   });
 
-  it('turns the model-understood file outcome into an enforced delivery contract', () => {
+  it('turns the model-understood file outcome into an enforced delivery contract', async () => {
     const plan = {
       understanding: '分析指定 PDF，并交付一份可下载的 Word 教案。',
       selectedSkills: [
@@ -1166,7 +1209,7 @@ describe('teacher agent skills', () => {
     expect(closurePrompt).toContain('禁止 Markdown 代码围栏、空 body、空 document');
   });
 
-  it('rejects empty HTML shells and preserves substantive fenced HTML', () => {
+  it('rejects empty HTML shells and preserves substantive fenced HTML', async () => {
     const empty = normalizeTeacherAgentResult(
       {
         answer: 'HTML 已生成。',
@@ -1211,7 +1254,7 @@ describe('teacher agent skills', () => {
     expect(missingTeacherAgentDeliverableFormats(complete, ['html'])).toEqual([]);
   });
 
-  it('does not mistake an input file analysis request for an output-file request', () => {
+  it('does not mistake an input file analysis request for an output-file request', async () => {
     expect(
       requiredTeacherAgentDeliverableFormats('请分析我上传的 PDF 文件并直接给出结论。', {
         understanding: '分析现有 PDF 并在聊天中回答。',
@@ -1221,7 +1264,7 @@ describe('teacher agent skills', () => {
     ).toEqual([]);
   });
 
-  it('uses every trusted material chapter when the teacher explicitly asks for all of them', () => {
+  it('uses every trusted material chapter when the teacher explicitly asks for all of them', async () => {
     const normalized = normalizeTeacherAgentResult(
       {
         answer: '我已准备好把全部章节送交教师确认。',
@@ -1256,7 +1299,7 @@ describe('teacher agent skills', () => {
     ]);
   });
 
-  it('rejects a claimed platform action that has no executable tool or file', () => {
+  it('rejects a claimed platform action that has no executable tool or file', async () => {
     expect(() =>
       normalizeTeacherAgentResult(
         {

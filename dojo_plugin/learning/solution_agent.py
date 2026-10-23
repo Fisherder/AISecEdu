@@ -187,8 +187,8 @@ def _public_challenge_context(challenge):
         "runtimeEnvironment": challenge.runtime_environment,
         "nativeWorkspace": profile.directory,
         "runtime": profile.public_context,
-        "workingDirectory": "/challenge",
-        "identity": "hacker (uid 1000)",
+        "workingDirectory": profile.directory if profile.is_windows else "/challenge",
+        "identity": "Student" if profile.is_windows else "hacker (uid 1000)",
     }
 
 
@@ -531,11 +531,15 @@ def _run_solution_agent(app, run_id):
             if exercise_mode(challenge) == "SIMULATION":
                 raise RuntimeError("确定性情境题应通过可重放目标路径验证。")
             solver_user = _temporary_solver_user(run.id)
+            profile = runtime_profile(challenge.runtime_environment)
             container = start_challenge(solver_user, challenge, False)
-            if challenge.runtime_environment == "windows":
-                ready = container.exec_run(["/usr/bin/timeout", "270", "/usr/local/bin/windows-exec", "--ready"], user="1000")
+            if profile.command_bridge:
+                ready = container.exec_run(
+                    ["/usr/bin/timeout", "270", f"/usr/local/bin/{profile.command_bridge}", "--ready"],
+                    user="1000",
+                )
                 if ready.exit_code:
-                    raise RuntimeError("Windows 课程文件与服务未能就绪：" + ready.output.decode(errors="replace")[-1000:])
+                    raise RuntimeError(f"{profile.label} 课程文件与服务未能就绪：" + ready.output.decode(errors="replace")[-1000:])
             run = _set_run_state(
                 run_id,
                 phase="executing",
@@ -670,7 +674,7 @@ def _run_solution_agent(app, run_id):
             db.session.remove()
 
 
-def enqueue_solution_run(dojo_challenge, actor, *, app=None, force=False):
+def enqueue_solution_run(dojo_challenge, actor, *, app=None, force=False, commit=True, publish=True):
     if exercise_mode(dojo_challenge) == "SIMULATION":
         raise ValueError("确定性情境题不需要容器解题验证。")
     profile = LearningChallengeProfiles.query.get(dojo_challenge.challenge_id)
@@ -697,7 +701,9 @@ def enqueue_solution_run(dojo_challenge, actor, *, app=None, force=False):
         },
     )
     db.session.add(run)
-    db.session.commit()
+    db.session.flush()
+    if commit:
+        db.session.commit()
     try:
         from ..agent_runtime.jobs import enqueue_job
 
@@ -712,8 +718,12 @@ def enqueue_solution_run(dojo_challenge, actor, *, app=None, force=False):
             payload={"solutionRunId": run.id},
             priority=10,
             max_attempts=3,
+            commit=commit,
+            publish=publish,
         )
     except Exception as exception:
+        if not commit:
+            raise
         run.status = "FAILED"
         run.phase = "failed"
         run.error = str(exception)[:4000]

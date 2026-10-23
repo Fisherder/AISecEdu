@@ -25,6 +25,10 @@
     </div>
   </header>
 
+  <div class="learning-score-notice alert alert-info" id="learning-score-policy-notice">
+    <strong>本次 AI 智能评分为实践附加分，不代表课程总成绩。</strong>
+    有效 flag 通过校验后至少获得 90 分（满分 100 分）；过程表现用于补充反馈和进一步加分。
+  </div>
   <div id="learning-score-notice" class="learning-score-notice alert alert-info" role="status">正在加载评分详情…</div>
 
   <div class="learning-score-content" hidden>
@@ -37,9 +41,10 @@
           </div>
         </div>
         <div>
-          <p class="learning-score-card-label">本次总分</p>
+          <p class="learning-score-card-label">本次实践附加分</p>
           <h2 id="learning-score-level">正在读取评分状态</h2>
           <p id="learning-score-feedback"></p>
+          <p id="learning-score-completion-credit" hidden></p>
         </div>
       </div>
       <div class="learning-score-metric">
@@ -107,5 +112,5 @@
 
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-score.js', v='aisecedu-20260726-score-page') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-score.js', v='coding-tiered-20261012-v31-final') }}"></script>
 {% endblock %}

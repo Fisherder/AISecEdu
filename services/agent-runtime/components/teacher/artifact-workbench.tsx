@@ -7,6 +7,8 @@ import type { LessonArtifact } from '@/lib/types/lesson';
 import type { QuizQuestion, QuizQuestionType } from '@/lib/types/stage';
 import { SlideThumbnail } from '@/components/slide-renderer/SlideThumbnail';
 import { useCodeRunnerIframeBridge } from '@/components/code-runner-iframe-bridge';
+import { patchHtmlForIframe } from '@/lib/utils/iframe';
+import { CinematicPreview, isCinematicContent } from '@/components/cinematic-preview';
 
 export interface ArtifactStructuredUpdate {
   title: string;
@@ -164,18 +166,27 @@ function InteractiveArtifactPreview({
     <iframe
       ref={iframeRef}
       title={`${artifact.title} 预览`}
-      srcDoc={html}
+      srcDoc={patchHtmlForIframe(html)}
       className="h-[400px] w-full rounded-lg border border-slate-700 bg-white"
-      sandbox="allow-scripts allow-forms allow-popups"
+      sandbox="allow-scripts"
     />
   );
 }
 
 export function ArtifactPreview({ artifact }: ArtifactPreviewProps) {
+  const content = artifact.content as unknown as Record<string, unknown>;
+  if (isCinematicContent(content)) {
+    return (
+      <CinematicPreview
+        key={artifact.id}
+        title={artifact.title}
+        html={typeof content.html === 'string' ? content.html : ''}
+      />
+    );
+  }
   if (isSlideArtifact(artifact)) return <SlideArtifactPreview artifact={artifact} />;
   if (isQuizArtifact(artifact)) return <QuizArtifactPreview artifact={artifact} />;
 
-  const content = artifact.content as unknown as Record<string, unknown>;
   if (typeof content.html === 'string') {
     return <InteractiveArtifactPreview artifact={artifact} html={content.html} />;
   }

@@ -38,8 +38,8 @@ import {
   generateProceduralSkillViaWorkflow,
   generateSimulationViaWorkflow,
   generateGameViaWorkflow,
-  generateViz3DViaWorkflow,
 } from './widget-workflow';
+import { generateCinematicExplainer } from '@/lib/server/cinematic-generation';
 import { postProcessInteractiveHtml } from './interactive-post-processor';
 import { parseActionsFromStructuredOutput } from './action-parser';
 import { parseJsonResponse } from './json-repair';
@@ -1099,6 +1099,11 @@ export async function generateWidgetContent(
   const widgetType = outline.widgetType;
   const widgetOutline = outline.widgetOutline;
 
+  if (widgetType === 'visualization3d') {
+    const artifact = await generateCinematicExplainer({type:'visualization3d',title:outline.title,description:[outline.description,languageDirective,widgetOutline ? `完整空间结构与交互要求：${JSON.stringify(widgetOutline)}` : ''].filter(Boolean).join('\n'),keyPoints:outline.keyPoints},outline.order ?? 0,aiCall);
+    return artifact.content as GeneratedInteractiveContent;
+  }
+
   if (!widgetType || !widgetOutline) {
     log.warn(`Interactive outline missing widget config, falling back to standard interactive`);
     return null;
@@ -1112,7 +1117,7 @@ export async function generateWidgetContent(
   // Cybersecurity profile: use the small-call workflow for diagram widgets so
   // weaker models (e.g. DeepSeek Flash) don't hang on the giant single call.
   if (widgetType === 'diagram' && useWf) {
-    return generateDiagramViaWorkflow(outline, aiCall, { languageDirective, subjectProfile: true });
+    return generateDiagramViaWorkflow(outline, aiCall, { languageDirective, subjectProfile: options.subjectProfile ?? false });
   }
   if (widgetType === 'code' && useWf) {
     return generateCodeViaWorkflow(outline, aiCall, { languageDirective, subjectProfile: true });
@@ -1125,9 +1130,6 @@ export async function generateWidgetContent(
   }
   if (widgetType === 'game' && useWf) {
     return generateGameViaWorkflow(outline, aiCall, { languageDirective, subjectProfile: true });
-  }
-  if (widgetType === 'visualization3d' && useWf) {
-    return generateViz3DViaWorkflow(outline, aiCall, { languageDirective, subjectProfile: true });
   }
 
   // Select appropriate prompt based on widget type
@@ -1186,19 +1188,6 @@ export async function generateWidgetContent(
         description: outline.description,
         keyPoints: (outline.keyPoints || []).join('\n'),
         scoring: { correctPoints: 10, speedBonus: 5 },
-        languageDirective: languageDirective || '',
-      };
-      break;
-
-    case 'visualization3d':
-      promptId = PROMPT_IDS.VISUALIZATION3D_CONTENT;
-      variables = {
-        title: outline.title,
-        visualizationType: widgetOutline.visualizationType || 'custom',
-        description: outline.description,
-        keyPoints: (outline.keyPoints || []).join('\n'),
-        objects: widgetOutline.objects || [],
-        interactions: widgetOutline.interactions || [],
         languageDirective: languageDirective || '',
       };
       break;
@@ -1973,6 +1962,11 @@ export function createSceneWithActions(
         // Ultra Mode widget fields
         widgetType: content.widgetType,
         widgetConfig: content.widgetConfig,
+        renderingMode: content.renderingMode,
+        cinematicIntent: content.cinematicIntent,
+        cinematicScene: content.cinematicScene,
+        cinematicDirection: content.cinematicDirection,
+        cinematicValidation: content.cinematicValidation,
       },
       actions,
       outlineId: outline.id,

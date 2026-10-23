@@ -1,0 +1,104 @@
+.course-hub:has(.la-workspace:not([hidden])){width:min(calc(100% - 40px), 1920px);}
+.course-hub:has(.la-workspace:not([hidden])) .course-hub-header{min-height:84px;}
+.course-hub:has(.la-workspace:not([hidden])) .course-hub-tabs{width:100%;max-width:100%;overflow-x:auto;box-sizing:border-box;}
+.la-workspace [hidden]{display:none!important;}
+.la-workspace button,.la-workspace select,.la-workspace input{min-height:38px;max-width:100%;}
+.la-header{display:flex;align-items:center;justify-content:space-between;}
+.la-header-actions{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
+.la-header-actions small{width:100%;}
+.la-filters{display:flex;flex-wrap:wrap;align-items:flex-end;}
+.la-filters label{display:grid;flex:1 1 140px;min-width:0;}
+.la-filters label:nth-child(3){flex-grow:1.6;}
+.la-filters select{width:100%;text-overflow:ellipsis;}
+.la-scope-line{display:flex;justify-content:space-between;}
+.la-kpis.cs-learning-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));}
+.la-kpis.cs-learning-kpis article{display:block;position:relative;min-height:142px;overflow:hidden;}
+.la-kpis.cs-learning-kpis strong{display:block;}
+.la-kpis.cs-learning-kpis article > span{display:block;width:auto;height:auto;}
+.la-kpis article > i{position:absolute;right:20px;top:20px;}
+.la-tabs{display:flex;overflow-x:auto;}
+.teacher-course-center-page .la-workspace nav.la-tabs{position:static;}
+.la-tabs button{white-space:nowrap;min-height:47px;}
+.la-overview-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(340px,1fr);}
+.la-card{min-width:0;}
+.la-card > header{display:flex;align-items:flex-start;justify-content:space-between;min-height:67px;}
+.la-card > header select{max-width:210px;}
+.la-chart{width:100%;height:274px;display:block;overflow:hidden;}
+.la-ring{height:195px;}
+.la-risk-legend{display:grid;grid-template-columns:1fr 1fr;}
+.la-risk-legend button{display:flex;justify-content:space-between;align-items:center;}
+.la-dot{display:inline-block;width:7px;height:7px;}
+.la-data > div{overflow-x:auto;}
+.la-table-scroll{overflow-x:auto;}
+.la-table{width:100%;}
+.la-table th{white-space:nowrap;}
+.la-table strong,.la-table small{display:block;}
+.la-table .la-name{max-width:240px;overflow-wrap:anywhere;}
+.la-table tbody .la-empty{white-space:normal;}
+.la-badge{display:inline-block;}
+.la-meter{height:4px;min-width:70px;overflow:hidden;}
+.la-meter i{display:block;height:100%;}
+.la-roster-filters{display:flex;flex-wrap:wrap;}
+.la-roster-filters label{flex:1 1 190px;}
+.la-roster-filters input{width:100%;}
+.la-pagination{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;}
+.la-pagination button{min-height:32px;}
+.la-empty{display:grid;min-height:160px;align-content:center;justify-items:center;}
+.la-matrix{overflow-x:auto;}
+.la-matrix table{width:100%;min-width:760px;}
+.la-matrix th:first-child{width:180px;}
+.la-matrix button{width:100%;min-height:37px;}
+.la-matrix .la-student-label{max-width:200px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;}
+.la-scale{display:flex;align-items:center;white-space:nowrap;}
+.la-scale i{width:85px;height:6px;}
+.la-question-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+.la-question{display:grid;grid-template-columns:1fr auto;}
+.la-question > div{min-width:0;}
+.la-question .la-score{min-width:60px;}
+.la-question .la-score small{display:block;}
+.la-question footer{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;}
+.la-followup{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;}
+.la-followup p{white-space:pre-wrap;}
+.la-workspace .cs-learning-methodology summary{min-height:60px;}
+.la-workspace .cs-learning-methodology summary > span{display:grid;grid-template-columns:1fr;}
+.la-workspace .cs-intervention-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+.la-workspace.is-expanded{position:fixed;z-index:1200;inset:0;overflow-y:auto;}
+body:has(.la-workspace.is-expanded){overflow:hidden;}
+.cs-learning-drawer{z-index:1500;}
+@media (min-width:1700px){
+.la-chart{height:310px;}
+.la-ring{height:231px;}
+}
+@media (max-width:1100px){
+.la-overview-grid{grid-template-columns:minmax(0,1.3fr) minmax(300px,1fr);}
+.la-card > header{flex-wrap:wrap;}
+.la-kpis article > i{display:none;}
+}
+@media (max-width:820px){
+.la-overview-grid{grid-template-columns:1fr;}
+.la-kpis.cs-learning-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}
+.la-header{align-items:flex-start;}
+.la-header-actions small{display:none;}
+.la-question-list{grid-template-columns:1fr;}
+.la-workspace .cs-intervention-list{grid-template-columns:1fr;}
+.la-chart{height:270px;}
+.la-ring{height:220px;}
+}
+@media (max-width:540px){
+.course-hub:has(.la-workspace:not([hidden])){width:calc(100% - 16px);}
+.la-header{flex-direction:column;}
+.la-header-actions{justify-content:flex-start;}
+.la-filters label{flex-basis:42%;}
+.la-scope-line{flex-direction:column;}
+.la-kpis.cs-learning-kpis article{min-height:135px;}
+.la-tabs #la-methods{display:none;}
+.la-followup{grid-template-columns:minmax(0,1fr);}
+.la-table{min-width:820px;}
+}
+@media (prefers-reduced-motion:reduce){
+.la-workspace *, .la-workspace *::after{scroll-behavior:auto!important;}
+}
+@media print{
+.la-header-actions, .la-filters, .la-tabs{display:none;}
+.la-view[hidden]{display:block!important;}
+}

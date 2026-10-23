@@ -91,8 +91,8 @@
     });
   }
 
-  async function multipart(path, formData, fallback) {
-    if (!window.fetch) {
+  async function multipart(path, formData, fallback, options = {}) {
+    if (!window.fetch && !window.XMLHttpRequest) {
       throw new Error("浏览器上传组件未就绪，请刷新页面后重试。");
     }
     const config = window.CTFd && window.CTFd.config ? window.CTFd.config : {};
@@ -100,24 +100,67 @@
     const headers = { Accept: "application/json" };
     // CTFd validates JSON CSRF tokens from a header, but multipart tokens from
     // a form field. Preserve that protection without setting Content-Type.
-    if (config.csrfNonce && formData && typeof formData.set === "function") {
-      formData.set("nonce", config.csrfNonce);
+    const csrfNonce = (window.init && window.init.csrfNonce) || config.csrfNonce;
+    if (csrfNonce && formData && typeof formData.set === "function") {
+      formData.set("nonce", csrfNonce);
     }
 
     // CTFd.fetch always forces Content-Type to application/json. Native fetch
     // must set the multipart boundary itself when the body is FormData.
-    const response = await window.fetch(`${urlRoot}/pwncollege_api/v1${path}`, {
+    const url = `${urlRoot}/pwncollege_api/v1${path}`;
+    const failureMessage = (status) => status === 413
+      ? "文件超过 50 MB，请压缩或拆分后再上传。"
+      : (fallback || "文件上传失败，请稍后重试。");
+    if (window.XMLHttpRequest && (options.onProgress || options.signal)) {
+      return new Promise((resolve, reject) => {
+        const xhr = new window.XMLHttpRequest();
+        let settled = false;
+        const signal = options.signal;
+        const finish = (error, value) => {
+          if (settled) return;
+          settled = true;
+          if (signal) signal.removeEventListener("abort", abort);
+          if (error) reject(error);
+          else resolve(value);
+        };
+        const abort = () => xhr.abort();
+        xhr.open("POST", url, true);
+        xhr.withCredentials = true;
+        xhr.timeout = Number(options.timeoutMs) || 10 * 60 * 1000;
+        xhr.setRequestHeader("Accept", "application/json");
+        if (typeof options.onProgress === "function") {
+          xhr.upload.addEventListener("progress", (event) => {
+            options.onProgress({
+              loaded: event.loaded,
+              total: event.lengthComputable ? event.total : null,
+            });
+          });
+        }
+        xhr.onload = () => {
+          readResponse(
+            { status: xhr.status, ok: xhr.status >= 200 && xhr.status < 300,
+              text: async () => xhr.responseText || "" },
+            failureMessage(xhr.status),
+          ).then((value) => finish(null, value), finish);
+        };
+        xhr.onerror = () => finish(new Error("网络连接中断。文件仍在本页，可直接重试上传。"));
+        xhr.ontimeout = () => finish(new Error("上传等待超时。文件仍在本页，可直接重试上传。"));
+        xhr.onabort = () => finish(new Error("已取消上传。"));
+        if (signal) {
+          if (signal.aborted) return finish(new Error("已取消上传。"));
+          signal.addEventListener("abort", abort, { once: true });
+        }
+        xhr.send(formData);
+      });
+    }
+    const response = await window.fetch(url, {
       method: "POST",
       credentials: "same-origin",
       headers,
       body: formData,
+      ...(options.signal ? { signal: options.signal } : {}),
     });
-    return readResponse(
-      response,
-      response.status === 413
-        ? "文件超过 50 MB，请压缩或拆分后再上传。"
-        : (fallback || "文件上传失败，请稍后重试。"),
-    );
+    return readResponse(response, failureMessage(response.status));
   }
 
   function showNotice(element, message, kind) {
@@ -229,8 +272,9 @@
   const addReadingOnlyState = () => {
     const pathParts = window.location.pathname.split("/").filter(Boolean);
     if (pathParts.length !== 2) return;
+    if (pathParts[0] === "teacher") return;
     if (document.querySelector(".module-practice-not-applicable")) return;
-    if (document.querySelector("[data-challenge-outline], .unit-outline-item, .challenge-name, .challenge-card")) return;
+    if (document.querySelector("[data-challenge-outline], .unit-outline-item, .challenge-name, .challenge-card, [data-inquiry-learning]")) return;
     const main = document.querySelector("main#main-content");
     if (!main) return;
     const status = document.createElement("p");

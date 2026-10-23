@@ -1,7 +1,9 @@
 import copy
 import datetime
+import json
 import logging
 import re
+import time
 import uuid
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
@@ -46,6 +48,10 @@ from ...learning.evidence import (
     save_reflection,
     verify_evidence_chain,
 )
+from ...learning.container_progress import (
+    cached_live_progress,
+    sync_live_progress,
+)
 from ...learning.exercise_modes import (
     exercise_mode,
     is_retired_exercise,
@@ -68,6 +74,7 @@ from ...learning.intelligence import (
     guide_reply,
     guide_thread_view,
     new_guide_thread,
+    prefetch_solution_reference,
     tutor_reply,
 )
 from ...learning.student_agent import (
@@ -111,7 +118,7 @@ from ...models import (
     TeachingAssignmentSubmissions,
 )
 from ...coursework import assignment_view
-from ...utils import get_all_containers
+from ...utils import get_all_containers, get_current_container
 from ...utils.dojo import dojo_admins_only, dojo_route, get_current_dojo_challenge
 from ...utils.image_pulls import publish_image_pull
 from .user import authed_only_cli
@@ -1036,6 +1043,7 @@ def _attempt_view(attempt, *, include_evidence=False):
         "submitted": attempt.submitted.isoformat() + "Z" if attempt.submitted else None,
         "completed": attempt.completed.isoformat() + "Z" if attempt.completed else None,
         "assessment": assessment_view(latest) if latest else None,
+        "liveProgress": cached_live_progress(attempt),
     }
     if include_evidence:
         events = (
@@ -1557,6 +1565,8 @@ class LearningOverview(Resource):
             )
             for dojo in dojos
         ]
+        from ...learning.inquiry_service import augment_learning_courses, inquiry_next_action
+        inquiry_pending = augment_learning_courses(user, courses, dojos)
         enrolled_courses = [course for course in courses if course["enrolled"]]
         available_courses = [course for course in courses if not course["enrolled"]]
         presented_enrolled_courses = (
@@ -1659,6 +1669,7 @@ class LearningOverview(Resource):
             courses=enrolled_courses,
             recommendations=recommendations,
         )
+        next_action = inquiry_next_action(inquiry_pending, next_action)
         degraded = any(value == "DEGRADED" for value in component_status.values())
         state = (
             "DEGRADED"
@@ -1703,6 +1714,7 @@ class LearningOverview(Resource):
             "activeAttempt": active_view,
             "staleContext": stale_context,
             "assignments": assignments,
+            "inquiryProjects": inquiry_pending,
             "masterySummary": {
                 "state": "AVAILABLE" if evidence_values else "UNKNOWN",
                 "label": "已有可核验学习证据" if evidence_values else "完成一次实训后形成能力判断",
@@ -2102,6 +2114,17 @@ class LearningDashboard(Resource):
     def get(self, dojo):
         user = get_current_user()
         recommendations = build_recommendations(user, dojo, persist=True)
+        container = get_current_container(user)
+        if container is not None:
+            for candidate in (
+                LearningAttempts.query.filter_by(
+                    user_id=user.id, dojo_id=dojo.dojo_id, status="ACTIVE"
+                )
+                .order_by(LearningAttempts.started.desc())
+                .limit(3)
+                .all()
+            ):
+                sync_live_progress(candidate, container)
         attempts = (
             LearningAttempts.query.filter_by(user_id=user.id, dojo_id=dojo.dojo_id)
             .order_by(LearningAttempts.started.desc())
@@ -2972,6 +2995,15 @@ class LearningDraftValidation(Resource):
         draft = _draft_or_404(draft_id)
         if draft.status == "PUBLISHED":
             return {"success": False, "error": "已发布草稿无需重复验证。"}, 409
+        if (draft.spec or {}).get("preparedRuntime"):
+            from ...learning.prepared_drafts import validate_prepared
+            try:
+                report = validate_prepared(draft, get_current_user())
+                db.session.commit()
+            except (ValueError, OSError) as error:
+                db.session.rollback()
+                return {"success": False, "error": str(error)}, 409
+            return {"success": True, "validation": report, "completed": True}
         active_job = LearningAuthoringJobs.query.filter(
             LearningAuthoringJobs.draft_id == draft.id,
             LearningAuthoringJobs.status.in_(("QUEUED", "RUNNING")),
@@ -3059,6 +3091,10 @@ class CurrentLearningAttempt(Resource):
         user = get_current_user()
         challenge = get_current_dojo_challenge(user)
         attempt = active_attempt(user.id, challenge) if challenge else active_attempt(user.id)
+        if attempt is not None:
+            sync_live_progress(attempt, get_current_container(user))
+            db.session.commit()
+            prefetch_solution_reference(attempt)
         return {
             "success": True,
             "active": bool(attempt),
@@ -3137,19 +3173,43 @@ class LearningAttemptAssessment(Resource):
 class LearningTutor(Resource):
     @authed_only
     def post(self):
+        started = time.monotonic()
+        stage_started = started
+        timings = {}
+
+        def mark(name):
+            nonlocal stage_started
+            now = time.monotonic()
+            timings[name] = round((now - stage_started) * 1000, 1)
+            stage_started = now
+
         user = get_current_user()
         data = request.get_json(silent=True) or {}
         question = str(data.get("question") or "").strip()
         challenge = get_current_dojo_challenge(user)
         attempt = active_attempt(user.id, challenge) if challenge else None
+        mark("attemptLookup")
         if not attempt:
             return {"success": False, "error": "当前没有活动题目会话"}, 409
         if not question:
             return {"success": False, "error": "问题不能为空"}, 400
         profile = LearningChallengeProfiles.query.get(attempt.challenge_id)
-        reply = tutor_reply(attempt, user, question, profile)
+        container = get_current_container(user)
+        mark("containerLookup")
+        sync_live_progress(attempt, container)
+        mark("liveProgress")
+        reply = tutor_reply(attempt, user, question, profile, container)
+        mark("tutor")
         db.session.commit()
-        return {"success": True, "reply": reply}
+        mark("commit")
+        timings["total"] = round((time.monotonic() - started) * 1000, 1)
+        logger.info(
+            "tutor route timings user=%s attempt=%s stages=%s",
+            user.id,
+            attempt.id,
+            json.dumps(timings, ensure_ascii=False, sort_keys=True),
+        )
+        return {"success": True, "reply": reply, "timings": timings}
 
 
 def _guide_thread_or_404(thread_id, user):
@@ -3568,3 +3628,49 @@ class LearningAnalytics(Resource):
                 for attempt in sorted(attempts, key=lambda item: item.started, reverse=True)[:30]
             ],
         }
+
+
+from .docker import docker_locked as _draft_docker_locked
+
+
+@learning_namespace.route('/drafts/<draft_id>/runtime')
+class LearningDraftRuntime(Resource):
+    @authed_only
+    def get(self, draft_id):
+        from ...learning.prepared_drafts import runtime_view
+        return {'success': True, 'runtime': runtime_view(_draft_or_404(draft_id))}
+
+    @authed_only
+    @_draft_docker_locked
+    def post(self, draft_id):
+        draft = _draft_or_404(draft_id)
+        from ...learning.prepared_drafts import validate_prepared, runtime_challenge
+        try:
+            validate_prepared(draft, get_current_user())
+            challenge = runtime_challenge(draft)
+            from .docker import start_challenge_session
+            start_challenge_session(get_current_user(), challenge, False)
+            db.session.commit()
+        except (ValueError, OSError) as error:
+            db.session.rollback()
+            return {'success': False, 'error': str(error)}, 409
+        return {'success': True, 'workspaceUrl': '/workspace?service=code'}
+
+
+@learning_namespace.route('/drafts/<draft_id>/source-materials/<int:index>')
+class LearningDraftSourceMaterial(Resource):
+    @authed_only
+    def get(self, draft_id, index):
+        draft = _draft_or_404(draft_id)
+        from ...learning.prepared_sources import source_material_path
+        from flask import send_file
+        import pathlib
+        try:
+            path, material = source_material_path(draft, index)
+        except (ValueError, OSError, KeyError):
+            abort(404)
+        is_pdf = material['mimeType'] == 'application/pdf'
+        response = send_file(path, mimetype=material['mimeType'] if is_pdf else 'application/octet-stream', as_attachment=not is_pdf, download_name=pathlib.Path(material['name']).name)
+        response.headers['Cache-Control'] = 'private, no-store'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        return response

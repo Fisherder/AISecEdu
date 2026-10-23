@@ -3,8 +3,10 @@ import type { AICallFn } from '@/lib/generation/pipeline-types';
 import { createFallbackTeachingPlan, normalizeTeachingPlan } from '@/lib/security/teaching-plan';
 import { buildLessonAiCall } from '@/lib/server/lesson-generation';
 import type { TeachingPackagePlan, TeachingPlanInput } from '@/lib/types/teaching-plan';
+import { CINEMATIC_CAPABILITY_BRIEF } from '@/lib/cinematic/capabilities';
 
 const PLANNER_SYSTEM_PROMPT = `你是玄甲全局智能体的“课程内容总编排器”。
+${CINEMATIC_CAPABILITY_BRIEF}
 
 你的职责不是机械地生成固定清单，而是根据学习者、目标、课时、主题性质和期望活动，自主判断最合适的教学内容组合与顺序。
 

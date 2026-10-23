@@ -1,0 +1,175 @@
+.player {
+  width: 100%;
+  min-width: 0;
+  color: var(--cw-text);
+  background: var(--cw-bg);
+  font-family: 'Noto Sans SC', sans-serif;
+}
+.canvas {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16/9;
+  overflow: hidden;
+}
+.canvas :global(.base-element-text),
+.canvas :global(.base-element-shape),
+.canvas :global(.base-element-line) {
+  transition:
+    top 320ms ease,
+    left 320ms ease,
+    opacity 250ms ease;
+}
+.hotspot {
+  position: absolute;
+  border: 0;
+  background: transparent;
+  cursor: help;
+  border-radius: 8px;
+}
+.hotspot:hover,
+.hotspot:focus-visible {
+  outline: 3px solid var(--cw-accent);
+  outline-offset: 3px;
+}
+.player button:focus-visible {
+  outline: 3px solid var(--cw-accent);
+  outline-offset: 3px;
+}
+.timeline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--cw-muted);
+  padding: 14px 20px;
+}
+.timeline ol {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  gap: 8px;
+}
+.player button {
+  color: inherit;
+  font: inherit;
+}
+.timeline button,
+.explanation button,
+.check button {
+  border: 1px solid var(--cw-muted);
+  padding: 9px 13px;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.timeline button[data-step-state='current'],
+.options button[aria-pressed='true'] {
+  border-color: var(--cw-accent);
+  background: var(--cw-surface);
+  box-shadow: inset 0 -3px var(--cw-accent);
+}
+.timeline button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.explanation {
+  padding: 18px 28px;
+  border-top: 1px solid var(--cw-muted);
+  font-size: 18px;
+  line-height: 1.65;
+}
+.objects {
+  margin: 14px 28px;
+  font-size: 16px;
+}
+.objects summary {
+  cursor: pointer;
+}
+.objects > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.objects button {
+  padding: 9px 13px;
+  border: 1px solid var(--cw-muted);
+  border-radius: 6px;
+  background: var(--cw-surface);
+  cursor: pointer;
+}
+.explanation strong {
+  color: var(--cw-accent);
+}
+.explanation p,
+.feedback p {
+  margin: 8px 0;
+}
+.check {
+  margin: 20px 28px;
+  padding: 18px 0 0;
+  border: 0;
+  border-top: 1px solid var(--cw-muted);
+}
+.check legend {
+  font-size: 20px;
+  font-weight: 700;
+  padding-right: 12px;
+}
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.options button {
+  text-align: left;
+  min-height: 44px;
+  flex: 1 1 180px;
+}
+.feedback {
+  padding-top: 16px;
+  line-height: 1.65;
+}
+.sources {
+  margin: 18px 28px;
+  padding-bottom: 20px;
+  font-size: 14px;
+  color: var(--cw-muted);
+}
+.sources summary {
+  cursor: pointer;
+}
+@media (max-width: 700px) {
+  .timeline {
+    flex-wrap: wrap;
+    padding: 10px;
+    font-size: 13px;
+  }
+  .timeline ol {
+    order: 2;
+    flex-basis: 100%;
+  }
+  .check,
+  .sources {
+    margin: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas :global(*) {
+    transition: none !important;
+  }
+}
+@media print {
+  .player {
+    print-color-adjust: exact;
+  }
+  .timeline,
+  .explanation,
+  .check,
+  .sources,
+  .hotspot {
+    display: none;
+  }
+}

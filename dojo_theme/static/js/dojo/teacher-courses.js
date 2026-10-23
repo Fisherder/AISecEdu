@@ -43,8 +43,6 @@
     workspaceController: null,
     courseSearchTimer: null,
     progress: null,
-    learningBaseProgress: null,
-    learningLoadSequence: 0,
     learningScopeInitialized: false,
     scrollStateTimer: null,
     questionItems: [],
@@ -77,11 +75,8 @@
     demoDrag: null,
     demoExpandedModules: new Set(),
     demoChapterStateInitialized: false,
-    studentCohortIds: null,
-    selectedStudentId: null,
     selectedQuestionDraftId: null,
     questionDrawerReturnFocus: null,
-    studentDrawerReturnFocus: null,
     tabLoads: {},
   };
 
@@ -181,18 +176,6 @@
     demoManagementToggle: document.getElementById("cs-demo-manage-toggle"),
     demoManagementBar: document.getElementById("cs-demo-management-bar"),
     demoManagementStatus: document.getElementById("cs-demo-management-status"),
-    interventionEffectSummary: document.getElementById("cs-intervention-effect-summary"),
-    learningStudent: document.getElementById("cs-learning-student"),
-    learningModule: document.getElementById("cs-learning-module"),
-    learningQuestion: document.getElementById("cs-learning-question"),
-    learningRange: document.getElementById("cs-learning-range"),
-    learningScopeSummary: document.getElementById("cs-learning-scope-summary"),
-    learningScope: document.querySelector(".cs-learning-scope"),
-    studentDrawer: document.getElementById("cs-student-insight-drawer"),
-    studentDrawerPanel: document.querySelector("#cs-student-insight-drawer > aside"),
-    studentDrawerTitle: document.getElementById("cs-student-drawer-title"),
-    studentDrawerSubtitle: document.getElementById("cs-student-drawer-subtitle"),
-    studentDrawerBody: document.getElementById("cs-student-drawer-body"),
   };
 
   function unwrap(payload) {
@@ -734,7 +717,7 @@
       elements.questionManagementToggle.classList.toggle("is-active", state.questionManagement);
       elements.questionManagementToggle.setAttribute("aria-pressed", state.questionManagement ? "true" : "false");
       elements.questionManagementToggle.disabled = state.questionOrderSaving || state.questionBulkBusy;
-      if (label) label.textContent = state.questionManagement ? "完成管理" : "管理题目";
+      if (label) label.textContent = state.questionManagement ? "完成管理" : "批量管理";
       if (icon) icon.className = state.questionManagement ? "fas fa-check" : "fas fa-sliders-h";
     }
     const toolbar = document.querySelector("[data-content-toolbar='questions']");
@@ -748,12 +731,7 @@
   }
 
   function selectedQuestionDrafts() {
-    const drafts = questionDraftRows();
-    const visibleIds = new Set(drafts.map(item => String(item.draftId || item.id)));
-    state.selectedQuestionDraftIds.forEach(id => {
-      if (!visibleIds.has(String(id))) state.selectedQuestionDraftIds.delete(id);
-    });
-    return drafts.filter(item => state.selectedQuestionDraftIds.has(String(item.draftId || item.id)));
+    return window.AISecEduBulkSelection.reconcile(state.selectedQuestionDraftIds, questionDraftRows(), item => item.draftId || item.id);
   }
 
   function syncQuestionBatchControls() {
@@ -765,11 +743,12 @@
     }
     if (elements.questionSelectAll) {
       const allSelected = Boolean(drafts.length) && selected.length === drafts.length;
-      elements.questionSelectAll.textContent = allSelected ? "取消全选" : "全选草稿";
+      elements.questionSelectAll.textContent = allSelected ? "取消全选" : "全选当前列表";
       elements.questionSelectAll.disabled = disabled || !drafts.length;
       elements.questionSelectAll.setAttribute("aria-pressed", allSelected ? "true" : "false");
     }
     if (elements.questionBatchRevise) elements.questionBatchRevise.disabled = disabled || !selected.length;
+    document.getElementById("cs-question-clear-selection").disabled = disabled || !selected.length;
     if (elements.questionBatchPublish) elements.questionBatchPublish.disabled = disabled || !selected.length;
     elements.challengeList?.querySelectorAll("[data-question-draft-select]").forEach(input => {
       input.checked = state.selectedQuestionDraftIds.has(String(input.dataset.questionDraftSelect || ""));
@@ -817,12 +796,7 @@
   }
 
   function selectedCoursewareArtifacts() {
-    const rows = coursewareRows();
-    const deletableIds = new Set(rows.filter(coursewareCanDelete).map(item => String(item.id)));
-    state.selectedCoursewareIds.forEach(id => {
-      if (!deletableIds.has(String(id))) state.selectedCoursewareIds.delete(id);
-    });
-    return rows.filter(item => state.selectedCoursewareIds.has(String(item.id)) && coursewareCanDelete(item));
+    return window.AISecEduBulkSelection.reconcile(state.selectedCoursewareIds, coursewareRows(), item => item.id, coursewareCanDelete);
   }
 
   function syncCoursewareManagementUi() {
@@ -834,7 +808,7 @@
       elements.coursewareManagementToggle.classList.toggle("is-active", state.coursewareManagement);
       elements.coursewareManagementToggle.setAttribute("aria-pressed", state.coursewareManagement ? "true" : "false");
       elements.coursewareManagementToggle.disabled = state.coursewareManagementPreparing || state.coursewareBulkBusy;
-      if (label) label.textContent = state.coursewareManagementPreparing ? "正在准备" : state.coursewareManagement ? "完成管理" : "管理课件";
+      if (label) label.textContent = state.coursewareManagementPreparing ? "正在准备" : state.coursewareManagement ? "完成管理" : "批量管理";
       if (icon) icon.className = state.coursewareManagementPreparing ? "fas fa-spinner fa-spin" : state.coursewareManagement ? "fas fa-check" : "fas fa-sliders-h";
     }
     const deletable = coursewareRows().filter(coursewareCanDelete);
@@ -843,11 +817,12 @@
     if (elements.coursewareSelectionStatus) elements.coursewareSelectionStatus.textContent = `已选 ${selected.length} 份未发布课件`;
     if (elements.coursewareSelectAll) {
       const allSelected = Boolean(deletable.length) && selected.length === deletable.length;
-      elements.coursewareSelectAll.textContent = allSelected ? "取消全选" : "全选可删除";
+      elements.coursewareSelectAll.textContent = allSelected ? "取消全选" : "全选当前列表";
       elements.coursewareSelectAll.disabled = disabled || !deletable.length;
       elements.coursewareSelectAll.setAttribute("aria-pressed", allSelected ? "true" : "false");
     }
     if (elements.coursewareBatchDelete) elements.coursewareBatchDelete.disabled = disabled || !selected.length;
+    document.getElementById("cs-courseware-clear-selection").disabled = disabled || !selected.length;
     if (elements.coursewareManagementStatus) {
       elements.coursewareManagementStatus.textContent = state.coursewareBulkStatus || (state.coursewareBulkBusy ? "正在删除…" : `${deletable.length} 份可删除`);
     }
@@ -886,6 +861,7 @@
 
   async function runCoursewareBatchAction(action) {
     if (!state.coursewareManagement || state.coursewareBulkBusy) return;
+    if (action === "clear") {state.selectedCoursewareIds.clear(); syncCoursewareManagementUi(); return;}
     const deletable = coursewareRows().filter(coursewareCanDelete);
     const selected = selectedCoursewareArtifacts();
     if (action === "select-all") {
@@ -933,7 +909,7 @@
   }
 
   function demoArtifacts() {
-    const demoTypes = new Set(["simulation", "attack-defense-scene", "classroom-scenario"]);
+    const demoTypes = new Set(["simulation", "attack-defense-scene", "classroom-scenario", "debate"]);
     return state.demoArtifacts.length || state.contentPaging.demos.total
       ? state.demoArtifacts
       : state.artifacts.filter(item => demoTypes.has(String(item.type || "").toLowerCase()));
@@ -1270,8 +1246,10 @@
   function artifactTypeLabel(type) {
     return ({
       "lesson-plan": "教案",
+      "learning-flow": "流程探究式学习",
       "slide-deck": "课件",
       simulation: "模拟演示",
+      debate: "AI 辩论",
       "attack-defense-scene": "攻防演示",
       "classroom-scenario": "课堂演示",
     })[String(type || "").toLowerCase()] || "教学内容";
@@ -1529,6 +1507,22 @@
     }, 260);
   }
 
+  async function loadCourseAssignments(reference) {
+    const list = document.getElementById("cs-assignment-list");
+    if (!list) return;
+    list.textContent = "正在读取测验与作业…";
+    const library = document.getElementById("cs-assignment-library");
+    if (library) library.href = `/teacher/library?dojo=${encodeURIComponent(reference)}`;
+    try {
+      const result = unwrap(await api.request(`/coursework/dojos/${encodeURIComponent(reference)}/assignments`));
+      if (String(state.course?.referenceId || state.course?.id) !== String(reference)) return;
+      const rows = result.assignments || [];
+      list.innerHTML = rows.length ? rows.map(item => `<article class="cs-library-row is-managed"><a class="cs-managed-main" href="/teacher/assignments/${encodeURIComponent(item.id)}"><span class="cs-library-icon"><i class="fas fa-tasks" aria-hidden="true"></i></span><span><strong>${escape(item.title)}</strong><small>${item.kind === "QUIZ" ? "测验" : "作业"} · ${escape(statusLabel(item.status))} · ${item.itemCount} 道题 · ${escape(moduleName(item.moduleIndex))}</small></span><em>检查与编辑 <i class="fas fa-arrow-right" aria-hidden="true"></i></em></a></article>`).join("") : '<p class="cs-empty">还没有测验或作业，可从素材库选用，或通过 AI 共创创建。</p>';
+    } catch (error) {
+      if (String(state.course?.referenceId || state.course?.id) === String(reference)) list.textContent = error.message || "测验与作业暂时未能加载，请重新打开课程。";
+    }
+  }
+
   function artifactDetailHref(artifactId) {
     const returnUrl = new URL(window.location.href);
     returnUrl.searchParams.set("selectedId", String(artifactId));
@@ -1714,11 +1708,13 @@
   function renderSimulations() {
     const labels = {
       simulation: "模拟演示",
+      debate: "AI 辩论",
       "attack-defense-scene": "攻防演示",
       "classroom-scenario": "课堂场景",
     };
     const icons = {
       simulation: "fa-project-diagram",
+      debate: "fa-comments",
       "attack-defense-scene": "fa-shield-alt",
       "classroom-scenario": "fa-chalkboard",
     };
@@ -2157,9 +2153,9 @@
     ].filter(Boolean).join(" · ");
     const main = isDraft
       ? `<button class="cs-managed-main" type="button" data-open-question-draft="${escape(item.draftId || item.id)}">
-          <span><i class="fas fa-file-alt" aria-hidden="true"></i></span>
-          <span><strong>${escape(title)}</strong><small>${escape(meta)}</small><p>${escape(item.summary || "暂无题目摘要")}</p></span>
-          <em>审阅草稿 <i class="fas fa-arrow-right" aria-hidden="true"></i></em>
+          <span><i class="fas fa-flag" aria-hidden="true"></i></span>
+          <span><strong>${escape(title)}</strong><small>未发布 · ${escape(meta)}</small><p>${escape(item.summary || "暂无题目摘要")}</p></span>
+          <em>打开题目 <i class="fas fa-arrow-right" aria-hidden="true"></i></em>
         </button>`
       : `<a class="cs-managed-main" href="${escape(item.href || "#")}">
           <span><i class="fas fa-flag" aria-hidden="true"></i></span>
@@ -2183,9 +2179,9 @@
         <span aria-hidden="true"><i class="fas fa-check"></i></span>
       </label>
       <button class="cs-managed-main" type="button" data-open-question-draft="${escape(item.draftId || item.id)}">
-        <span><i class="fas fa-file-alt" aria-hidden="true"></i></span>
+        <span><i class="fas fa-flag" aria-hidden="true"></i></span>
         <span><strong>${escape(title)}</strong><small>未发布 · ${escape(statusLabel(item.state || item.status))} · 版本 ${Number(item.revision || 1)}</small></span>
-        <em>审阅草稿 <i class="fas fa-arrow-right" aria-hidden="true"></i></em>
+        <em>打开题目 <i class="fas fa-arrow-right" aria-hidden="true"></i></em>
       </button>
       ${managementButtons("draft", item.draftId || item.id, title, {"module-index": item.moduleIndex})}
     </article>`;
@@ -2420,10 +2416,16 @@
   function renderQuestionDraftDetail(draft) {
     const spec = draft.spec && typeof draft.spec === "object" ? draft.spec : {};
     const validation = draft.validation && typeof draft.validation === "object" ? draft.validation : {};
+    const releaseGate = spec.releaseGate && typeof spec.releaseGate === "object" ? spec.releaseGate : null;
     const status = String(draft.status || "DRAFT").toUpperCase();
     const validationStatus = String(validation.status || "PENDING").toUpperCase();
     const active = ["BUILDING", "GENERATING", "QUEUED", "RUNNING", "VALIDATING"].includes(status);
-    const publishReady = ["PASS", "PASSED"].includes(validationStatus) && !active;
+    const releaseReady = !releaseGate || ["PASS", "PASSED", "APPROVED"].includes(String(releaseGate.status || "").toUpperCase());
+    const publishReady = ["PASS", "PASSED"].includes(validationStatus) && releaseReady && !active;
+    const runtimeReady = draft.runtime?.available === true;
+    const linked = draft.challenge && typeof draft.challenge === "object" ? draft.challenge : null;
+    const sourceMaterials = Array.isArray(draft.sourceMaterials) ? draft.sourceMaterials : [];
+    const sourceMarkup = sourceMaterials.length ? `<section class="cs-question-detail-section"><span class="hub-kicker">教师资料</span><h3>原始课程资料</h3><p>保留原始文件与来源摘要，仅本课程教师可查看。平时作业要求以正文文本提供，已移除废弃助手链接。</p><ul>${sourceMaterials.map(item => `<li><a href="${escape(item.url)}" target="_blank" rel="noopener">${escape(item.name)}</a> · ${escape(item.sha256.slice(0, 12))}</li>`).join("")}</ul></section>` : "";
     const objectives = Array.isArray(spec.objectives) ? spec.objectives : [];
     const checks = Array.isArray(validation.checks) ? validation.checks.slice(0, 8) : [];
     const objectiveMarkup = objectives.length
@@ -2436,7 +2438,12 @@
           return `<li><span class="is-${tone}">${escape(["PASS", "PASSED"].includes(checkStatus) ? "通过" : ["WARN", "WARNING"].includes(checkStatus) ? "提醒" : ["BLOCK", "FAIL", "FAILED"].includes(checkStatus) ? "阻断" : "待检查")}</span><div><strong>${escape(item.name || item.phase || item.category || "发布检查")}</strong><p>${escape(item.message || item.summary || "检查结果已记录。")}</p></div></li>`;
         }).join("")
       : '<li class="is-empty">尚无逐项检查结果；可以启动一次发布前检查。</li>';
-    elements.questionDrawerTitle.textContent = spec.name || draft.brief || "未命名题目草稿";
+    const releaseRequirements = Array.isArray(releaseGate?.requirements) ? releaseGate.requirements : [];
+    const releaseMarkup = releaseGate
+      ? `<section class="cs-question-detail-section"><span class="hub-kicker">发布准备</span><h3>${escape(String(releaseGate.status || "").toUpperCase() === "APPROVED" ? "发布准备已批准" : "仍需完成发布准备")}</h3><p>${escape(releaseGate.summary || "环境、核验器与教学审核完成后才能发布。")}</p>${releaseRequirements.length ? `<ul class="cs-question-checks">${releaseRequirements.map(item => { const itemStatus = String(item?.status || "PENDING").toUpperCase(); const tone = ["PASS", "PASSED", "APPROVED"].includes(itemStatus) ? "success" : ["WARN", "WARNING"].includes(itemStatus) ? "warning" : "danger"; return `<li><span class="is-${tone}">${escape(["PASS", "PASSED", "APPROVED"].includes(itemStatus) ? "完成" : itemStatus === "BLOCK" ? "阻断" : "待办")}</span><div><strong>${escape(item?.label || item?.name || "发布条件")}</strong><p>${escape(item?.detail || item?.message || "待教师确认。")}</p></div></li>`; }).join("")}</ul>` : ""}</section>`
+      : "";
+    const publishHint = active ? "题目正在处理，暂不能发布" : !releaseReady ? "请先完成“发布准备”中的环境、核验器和教学审核" : !["PASS", "PASSED"].includes(validationStatus) ? "通过发布前检查后才能发布" : "发布到当前课程";
+    elements.questionDrawerTitle.textContent = linked?.name || spec.name || draft.brief || "未命名题目草稿";
     elements.questionDrawerSubtitle.textContent = `${statusLabel(status)} · 版本 ${Number(draft.revision || 1)} · 更新于 ${formatDate(draft.updated, true)}`;
     elements.questionDrawerBody.innerHTML = `
       <section class="cs-question-detail-summary">
@@ -2445,15 +2452,26 @@
         <div><small>练习方式</small><strong>${escape(exerciseModeLabel(spec.exerciseMode || spec.mode) || "在线实操")}</strong></div>
         <div><small>难度级别</small><strong>${escape(spec.difficulty || draft.level || "未设置")}</strong></div>
       </section>
-      <section class="cs-question-detail-section"><span class="hub-kicker">学生可见内容</span><h3>题目概述</h3><p>${escape(spec.description || draft.brief || "尚未填写题目描述。")}</p></section>
+      ${linked ? `<section class="cs-question-detail-section cs-question-linked-challenge">
+        <span class="hub-kicker">题目环境</span><h3>${escape(linked.name || spec.name || "题目")}</h3>
+        <p>${escape(linked.description || spec.description || "尚未填写题目描述。")}</p>
+        <p class="cs-question-detail-empty"><i class="fas fa-desktop" aria-hidden="true"></i> 当前草稿已关联到隐藏题目（${escape(linked.moduleName || linked.moduleId || "当前章节")}）；可从下方进入题目页面并启动环境。</p>
+        <div class="cs-question-detail-actions" role="group" aria-label="题目入口">
+          <a class="hub-button is-primary" href="${escape(linked.href)}"><i class="fas fa-desktop" aria-hidden="true"></i>打开题目并启动环境</a>
+        </div>
+      </section>` : `<section class="cs-question-detail-section"><span class="hub-kicker">学生可见内容</span><h3>题目概述</h3><p>${escape(spec.description || draft.brief || "尚未填写题目描述。")}</p></section>`}
       <section class="cs-question-detail-section"><span class="hub-kicker">教学目标</span><h3>希望学生掌握什么</h3>${objectiveMarkup}</section>
       <section class="cs-question-detail-section"><span class="hub-kicker">质量证据</span><h3>发布前检查</h3><ul class="cs-question-checks">${checkMarkup}</ul></section>
+      ${releaseMarkup}
+      ${sourceMarkup}
       <p class="cs-question-private-note"><i class="fas fa-lock" aria-hidden="true"></i>这里只展示教师决策所需摘要；标准答案、验证密钥、模型提示词和内部运行日志不会出现在课程列表或学生预览中。</p>
       <div class="cs-question-detail-actions" role="group" aria-label="题目草稿操作">
+        ${!active ? `<a class="hub-button is-secondary" href="/teacher/library?sourceKind=practice&sourceId=${encodeURIComponent(draft.id)}"><i class="fas fa-book" aria-hidden="true"></i>存入素材库</a>` : ""}
+        ${runtimeReady ? `<button class="hub-button is-secondary" type="button" data-question-action="runtime" data-draft-id="${escape(draft.id)}"><i class="fas fa-terminal" aria-hidden="true"></i>试运行</button>` : ""}
         <button class="hub-button is-secondary" type="button" data-question-action="preview" data-draft-id="${escape(draft.id)}"><i class="fas fa-eye" aria-hidden="true"></i>学生视图</button>
         <button class="hub-button is-secondary" type="button" data-question-action="revise" data-draft-id="${escape(draft.id)}"${active ? " disabled" : ""}><i class="fas fa-pen" aria-hidden="true"></i>提出修订</button>
         <button class="hub-button is-secondary" type="button" data-question-action="validate" data-draft-id="${escape(draft.id)}"${active ? " disabled" : ""}><i class="fas fa-shield-alt" aria-hidden="true"></i>重新检查</button>
-        <button class="hub-button is-primary" type="button" data-question-action="publish" data-draft-id="${escape(draft.id)}"${publishReady ? "" : " disabled"} title="${publishReady ? "发布到当前课程" : "通过发布前检查后才能发布"}"><i class="fas fa-paper-plane" aria-hidden="true"></i>发布题目</button>
+        <button class="hub-button is-primary" type="button" data-question-action="publish" data-draft-id="${escape(draft.id)}"${publishReady ? "" : " disabled"} title="${escape(publishHint)}"><i class="fas fa-paper-plane" aria-hidden="true"></i>发布题目</button>
         <button class="hub-button is-danger" type="button" data-question-action="delete" data-draft-id="${escape(draft.id)}"${active ? " disabled" : ""}><i class="fas fa-trash-alt" aria-hidden="true"></i>删除草稿</button>
       </div>`;
   }
@@ -2525,7 +2543,11 @@
     setCourseWorkspaceInert(true, elements.questionDrawer);
     updateQuestionSelectionUrl(draftId);
     window.requestAnimationFrame(() => elements.questionDrawerPanel?.focus({preventScroll: true}));
-    await loadQuestionDraftIntoDrawer(draftId);
+    const draft = await loadQuestionDraftIntoDrawer(draftId);
+    if (draft && query.get("studentPreview") === "1") {
+      query.delete("studentPreview");
+      await runQuestionDrawerAction("preview", draftId, null);
+    }
   }
 
   function closeQuestionDrawer(options) {
@@ -2563,6 +2585,17 @@
     if (action === "back") {
       await loadQuestionDraftIntoDrawer(draftId);
       window.requestAnimationFrame(() => elements.questionDrawerBody?.querySelector('[data-question-action="preview"]')?.focus({preventScroll: true}));
+      return;
+    }
+    if (action === "runtime") {
+      const confirmed = await window.AISecEduUI.confirm("试运行将切换本账号当前实验环境，请先保存代码。题目仍是草稿，学生不可访问。", {title: "试运行草稿", confirmLabel: "打开环境"});
+      if (!confirmed) return;
+      setQuestionDrawerBusy(trigger, "正在准备环境…");
+      try {
+        const payload = await api.json("POST", `/learning/drafts/${encodeURIComponent(draftId)}/runtime`, {});
+        if (payload.success !== true) throw new Error(payload.error || "环境启动失败");
+        window.location.assign(payload.workspaceUrl);
+      } catch (error) { showNotice(error.message, "danger"); restoreQuestionDrawerButton(trigger); }
       return;
     }
     if (action === "preview") {
@@ -2628,6 +2661,7 @@
         window.AISecEduUI?.notify("题目发布成功。", "success");
         return;
       }
+      if (payload.completed) { await loadQuestionDraftIntoDrawer(draftId); showNotice("运行题包和发布条件已复核，题目仍是草稿。", "success"); return; }
       await loadQuestionContent({resetPage: true});
       elements.questionDrawerSubtitle.textContent = action === "revise" ? "修订任务已启动，可在任务中心继续跟踪" : "发布前检查已启动，可在任务中心继续跟踪";
       window.AISecEduUI?.notify(action === "revise" ? "题目修订任务已启动。" : "发布前检查已启动。", "success");
@@ -2653,6 +2687,8 @@
   }
 
   async function runQuestionBatchAction(action, trigger) {
+    if (state.questionBulkBusy || state.questionOrderSaving) return;
+    if (action === "clear") {state.selectedQuestionDraftIds.clear(); syncQuestionBatchControls(); return;}
     if (action === "select-all") {
       toggleAllQuestionDrafts();
       return;
@@ -2753,570 +2789,25 @@
     }
   }
 
-  function learningScopeValues() {
-    return {
-      studentId: elements.learningStudent?.value || "",
-      moduleIndex: elements.learningModule?.value || "",
-      challengeId: elements.learningQuestion?.value || "",
-      timeRange: elements.learningRange?.value || "12w",
-    };
-  }
-
-  function learningScopeParams(values) {
-    const scope = values || learningScopeValues();
-    const params = new URLSearchParams({timeRange: scope.timeRange || "12w"});
-    if (scope.studentId) params.set("studentId", scope.studentId);
-    if (scope.moduleIndex !== "") params.set("moduleIndex", scope.moduleIndex);
-    if (scope.challengeId) params.set("challengeId", scope.challengeId);
-    return params;
-  }
-
-  function learningTimeLabel(value) {
-    return ({
-      "7d": "过去 7 天",
-      "30d": "过去 30 天",
-      "90d": "过去 90 天",
-      "12w": "过去 12 周",
-      lifetime: "课程全部时间",
-    })[value] || "过去 12 周";
-  }
-
-  function learningOptionValue(select, fallback) {
-    const selected = select?.selectedOptions?.[0];
-    return selected?.textContent?.trim() || fallback;
-  }
-
-  function renderLearningQuestionOptions(preferredValue) {
-    if (!elements.learningQuestion) return;
-    const base = state.learningBaseProgress || state.progress || {};
-    const moduleValue = elements.learningModule?.value || "";
-    const questions = (base.challengeDiagnostics || []).filter(item =>
-      moduleValue === "" || String(item.moduleIndex) === moduleValue
-    );
-    const current = preferredValue == null ? elements.learningQuestion.value : String(preferredValue || "");
-    elements.learningQuestion.innerHTML = '<option value="">全部题目</option>' + questions.map(item =>
-      `<option value="${escape(item.id)}">${escape(item.moduleName || "未分章")} · ${escape(item.name || "未命名题目")}</option>`
-    ).join("");
-    elements.learningQuestion.value = Array.from(elements.learningQuestion.options).some(option => option.value === current) ? current : "";
-  }
-
-  function populateLearningScopeControls(values) {
-    const base = state.learningBaseProgress || state.progress || {};
-    const desired = values || learningScopeValues();
-    if (elements.learningStudent) {
-      elements.learningStudent.innerHTML = '<option value="">全班学生</option>' + (base.students || []).map(item =>
-        `<option value="${Number(item.userId)}">${escape(item.name || `学生 ${item.userId}`)}</option>`
-      ).join("");
-      elements.learningStudent.value = Array.from(elements.learningStudent.options).some(option => option.value === String(desired.studentId || "")) ? String(desired.studentId || "") : "";
-    }
-    if (elements.learningModule) {
-      elements.learningModule.innerHTML = '<option value="">全部章节</option>' + ((state.course && state.course.modules) || []).map(module =>
-        `<option value="${Number(module.index)}">${escape(module.name || `章节 ${Number(module.index) + 1}`)}</option>`
-      ).join("");
-      elements.learningModule.value = Array.from(elements.learningModule.options).some(option => option.value === String(desired.moduleIndex ?? "")) ? String(desired.moduleIndex ?? "") : "";
-    }
-    renderLearningQuestionOptions(desired.challengeId);
-    if (elements.learningRange) {
-      const range = String(desired.timeRange || "12w");
-      elements.learningRange.value = Array.from(elements.learningRange.options).some(option => option.value === range) ? range : "12w";
-    }
-  }
-
-  function restoreLearningScopeFromUrl() {
-    const current = new URL(window.location.href).searchParams;
-    const values = {
-      studentId: current.get("learningStudent") || "",
-      moduleIndex: current.get("learningModule") || "",
-      challengeId: current.get("learningQuestion") || "",
-      timeRange: current.get("learningRange") || "12w",
-    };
-    populateLearningScopeControls(values);
-    state.learningScopeInitialized = true;
-    return learningScopeValues();
-  }
-
-  function syncLearningScopeUrl() {
-    const values = learningScopeValues();
-    const next = new URL(window.location.href);
-    const mappings = {
-      learningStudent: values.studentId,
-      learningModule: values.moduleIndex,
-      learningQuestion: values.challengeId,
-      learningRange: values.timeRange,
-    };
-    Object.entries(mappings).forEach(([key, value]) => {
-      if (value) {
-        next.searchParams.set(key, value);
-        query.set(key, value);
-      } else {
-        next.searchParams.delete(key);
-        query.delete(key);
-      }
-    });
-    history.replaceState(null, "", next);
-  }
-
-  function renderLearningScopeSummary() {
-    if (!elements.learningScopeSummary) return;
-    const values = learningScopeValues();
-    const parts = [
-      learningOptionValue(elements.learningStudent, "全班学生"),
-      learningOptionValue(elements.learningModule, "全部章节"),
-      learningOptionValue(elements.learningQuestion, "全部题目"),
-      learningTimeLabel(values.timeRange),
-    ];
-    elements.learningScopeSummary.textContent = parts.join(" · ");
-  }
-
-  function boundedPercent(value) {
-    return Math.max(0, Math.min(100, Number(value) || 0));
-  }
-
-  function riskView(level) {
-    return ({
-      high: {label: "优先干预", tone: "danger", icon: "fa-exclamation-triangle"},
-      medium: {label: "持续关注", tone: "warning", icon: "fa-eye"},
-      low: {label: "进展稳定", tone: "success", icon: "fa-check-circle"},
-      unknown: {label: "证据不足", tone: "neutral", icon: "fa-question-circle"},
-    })[level] || {label: "待判断", tone: "neutral", icon: "fa-question-circle"};
-  }
-
-  function activityRecency(item) {
-    if (item.daysInactive == null) return "尚无活动";
-    if (Number(item.daysInactive) === 0) return "今天有活动";
-    if (Number(item.daysInactive) === 1) return "昨天有活动";
-    return `${Number(item.daysInactive)} 天前`;
-  }
-
-  function filteredStudents() {
-    const students = (state.progress && state.progress.students) || [];
-    const search = String(document.getElementById("cs-student-search")?.value || "").trim().toLowerCase();
-    const risk = document.getElementById("cs-student-risk-filter")?.value || "all";
-    const evidence = document.getElementById("cs-student-evidence-filter")?.value || "all";
-    return students.filter(item => {
-      if (search && !String(item.name || "").toLowerCase().includes(search)) return false;
-      if (risk !== "all" && item.riskLevel !== risk) return false;
-      if (evidence !== "all" && item.evidenceLevel !== evidence) return false;
-      if (state.studentCohortIds && !state.studentCohortIds.has(Number(item.userId))) return false;
-      return true;
-    });
-  }
-
-  function renderStudents() {
-    const rows = filteredStudents();
-    const table = document.getElementById("cs-student-table");
-    const count = document.getElementById("cs-student-result-count");
-    const clear = document.getElementById("cs-clear-cohort-filter");
-    if (count) count.textContent = `${rows.length} 名学生`;
-    if (clear) clear.hidden = !state.studentCohortIds;
-    if (!table) return;
-    table.innerHTML = rows.length ? rows.map(item => {
-      const completion = Math.round(Number(item.verifiedCompletion || 0) * 100);
-      const mastery = item.masteryScore == null ? null : Math.round(Number(item.masteryScore));
-      const evidence = Math.round(Number(item.evidenceConfidence || 0));
-      const risk = riskView(item.riskLevel);
-      const weakSkills = (item.weakSkills || []).slice(0, 2);
-      const weakCriteria = (item.weakCriteria || []).filter(gap => Number(gap.mastery) < 70).slice(0, 1);
-      const weakMarkup = weakSkills.length
-        ? weakSkills.map(skill => `<span>${escape(skill.label)} ${Math.round(Number(skill.mastery || 0))}%</span>`).join("")
-        : weakCriteria.length
-          ? `<span>${escape(weakCriteria[0].label)}</span>`
-          : '<span class="is-muted">尚未形成能力评估</span>';
-      const signals = item.activitySignals || {};
-      return `<tr data-student-id="${Number(item.userId)}" tabindex="0" aria-label="查看${escape(item.name)}的学情详情">
-        <td><span class="cs-student-identity"><strong>${escape(item.name)}</strong><em class="cs-risk-pill is-${risk.tone}"><i class="fas ${risk.icon}" aria-hidden="true"></i>${risk.label}</em>${(item.riskSignals || [])[0] ? `<small>${escape(item.riskSignals[0].label)}</small>` : ""}</span></td>
-        <td>${mastery == null ? '<span class="cs-unobserved">未观测</span>' : `<span class="cs-metric-with-bar"><strong>${mastery}%</strong><span><i style="width:${boundedPercent(mastery)}%"></i></span><small>${(item.weakSkills || []).length} 个已评估维度</small></span>`}</td>
-        <td><span class="cs-metric-with-bar"><strong>${completion}%</strong><span><i style="width:${boundedPercent(completion)}%"></i></span><small>${Number(item.requiredSolved || 0)} / ${Number(item.requiredTotal || 0)} 道必修题</small></span></td>
-        <td><span class="cs-weak-tags">${weakMarkup}</span></td>
-        <td><span class="cs-process-brief"><strong>${Number(item.attemptCount || 0)} 次尝试</strong><small>${Number(signals.failedCommands || 0)} 次失败 · ${Number(signals.resets || 0)} 次重置${item.averageProcessScore == null ? "" : ` · 过程 ${Math.round(Number(item.averageProcessScore))} 分`}</small></span></td>
-        <td><span class="cs-evidence-meter is-${escape(item.evidenceLevel || "不足")}"><strong>${escape(item.evidenceLevel || "不足")} · ${evidence}%</strong><small>${Number(item.evidenceCount || 0)} 条过程事件</small></span></td>
-        <td><span class="cs-last-activity"><strong>${escape(activityRecency(item))}</strong><small>${escape(formatDate(item.lastActivity, true))}</small></span></td>
-        <td><button class="cs-open-student" type="button" data-open-student="${Number(item.userId)}" aria-label="打开${escape(item.name)}的学情详情"><i class="fas fa-arrow-right" aria-hidden="true"></i></button></td>
-      </tr>`;
-    }).join("") : '<tr><td colspan="8"><div class="cs-empty"><strong>没有匹配的学生</strong><br>可清除筛选，或等待学生产生可核验的学习证据。</div></td></tr>';
-  }
-
-  function renderLearningTimeline() {
-    const target = document.getElementById("cs-learning-timeline");
-    if (!target) return;
-    const rows = (state.progress && state.progress.timeline) || [];
-    const meta = (state.progress && state.progress.timelineMeta) || {};
-    const maximumEvidence = Math.max(1, ...rows.map(item => Number(item.evidence || 0)));
-    const maximumSolves = Math.max(1, ...rows.map(item => Number(item.solves || 0)));
-    const totalEvidence = rows.reduce((sum, item) => sum + Number(item.evidence || 0), 0);
-    const totalSolves = rows.reduce((sum, item) => sum + Number(item.solves || 0), 0);
-    const rangeLabel = meta.label || learningTimeLabel(learningScopeValues().timeRange);
-    const range = document.getElementById("cs-timeline-range");
-    if (range) range.textContent = rangeLabel;
-    const subtitle = document.getElementById("cs-timeline-subtitle");
-    if (subtitle) subtitle.textContent = `${rangeLabel}共形成 ${totalEvidence} 条过程证据、${totalSolves} 次题目通过；柱高分别在各自量尺内比较。${meta.truncated ? "趋势图仅展示最近 52 周，汇总指标仍使用完整所选范围。" : ""}`;
-    target.style.setProperty("--timeline-columns", String(Math.max(1, rows.length)));
-    target.setAttribute("aria-label", `${rangeLabel}的学习活动趋势，共 ${totalEvidence} 条过程证据、${totalSolves} 次题目通过`);
-    target.innerHTML = rows.length ? rows.map(item => {
-      const evidenceHeight = Number(item.evidence || 0) ? Math.max(5, 100 * Number(item.evidence) / maximumEvidence) : 0;
-      const solveHeight = Number(item.solves || 0) ? Math.max(5, 100 * Number(item.solves) / maximumSolves) : 0;
-      const title = `${item.label}：${Number(item.activeStudents || 0)} 名活跃学生，${Number(item.attempts || 0)} 次尝试，${Number(item.evidence || 0)} 条过程证据，${Number(item.solves || 0)} 次通过，${Number(item.assessments || 0)} 次评估`;
-      return `<span class="cs-timeline-week" title="${escape(title)}"><span class="cs-timeline-value">${Number(item.activeStudents || 0)}</span><span class="cs-timeline-bars"><i class="is-activity" style="height:${evidenceHeight}%"></i><i class="is-solve" style="height:${solveHeight}%"></i></span><small>${escape(item.label)}</small></span>`;
-    }).join("") : '<div class="cs-empty">暂无可展示的时间序列。</div>';
-  }
-
-  function renderAbilityOverview() {
-    const target = document.getElementById("cs-ability-overview");
-    if (!target) return;
-    const rows = (state.progress && state.progress.abilityOverview) || [];
-    target.innerHTML = rows.length ? rows.map(item => {
-      const observed = Number(item.studentsWithEvidence || 0);
-      const available = item.averageMastery != null && observed >= 3;
-      const mastery = available ? Math.round(Number(item.averageMastery)) : 0;
-      return `<article class="cs-ability-row${available ? "" : " is-unobserved"}"><header><strong>${escape(item.label)}</strong><span>${available ? `${mastery}%` : observed ? "证据不足" : "未观测"}</span></header><span class="cs-ability-track"><i style="width:${available ? boundedPercent(mastery) : 0}%"></i></span><footer><span>${observed} / ${Number(item.studentCount || 0)} 人有证据</span><span>${available ? `${Number(item.lowMasteryCount || 0)} 人低于 60%` : "至少 3 人后展示班级均值"}</span></footer></article>`;
-    }).join("") : '<div class="cs-empty">完成一次形成性评估后，这里会呈现班级能力掌握。</div>';
-  }
-
-  function renderBottlenecks() {
-    const target = document.getElementById("cs-bottleneck-list");
-    if (!target) return;
-    const rows = ((state.progress && state.progress.challengeDiagnostics) || []).filter(item => Number(item.attemptedStudents || 0) > 0).slice(0, 6);
-    target.innerHTML = rows.length ? rows.map((item, index) => {
-      const success = Math.round(Number(item.attemptSuccessRate || 0) * 100);
-      const insufficient = item.diagnosticStatus === "insufficient";
-      const gap = (item.commonGaps || [])[0];
-      const status = insufficient ? "证据不足" : item.diagnosticStatus === "attention" ? "需干预" : item.diagnosticStatus === "watch" ? "观察" : "稳定";
-      const result = insufficient
-        ? `仅 ${Number(item.attemptedStudents || 0)} 人尝试 · 至少 ${Number(item.minimumReliableSample || 3)} 人后展示成功率`
-        : `尝试后通过 ${success}% · ${Number(item.solvedStudents || 0)} / ${Number(item.attemptedStudents || 0)} 人`;
-      return `<article class="cs-bottleneck-item is-${escape(item.diagnosticStatus)}"><span class="cs-bottleneck-rank">${String(index + 1).padStart(2, "0")}</span><div><header><span><small>${escape(item.moduleName)}</small><strong>${escape(item.name)}</strong></span><em>${status}</em></header><span class="cs-bottleneck-track"><i style="width:${insufficient ? 0 : boundedPercent(success)}%"></i></span><footer><span>${escape(result)}</span><span>${Number(item.strugglingStudents || 0)} 人反复试错${gap ? ` · 缺口：${escape(gap.label)}` : ""} · 置信度 ${Math.round(Number(item.diagnosticConfidence || 0) * 100)}%</span></footer></div></article>`;
-    }).join("") : '<div class="cs-empty">尚无学生尝试题目。当前不展示不稳定的题目成功率。</div>';
-  }
-
-  function renderInterventions() {
-    const target = document.getElementById("cs-intervention-list");
-    if (!target) return;
-    const tracking = (state.progress && state.progress.interventionTracking) || {};
-    if (elements.interventionEffectSummary) {
-      elements.interventionEffectSummary.innerHTML = Number(tracking.totalCount || 0)
-        ? `<span><small>进行中</small><strong>${Number(tracking.activeCount || 0)}</strong></span><span class="is-ready"><small>待复查</small><strong>${Number(tracking.readyForReviewCount || 0)}</strong></span><span><small>已复查</small><strong>${Number(tracking.reviewedCount || 0)}</strong></span><span class="is-improving"><small>同期改善</small><strong>${Number(tracking.improvingCount || 0)}</strong></span><p>${escape(tracking.caveat || "同期变化用于支持复查，不作因果归因。")}</p>`
-        : '<div><i class="fas fa-clipboard-check" aria-hidden="true"></i><span><strong>尚未记录教学干预</strong><small>打开学生详情即可冻结基线，并在约定时间复查变化。</small></span></div>';
-    }
-    const rows = (state.progress && state.progress.interventions) || [];
-    target.innerHTML = rows.length ? rows.map(item => `<article class="cs-intervention-item is-${escape(item.tone)}"><span><i class="fas ${item.tone === "danger" ? "fa-exclamation-triangle" : item.tone === "success" ? "fa-check-circle" : item.tone === "warning" ? "fa-pause-circle" : "fa-lightbulb"}" aria-hidden="true"></i></span><div><header><strong>${escape(item.title)}</strong><em>${Number(item.count || 0)} 人</em></header><p>${escape(item.reason)}</p><small><b>建议：</b>${escape(item.action)}</small><button type="button" data-intervention-id="${escape(item.id)}">查看这 ${Number(item.count || 0)} 名学生 <i class="fas fa-arrow-right" aria-hidden="true"></i></button></div></article>`).join("") : '<div class="cs-empty"><strong>当前没有明确的干预队列</strong><br>证据增加后，系统会根据透明规则生成可执行建议。</div>';
-  }
-
-  function renderDataQuality() {
-    const quality = (state.progress && state.progress.dataQuality) || {};
-    const target = document.getElementById("cs-data-quality");
-    if (!target) return;
-    const scopeLabel = learningTimeLabel(quality.scope?.timeRange || learningScopeValues().timeRange);
-    document.getElementById("cs-data-quality-summary").textContent = `${Number(quality.coveredStudents || 0)} / ${Number(quality.studentCount || 0)} 名学生具备基础证据 · ${scopeLabel} · 生成于 ${formatDate(quality.generatedAt, true)}`;
-    const metricLabels = {
-      studentCount: "课程学生",
-      evidenceCoverage: "证据覆盖",
-      averageMastery: "平均掌握度",
-      verifiedCompletion: "真实完成率",
-      highRiskStudents: "优先干预",
-      stalledStudents: "学习停滞",
-    };
-    const metrics = Object.entries((state.progress && state.progress.metrics) || {});
-    const metricContract = metrics.map(([key, metric]) => {
-      const value = metric.unavailableReason
-        ? "暂不可用"
-        : key === "evidenceCoverage" || key === "verifiedCompletion"
-          ? `${Math.round(Number(metric.value || 0) * 100)}%`
-          : key === "averageMastery"
-            ? `${Math.round(Number(metric.value || 0))}%`
-            : String(Math.round(Number(metric.value || 0)));
-      const denominator = metric.denominator == null ? "快照计数" : `${Number(metric.numerator || 0)} / ${Number(metric.denominator || 0)}`;
-      const range = metric.timeRange?.label || scopeLabel;
-      return `<article><header><strong>${escape(metricLabels[key] || key)}</strong><span>${escape(value)}</span></header><p>${escape(metric.unavailableReason || metric.definition || "")}</p><small>${escape(denominator)} · ${Number(metric.sampleSize || 0)} 个样本 · 覆盖 ${Math.round(Number(metric.coverage || 0) * 100)}% · ${Number(metric.evidenceCount || 0)} 条证据 · ${escape(range)} · 置信度 ${Math.round(Number(metric.confidence || 0) * 100)}%</small></article>`;
-    }).join("");
-    target.innerHTML = `<section><h4>本次分析覆盖</h4><div class="cs-quality-stats"><span><strong>${Number(quality.evidenceEventCount || 0)}</strong>过程事件</span><span><strong>${Number(quality.attemptCount || 0)}</strong>学习尝试</span><span><strong>${Number(quality.assessmentCount || 0)}</strong>形成评估</span><span><strong>${Number(quality.skillStateCount || 0)}</strong>能力状态</span></div></section>${metricContract ? `<section><h4>当前指标证据卡</h4><div class="cs-metric-contract">${metricContract}</div></section>` : ""}<section><h4>指标定义</h4><dl>${(quality.definitions || []).map(item => `<div><dt>${escape(item.metric)}</dt><dd>${escape(item.definition)}</dd></div>`).join("")}</dl></section><section><h4>可信边界</h4><ul>${(quality.caveats || []).map(item => `<li>${escape(item)}</li>`).join("")}</ul></section>`;
-  }
-
-  function signedDelta(value) {
-    if (value == null || Number.isNaN(Number(value))) return "—";
-    const numeric = Number(value);
-    const display = Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(1);
-    return `${numeric > 0 ? "+" : ""}${display}`;
-  }
-
-  function interventionChange(label, value, suffix) {
-    if (value == null || Number.isNaN(Number(value))) return "";
-    const numeric = Number(value);
-    const tone = numeric > 0 ? "is-positive" : numeric < 0 ? "is-negative" : "is-neutral";
-    return `<span class="${tone}"><small>${escape(label)}</small><strong>${escape(signedDelta(numeric))}${escape(suffix || "")}</strong></span>`;
-  }
-
-  function renderStudentInterventionHistory(student) {
-    const rows = student.interventionHistory || [];
-    if (!rows.length) {
-      return '<div class="cs-empty"><strong>尚未记录干预</strong><br>记录后会冻结当前基线，并在复查时比较同口径变化。</div>';
-    }
-    const statusLabels = {tracking: "跟踪中", ready_for_review: "到期待复查", reviewed: "已复查"};
-    const trendTones = {improving: "success", declining: "danger", mixed: "warning", unchanged: "neutral", no_new_evidence: "neutral"};
-    return rows.map(item => {
-      const baseline = item.baseline || {};
-      const changes = item.changes || {};
-      const changeMarkup = [
-        interventionChange("真实完成", changes.completionPoints, " 个百分点"),
-        interventionChange("能力掌握", changes.masteryPoints, " 分"),
-        interventionChange("过程评分", changes.processPoints, " 分"),
-        interventionChange("风险降低", changes.riskScoreReduction, " 分"),
-        interventionChange("新增证据", changes.evidenceCount, " 条"),
-      ].filter(Boolean).join("");
-      const baselineCompletion = Math.round(Number(baseline.verifiedCompletion || 0) * 100);
-      const baselineMastery = baseline.masteryScore == null ? "未观测" : `${Math.round(Number(baseline.masteryScore))}%`;
-      const status = statusLabels[item.status] || "跟踪中";
-      const trendTone = trendTones[item.observedTrend] || "neutral";
-      const review = item.teacherOutcomeLabel
-        ? `<div class="cs-intervention-review"><strong>${escape(item.teacherOutcomeLabel)}</strong>${item.reviewNote ? `<p>${escape(item.reviewNote)}</p>` : ""}<small>复查于 ${escape(formatDate(item.reviewedAt, true))}</small></div>`
-        : "";
-      const reviewButton = item.status === "reviewed"
-        ? ""
-        : `<button type="button" class="hub-button is-secondary" data-review-intervention="${escape(item.id)}" data-review-student="${Number(student.userId)}"><i class="fas fa-clipboard-check" aria-hidden="true"></i>${item.status === "ready_for_review" ? "现在复查" : "提前复查"}</button>`;
-      return `<article class="cs-intervention-history-item is-${escape(trendTone)}"><header><div><small>${escape(formatDate(item.startedAt, true))}</small><strong>${escape(item.title)}</strong></div><span>${escape(status)}</span></header><p>${escape(item.plan || "未填写具体计划")}</p><small class="cs-intervention-baseline">干预基线：完成 ${baselineCompletion}% · 掌握 ${baselineMastery} · 证据 ${Number(baseline.evidenceCount || 0)} 条</small><div class="cs-intervention-changes">${changeMarkup || '<span class="is-neutral"><small>同期变化</small><strong>尚不可比较</strong></span>'}</div><footer><span class="cs-observed-trend is-${escape(trendTone)}">${escape(item.observedTrendLabel || "尚不可判断")}</span><span>计划复查 ${escape(formatDate(item.followUpAt, true))}</span>${reviewButton}</footer>${review}</article>`;
-    }).join("");
-  }
-
-  function renderStudentDrawer(student) {
-    if (!student || !elements.studentDrawerBody) return;
-    const risk = riskView(student.riskLevel);
-    const mastery = student.masteryScore == null ? "未观测" : `${Math.round(Number(student.masteryScore))}%`;
-    const completion = `${Math.round(Number(student.verifiedCompletion || 0) * 100)}%`;
-    elements.studentDrawerTitle.textContent = student.name || "学生详情";
-    elements.studentDrawerSubtitle.textContent = `${risk.label} · ${activityRecency(student)} · 证据${student.evidenceLevel || "不足"}`;
-    const riskSignals = (student.riskSignals || []).map(item => `<article class="cs-student-signal is-${escape(item.severity)}"><span><i class="fas ${item.severity === "high" ? "fa-exclamation-triangle" : item.severity === "medium" ? "fa-eye" : item.severity === "unknown" ? "fa-question-circle" : "fa-info-circle"}" aria-hidden="true"></i></span><div><strong>${escape(item.label)}</strong><p>${escape(item.detail)}</p></div></article>`).join("");
-    const skillRows = (student.skills || []).map(item => `<article class="cs-student-skill${item.evidenceCount ? "" : " is-unobserved"}"><header><strong>${escape(item.label)}</strong><span>${item.evidenceCount ? `${Math.round(Number(item.mastery || 0))}%` : "未观测"}</span></header><span><i style="width:${item.evidenceCount ? boundedPercent(item.mastery) : 0}%"></i></span><small>${Number(item.evidenceCount || 0)} 次评估证据 · 置信度 ${Math.round(Number(item.confidence || 0) * 100)}%</small></article>`).join("");
-    const criteria = (student.weakCriteria || []).slice(0, 4).map(item => `<span><strong>${escape(item.label)}</strong><em>${Math.round(Number(item.mastery || 0))}%</em></span>`).join("");
-    const challenges = (student.challengePerformance || []).slice(0, 6).map(item => `<article><span class="${item.solved ? "is-solved" : "is-open"}"><i class="fas ${item.solved ? "fa-check" : "fa-flag"}" aria-hidden="true"></i></span><div><small>${escape(item.moduleName)}</small><strong>${escape(item.name)}</strong><p>${item.solved ? "已通过可信判题" : "尚未通过"} · ${Number(item.attemptCount || 0)} 次尝试 · ${Number(item.failedCommands || 0)} 次失败命令${item.averageProcessScore == null ? "" : ` · 过程 ${Math.round(Number(item.averageProcessScore))} 分`}</p></div></article>`).join("");
-    const evidence = (student.recentEvidence || []).map(item => `<article><span><i class="fas fa-circle" aria-hidden="true"></i></span><div><strong>${escape(item.label)}</strong><p>${escape(item.challengeName)} · ${Number(item.count || 0)} 条 · 平均信任级别 ${Number(item.averageTrustLevel || 0).toFixed(1)} / 4</p></div><time>${escape(formatDate(item.lastOccurred, true))}</time></article>`).join("");
-    const objectives = (student.objectives || []).map(item => `<span class="${item.complete ? "is-complete" : ""}"><i class="fas ${item.complete ? "fa-check-circle" : "fa-circle"}" aria-hidden="true"></i>${escape(item.name || item.id)}</span>`).join("");
-    const assignments = ((student.assignmentSummary || {}).items || []).map(item => `<article><span><strong>${escape(item.title)}</strong><small>${item.overdue ? "已逾期" : statusLabel(item.status)}${item.scorePercent == null ? "" : ` · ${Math.round(Number(item.scorePercent))} 分`}</small></span><time>${item.dueAt ? `截止 ${escape(formatDate(item.dueAt, true))}` : "无截止时间"}</time></article>`).join("");
-    const signals = student.activitySignals || {};
-    const interventionHistory = renderStudentInterventionHistory(student);
-    elements.studentDrawerBody.innerHTML = `
-      <section class="cs-student-detail-kpis">
-        <article><small>真实完成</small><strong>${completion}</strong><span>${Number(student.requiredSolved || 0)} / ${Number(student.requiredTotal || 0)} 道必修题</span></article>
-        <article><small>能力掌握</small><strong>${mastery}</strong><span>置信度 ${Math.round(Number(student.masteryConfidence || 0) * 100)}%</span></article>
-        <article><small>过程评分</small><strong>${student.averageProcessScore == null ? "未评估" : Math.round(Number(student.averageProcessScore))}</strong><span>结果评分 ${student.averageObjectiveScore == null ? "未评估" : Math.round(Number(student.averageObjectiveScore))}</span></article>
-        <article><small>证据充分度</small><strong>${Math.round(Number(student.evidenceConfidence || 0))}%</strong><span>${Number(student.evidenceCount || 0)} 条过程事件</span></article>
-      </section>
-      <section class="cs-student-detail-section">
-        <header><div><span class="hub-kicker">为什么需要关注</span><h3>风险与机会信号</h3></div><div class="cs-student-detail-actions"><button type="button" class="hub-button is-secondary" data-log-intervention="${Number(student.userId)}"><i class="fas fa-clipboard-list" aria-hidden="true"></i>记录干预</button><button type="button" class="hub-button is-primary" data-student-agent="${Number(student.userId)}"><i class="fas fa-magic" aria-hidden="true"></i>准备方案</button></div></header>
-        <div class="cs-student-signals">${riskSignals || '<div class="cs-empty">当前没有明确风险信号。</div>'}</div>
-      </section>
-      <section class="cs-student-detail-section">
-        <header><div><span class="hub-kicker">教学闭环</span><h3>干预、复查与同期变化</h3></div></header>
-        <div class="cs-intervention-history">${interventionHistory}</div>
-        <p class="cs-detail-caveat">系统比较干预开始与复查时的同口径证据；同期变化不等同于干预造成的因果效果。</p>
-      </section>
-      <section class="cs-student-detail-section">
-        <header><div><span class="hub-kicker">六维能力</span><h3>掌握度与置信度</h3></div></header>
-        <div class="cs-student-skill-grid">${skillRows}</div>${criteria ? `<div class="cs-criteria-gaps"><strong>优先补强的过程标准</strong><div>${criteria}</div></div>` : ""}
-      </section>
-      <section class="cs-student-detail-section">
-        <header><div><span class="hub-kicker">学习策略</span><h3>过程行为画像</h3></div></header>
-        <div class="cs-process-matrix"><span><strong>${Number(signals.completedCommands || 0)}</strong><small>有效命令</small></span><span><strong>${Number(signals.failedCommands || 0)}</strong><small>失败命令</small></span><span><strong>${Number(signals.resets || 0)}</strong><small>环境重置</small></span><span><strong>${Number(signals.interruptions || 0)}</strong><small>实验中断</small></span><span><strong>${Number(signals.tutorMessages || 0)}</strong><small>辅导回应</small></span><span><strong>${Number(signals.reflections || 0)}</strong><small>学习反思</small></span></div>
-        <p class="cs-detail-caveat">辅导使用只代表支持需求，不单独用于判断能力或独立性；结论需结合目标、过程与反思证据。</p>
-      </section>
-      <section class="cs-student-detail-section"><header><div><span class="hub-kicker">题目级诊断</span><h3>当前卡点与通过记录</h3></div></header><div class="cs-student-challenges">${challenges || '<div class="cs-empty">尚无题目级学习记录。</div>'}</div></section>
-      ${objectives ? `<section class="cs-student-detail-section"><header><div><span class="hub-kicker">课程目标</span><h3>目标达成映射</h3></div></header><div class="cs-objective-status">${objectives}</div></section>` : ""}
-      ${assignments ? `<section class="cs-student-detail-section"><header><div><span class="hub-kicker">课程任务</span><h3>提交与逾期</h3></div></header><div class="cs-student-assignments">${assignments}</div></section>` : ""}
-      <section class="cs-student-detail-section"><header><div><span class="hub-kicker">可回溯证据</span><h3>最近证据时间线</h3></div></header><div class="cs-evidence-timeline">${evidence || '<div class="cs-empty">尚无过程证据。</div>'}</div></section>`;
-  }
-
-  function openStudentDrawer(userId, trigger) {
-    const student = ((state.progress && state.progress.students) || []).find(item => Number(item.userId) === Number(userId));
-    if (!student || !elements.studentDrawer) return;
-    closeQuestionDrawer({restoreFocus: false});
-    state.selectedStudentId = Number(userId);
-    state.studentDrawerReturnFocus = trigger || document.activeElement;
-    renderStudentDrawer(student);
-    elements.studentDrawer.hidden = false;
-    elements.studentDrawer.setAttribute("aria-hidden", "false");
-    document.body.classList.add("has-learning-drawer");
-    setCourseWorkspaceInert(true, elements.studentDrawer);
-    window.requestAnimationFrame(() => elements.studentDrawerPanel?.focus({preventScroll: true}));
-  }
-
-  function closeStudentDrawer(options) {
-    if (!elements.studentDrawer || elements.studentDrawer.hidden) return;
-    elements.studentDrawer.hidden = true;
-    elements.studentDrawer.setAttribute("aria-hidden", "true");
-    document.body.classList.remove("has-learning-drawer");
-    setCourseWorkspaceInert(false);
-    state.selectedStudentId = null;
-    const returnFocus = state.studentDrawerReturnFocus;
-    state.studentDrawerReturnFocus = null;
-    if ((!options || options.restoreFocus !== false) && returnFocus instanceof HTMLElement && returnFocus.isConnected) {
-      returnFocus.focus({preventScroll: true});
-    }
-  }
-
-  function learningMetric(name) {
-    const progress = state.progress || {};
-    return (progress.metrics && progress.metrics[name]) ||
-      (progress.summary && progress.summary.metrics && progress.summary.metrics[name]) ||
-      null;
-  }
-
-  function metricAvailable(metric) {
-    return Boolean(metric && !metric.unavailableReason && metric.value != null);
-  }
-
-  function metricDisplay(metric, kind) {
-    if (!metricAvailable(metric)) return "暂不可用";
-    if (kind === "percent") return `${Math.round(Number(metric.value) * 100)}%`;
-    return String(Math.round(Number(metric.value)));
-  }
-
-  function metricEvidenceNote(metric, fallback) {
-    if (!metric) return fallback;
-    if (metric.unavailableReason) return metric.unavailableReason;
-    const fraction = metric.denominator == null
-      ? ""
-      : `${Number(metric.numerator || 0)} / ${Number(metric.denominator || 0)} · `;
-    const range = metric.timeRange?.label || learningTimeLabel(learningScopeValues().timeRange);
-    return `${fraction}${Number(metric.sampleSize || 0)} 个样本 · 覆盖 ${Math.round(Number(metric.coverage || 0) * 100)}% · ${Number(metric.evidenceCount || 0)} 条证据 · ${range} · 置信度 ${Math.round(Number(metric.confidence || 0) * 100)}%`;
-  }
+  const analyticsWorkspace = window.DojoAnalytics?.create(document.getElementById("learning-insights"), {
+    request: async (path, config) => unwrap(await api.request(path, config)),
+    json: async (method, path, body) => unwrap(await api.json(method, path, body)),
+    onSnapshot: progress => {
+      state.progress = progress;
+      renderMetrics();
+    },
+  });
 
   function renderStudentInsights() {
-    const summary = (state.progress && state.progress.summary) || {};
-    const coverage = learningMetric("evidenceCoverage");
-    const mastery = learningMetric("averageMastery");
-    const risk = learningMetric("highRiskStudents");
-    const stalled = learningMetric("stalledStudents");
-    document.getElementById("cs-insight-coverage").textContent = metricDisplay(coverage, "percent");
-    document.getElementById("cs-insight-coverage-note").textContent = metricEvidenceNote(coverage, `${Number(summary.evidenceCoveredStudents || 0)} / ${Number(summary.studentCount || 0)} 名学生达到基础证据量`);
-    document.getElementById("cs-insight-mastery").textContent = metricAvailable(mastery) ? `${Math.round(Number(mastery.value))}%` : "暂不可用";
-    document.getElementById("cs-insight-mastery-note").textContent = metricEvidenceNote(mastery, `${Number(summary.masteryStudentCount || 0)} 名学生已有能力评估`);
-    document.getElementById("cs-insight-risk").textContent = metricDisplay(risk, "count");
-    document.getElementById("cs-insight-risk-note").textContent = metricEvidenceNote(risk, `${Number(summary.watchCount || 0)} 人持续关注 · ${Number(summary.unknownCount || 0)} 人证据不足`);
-    document.getElementById("cs-insight-stalled").textContent = metricDisplay(stalled, "count");
-    document.getElementById("cs-insight-stalled-note").textContent = metricEvidenceNote(stalled, "仍有未完成尝试且近期无进展");
-    const quality = (state.progress && state.progress.dataQuality) || {};
-    document.getElementById("cs-progress-freshness").textContent = `证据更新于 ${formatDate(quality.generatedAt, true)}`;
-    renderLearningScopeSummary();
-    renderLearningTimeline();
-    renderAbilityOverview();
-    renderBottlenecks();
-    renderInterventions();
-    renderDataQuality();
-    if (state.selectedStudentId != null) {
-      const selected = ((state.progress && state.progress.students) || []).find(item => Number(item.userId) === Number(state.selectedStudentId));
-      if (selected) renderStudentDrawer(selected);
-      else closeStudentDrawer({restoreFocus: false});
-    }
+    analyticsWorkspace?.setCourse(state.course);
   }
 
-  async function reloadLearningProgress(options) {
-    if (!state.course) return false;
-    const sequence = ++state.learningLoadSequence;
-    const values = learningScopeValues();
-    if (!options || options.syncUrl !== false) syncLearningScopeUrl();
-    const params = learningScopeParams(values);
-    elements.learningScope?.setAttribute("aria-busy", "true");
-    const freshness = document.getElementById("cs-progress-freshness");
-    if (freshness) freshness.textContent = "正在按所选范围重新汇总证据…";
-    try {
-      const progress = unwrap(await api.request(`/teaching/progress/${encodeURIComponent(state.course.referenceId || state.course.id)}?${params.toString()}`));
-      if (sequence !== state.learningLoadSequence) return false;
-      state.progress = progress;
-      state.studentCohortIds = null;
-      renderStudents();
-      renderStudentInsights();
-      renderMetrics();
-      return true;
-    } finally {
-      if (sequence === state.learningLoadSequence) elements.learningScope?.removeAttribute("aria-busy");
-    }
+  function closeStudentDrawer() {
+    analyticsWorkspace?.close();
   }
 
-  async function applyLearningScopeChange(source) {
-    if (source === "module") renderLearningQuestionOptions();
-    try {
-      await reloadLearningProgress();
-    } catch (error) {
-      showNotice(error.message || "无法按所选范围更新学情。", "danger");
-    }
-  }
-
-  async function logStudentIntervention(studentId, trigger) {
-    const student = ((state.progress && state.progress.students) || []).find(item => Number(item.userId) === Number(studentId));
-    if (!student) return;
-    const primarySignal = (student.riskSignals || [])[0] || {};
-    const focus = primarySignal.label || "学习进展";
-    const plan = await window.AISecEduUI.prompt(
-      `为“${student.name}”记录一项具体干预。系统会冻结当前学情基线，并默认在 7 天后提示复查。`,
-      {
-        title: "记录教学干预",
-        inputLabel: "具体动作与预期观察",
-        value: `围绕“${focus}”核对当前卡点，安排一个可完成的小目标，并在 7 天后按同一口径复查。`,
-        maxLength: 500,
-        confirmLabel: "记录并开始跟踪",
-      },
-    );
-    if (plan === null) return;
-    if (!plan.trim()) {
-      showNotice("请填写具体的干预动作。", "danger");
-      return;
-    }
-    if (trigger) trigger.disabled = true;
-    try {
-      unwrap(await api.json("POST", `/teaching/progress/${encodeURIComponent(state.course.id)}/interventions`, {
-        studentId: Number(student.userId),
-        title: `${focus}跟进`,
-        kind: primarySignal.code || "TEACHER_PLAN",
-        plan: plan.trim(),
-        followUpDays: 7,
-      }));
-      await reloadLearningProgress();
-      showNotice("干预已记录，当前学情已作为基线并开始跟踪。", "success");
-    } catch (error) {
-      showNotice(error.message || "记录干预失败。", "danger");
-    } finally {
-      if (trigger && trigger.isConnected) trigger.disabled = false;
-    }
-  }
-
-  async function reviewStudentIntervention(interventionId, studentId, trigger) {
-    const student = ((state.progress && state.progress.students) || []).find(item => Number(item.userId) === Number(studentId));
-    const intervention = (student && student.interventionHistory || []).find(item => item.id === interventionId);
-    if (!student || !intervention) return;
-    const outcomeDialog = window.AISecEduUI.dialog({
-      kind: "info",
-      title: "复查干预效果",
-      message: `结合“${intervention.title}”实施情况，你对学生当前变化的判断是？`,
-      details: `系统观测为“${intervention.observedTrendLabel || "尚不可判断"}”；请结合课堂观察判断，不把同期变化直接当作因果效果。`,
-      actions: [
-        {label: "已有改善", value: "IMPROVED", primary: true, style: "success"},
-        {label: "无明显变化", value: "UNCHANGED", style: "outline-secondary"},
-        {label: "有所下降", value: "DECLINED", style: "danger"},
-        {label: "暂不确定", value: "UNCERTAIN", style: "outline-secondary"},
-      ],
-    });
-    const teacherOutcome = await outcomeDialog.closed;
-    if (!["IMPROVED", "UNCHANGED", "DECLINED", "UNCERTAIN"].includes(teacherOutcome)) return;
-    const note = await window.AISecEduUI.prompt("补充本次复查依据；可以留空，但建议记录观察到的行为或作品变化。", {
-      title: "记录复查依据",
-      inputLabel: "课堂观察或证据说明",
-      value: "",
-      maxLength: 2000,
-      confirmLabel: "保存复查",
-    });
-    if (note === null) return;
-    if (trigger) trigger.disabled = true;
-    try {
-      unwrap(await api.json(
-        "POST",
-        `/teaching/progress/${encodeURIComponent(state.course.id)}/interventions/${encodeURIComponent(interventionId)}/review`,
-        {teacherOutcome, note: note.trim()},
-      ));
-      await reloadLearningProgress();
-      showNotice("复查已保存，学情变化与教师判断已并列记录。", "success");
-    } catch (error) {
-      showNotice(error.message || "保存复查失败。", "danger");
-    } finally {
-      if (trigger && trigger.isConnected) trigger.disabled = false;
-    }
+  async function reloadLearningProgress() {
+    return analyticsWorkspace ? analyticsWorkspace.load(state.course) : false;
   }
 
   function renderActivity() {
@@ -3385,19 +2876,16 @@
   }
 
   function renderMetrics() {
-    const summary = (state.progress && state.progress.summary) || {};
-    const counts = (state.workspace && state.workspace.counts) || state.course.counts || {};
-    const students = learningMetric("studentCount");
-    const completion = learningMetric("verifiedCompletion");
+    const summary = state.progress?.summary || {};
+    const counts = state.workspace?.counts || state.course.counts || {};
     const studentMetric = document.getElementById("cs-stat-students");
-    studentMetric.textContent = metricAvailable(students)
-      ? Number(students.value)
-      : state.progress ? Number(summary.studentCount || 0) : "—";
-    studentMetric.title = state.progress ? "" : "打开“学情”后按需计算";
-    document.getElementById("cs-stat-completion").textContent = metricDisplay(completion, "percent");
-    document.getElementById("cs-stat-questions").textContent = Number((counts.questions || {}).total || 0);
-    document.getElementById("cs-stat-demos").textContent = Number(state.contentPaging.demos.total || (counts.demos || {}).total || 0);
-    document.getElementById("cs-stat-artifacts").textContent = Number(state.contentPaging.courseware.total || (counts.courseware || {}).total || 0);
+    studentMetric.textContent = summary.students ?? summary.studentCount ?? "—";
+    studentMetric.title = state.progress ? "" : "打开学情后显示课程学习记录";
+    const completion = summary.completionRate ?? summary.averageVerifiedCompletion;
+    document.getElementById("cs-stat-completion").textContent = completion == null ? "—" : `${Math.round(completion * 100)}%`;
+    document.getElementById("cs-stat-questions").textContent = Number(counts.questions?.total || 0);
+    document.getElementById("cs-stat-demos").textContent = Number(state.contentPaging.demos.total || counts.demos?.total || 0);
+    document.getElementById("cs-stat-artifacts").textContent = Number(state.contentPaging.courseware.total || counts.courseware?.total || 0);
   }
 
   function renderAll() {
@@ -3409,7 +2897,6 @@
     renderArtifacts();
     renderSimulations();
     renderChallenges();
-    renderStudents();
     renderStudentInsights();
     renderOverviewPriorities();
     renderActivity();
@@ -3478,11 +2965,8 @@
     if (elements.questionSort) elements.questionSort.value = "course_order";
     state.workspace = null;
     state.progress = null;
-    state.learningBaseProgress = null;
-    state.learningScopeInitialized = false;
     state.courseCode = "";
     state.courseCodeState = "idle";
-    state.studentCohortIds = null;
     state.tabLoads = {};
     syncCourseCodeControls(false);
     try {
@@ -3493,8 +2977,11 @@
       if (sequence !== state.workspaceLoadSequence) return;
       state.workspace = workspace;
       state.course = workspace.course || state.course;
+      void loadCourseAssignments(state.course.referenceId || state.course.id);
+      const libraryLink = document.getElementById("cs-library-open");
+      if (libraryLink) libraryLink.href = `/teacher/library?dojo=${encodeURIComponent(state.course.referenceId || state.course.id)}`;
       state.materials = workspace.materials || [];
-      const demoTypes = new Set(["simulation", "attack-defense-scene", "classroom-scenario"]);
+      const demoTypes = new Set(["simulation", "attack-defense-scene", "classroom-scenario", "debate"]);
       const nonCoursewareTypes = new Set(["question-set", "assessment", "challenge", "knowledge-test", "quiz", "debate", ...demoTypes]);
       state.coursewareArtifacts = (workspace.artifacts || []).filter(item => !nonCoursewareTypes.has(String(item.type || "").toLowerCase()));
       state.demoArtifacts = (workspace.artifacts || []).filter(item => demoTypes.has(String(item.type || "").toLowerCase()));
@@ -3504,15 +2991,6 @@
       state.contentPaging.demos.total = Number(workspace.counts?.demos?.total || state.demoArtifacts.length);
       state.questionCounts = workspace.counts?.questions || state.questionCounts;
       state.progress = workspace.learning || null;
-      state.learningBaseProgress = workspace.learning || null;
-      const learningScope = restoreLearningScopeFromUrl();
-      const learningScopeNeedsReload = Boolean(
-        learningScope.studentId
-        || learningScope.moduleIndex !== ""
-        || learningScope.challengeId
-        || learningScope.timeRange !== "12w"
-      );
-      state.learningScopeInitialized = Boolean(workspace.learning) && !learningScopeNeedsReload;
       renderAll();
       restoreWorkspaceCollectionState();
       const tab = query.get("tab") || "overview";
@@ -4320,103 +3798,6 @@
   });
   elements.questionDrawer?.addEventListener("keydown", event => {
     trapDialogFocus(event, elements.questionDrawerPanel, closeQuestionDrawer);
-  });
-  document.getElementById("cs-student-search")?.addEventListener("input", renderStudents);
-  document.getElementById("cs-student-risk-filter")?.addEventListener("change", renderStudents);
-  document.getElementById("cs-student-evidence-filter")?.addEventListener("change", renderStudents);
-  document.getElementById("cs-clear-cohort-filter")?.addEventListener("click", () => {
-    state.studentCohortIds = null;
-    renderStudents();
-  });
-  document.getElementById("cs-student-table")?.addEventListener("click", event => {
-    const trigger = event.target.closest("[data-open-student]");
-    const row = event.target.closest("[data-student-id]");
-    if (trigger) openStudentDrawer(trigger.dataset.openStudent, trigger);
-    else if (row) openStudentDrawer(row.dataset.studentId, row);
-  });
-  document.getElementById("cs-student-table")?.addEventListener("keydown", event => {
-    const row = event.target.closest("[data-student-id]");
-    if (!row || !["Enter", " "].includes(event.key)) return;
-    event.preventDefault();
-    openStudentDrawer(row.dataset.studentId, row);
-  });
-  document.getElementById("cs-intervention-list")?.addEventListener("click", event => {
-    const trigger = event.target.closest("[data-intervention-id]");
-    if (!trigger) return;
-    const intervention = ((state.progress && state.progress.interventions) || []).find(item => item.id === trigger.dataset.interventionId);
-    if (!intervention) return;
-    state.studentCohortIds = new Set((intervention.studentIds || []).map(Number));
-    document.getElementById("cs-student-risk-filter").value = "all";
-    document.getElementById("cs-student-evidence-filter").value = "all";
-    renderStudents();
-    document.querySelector(".cs-learning-roster")?.scrollIntoView({behavior: "smooth", block: "start"});
-  });
-  elements.studentDrawer?.addEventListener("click", event => {
-    if (event.target.closest("[data-student-drawer-close]")) closeStudentDrawer();
-  });
-  elements.studentDrawer?.addEventListener("keydown", event => {
-    trapDialogFocus(event, elements.studentDrawerPanel, closeStudentDrawer);
-  });
-  elements.studentDrawerBody?.addEventListener("click", event => {
-    const logTrigger = event.target.closest("[data-log-intervention]");
-    if (logTrigger) {
-      void logStudentIntervention(logTrigger.dataset.logIntervention, logTrigger);
-      return;
-    }
-    const reviewTrigger = event.target.closest("[data-review-intervention]");
-    if (reviewTrigger) {
-      void reviewStudentIntervention(
-        reviewTrigger.dataset.reviewIntervention,
-        reviewTrigger.dataset.reviewStudent,
-        reviewTrigger,
-      );
-      return;
-    }
-    const trigger = event.target.closest("[data-student-agent]");
-    if (!trigger) return;
-    const student = ((state.progress && state.progress.students) || []).find(item => Number(item.userId) === Number(trigger.dataset.studentAgent));
-    if (!student) return;
-    const weak = (student.weakSkills || []).slice(0, 2).map(item => item.label).join("、") || "尚未形成能力评估";
-    const risks = (student.riskSignals || []).map(item => item.label).join("、") || "当前无明确风险";
-    openAgent("auto", `请为课程“${state.course.name || "未命名课程"}”中的学生“${student.name}”制定一份可执行、不过度推断的教学干预方案。真实完成率为${Math.round(Number(student.verifiedCompletion || 0) * 100)}%，主要薄弱维度为${weak}，当前信号为${risks}。请先区分证据事实与推断，再给出诊断问题、下一项小目标、教师支持方式、复查时间与判断干预是否有效的指标。`);
-  });
-  elements.learningStudent?.addEventListener("change", () => void applyLearningScopeChange("student"));
-  elements.learningModule?.addEventListener("change", () => void applyLearningScopeChange("module"));
-  elements.learningQuestion?.addEventListener("change", () => void applyLearningScopeChange("question"));
-  elements.learningRange?.addEventListener("change", () => void applyLearningScopeChange("range"));
-  document.getElementById("cs-reset-learning-scope")?.addEventListener("click", () => {
-    populateLearningScopeControls({studentId: "", moduleIndex: "", challengeId: "", timeRange: "12w"});
-    void applyLearningScopeChange("reset");
-  });
-  document.getElementById("cs-export-learning")?.addEventListener("click", () => {
-    if (!state.course) return;
-    syncLearningScopeUrl();
-    const link = document.createElement("a");
-    link.href = `/pwncollege_api/v1/teaching/progress/${encodeURIComponent(state.course.referenceId || state.course.id)}/export?${learningScopeParams().toString()}`;
-    link.download = "";
-    link.rel = "noopener";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    showNotice("正在导出当前筛选范围的学情数据。", "success");
-  });
-  document.getElementById("cs-refresh-progress")?.addEventListener("click", async event => {
-    const button = event.currentTarget;
-    const icon = button.querySelector("i");
-    const label = button.querySelector("span");
-    button.disabled = true;
-    icon?.classList.add("fa-spin");
-    if (label) label.textContent = "正在刷新";
-    try {
-      await reloadLearningProgress();
-      showNotice("学习证据已刷新。", "success");
-    } catch (error) {
-      showNotice(error.message || "刷新失败。", "danger");
-    } finally {
-      button.disabled = false;
-      icon?.classList.remove("fa-spin");
-      if (label) label.textContent = "刷新证据";
-    }
   });
   init();
 })();

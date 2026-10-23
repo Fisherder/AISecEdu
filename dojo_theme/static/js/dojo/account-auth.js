@@ -100,7 +100,10 @@
         });
         var next = safeDestination(document.getElementById("account-auth-next").value, "");
         var fallback = payload.data && payload.data.course_teacher ? "/teacher/courses" : "/student";
-        window.location.assign(next || fallback);
+        var destination = next || safeDestination(payload.data && payload.data.postLoginDestination, fallback);
+        window.location.assign(payload.data && payload.data.activationRequired
+          ? "/activate-account?next=" + encodeURIComponent(destination)
+          : destination);
       } catch (error) {
         showError(error.message || "登录失败，请检查账号信息。");
         setBusy(loginForm, false, "");

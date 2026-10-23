@@ -6,7 +6,7 @@
 {% block footer %}{% endblock %}
 
 {% block stylesheets %}
-<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/admin-product.css', v='aisecedu-admin-product-v6-readability-v1') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/admin-product.css', v='frontend-restored-20261001-1') }}">
 {% if selected_section in native_config_sections %}
 <link rel="stylesheet" href="{{ url_for('views.themes', theme='admin', path='css/admin.css') }}">
 <link rel="stylesheet" href="{{ url_for('views.themes', theme='admin', path='css/codemirror.css') }}">
@@ -95,6 +95,6 @@
 
 {% block scripts %}
 {% if selected_section not in native_config_sections %}
-<script defer src="{{ url_for('views.themes_beta', path='js/dojo/admin-config.js', v='aisecedu-admin-config-v1') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/admin-config.js', v='frontend-restored-20261001-1') }}"></script>
 {% endif %}
 {% endblock %}

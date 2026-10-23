@@ -3,7 +3,7 @@
 {% block body_class %}course-system-page content-management-page course-grades-page{% endblock %}
 
 {% block stylesheets %}
-<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='aisecedu-course-hub-v12-readability-v1') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/course-hub.css', v='frontend-restored-20261001-1') }}">
 {% endblock %}
 
 {% block content %}
@@ -72,7 +72,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script defer src="{{ url_for('views.themes', path='js/dojo/grades.js', v='aisecedu-content-management-v2') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/grades.js', v='frontend-restored-20261001-1') }}"></script>
 {% if not grades %}
 <script>document.addEventListener("DOMContentLoaded", () => loadAllGrades("#grades"));</script>
 {% endif %}

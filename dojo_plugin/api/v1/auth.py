@@ -55,7 +55,11 @@ def _message(message):
 
 
 def _auth_user_data(user):
-    from ...models import DojoAdmins
+    from ...account_activation import activation_required
+    from ...models.construction import ConstructionMembers
+    from ...product.capabilities import teacher_mode_available
+
+    construction_member = ConstructionMembers.query.filter_by(user_id=user.id, active=True).first() is not None
 
     return {
         "user_id": user.id,
@@ -64,8 +68,9 @@ def _auth_user_data(user):
         "type": user.type,
         "verified": user.verified,
         "team_id": user.team_id,
-        "course_teacher": user.type == "admin"
-        or DojoAdmins.query.filter_by(user_id=user.id).first() is not None,
+        "course_teacher": teacher_mode_available(user),
+        "activationRequired": activation_required(user),
+        "postLoginDestination": "/teacher/construction" if construction_member else None,
     }
 
 

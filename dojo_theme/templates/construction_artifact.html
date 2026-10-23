@@ -1,0 +1,3 @@
+{% extends "teaching_artifact.html" %}
+{% block stylesheets %}{{ super() }}<style>#artifact-student-preview,.artifact-detail-actions>a[href*="sourceKind=artifact"]{display:none!important}.construction-frozen-note{padding:8px 12px;border:1px solid #ceddec;border-radius:8px;background:#eef5fb;color:#355e85;font-size:13px;white-space:nowrap}</style>{% endblock %}
+{% block scripts %}{{ super() }}<script>(function(){const actions=document.querySelector('.artifact-detail-actions');if(actions){const note=document.createElement('span');note.className='construction-frozen-note';note.textContent='固定审核副本 · 只读';actions.prepend(note);}})();</script>{% endblock %}

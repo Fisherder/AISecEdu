@@ -1,7 +1,7 @@
 # ---- Stage 1: Base ----
 FROM node:22-alpine AS base
 
-RUN apk add --no-cache libc6-compat
+RUN sed -i "s|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g" /etc/apk/repositories && apk add --no-cache libc6-compat
 RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
 
 WORKDIR /app
@@ -10,7 +10,7 @@ WORKDIR /app
 FROM base AS deps
 
 # Native build tools for sharp, @napi-rs/canvas
-RUN apk add --no-cache python3 build-base g++ cairo-dev pango-dev jpeg-dev giflib-dev librsvg-dev
+RUN sed -i "s|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g" /etc/apk/repositories && apk add --no-cache python3 build-base g++ cairo-dev pango-dev jpeg-dev giflib-dev librsvg-dev
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/ ./packages/
@@ -58,7 +58,8 @@ ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
-RUN apk add --no-cache libc6-compat cairo pango jpeg giflib librsvg
+RUN sed -i "s|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g" /etc/apk/repositories && apk add --no-cache libc6-compat cairo pango jpeg giflib librsvg \
+    poppler-utils tesseract-ocr tesseract-ocr-data-eng tesseract-ocr-data-chi_sim
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
@@ -79,6 +80,8 @@ RUN test -s lib/prompts/templates/slide-plan/system.md && \
     test -s lib/curriculum/curriculum.json && \
     test -s lib/security/knowledge-base.json && \
     test -s lib/security/templates/sqli-lab.html
+
+RUN node -e "const {Linter}=require('eslint'); if(new Linter().verify('missingFunction();',{rules:{'no-undef':'error'}}).length!==1) process.exit(1)"
 
 USER nextjs
 

@@ -357,6 +357,12 @@ describe('OpenAI provider defaults', () => {
       { thinking: { type: 'enabled' }, reasoning_effort: 'max' },
     ],
     [
+      'deepseek',
+      'deepseek-v4-flash',
+      { mode: 'enabled', effort: 'low' },
+      { thinking: { type: 'enabled' }, reasoning_effort: 'low' },
+    ],
+    [
       'qwen',
       'qwen3.6-plus',
       { mode: 'enabled', budgetTokens: 4096 },

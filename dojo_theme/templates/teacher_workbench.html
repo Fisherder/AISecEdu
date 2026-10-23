@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block body_class %}cocreation-workbench-page{% endblock %}
+{% block navigation %}
+{% set active_navigation = namespace(items=[]) %}
+{% for item in product_context.navigation %}
+{% set active_navigation.items = active_navigation.items + [dict(item, current=item.href == '/teacher?view=conversation')] %}
+{% endfor %}
+{% set product_context = dict(product_context, navigation=active_navigation.items) %}
+{% include "components/navbar.html" %}
+{% endblock %}
+{% block legacy_runtime %}{% endblock %}
+{% block entrypoint %}{% endblock %}
+{% block content %}
+<div id="cocreation-workbench" data-owner-id="{{ agent_owner_id }}" style="position:fixed;inset:var(--product-nav-height,60px) 0 0;z-index:100;contain:layout;background:var(--theme-bg);color:var(--theme-text)">
+  <noscript>AI 共创需要启用 JavaScript。<a href="/teacher?view=dashboard">返回教学空间</a></noscript>
+</div>
+{% endblock %}
+{% block footer %}{% endblock %}
+{% block scripts %}
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/workbench-v3/app-33e2fa9a6207.js', v='33e2fa9a6207') }}"></script>
+{% endblock %}

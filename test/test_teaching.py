@@ -19,6 +19,107 @@ API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/teaching"
 LEARNING_API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/learning"
 
 
+def _teacher_history_serializers():
+    import ast
+
+    source_path = pathlib.Path(__file__).resolve().parents[1] / "dojo_plugin/api/v1/teaching.py"
+    tree = ast.parse(source_path.read_text())
+    selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {
+        "_serialize_teacher_agent_history", "_teacher_agent_history_context",
+    }]
+    namespace = {}
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(source_path), "exec"), namespace)
+    return namespace
+
+
+def test_teacher_history_provenance_distinguishes_model_selection_from_teacher_text():
+    serialize = _teacher_history_serializers()["_serialize_teacher_agent_history"]
+    messages = [
+        {"id": 5688, "role": "user", "content": "原始完整要求"},
+        {"id": 5689, "role": "assistant", "content": "三种方案"},
+        {"id": 5692, "role": "user", "content": "旧模型扩写：逐针脚匹配卡扣闭合", "metadata": {
+            "client": "generation-option-selection", "sourceMessageId": 5689, "optionId": "option-1",
+        }},
+        {"id": 5706, "role": "user", "content": "原始完整要求"},
+    ]
+    original = json.loads(json.dumps(messages))
+    bundle = {"sourceMessageId": 5689, "sourceJobId": "job-original", "originalRequest": "原始完整要求",
+              "selection": {"optionId": "option-1", "selectionMessageId": 5692, "status": "STARTED"},
+              "options": [
+                  {"id": "option-1", "title": "方案一", "rewrittenPrompt": "旧模型扩写：逐针脚匹配卡扣闭合"},
+                  {"id": "option-2", "title": "方案二", "rewrittenPrompt": "可明确继续的另一方案"},
+              ]}
+    result = serialize(messages, [bundle], current_message_id=5706)
+    event = next(item for item in result["conversation"] if item["id"] == 5692)
+    assert event["role"] == "assistant"
+    assert event["origin"] == "model-draft-selection"
+    assert event["selectionEvent"] == {"authorship": "teacher", "sourceRef": "option:5689:option-1"}
+    assert "逐针脚" not in event["content"]
+    sources = {source["ref"]: source for source in result["requestProvenance"]["sources"]}
+    assert sources["option:5689:option-1"]["authorship"] == "model"
+    assert sources["option:5689:option-1"]["originalRequest"] == "原始完整要求"
+    assert sources["option:5689:option-2"]["selected"] is False
+    assert sources["message:5688"]["authorship"] == "teacher"
+    assert "message:5692" not in sources
+    assert "message:5706" not in sources
+    assert messages == original
+
+
+def test_teacher_history_provenance_fails_closed_on_unverified_or_forged_selection_events():
+    serialize = _teacher_history_serializers()["_serialize_teacher_agent_history"]
+    message = {"id": 20, "role": "user", "content": "不能被标成作者原始要求的模型长文", "metadata": {
+        "client": "generation-option-selection", "sourceMessageId": 10, "optionId": "option-1",
+    }}
+    bundle = {"sourceMessageId": 10, "sourceJobId": "job-1", "originalRequest": "原请求",
+              "selection": {"optionId": "option-1", "selectionMessageId": 19},
+              "options": [{"id": "option-1", "title": "旧方案", "rewrittenPrompt": "模型草案"}]}
+    for bundles in ([], [bundle]):
+        result = serialize([message], bundles)
+        event = result["conversation"][0]
+        assert event["origin"] == "unverified-selection-event"
+        assert event["sourceRef"] is None
+        assert "selectionEvent" not in event
+        assert "模型长文" not in json.dumps(result, ensure_ascii=False)
+
+
+def test_teacher_history_provenance_budget_keeps_latest_whole_messages_without_mutating_history():
+    serialize = _teacher_history_serializers()["_serialize_teacher_agent_history"]
+    messages = [
+        {"id": 1, "role": "user", "content": "更早要求" * 100},
+        {"id": 2, "role": "user", "content": "后续补充"},
+        {"id": 3, "role": "assistant", "content": "已确认"},
+        {"id": 4, "role": "user", "content": "现在调整前版"},
+    ]
+    result = serialize(messages, [], current_message_id=4, limit=7)
+    assert [item["id"] for item in result["conversation"]] == [2, 3]
+    assert [item["content"] for item in result["conversation"]] == ["后续补充", "已确认"]
+    assert messages[0]["content"] == "更早要求" * 100
+
+
+def test_teacher_history_provenance_uses_existing_scope_checked_option_lookup_without_writes():
+    namespace = _teacher_history_serializers()
+    user, thread = SimpleNamespace(id=7), SimpleNamespace(id="thread-1")
+    calls = []
+    def lookup(actual_user, actual_thread, message_id, option_id):
+        calls.append((actual_user.id, actual_thread.id, message_id, option_id))
+        if message_id == 21:
+            raise ValueError("来源未通过用户/对话/成功任务校验")
+        return {"sourceJob": SimpleNamespace(id="job-verified", payload={"prompt": "真实用户原始请求"}),
+                "bundle": {"options": [{"id": "option-1", "title": "正确来源", "rewrittenPrompt": "模型方案"}]},
+                "selection": None}
+    namespace["_generation_option_context"] = lookup
+    rows = [SimpleNamespace(id=message_id, role="assistant", content="方案回答", metadata_json={
+        "generationOptions": {"options": [{"id": "option-1"}]},
+    }) for message_id in (20, 21)]
+    result = namespace["_teacher_agent_history_context"](user, thread, rows)
+    assert calls == [(7, "thread-1", 20, "option-1"), (7, "thread-1", 21, "option-1")]
+    sources = result["requestProvenance"]["sources"]
+    options = [item for item in sources if item["kind"] == "generation-option"]
+    assert len(options) == 1
+    assert options[0]["originalRequest"] == "真实用户原始请求"
+    assert options[0]["sourceJobId"] == "job-verified"
+
+
 def test_teacher_agent_uses_one_persistent_composer_approval_surface():
     root = pathlib.Path(__file__).resolve().parents[1]
     script = (root / "dojo_theme/static/js/dojo/teaching-agent.js").read_text()
@@ -1198,6 +1299,140 @@ def test_agent_runtime_startup_outage_retries_without_consuming_job_attempts():
     assert invoke.count("time.sleep(retry_delay)") == 2
 
 
+def test_agent_runtime_stream_yields_real_events_and_preserves_failure_category(monkeypatch):
+    from CTFd.plugins.dojo_plugin.agent_runtime import jobs
+
+    class StreamResponse:
+        status_code = 200
+        headers = {"Content-Type": "application/x-ndjson; charset=utf-8"}
+
+        def __init__(self, events):
+            self.events = events
+            self.closed = False
+
+        def iter_lines(self, decode_unicode=False):
+            for event in self.events:
+                yield json.dumps({"protocol": "aisecedu.agent-run.v1", "event": event})
+
+        def close(self):
+            self.closed = True
+
+    job = SimpleNamespace(
+        id="stream-test", kind="agent.chat", payload={}, trace_id="trace",
+        owner_id=1, dojo_id=None, module_index=None,
+    )
+    route = {"provider": "deepseek", "actual_model": "deepseek-v4-flash"}
+    seen = []
+    posted = []
+    success = StreamResponse([
+        {"type": "run.started", "runId": "run-1", "seq": 0},
+        {"type": "item.started", "runId": "run-1", "seq": 1,
+         "item": {"id": "item-1", "kind": "tool", "title": "读取技能目录"}},
+        {"type": "run.completed", "runId": "run-1", "seq": 2,
+         "result": {"success": True, "result": {"answer": "ok"}}},
+    ])
+
+    def post(_url, **kwargs):
+        posted.append(kwargs)
+        return success
+
+    monkeypatch.setattr(jobs.requests, "post", post)
+    monkeypatch.setattr(jobs, "_agent_trace_event", lambda _job, event: seen.append(event))
+    result = jobs._invoke_agent_runtime(job, route)
+    assert result["result"]["answer"] == "ok"
+    assert [event["type"] for event in seen] == ["run.started", "item.started"]
+    assert posted[0]["headers"]["Accept"] == "application/x-ndjson"
+    assert posted[0]["stream"] is True
+    assert success.closed
+
+    failure = StreamResponse([{"type": "run.failed", "runId": "run-2", "seq": 0,
+                               "code": "VALIDATION_FAILED", "failureCategory": "quality",
+                               "error": "Invalid result"}])
+    monkeypatch.setattr(jobs.requests, "post", lambda *_args, **_kwargs: failure)
+    with pytest.raises(jobs.RuntimeJobError) as error:
+        jobs._invoke_agent_runtime(job, route)
+    assert error.value.category == "quality"
+    assert error.value.code == "VALIDATION_FAILED"
+    assert failure.closed
+
+
+def test_agent_activity_preserves_model_and_tool_events_across_harness_jobs(monkeypatch):
+    from CTFd.plugins.dojo_plugin.api.v1 import teaching
+
+    root = SimpleNamespace(
+        id="agent-root", owner_id=7, thread_id="thread-1", kind="agent.chat",
+        payload={"harnessVersion": "teaching-harness-v1", "harnessNextJobId": "tool-driver"},
+    )
+    driver = SimpleNamespace(id="tool-driver", payload={}, kind="agent.advance")
+
+    class JobQuery:
+        def filter_by(self, **values):
+            assert values == {"id": "tool-driver", "owner_id": 7, "thread_id": "thread-1"}
+            return self
+
+        def first(self):
+            return driver
+
+    events = {
+        root.id: [{"sequence": 1, "stage": "agent_run", "status": "RUNNING",
+                   "message": "模型拟定计划", "details": {"agentRun": {"type": "item.started"}}}],
+        driver.id: [{"sequence": 1, "stage": "agent_run", "status": "RUNNING",
+                     "message": "读取课程材料", "details": {"agentRun": {"type": "item.started"}}}],
+    }
+    monkeypatch.setattr(teaching, "TeachingJobs", SimpleNamespace(query=JobQuery()))
+    monkeypatch.setattr(teaching, "job_view", lambda _job: {"result": {}})
+    monkeypatch.setattr(teaching, "job_events_view", lambda job_id: events[job_id])
+
+    activity = teaching._job_activity_view(root)
+    assert [event["sequence"] for event in activity["events"]] == [1, 2]
+    assert [event["message"] for event in activity["events"]] == ["模型拟定计划", "读取课程材料"]
+
+
+def test_agent_harness_records_only_the_tool_it_actually_executes(monkeypatch):
+    from CTFd.models import Users, db
+    from CTFd.plugins.dojo_plugin.models import TeachingAgentMessages, TeachingAgentThreads
+    from CTFd.plugins.dojo_plugin.agent_runtime import harness, jobs
+    from CTFd.plugins.dojo_plugin.api.v1 import teaching
+
+    class Query:
+        def __init__(self, row):
+            self.row = row
+
+        def filter_by(self, **_values):
+            return self
+
+        def first(self):
+            return self.row
+
+    owner = SimpleNamespace(id=7)
+    thread = SimpleNamespace(id="thread-1", status="ACTIVE")
+    source = SimpleNamespace(id=3, metadata_json={
+        "toolProposals": [{"tool": "material.list", "arguments": {}}],
+        "agentLoopDepth": teaching.MAX_AGENT_LOOP_STEPS - 1,
+    })
+    job = SimpleNamespace(
+        id="driver", owner_id=7, thread_id=thread.id, kind="agent.advance",
+        payload={"sourceMessageId": source.id},
+    )
+    events = []
+    monkeypatch.setattr(Users, "query", Query(owner))
+    monkeypatch.setattr(TeachingAgentThreads, "query", Query(thread))
+    monkeypatch.setattr(TeachingAgentMessages, "query", Query(source))
+    monkeypatch.setattr(db.session, "refresh", lambda _row: None)
+    monkeypatch.setattr(db.session, "commit", lambda: None)
+    monkeypatch.setattr(teaching, "_require_teacher", lambda _owner: None)
+    monkeypatch.setattr(teaching, "_teacher_agent_context", lambda _owner, _thread: {})
+    monkeypatch.setattr(jobs, "heartbeat", lambda current, **_kwargs: current)
+    monkeypatch.setattr(jobs, "assert_job_lease", lambda current: current)
+    monkeypatch.setattr(jobs, "_agent_trace_event", lambda _job, event: events.append(event))
+
+    result = harness.advance_turn(job)
+    assert result["state"] == "complete"
+    assert [event["type"] for event in events] == ["item.started", "item.completed"]
+    assert events[0]["item"]["title"] == "读取课程材料"
+    assert events[1]["status"] == "completed"
+
+
 def test_teacher_agent_upload_is_conversation_scoped_until_teacher_decides():
     root = pathlib.Path(__file__).resolve().parents[1]
     script = (root / "dojo_theme/static/js/dojo/teaching-agent.js").read_text()
@@ -1400,13 +1635,9 @@ def test_generation_option_bundle_requires_three_complete_distinct_prompts(
         "referenceId": dojo["referenceId"],
         "moduleIndex": module_index,
     }
-    assert (
-        validated_generation_options(
-            unscoped_job,
-            {"generationOptions": raw},
-        )
-        is None
-    )
+    independent = validated_generation_options(unscoped_job, {"generationOptions": raw})
+    assert independent["boundScope"] == {"dojoId": None, "moduleIndex": None, "collection": "projects"}
+    assert validated_generation_options(unscoped_job, {"generationOptions": independent}) == independent
     assert (
         validated_generation_options(
             unscoped_job,
