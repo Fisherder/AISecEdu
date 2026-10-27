@@ -16,6 +16,7 @@
       <p id="learning-score-meta">正在分别读取活动状态、评分与过程证据…</p>
     </div>
     <div class="learning-score-actions">
+      {% if Session.rainier_session_id %}<a class="btn btn-outline-primary" href="/integrations/rainier/status">实验平台回传</a>{% endif %}
       <a id="learning-score-challenge-link" class="btn btn-outline-secondary" href="/{{ challenge.dojo.reference_id }}/{{ challenge.module.id }}/{{ challenge.id }}">
         <i class="fas fa-arrow-left" aria-hidden="true"></i> 返回题目
       </a>

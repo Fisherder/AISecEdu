@@ -14,7 +14,7 @@ import {
   LoaderCircle,
 } from 'lucide-react';
 import { useWorkbench } from '../core/context';
-import { modeLabels, terminal, type Mode, type PendingTurn } from '../core/types';
+import { terminal, type PendingTurn } from '../core/types';
 import { Button, IconButton } from './ui';
 
 function QueueRow({ turn }: { turn: PendingTurn }) {
@@ -204,11 +204,7 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
             placeholder={
               drag
                 ? '松开以添加文件'
-                : draft.mode === 'plan'
-                  ? '描述目标，先一起审阅计划…'
-                  : draft.mode === 'ask'
-                    ? '询问教学内容、原理或已有资料…'
-                    : '描述想制作的内容，或继续修改成品…'
+                : '直接提问、描述教学目标，或继续修改已有内容…'
             }
             value={draft.text}
             rows={welcome ? 3 : 2}
@@ -276,17 +272,7 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
                 event.target.value = '';
               }}
             />
-            <select
-              aria-label="智能体模式"
-              value={draft.mode}
-              onChange={(event) => c.setDraft({ mode: event.target.value as Mode })}
-            >
-              {Object.entries(modeLabels).map(([mode, label]) => (
-                <option key={mode} value={mode}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            <span className="model-label" title="根据自然语言自动判断问答、规划或制作任务">自动理解需求</span>
             <select
               aria-label="学习模式"
               value={draft.learningPattern}
@@ -342,13 +328,9 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
       )}
       <div className="composer-footnote">
         <span>
-          {draft.mode === 'plan'
-            ? '先规划，审阅后再执行'
-            : draft.mode === 'ask'
-              ? '只读问答，不修改教学内容'
-              : active
-                ? '关闭页面后，任务仍在后台执行'
-                : '生成的教学内容可继续审阅和修改'}
+          {active
+            ? '关闭页面后，任务仍在后台执行'
+            : '先明确需求，再确定方案；随时用对话补充或修改'}
         </span>
         <span>
           <CornerDownLeft size={11} /> 发送{' '}

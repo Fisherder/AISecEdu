@@ -1,11 +1,12 @@
 import type { AgentSkill, AgentSkillSummary } from '@/lib/server/agent-skills';
+import { TEACHER_INTENT_POLICY, SUPERPOWERS_TEACHING_ADAPTER } from './teacher-intent';
 import { CINEMATIC_CAPABILITY_BRIEF, CINEMATIC_CAMERA_PLAYBACK_BRIEF, CINEMATIC_TEACHING_PURPOSE_BRIEF } from '@/lib/cinematic/capabilities';
 import { CINEMATIC_AUTONOMOUS_DESIGN_BRIEF } from '@/lib/cinematic/design-policy';
 import { COURSEWARE_PLANNING_BRIEF } from '@/lib/courseware/schema';
 import { LEARNER_LANGUAGE_BRIEF } from '@/lib/teaching/learner-language';
 import { assembleAgentPrompt, COLLABORATION_POLICY, PLANNING_POLICY, INTERACTION_OUTPUT_POLICY, QUESTION_REPLY_POLICY } from './prompt-assembly';
 
-const TEACHER_REQUEST_PROVENANCE_BRIEF = `先完成需求来源判断，在规划JSON顶层增加requestRelation:{mode:"new-request|continue|revise|clarify",sourceRefs:[],evidence:"本轮原话中的指代证据"}。requestAuthority.sourceIndex是服务端来源索引，ref只能原样复制。teacher-message是教师原文；generation-option/assistant-message/artifact是模型草案或既有产物；selected仅表示当时选过，不等于本轮仍采用。新请求（包括重新完整提交相同原文、仅旧任务失败）用new-request、sourceRefs:[]，不要继承旧扩写。明确继续/按方案2/调整前版时，用continue/revise并引用唯一对应方案或产物ref，必要时同时引用相关真实教师补充的message ref；evidence逐字引用本轮指代原话。不得通过主题关键词决定新建还是继续；含糊且无法唯一定位用clarify、空refs并询问。当前只有来源索引，不提供旧模型扩写全文；执行阶段只会载入你明确引用且服务端验证过的来源，不得虚构其内容。课程附件、资料和verified工具观察继续保留为事实，不需要把它们伪造为模型方案需求。`;
+const TEACHER_REQUEST_PROVENANCE_BRIEF = `先完成需求来源判断，在规划JSON顶层增加requestRelation:{mode:"new-request|continue|revise|clarify",sourceRefs:[],evidence:"本轮原话中的指代证据"}。requestAuthority.sourceIndex是服务端来源索引，ref只能原样复制。teacher-message是教师原文；generation-option/assistant-message/artifact是模型草案或既有产物；selected仅表示当时选过，不等于本轮仍采用。新请求（包括重新完整提交相同原文、仅旧任务失败）用new-request、sourceRefs:[]，不要继承旧扩写。明确继续/按方案2/调整前版时，用continue/revise并引用唯一对应方案或产物ref，必要时同时引用相关真实教师补充的message ref；evidence只填写本轮一段连续的指代原话，不加解释或省略号。不得通过主题关键词决定新建还是继续；含糊且无法唯一定位用clarify、空refs并询问。当前只有来源索引，不提供旧模型扩写全文；执行阶段只会载入你明确引用且服务端验证过的来源，不得虚构其内容。课程附件、资料和verified工具观察继续保留为事实，不需要把它们伪造为模型方案需求。`;
 
 const STEERING_BRIEF = 'context.steering 存在时，这是服务端绑定到运行中原任务的补充输入。originalRequest 为原始目标，instruction 是本轮新增或修正要求，后者冲突时优先。结合已完成的真实操作继续，不重新从头执行；不要把补充当作独立任务而丢掉原目标。mode=next-step 表示旧执行循环已在操作边界让出，mode=after-completion 表示操作已完成后再收到补充；均不能声称撤销了已完成的操作。依据真实来源索引填写 requestRelation，原目标来源不唯一时询问，不能编造引用。';
 
@@ -23,7 +24,7 @@ ${JSON.stringify(catalog.map(({ name, description }) => ({ name, description }))
 
 只要 generationTarget 不为 null，就必须同时给出 generationScope，表达你结合教师原意与可信课程事实所做的语义作用域判断。教师明确指定课程或章节、使用能唯一指向当前课程/章节的自然语言时，status=bound，并从 platformFacts.availableCourses 原样复制唯一课程的 referenceId 与真实 moduleIndex；面向整个课程时 moduleIndex=null。不要根据名称自行编造内部值，也不要因为列表里只有一个课程就默认选中。教师没有提供任何课程归属且当前对话也没有可信课程作用域时使用 status=unscoped；课件、交互演示、仿真与辩论默认保存到教师私有的生成项目合集，不追问课程，仍返回三种方案；只有 CTF 实践题需要课程章节。教师指向课程或章节但可信事实无法唯一匹配时使用 status=ambiguous；下一阶段同样会自然语言追问，不能先生成候选。courseName/moduleName 只是可读说明，真实值由服务端按 referenceId/moduleIndex 复核。generationTarget 为 null 时 generationScope 必须为 null。
 
-只输出一个完整合法 JSON；understanding简述原意，plan为3–6个简短结果步骤，不在本阶段扩写几千字的详细分镜，也不要省略需求来源字段：{"requestRelation":{"mode":"new-request","sourceRefs":[],"evidence":""},"understanding":"用自己的话准确描述教师真正要得到什么","selectedSkills":["skill-name"],"plan":["面向结果的步骤"],"generationTarget":null或{"targetTool":"candidate.generate","artifactType":"slide-deck","reason":"为什么这是新生成任务"},"generationScope":null或{"status":"bound","referenceId":"从 availableCourses 复制","moduleIndex":0,"courseName":"课程显示名","moduleName":"章节显示名","reason":"为什么能唯一确定"}或{"status":"unscoped","reason":"教师未指定课程，保存到生成项目合集"}或{"status":"ambiguous","reason":"缺少或冲突的作用域信息"}}。示例requestRelation只适用于新请求，继续/修订/澄清必须按开头的来源规则填写；不能照抄new-request跳过原意判断。不要回答教师，不要声称已执行，不要输出固定分类或置信度。`;
+只输出一个完整合法 JSON；understanding简述原意，plan为3–6个简短结果步骤，不在本阶段扩写几千字的详细分镜，也不要省略需求来源字段：{"requestRelation":{"mode":"new-request","sourceRefs":[],"evidence":""},"understanding":"用自己的话准确描述教师真正要得到什么","selectedSkills":["skill-name"],"plan":["面向结果的步骤"],"generationTarget":null或{"targetTool":"candidate.generate","artifactType":"slide-deck","reason":"为什么这是新生成任务"},"generationScope":null或{"status":"bound","referenceId":"从 availableCourses 复制","moduleIndex":0,"courseName":"课程显示名","moduleName":"章节显示名","reason":"为什么能唯一确定"}或{"status":"unscoped","reason":"教师未指定课程，保存到生成项目合集"}或{"status":"ambiguous","reason":"缺少或冲突的作用域信息"}}。示例requestRelation只适用于新请求，继续/修订/澄清必须按开头的来源规则填写；不能照抄new-request跳过原意判断。不要回答教师，不要声称已执行；按自动任务契约补充 intent，不输出关键词分类或置信度。`;
 }
 
 function executionDomain(skills: AgentSkill[]) {
@@ -79,12 +80,16 @@ ${process.env.COURSEWARE_GENERATOR === 'native-v2' ? '\n' + COURSEWARE_PLANNING_
 }
 
 
-export function teacherAgentPlanningPrompt(catalog: AgentSkillSummary[]) {
+export function teacherAgentPlanningPrompt(catalog: AgentSkillSummary[], processSkills: AgentSkill[] = []) {
   return assembleAgentPrompt('planning', [
     { id: 'collaboration', order: 0, text: COLLABORATION_POLICY },
     { id: 'question-reply', order: 5, text: QUESTION_REPLY_POLICY },
     { id: 'planning', order: 10, text: PLANNING_POLICY },
+    { id: 'automatic-task-intent', order: 12, text: TEACHER_INTENT_POLICY },
+    { id: 'superpowers-teaching-adapter', order: 13, text: SUPERPOWERS_TEACHING_ADAPTER },
+    { id: 'superpowers-requirements', order: 14, text: processSkills.map(skill => `${skill.name}:\n${skill.instructions}`).join('\n\n') },
     { id: 'teacher-planning-domain', order: 20, text: planningDomain(catalog) },
+    { id: 'natural-proposal-continuation', order: 24, text: '教师已在本轮明确说按已有某个方案开始制作时，从 requestAuthority.sourceIndex 选择唯一对应的 generation-option 来源；requestRelation 使用 continue 并引用该 option 的 ref，intent.kind=create，generationTarget 和 generationScope 均为 null。下一阶段用 generation.start 开始已选方案，不重新生成三套方案。若本轮是在调整方案而未确定开始，应沿用原要求和明确修改继续协商，不启动原方案。修改尚未执行的计划仍属于 intent.kind=plan；修改真实文件或内容产物才是 revise。' },
     { id: 'inquiry-pattern-planning', order: 25, text: 'platformFacts.selectedLearningPattern.id=process-inquiry 时，必须加载 process-inquiry-learning，generationTarget 和 generationScope 均为 null，直接设计完整学习流程并使用 module.inquiry 创建草稿。不适用其他产物的三方案协议。仅当平台目录确有相应 engine 才能创建，不得用问答或动画占位代替机制。' },
   ]);
 }
@@ -97,6 +102,8 @@ export function teacherAgentExecutionPrompt(skills: AgentSkill[], catalog: Agent
   return assembleAgentPrompt('execution', [
     { id: 'collaboration', order: 0, text: COLLABORATION_POLICY },
     { id: 'question-reply', order: 5, text: QUESTION_REPLY_POLICY },
+    { id: 'superpowers-teaching-adapter', order: 7, text: SUPERPOWERS_TEACHING_ADAPTER },
+    { id: 'natural-proposal-execution', order: 8, text: '教师可以直接用自然语言采用已有方案。只有本轮明确要求开始制作、且 requestAuthority.adoptedSources 存在唯一对应的 generation-option 时，使用 generation.start({sourceMessageId,optionId})，参数原样复制该来源。此工具会由平台再次核对教师、对话、方案版本和课程权限，复用同一个正式生成入口；不能虚构标识，不能用它发布内容，也不能把“先改方案”当成开始生成。请求修改现有产物时继续使用 artifact.revise 并保留所有原约束。' },
     { id: 'skill-catalog', order: 15, text: available.length
       ? `以下目录只含技能名称和简介，不含指令正文。需要使用其中某项技能时，先调用 skill({name}) 加载，再继续完成任务；技能正文点名的资源可用 skill_resource({name,path}) 按需读取。已在本轮载入的技能不必重复调用。\n<available_skills>\n${JSON.stringify(available)}\n</available_skills>`
       : '' },

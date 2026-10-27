@@ -16,6 +16,15 @@ vi.mock('@/lib/server/lesson-generation', () => ({
   generateSingleArtifact: mocks.generateSingleArtifact,
 }));
 vi.mock('@/lib/server/resolve-model', () => ({ resolveModel: mocks.resolveModel }));
+vi.mock('@/lib/server/agent-skills', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/server/agent-skills')>();
+  const owner = (value?: number) => process.env.AISECEDU_INTERNAL_URL && process.env.AISECEDU_SERVICE_SECRET ? value : undefined;
+  return {
+    ...actual,
+    listAgentSkills: (value?: number) => actual.listAgentSkills(owner(value)),
+    loadAgentSkills: (names: string[], prompt: string, value?: number, audience?: 'model' | 'user') => actual.loadAgentSkills(names, prompt, owner(value), audience),
+  };
+});
 vi.mock('@/lib/server/aisecedu-integration', () => ({
   AISECEDU_SERVICE_HEADER: 'X-AISecEdu-Service-Token',
   aiseceduInternalOrigin: () => 'http://ctfd',
@@ -23,13 +32,16 @@ vi.mock('@/lib/server/aisecedu-integration', () => ({
 }));
 
 function request(body: Record<string, unknown>, token = 'integration-secret') {
+  const payload = body.payload as Record<string, unknown> | undefined;
+  const submitted = body.kind === 'agent.chat'
+    ? { ...body, payload: { executionMode: 'execute', ...payload } } : body;
   return new NextRequest('http://localhost/api/integration/jobs/execute', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-AISecEdu-Service-Token': token,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(submitted),
   });
 }
 
@@ -117,6 +129,83 @@ describe('玄甲 durable job integration route', () => {
       modelInfo: { outputWindow: 16_000 },
       thinkingConfig: { effort: 'high' },
     });
+  });
+
+  it('automatically answers a question without creating content or asking an unrelated design question', async () => {
+    mockAgentTurn({ answer: '参数化查询把数据与 SQL 结构分开。', plan: [], questions: [] }, {
+      understanding: '解释参数化查询', selectedSkills: [], plan: [], generationTarget: null,
+      intent: { kind: 'answer', summary: '解释参数化查询', needsClarification: false, questions: [] },
+    });
+    const { POST } = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request({ ...body(), payload: { executionMode: 'auto', prompt: '参数化查询有什么作用？', context: {} } }));
+    const output = await response.json();
+    expect(response.status).toBe(200);
+    expect(output.result.executionMode).toBe('ask');
+    expect(output.result.questions).toEqual([]);
+    expect(output.result.deliverables).toEqual([]);
+    expect(output.result.toolProposals).toEqual([]);
+    expect(mocks.generateSingleArtifact).not.toHaveBeenCalled();
+  });
+
+  it.each(['plan', 'create'])('requires structured clarification before completing a new automatic %s request', async kind => {
+    mocks.callLLM.mockResolvedValueOnce({ text: JSON.stringify({
+      understanding: '安全编码课', selectedSkills: [], plan: ['制作教学内容'], generationTarget: null,
+      intent: { kind, summary: '为学生准备安全编码教学内容', needsClarification: true,
+        questions: [{ id: 'audience', text: '学生是否已经学过 C 指针？', choices: ['已经学过', '还没有'] }] },
+    }) });
+    const { POST } = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request({ ...body(), payload: { executionMode: 'auto', prompt: '帮我准备安全编码课', context: {} } }));
+    const output = await response.json();
+    expect(response.status).toBe(200);
+    expect(output.result.interaction.state).toBe('awaiting-input');
+    expect(output.result.questions[0].allowFreeText).toBe(true);
+    expect(output.result.plan).toEqual([]);
+    expect(output.result.generationOptions).toBeNull();
+    expect(output.result.deliverables).toEqual([]);
+    expect(output.result.selectedSkills).toContain('brainstorming');
+    expect(mocks.callLLM).toHaveBeenCalledTimes(1);
+    expect(mocks.callLLM.mock.calls[0][0].system).toContain('First: What Do You Actually Know?');
+  });
+
+  it('finishes the same plan after a verified teacher reply without requiring a mode change', async () => {
+    mockAgentTurn({ answer: '三十分钟计划：先演示，再练习并核验。', plan: ['演示', '练习', '核验'], questions: [] }, {
+      understanding: '为已学过指针的学生规划安全编码课', selectedSkills: [], plan: ['形成教学计划'], generationTarget: null,
+      intent: { kind: 'plan', summary: '为已学过指针的学生规划三十分钟安全编码课', needsClarification: false, questions: [] },
+    });
+    const { POST } = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request({ ...body(), payload: { executionMode: 'auto', prompt: '已经学过，三十分钟', context: {
+      questionReply: { originalRequest: '先帮我规划一节安全编码课', round: 1,
+        answers: [{ question: '学生基础与课时？', answer: '已经学过指针，三十分钟' }] },
+    } } }));
+    const output = await response.json();
+    expect(response.status).toBe(200);
+    expect(output.result.executionMode).toBe('plan');
+    expect(output.result.intentDecision.clarification.state).toBe('confirmed');
+    expect(output.result.questions).toEqual([]);
+    expect(output.result.toolProposals).toEqual([]);
+    expect(output.result.plan).toEqual(['演示', '练习', '核验']);
+    expect(mocks.callLLM.mock.calls[1][0].prompt).toContain('三十分钟');
+  });
+
+  it('starts the exact adopted proposal after a natural language selection', async () => {
+    const source = { ref: 'option:101:option-2', kind: 'generation-option', authorship: 'model', sourceMessageId: 101,
+      sourceJobId: 'job-options', optionId: 'option-2', title: '对比与练习', originalRequest: '制作参数化查询课件', content: '保留三个问题及反馈的十五分钟课件',
+      intentDecision: { version: 'teacher-intent-v1', intent: 'create', request: '制作参数化查询课件', clarification: { state: 'confirmed', round: 1 } } };
+    mockAgentTurn({ answer: '按已选第二套方案开始制作。', questions: [], suggestions: [],
+      toolProposals: [{ tool: 'generation.start', arguments: { sourceMessageId: 101, optionId: 'option-2' }, reason: '教师明确采用第二套方案' }], deliverables: [] }, {
+      understanding: '按第二套方案制作', selectedSkills: [], plan: [], generationTarget: null,
+      requestRelation: { mode: 'continue', sourceRefs: [source.ref], evidence: '采用第二套方案，开始制作' },
+      intent: { kind: 'create', summary: '采用第二套方案制作十五分钟课件', needsClarification: false, questions: [] },
+    });
+    const { POST } = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request({ ...body(), payload: { executionMode: 'auto', prompt: '采用第二套方案，开始制作', context: {
+      requestProvenance: { version: 'teacher-request-v1', currentMessageId: 103, sources: [source] },
+    } } }));
+    const output = await response.json();
+    expect(response.status, JSON.stringify(output)).toBe(200);
+    expect(output.result.intentDecision.clarification.state).toBe('confirmed');
+    expect(output.result.toolProposals).toEqual([expect.objectContaining({ tool: 'generation.start', arguments: { sourceMessageId: 101, optionId: 'option-2' } })]);
+    expect(output.result.generationOptions).toBeFalsy();
   });
 
   it('logs bounded visual-intent failure fields without exposing them in the API response', async () => {

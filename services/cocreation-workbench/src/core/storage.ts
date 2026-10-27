@@ -18,7 +18,7 @@ export function writeLocal(name: string, value: unknown) {
 export const blankDraft = (): Draft => ({
   learningPattern: '',
   text: '',
-  mode: 'execute',
+  mode: 'auto',
   delivery: 'after-current',
   sources: [],
   skills: [],
@@ -35,7 +35,7 @@ export class WorkspaceStorage {
       ...blankDraft(),
       ...saved,
       learningPattern: (saved.learningPattern ?? selectedPattern) === 'process-inquiry' ? 'process-inquiry' : '',
-      mode: ['execute', 'plan', 'ask'].includes(saved.mode || '') ? saved.mode! : 'execute',
+      mode: 'auto',
       sources: Array.isArray(saved.sources) ? saved.sources : [],
       skills: Array.isArray(saved.skills) ? saved.skills : [],
     };

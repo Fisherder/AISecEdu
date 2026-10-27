@@ -15,6 +15,8 @@ class TurnDeferred(RuntimeError):
 
 
 def execution_policy(tool, schemas, course_tools, navigation_tools):
+    if tool == "generation.start":
+        return "server"
     schema = schemas.get(tool)
     if schema is None or schema[0] == "R3" or tool in DECISION_TOOLS or tool in navigation_tools or tool == "artifact.open":
         return "user"
@@ -205,6 +207,7 @@ def advance_turn(job):
             save("awaiting-action")
             return finish({"state": "awaiting-action", "sourceMessageId": source.id})
         tool_titles = {
+            "generation.start": "按教师选定的方案制作",
             "progress.read": "读取任务进度", "material.list": "读取课程材料",
             "artifact.list": "查找已有成品", "job.list": "查询任务",
             "approval.list": "查询待确认操作", "classroom.list": "读取课堂信息",
@@ -231,6 +234,8 @@ def advance_turn(job):
             scope = api.build_scope(owner, role="teacher", dojo_id=arguments.get("referenceId"), module_index=arguments.get("moduleIndex"))
             thread.dojo_id, thread.module_index = scope.dojo_id, scope.module_index
             db.session.commit()
+        elif tool == "generation.start":
+            data = response_data(api.start_teacher_generation(owner, thread.id, arguments, request_key))
         elif tool == "artifact.revise":
             data = response_data(api.revise_teacher_artifact(owner, str(arguments.get("artifactId") or ""), arguments, request_key))
         elif tool == "material.analyze":

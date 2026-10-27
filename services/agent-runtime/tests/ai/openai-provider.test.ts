@@ -87,6 +87,14 @@ describe('OpenAI provider defaults', () => {
     azureMock.createAzure.mockReturnValue(azureMock.model);
   });
 
+  it('uses the supported DeepSeek Flash API name for the configured V4.1 Flash model', async () => {
+    const body = await captureInjectedRequestBody('deepseek', 'deepseek-v4.1-flash', { mode: 'disabled', enabled: false });
+    expect(body.model).toBe('deepseek-flash');
+    expect(body.thinking).toEqual({ type: 'disabled' });
+    expect(body.messages).toEqual([{ role: 'user', content: 'hi' }]);
+    expect(getModelInfo('deepseek', 'deepseek-v4.1-flash')?.name).toBe('DeepSeek V4.1 Flash');
+  });
+
   it.each([
     ['gpt-5.6', 'GPT-5.6 Sol'],
     ['gpt-5.6-terra', 'GPT-5.6 Terra'],

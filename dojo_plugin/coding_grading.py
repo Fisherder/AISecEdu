@@ -9,6 +9,7 @@ from sqlalchemy import func, text
 
 from .coding_rubric import RUBRIC_VERSION, AI_RULES, SUPPORTED_RUBRIC_VERSIONS, ai_rules_for_version, grade_results, normalize_ai_review, digest
 from .models import LearningAuditEvents, LearningAttempts, LearningAssessments, TeachingJobs
+from .rainier import maybe_queue_assessment, usage_scope
 
 RECEIPT_ACTION = 'coding.submission.verified'
 REVIEW_ACTION = 'coding.review.suggested'
@@ -86,6 +87,7 @@ def assess_coding_attempt(attempt):
     if attempt.status=='ACTIVE':attempt.status='SUBMITTED'
     from .learning.evidence import append_evidence
     append_evidence(attempt, 'assessment.created', {'assessmentId':assessment.id,'rubricVersion':event_rubric(event),'receiptEventId':event.id,'totalScore':assessment.total_score}, source='GRADER',trust_level=4)
+    maybe_queue_assessment(assessment)
     return assessment
 
 
@@ -109,7 +111,8 @@ def execute_review(job):
     payload={'submissionSha256':p['submissionSha256'],'rubricVersion':event_rubric(event),'rubric':review_rules,'sources':sources,'grading':p['grading'],'checks':[{'id':r['id'],'component':r['component'],'name':r['name'],'passed':r['passed'],'feedback':r['feedback'][:500]} for r in p['results']]}
     error=None
     for _ in range(2):
-        value=model_json(system+('\n上次引用或字段校验失败：'+str(error)+'。请直接复制给定行号和对应原文，不要估算。' if error else ''),payload,model=DOJO_AI_GRADER_MODEL,temperature=0,max_tokens=4000,attempts=1,total_timeout_seconds=50)
+        with usage_scope(event.details.get('attemptId'), '安全编码完成项与缺项复核'):
+            value=model_json(system+('\n上次引用或字段校验失败：'+str(error)+'。请直接复制给定行号和对应原文，不要估算。' if error else ''),payload,model=DOJO_AI_GRADER_MODEL,temperature=0,max_tokens=4000,attempts=1,total_timeout_seconds=50)
         if not value:raise ValueError('AI 复核服务未启用或未返回结果')
         try:
             review=normalize_ai_review(value,p)

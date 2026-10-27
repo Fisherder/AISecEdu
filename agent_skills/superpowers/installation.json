@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "plugin": "superpowers",
+  "version": "7.0.1",
+  "repository": "https://github.com/obra/superpowers",
+  "commit": "2ce8aa15d05bd57213e6f746f953aafb7ded7a8b",
+  "license": "MIT",
+  "installedFor": "aisecedu-teacher-agent",
+  "adapter": "lib/server/agent-harness/teacher-intent.ts",
+  "skills": [
+    {
+      "name": "brainstorming",
+      "sourcePath": "skills/brainstorming",
+      "sha256": "61a7ef918652108c76a3fd01e02dd92d39996c6b46d4cb2819cbd03f6c45e46a"
+    },
+    {
+      "name": "diagnosing-superpowers",
+      "sourcePath": "skills/diagnosing-superpowers",
+      "sha256": "3143de8695c5a2d63e8b1675f33837578076f464deb127c2ebdd0b46fceef886"
+    },
+    {
+      "name": "dispatching-parallel-agents",
+      "sourcePath": "skills/dispatching-parallel-agents",
+      "sha256": "1968923066f3b707eb01d1992cdf4c42284c3855f70253b9cd5000ff45fca13c"
+    },
+    {
+      "name": "executing-plans",
+      "sourcePath": "skills/executing-plans",
+      "sha256": "e4649e59880ef2643d1da128e3d607e87e3f969410d72095a5bf65811b6036dc"
+    },
+    {
+      "name": "finishing-a-development-branch",
+      "sourcePath": "skills/finishing-a-development-branch",
+      "sha256": "8db5a922b242dd4e1bf824cb91c13b3e8d8e8a86d6ceaf7f0774eb9cce909d65"
+    },
+    {
+      "name": "receiving-code-review",
+      "sourcePath": "skills/receiving-code-review",
+      "sha256": "091df1629510af1b92fc4abd6f96732ebedb4cb2c0f3457e8f2740b0504a2438"
+    },
+    {
+      "name": "requesting-code-review",
+      "sourcePath": "skills/requesting-code-review",
+      "sha256": "2180e14a448e9410bec88e6646a2d1f0ce7fdd58de27388c1e052e929679d2bc"
+    },
+    {
+      "name": "subagent-driven-development",
+      "sourcePath": "skills/subagent-driven-development",
+      "sha256": "ba41f697136cba88a7962d60c8e2f97488ba04a8688b1d0fbeb27f6953808e75"
+    },
+    {
+      "name": "systematic-debugging",
+      "sourcePath": "skills/systematic-debugging",
+      "sha256": "51c6435d98c83c42c96ba7c35725a0b2c376cd487fb1a4e6bd0ddbe7e33ef202"
+    },
+    {
+      "name": "test-driven-development",
+      "sourcePath": "skills/test-driven-development",
+      "sha256": "64b03fce4aee5a97a93160cea8111f3ba13a17b7c001db4bd5836d67fd10705d"
+    },
+    {
+      "name": "using-git-worktrees",
+      "sourcePath": "skills/using-git-worktrees",
+      "sha256": "8cfb86f121269e8f7f12361e6795c4f6738828340e28964c9229d365666c9edd"
+    },
+    {
+      "name": "using-superpowers",
+      "sourcePath": "skills/using-superpowers",
+      "sha256": "82c5c8866ad7f5dd4440ce66bd7806ba48a2f13771beae5cf112e53f08fe36ba"
+    },
+    {
+      "name": "verification-before-completion",
+      "sourcePath": "skills/verification-before-completion",
+      "sha256": "2befe7fc55bcadaa3d97dd9e8efeb633d2561c0ebe74c5a8b17c4d9e7e4520b3"
+    },
+    {
+      "name": "writing-plans",
+      "sourcePath": "skills/writing-plans",
+      "sha256": "a6c67c1900064347c2a329990dd3c555657c51c3ec53b259a08aa01a2c26139a"
+    },
+    {
+      "name": "writing-skills",
+      "sourcePath": "skills/writing-skills",
+      "sha256": "8cb3ac68c6d8c4bb46886b998b09af7989643cab8bd0e46ee86dd62e64546bbe"
+    }
+  ]
+}

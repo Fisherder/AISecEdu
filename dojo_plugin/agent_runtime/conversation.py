@@ -53,7 +53,7 @@ def submission_fingerprint(body):
     return hashlib.sha256(json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def question_reply_context(source_payload, questions, answers):
+def question_reply_context(source_payload, questions, answers, source_result=None):
     previous = (source_payload.get("context") or {}).get("questionReply") or {}
     # A second clarification still belongs to the initial teacher request.
     # Preserve earlier answers while letting an explicit new answer revise it.
@@ -61,6 +61,8 @@ def question_reply_context(source_payload, questions, answers):
                 if isinstance(row, dict) and isinstance(row.get("question"), str) and isinstance(row.get("answer"), str)}
     combined.update({q["text"]: answers[q["id"]] for q in questions})
     return {"originalRequest": previous.get("originalRequest") or source_payload.get("prompt"),
+            "round": int(previous.get("round") or 0) + 1,
+            "intentDecision": (source_result or {}).get("intentDecision"),
             "answers": [{"question": question, "answer": answer} for question, answer in list(combined.items())[-24:]]}
 
 

@@ -21,7 +21,7 @@ const MAX_SKILLS = 64;
 const MAX_SKILL_BYTES = 96_000;
 const MAX_FRONTMATTER_BYTES = 16_384;
 const MAX_REFERENCE_TOTAL_BYTES = 64_000;
-const RESOURCE_PATH = /^(?:references|scripts|assets)\/[a-zA-Z0-9][a-zA-Z0-9._/-]*$/;
+const RESOURCE_PATH = /^(?:(?:references|scripts|assets)\/[a-zA-Z0-9][a-zA-Z0-9._/-]*|[a-zA-Z0-9][a-zA-Z0-9._-]*\.(?:md|txt|json|py|js|sh))$/;
 
 type BuiltinEntry = { summary: AgentSkillSummary; rootPath: string; skillPath: string };
 let lastCompleteBuiltinEntries: BuiltinEntry[] = [];
@@ -301,6 +301,11 @@ export async function getAgentSkill(
     if (!account.invocation[audience === 'model' ? 'modelInvocable' : 'userInvocable']) return null;
     return loadAccountSkill(name, ownerId, audience);
   }
+  return getBuiltinAgentSkill(name, audience);
+}
+
+export function getBuiltinAgentSkill(name: string, audience: 'model' | 'user' = 'model'): AgentSkill | null {
+  if (!SKILL_NAME.test(name)) return null;
   const entry = discoverBuiltinSkillEntries().entries.find((item) => item.summary.name === name);
   if (!entry || !entry.summary.invocation[audience === 'model' ? 'modelInvocable' : 'userInvocable']) return null;
   try {

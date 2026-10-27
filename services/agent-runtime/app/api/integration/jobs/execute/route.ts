@@ -53,7 +53,7 @@ import { resolveCinematicRevisionIntent } from '@/lib/server/cinematic-revision-
 import { CinematicExecution, CinematicExecutionError, cinematicExecutionBudget, type CinematicCallOptions } from '@/lib/server/cinematic-execution';
 import { resolveModel } from '@/lib/server/resolve-model';
 import { recordIntegrationRequest } from '@/lib/server/integration-metrics';
-import { SkillCatalogUnavailableError, invokedUserSkillNames, listAgentSkills, loadAgentSkills, type AgentSkill } from '@/lib/server/agent-skills';
+import { SkillCatalogUnavailableError, invokedUserSkillNames, listAgentSkills, loadAgentSkills, getBuiltinAgentSkill, type AgentSkill } from '@/lib/server/agent-skills';
 import { createAgentSkillTools } from '@/lib/server/agent-skill-tools';
 import {
   parseSlideDeckPageRequirement,
@@ -78,6 +78,7 @@ import {
 import { teacherAgentPlanningPrompt, teacherAgentExecutionPrompt } from '@/lib/server/agent-harness/teacher-prompts';
 import { agentInteraction, recoverUnstructuredAgentQuestion } from '@/lib/server/agent-harness/interaction';
 import { workbenchMode, readOnlyWorkbenchPrompt, normalizeReadOnlyWorkbenchResult } from '@/lib/server/agent-harness/workbench-mode';
+import { applyTeacherIntent, TeacherIntentError, SUPERPOWERS_TEACHING_ADAPTER } from '@/lib/server/agent-harness/teacher-intent';
 import { createLogger } from '@/lib/logger';
 import { VisualIntentResolutionError } from '@/lib/cinematic/intent-diagnostics';
 import { CinematicQualityError } from '@/lib/server/cinematic-generation';
@@ -119,6 +120,7 @@ type JobRequest = {
 };
 
 const AGENT_TOOLS = new Set([
+  'generation.start',
   'module.inquiry',
   'dojo.select',
   'course.list',
@@ -3227,10 +3229,10 @@ export async function POST(req: NextRequest) {
     let planningUsage: Record<string, number> = {};
     const mode = kind === 'agent.chat' ? workbenchMode(payload.executionMode) : 'execute';
     const agentRequest = kind === 'agent.chat' ? teacherGenerationRequest(payload) : { authority: '', negotiation: '' };
-    const originalAgentPrompt = agentRequest.authority;
+    let originalAgentPrompt = agentRequest.authority;
     const agentPlatformFacts = recordValue(recordValue(payload.context)?.platformFacts);
     let agentPromptContext: Record<string, unknown> | undefined;
-    if (kind === 'agent.chat' && mode !== 'execute') {
+    if (kind === 'agent.chat' && (mode === 'ask' || mode === 'plan')) {
       const requestedSkills = [...new Set([...originalAgentPrompt.matchAll(/^\/([a-z0-9]+(?:-[a-z0-9]+)*)\b/gm)].map(match => match[1]))];
       const loader: (names: string[], context: string, owner?: number, invocation?: 'user') => Promise<AgentSkill[]> = loadAgentSkills;
       const readOnlySkills = requestedSkills.length ? await loader(requestedSkills, originalAgentPrompt, typeof body.scope?.ownerId === 'number' ? body.scope.ownerId : undefined, 'user') : [];
@@ -3265,7 +3267,7 @@ export async function POST(req: NextRequest) {
         })
       : undefined;
     if (kind === 'agent.chat') {
-      const requestAuthority = { prompt: originalAgentPrompt, context: payload.context };
+      const requestAuthority = { prompt: originalAgentPrompt, context: payload.context, requireIntent: mode === 'auto' };
       agentPromptContext = teacherAgentContextForPrompt(payload.context, originalAgentPrompt);
       const scopeOwnerId = body.scope?.ownerId;
       skillOwnerId = typeof scopeOwnerId === 'number' ? scopeOwnerId : undefined;
@@ -3284,7 +3286,10 @@ export async function POST(req: NextRequest) {
       }
       let planningSourceRejected = false;
       try {
-        const planningPrompt = teacherAgentPlanningPrompt(catalog);
+        const processSkills = mode === 'auto' ? [getBuiltinAgentSkill('brainstorming')].filter((skill): skill is AgentSkill => skill !== null) : [];
+        if (mode === 'auto' && !processSkills.some(skill => skill.name === 'brainstorming'))
+          throw new TeacherIntentError('Superpowers requirement clarification skill is unavailable');
+        const planningPrompt = teacherAgentPlanningPrompt(catalog, processSkills);
         promptManifests.push(planningPrompt.manifest);
         const savedPlanning = recordValue(agentTurnCheckpoint?.stages.read('agent-plan'));
         const planningResult = savedPlanning && typeof savedPlanning.text === 'string'
@@ -3355,7 +3360,7 @@ export async function POST(req: NextRequest) {
             skillContext,
             skillOwnerId,
           );
-          selectedAgentSkills = [...new Map([...explicitSkills, ...plannedSkills].map((skill) => [skill.name, skill])).values()];
+          selectedAgentSkills = [...new Map([...explicitSkills, ...plannedSkills, ...processSkills].map((skill) => [skill.name, skill])).values()];
           if (skillsItem) trace?.completeItem(undefined, skillsItem, {
             metadata: { skillCount: selectedAgentSkills.length },
           });
@@ -3369,7 +3374,7 @@ export async function POST(req: NextRequest) {
           usage: planningResult.totalUsage ?? planningResult.usage,
         });
       } catch (planningError) {
-        if (planningSourceRejected || planningError instanceof TeacherRequestRelationError ||
+        if (planningSourceRejected || planningError instanceof TeacherRequestRelationError || planningError instanceof TeacherIntentError ||
             planningError instanceof SkillCatalogUnavailableError) {
           throw planningError;
         }
@@ -3393,6 +3398,36 @@ export async function POST(req: NextRequest) {
           skillOwnerId,
           'user',
         );
+      }
+    }
+
+    if (kind === 'agent.chat' && mode === 'auto') {
+      const decision = agentPlan?.intentDecision;
+      if (!decision) throw new TeacherIntentError('The automatic task decision is missing');
+      originalAgentPrompt = decision.request;
+      const finishIntent = (value: Record<string, unknown>, usage: Record<string, unknown> | undefined = {}) => {
+        const parsed = applyTeacherIntent(value, decision);
+        return reply({ success: true, result: parsed, model: {
+          provider: resolved.providerId, actualModel: resolved.modelId, modelVersion: resolved.modelString,
+          usage: mergeUsage(planningUsage, usage), latencyMs: Date.now() - started,
+          responseHash: createHash('sha256').update(JSON.stringify(parsed)).digest('hex'),
+          executionMode: 'semantic-teacher-intent-v1',
+        } });
+      };
+      const base = { selectedSkills: selectedAgentSkills.map(skill => skill.name), promptManifest: promptManifests };
+      if (decision.clarification.state === 'awaiting-input') return finishIntent(base);
+      if (decision.executionMode !== 'execute') {
+        const response = await callLLM({
+          model: resolved.model, abortSignal: req.signal,
+          system: `${SUPERPOWERS_TEACHING_ADAPTER}\n${readOnlyWorkbenchPrompt(decision.executionMode)}`,
+          prompt: `教师完整要求：\n${originalAgentPrompt}\n\n可信上下文与资料：\n${teacherAgentContextJson({
+            context: agentPromptContext, conversation: recordValue(payload.context)?.conversation,
+            materialContext: payload.materialContext, materialDossier: materialDossierForPrompt(payload),
+            requirements: decision.clarification, skills: selectedAgentSkills,
+          }, 180_000)}`,
+          output: resilientJsonOutput(), maxOutputTokens: Math.min(resolved.modelInfo?.outputWindow || 16000, 24000),
+        }, `aisecedu-auto-${decision.executionMode}`, { retries: 1 }, teacherPlanningModelThinking(resolved));
+        return finishIntent({ ...normalizeReadOnlyWorkbenchResult(recordValue(response.output) || parseJson(response.text), decision.executionMode), ...base }, response.totalUsage ?? response.usage);
       }
     }
 
@@ -4050,6 +4085,7 @@ ${revisionPageRequirement?.explicit ? `${slideDeckPageInstruction(revisionPageRe
       parsed.plan = agentPlan?.plan ?? [];
       parsed.interaction = agentInteraction(parsed);
       parsed.promptManifest = promptManifests;
+      if (mode === 'auto' && agentPlan?.intentDecision) parsed = applyTeacherIntent(parsed, agentPlan.intentDecision);
     }
     if (kind === 'artifact.revise') {
       const currentContent = recordValue(payload.currentContent);

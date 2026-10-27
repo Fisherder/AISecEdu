@@ -187,6 +187,17 @@ describe('teacher generation history provenance', () => {
     ).toEqual(['artifact:artifact-1']);
   });
 
+  it('retains only a verified teacher quote from narrative continuation evidence', () => {
+    const prompt = '教师补充信息：学生已经学过 Python。按这些要求继续。';
+    const resolved = normalizeTeacherRequestRelation({ mode: 'continue', sourceRefs: ['message:5702'],
+      evidence: '教师补充“按这些要求继续”，承接原始请求及澄清问题。' }, { prompt, context: context() });
+    expect(resolved.evidence).toBe('按这些要求继续');
+    expect(() => normalizeTeacherRequestRelation({ mode: 'continue', sourceRefs: ['message:5702'],
+      evidence: '教师说“未提供的要求”，因此继续。' }, { prompt, context: context() })).toThrow();
+    expect(() => normalizeTeacherRequestRelation({ mode: 'continue', sourceRefs: ['message:99999'],
+      evidence: '教师说“按这些要求继续”。' }, { prompt, context: context() })).toThrow();
+  });
+
   it.each([
     { mode: 'continue', sourceRefs: ['option:5707:option-1'], evidence: '继续' },
     { mode: 'continue', sourceRefs: [], evidence: '继续' },

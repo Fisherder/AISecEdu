@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="container py-5">
+  <h1>进入润尼尔实验</h1>
+  {% if error %}
+  <p role="alert">{{ error }}</p>
+  <a class="btn btn-secondary" href="/dojos">返回课程</a>
+  {% else %}
+  <p>当前玄甲账号：{{ local_name }}。继续后将验证平台预约，并把之后新启动的本题作答与该预约关联。</p>
+  <p>完成实验后可回传成绩、过程步骤和 AI 使用统计。历史作答、完整对话、私有解法和实验凭证不会作为回传内容。</p>
+  <form method="post" action="/integrations/rainier/launch">
+    <input type="hidden" name="nonce" value="{{ Session.nonce }}">
+    <button class="btn btn-primary" type="submit">验证预约并进入实验</button>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}

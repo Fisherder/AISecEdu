@@ -238,6 +238,8 @@ def start_attempt(user, dojo_challenge, mode, runtime=None):
     )
     db.session.add(attempt)
     db.session.flush()
+    from ..rainier import bind_attempt
+    bind_attempt(attempt)
     append_evidence(
         attempt,
         "lab.started",

@@ -62,6 +62,7 @@ from .pages.feed import feed
 from .pages.index import static_html_override
 from .pages.test_error import test_error_pages
 from .pages.learning import learning as learning_pages
+from .pages.rainier import rainier_pages
 from .api import api
 from .utils.events import publish_queued_events
 from .utils import listeners
@@ -646,6 +647,7 @@ def load(app):
     if enable_test_routes:
         app.register_blueprint(test_error_pages)
     app.register_blueprint(learning_pages)
+    app.register_blueprint(rainier_pages)
     # CTFd registers its own `/privacy` rule before plugins. Keep that stable
     # endpoint but render the 玄甲 legal recovery state so an unconfigured
     # document is not an unexplained 404.

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="container py-5">
+  <h1>实验平台回传</h1>
+  {% if error %}<p class="alert alert-info" role="status">{{ error }}</p>{% endif %}
+  {% if run %}
+  <p>当前预约：{{ run.exp_id }}。仅关联从该预约进入后新启动的本题作答。</p>
+  {% if record %}
+  {% set states = {'QUEUED':'已排队', 'SENDING':'正在回传', 'SENT':'平台已确认保存', 'REJECTED':'平台未接受数据', 'UNCERTAIN':'回传结果待核对', 'SUPERSEDED':'已有更新评测'} %}
+  <p role="status">回传状态：{{ states.get(record.status, record.status) }}{% if record.response_code %}（平台响应码 {{ record.response_code }}）{% endif %}。</p>
+  {% if record.status in ['UNCERTAIN', 'REJECTED', 'SENDING'] %}<p>请联系管理员核对平台记录，确认后处理；刷新本页不会重复提交。</p>{% endif %}
+  {% endif %}
+  {% if preview %}
+  <p>正式成绩：{{ assessment.total_score }} / 100；回传 {{ preview.expScoreDetails | length }} 个过程与成绩步骤。</p>
+  {% if preview.ai_data %}<p>本次已记录 {{ preview.ai_data.ai_call_count }} 次模型请求，覆盖：{{ preview.ai_data.ai_usage_scenarios | join('、') }}。</p>
+  {% else %}<p>本次没有关联的 AI 调用记录，将省略 AI 数据字段。</p>{% endif %}
+  <p>回传内容包含正式成绩、实际活动步骤和 AI 使用统计，不包含完整对话或私有解法。</p>
+  {% if not send_enabled %}<p>当前为联调预览，管理员尚未启用正式发送。</p>
+  {% elif not record %}
+  <form method="post" action="/integrations/rainier/status">
+    <input type="hidden" name="nonce" value="{{ Session.nonce }}">
+    <input type="hidden" name="assessmentId" value="{{ assessment.id }}">
+    <button class="btn btn-primary" type="submit">提交本次实验数据</button>
+  </form>
+  {% endif %}
+  {% endif %}
+  <a class="btn btn-outline-secondary" href="/integrations/rainier/status">刷新回传状态</a>
+  {% endif %}
+  <a class="btn btn-link" href="/dojos">返回课程</a>
+</main>
+{% endblock %}

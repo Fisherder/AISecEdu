@@ -94,7 +94,7 @@ def freeze_plan(source, *, source_job=None, driver=None, generation_options=None
                                                  thread_id=source.thread_id, kind='agent.chat').first()
     fields = ('jobId', 'agentLoopDepth', 'agentLoopTrace', 'agentRootJobId', 'harnessManaged',
               'generationOptions', 'generationRound', 'refinementSourceMessageId',
-              'generationSelection', 'generationRefinement', 'executionMode')
+              'generationSelection', 'generationRefinement', 'executionMode', 'intentDecision')
     projected = {key: metadata[key] for key in fields if key in metadata}
     projected.update({'toolProposals': proposals, 'pending': False})
     if source_job:

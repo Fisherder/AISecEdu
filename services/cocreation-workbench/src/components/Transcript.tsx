@@ -23,6 +23,7 @@ import { dateLabel, terminal, type Message, type Data } from '../core/types';
 import { Button, IconButton, Status, Code, Dialog } from './ui';
 import { Composer } from './Composer';
 import { GenerationConfirmation } from './GenerationConfirmation';
+import { readLocal, writeLocal } from '../core/storage';
 
 export function RichText({ text }: { text: string }) {
   const { controller: c } = useWorkbench();
@@ -68,8 +69,10 @@ export function RichText({ text }: { text: string }) {
 }
 function Questions({ message }: { message: Message }) {
   const { state, controller: c } = useWorkbench();
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const answerKey = `aisecedu:requirements:${state.thread?.id}:${message.id}`;
+  const [answers, setAnswers] = useState<Record<string, string>>(() => readLocal(answerKey, {}));
   const questions: Data[] = message.metadata.questions || [];
+  useEffect(() => { writeLocal(answerKey, answers); }, [answerKey, answers]);
   if (!questions.length || message.metadata.questionReplyJobId || message.metadata.pending)
     return null;
   return (
@@ -85,7 +88,8 @@ function Questions({ message }: { message: Message }) {
         });
       }}
     >
-      <h3>补充这些信息后继续</h3>
+      <h3>先明确需求</h3>
+      <p>选择适合的答案，也可以直接填写你的想法。回答后将继续同一项任务。</p>
       {questions.map((question) => (
         <fieldset key={question.id}>
           <legend>{question.text}</legend>
@@ -94,19 +98,21 @@ function Questions({ message }: { message: Message }) {
               <Button
                 key={choice}
                 className={answers[question.id] === choice ? 'selected' : ''}
+                aria-pressed={answers[question.id] === choice}
                 onClick={() => setAnswers({ ...answers, [question.id]: choice })}
               >
                 {choice}
               </Button>
             ))}
           </div>
-          <input
+          <textarea
             aria-label={question.text}
             placeholder="选择一个选项，或输入你的回答"
             value={answers[question.id] || ''}
             onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
             maxLength={2000}
             required
+            rows={2}
           />
         </fieldset>
       ))}
@@ -327,6 +333,7 @@ function MessageView({ message }: { message: Message }) {
     .at(-1);
   const plan: any[] = Array.isArray(metadata.plan) ? metadata.plan : [];
   const pending = metadata.pending === true;
+  const waitingForAnswers = Boolean(metadata.questions?.length && !metadata.questionReplyJobId && !pending);
   const text = pending && streamed ? streamed : pending ? '' : message.content;
   const latest = [...activity]
     .reverse()
@@ -349,7 +356,7 @@ function MessageView({ message }: { message: Message }) {
         )}
         <strong>{user ? '你' : '玄甲'}</strong>
         <time>{dateLabel(message.created)}</time>
-        {metadata.executionMode && metadata.executionMode !== 'execute' && (
+        {['ask', 'plan'].includes(metadata.executionMode) && (
           <span className="tag">{metadata.executionMode === 'plan' ? '规划' : '问答'}</span>
         )}
       </div>
@@ -373,8 +380,8 @@ function MessageView({ message }: { message: Message }) {
         )}
         {job && (
           <button className="run-summary" onClick={() => c.selectJob(job.id)}>
-            <Status status={job.status} />
-            <span>{latest?.title || job.message || job.stage || '查看执行记录'}</span>
+            <Status status={waitingForAnswers ? 'WAITING_INPUT' : job.status} />
+            <span>{waitingForAnswers ? '等待你回答需求问题' : latest?.title || job.message || job.stage || '查看执行记录'}</span>
             <ArrowUpRight size={14} />
           </button>
         )}
@@ -387,20 +394,19 @@ function MessageView({ message }: { message: Message }) {
                 : '正在处理，执行记录会实时更新。')}
           </p>
         )}
-        {metadata.executionMode === 'plan' && !pending && !metadata.failed && (
+        {metadata.executionMode === 'plan' && !pending && !metadata.failed && !metadata.questions?.length && (
           <Button
             className="primary"
             disabled={state.busy}
             onClick={() =>
               void c.send({
                 content: '按这份计划执行。',
-                executionMode: 'execute',
                 planSourceMessageId: message.id,
               })
             }
           >
             <Play size={14} />
-            按此计划执行
+            按此计划制作
           </Button>
         )}
         <Questions message={message} />

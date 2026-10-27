@@ -135,6 +135,7 @@ def _stream_for_job_kind(kind):
 def _stream_for_job(job):
     return _stream_for_job_kind(getattr(job, "kind", None))
 AGENT_TOOL_SCHEMAS = {
+    "generation.start": ("R1", {"sourceMessageId", "optionId"}),
     "module.inquiry": ("R1", {"moduleIndex", "spec"}),
     "dojo.select": ("R0", {"referenceId", "moduleIndex"}),
     "course.list": ("R0", set()),
@@ -404,7 +405,16 @@ def _validated_tool_proposals(job, result):
             if key in raw_arguments
         }
         target_dojo = None
-        if tool == "dojo.select":
+        if tool == "generation.start":
+            from .workbench import generation_selection_authorized
+            reference = f"option:{arguments.get('sourceMessageId')}:{arguments.get('optionId')}"
+            sources = ((job.payload or {}).get("context") or {}).get("requestProvenance", {}).get("sources") or []
+            if not generation_selection_authorized(result.get("intentDecision"), arguments) or not any(
+                source.get("ref") == reference and source.get("kind") == "generation-option"
+                for source in sources if isinstance(source, dict)
+            ):
+                continue
+        elif tool == "dojo.select":
             owner = Users.query.filter_by(id=job.owner_id).first()
             target_reference = str(arguments.get("referenceId") or "").strip()
             target_dojo = (
@@ -3223,8 +3233,8 @@ def _persist_result(job, result):
 
         restore_input_cache(job, bootstrap=True)
         from .workbench import execution_mode, project_mode_result
-        mode = execution_mode(job.payload or {})
         result = project_mode_result(job.payload or {}, result)
+        mode = execution_mode(result) if execution_mode(job.payload or {}) == "auto" else execution_mode(job.payload or {})
         context = (job.payload or {}).get("context")
         context = context if isinstance(context, dict) else {}
         agent_loop = context.get("agentLoop")
@@ -3284,6 +3294,7 @@ def _persist_result(job, result):
                 "jobKind": job.kind,
                 "jobStatus": "SUCCEEDED",
                 "executionMode": mode,
+                "intentDecision": result.get("intentDecision"),
                 "suggestions": result.get("suggestions") or [],
                 "selectedSkills": result.get("selectedSkills") or [],
                 "plan": result.get("plan") or [],
@@ -3329,6 +3340,7 @@ def _persist_result(job, result):
         return {
             "answer": answer,
             "executionMode": mode,
+            "intentDecision": result.get("intentDecision"),
             "suggestions": result.get("suggestions") or [],
             "requiresAction": bool(
                 result.get("requiresAction") or tool_proposals or generation_options
@@ -4264,7 +4276,10 @@ def process_job(job_id, *, worker_id=None):
     job._execution_identity = identity
     route = None
     try:
-        if job.kind == 'coding.review':
+        if job.kind == 'rainier.submit':
+            from ..rainier import send_submission
+            compact_result = send_submission(job)
+        elif job.kind == 'coding.review':
             from ..coding_grading import execute_review
             job = heartbeat(job, stage='reviewing', progress=30, message='依据固定源码与核验量规评价代码')
             compact_result = execute_review(job)

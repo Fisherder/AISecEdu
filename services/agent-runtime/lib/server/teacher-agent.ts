@@ -1,4 +1,5 @@
 import type { AgentSkill, AgentSkillSummary } from '@/lib/server/agent-skills';
+import { normalizeTeacherIntent, type TeacherIntentDecision } from './agent-harness/teacher-intent';
 import { CINEMATIC_CAPABILITY_BRIEF, CINEMATIC_CAMERA_PLAYBACK_BRIEF, CINEMATIC_TEACHING_PURPOSE_BRIEF } from '@/lib/cinematic/capabilities';
 import { CINEMATIC_AUTONOMOUS_DESIGN_BRIEF } from '@/lib/cinematic/design-policy';
 import { COURSEWARE_PLANNING_BRIEF } from '@/lib/courseware/schema';
@@ -15,6 +16,7 @@ export type TeacherAgentPlan = {
   generationTarget?: TeacherGenerationTarget | null;
   generationScope?: TeacherGenerationScopeResolution | null;
   requestRelation?: TeacherRequestRelation;
+  intentDecision?: TeacherIntentDecision;
 };
 
 export type TeacherRequestRelation = {
@@ -23,7 +25,7 @@ export type TeacherRequestRelation = {
   evidence: string;
 };
 
-type TeacherRequestAuthority = { prompt: string; context: unknown };
+type TeacherRequestAuthority = { prompt: string; context: unknown; requireIntent?: boolean };
 
 import { teacherAgentPlanningPrompt, teacherAgentExecutionPrompt } from './agent-harness/teacher-prompts';
 import { agentInteraction, normalizeAgentQuestions } from './agent-harness/interaction';
@@ -93,7 +95,8 @@ export class InvalidTeacherSourceReferenceError extends TeacherRequestRelationEr
 
 function teacherInstructionEvidence(prompt: string, evidence: unknown): string {
   if (typeof evidence !== 'string' || !evidence.trim()) return '';
-  if (prompt.includes(evidence)) return evidence;
+  const candidates = [evidence, ...Array.from(evidence.matchAll(/["“「『`]([^"”」』`\n]{2,2000})["”」』`]/g), match => match[1])];
+  for (const candidate of candidates) if (prompt.includes(candidate)) return candidate;
   const characters: string[] = [];
   const positions: Array<{ start: number; end: number }> = [];
   const ignored = /[\s,.;:!?"'，。！？；：“”‘’、]/u;
@@ -108,14 +111,17 @@ function teacherInstructionEvidence(prompt: string, evidence: unknown): string {
     }
     offset += character.length;
   }
-  const quoted = Array.from(evidence.normalize('NFKC')).filter(character => !ignored.test(character)).join('');
-  if (!quoted) return '';
   const normalizedPrompt = characters.join('');
-  const found = normalizedPrompt.indexOf(quoted);
-  if (found < 0) return '';
-  const start = Array.from(normalizedPrompt.slice(0, found)).length;
-  const end = start + Array.from(quoted).length - 1;
-  return prompt.slice(positions[start].start, positions[end].end);
+  for (const candidate of candidates) {
+    const quoted = Array.from(candidate.normalize('NFKC')).filter(character => !ignored.test(character)).join('');
+    if (!quoted) continue;
+    const found = normalizedPrompt.indexOf(quoted);
+    if (found < 0) continue;
+    const start = Array.from(normalizedPrompt.slice(0, found)).length;
+    const end = start + Array.from(quoted).length - 1;
+    return prompt.slice(positions[start].start, positions[end].end);
+  }
+  return '';
 }
 
 export function normalizeTeacherRequestRelation(
@@ -1467,6 +1473,14 @@ export function enforceTeacherGenerationOptions(
   platformFacts?: Record<string, unknown> | null,
 ): Record<string, unknown> {
   const contractedResult = enforceTeacherQuestionBatchContract(originalPrompt, result);
+  const acceptedOption = Array.isArray(contractedResult.toolProposals) && contractedResult.toolProposals.some(raw => {
+    const proposal = recordValue(raw);
+    const args = recordValue(proposal?.arguments);
+    return proposal?.tool === 'generation.start' && plan?.intentDecision?.intent === 'create' &&
+      plan.intentDecision.clarification.state === 'confirmed' &&
+      plan.intentDecision.sourceRefs.includes(`option:${args?.sourceMessageId}:${args?.optionId}`);
+  });
+  if (acceptedOption) return contractedResult;
   const explicitQuestionCount = requestedQuestionCount(originalPrompt);
   const rawGenerationTarget = normalizeGenerationTarget(
     recordValue(contractedResult.generationOptions),
@@ -2009,6 +2023,8 @@ export function normalizeTeacherAgentPlan(
       ? normalizeTeacherRequestRelation(value.requestRelation, authority)
       : undefined;
   const available = new Set(catalog.map((skill) => skill.name));
+  const intentDecision = authority && (authority.requireIntent || value.intent !== undefined)
+    ? normalizeTeacherIntent(value.intent, authority, requestRelation) : undefined;
   const modelSelectedSkills = Array.isArray(value.selectedSkills)
     ? value.selectedSkills.filter(
         (item): item is string => typeof item === 'string' && available.has(item),
@@ -2035,6 +2051,9 @@ export function normalizeTeacherAgentPlan(
   // accidentally omit the detailed deck, CTF, or simulation workflow.
   if (inquiryPatternSelected && !available.has('process-inquiry-learning')) throw new Error('流程探究式学习的必需技能未就绪，请恢复技能目录后重试。');
   const selectedSkills = [
+    ...(intentDecision && ['plan', 'create', 'revise'].includes(intentDecision.intent)
+      ? ['brainstorming', ...(intentDecision.clarification.state === 'confirmed' ? ['writing-plans'] : [])]
+        .filter(name => available.has(name)) : []),
     ...(requiredProductionSkill && available.has(requiredProductionSkill)
       ? [requiredProductionSkill]
       : []),
@@ -2052,6 +2071,7 @@ export function normalizeTeacherAgentPlan(
     generationTarget,
     generationScope: generationTarget ? generationScope : null,
     ...(requestRelation ? { requestRelation } : {}),
+    ...(intentDecision ? { intentDecision } : {}),
   };
 }
 

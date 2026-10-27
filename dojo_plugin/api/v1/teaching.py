@@ -5934,6 +5934,7 @@ def _serialize_teacher_agent_history(messages, bundles, current_message_id=None,
                 "content": option["rewrittenPrompt"],
                 "originalRequest": bundle["originalRequest"],
                 "selected": selection.get("optionId") == option["id"],
+                "intentDecision": bundle.get("intentDecision"),
                 "selectionMessageId": selection.get("selectionMessageId")
                 if selection.get("optionId") == option["id"] else None,
             }
@@ -5972,6 +5973,8 @@ def _serialize_teacher_agent_history(messages, bundles, current_message_id=None,
                 "authorship": "teacher" if role == "user" else "model",
                 "messageId": message["id"],
                 "content": text,
+                **({"intentDecision": metadata["intentDecision"]}
+                   if role == "assistant" and isinstance(metadata.get("intentDecision"), dict) else {}),
             })
     conversation.reverse()
     return {
@@ -6009,6 +6012,7 @@ def _teacher_agent_history_context(user, thread, recent_messages, current_messag
             "originalRequest": str(verified['sourcePayload'].get("prompt") or ""),
             "options": verified["bundle"]["options"],
             "selection": verified["selection"],
+            "intentDecision": metadata.get("intentDecision"),
         })
     from ...agent_runtime.workbench import attach_generated_file_sources
     return attach_generated_file_sources(
@@ -6209,6 +6213,94 @@ def _confirmed_challenge_generation_plan(arguments, raw_plan):
     )
 
 
+def select_teacher_generation(user, thread_id, message_id, option_id):
+    try:
+        _require_teacher(user)
+        thread = _thread_for_owner(thread_id, user)
+        if thread.status != "ACTIVE":
+            return _error(
+                "请先恢复这个对话，再选择生成方案。",
+                409,
+                code="THREAD_ARCHIVED",
+            )
+        context = _generation_option_context(
+            user,
+            thread,
+            message_id,
+            option_id,
+            require_current=True,
+            lock=True,
+        )
+        source_message = context["sourceMessage"]
+        option = context["option"]
+        metadata = dict(context['metadata'])
+        existing = metadata.get("generationSelection")
+        existing = existing if isinstance(existing, dict) else None
+        if existing is not None:
+            if str(existing.get("optionId") or "") != option["id"]:
+                raise GenerationOptionConflict(
+                    "已经选择了另一套方案；如需更换，请重新提出生成要求。"
+                )
+            proposal = _generation_option_proposal(user, thread, context)
+            return _ok(
+                {
+                    "thread": _thread_view(thread, include_messages=True),
+                    "proposal": proposal,
+                    "selection": existing,
+                    "sourceJobId": context["sourceJob"].id,
+                    "deduplicated": True,
+                }
+            )
+
+        proposal = _generation_option_proposal(user, thread, context)
+        selection_message = TeachingAgentMessages(
+            thread_id=thread.id,
+            user_id=user.id,
+            role="user",
+            content=(
+                f"按“{option['title']}”正式生成：\n\n{option['rewrittenPrompt']}"
+            )[:MAX_MESSAGE_CHARS],
+            metadata_json={
+                "client": "generation-option-selection",
+                "sourceMessageId": source_message.id,
+                "optionId": option["id"],
+            },
+        )
+        db.session.add(selection_message)
+        db.session.flush()
+        selection = {
+            "optionId": option["id"],
+            "title": option["title"],
+            "targetTool": context["bundle"]["targetTool"],
+            "status": "SELECTED",
+            "selectionMessageId": selection_message.id,
+            "selectedAt": _timestamp(datetime.datetime.utcnow()),
+        }
+        metadata["generationSelection"] = selection
+        from ...agent_runtime.generation_events import record_generation
+        record_generation(context, 'selected', selection)
+        source_message.metadata_json = metadata
+        thread.updated = datetime.datetime.utcnow()
+        db.session.commit()
+        return _ok(
+            {
+                "thread": _thread_view(thread, include_messages=True),
+                "proposal": proposal,
+                "selection": selection,
+                "sourceJobId": context["sourceJob"].id,
+                "deduplicated": False,
+            }
+        )
+    except ScopeError as exc:
+        db.session.rollback()
+        return _error(exc, 404, code="NOT_FOUND")
+    except GenerationOptionConflict as exc:
+        db.session.rollback()
+        return _error(exc, 409, code="GENERATION_OPTION_ALREADY_SELECTED")
+    except ValueError as exc:
+        db.session.rollback()
+        return _error(exc, 400, code="INVALID_GENERATION_OPTION")
+
 @teaching_namespace.route(
     "/threads/<string:thread_id>/messages/<int:message_id>/generation-options/"
     "<string:option_id>/select"
@@ -6216,93 +6308,31 @@ def _confirmed_challenge_generation_plan(arguments, raw_plan):
 class TeachingGenerationOptionSelection(Resource):
     @authed_only
     def post(self, thread_id, message_id, option_id):
-        user = _current_user()
-        try:
-            _require_teacher(user)
-            thread = _thread_for_owner(thread_id, user)
-            if thread.status != "ACTIVE":
-                return _error(
-                    "请先恢复这个对话，再选择生成方案。",
-                    409,
-                    code="THREAD_ARCHIVED",
-                )
-            context = _generation_option_context(
-                user,
-                thread,
-                message_id,
-                option_id,
-                require_current=True,
-                lock=True,
-            )
-            source_message = context["sourceMessage"]
-            option = context["option"]
-            metadata = dict(context['metadata'])
-            existing = metadata.get("generationSelection")
-            existing = existing if isinstance(existing, dict) else None
-            if existing is not None:
-                if str(existing.get("optionId") or "") != option["id"]:
-                    raise GenerationOptionConflict(
-                        "已经选择了另一套方案；如需更换，请重新提出生成要求。"
-                    )
-                proposal = _generation_option_proposal(user, thread, context)
-                return _ok(
-                    {
-                        "thread": _thread_view(thread, include_messages=True),
-                        "proposal": proposal,
-                        "selection": existing,
-                        "sourceJobId": context["sourceJob"].id,
-                        "deduplicated": True,
-                    }
-                )
+        return select_teacher_generation(_current_user(), thread_id, message_id, option_id)
 
-            proposal = _generation_option_proposal(user, thread, context)
-            selection_message = TeachingAgentMessages(
-                thread_id=thread.id,
-                user_id=user.id,
-                role="user",
-                content=(
-                    f"按“{option['title']}”正式生成：\n\n{option['rewrittenPrompt']}"
-                )[:MAX_MESSAGE_CHARS],
-                metadata_json={
-                    "client": "generation-option-selection",
-                    "sourceMessageId": source_message.id,
-                    "optionId": option["id"],
-                },
-            )
-            db.session.add(selection_message)
-            db.session.flush()
-            selection = {
-                "optionId": option["id"],
-                "title": option["title"],
-                "targetTool": context["bundle"]["targetTool"],
-                "status": "SELECTED",
-                "selectionMessageId": selection_message.id,
-                "selectedAt": _timestamp(datetime.datetime.utcnow()),
-            }
-            metadata["generationSelection"] = selection
-            from ...agent_runtime.generation_events import record_generation
-            record_generation(context, 'selected', selection)
-            source_message.metadata_json = metadata
-            thread.updated = datetime.datetime.utcnow()
-            db.session.commit()
-            return _ok(
-                {
-                    "thread": _thread_view(thread, include_messages=True),
-                    "proposal": proposal,
-                    "selection": selection,
-                    "sourceJobId": context["sourceJob"].id,
-                    "deduplicated": False,
-                }
-            )
-        except ScopeError as exc:
-            db.session.rollback()
-            return _error(exc, 404, code="NOT_FOUND")
-        except GenerationOptionConflict as exc:
-            db.session.rollback()
-            return _error(exc, 409, code="GENERATION_OPTION_ALREADY_SELECTED")
-        except ValueError as exc:
-            db.session.rollback()
-            return _error(exc, 400, code="INVALID_GENERATION_OPTION")
+
+def start_teacher_generation(user, thread_id, arguments, request_key):
+    message_id = arguments.get("sourceMessageId")
+    option_id = arguments.get("optionId")
+    response = select_teacher_generation(user, thread_id, message_id, option_id)
+    value, status = response if isinstance(response, tuple) else (response, 200)
+    if status >= 400 or not value.get("success"):
+        return response
+    data = value["data"]
+    proposal = data["proposal"]
+    selection = {"sourceMessageId": message_id, "optionId": option_id}
+    if proposal["tool"] == "candidate.generate":
+        args = proposal["arguments"]
+        return submit_teacher_message(user, thread_id, {
+            "agentContinuation": True, "action": "generate", "content": args["prompt"],
+            "artifactType": args["artifactType"], "candidateMode": "single",
+            "candidateCount": args.get("candidateCount") or 1,
+            "sourceRefs": args.get("sourceRefs") or [], "generationSelection": selection,
+        }, request_key)
+    return execute_teacher_tool(user, {
+        "threadId": thread_id, "tool": proposal["tool"], "arguments": proposal["arguments"],
+        "sourceJobId": data["sourceJobId"], "generationSelection": selection,
+    }, request_key)
 
 
 @teaching_namespace.route(
@@ -6434,7 +6464,7 @@ def _agent_continuation_context(user, thread, body):
         raise ValueError("Agent continuation source job is not complete")
     from ...agent_runtime.workbench import require_execution_mode
     from ...agent_runtime.model_inputs import request_payload
-    require_execution_mode(request_payload(source_job))
+    require_execution_mode(source_job.result or metadata)
 
     proposals = metadata.get("toolProposals")
     proposals = proposals if isinstance(proposals, list) else []
@@ -6569,6 +6599,7 @@ def _agent_continuation_context(user, thread, body):
         "prompt": prompt,
         "requestProvenance": (root_payload.get("context") or {}).get("requestProvenance"),
         "questionReply": (root_payload.get("context") or {}).get("questionReply"),
+        "intentDecision": (source_job.result or {}).get("intentDecision"),
         "constraints": scrub_payload(root_payload.get("constraints") or {}),
         "sourceRefs": scrub_payload(root_payload.get("sourceRefs") or []),
         "allowDegraded": bool(root_payload.get("allowDegraded")),
@@ -6604,7 +6635,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             )
         requested_action = str(body.get("action") or "").strip().lower()
         continuation = body.get("agentContinuation") is True
-        if continuation:
+        if continuation and mode in {"ask", "plan"}:
             require_execution_mode(body)
         submission_key = _supplied_idempotency(user.id, "thread-message", request_key)
         wait_for_job_ids = []
@@ -6639,8 +6670,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if source_job is None or question_meta.get("pending") is not False:
                 raise ConversationConflict("问题尚未准备完成，请稍后再试。")
             answers = validated_question_answers(question_meta.get("questions"), reply)
-            question_context = question_reply_context(source_job.payload or {}, question_meta["questions"], answers)
-            mode = execution_mode(source_job.payload or {})
+            question_context = question_reply_context(source_job.payload or {}, question_meta["questions"], answers, source_job.result)
+            mode = "auto" if question_meta.get("intentDecision") else execution_mode(source_job.payload or {})
         selected_generation = None
         if continuation:
             if requested_action == "continue":
@@ -6686,8 +6717,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
 
         plan_context = None
         if body.get("planSourceMessageId") is not None:
-            if continuation or mode != "execute":
-                raise ConversationConflict("执行计划需要明确选择执行模式。")
+            if continuation or mode not in {"auto", "execute"}:
+                raise ConversationConflict("请通过自然语言明确希望继续制作哪份计划。")
             try:
                 plan_message_id = int(body["planSourceMessageId"])
             except (ValueError, TypeError) as exc:
@@ -6701,7 +6732,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 id=plan_meta.get("jobId"), owner_id=user.id, thread_id=thread.id,
                 kind="agent.chat", status="SUCCEEDED",
             ).first() if plan_source else None
-            if plan_job is None or execution_mode(plan_job.payload or {}) != "plan" or plan_meta.get("pending") is not False:
+            if plan_job is None or plan_meta.get("executionMode") != "plan" or plan_meta.get("pending") is not False or plan_meta.get("questions"):
                 raise ConversationConflict("这份计划尚未完成或不属于当前会话。")
             plan_context = {"messageId": plan_source.id, "answer": plan_source.content,
                             "plan": plan_meta.get("plan") or []}
@@ -6939,6 +6970,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                     "agentLoop": agent_loop,
                     "questionReply": question_context,
                     "approvedPlan": plan_context,
+                    "priorIntentDecision": continuation_context.get("intentDecision") if continuation_context else None,
                 },
                 "allowDegraded": allow_degraded,
             }

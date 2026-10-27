@@ -1,10 +1,10 @@
-MODES = frozenset({"execute", "plan", "ask"})
+MODES = frozenset({"auto", "execute", "plan", "ask"})
 
 
 def execution_mode(payload):
-    value = payload.get("executionMode", "execute")
+    value = payload.get("executionMode", "auto")
     if value is None or value == "":
-        value = "execute"
+        value = "auto"
     if not isinstance(value, str) or value not in MODES:
         raise ValueError("请选择有效的智能体模式。")
     return value
@@ -12,6 +12,26 @@ def execution_mode(payload):
 
 def project_mode_result(payload, result):
     mode = execution_mode(payload)
+    if mode == "auto":
+        decision = result.get("intentDecision")
+        expected = {"answer": "ask", "plan": "plan", "create": "execute", "revise": "execute", "operate": "execute"}
+        if not isinstance(decision, dict) or decision.get("version") != "teacher-intent-v1" or decision.get("intent") not in expected:
+            raise ValueError("智能体尚未完成任务意图判断，未执行任何内容操作。")
+        mode = expected[decision["intent"]]
+        if decision.get("executionMode") != mode or result.get("executionMode") != mode:
+            raise ValueError("任务意图与执行权限不一致。")
+        clarification = decision.get("clarification")
+        if not isinstance(clarification, dict) or clarification.get("state") not in {"awaiting-input", "confirmed", "not-required"}:
+            raise ValueError("任务需求澄清状态无效。")
+        if decision["intent"] in {"plan", "create"} and clarification["state"] == "not-required":
+            raise ValueError("规划和创作须先明确教师需求。")
+        if clarification["state"] == "awaiting-input":
+            questions = clarification.get("questions")
+            if not isinstance(questions, list) or not 1 <= len(questions) <= 3:
+                raise ValueError("请通过结构化问题明确需求后继续。")
+            return {**result, "executionMode": mode, "plan": [], "toolProposals": [],
+                    "generationOptions": None, "deliverables": [], "questions": questions,
+                    "requiresAction": True, "interaction": {"state": "awaiting-input", "questions": questions}}
     if mode == "execute":
         return result
     return {
@@ -26,8 +46,20 @@ def project_mode_result(payload, result):
 
 
 def require_execution_mode(payload):
-    if execution_mode(payload) != "execute":
-        raise ValueError("当前是只读规划或问答，请显式选择执行后再修改教学内容。")
+    if execution_mode(payload) != "execute" or (payload.get("intentDecision") or {}).get("clarification", {}).get("state") == "awaiting-input":
+        raise ValueError("当前任务仍在问答、规划或需求澄清中，尚未授权修改教学内容。")
+
+
+def generation_selection_authorized(decision, arguments):
+    if not isinstance(decision, dict) or decision.get("version") != "teacher-intent-v1" or decision.get("intent") != "create":
+        return False
+    if (decision.get("clarification") or {}).get("state") != "confirmed":
+        return False
+    message_id = arguments.get("sourceMessageId")
+    option_id = arguments.get("optionId")
+    if type(message_id) is not int or message_id < 1 or not isinstance(option_id, str):
+        return False
+    return f"option:{message_id}:{option_id}" in (decision.get("sourceRefs") or [])
 
 
 def attach_generated_file_sources(history, messages, owner_id, thread_id, max_chars=120000):

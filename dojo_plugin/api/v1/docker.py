@@ -69,7 +69,14 @@ HOST_HOMES_MOUNTS = HOST_HOMES / "mounts"
 HOST_HOMES_OVERLAYS = HOST_HOMES / "overlays"
 
 
+class WindowsShutdownPending(RuntimeError):
+    pass
+
+
 def flush_guest_disk_before_stop(container):
+    if (container.labels or {}).get('dojo.runtime_environment') != 'windows2000':
+        return
+    stopped = False
     try:
         from ...agent_runtime.guest_input import flush_guest_disk, shutdown_guest
 
@@ -77,8 +84,11 @@ def flush_guest_disk_before_stop(container):
             logger.info("Flushed guest disk cache before stopping the container")
         if shutdown_guest(container):
             logger.info("Windows guest shut down before stopping the container")
+            stopped = True
     except Exception as error:
-        logger.warning("Guest disk flush skipped: %s", error)
+        logger.warning("Windows guest stop deferred: %s", type(error).__name__)
+    if not stopped:
+        raise WindowsShutdownPending('Windows 尚未完成正常关机，当前环境和文件已保留，请稍后重试。')
 
 
 def remove_container(user):
@@ -789,6 +799,10 @@ class RunDocker(Resource):
 
         try:
             attempt = active_attempt(user.id)
+            state = preserved_state() if container else {"kind": "none", "message": "启动后会从初始状态开始。"}
+            if container:
+                remove_container(user)
+                publish_stat_event("container_stats_update", {})
             if simulation_run:
                 stop_simulation_run(simulation_run)
             elif attempt:
@@ -801,11 +815,6 @@ class RunDocker(Resource):
                 )
                 attempt.status = "STOPPED"
                 attempt.completed = datetime.datetime.utcnow()
-                db.session.commit()
-            state = preserved_state() if container else {"kind": "none", "message": "启动后会从初始状态开始。"}
-            if container:
-                remove_container(user)
-                publish_stat_event("container_stats_update", {})
             db.session.commit()
             return {
                 "success": True,
@@ -816,6 +825,9 @@ class RunDocker(Resource):
                 ),
                 "statePreserved": state,
             }
+        except WindowsShutdownPending as error:
+            db.session.rollback()
+            return {"success": False, "error": str(error), "shutdownPending": True, "statePreserved": preserved_state()}, 409
         except Exception as e:
             logger.error(f"Failed to terminate container for user {user.id}: {e}")
             db.session.rollback()

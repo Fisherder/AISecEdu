@@ -1,5 +1,5 @@
 export type Data = Record<string, any>;
-export type Mode = 'execute' | 'plan' | 'ask';
+export type Mode = 'auto';
 export type Panel = 'artifacts' | 'activity' | 'context';
 export interface Message {
   id: number;
@@ -127,8 +127,8 @@ export interface WorkspaceState {
   archived: boolean;
 }
 export const terminal = (job: Job) => ['SUCCEEDED', 'FAILED', 'CANCELED'].includes(job.status);
-export const modeLabels: Record<Mode, string> = { execute: '执行', plan: '规划', ask: '问答' };
 export const statusLabels: Record<string, string> = {
+  WAITING_INPUT: '待回答',
   QUEUED: '等待执行',
   RUNNING: '执行中',
   CANCEL_REQUESTED: '正在停止',

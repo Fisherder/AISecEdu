@@ -30,6 +30,7 @@ from .intelligence import (
 from .standards import ABILITY_DIMENSIONS, ABILITY_LABELS, CATEGORY_SKILLS, DEFAULT_RUBRIC
 from .student_experience import mastery_state
 from .score_policy import completion_score_policy
+from ..rainier import maybe_queue_assessment, track_attempt_ai
 
 
 logger = logging.getLogger(__name__)
@@ -300,6 +301,7 @@ def _safe_grader_feedback(value, fallback, solution_reference):
     )
 
 
+@track_attempt_ai("实验结果分析与过程评测")
 def _model_process_assessment(
     attempt,
     events,
@@ -607,6 +609,7 @@ def assess_attempt(
         trust_level=3,
     )
     _update_skills(attempt, abilities)
+    maybe_queue_assessment(assessment)
     return assessment
 
 

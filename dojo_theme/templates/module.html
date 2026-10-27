@@ -122,6 +122,7 @@
     {% endfor %}
   </section>
   {% endif %}
+  {% set is_software_security_lab_module = dojo.dojo_id == 3839952 and module.id == 'reverse-debugging' %}
   {% if module.resources or module.challenges %}
   {% if is_dojo_admin and not module.show_challenges %}
   <p><i>此单元的题目对学生隐藏，但课程教师仍可见。</i></p>
@@ -144,7 +145,7 @@
             {% elif item.item_type == 'challenge' and (module.show_challenges or is_dojo_admin) and (item in visible_challenges or is_dojo_admin) %}
               {% set outline_locked = item.progression_locked and outline.previous_challenge and outline.previous_challenge.challenge_id not in user_solves and item.challenge_id not in user_solves and not is_dojo_admin %}
               {% set outline_current = item.id == scroll_to_challenge or item.challenge_id == current_challenge_id or outline.first %}
-              <a class="unit-outline-item{{ ' is-current' if outline_current else '' }}{{ ' is-complete' if item.challenge_id in user_solves else '' }}{{ ' is-locked' if outline_locked else '' }}" href="#module-content-item-{{ loop.index }}" data-challenge-outline="{{ item.id }}"><span><i class="fas {{ 'fa-lock' if outline_locked else ('fa-check' if item.challenge_id in user_solves else 'fa-flag') }}" aria-hidden="true"></i></span><span><strong>{{ item.name or item.id }}</strong><small>{{ '选修实践' if not item.required else '必修实践' }} · 预计 20 分钟</small></span><em>{{ '当前' if outline_current else ('完成' if item.challenge_id in user_solves else ('锁定' if outline_locked else '未开始')) }}</em></a>
+              <a class="unit-outline-item{{ ' is-current' if outline_current else '' }}{{ ' is-complete' if item.challenge_id in user_solves else '' }}{{ ' is-locked' if outline_locked else '' }}" href="#module-content-item-{{ loop.index }}" data-challenge-outline="{{ item.id }}"><span><i class="fas {{ 'fa-lock' if outline_locked else ('fa-check' if item.challenge_id in user_solves else ('fa-flask' if is_software_security_lab_module else 'fa-flag')) }}" aria-hidden="true"></i></span><span><strong>{{ item.name or item.id }}</strong><small>{{ '选修实践' if not item.required else '必修实践' }} · 预计 20 分钟</small></span><em>{{ '当前' if outline_current else ('完成' if item.challenge_id in user_solves else ('锁定' if outline_locked else '未开始')) }}</em></a>
               {% set outline.first = false %}
               {% set outline.previous_challenge = item %}
             {% endif %}
@@ -222,7 +223,7 @@
           and not dojo.is_admin() %}
         {% if lock_challenge %}
           {% set icon = "fas fa-lock" %}
-        {% elif not challenge.required %}
+        {% elif is_software_security_lab_module or not challenge.required %}
           {% set icon = "fa fa-flask" %}
         {% else %}
           {% set icon = "fas fa-flag" %}

@@ -1081,6 +1081,7 @@ from .material_library import (
 )
 from .material_assets import MaterialAssetCopies
 from .inquiry import InquiryAttempts, InquiryEvents, InquiryReleases
+from .rainier import RainierAICalls, RainierAttemptLinks, RainierIdentities, RainierSessions, RainierSubmissions
 
 from .construction import (ConstructionBatches, ConstructionMembers, ConstructionCourses, ConstructionTasks,
                            ConstructionSubmissions, ConstructionSpaces, ConstructionReleases, ConstructionEvents, ConstructionNotices)

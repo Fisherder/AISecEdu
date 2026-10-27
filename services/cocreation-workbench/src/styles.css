@@ -995,9 +995,18 @@ kbd {
 .question-block h3 {
   margin-bottom: 15px;
 }
-.question-block input {
+.question-block input,
+.question-block textarea {
   width: 100%;
   font-size: 12px;
+}
+.question-block textarea {
+  resize: vertical;
+  margin: 8px 0 14px;
+}
+.question-block > p {
+  color: var(--muted);
+  margin-bottom: 16px;
 }
 .choice-list {
   display: flex;

@@ -29,6 +29,7 @@ from .v1.inquiry import inquiry_namespace
 from .v1.construction import construction_namespace
 from .v1.ui import ui_namespace
 from .v1.admin import admin_namespace
+from .v1.rainier import rainier_namespace
 
 api = Blueprint("pwncollege_api", __name__)
 
@@ -98,6 +99,7 @@ api_v1.add_namespace(material_library_namespace, "/material-library")
 api_v1.add_namespace(inquiry_namespace, "/inquiry")
 api_v1.add_namespace(ui_namespace, "/ui")
 api_v1.add_namespace(admin_namespace, "/admin")
+api_v1.add_namespace(rainier_namespace, "/rainier")
 
 api_v1.add_namespace(construction_namespace, "/construction")
 

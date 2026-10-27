@@ -377,7 +377,6 @@ export class WorkbenchController {
                 key: key(),
                 body: {
                   content: [...draft.skills.map((skill) => '/' + skill), content].join('\n'),
-                  executionMode: draft.mode,
                   learningPattern: draft.learningPattern,
                   sourceRefs: draft.sources.map((source) => ({ type: source.type, id: source.id })),
                   artifactType: draft.artifactType,
@@ -385,6 +384,7 @@ export class WorkbenchController {
                   candidateCount: 3,
                   ...(active ? { delivery: draft.delivery, expectedJobId: active.id } : {}),
                   ...extra,
+                  executionMode: 'auto',
                 },
               };
       this.storage.set('pending-submit', this.pendingSubmit);

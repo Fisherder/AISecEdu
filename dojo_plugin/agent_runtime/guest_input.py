@@ -158,20 +158,37 @@ sys.exit(0)
 '''
 
 
-GUEST_SHUTDOWN_COMMAND = ["python3", "-c", r'''
-import sys
+GUEST_SHUTDOWN_COMMAND = ["/usr/bin/timeout", "45", "python3", "-c", r'''
+import pathlib,sys
 sys.path.insert(0, '/usr/local/lib/windows-lab')
 import start
+
+def running_guest():
+    for process in pathlib.Path('/proc').iterdir():
+        if not process.name.isdigit():
+            continue
+        try:
+            args = (process / 'cmdline').read_bytes().split(b'\0')
+        except OSError:
+            continue
+        if args and pathlib.PurePosixPath(args[0].decode('utf-8', 'replace')).name.startswith('qemu-system-') and any(b'/var/lib/windows-lab/student.qcow2' in arg for arg in args[1:]):
+            return True
+    return False
+
+if not running_guest():
+    sys.exit(0)
 try:
     start.qmp('query-status')
-except OSError:
-    sys.exit(0)
+except Exception:
+    sys.exit(75)
 start.shutdown_guest()
+if not running_guest():
+    sys.exit(0)
 try:
     state = start.qmp('query-status')
-except OSError:
-    sys.exit(0)
-sys.exit(0 if state.get('status') == 'shutdown' else 1)
+except Exception:
+    sys.exit(0 if not running_guest() else 75)
+sys.exit(0 if state.get('status') == 'shutdown' else 75)
 ''']
 
 

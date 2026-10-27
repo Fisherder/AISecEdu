@@ -43,6 +43,7 @@ from .guide_prompts import build_guide_prompt
 from .screenshots import capture_workspace_screenshot
 from .student_agent import sanitize_tool_calls, student_resource_reference_for_url
 from .standards import DEFAULT_HINT_POLICY
+from ..rainier import record_model_dispatch, settle_model_dispatch, track_attempt_ai, usage_scope
 
 
 logger = logging.getLogger(__name__)
@@ -284,6 +285,8 @@ def model_json(
         total_budget = min(total_budget, max(0.001, float(total_timeout_seconds)))
     total_deadline = total_started + total_budget
     for attempt_number in range(1, max(1, attempts) + 1):
+        dispatch_id = None
+        provider_response = None
         try:
             started = time.monotonic()
             remaining_seconds = total_deadline - started
@@ -329,6 +332,7 @@ def model_json(
                 request_body.pop("reasoning_effort", None)
                 request_body["temperature"] = temperature
             with _model_request_deadline(remaining_seconds):
+                dispatch_id = record_model_dispatch(model)
                 response = requests.post(
                     f"{DOJO_AI_BASE_URL}/chat/completions",
                     headers=headers,
@@ -337,6 +341,7 @@ def model_json(
                     timeout=(min(8.0, remaining_seconds), min(DOJO_AI_TIMEOUT_SECONDS, remaining_seconds)),
                 )
                 payload = _read_model_response_json(response, total_deadline)
+                provider_response = payload
                 choices = payload.get("choices") if isinstance(payload, dict) else None
                 if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
                     raise ValueError("model service returned no valid answer")
@@ -412,6 +417,8 @@ def model_json(
                     remaining_seconds,
                 )
             )
+        finally:
+            settle_model_dispatch(dispatch_id, provider_response)
     if last_error:
         raise last_error
     return None
@@ -1049,6 +1056,7 @@ def _safe_tutor_text(value, fallback, solution_reference=None):
     return value, False, None
 
 
+@track_attempt_ai("实验操作指导")
 def tutor_reply(attempt, user, question, challenge_profile=None, container=None):
     question = redact_text(question).strip()[:4000]
     events = list(attempt.evidence_timeline) if hasattr(attempt, "evidence_timeline") else []
@@ -2050,23 +2058,24 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
         "conflicts": [],
     }
     try:
-        generated = None if needs_reference else model_json(
-            guide_prompt,
-            {
-                "question": question,
-                "conversation": history,
-                "scope": scope,
-                "learningProfile": model_profile,
-                "activeStudyContext": active_context,
-                "referencedStudyContexts": referenced_contexts,
-                "studentWorkspace": agent_context,
-            },
-            model=DOJO_AI_GUIDE_MODEL,
-            thinking=False,
-            temperature=0.25,
-            max_tokens=3500,
-            total_timeout_seconds=90,
-        )
+        with usage_scope(current_attempt.id if current_attempt and reference_ids == [current_reference_id] else None, '当前实验学习指导'):
+            generated = None if needs_reference else model_json(
+                guide_prompt,
+                {
+                    "question": question,
+                    "conversation": history,
+                    "scope": scope,
+                    "learningProfile": model_profile,
+                    "activeStudyContext": active_context,
+                    "referencedStudyContexts": referenced_contexts,
+                    "studentWorkspace": agent_context,
+                },
+                model=DOJO_AI_GUIDE_MODEL,
+                thinking=False,
+                temperature=0.25,
+                max_tokens=3500,
+                total_timeout_seconds=90,
+            )
         if generated:
             tool_calls = sanitize_tool_calls(generated.get("toolCalls"))
             actions = [

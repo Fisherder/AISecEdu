@@ -16,7 +16,7 @@ services:
       echo \"Reused verified migrated workspace profile: $$actual ($$closure_count\
       \ paths)\"\n"
   agent-runtime:
-    image: aisecedu/agent-runtime:inquiry-20261019-r1
+    image: aisecedu/agent-runtime:auto-intent-20261023-r4
     environment:
       PARALLEL_SCENE_CONCURRENCY: '4'
       COURSEWARE_GENERATOR: native-v2

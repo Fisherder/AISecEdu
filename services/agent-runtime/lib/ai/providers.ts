@@ -1760,9 +1760,14 @@ export function getModel(config: ModelConfig): ModelWithInfo {
             try {
               if (typeof init?.body === 'string') body = JSON.parse(init.body);
             } catch { /* Log only policy metadata, never request content. */ }
+            if (body.model === 'deepseek-v4.1-flash') {
+              body.model = 'deepseek-flash';
+              init = { ...init, body: JSON.stringify(body) };
+            }
             const setting = body.thinking;
             log.info('DeepSeek request policy', {
               modelId: config.modelId,
+              apiModelId: body.model,
               contextMode: thinking ? getThinkingMode(thinking) : 'missing',
               sentThinking: setting && typeof setting === 'object' && 'type' in setting
                 ? (setting as {type: unknown}).type : 'absent',
