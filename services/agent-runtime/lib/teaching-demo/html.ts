@@ -1,5 +1,12 @@
 import { Script } from 'node:vm';
+import { Linter } from 'eslint';
 import { teachingDemoFoundation } from './design';
+
+const linter = new Linter();
+const browserGlobals = Object.fromEntries(
+  'window document console navigator performance requestAnimationFrame cancelAnimationFrame setTimeout clearTimeout setInterval clearInterval devicePixelRatio innerWidth innerHeight outerWidth outerHeight self location addEventListener removeEventListener getComputedStyle matchMedia ResizeObserver MutationObserver IntersectionObserver Image ImageData Path2D Event CustomEvent PointerEvent MouseEvent KeyboardEvent HTMLElement HTMLInputElement HTMLSelectElement HTMLOutputElement HTMLCanvasElement SVGElement Node CanvasRenderingContext2D DOMMatrix DOMPoint DOMParser XMLSerializer URL URLSearchParams Blob File FileReader TextEncoder TextDecoder atob btoa screen scrollX scrollY scrollTo scrollBy queueMicrotask getSelection Element Document DocumentFragment HTMLButtonElement CSS structuredClone AbortController AbortSignal'
+    .split(' ').map(name => [name, 'readonly']),
+);
 
 export class TeachingDemoValidationError extends Error {
   name = 'TeachingDemoValidationError';
@@ -22,13 +29,20 @@ export function validateTeachingDemoHtml(raw: string) {
   for (const role of ['workflow', 'visualization', 'controls', 'experiment', 'quiz', 'summary'])
     if (!new RegExp(`data-demo=["']${role}["']`).test(markup.replace(/\s*=\s*/g, '='))) issues.push(`缺少可见区域${role}`);
   let scripts = 0;
+  const scriptBodies: string[] = [];
   for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
     if (/application\/json/.test(match[1])) continue;
     scripts++;
+    scriptBodies.push(match[2]);
     try { new Script(match[2], {filename: `teaching-demo-script-${scripts}.js`}); }
     catch (error) { issues.push(`脚本${scripts}语法错误：${error instanceof Error ? error.message : error}`); }
   }
   if (!scripts) issues.push('缺少可执行交互脚本');
+  else for (const diagnostic of linter.verify(scriptBodies.join('\n;\n'), {
+    languageOptions: {ecmaVersion: 2022, sourceType: 'script', globals: browserGlobals as Record<string, 'readonly'>},
+    rules: {'no-undef': 'error'},
+  }).filter(item => item.severity === 2).slice(0, 8))
+    issues.push(`脚本第${diagnostic.line}行标识符检查：${diagnostic.message}`);
   if (issues.length) throw new TeachingDemoValidationError(issues);
   const clean = html.replace(/<style\b[^>]*data-teaching-demo-foundation[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<meta\b(?=[^>]*http-equiv\s*=\s*["']Content-Security-Policy["'])[^>]*>/gi, '');

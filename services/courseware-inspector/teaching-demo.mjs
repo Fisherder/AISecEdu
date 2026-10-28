@@ -42,12 +42,24 @@ export async function inspectTeachingDemo(browser, {data, signal}) {
       }, {method, argument});
     };
     const checkOutputs = async (snapshot, inputs) => {
-      if (!same(snapshot.inputs, inputs)) throw Error('实际输入与测试输入不一致');
       const expected = teachingDemoExpected(data.profile, inputs);
-      for (const [key, value] of Object.entries(expected)) {
-        if (snapshot.outputs[key] !== value) throw Error(`独立算法检查失败：${key}实际${snapshot.outputs[key]}，应为${value}`);
-        const visible = frame.locator(`[data-demo-value="${key}"]`).filter({visible: true}).first();
-        if (!await visible.count() || await visibleText(visible) !== value) throw Error(`舞台可见结果与真实计算不一致：${key}`);
+      const checkMath = value => {
+        if (!same(value.inputs, inputs)) throw Error('实际输入与测试输入不一致');
+        for (const [key, expectedValue] of Object.entries(expected))
+          if (value.outputs[key] !== expectedValue) throw Error(`独立算法检查失败：${key}实际${value.outputs[key]}，应为${expectedValue}`);
+      };
+      checkMath(snapshot);
+      try {
+        checkMath(await action('step', snapshot.stepCount - 1 - snapshot.step));
+        for (const [key, value] of Object.entries(expected)) {
+          const visible = frame.locator(`[data-demo-value="${key}"]`).filter({visible: true});
+          if (!await visible.count()) throw Error(`末步缺少可见结果：${key}`);
+          for (const node of await visible.all())
+            if (await visibleText(node) !== value) throw Error(`末步舞台可见结果与真实计算不一致：${key}`);
+        }
+      } finally {
+        const current = await action('snapshot');
+        if (current.step !== snapshot.step) await action('step', snapshot.step - current.step);
       }
     };
     const attempt = async (label, operation) => {
@@ -112,14 +124,14 @@ export async function inspectTeachingDemo(browser, {data, signal}) {
         }
       if (same(baseline, variant)) throw Error('对照实验没有产生可观察的结果变化');
       controls.experiment = true;
-      const inputs = cases.valid[1];
-      for (const [key, value] of Object.entries(inputs)) await frame.locator(`[data-demo-input="${key}"]`).fill(value);
+      const inputs = cases.valid.find(value => Object.keys(snapshot.inputs).filter(key => value[key] !== snapshot.inputs[key]).length === 1) || cases.valid[1];
+      for (const [key, value] of Object.entries(inputs).filter(([key, value]) => value !== snapshot.inputs[key])) await frame.locator(`[data-demo-input="${key}"]`).filter({visible: true}).first().fill(value);
       await button('apply').click();
       const after = await action('snapshot');
-      await checkOutputs(after, inputs);
       const result = frame.locator('[data-demo-experiment-result]').filter({visible: true});
       if (after.experiment !== null || after.playing || after.step !== 0 ||
           await result.count() && (await result.innerText()).trim()) throw Error('参数变化未停止播放并清除旧实验结果');
+      await checkOutputs(after, inputs);
       controls.parameterChange = true;
     });
     await attempt('练习', async () => {
@@ -142,10 +154,11 @@ export async function inspectTeachingDemo(browser, {data, signal}) {
       controls.quiz = true;
     });
     await attempt('重置', async () => {
+      await action('step', -(await action('snapshot')).step);
       await button('play').click();
+      if (!(await action('snapshot')).playing) throw Error('播放按钮没有启动同一状态的播放计时器');
       await button('reset').click();
       const snapshot = await action('snapshot');
-      await checkOutputs(snapshot, cases.valid[0]);
       const result = frame.locator('[data-demo-experiment-result]').filter({visible: true});
       if (snapshot.step !== 0) throw Error('重置后step必须为0');
       if (snapshot.playing) throw Error('重置后必须停止播放和计时器');
@@ -153,6 +166,7 @@ export async function inspectTeachingDemo(browser, {data, signal}) {
       const selected = await frame.locator('fieldset input:checked').evaluateAll(nodes => nodes.map(node => `${node.name}=${node.value}`));
       if (selected.length) throw Error('重置后仍选中了练习或实验预测选项：' + selected.join(',') + '；清除所有radio选择与反馈');
       if (await result.count() && (await result.innerText()).trim()) throw Error('重置后仍显示旧实验DOM结果，需清空或隐藏[data-demo-experiment-result]');
+      await checkOutputs(snapshot, cases.valid[0]);
       controls.reset = true;
     });
     await page.setViewportSize({width: 1365, height: 900});

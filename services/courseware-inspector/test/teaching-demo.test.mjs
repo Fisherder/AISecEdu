@@ -26,10 +26,18 @@ test('real browser accepts working RSA and rejects fake results and stale experi
     const svgMarkup=html.match(/<svg[\s\S]*?<\/svg>/)[0];
     const dynamicSvg=html.replace(svgMarkup,'').replace('reset();',`document.querySelector('[data-demo="visualization"]').insertAdjacentHTML('afterbegin',${JSON.stringify(svgMarkup)});reset();`);
     assert.deepEqual((await inspectTeachingDemo(browser,{data:{html:dynamicSvg,profile:'rsa'}})).issues,[]);
-    const missingDiagram=html.replace(svgMarkup,'');
+    const missingDiagram=html.replace(svgMarkup,'<p id="diagram"></p>');
     assert.ok((await inspectTeachingDemo(browser,{data:{html:missingDiagram,profile:'rsa'}})).issues.some(issue=>issue.includes('专用主图')));
     const doubleClick=html.replace('</body>',`<script>document.addEventListener('click',event=>{if(event.target.getAttribute('data-demo-action')==='next')window.aiseceduDemo.step(1)})</script></body>`);
     assert.ok((await inspectTeachingDemo(browser,{data:{html:doubleClick,profile:'rsa'}})).issues.some(issue=>issue.includes('只触发一次')));
+    const staged=html.replace("document.querySelector('#diagram').textContent=",`document.querySelector('[data-demo-value="recovered"]').hidden=step<2;document.querySelector('#diagram').textContent=`);
+    assert.deepEqual((await inspectTeachingDemo(browser,{data:{html:staged,profile:'rsa'}})).issues,[]);
+    const mirrored=html.replace('<h2>只改变消息</h2>','<h2>只改变消息</h2><label>消息副本<input data-demo-input="message" value="65"></label>')
+      .replace(`document.querySelector('[data-demo-input="'+k+'"]').value=v`,`document.querySelectorAll('[data-demo-input="'+k+'"]').forEach(node=>node.value=v)`)
+      .replace('window.aiseceduDemo=',`document.addEventListener('input',event=>{if(event.target.dataset.demoInput==='message')document.querySelectorAll('[data-demo-input="message"]').forEach(node=>node.value=event.target.value)});window.aiseceduDemo=`);
+    assert.deepEqual((await inspectTeachingDemo(browser,{data:{html:mirrored,profile:'rsa'}})).issues,[]);
+    const brokenPlay=html.replace('play:()=>{stop();playing=true;timer=setInterval(()=>move(1),500)}','play:()=>{}');
+    assert.ok((await inspectTeachingDemo(browser,{data:{html:brokenPlay,profile:'rsa'}})).issues.some(issue=>issue.includes('播放按钮')));
     const repeatedControls=html.replace('<h2>只改变消息</h2>','<h2>只改变消息</h2><button data-demo-action="experiment">另一个实验入口</button>').replace('<label><input type="radio" name="q1" value="yes">能</label>', '<label><input type="radio" name="q1" value="maybe">不确定</label><label><input type="radio" name="q1" value="yes">能</label>');
     assert.deepEqual((await inspectTeachingDemo(browser,{data:{html:repeatedControls,profile:'rsa'}})).issues,[]);
     const compact=html.replace('baseline:{...outputs}','baseline:{ciphertext:outputs.ciphertext,recovered:outputs.recovered}').replace('variant:calc(variantInputs)','variant:((v)=>({ciphertext:v.ciphertext,recovered:v.recovered}))(calc(variantInputs))');
@@ -38,6 +46,9 @@ test('real browser accepts working RSA and rejects fake results and stale experi
     assert.deepEqual((await inspectTeachingDemo(browser,{data:{html:svg,profile:'rsa'}})).issues,[]);
     const fake=html.replace('outputs=result;','outputs={n:"3233",phi:"3120",d:"2753",ciphertext:"2790",recovered:"65"};');
     assert.ok((await inspectTeachingDemo(browser,{data:{html:fake,profile:'rsa'}})).issues.some(s=>s.includes('算法')));
+    const staleDom=html.replace('function setInputs(v){',`function setInputs(v){const oldResult=document.querySelector('[data-demo-experiment-result]').innerHTML;`)
+      .replace('step=0;experiment=null;render()}',`step=0;experiment=null;render();if(oldResult)document.querySelector('[data-demo-experiment-result]').innerHTML=oldResult}`);
+    assert.ok((await inspectTeachingDemo(browser,{data:{html:staleDom,profile:'rsa'}})).issues.some(issue=>issue.includes('旧实验')));
     const stale=html.replace('step=0;experiment=null;render()','step=0;render()');
     assert.ok((await inspectTeachingDemo(browser,{data:{html:stale,profile:'rsa'}})).issues.some(s=>s.includes('旧实验')));
   } finally {await browser.close()}
