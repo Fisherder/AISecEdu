@@ -1,17 +1,9 @@
-### Introduction
+# 参与 AISecEdu 开发
 
-Thank you for taking the time to learn how to contribute to the pwncollege dojo! We greatly appreciate every type of contribution, whether it's a bug report, a new feature, a security report or just a small fix in the docs.
-Every type of contribution helps the whole community of pwncollege, and improves the learning experience for everyone.
+先阅读 [开发入口](docs/development.md)。可直接转交给新成员的文档为 [新成员开发手册](docs/development/onboarding.md)，代码、接口、测试和发布要求统一维护在 [开发规范](docs/development/standards.md)。
 
-In this file we're going to be walking through how to contribute to pwncollege, and what we expect from our contributors.
+每项任务登记负责人、问题、范围和验收条件。在个人代码副本创建功能分支，完成 `make dev-check` 与改动相关测试，再提交 PR。共享平台部署、模型调用和工作区验收先登记任务，由维护者安排。
 
-### Bug Reports
-When submitting a bug report, make sure to follow these guidelines:
+PR 使用仓库模板，说明修改结果、测试、数据影响和恢复方法。普通改动由非作者审查，权限、评分、数据库、容器和发布改动须由对应维护者复核。未执行的检查如实列明，不把语法通过或模型自述当作功能验收。
 
-1. Check that the issue doesn't already exist
-2. Always write the steps to reproduce the bug (or if you can't reproduce it, write that in your report).
-3. Write in your report what happens, and what you expect to happen.
-4. If you know what part of the code results in that bug, and don't know how to fix it, make sure to mention where that code is!
-
-### Feature Suggestion & Questions
-If you want to suggest a new feature, or you have a question, please use the [Discussions Tab](https://github.com/pwncollege/dojo/discussions).
+安全问题向维护者提供裁剪后的复现信息。不要在 Issue、PR 或日志中填写真实凭据、学生个人信息与私有答案。上游来源和许可证声明继续保留。

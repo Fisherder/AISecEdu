@@ -1,0 +1,7 @@
+{
+  "linuxAccount": "dev_example",
+  "githubAccount": "example",
+  "sshPublicKeyFile": "/path/to/developer.pub",
+  "module": "dojo_theme",
+  "platformAccess": "synthetic-test-course-only"
+}

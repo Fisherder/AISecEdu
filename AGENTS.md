@@ -2,6 +2,14 @@
 
 This file provides guidance to AI agents when working with code in this repository.
 
+## Team Development
+
+Start with `docs/development.md`, then follow `docs/development/standards.md` for the maintained contribution, validation and release rules. New contributors use `docs/development/onboarding.md`; maintainers use `docs/development/operations.md`.
+
+Work in a personal clone or a dedicated task checkout. `/srv/aisecedu-dojo` is the production bind mount and `/srv/aisecedu-development-volume/aisecedu-dojo` is the shared full development bind mount. Neither is a personal editing directory. Do not switch branches, install dependencies or run broad deployment/test commands there as routine contributor work. Coordinate shared-environment changes through the maintainer and `aisecedu-dev` reservation records.
+
+`make dev-check` is the contributor quick check. It does not connect to either platform or call a model. Full browser, workspace, database, model and load checks require a registered task and the appropriate test scope. The commands below that create/restart containers are maintainer references, not ordinary contributor setup steps. Preserve unrelated changes and existing task artifacts.
+
 ## Overview
 
 The pwn.college DOJO is a cybersecurity education platform built as a comprehensive CTFd plugin.

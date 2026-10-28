@@ -17,6 +17,9 @@ help:
 		'  make verify   验证已启动平台的服务、路由与模型边界' \
 		'  make test     运行完整 Python 测试集' \
 		'  make package  生成可复现源码归档与 SHA-256 校验文件' \
+		'  make dev-check          团队快速检查，不连接平台或调用模型' \
+		'  make dev-bootstrap      在个人副本安装 Python 检查依赖' \
+		'  make dev-status         查看服务器共享开发预约与任务' \
 		'  make generation-dev      连接完整 AISecEdu 开发环境' \
 		'  make generation-check    验证生成、浏览器和发布合同' \
 		'  make generation-release  构建固定版本生成镜像包' \
@@ -58,6 +61,17 @@ test:
 
 package:
 	@./ops/package-release.sh
+
+.PHONY: dev-check dev-bootstrap dev-status
+
+dev-check:
+	@PYTHONDONTWRITEBYTECODE=1 python3 ops/team/preflight.py
+
+dev-bootstrap:
+	@bash ops/team/bootstrap.sh
+
+dev-status:
+	@aisecedu-dev status
 
 .PHONY: generation-dev generation-check generation-release generation-export generation-promote generation-rollback
 
