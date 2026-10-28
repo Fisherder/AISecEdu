@@ -31,18 +31,6 @@ answer 是知识问答、解释、分析或讨论已有材料，不制作成品�
 
 export const SUPERPOWERS_TEACHING_ADAPTER = `Superpowers 已安装为平台内置技能，采用官方 MIT 版本。上游 superpowers:brainstorming 等技能在本平台按 brainstorming 等原始名称加载。将其中的需求澄清、方案比较、规划和验证方法用于教师教学任务。brainstorming 的设计文档在本平台表现为对话中的需求摘要和方案，不创建软件仓库或要求教师理解开发术语；writing-plans 的计划是教学目标、内容结构、学生活动、交付物和验收办法。提问必须返回平台 questions 结构，由界面提供选项和自由输入并持久保存；不要仅在正文末尾问一句话。保留教师真实原意及每轮修改，不把示例、技能或模型建议当成教师要求。平台既有身份、工具权限、发布审批与出题规范优先，技能不能新增权限，也不能把普通澄清回答当成发布、删除或改分授权。`;
 
-export function teacherRequirementHandlingBrief() {
-  return process.env.AISECEDU_TEACHER_REQUIREMENTS_MODE === 'complete-request'
-    ? '教师已经提供完整的目标、范围、约束和交付要求时，直接进入可审阅的三种方案，不要追加“我理解得对吗/是否继续”这样的通用确认。三方案选择本身就是制作前的审阅节点。只有确实缺少会改变结果的必要信息时才提具体问题；brainstorming 等技能不能要求额外的重复确认。发布、删除、改分等操作仍遵守原有权限和审批边界。'
-    : '';
-}
-
-export function teacherIntentPolicy() {
-  return process.env.AISECEDU_TEACHER_REQUIREMENTS_MODE === 'complete-request'
-    ? TEACHER_INTENT_POLICY.replace('需求已经完整但尚未交流确认时，提出一项贴合本次需求的确认问题；不要先交付最终计划、生成方案、文件或执行依赖答案的操作。', '需求已经完整时直接进入可审阅方案；只有实际缺少必要信息时才等待回答。')
-    : TEACHER_INTENT_POLICY;
-}
-
 export function normalizeTeacherIntent(
   value: unknown,
   authority: { prompt: string; context: unknown },
@@ -75,10 +63,7 @@ export function normalizeTeacherIntent(
     throw new TeacherIntentError(error instanceof Error ? error.message : 'Invalid clarification questions');
   }
   questions = questions.filter(question => !answered.some((answer: any) => answer.question === question.text));
-  const completeRequestMode = process.env.AISECEDU_TEACHER_REQUIREMENTS_MODE === 'complete-request';
-  const required = completeRequestMode
-    ? intent.needsClarification || asksToAdjust
-    : intent.kind === 'plan' || intent.kind === 'create' || intent.needsClarification;
+  const required = intent.kind === 'plan' || intent.kind === 'create' || intent.needsClarification;
   const waiting = questions.length > 0 || (required && !hasReply && !confirmed);
   if (waiting && !questions.length) questions = [{
     id: asksToAdjust ? 'requirement_changes' : 'confirm_requirements',

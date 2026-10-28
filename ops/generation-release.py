@@ -37,7 +37,7 @@ def overlay(images, enabled='html-v1'):
         'agent-runtime': {'image': images['agent-runtime'], 'pull_policy': 'never',
                           'environment': {'AISECEDU_TEACHING_DEMO_ENGINE': enabled,
                                           'COURSEWARE_INSPECTOR_URL': 'http://courseware-inspector:3015',
-                                          'AISECEDU_TEACHER_REQUIREMENTS_MODE': 'complete-request'}},
+                                          'AISECEDU_TEACHER_REQUIREMENTS_MODE': ''}},
         'courseware-inspector': {'image': images['courseware-inspector'], 'pull_policy': 'never'},
     }}
 

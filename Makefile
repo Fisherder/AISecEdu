@@ -65,7 +65,7 @@ generation-dev:
 	@./ops/staging/connect.sh
 
 generation-check:
-	@cd services/agent-runtime && node node_modules/vitest/vitest.mjs run tests/lib/teaching-demo/generation.test.ts tests/unit/generation-failure.test.ts tests/unit/cinematic-model-policy.test.ts tests/integration/cinematic-model-policy-route.test.ts tests/unit/teacher-direct-generation.test.ts tests/ai/provider-transport-journal.test.ts tests/unit/durable-model-events.test.ts
+	@cd services/agent-runtime && node node_modules/vitest/vitest.mjs run tests/lib/teaching-demo/generation.test.ts tests/unit/generation-failure.test.ts tests/unit/cinematic-model-policy.test.ts tests/integration/cinematic-model-policy-route.test.ts tests/ai/provider-transport-journal.test.ts tests/unit/durable-model-events.test.ts
 	@GENERATION_REQUIRE_BROWSER=1 node --test services/courseware-inspector/test/teaching-demo.test.mjs
 	@python3 -m unittest discover -s test -p test_generation_release_unit.py
 

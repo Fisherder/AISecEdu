@@ -1,6 +1,6 @@
 import type { AgentSkill, AgentSkillSummary } from '@/lib/server/agent-skills';
 import { teachingDemoCapabilityBrief } from '@/lib/teaching-demo/capabilities';
-import { teacherIntentPolicy, SUPERPOWERS_TEACHING_ADAPTER, teacherRequirementHandlingBrief } from './teacher-intent';
+import { TEACHER_INTENT_POLICY, SUPERPOWERS_TEACHING_ADAPTER } from './teacher-intent';
 import { CINEMATIC_CAPABILITY_BRIEF, CINEMATIC_CAMERA_PLAYBACK_BRIEF, CINEMATIC_TEACHING_PURPOSE_BRIEF } from '@/lib/cinematic/capabilities';
 import { CINEMATIC_AUTONOMOUS_DESIGN_BRIEF } from '@/lib/cinematic/design-policy';
 import { COURSEWARE_PLANNING_BRIEF } from '@/lib/courseware/schema';
@@ -86,10 +86,9 @@ export function teacherAgentPlanningPrompt(catalog: AgentSkillSummary[], process
     { id: 'collaboration', order: 0, text: COLLABORATION_POLICY },
     { id: 'question-reply', order: 5, text: QUESTION_REPLY_POLICY },
     { id: 'planning', order: 10, text: PLANNING_POLICY },
-    { id: 'automatic-task-intent', order: 12, text: teacherIntentPolicy() },
+    { id: 'automatic-task-intent', order: 12, text: TEACHER_INTENT_POLICY },
     { id: 'superpowers-teaching-adapter', order: 13, text: SUPERPOWERS_TEACHING_ADAPTER },
     { id: 'superpowers-requirements', order: 14, text: processSkills.map(skill => `${skill.name}:\n${skill.instructions}`).join('\n\n') },
-    { id: 'complete-request-policy', order: 15, text: teacherRequirementHandlingBrief() },
     { id: 'teacher-planning-domain', order: 20, text: planningDomain(catalog) },
     { id: 'natural-proposal-continuation', order: 24, text: '教师已在本轮明确说按已有某个方案开始制作时，从 requestAuthority.sourceIndex 选择唯一对应的 generation-option 来源；requestRelation 使用 continue 并引用该 option 的 ref，intent.kind=create，generationTarget 和 generationScope 均为 null。下一阶段用 generation.start 开始已选方案，不重新生成三套方案。若本轮是在调整方案而未确定开始，应沿用原要求和明确修改继续协商，不启动原方案。修改尚未执行的计划仍属于 intent.kind=plan；修改真实文件或内容产物才是 revise。' },
     { id: 'inquiry-pattern-planning', order: 25, text: 'platformFacts.selectedLearningPattern.id=process-inquiry 时，必须加载 process-inquiry-learning，generationTarget 和 generationScope 均为 null，直接设计完整学习流程并使用 module.inquiry 创建草稿。不适用其他产物的三方案协议。仅当平台目录确有相应 engine 才能创建，不得用问答或动画占位代替机制。' },
@@ -102,7 +101,6 @@ export function teacherAgentExecutionPrompt(skills: AgentSkill[], catalog: Agent
     .filter((skill) => skill.invocation.modelInvocable && !alreadyLoaded.has(skill.name))
     .map(({ name, description }) => ({ name, description }));
   return assembleAgentPrompt('execution', [
-    { id: 'complete-request-policy', order: 15, text: teacherRequirementHandlingBrief() },
     { id: 'collaboration', order: 0, text: COLLABORATION_POLICY },
     { id: 'question-reply', order: 5, text: QUESTION_REPLY_POLICY },
     { id: 'superpowers-teaching-adapter', order: 7, text: SUPERPOWERS_TEACHING_ADAPTER },
