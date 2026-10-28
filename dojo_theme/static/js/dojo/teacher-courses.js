@@ -727,7 +727,7 @@
   }
 
   function questionDraftRows() {
-    return state.questionItems.filter(item => item.kind === "draft" && (item.draftId || item.id));
+    return state.questionItems.filter(item => item.kind === "draft" && !item.runtimeManaged && (item.draftId || item.id));
   }
 
   function selectedQuestionDrafts() {
@@ -2142,25 +2142,27 @@
   function questionBrowseRow(item) {
     const title = item.title || "未命名题目";
     const isDraft = item.kind === "draft";
+    const isRuntime = item.runtimeManaged === true;
+    const icon = ["fa-flask", "fa-flag", "fa-file-alt"].includes(item.icon) ? item.icon : isDraft ? "fa-file-alt" : "fa-flag";
     const stateName = String(item.state || item.status || "draft").toLowerCase();
     const meta = [
       item.moduleName,
       item.required ? "必修题" : "选修题",
       exerciseModeLabel(item.exerciseMode),
-      isDraft ? `版本 ${Number(item.revision || 1)}` : "课程题目",
+      isRuntime ? "未发布实验" : isDraft ? `版本 ${Number(item.revision || 1)}` : "课程题目",
       item.ownerName,
       item.updated ? `${formatDate(item.updated, true)}更新` : "",
     ].filter(Boolean).join(" · ");
-    const main = isDraft
+    const main = isDraft && !isRuntime
       ? `<button class="cs-managed-main" type="button" data-open-question-draft="${escape(item.draftId || item.id)}">
-          <span><i class="fas fa-flag" aria-hidden="true"></i></span>
+          <span><i class="fas ${icon}" aria-hidden="true"></i></span>
           <span><strong>${escape(title)}</strong><small>未发布 · ${escape(meta)}</small><p>${escape(item.summary || "暂无题目摘要")}</p></span>
           <em>打开题目 <i class="fas fa-arrow-right" aria-hidden="true"></i></em>
         </button>`
       : `<a class="cs-managed-main" href="${escape(item.href || "#")}">
-          <span><i class="fas fa-flag" aria-hidden="true"></i></span>
+          <span><i class="fas ${icon}" aria-hidden="true"></i></span>
           <span><strong>${escape(title)}</strong><small>${escape(meta)}</small><p>${escape(item.summary || "暂无题目摘要")}</p></span>
-          <em>打开题目 <i class="fas fa-arrow-right" aria-hidden="true"></i></em>
+          <em>${isRuntime ? "预览实验" : "打开题目"} <i class="fas fa-arrow-right" aria-hidden="true"></i></em>
         </a>`;
     return `<article class="cs-challenge-row cs-question-unified-row is-managed is-${escape(questionStateTone(stateName))}" data-question-item-id="${escape(item.id)}">
       ${main}
@@ -2169,6 +2171,7 @@
   }
 
   function questionDraftManagementRow(item) {
+    if (item.runtimeManaged) return questionBrowseRow(item);
     const title = item.title || "未命名题目草稿";
     const draftId = String(item.draftId || item.id);
     const selected = state.selectedQuestionDraftIds.has(draftId);
@@ -2222,7 +2225,7 @@
             return `<article class="cs-challenge-row is-managed is-question-managed" data-question-key="${key}">
               <button class="cs-question-drag-handle" type="button" draggable="true" aria-label="拖动“${escape(challenge.name || "未命名实践题")}”调整顺序或章节" title="拖动调整顺序或章节"><i class="fas fa-grip-vertical" aria-hidden="true"></i></button>
               <a class="cs-managed-main" href="${escape(challenge.url || `/${state.course.referenceId}/${module.id}/${challenge.id}`)}">
-                <span><i class="fas fa-flag" aria-hidden="true"></i></span>
+                <span><i class="fas ${challenge.icon === "fa-flask" ? "fa-flask" : "fa-flag"}" aria-hidden="true"></i></span>
                 <span><strong>${escape(challenge.name || "未命名实践题")}</strong><small>已发布 · ${challenge.required ? "必修题" : "选修题"}${challenge.exerciseMode ? ` · ${escape(exerciseModeLabel(challenge.exerciseMode))}` : ""}</small></span>
                 <em>打开题目 <i class="fas fa-arrow-right" aria-hidden="true"></i></em>
               </a>
@@ -2414,6 +2417,14 @@
   }
 
   function renderQuestionDraftDetail(draft) {
+    if (draft.runtimeManaged && draft.challenge) {
+      const linked = draft.challenge;
+      const published = String(linked.publicationState || "PUBLISHED").toUpperCase() !== "DRAFT";
+      elements.questionDrawerTitle.textContent = linked.name || "课程实验";
+      elements.questionDrawerSubtitle.textContent = published ? "已发布实验" : "未发布实验";
+      elements.questionDrawerBody.innerHTML = `<section class="cs-question-detail-summary"><span class="cs-question-state is-${published ? "success" : "neutral"}">${published ? "已发布" : "未发布"}</span><div><small>实验环境</small><strong>Windows 2000</strong></div><div><small>完成方式</small><strong>实验检查工具与 Flag</strong></div></section><section class="cs-question-detail-section"><h3>${escape(linked.name || "课程实验")}</h3><p>${escape(linked.description || "")}</p><p>本实验沿用现有实验环境和检查工具。请从实验页面进入环境，按题面运行 check.cmd 获取完成凭证。</p><div class="cs-question-detail-actions"><a class="hub-button is-primary" href="${escape(linked.href)}"><i class="fas fa-flask" aria-hidden="true"></i>${published ? "打开实验" : "预览实验"}</a></div></section>`;
+      return;
+    }
     const spec = draft.spec && typeof draft.spec === "object" ? draft.spec : {};
     const validation = draft.validation && typeof draft.validation === "object" ? draft.validation : {};
     const releaseGate = spec.releaseGate && typeof spec.releaseGate === "object" ? spec.releaseGate : null;
