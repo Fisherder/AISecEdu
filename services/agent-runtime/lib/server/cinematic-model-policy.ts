@@ -1,10 +1,12 @@
 import type { ThinkingConfig } from '@/lib/types/provider';
+import type { AICallFn } from '@/lib/generation/pipeline-types';
 
 export function cinematicModelThinking(
   model: { providerId: string; modelId: string },
   cinematic: boolean,
-  stage?: 'cinematic-scene' | 'cinematic-repair' | 'cinematic-review' | 'intent-source-verification' | 'process-scene' | 'process-repair',
+  stage?: NonNullable<Parameters<AICallFn>[3]>['stage'],
 ): ThinkingConfig {
+  if (stage === 'teaching-demo' || stage === 'teaching-demo-repair') return {mode: 'disabled', enabled: false};
   if (model.providerId === 'deepseek' && ['deepseek-chat', 'deepseek-v4.1-flash'].includes(model.modelId))
     return { mode: 'disabled', enabled: false };
   if (cinematic && ['cinematic-scene', 'cinematic-review', 'intent-source-verification', 'cinematic-repair'].includes(stage || '') && model.providerId === 'deepseek' && model.modelId === 'deepseek-v4-flash')

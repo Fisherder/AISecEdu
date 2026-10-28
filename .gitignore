@@ -64,3 +64,7 @@ dojo/dojo-init.bak-*
 *.bak*
 *.orig
 *.before-*
+
+/.impeccable/review/
+
+/docker-compose.staging.yml

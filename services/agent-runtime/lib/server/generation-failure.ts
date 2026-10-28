@@ -19,6 +19,12 @@ export function generationFailure(error: unknown): Failure {
   const names = chain.map(item => String(item.name || ''));
   const message = chain.map(item => String(item.message || '')).join(' ');
   const status = chain.map(item => Number(item.statusCode || item.status)).find(Number.isFinite);
+  if (chain.some(item => item.name === 'CinematicExecutionError' && item.reason === 'budget-exhausted'))
+    return {failureCategory: 'permanent', errorCode: 'GENERATION_TIME_BUDGET_EXHAUSTED',
+      error: '本轮生成已到达质量交付时限；已保留全部完成步骤，可从检查点继续定向修复。'};
+  if (names.includes('TeachingDemoRepairExhaustedError'))
+    return {failureCategory: 'permanent', errorCode: 'TEACHING_DEMO_REPAIR_EXHAUSTED',
+      error: '教学演示已用完本次局部修复预算；底稿与诊断保留在原任务中，未自动重做整条链路。'};
   if (names.includes('SkillCatalogUnavailableError'))
     return { failureCategory: 'service', errorCode: 'SKILL_CATALOG_UNAVAILABLE',
       error: '技能目录暂时不可用，任务已保存并会在服务恢复后重试。', retryAfterSeconds: 30 };
@@ -26,7 +32,7 @@ export function generationFailure(error: unknown): Failure {
     return { failureCategory: 'permanent', errorCode: 'MODEL_CONFIGURATION_REQUIRED', error: '模型服务的账号、额度或权限需要检查；已保留任务。' };
   if (status === 429 || (status !== undefined && status >= 500) ||
       codes.some(code => /^(ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT)$/.test(code)) ||
-      names.some(name => ['TimeoutError', 'CinematicInspectorUnavailableError', 'CoursewareInspectorUnavailableError', 'ModelCapacityError'].includes(name)) ||
+      names.some(name => ['TimeoutError', 'CinematicInspectorUnavailableError', 'CoursewareInspectorUnavailableError', 'ProcessInspectorUnavailableError', 'TeachingDemoInspectorUnavailableError', 'ModelCapacityError'].includes(name)) ||
       chain.some(item => item.name === 'CinematicExecutionError' && ['deadline', 'model-timeout', 'disconnected'].includes(String(item.reason))) ||
       /fetch failed|socket hang up|timed out|request timeout|service unavailable/i.test(message)) {
     return { failureCategory: 'service', errorCode: status === 429 ? 'MODEL_RATE_LIMITED' : 'GENERATION_TEMPORARILY_UNAVAILABLE',

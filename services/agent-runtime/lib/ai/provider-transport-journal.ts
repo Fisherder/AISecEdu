@@ -16,6 +16,7 @@ const SAFE_HEADERS = new Set([
 export interface ProviderTransportState {
   count: number;
   unfinished: Set<string>;
+  settlements?: Promise<void>[];
 }
 
 function safeHeaders(headers?: HeadersInit): Record<string, string> {
@@ -81,6 +82,8 @@ export async function journalProviderTransport(
     bodySha256: createHash('sha256').update(bytes).digest('hex'), bodyEncoding: 'base64',
   });
   state.unfinished.add(callId);
+  let settled!: () => void;
+  (state.settlements ??= []).push(new Promise<void>(resolve => { settled = resolve; }));
   const hash = createHash('sha256');
   let byteLength = 0;
   let frames = 0;
@@ -88,11 +91,13 @@ export async function journalProviderTransport(
   const finish = async (status: 'completed' | 'failed' | 'cancelled', error?: unknown) => {
     if (finished) return;
     finished = true;
-    await write('provider.finished', callId, {
-      status, chunksCount: frames, byteLength, bodySha256: hash.copy().digest('hex'),
-      ...(error ? { errorType: error instanceof Error ? error.name : 'UnknownError' } : {}),
-    });
-    state.unfinished.delete(callId);
+    try {
+      await write('provider.finished', callId, {
+        status, chunksCount: frames, byteLength, bodySha256: hash.copy().digest('hex'),
+        ...(error ? { errorType: error instanceof Error ? error.name : 'UnknownError' } : {}),
+      });
+      state.unfinished.delete(callId);
+    } finally { settled(); }
   };
   let response: Response | undefined;
   try {
@@ -105,6 +110,7 @@ export async function journalProviderTransport(
   } catch (error) {
     await response?.body?.cancel().catch(() => {});
     if (!active.journalFailure) await finish(signal?.aborted ? 'cancelled' : 'failed', error);
+    else settled();
     throw error;
   }
   if (!response.body) { await finish('completed'); return response; }
@@ -144,7 +150,7 @@ export async function journalProviderTransport(
       } catch (error) {
         await reader.cancel().catch(() => {});
         pending = undefined;
-        try { if (!active.journalFailure) await finish(signal?.aborted ? 'cancelled' : 'failed', error); }
+        try { if (!active.journalFailure) await finish(signal?.aborted ? 'cancelled' : 'failed', error); else settled(); }
         catch (journalError) { error = journalError; }
         controller.error(error);
       }
@@ -157,10 +163,27 @@ export async function journalProviderTransport(
       await pulling;
       pending = undefined;
       if (!active.journalFailure) await finish('cancelled', reason);
+      else settled();
     },
   }, { highWaterMark: 0 });
   const captured = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   for (const key of ['url', 'redirected', 'type'] as const)
     Object.defineProperty(captured, key, { value: response[key] });
   return captured;
+}
+
+export async function waitForProviderTransports(active: ActiveModelCall, signal: AbortSignal) {
+  if (!active.transports?.settlements?.length) return;
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
+  deadline.throwIfAborted();
+  let aborted!: () => void;
+  try {
+    await Promise.race([
+      Promise.all(active.transports.settlements),
+      new Promise<never>((_resolve, reject) => {
+        aborted = () => reject(deadline.reason);
+        deadline.addEventListener('abort', aborted, {once: true});
+      }),
+    ]);
+  } finally { deadline.removeEventListener('abort', aborted); }
 }

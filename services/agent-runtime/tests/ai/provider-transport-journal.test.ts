@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateText } from 'ai';
-import { journalProviderTransport } from '@/lib/ai/provider-transport-journal';
+import { journalProviderTransport, waitForProviderTransports } from '@/lib/ai/provider-transport-journal';
 import { providerFetch } from '@/lib/ai/provider-fetch';
 import { getModel } from '@/lib/ai/providers';
 import { withActiveModelCall, type ActiveModelCall } from '@/lib/ai/model-call-journal';
@@ -23,6 +23,23 @@ const bytesOf = (events: ReturnType<typeof fixture>['events']) => Buffer.concat(
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('provider transport durability', () => {
+  it('waits for the terminal receipt even when the SDK finishes before persistence', async () => {
+    const {active,events}=fixture();
+    let release!: () => void; let entered!: () => void;
+    const barrier=new Promise<void>(resolve=>{release=resolve});
+    const started=new Promise<void>(resolve=>{entered=resolve});
+    const original=active.journal.write;
+    active.journal.write=async(type,id,detail)=>{if(type==='provider.finished'){entered();await barrier}await original(type,id,detail)};
+    const response=await journalProviderTransport(active,identity,async()=>new Response('complete'),
+      'https://provider.example/v1/chat',{method:'POST',body:'{}'});
+    const reading=response.text();await started;
+    let committed=false;
+    const waiting=waitForProviderTransports(active,new AbortController().signal).then(()=>{committed=true});
+    await Promise.resolve();expect(committed).toBe(false);expect(active.transports?.unfinished.size).toBe(1);
+    release();await Promise.all([reading,waiting]);
+    expect(committed).toBe(true);expect(active.transports?.unfinished.size).toBe(0);expect(events.at(-1)?.type).toBe('provider.finished');
+  });
+
   it('records the effective request before sending and byte-exact UTF-8 fragments before consumption', async () => {
     const { active, events } = fixture();
     const expected = Buffer.from('data: {"text":"概率论🧪"}\n\n');

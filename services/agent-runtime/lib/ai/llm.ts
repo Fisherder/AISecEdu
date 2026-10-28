@@ -1,3 +1,4 @@
+import { waitForProviderTransports } from './provider-transport-journal';
 /**
  * Unified LLM Call Layer
  *
@@ -280,7 +281,13 @@ const DEFAULT_VALIDATE = (text: string) => text.trim().length > 0;
 
 class ModelJournalWriteError extends Error {
   constructor(cause: unknown) {
-    super('Durable model call event could not be saved', { cause });
+    const nested = cause instanceof Error ? (cause.cause as {code?: unknown} | undefined)?.code : undefined;
+    const code = typeof nested === 'string' && /^[A-Z0-9_]{1,64}$/.test(nested) ? ': ' + nested : '';
+    const reason = typeof cause === 'string' ? cause
+      : cause instanceof ModelJournalWriteError ? cause.message
+      : cause instanceof Error ? `${cause.name}${code}${/^Model event persistence returned HTTP \d+$/.test(cause.message) ? ': ' + cause.message : ''}`
+      : 'UnknownError';
+    super(`Durable model call event could not be saved (${reason})`, { cause });
     this.name = 'ModelJournalWriteError';
   }
 }
@@ -660,6 +667,7 @@ export async function callLLM<T extends GenerateTextParams>(
         callSignal,
       );
       emitPreview(true);
+      if (activeCall) await waitForProviderTransports(activeCall, callSignal);
       if (activeCall?.journalFailure) throw new ModelJournalWriteError(activeCall.journalFailure);
       if (hasTransportJournal(params.model) && journal && (!activeCall?.transports?.count || activeCall.transports.unfinished.size))
         throw new ModelJournalWriteError('The provider transport journal is incomplete');

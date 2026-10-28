@@ -99,6 +99,12 @@ case "$ACTION" in
         [ "${ENABLE_SPLUNK}" = "true" ] && profiles+=("splunk")
 
         args=(--env-file=/data/config.env)
+        if [[ -f docker-compose.staging.yml || -f docker-compose.generation-release.yml ]]; then
+            args+=(-f docker-compose.yml)
+            [[ ! -f docker-compose.override.yml ]] || args+=(-f docker-compose.override.yml)
+            [[ ! -f docker-compose.staging.yml ]] || args+=(-f docker-compose.staging.yml)
+            [[ ! -f docker-compose.generation-release.yml ]] || args+=(-f docker-compose.generation-release.yml)
+        fi
         for p in "${profiles[@]}"; do
             args+=(--profile "$p")
         done

@@ -4,12 +4,14 @@ import { inspectCourseware } from './inspector.mjs';
 import { inspectCinematic } from './cinematic.mjs';
 import { inspectProcess, ProcessInteractionProofError } from './process.mjs';
 import { InspectionQueue, InspectionQueueError } from './queue.mjs';
+import { inspectTeachingDemo } from './teaching-demo.mjs';
 
 export const CINEMATIC_QUEUE_WAIT_MS = 600000;
 
 export function createInspectionServer({ browser, secret, renderOrigin,
   queue = new InspectionQueue({waitTimeoutMs: CINEMATIC_QUEUE_WAIT_MS}),
   inspectAnimation = inspectCinematic, inspectInteraction = inspectProcess, inspectPage = inspectCourseware,
+  inspectDemo = inspectTeachingDemo,
   logError = error => console.error('Courseware inspection failed:', error.message),
 }) {
   if (typeof secret !== 'string' || secret.length < 24 || !renderOrigin)
@@ -25,7 +27,7 @@ export function createInspectionServer({ browser, secret, renderOrigin,
       return reply(403, {error: 'Forbidden'});
     if (request.url === '/health' && request.method === 'GET')
       return reply(200, {ok: true, active: queue.active, queued: queue.queued});
-    if (!['/inspect', '/inspect-cinematic', '/inspect-process'].includes(request.url) || request.method !== 'POST')
+    if (!['/inspect', '/inspect-cinematic', '/inspect-process', '/inspect-teaching-demo'].includes(request.url) || request.method !== 'POST')
       return reply(404, {error: 'Not found'});
     const canceled = new AbortController();
     response.on('close', () => canceled.abort());
@@ -41,7 +43,12 @@ export function createInspectionServer({ browser, secret, renderOrigin,
       const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       const cinematic = request.url === '/inspect-cinematic';
       const process = request.url === '/inspect-process';
-      if (cinematic) {
+      const demo = request.url === '/inspect-teaching-demo';
+      if (demo) {
+        if (typeof data?.html !== 'string' || data.html.length < 2000 || data.html.length > 260000 ||
+            !['rsa', 'dh', 'aes-128', 'sha256', 'hmac-sha256'].includes(data.profile))
+          return reply(400, {error: 'Invalid teaching demo candidate'});
+      } else if (cinematic) {
         if (data?.schemaVersion !== 'cinematic-v1' || !Array.isArray(data.nodes) || data.nodes.length > 100 || !Array.isArray(data.shots) || data.shots.length > 20 || !Array.isArray(data.chapters) || data.chapters.length > 10 || !Number.isFinite(data.duration) || data.duration < 20 || data.duration > 180)
           return reply(400, {error: 'Invalid cinematic candidate'});
       } else if (process) {
@@ -49,9 +56,9 @@ export function createInspectionServer({ browser, secret, renderOrigin,
           return reply(400, {error: 'Invalid process candidate'});
       } else if (data?.page?.schema !== 'courseware-page-v2' || !Array.isArray(data.page.beats) || data.page.beats.length > 6)
         return reply(400, {error: 'Invalid candidate'});
-      const result = await queue.run(() => (cinematic ? inspectAnimation : process ? inspectInteraction : inspectPage)(browser, {
+      const result = await queue.run(() => (demo ? inspectDemo : cinematic ? inspectAnimation : process ? inspectInteraction : inspectPage)(browser, {
         data, renderOrigin, serviceToken: secret, signal: canceled.signal,
-      }), {signal: canceled.signal, waitTimeoutMs: Math.min(queue.waitTimeoutMs, cinematic ? CINEMATIC_QUEUE_WAIT_MS : process ? 90000 : 45000)});
+      }), {signal: canceled.signal, waitTimeoutMs: Math.min(queue.waitTimeoutMs, cinematic ? CINEMATIC_QUEUE_WAIT_MS : process || demo ? 90000 : 45000)});
       canceled.signal.throwIfAborted();
       reply(200, result);
     } catch (error) {

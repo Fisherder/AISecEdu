@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { teachingDemoCapabilityBrief } from '@/lib/teaching-demo/capabilities';
 import type { AICallFn } from '@/lib/generation/pipeline-types';
 import { parseCinematicJson } from '@/lib/cinematic/json';
 import { CINEMATIC_OPTION_CAPABILITY_BRIEF } from '@/lib/cinematic/capabilities';
@@ -27,7 +28,7 @@ export async function reviewSimulationOptions(value: unknown, authority: unknown
   const options = structuredClone(initial);
   const attempts: Array<{ issues: z.infer<typeof reviewSchema>['issues']; correctedOptions: number[] }> = [];
   try {
-    const review = reviewSchema.parse(parseCinematicJson(await aiCall(SIMULATION_OPTION_REVIEW_PROMPT,
+    const review = reviewSchema.parse(parseCinematicJson(await aiCall(SIMULATION_OPTION_REVIEW_PROMPT + (teachingDemoCapabilityBrief() ? '\n' + teachingDemoCapabilityBrief() : ''),
       JSON.stringify({ authority, candidateOptions: options }))).value);
     const affected = [...new Set(review.issues.map(issue => issue.option))].sort();
     const corrected = review.corrections.map(correction => correction.option).sort();

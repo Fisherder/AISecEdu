@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   resolveModel: vi.fn(),
   generate: vi.fn(),
   diagram: vi.fn(),
+  demo: vi.fn(),
 }));
 vi.mock('@/lib/ai/llm', () => ({ callLLM: mocks.callLLM }));
 vi.mock('@/lib/server/resolve-model', () => ({ resolveModel: mocks.resolveModel }));
@@ -19,6 +20,7 @@ vi.mock('@/lib/server/animated-explainer', async (original) => ({
   generateAnimatedExplainer: mocks.generate,
 }));
 vi.mock('@/lib/server/lesson-generation', () => ({ generateSingleArtifact: mocks.diagram }));
+vi.mock('@/lib/teaching-demo/generation', () => ({generateTeachingDemo: mocks.demo}));
 
 function verifiedIntentResponse(parameters: {messages: Array<{content: string}>}) {
   const input = JSON.parse(parameters.messages[1].content);
@@ -99,11 +101,7 @@ describe('cinematic reasoning in authenticated job routes', () => {
     expect(mocks.generate.mock.calls[0][0].originalRequest).toBe(fullRequest);
     expect(mocks.generate.mock.calls[0][0].description).toContain('最后的独立要求：复原全部结构。');
     expect(mocks.callLLM.mock.calls[0][3]).toEqual({ mode: 'enabled', enabled: true, effort: 'low' });
-    expect(mocks.callLLM.mock.calls[1][3]).toEqual({
-      mode: 'enabled',
-      enabled: true,
-      effort: 'low',
-    });
+    expect(mocks.callLLM.mock.calls[1][3]).toEqual({mode: 'disabled', enabled: false});
     expect(mocks.callLLM.mock.calls[0][0].abortSignal).toBeInstanceOf(AbortSignal);
     expect(mocks.callLLM.mock.calls[1][0].abortSignal).toBeInstanceOf(AbortSignal);
     expect(mocks.callLLM.mock.calls[1][0].maxRetries).toBe(0);
@@ -157,7 +155,7 @@ describe('cinematic reasoning in authenticated job routes', () => {
     expect(mocks.generate).not.toHaveBeenCalled();
     expect(mocks.callLLM).toHaveBeenCalledTimes(3);
     expect(mocks.callLLM.mock.calls[0][3]).toEqual({ mode: 'enabled', enabled: true, effort: 'low' });
-    expect(mocks.callLLM.mock.calls[1][3]).toEqual({ mode: 'enabled', enabled: true, effort: 'low' });
+    expect(mocks.callLLM.mock.calls[1][3]).toEqual({mode: 'disabled', enabled: false});
   });
 
   it('uses the same Flash policy and output cap when revising an existing cinematic scene', async () => {
@@ -312,5 +310,31 @@ describe('cinematic reasoning in authenticated job routes', () => {
     });
     expect(providerSignal.aborted).toBe(true);
     expect(mocks.callLLM).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe('teaching demo route transport policy', () => {
+  it('preserves verified intent and sends raw HTML with zero nested retries', async () => {
+    vi.clearAllMocks();
+    vi.stubEnv('AISECEDU_TEACHING_DEMO_ENGINE', 'html-v1');
+    mocks.resolveModel.mockResolvedValue({providerId:'deepseek',modelId:'deepseek-v4-flash',modelString:'deepseek:deepseek-v4-flash',model:{id:'flash'},modelInfo:{outputWindow:393216}});
+    mocks.callLLM.mockResolvedValueOnce({text:JSON.stringify({mode:'interactive-2d',twoDimensionalFormat:'simulation',reason:'真实参数实验',objects:['RSA'],interactions:[],interactionRequirements:[],visualPriorities:[]})})
+      .mockImplementationOnce(verifiedIntentResponse).mockResolvedValueOnce({text:'<!doctype html>'});
+    mocks.demo.mockImplementation(async (input, order, profile, aiCall) => {
+      expect(input.originalRequest).toContain('RSA'); expect(profile.id).toBe('rsa');
+      await aiCall('只返回HTML','完整教师要求',undefined,{stage:'teaching-demo'});
+      return {id:'demo',type:'simulation',title:'RSA',order,createdAt:1,content:{renderingMode:'teaching-demo-v1',html:'<main>RSA</main>'}};
+    });
+    try {
+      const {POST}=await import('@/app/api/integration/jobs/execute/route');
+      const response=await POST(request('artifact.materialize',{artifactType:'simulation',requestPrompt:'RSA 加解密参数实验',plan:{title:'RSA'}}));
+      expect(response.status).toBe(200);expect(mocks.demo).toHaveBeenCalledTimes(1);expect(mocks.generate).not.toHaveBeenCalled();expect(mocks.diagram).not.toHaveBeenCalled();
+      expect(mocks.callLLM).toHaveBeenCalledTimes(3);
+      const call=mocks.callLLM.mock.calls.at(-1)!;
+      expect(call[0].output).toBeUndefined();expect(call[0].maxOutputTokens).toBe(24000);expect(call[0].maxRetries).toBe(0);
+      expect(call[2]).toEqual({retries:0});expect(call[3]).toEqual({mode:'disabled',enabled:false});
+      expect(call[0].messages[0].content).not.toContain('JSON结构');
+    } finally {vi.unstubAllEnvs()}
   });
 });

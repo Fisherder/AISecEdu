@@ -3,6 +3,10 @@ import { CinematicExecutionError } from '@/lib/server/cinematic-execution';
 import { generationFailure } from '@/lib/server/generation-failure';
 
 describe('generation failure scheduling', () => {
+  it('stops exhausted content repairs but preserves retryable inspector outages', () => {
+    expect(generationFailure({name:'TeachingDemoRepairExhaustedError'})).toMatchObject({failureCategory:'permanent',errorCode:'TEACHING_DEMO_REPAIR_EXHAUSTED'});
+    expect(generationFailure({name:'TeachingDemoInspectorUnavailableError'})).toMatchObject({failureCategory:'service',retryAfterSeconds:30});
+  });
   it('does not restart an entire generation after its absolute delivery budget is exhausted', () => {
     expect(generationFailure(new CinematicExecutionError('budget-exhausted'))).toEqual({
       failureCategory: 'permanent',

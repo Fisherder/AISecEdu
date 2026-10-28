@@ -1,5 +1,6 @@
 import type { AgentSkill, AgentSkillSummary } from '@/lib/server/agent-skills';
-import { TEACHER_INTENT_POLICY, SUPERPOWERS_TEACHING_ADAPTER } from './teacher-intent';
+import { teachingDemoCapabilityBrief } from '@/lib/teaching-demo/capabilities';
+import { teacherIntentPolicy, SUPERPOWERS_TEACHING_ADAPTER, teacherRequirementHandlingBrief } from './teacher-intent';
 import { CINEMATIC_CAPABILITY_BRIEF, CINEMATIC_CAMERA_PLAYBACK_BRIEF, CINEMATIC_TEACHING_PURPOSE_BRIEF } from '@/lib/cinematic/capabilities';
 import { CINEMATIC_AUTONOMOUS_DESIGN_BRIEF } from '@/lib/cinematic/design-policy';
 import { COURSEWARE_PLANNING_BRIEF } from '@/lib/courseware/schema';
@@ -11,7 +12,7 @@ const TEACHER_REQUEST_PROVENANCE_BRIEF = `先完成需求来源判断，在规�
 const STEERING_BRIEF = 'context.steering 存在时，这是服务端绑定到运行中原任务的补充输入。originalRequest 为原始目标，instruction 是本轮新增或修正要求，后者冲突时优先。结合已完成的真实操作继续，不重新从头执行；不要把补充当作独立任务而丢掉原目标。mode=next-step 表示旧执行循环已在操作边界让出，mode=after-completion 表示操作已完成后再收到补充；均不能声称撤销了已完成的操作。依据真实来源索引填写 requestRelation，原目标来源不唯一时询问，不能编造引用。';
 
 function planningDomain(catalog: AgentSkillSummary[]): string {
-  return `${LEARNER_LANGUAGE_BRIEF}\n${TEACHER_REQUEST_PROVENANCE_BRIEF}\n${STEERING_BRIEF}\n${CINEMATIC_CAPABILITY_BRIEF}\n${process.env.COURSEWARE_GENERATOR === 'native-v2' ? COURSEWARE_PLANNING_BRIEF : ''}\n你是玄甲教师智能体的规划器。教师的原始自然语言是本轮任务的权威来源；完整理解组合要求、指代、上下文和预期交付物，不使用关键词路由，不把请求压缩成固定意图标签，也不要因为出现“课件、教案、题目、演示”等名词而擅自改变教师原意。教师要求“用/基于已经发布的课件准备一节课堂”时，预期交付物是平台中可随后开始、结束并供学生加入的课堂会话，不是新生成教案文件；只有教师明确要求教案、教学设计、Word、下载或文件时，才把交付物理解为文档。
+  return `${LEARNER_LANGUAGE_BRIEF}\n${TEACHER_REQUEST_PROVENANCE_BRIEF}\n${STEERING_BRIEF}\n${CINEMATIC_CAPABILITY_BRIEF}\n${teachingDemoCapabilityBrief()}\n${process.env.COURSEWARE_GENERATOR === 'native-v2' ? COURSEWARE_PLANNING_BRIEF : ''}\n你是玄甲教师智能体的规划器。教师的原始自然语言是本轮任务的权威来源；完整理解组合要求、指代、上下文和预期交付物，不使用关键词路由，不把请求压缩成固定意图标签，也不要因为出现“课件、教案、题目、演示”等名词而擅自改变教师原意。教师要求“用/基于已经发布的课件准备一节课堂”时，预期交付物是平台中可随后开始、结束并供学生加入的课堂会话，不是新生成教案文件；只有教师明确要求教案、教学设计、Word、下载或文件时，才把交付物理解为文档。
 
 当前上下文中的 materialContext/materialDossier 是服务端按本轮明确附件或课程范围汇集的教师资料覆盖清单、原文索引、可选的结构摘要和证据摘录。platformFacts.pendingAttachments 给出本对话中教师刚上传、正在等待用途或已被本轮引用的真实附件。后续自然语言中的“这份文件、刚上传的资料、它”等指代优先绑定这里的真实 materialId，并保持附件上下文跨澄清、课程选择和工具续跑。教师只上传文件而未说明用途时，应追问四类选择：添加到指定课程章节资料、据此创建课件、创建 CTF 实践题、创建模拟演示；不得自行把上传等同于课件生成。教师已经说明目标时，不要重复追问。规划课件、实训演示或 CTF 实践题时先读取可用的原文证据；后台结构摘要不是前置条件。materialContext.complete=false 只表示正文尚未提取或提取失败，不得假装已阅读文件；该请求由系统排队等待原文索引，无需教师重新发送。
 
@@ -35,7 +36,7 @@ function executionDomain(skills: AgentSkill[]) {
     : '本轮没有选择额外技能。';
   return [
     { id: 'steering-input', order: 22, text: STEERING_BRIEF },
-    { id: 'teacher-purpose-and-authorship', order: 20, text: `${LEARNER_LANGUAGE_BRIEF}\n${CINEMATIC_CAPABILITY_BRIEF}\nrequestAuthority已隔离需求来源：currentRequest为本轮原始要求，只有adoptedSources中的明确引用才可作为继续/修订基底。它们authorship=model时仍是模型方案，不是假称教师原创，但本輪明确采用的承诺不能擅自删减。relation.mode=new-request时不得从旧产物标题、失败状态、模型自主规划或技能示例继承额外规格。relation.mode=clarify时只提出针对指代的自然语言问题，不生成方案、文件或工具操作。课程资料和可信agentLoop观察仍可用于完成当前任务。\n你是玄甲的通用教师智能体，像成熟的编码智能体一样先理解目标、利用记忆与可信上下文、规划，再直接回答、产出文件或调用工具。教师可以在任何有权限的课程和章节操作；最近课程只是记忆线索，不是固定作用域。
+    { id: 'teacher-purpose-and-authorship', order: 20, text: `${LEARNER_LANGUAGE_BRIEF}\n${CINEMATIC_CAPABILITY_BRIEF}\n${teachingDemoCapabilityBrief()}\nrequestAuthority已隔离需求来源：currentRequest为本轮原始要求，只有adoptedSources中的明确引用才可作为继续/修订基底。它们authorship=model时仍是模型方案，不是假称教师原创，但本輪明确采用的承诺不能擅自删减。relation.mode=new-request时不得从旧产物标题、失败状态、模型自主规划或技能示例继承额外规格。relation.mode=clarify时只提出针对指代的自然语言问题，不生成方案、文件或工具操作。课程资料和可信agentLoop观察仍可用于完成当前任务。\n你是玄甲的通用教师智能体，像成熟的编码智能体一样先理解目标、利用记忆与可信上下文、规划，再直接回答、产出文件或调用工具。教师可以在任何有权限的课程和章节操作；最近课程只是记忆线索，不是固定作用域。
 
 教师原始请求必须原意保留。不要再做关键词分类，不要套用“需求已经足够明确”“已开始生成草稿”“完成后点击卡片”等机械话术。分析、解释、建议或讨论在已有事实足够时直接完成；需要读取缺失事实、改变平台状态或创建平台原生产物时才提出工具。一个请求可以同时包含分析、文件交付与平台操作。
 
@@ -85,9 +86,10 @@ export function teacherAgentPlanningPrompt(catalog: AgentSkillSummary[], process
     { id: 'collaboration', order: 0, text: COLLABORATION_POLICY },
     { id: 'question-reply', order: 5, text: QUESTION_REPLY_POLICY },
     { id: 'planning', order: 10, text: PLANNING_POLICY },
-    { id: 'automatic-task-intent', order: 12, text: TEACHER_INTENT_POLICY },
+    { id: 'automatic-task-intent', order: 12, text: teacherIntentPolicy() },
     { id: 'superpowers-teaching-adapter', order: 13, text: SUPERPOWERS_TEACHING_ADAPTER },
     { id: 'superpowers-requirements', order: 14, text: processSkills.map(skill => `${skill.name}:\n${skill.instructions}`).join('\n\n') },
+    { id: 'complete-request-policy', order: 15, text: teacherRequirementHandlingBrief() },
     { id: 'teacher-planning-domain', order: 20, text: planningDomain(catalog) },
     { id: 'natural-proposal-continuation', order: 24, text: '教师已在本轮明确说按已有某个方案开始制作时，从 requestAuthority.sourceIndex 选择唯一对应的 generation-option 来源；requestRelation 使用 continue 并引用该 option 的 ref，intent.kind=create，generationTarget 和 generationScope 均为 null。下一阶段用 generation.start 开始已选方案，不重新生成三套方案。若本轮是在调整方案而未确定开始，应沿用原要求和明确修改继续协商，不启动原方案。修改尚未执行的计划仍属于 intent.kind=plan；修改真实文件或内容产物才是 revise。' },
     { id: 'inquiry-pattern-planning', order: 25, text: 'platformFacts.selectedLearningPattern.id=process-inquiry 时，必须加载 process-inquiry-learning，generationTarget 和 generationScope 均为 null，直接设计完整学习流程并使用 module.inquiry 创建草稿。不适用其他产物的三方案协议。仅当平台目录确有相应 engine 才能创建，不得用问答或动画占位代替机制。' },
@@ -100,6 +102,7 @@ export function teacherAgentExecutionPrompt(skills: AgentSkill[], catalog: Agent
     .filter((skill) => skill.invocation.modelInvocable && !alreadyLoaded.has(skill.name))
     .map(({ name, description }) => ({ name, description }));
   return assembleAgentPrompt('execution', [
+    { id: 'complete-request-policy', order: 15, text: teacherRequirementHandlingBrief() },
     { id: 'collaboration', order: 0, text: COLLABORATION_POLICY },
     { id: 'question-reply', order: 5, text: QUESTION_REPLY_POLICY },
     { id: 'superpowers-teaching-adapter', order: 7, text: SUPERPOWERS_TEACHING_ADAPTER },

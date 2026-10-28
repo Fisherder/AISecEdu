@@ -251,7 +251,13 @@ export interface GeneratedInteractiveContent {
   widgetType?: WidgetType;
   widgetConfig?: WidgetConfig;
   generationFallback?: boolean;
-  renderingMode?: 'animated-html' | 'cinematic-v1' | 'process-v1';
+  renderingMode?: 'animated-html' | 'cinematic-v1' | 'process-v1' | 'teaching-demo-v1';
+  teachingDemo?: {
+    version: 'teaching-demo-v1'; profile: import('@/lib/teaching-demo/profiles').TeachingDemoProfileId;
+    requestHash: string; sourceSha256: string; modelCalls: number;
+    browser: import('@/lib/teaching-demo/render-client').TeachingDemoInspection['evidence'];
+    algorithmScope: 'independent-bounded-oracles';
+  };
   processScene?: import('@/lib/process/schema').ProcessScene;
   processIntent?: import('@/lib/cinematic/capabilities').VisualGenerationIntent;
   processValidation?: {
