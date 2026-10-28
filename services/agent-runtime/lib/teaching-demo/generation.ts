@@ -11,7 +11,7 @@ import { applyTeachingDemoEdits, TeachingDemoValidationError, validateTeachingDe
 import { configuredTeachingDemoInspector, type TeachingDemoInspection, type TeachingDemoInspector } from './render-client';
 import type { TeachingDemoProfile } from './profiles';
 
-const MAX_MODEL_CALLS = 3;
+const MAX_MODEL_CALLS = 5;
 type SavedDraft = {fingerprint: string; raw: string; calls: number; issues: string[]; requiresEdit?: boolean};
 
 export class TeachingDemoRepairExhaustedError extends Error {

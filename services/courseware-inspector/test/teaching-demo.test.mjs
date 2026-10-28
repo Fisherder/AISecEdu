@@ -38,6 +38,10 @@ test('real browser accepts working RSA and rejects fake results and stale experi
     assert.deepEqual((await inspectTeachingDemo(browser,{data:{html:mirrored,profile:'rsa'}})).issues,[]);
     const brokenPlay=html.replace('play:()=>{stop();playing=true;timer=setInterval(()=>move(1),500)}','play:()=>{}');
     assert.ok((await inspectTeachingDemo(browser,{data:{html:brokenPlay,profile:'rsa'}})).issues.some(issue=>issue.includes('播放按钮')));
+    const experimentMetadata=html.replace('experiment={inputs:{...inputs},baseline:',`experiment={inputs:{...inputs,messageA:'65',messageB:'88'},baseline:`);
+    assert.deepEqual((await inspectTeachingDemo(browser,{data:{html:experimentMetadata,profile:'rsa'}})).issues,[]);
+    const wrongBaseline=html.replace('experiment={inputs:{...inputs},baseline:',`experiment={inputs:{...inputs,message:'99'},baseline:`);
+    assert.ok((await inspectTeachingDemo(browser,{data:{html:wrongBaseline,profile:'rsa'}})).issues.some(issue=>issue.includes('实验基准参数')));
     const repeatedControls=html.replace('<h2>只改变消息</h2>','<h2>只改变消息</h2><button data-demo-action="experiment">另一个实验入口</button>').replace('<label><input type="radio" name="q1" value="yes">能</label>', '<label><input type="radio" name="q1" value="maybe">不确定</label><label><input type="radio" name="q1" value="yes">能</label>');
     assert.deepEqual((await inspectTeachingDemo(browser,{data:{html:repeatedControls,profile:'rsa'}})).issues,[]);
     const compact=html.replace('baseline:{...outputs}','baseline:{ciphertext:outputs.ciphertext,recovered:outputs.recovered}').replace('variant:calc(variantInputs)','variant:((v)=>({ciphertext:v.ciphertext,recovered:v.recovered}))(calc(variantInputs))');

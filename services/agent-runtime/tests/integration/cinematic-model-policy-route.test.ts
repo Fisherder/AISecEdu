@@ -333,7 +333,7 @@ describe('teaching demo route transport policy', () => {
       expect(mocks.callLLM).toHaveBeenCalledTimes(3);
       const call=mocks.callLLM.mock.calls.at(-1)!;
       expect(call[0].output).toBeUndefined();expect(call[0].maxOutputTokens).toBe(24000);expect(call[0].maxRetries).toBe(0);
-      expect(call[2]).toEqual({retries:0});expect(call[3]).toEqual({mode:'disabled',enabled:false});
+      expect(call[2]).toEqual({retries:0,allowTruncatedResult:true});expect(call[3]).toEqual({mode:'disabled',enabled:false});
       expect(call[0].messages[0].content).not.toContain('JSON结构');
     } finally {vi.unstubAllEnvs()}
   });

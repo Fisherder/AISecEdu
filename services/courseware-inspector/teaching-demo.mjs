@@ -107,7 +107,9 @@ export async function inspectTeachingDemo(browser, {data, signal}) {
       await action('setInputs', cases.valid[0]);
       await button('experiment').click();
       const snapshot = await action('snapshot'), experiment = snapshot.experiment;
-      if (!experiment || !same(experiment.inputs, snapshot.inputs)) throw Error('实验基准输入不属于当前输入');
+      if (!experiment) throw Error('实验未产生基准与变式结果');
+      const mismatched = Object.keys(snapshot.inputs).filter(key => String(experiment.inputs?.[key]) !== String(snapshot.inputs[key]));
+      if (mismatched.length) throw Error('实验基准参数与当前输入不一致：' + mismatched.map(key => `${key}应为${snapshot.inputs[key]}，实际${experiment.inputs?.[key]}`).join('；'));
       const changed = Object.keys(snapshot.inputs).filter(key => experiment.variantInputs[key] !== snapshot.inputs[key]);
       if (changed.length !== 1) throw Error('变式必须只改变一个输入');
       const baseline = teachingDemoExpected(data.profile, snapshot.inputs);

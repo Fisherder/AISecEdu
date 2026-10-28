@@ -2500,7 +2500,7 @@ async function materializeWithRuntime(
           ...(abortSignal ? { abortSignal, maxRetries: 0, ...(!teachingDemoCall ? {output: inputDrivenProcess ? processModelOutput() : Output.json()} : {}) } : {}),
         },
         'generate-classroom',
-        { retries: teachingDemoCall ? 0 : 1 },
+        teachingDemoCall ? {retries: 0, allowTruncatedResult: true} : {retries: 1},
         recovering ? { mode: 'disabled', enabled: false } : thinking,
       );
     let response!: CinematicModelResult;
