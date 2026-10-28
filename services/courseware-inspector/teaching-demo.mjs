@@ -60,6 +60,10 @@ export async function inspectTeachingDemo(browser, {data, signal}) {
       await checkOutputs(snapshot, cases.valid[0]);
       for (const role of ['workflow', 'visualization', 'controls', 'experiment', 'quiz', 'summary'])
         if (!await frame.locator(`[data-demo="${role}"]`).isVisible()) throw Error('区域不可见：' + role);
+      const diagram = frame.locator('[data-demo="visualization"]').locator('svg,canvas,[data-demo-diagram]').filter({visible: true}).first();
+      if (!await diagram.count()) throw Error('渲染后的主舞台缺少可见专用主图');
+      const size = await diagram.boundingBox();
+      if (!size || size.width < 24 || size.height < 24) throw Error('专用主图尺寸不足以观察');
     });
     for (const inputs of cases.valid) await attempt('算法', async () => {
       const snapshot = await action('setInputs', inputs);
@@ -75,7 +79,8 @@ export async function inspectTeachingDemo(browser, {data, signal}) {
     await attempt('步骤', async () => {
       await action('reset');
       await button('next').click();
-      if ((await action('snapshot')).step !== 1) throw Error('下一步未推进同一状态');
+      const advanced = await action('snapshot');
+      if (advanced.step !== 1) throw Error(`下一步应只触发一次，从0到1，实际到${advanced.step}；检查按钮监听与document事件委托是否重复处理点击`);
       controls.forward = true;
       await button('previous').click();
       if ((await action('snapshot')).step !== 0) throw Error('上一步未恢复同一状态');

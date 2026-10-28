@@ -23,6 +23,13 @@ test('real browser accepts working RSA and rejects fake results and stale experi
     const html=await readFile(new URL('./fixtures/teaching-demo-rsa.html',import.meta.url),'utf8');
     const good=await inspectTeachingDemo(browser,{data:{html,profile:'rsa'}});
     assert.deepEqual(good.issues,[]);assert.equal(good.evidence.oracleCases,6);
+    const svgMarkup=html.match(/<svg[\s\S]*?<\/svg>/)[0];
+    const dynamicSvg=html.replace(svgMarkup,'').replace('reset();',`document.querySelector('[data-demo="visualization"]').insertAdjacentHTML('afterbegin',${JSON.stringify(svgMarkup)});reset();`);
+    assert.deepEqual((await inspectTeachingDemo(browser,{data:{html:dynamicSvg,profile:'rsa'}})).issues,[]);
+    const missingDiagram=html.replace(svgMarkup,'');
+    assert.ok((await inspectTeachingDemo(browser,{data:{html:missingDiagram,profile:'rsa'}})).issues.some(issue=>issue.includes('专用主图')));
+    const doubleClick=html.replace('</body>',`<script>document.addEventListener('click',event=>{if(event.target.getAttribute('data-demo-action')==='next')window.aiseceduDemo.step(1)})</script></body>`);
+    assert.ok((await inspectTeachingDemo(browser,{data:{html:doubleClick,profile:'rsa'}})).issues.some(issue=>issue.includes('只触发一次')));
     const repeatedControls=html.replace('<h2>只改变消息</h2>','<h2>只改变消息</h2><button data-demo-action="experiment">另一个实验入口</button>').replace('<label><input type="radio" name="q1" value="yes">能</label>', '<label><input type="radio" name="q1" value="maybe">不确定</label><label><input type="radio" name="q1" value="yes">能</label>');
     assert.deepEqual((await inspectTeachingDemo(browser,{data:{html:repeatedControls,profile:'rsa'}})).issues,[]);
     const compact=html.replace('baseline:{...outputs}','baseline:{ciphertext:outputs.ciphertext,recovered:outputs.recovered}').replace('variant:calc(variantInputs)','variant:((v)=>({ciphertext:v.ciphertext,recovered:v.recovered}))(calc(variantInputs))');

@@ -32,9 +32,18 @@ export function teachingDemoProfile(id: string): TeachingDemoProfile | undefined
   return profiles.find(profile => profile.id === id);
 }
 
+function requiresOaepGeneration(request: string) {
+  return request.split(/[。；\n]/).some(clause => {
+    if (!/\bOAEP\b/i.test(clause)) return false;
+    if (/RSA-OAEP|(?:实现|计算|编码|解码|演示|交互).{0,18}OAEP|OAEP.{0,18}(?:实现|计算|编码|解码|加解密|加密|解密|演示)/i.test(clause)) return true;
+    return !/(?:实际|真实|安全|边界).{0,100}(?:需要|需|必须|应|配合|采用|使用).{0,80}OAEP/i.test(clause);
+  });
+}
+
 export function selectTeachingDemoProfile(request: string, intent: VisualGenerationIntent, mode = process.env.AISECEDU_TEACHING_DEMO_ENGINE): TeachingDemoProfile | undefined {
   if (mode !== 'html-v1' || intent.mode !== 'interactive-2d' || intent.twoDimensionalFormat !== 'simulation') return;
-  if (/签名|椭圆|ECDSA|ECDH|RSA-PSS|OAEP|AES-?(?:192|256)|SHA-?(?:1|224|384|512)|MD[245]|SHA-?3|SHAKE|SM[234]|BLAKE|\b(?:DES|CBC|GCM|CTR|CFB|OFB)\b|Feistel/i.test(request)) return;
+  if (/签名|椭圆|ECDSA|ECDH|RSA-PSS|AES-?(?:192|256)|SHA-?(?:1|224|384|512)|MD[245]|SHA-?3|SHAKE|SM[234]|BLAKE|\b(?:DES|CBC|GCM|CTR|CFB|OFB)\b|Feistel/i.test(request)) return;
+  if (requiresOaepGeneration(request)) return;
   const matches: TeachingDemoProfileId[] = [];
   if (/\bRSA\b/i.test(request)) matches.push('rsa');
   if (/Diffie|Hellman|\bDH\b|迪菲/i.test(request)) matches.push('dh');

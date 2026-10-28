@@ -26,6 +26,17 @@ describe('teaching demo durable generation',()=>{
 });
 describe('teaching demo contracts',()=>{
   it('accepts SVG namespaces and CSS top while blocking network code',()=>{expect(validateTeachingDemoHtml(raw.replace('<svg ','<svg xmlns="http://www.w3.org/2000/svg" style="top:0" '))).toContain('Content-Security-Policy');expect(()=>validateTeachingDemoHtml(raw.replace('reset();','fetch("https://example.com");reset();'))).toThrow('外部依赖')});
+  it('allows a graph rendered by the script so its visibility is checked in the browser',()=>{
+    const dynamic=raw.replace(/<svg[\s\S]*?<\/svg>/,'');
+    expect(validateTeachingDemoHtml(dynamic)).toContain('Content-Security-Policy');
+  });
+  it('keeps an RSA boundary reference to OAEP distinct from implementing OAEP',()=>{
+    const intent={mode:'interactive-2d',twoDimensionalFormat:'simulation'} as Parameters<typeof selectTeachingDemoProfile>[1];
+    expect(selectTeachingDemoProfile('二维 RSA 密钥生成与加解密。安全边界：真实 RSA 使用2048位以上模数，并且必须配合填充（如 OAEP），否则相同消息得到相同密文。',intent,'html-v1')?.id).toBe('rsa');
+    expect(selectTeachingDemoProfile('二维 RSA-OAEP 加解密演示。',intent,'html-v1')).toBeUndefined();
+    expect(selectTeachingDemoProfile('二维 RSA。实际系统必须实现 OAEP 编码与加解密计算。',intent,'html-v1')).toBeUndefined();
+    expect(selectTeachingDemoProfile('二维 RSA 与 OAEP 原理。',intent,'html-v1')).toBeUndefined();
+  });
   it('allows inert forms while rejecting submission targets',()=>{expect(validateTeachingDemoHtml(raw.replace('<body>','<body><form onsubmit="return false">').replace('</body>','</form></body>'))).toContain('form-action');expect(()=>validateTeachingDemoHtml(raw.replace('<body>','<body><form action="https://example.com">'))).toThrow('外部依赖')});
   it('does not duplicate injected design and policy',()=>{const first=validateTeachingDemoHtml(raw);expect(validateTeachingDemoHtml(first)).toBe(first)});
   it('refuses ambiguous or no-op text patches',()=>{expect(()=>applyTeachingDemoEdits('aa aa',{edits:[{before:'aa',after:'bb'}]})).toThrow();expect(()=>applyTeachingDemoEdits('aa',{edits:[{before:'aa',after:'aa'}]})).toThrow()});

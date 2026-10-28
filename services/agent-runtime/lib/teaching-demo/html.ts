@@ -21,7 +21,6 @@ export function validateTeachingDemoHtml(raw: string) {
   const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
   for (const role of ['workflow', 'visualization', 'controls', 'experiment', 'quiz', 'summary'])
     if (!new RegExp(`data-demo=["']${role}["']`).test(markup.replace(/\s*=\s*/g, '='))) issues.push(`缺少可见区域${role}`);
-  if (!/<(?:svg|canvas)\b|data-demo-diagram/i.test(markup)) issues.push('缺少专用主图');
   let scripts = 0;
   for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
     if (/application\/json/.test(match[1])) continue;

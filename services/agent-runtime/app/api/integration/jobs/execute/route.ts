@@ -4035,7 +4035,8 @@ ${revisionPageRequirement?.explicit ? `${slideDeckPageInstruction(revisionPageRe
         const invoke = async () => {
         const reviewed = await callLLM({ model: resolved.model, system: reviewSystem, prompt: reviewPrompt,
           output: resilientJsonOutput(), maxOutputTokens: Math.min(resolved.modelInfo?.outputWindow || CINEMATIC_MAX_OUTPUT_TOKENS, CINEMATIC_MAX_OUTPUT_TOKENS),
-          abortSignal: req.signal }, 'simulation-option-review', { retries: 1 }, teacherPlanningModelThinking(resolved));
+          abortSignal: req.signal }, 'simulation-option-review', { retries: 1 }, process.env.AISECEDU_TEACHING_DEMO_ENGINE === 'html-v1'
+          ? cinematicModelThinking(resolved, true, 'cinematic-review') : teacherPlanningModelThinking(resolved));
         planningUsage = mergeUsage(planningUsage, reviewed.totalUsage ?? reviewed.usage);
         return reviewed.text;
         };
