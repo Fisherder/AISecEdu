@@ -1,4 +1,5 @@
 import http.client
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler
 import json
 import os
@@ -29,7 +30,7 @@ def response(path, body):
         return 200, {'Capabilities': {'Scope': 'local'}}
     if path not in {'/VolumeDriver.Get', '/VolumeDriver.Path', '/VolumeDriver.List'}:
         return 503, {'Err': 'Homefs is starting; retry after the storage service is ready'}
-    with sqlite3.connect(f'file:{ROOT / "homefs.db"}?mode=ro', uri=True) as database:
+    with closing(sqlite3.connect(f'file:{ROOT / "homefs.db"}?mode=ro', uri=True)) as database:
         if path == '/VolumeDriver.List':
             rows = database.execute('SELECT name,overlay FROM docker_volumes ORDER BY name').fetchall()
             return 200, {'Volumes': [{'Name': name, 'Mountpoint': mountpoint(name, overlay)} for name, overlay in rows], 'Err': ''}

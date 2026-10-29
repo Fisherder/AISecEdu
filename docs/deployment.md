@@ -259,3 +259,32 @@ Error response from daemon: path /run/homefs is mounted on /run/homefs but it is
   `-v /host/path:/data:shared`
 
 - If the problem persists: rebuild the outer docker container
+
+### Restoring Homefs volume registrations
+
+Preserve both `data/docker/volumes` and the complete Homefs filesystem when
+copying an installation. Docker's volume metadata and `homefs.db` describe the
+same student directories and overlays.
+
+`dojo init` installs `homefs-bootstrap.service` before Docker starts. This
+temporary local Unix-socket service reads existing Homefs registrations so
+Docker can restore them before the Homefs container is running. It rejects
+storage mutations and exits when the real Homefs container starts. This also
+supports cold starts after copying the Docker volume metadata to a new host.
+
+### Small demonstration hosts
+
+The classroom defaults can be reduced through `data/config.env`. For example,
+`CTFD_WORKERS=2`, `HOMEFS_WORKERS=2`, `COURSEWARE_INSPECTOR_CPUS=2` and
+`GLOBAL_AGENT_RUNTIME_SCENE_CONCURRENCY=1` reduce concurrent work while keeping
+the same queues and stored course data. Set the inspector CPU limit within the
+number of CPUs available on the host.
+
+Run one outer platform instance when validating a Windows guest on an 8 GiB
+host. Stop the previous instance before starting the guest so both complete
+service stacks do not compete for memory. Windows acceleration and persistence
+are described in `workspace/services/windows-desktop/README.md`.
+
+When a host reverse proxy publishes the workspace on a different local port,
+set `WORKSPACE_PUBLISH_PORT` to that local port and retain the public port in
+`WORKSPACE_HTTPS_PORT`.
