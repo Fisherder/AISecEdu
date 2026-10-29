@@ -33,6 +33,7 @@ from CTFd.utils.user import get_current_user
 
 from ... import config
 from ...runtime_profiles import RUNTIME_PROFILES
+from ...learning.legacy_runtime import catalog_icon, is_runtime_reference, runtime_reference_matches, runtime_url
 from ...agent_runtime.conversation import (
     HARNESS_VERSION, ConversationConflict, prepare_turn_submission,
     submission_fingerprint, pending_turns, unreferenced_attachment_refs,
@@ -992,6 +993,7 @@ def _dojo_view(dojo, *, include_modules=True):
                         "name": challenge.name or challenge.id,
                         "required": bool(challenge.required),
                         "exerciseMode": challenge.exercise_mode,
+                        "icon": catalog_icon(challenge),
                         "url": f"/{dojo.reference_id}/{module.id}/{challenge.id}",
                     }
                     for challenge in module.challenges
@@ -1030,11 +1032,25 @@ def _content_count(items):
     }
 
 
+def _question_course_order(item):
+    position = item.get("sortOrder")
+    return (
+        item.get("moduleIndex") is None,
+        int(item.get("moduleIndex") or 0),
+        position is None,
+        int(position or 0),
+        str(item.get("created") or ""),
+        str(item.get("id") or ""),
+    )
+
+
 def _course_question_list_views(dojo):
     modules = {module.module_index: module for module in dojo.modules}
+    challenges = DojoChallenges.query.filter_by(dojo_id=dojo.dojo_id).all()
+    challenge_index = {(row.module_index, row.id): row for row in challenges}
     published = [
         challenge
-        for challenge in DojoChallenges.query.filter_by(dojo_id=dojo.dojo_id).all()
+        for challenge in challenges
         if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT"
     ]
     drafts = (
@@ -1083,12 +1099,14 @@ def _course_question_list_views(dojo):
                 "title": challenge.name or challenge.id,
                 "summary": str(challenge.description or "")[:1200],
                 "moduleIndex": challenge.module_index,
+                "sortOrder": challenge.challenge_index,
                 "moduleId": module.id if module else None,
                 "moduleName": module.name if module else "未分配章节",
                 "status": "PUBLISHED",
                 "state": "published",
                 "required": bool(challenge.required),
                 "exerciseMode": str(challenge.exercise_mode or "CONTAINER").upper(),
+                "icon": catalog_icon(challenge),
                 "revision": profile.version if profile is not None else 1,
                 "validationStatus": str(
                     ((profile.validation or {}).get("status") if profile else None)
@@ -1107,35 +1125,46 @@ def _course_question_list_views(dojo):
                 ),
             }
         )
+    represented_runtime_ids = set(published_ids)
     for draft in drafts:
         spec = draft.spec if isinstance(draft.spec, dict) else {}
+        runtime = challenge_index.get((draft.module_index, str(spec.get("id") or "")))
+        runtime = runtime if runtime and runtime_reference_matches(draft, runtime) else None
+        if runtime and runtime.challenge_id in represented_runtime_ids:
+            continue
+        if runtime:
+            represented_runtime_ids.add(runtime.challenge_id)
         validation = draft.validation if isinstance(draft.validation, dict) else {}
         module = modules.get(draft.module_index)
-        state = _content_state(draft.status, validation)
+        state = "draft" if runtime else _content_state(draft.status, validation)
         rows.append(
             {
                 "id": draft.id,
                 "kind": "draft",
-                "challengeId": None,
-                "challengeNumericId": None,
+                "challengeId": runtime.id if runtime else None,
+                "challengeNumericId": runtime.challenge_id if runtime else None,
                 "draftId": draft.id,
-                "title": str(spec.get("name") or draft.brief or "未命名题目草稿")[:240],
-                "summary": str(spec.get("description") or draft.brief or "")[:1200],
+                "title": str(runtime.name if runtime else spec.get("name") or draft.brief or "未命名题目草稿")[:240],
+                "summary": str(runtime.description if runtime else spec.get("description") or draft.brief or "")[:1200],
                 "moduleIndex": draft.module_index,
+                "sortOrder": runtime.challenge_index if runtime else None,
                 "moduleId": module.id if module else None,
                 "moduleName": module.name if module else "未分配章节",
-                "status": draft.status,
+                "status": "DRAFT" if runtime else draft.status,
                 "state": state,
-                "required": bool(spec.get("required", True)),
+                "required": bool(runtime.required) if runtime else bool(spec.get("required", True)),
                 "exerciseMode": str(
-                    spec.get("exerciseMode") or spec.get("mode") or "CONTAINER"
+                    runtime.exercise_mode if runtime else spec.get("exerciseMode") or spec.get("mode") or "CONTAINER"
                 ).upper(),
+                "icon": catalog_icon(runtime) if runtime else "fa-file-alt",
+                "runtimeManaged": bool(runtime),
                 "revision": draft.revision,
-                "validationStatus": str(validation.get("status") or "PENDING"),
+                "validationStatus": "NOT_APPLICABLE" if runtime else str(validation.get("status") or "PENDING"),
                 "needsAttention": state in ATTENTION_CONTENT_STATES,
                 "ownerName": owner_names.get(draft.author_id, "课程教师"),
                 "updated": _timestamp(draft.updated),
-                "href": (
+                "created": _timestamp(draft.created),
+                "href": runtime_url(runtime) if runtime else (
                     f"/teacher/courses?dojo={dojo.reference_id}"
                     f"&tab=questions&selectedId={draft.id}&view=library"
                 ),
@@ -1206,6 +1235,20 @@ def _course_content_snapshot(
         }
         for draft in unpublished_drafts
     ]
+    if any(is_runtime_reference(draft) for draft in unpublished_drafts):
+        question_items = [
+            {
+                "objectType": "question",
+                "objectId": item["id"],
+                "moduleIndex": item["moduleIndex"],
+                "title": item["title"],
+                "state": item["state"],
+                "updated": datetime.datetime.fromisoformat(item["updated"].removesuffix("Z")) if item["updated"] else None,
+                "nextAction": "retry_validation" if item["needsAttention"] else "open",
+                "href": item["href"],
+            }
+            for item in _course_question_list_views(dojo)
+        ]
 
     if artifacts is None:
         artifacts = (
@@ -4555,7 +4598,9 @@ class ManagedCourseContentCollection(Resource):
             source_filter = str(request.args.get("source") or "").strip().lower()
             if source_filter not in {"", "material", "artifact", "direct"}:
                 raise ValueError("来源筛选参数无效。")
-            sort = str(request.args.get("sort") or "updated_desc").strip().lower()
+            sort = str(request.args.get("sort") or (
+                "course_order" if kind == "questions" else "updated_desc"
+            )).strip().lower()
             module_index = request.args.get("moduleIndex")
             required_filter = str(request.args.get("required") or "").strip().lower()
             mode_filter = str(request.args.get("mode") or "").strip().upper()
@@ -4610,14 +4655,7 @@ class ManagedCourseContentCollection(Resource):
                 elif sort == "updated_asc":
                     filtered_items.sort(key=lambda item: str(item.get("updated") or ""))
                 elif sort == "course_order":
-                    filtered_items.sort(
-                        key=lambda item: (
-                            item.get("moduleIndex") is None,
-                            int(item.get("moduleIndex") or 0),
-                            item.get("kind") != "published",
-                            str(item.get("title") or "").casefold(),
-                        )
-                    )
+                    filtered_items.sort(key=_question_course_order)
                 else:
                     filtered_items.sort(
                         key=lambda item: str(item.get("updated") or ""),

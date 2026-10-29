@@ -73,6 +73,21 @@ workspace creates a fresh disk and removes the previous result.
 
 ## Building an evaluation seed
 
+The runtime selects KVM when `/dev/kvm` is accessible and otherwise uses QEMU
+TCG. `DOJO_WINDOWS_ACCELERATOR=auto|kvm|tcg` selects this behavior through
+`data/config.env`. Explicit `kvm` fails when unavailable. TCG keeps the guest
+unprivileged and clears supplementary groups; it requires no `/dev/kvm` device.
+TCG performance must be checked on the deployment host before classroom use.
+
+For installed Windows 2000 course images, apply the acceleration layer without
+replacing course provisioning, guest disks, checks, or existing learner volumes:
+
+```sh
+docker build --build-arg BASE_IMAGE=<installed-course-image> \
+  -f workspace/services/windows2000-desktop/Dockerfile \
+  -t <deployed-course-image> workspace/services
+```
+
 Use a licensed, fully configured Windows evaluation VM on the deployment host.
 Acceptance of Microsoft's evaluation license is a human decision. In this
 deployment the user accepted the official 90-day evaluation, activated through

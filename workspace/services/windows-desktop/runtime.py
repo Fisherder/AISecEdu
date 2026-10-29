@@ -13,6 +13,8 @@ import sys
 import tempfile
 import time
 
+from acceleration import acceleration, guest_options, identity_groups
+
 
 STATE = pathlib.Path("/var/lib/windows-lab")
 ROOT = pathlib.Path("/usr/local/lib/windows-runtime")
@@ -73,7 +75,8 @@ def supervise():
     tpm_root = pathlib.Path(tempfile.mkdtemp(prefix="aisecedu-windows-tpm-"))
     os.chown(tpm_root, UID, UID)
     private_copy(STATE / "tpm", tpm_root / "state")
-    identity = ["/usr/bin/setpriv", f"--reuid={UID}", f"--regid={UID}", "--groups=" + str(os.stat("/dev/kvm").st_gid), "--no-new-privs"]
+    mode = acceleration()
+    identity = ["/usr/bin/setpriv", f"--reuid={UID}", f"--regid={UID}", *identity_groups(mode), "--no-new-privs"]
 
     def launch(command, *, guest_user=False):
         child = subprocess.Popen((identity if guest_user else []) + command, stdin=subprocess.DEVNULL)
@@ -99,8 +102,8 @@ def supervise():
         tpm = launch(["/usr/bin/swtpm", "socket", "--tpm2", "--tpmstate", f"dir={tpm_root}/state", "--ctrl", f"type=unixio,path={tpm_root}/tpm.sock"], guest_user=True)
         wait_socket(tpm_root / "tpm.sock", tpm)
         guest = launch([
-            "/usr/bin/qemu-system-x86_64", "-name", "AISecEdu-Windows-Workspace", "-enable-kvm",
-            "-machine", "pc-q35-8.2,smm=on", "-cpu", "host", "-m", "4096", "-smp", "4",
+            "/usr/bin/qemu-system-x86_64", "-name", "AISecEdu-Windows-Workspace", *guest_options(mode),
+            "-machine", "pc-q35-8.2,smm=on", "-m", "4096",
             "-uuid", "51dc9b66-281d-42f1-9bfb-344489e36424",
             "-global", "driver=cfi.pflash01,property=secure,value=on",
             "-drive", "if=pflash,format=raw,unit=0,readonly=on,file=/opt/windows/firmware.fd",
@@ -150,6 +153,20 @@ def supervise():
         shutil.rmtree(tpm_root)
 
 
+def initialize_state():
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    os.chown(STATE, UID, UID)
+    overlay = STATE / "student.qcow2"
+    if not overlay.exists():
+        subprocess.run(["/usr/bin/qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", "/opt/windows/course-seed.qcow2", str(overlay)], check=True)
+    os.chown(overlay, UID, UID)
+    overlay.chmod(0o600)
+    for source, name in [(pathlib.Path("/opt/windows/firmware-vars.fd"), "vars.fd"),
+                         (pathlib.Path("/opt/windows/tpm-base"), "tpm")]:
+        if not (STATE / name).exists():
+            private_copy(source, STATE / name)
+
+
 def initialize():
     if os.geteuid() != 0:
         raise RuntimeError("The platform must initialize the Windows runtime")
@@ -157,15 +174,8 @@ def initialize():
         fcntl.flock(lock, fcntl.LOCK_EX)
         if (STATE / "started").exists():
             return
-        if not os.access("/dev/kvm", os.R_OK | os.W_OK):
-            raise RuntimeError("The Windows profile requires a KVM-enabled workspace node")
-        STATE.mkdir(mode=0o700)
-        os.chown(STATE, UID, UID)
-        subprocess.run(["/usr/bin/qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", "/opt/windows/course-seed.qcow2", str(STATE / "student.qcow2")], check=True)
-        os.chown(STATE / "student.qcow2", UID, UID)
-        (STATE / "student.qcow2").chmod(0o600)
-        private_copy(pathlib.Path("/opt/windows/firmware-vars.fd"), STATE / "vars.fd")
-        private_copy(pathlib.Path("/opt/windows/tpm-base"), STATE / "tpm")
+        acceleration()
+        initialize_state()
         pathlib.Path("/usr/share/novnc/lab-result.json").unlink(missing_ok=True)
         workspace_commands()
         with open("/run/dojo/var/root/windows-runtime.log", "ab") as output:

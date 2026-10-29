@@ -40,6 +40,7 @@ from ...learning.authoring import (
     remove_generated_package_assets,
     revise_draft,
 )
+from ...learning.legacy_runtime import linked_runtime_challenge, runtime_url
 from ...learning.evidence import (
     ALLOWED_WORKSPACE_EVENTS,
     active_attempt,
@@ -296,6 +297,25 @@ def _catalog_order_plan(modules, challenges, body):
     for module_id, source_keys in requested_by_module.items():
         target_module = module_by_id[module_id]
         target_index = int(target_module.module_index)
+        module_challenges = [
+            challenge for challenge in challenges
+            if int(challenge.module_index) == target_index
+        ]
+        unified_slots = sorted(
+            int(challenge.unified_index) if getattr(challenge, "unified_index", None) is not None
+            else 1000 + int(challenge.challenge_index)
+            for challenge in module_challenges if is_supported_exercise(challenge)
+        )
+        next_unified = max(
+            [0, *unified_slots]
+            + [resource.resource_index for resource in getattr(target_module, "resources", [])]
+            + [int(challenge.unified_index) if getattr(challenge, "unified_index", None) is not None
+               else 1000 + int(challenge.challenge_index)
+               for challenge in module_challenges]
+        ) + 1
+        while len(unified_slots) < len(source_keys):
+            unified_slots.append(next_unified)
+            next_unified += 1
         reserved_indices = {
             int(challenge.challenge_index)
             for challenge in unsupported_by_module[target_index]
@@ -304,7 +324,7 @@ def _catalog_order_plan(modules, challenges, body):
             str(challenge.id) for challenge in unsupported_by_module[target_index]
         }
         next_index = 0
-        for source_key in source_keys:
+        for source_key, unified_index in zip(source_keys, unified_slots):
             challenge = supported[source_key]
             slug = str(challenge.id)
             if slug in used_slugs:
@@ -322,6 +342,7 @@ def _catalog_order_plan(modules, challenges, body):
                     "sourceModule": module_by_index[source_key[0]],
                     "targetModule": target_module,
                     "target": (target_index, next_index),
+                    "unifiedIndex": unified_index,
                 }
             )
             next_index += 1
@@ -434,6 +455,7 @@ def _apply_catalog_order(dojo, plan):
     for ordinal, item in enumerate(changed):
         challenge = item["challenge"]
         data = copy.deepcopy(challenge.data or {})
+        data["unified_index"] = item["unifiedIndex"]
         if (
             item["source"][0] != item["target"][0]
             and not data.get("path_override")
@@ -581,6 +603,16 @@ def _draft_or_404(draft_id):
     if not draft.dojo.is_admin(get_current_user()):
         abort(403)
     return draft
+
+
+def _runtime_draft_conflict(draft):
+    challenge = linked_runtime_challenge(draft)
+    return {
+        "success": False,
+        "code": "EXISTING_RUNTIME",
+        "error": "此记录对应现有 Windows 实验，请打开实验并使用原有 check.cmd 核验，不适用 Linux 新题生成检查。",
+        "runtimeUrl": runtime_url(challenge),
+    }, 409
 
 
 def _authoring_job_or_404(job_id):
@@ -2717,6 +2749,8 @@ class LearningDraftRevisionJob(Resource):
     @authed_only
     def post(self, draft_id):
         draft = _draft_or_404(draft_id)
+        if linked_runtime_challenge(draft):
+            return _runtime_draft_conflict(draft)
         active_job = LearningAuthoringJobs.query.filter(
             LearningAuthoringJobs.draft_id == draft.id,
             LearningAuthoringJobs.status.in_(("QUEUED", "RUNNING")),
@@ -2844,6 +2878,8 @@ class LearningDraftDetail(Resource):
     @authed_only
     def patch(self, draft_id):
         draft = _draft_or_404(draft_id)
+        if linked_runtime_challenge(draft):
+            return _runtime_draft_conflict(draft)
         if draft.published_challenge_id is not None or draft.status == "PUBLISHED":
             return {
                 "success": False,
@@ -2932,6 +2968,8 @@ class LearningDraftDetail(Resource):
     @authed_only
     def post(self, draft_id):
         draft = _draft_or_404(draft_id)
+        if linked_runtime_challenge(draft):
+            return _runtime_draft_conflict(draft)
         active_job = LearningAuthoringJobs.query.filter(
             LearningAuthoringJobs.draft_id == draft.id,
             LearningAuthoringJobs.status.in_(("QUEUED", "RUNNING")),
@@ -2993,6 +3031,8 @@ class LearningDraftValidation(Resource):
     @authed_only
     def post(self, draft_id):
         draft = _draft_or_404(draft_id)
+        if linked_runtime_challenge(draft):
+            return _runtime_draft_conflict(draft)
         if draft.status == "PUBLISHED":
             return {"success": False, "error": "已发布草稿无需重复验证。"}, 409
         if (draft.spec or {}).get("preparedRuntime"):
@@ -3041,6 +3081,8 @@ class LearningDraftPublish(Resource):
     @authed_only
     def post(self, draft_id):
         draft = _draft_or_404(draft_id)
+        if linked_runtime_challenge(draft):
+            return _runtime_draft_conflict(draft)
         actor = get_current_user()
         try:
             challenge = publish_draft(draft, actor)

@@ -52,6 +52,7 @@ define DOJO_HTTP_ENABLED false
 define DOJO_ENV development
 define DOJO_OFFLINE false
 define DOJO_WORKSPACE full
+define DOJO_SHM_SIZE 230G
 define WORKSPACE_KEY
 define WORKSPACE_SECRET $(openssl rand -hex 16)
 define WORKSPACE_NODE 0
@@ -74,6 +75,12 @@ define DB_HOST db
 define DB_NAME ctfd
 define DB_USER ctfd
 define DB_PASS ctfd
+define CTFD_WORKERS 32
+define POSTGRES_MAX_CONNECTIONS 256
+define PGBOUNCER_DEFAULT_POOL_SIZE 160
+define PGBOUNCER_RESERVE_POOL_SIZE 32
+define PGBOUNCER_MAX_DB_CONNECTIONS 192
+define GLOBAL_AGENT_RUNTIME_SCENE_CONCURRENCY 4
 define BACKUP_AES_KEY_FILE
 define S3_BACKUP_BUCKET
 define AWS_DEFAULT_REGION
@@ -89,6 +96,7 @@ define DOJO_AI_API_KEY
 define DOJO_LINUX_RUNTIME_IMAGE pwncollege/challenge-legacy:latest
 define DOJO_WINDOWS_RUNTIME_IMAGE aisecedu/windows-runtime:1
 define DOJO_WINDOWS2000_RUNTIME_IMAGE aisecedu/windows2000-runtime:1
+define DOJO_WINDOWS_ACCELERATOR auto
 define DOJO_AI_TUTOR_MODEL deepseek-v4-flash
 define DOJO_AI_GUIDE_MODEL deepseek-v4-flash
 define DOJO_AI_GRADER_MODEL deepseek-v4-flash

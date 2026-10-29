@@ -8,17 +8,17 @@ services:
     - /bin/sh
     - -c
     command:
-    - "set -eu\nprofile=/nix/var/nix/profiles/dojo-workspace\nexpected=/nix/store/0hs7db796vbhdnjfzpyq7h7aq3wr6wm6-dojo-workspace-full\n\
+    - "set -eu\nprofile=/nix/var/nix/profiles/dojo-workspace\nexpected=/nix/store/scw1jy88mkidr6zaq3zrbs32irwdsyd3-dojo-workspace-markdown-gitless3-20261012\n\
       actual=$$(readlink -f \"$$profile\")\ntest \"$$actual\" = \"$$expected\"\nclosure_count=$$(nix-store\
-      \ --store local -qR \"$$actual\" | wc -l)\ntest \"$$closure_count\" -eq 2366\n\
+      \ --store local -qR \"$$actual\" | wc -l)\ntest \"$$closure_count\" -eq 97\n\
       suid_file=\"$$actual/suid\"\ntest -f \"$$suid_file\"\nwhile IFS= read -r path;\
-      \ do\n  test -e \"$$path\"\n  chmod u+s \"$$path\"\ndone < \"$$suid_file\"\n\
+      \ do\n  test -e \"$$path\"\n  test -u \"$$path\" || chmod u+s \"$$path\"\ndone < \"$$suid_file\"\n\
       echo \"Reused verified migrated workspace profile: $$actual ($$closure_count\
       \ paths)\"\n"
   agent-runtime:
     image: aisecedu/agent-runtime:auto-intent-20261023-r4
     environment:
-      PARALLEL_SCENE_CONCURRENCY: '4'
+      PARALLEL_SCENE_CONCURRENCY: ${GLOBAL_AGENT_RUNTIME_SCENE_CONCURRENCY:-4}
       COURSEWARE_GENERATOR: native-v2
       COURSEWARE_INSPECTOR_URL: http://courseware-inspector:3015
   courseware-inspector:
