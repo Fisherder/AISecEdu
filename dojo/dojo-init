@@ -76,6 +76,7 @@ define DB_NAME ctfd
 define DB_USER ctfd
 define DB_PASS ctfd
 define CTFD_WORKERS 32
+define HOMEFS_WORKERS 32
 define POSTGRES_MAX_CONNECTIONS 256
 define PGBOUNCER_DEFAULT_POOL_SIZE 160
 define PGBOUNCER_RESERVE_POOL_SIZE 32
@@ -193,6 +194,10 @@ if [ "$(findmnt -nro FSTYPE -- /data/homes)" != "btrfs" ] && [ "$(findmnt -nro F
     mount "$loop_device" /data/homes
 fi
 btrfs quota enable /data/homes
+
+mkdir -p /etc/systemd/system/docker.service.d
+ln -sfn /opt/pwn.college/etc/systemd/system/homefs-bootstrap.service /etc/systemd/system/homefs-bootstrap.service
+ln -sfn /opt/pwn.college/etc/systemd/system/docker.service.d/homefs-bootstrap.conf /etc/systemd/system/docker.service.d/homefs-bootstrap.conf
 
 if [ ! -d /data/ssh_host_keys ]; then
     mkdir -p /data/ssh_host_keys

@@ -144,6 +144,15 @@ services:
     restart: always
     privileged: true
     build: ./homefs
+    command:
+      - gunicorn
+      - homefs:create_app()
+      - --bind=unix:/run/docker/plugins/homefs.sock
+      - --bind=0.0.0.0:4201
+      - --workers=${HOMEFS_WORKERS:-32}
+      - --threads=8
+      - --access-logfile=-
+      - --timeout=300
     environment:
       - STORAGE_ROOT=/run/homefs
       - STORAGE_HOST=192.168.42.1
