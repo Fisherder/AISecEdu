@@ -6,7 +6,7 @@
 
 向维护者提供希望使用的 Linux 账号名、SSH 公钥、GitHub 用户名及主要负责模块。发送公钥，例如 `id_ed25519.pub`，不要发送私钥。Linux 账号和代码仓库权限需要分别开通。
 
-本次准备没有新增成员账号。没有账号时可以先阅读源码包和本文；取得维护者确认的账号后，再执行下面的服务器操作。文中的 `dev_yourname` 是示例，替换为实际账号。首次连接时向维护者核对服务器主机密钥指纹。
+成员按维护者发放的个人账号接入。没有账号时可以先阅读源码包和本文；取得维护者确认的账号后，再执行下面的服务器操作。文中的 `dev_yourname` 是示例，替换为实际账号。首次连接时向维护者核对服务器主机密钥指纹。
 
 ## 系统地图
 
@@ -41,10 +41,11 @@ git remote rename origin baseline
 git remote add origin https://github.com/Fisherder/AISecEdu.git
 git config user.name '你的姓名'
 git config user.email '你的提交邮箱'
-git switch -c feat/yourname/first-task
+git fetch origin
+git switch -c feat/yourname/first-task origin/develop
 ```
 
-`baseline` 是服务器只读协作基线。`origin` 用于个人提交和 PR，推送前需要仓库授权；不要使用他人的 GitHub token。服务器基线包含当前开发成果，可能领先远程默认分支，合并前由维护者确认目标分支。
+`baseline` 是服务器只读协作基线。`origin` 用于个人提交和 PR，推送前需要仓库授权；不要使用他人的 GitHub token。服务器镜像默认分支为 `develop`。普通 PR 的 base 一律选择 `develop`；新任务以 `origin/develop` 为起点，`main` 由维护者安排发布整合。已有成员保留当前任务分支，先 fetch 并比较，不重置或覆盖既有工作。
 
 开发目录为 `~/work/aisecedu`。不要到 `/srv/aisecedu-dojo` 或 `/srv/aisecedu-development-volume/aisecedu-dojo` 修改文件、切分支或安装依赖；它们分别挂载给运行中的生产与共享开发平台。
 
@@ -126,7 +127,7 @@ aisecedu-dev release --note '验收结果、遗留问题及恢复状态'
 
 ## 提交给维护者
 
-有仓库推送权限时推送自己的分支并创建 PR，使用仓库模板写清行为、数据影响、测试和恢复方法。普通修改由非作者审查；高风险范围由对应维护者审核。
+有仓库推送权限时推送自己的分支并创建以 `develop` 为目标的 PR，使用仓库模板写清行为、数据影响、测试和恢复方法。普通修改由非作者审查；高风险范围由对应维护者审核。
 
 ```sh
 git push -u origin HEAD
@@ -136,7 +137,7 @@ git push -u origin HEAD
 
 ```sh
 mkdir -p ~/deliveries
-git format-patch --stdout baseline/team/development-foundation-20261028..HEAD > ~/deliveries/first-task.patch
+git format-patch --stdout origin/develop..HEAD > ~/deliveries/first-task.patch
 ```
 
 维护者若已更新服务器基线，先 `git fetch baseline` 并确认本任务起点。提交已进入 PR 的历史修改前与审查者协调；避免覆盖他人的提交。

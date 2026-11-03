@@ -1,5 +1,7 @@
 # AISecEdu 开发入口
 
+统一开发分支与普通 PR 目标为 `develop`，也是 GitHub 默认分支。新任务从 `origin/develop` 创建个人分支；验收后的版本由维护者安排 `develop` 到 `main` 的发布整合。分支规则见 [开发分支约定](development/branches.md)。
+
 团队使用 `10.92.35.7` 上现有的完整开发平台，每人在个人源码副本开发，通过提交、审查和预约完成共享联调。新成员无需自行搭建整套 Docker、Kata、Nix 或 Windows 客户机。
 
 | 需要做的事 | 阅读入口 |
