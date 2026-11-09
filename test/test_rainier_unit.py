@@ -67,6 +67,9 @@ def integration(tmp_path, monkeypatch):
         @property
         def module(self):
             return SimpleNamespace(id="test-unit")
+        @property
+        def reference_id(self):
+            return f"test-course/test-unit/{self.challenge_id}"
     class LearningAuditEvents(db.Model):
         __tablename__ = "learning_audit_events"
         id = db.Column(db.Integer, primary_key=True)
@@ -569,3 +572,19 @@ def test_course_launch_returns_course_entry_after_verified_reservation(integrati
     response = e.client.post("/integrations/rainier/launch")
     assert response.status_code == 303 and response.location == "/dojo/test-course"
     assert e.storage.RainierSessions.query.one().challenge_id == 0
+
+
+def test_course_guide_counts_same_course_references_and_excludes_mixed_courses(integration):
+    e = integration
+    run, attempt, _ = seeded(e)
+    configure_course(e);run.challenge_id = 0;e.db.session.commit()
+    assert e.service.guide_usage_attempt(attempt, ["test-course/test-unit/20", "test-course/test-unit/21"]) == attempt.id
+    assert e.service.guide_usage_attempt(attempt, ["test-course/test-unit/20", "other-course/test-unit/21"]) is None
+    assert e.service.guide_usage_attempt(attempt, []) is None
+
+
+def test_single_experiment_does_not_count_multi_experiment_guide(integration):
+    e = integration
+    _, attempt, _ = seeded(e)
+    assert e.service.guide_usage_attempt(attempt, ["test-course/test-unit/20"]) == attempt.id
+    assert e.service.guide_usage_attempt(attempt, ["test-course/test-unit/20", "test-course/test-unit/21"]) is None

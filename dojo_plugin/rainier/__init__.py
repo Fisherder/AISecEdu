@@ -150,6 +150,26 @@ def bind_attempt(attempt):
     db.session.add(RainierAttemptLinks(attempt_id=attempt.id, session_id=run.id))
 
 
+def guide_usage_attempt(attempt, reference_ids):
+    if not attempt or not reference_ids or not attempt.dojo_challenge:
+        return None
+    challenge = attempt.dojo_challenge
+    if reference_ids == [challenge.reference_id]:
+        return attempt.id
+    link = db.session.get(RainierAttemptLinks, attempt.id)
+    run = db.session.get(RainierSessions, link.session_id) if link else None
+    if run is None:
+        return None
+    try:
+        app = application_for(run)
+    except ContractError:
+        return None
+    prefix = challenge.dojo.reference_id + "/"
+    if app.get("scope") == "course" and all(value.startswith(prefix) for value in reference_ids):
+        return attempt.id
+    return None
+
+
 @contextmanager
 def usage_scope(attempt_id, scenario):
     link = RainierAttemptLinks.query.filter_by(attempt_id=attempt_id).first() if attempt_id else None

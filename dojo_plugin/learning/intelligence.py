@@ -43,7 +43,7 @@ from .guide_prompts import build_guide_prompt
 from .screenshots import capture_workspace_screenshot
 from .student_agent import sanitize_tool_calls, student_resource_reference_for_url
 from .standards import DEFAULT_HINT_POLICY
-from ..rainier import record_model_dispatch, settle_model_dispatch, track_attempt_ai, usage_scope
+from ..rainier import guide_usage_attempt, record_model_dispatch, settle_model_dispatch, track_attempt_ai, usage_scope
 
 
 logger = logging.getLogger(__name__)
@@ -2069,7 +2069,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
         "conflicts": [],
     }
     try:
-        with usage_scope(current_attempt.id if current_attempt and reference_ids == [current_reference_id] else None, '当前实验学习指导'):
+        with usage_scope(guide_usage_attempt(current_attempt, reference_ids), '当前实验学习指导'):
             generated = None if needs_reference else model_json(
                 guide_prompt,
                 {
