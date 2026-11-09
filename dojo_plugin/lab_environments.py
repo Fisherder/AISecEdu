@@ -17,6 +17,29 @@ from .learning.evidence import append_evidence
 ACTION = 'coding.submission.verified'
 SUPPORTED_TASKS = {'secure-copy-homework1', 'hw02-bounds-check', 'hw03-safe-sprintf', 'lab03-shellcode-layout', 'lab04-ftp-fuzz', 'lab05-exception-dispatch', 'lab06-format-audit', 'lab07-sql-injection'}
 
+# Prepared labs may provide check/submit directly without the snapshot utility.
+_PREPARED_HEALTH_PROGRAM = r'''
+import json,os,sys,tempfile
+from pathlib import Path
+m=json.loads(sys.argv[1]);checks=[]
+for key in ('compiler','debugger','python'):
+    if m.get(key):
+        checks.append({'name':key,'passed':os.access(m[key],os.X_OK),'output':m[key]})
+for command in ('check','submit'):
+    path='/challenge/'+command
+    checks.append({'name':command,'passed':os.access(path,os.X_OK),'output':path})
+workspace=Path(m['workspace'])
+try:
+    with tempfile.TemporaryFile(dir=workspace) as f:
+        f.write(b'health-check');f.flush()
+    writable=True
+except OSError:
+    writable=False
+checks.append({'name':'persistent workspace','passed':writable,'output':str(workspace)})
+ready=all(c['passed'] for c in checks)
+print(json.dumps({'success':ready,'ready':ready,'checks':checks}))
+'''
+
 def _structured_checks(output):
     checks = []
     declared = None
@@ -188,6 +211,8 @@ def register_api(namespace):
                 command = ['/usr/bin/timeout', '210', '/challenge/' + operation, manifest['workspace'] + '/' + manifest['studentSource']]
             else:
                 command = ['/usr/bin/timeout', '30', '/opt/aisecedu/bin/labctl', operation if operation != 'sync' else 'history']
+                if operation == 'health' and container.exec_run(['/usr/bin/test', '-x', '/opt/aisecedu/bin/labctl'], user='1000').exit_code != 0:
+                    command = ['/usr/bin/timeout', '30', '/usr/local/bin/python3', '-I', '-c', _PREPARED_HEALTH_PROGRAM, json.dumps(manifest)]
                 if operation == 'restore':
                     command += ['--id', str(data.get('id') or '')]
                 if operation in {'restore', 'reset'} and data.get('apply') is True:
