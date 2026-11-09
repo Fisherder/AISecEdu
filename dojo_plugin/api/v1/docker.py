@@ -5,6 +5,7 @@ import os
 import logging
 import time
 import re
+from contextlib import contextmanager
 
 import docker
 import docker.errors
@@ -27,6 +28,7 @@ from ...config import (
     USER_FIREWALL_ALLOWED,
     WORKSPACE_SESSION_SECONDS,
     DOJO_WINDOWS_ACCELERATOR,
+    DOJO_MAX_ACTIVE_WORKSPACES,
 )
 from ...models import DojoModules, DojoChallenges
 from ...utils import (
@@ -44,6 +46,7 @@ from ...utils.dojo import dojo_accessible, get_current_dojo_challenge
 from ...utils.workspace import exec_run, workspace_start_slot
 from ...runtime_profiles import runtime_profile, container_runtime_profile, profile_for_runtime_label
 from ...question_reset import selected_volume, switch_volume, windows_volume, coding_reset
+from ...workspace_capacity import WorkspaceCapacityError, check_workspace_capacity
 from ...utils.feed import publish_container_start
 from ...utils.background_stats import publish_stat_event
 from ...utils.request_logging import get_trace_id, log_generator_output
@@ -60,6 +63,22 @@ from ...learning.simulation import (
 logger = logging.getLogger(__name__)
 
 DOCKER_LOCK_SECONDS = max(60, int(os.getenv("DOJO_DOCKER_LOCK_SECONDS", "1200")))
+
+
+@contextmanager
+def active_workspace_capacity(user):
+    if not DOJO_MAX_ACTIVE_WORKSPACES:
+        yield
+        return
+    client = redis.from_url(current_app.config["REDIS_URL"])
+    try:
+        with client.lock("dojo.active-workspace-capacity", blocking_timeout=0,
+                         timeout=DOCKER_LOCK_SECONDS, raise_on_release_error=False):
+            containers = user_docker_client(user).containers.list(filters={"label": "dojo.user_id"})
+            check_workspace_capacity(containers, container_name(user), DOJO_MAX_ACTIVE_WORKSPACES)
+            yield
+    except redis.exceptions.RedisError:
+        raise WorkspaceCapacityError("实验启动正在排队，请稍后重试。") from None
 
 docker_namespace = Namespace(
     "docker", description="Endpoint to manage docker containers"
@@ -507,7 +526,7 @@ def start_challenge_session(user, dojo_challenge, practice, *, as_user=None, res
                 f"Starting challenge for user {user.id} "
                 f"(attempt {attempt_number}/{max_attempts})..."
             )
-            with workspace_start_slot():
+            with workspace_start_slot(), active_workspace_capacity(user):
                 container = start_challenge(
                     user,
                     dojo_challenge,
@@ -546,6 +565,8 @@ def start_challenge_session(user, dojo_challenge, practice, *, as_user=None, res
 
             publish_stat_event("container_stats_update", {})
             return container, learning_attempt
+        except WorkspaceCapacityError:
+            raise
         except Exception as error:
             logger.warning(
                 f"Attempt {attempt_number} failed for user {user.id} with error: {error}"

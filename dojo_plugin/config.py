@@ -12,6 +12,8 @@ from CTFd.utils import config, set_config
 
 logger = logging.getLogger(__name__)
 
+DOJO_MAX_ACTIVE_WORKSPACES = max(0, int(os.getenv("DOJO_MAX_ACTIVE_WORKSPACES", "0")))
+
 DOJOS_DIR = pathlib.Path("/var/dojos")
 
 FEED_EVENT_TTL = int(os.environ.get("FEED_EVENT_TTL", "86400"))

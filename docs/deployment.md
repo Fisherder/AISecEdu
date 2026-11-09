@@ -259,3 +259,5 @@ Error response from daemon: path /run/homefs is mounted on /run/homefs but it is
   `-v /host/path:/data:shared`
 
 - If the problem persists: rebuild the outer docker container
+
+云端演示可设置 `DOJO_MAX_ACTIVE_WORKSPACES=1`、`DOJO_WORKSPACE_START_CONCURRENCY=1`、`DOJO_CODE_START_CONCURRENCY=1` 和 `DOJO_DESKTOP_START_CONCURRENCY=1`。总容量检查在共享锁内执行，容量已满时提示等待，不停止其他使用者；同一使用者仍可切换实验。默认总容量为 `0`，保持正式教学环境原来的容量策略。

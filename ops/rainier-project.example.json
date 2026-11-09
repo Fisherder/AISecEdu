@@ -13,5 +13,5 @@
   "timezone": "Asia/Shanghai",
   "reportKeys": {"summary": "text1", "score": "text2"},
   "modelDeployment": "公有云服务",
-  "modelProvider": "DeepSeek"
+  "modelProvider": "ZetaTechs（DeepSeek 模型）"
 }
