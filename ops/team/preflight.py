@@ -23,6 +23,7 @@ def main():
         [sys.executable, 'test/test_authoring_standards_unit.py'],
         [sys.executable, '-m', 'unittest', 'discover', '-s', 'test', '-p', 'test_generation_release_unit.py'],
         [sys.executable, '-m', 'unittest', 'discover', '-s', 'test', '-p', 'test_team_control_unit.py'],
+        [sys.executable, 'test/test_dojo_init_config_unit.py'],
     ):
         result = subprocess.run(command, cwd=ROOT)
         if result.returncode:

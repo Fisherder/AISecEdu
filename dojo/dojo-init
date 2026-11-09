@@ -35,11 +35,23 @@ fi
 define () {
     name="$1"
     default="$2"
-    re="^${name}=\K.*"
-    current="$(env | grep -oP ${re})"
-    defined="$(grep -oP ${re} /data/config.env)"
+    eval "current=\${${name}-}"
+    defined="$(sed -n "s/^${name}=//p" /data/config.env)"
     value="${current:-${defined:-$default}}"
-    echo "${name}=${value}" >> /data/.config.env
+    if [ "${3:-}" = "source-list" ]; then
+        case "$value" in
+            \"*\") value="${value#\"}"; value="${value%\"}" ;;
+        esac
+        # This file is read by both the shell and Compose; CSP sources need literal quoting.
+        if [ "$(printf '%s' "$value" | tr -d '\r\n')" != "$value" ] ||
+            printf '%s' "$value" | grep -q '["\\$`[:cntrl:]]'; then
+            printf 'Invalid source-list configuration: %s\n' "$name" >&2
+            exit 1
+        fi
+        printf '%s="%s"\n' "$name" "$value" >> /data/.config.env
+    else
+        printf '%s=%s\n' "$name" "$value" >> /data/.config.env
+    fi
 }
 DEFAULT_DOJO_HOST=localhost.pwn.college
 dojo_workspace_from_environment="${DOJO_WORKSPACE+x}"
@@ -100,13 +112,14 @@ define DOJO_AI_AUTHORING_VALIDATION_MAX_ROUNDS 5
 define DOJO_AI_TIMEOUT_SECONDS 120
 define DOJO_AI_MAX_CONTEXT_CHARS 180000
 define DOJO_AI_MAX_FILE_CHARS 32000
-legacy_agent_ticket_secret="$(grep -oP '^OPENMAIC_TICKET_SECRET=\K.*' /data/config.env)"
-legacy_agent_service_secret="$(grep -oP '^OPENMAIC_SERVICE_SECRET=\K.*' /data/config.env)"
+legacy_agent_ticket_secret="$(sed -n 's/^OPENMAIC_TICKET_SECRET=//p' /data/config.env)"
+legacy_agent_service_secret="$(sed -n 's/^OPENMAIC_SERVICE_SECRET=//p' /data/config.env)"
 define GLOBAL_AGENT_RUNTIME_TICKET_SECRET "${legacy_agent_ticket_secret:-$(openssl rand -hex 32)}"
 define GLOBAL_AGENT_RUNTIME_SERVICE_SECRET "${legacy_agent_service_secret:-$(openssl rand -hex 32)}"
-define GLOBAL_AGENT_RUNTIME_PUBLIC_ORIGIN "https://${DOJO_HOST}/agent-runtime"
-define AISECEDU_PUBLIC_ORIGIN "https://${DOJO_HOST}"
-define GLOBAL_AGENT_RUNTIME_FRAME_ANCESTORS "https://${DOJO_HOST} http://${DOJO_HOST}"
+configured_dojo_host="$(sed -n 's/^DOJO_HOST=//p' /data/.config.env)"
+define GLOBAL_AGENT_RUNTIME_PUBLIC_ORIGIN "https://${configured_dojo_host}/agent-runtime"
+define AISECEDU_PUBLIC_ORIGIN "https://${configured_dojo_host}"
+define GLOBAL_AGENT_RUNTIME_FRAME_ANCESTORS "https://${configured_dojo_host} http://${configured_dojo_host}" source-list
 define GLOBAL_AGENT_RUNTIME_DATA_VOLUME pwncollege_agent-runtime-data
 
 mv /data/.config.env /data/config.env
