@@ -70,7 +70,7 @@
   <header class="unit-detail-header">
     <div class="unit-header-row">
       <div>
-        <span class="product-kicker">第 {{ course_outline.position }} / {{ course_outline.total }} 章 · {% if visible_challenges %}{{ visible_challenges | length }} 项实训{% endif %}{% if inquiry_activities %}{{ ' · ' if visible_challenges else '' }}{{ inquiry_activities | length }} 项流程探究{% elif not visible_challenges %}阅读章节 · 无必修实践{% endif %}</span>
+        <span class="product-kicker">{% if course_outline.position %}第 {{ course_outline.position }} / {{ course_outline.total }} 章{% else %}章节尚未开放{% endif %} · {% if visible_challenges %}{{ visible_challenges | length }} 项实训{% endif %}{% if inquiry_activities %}{{ ' · ' if visible_challenges else '' }}{{ inquiry_activities | length }} 项流程探究{% elif not visible_challenges %}阅读章节 · 无必修实践{% endif %}</span>
         <h1>{{ module.name or module.id }}</h1>
         <p>{{ (module.description | striptags | truncate(180)) if module.description else '阅读课程内容，在同一页面启动 CTF 实践题或模拟实训，并随时使用题目内 AI 助手。' }}</p>
       </div>

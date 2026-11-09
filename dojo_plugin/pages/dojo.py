@@ -595,7 +595,7 @@ def view_module(dojo, module, scroll_to_challenge=None):
         current_challenge_id=(current_challenge.challenge_id if current_challenge else None),
         current_dojo_custom_js=(current_challenge.dojo.custom_js if current_challenge else None),
         course_outline={
-            "position": module_position + 1,
+            "position": module_position + 1 if module_position is not None else None,
             "total": len(visible_modules),
             "previous": previous_module,
             "next": next_module,
