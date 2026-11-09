@@ -6,7 +6,6 @@ PAGE_NAMES = (
     ("/learning/inquiry", "流程探究式学习"),
     ("/teacher/assignments", "测验与作业编辑"),
     ("/teacher/library", "教学素材库"),
-    ("/teacher/construction", "课程建设任务中心"),
     ("/teacher/courses", "课程中心"),
     ("/teacher", "AI 共创"),
     ("/student", "今天"),

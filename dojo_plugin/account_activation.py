@@ -4,8 +4,6 @@ from flask import jsonify, redirect, request
 from CTFd.models import db
 from CTFd.utils.user import get_current_user
 
-from .models.construction import ConstructionMembers
-
 
 class AssignedAccountActivation(db.Model):
     __tablename__ = "assigned_account_activations"
@@ -20,7 +18,7 @@ def activation_required(user):
     record = AssignedAccountActivation.query.filter_by(user_id=user.id).first()
     if record is not None:
         return record.completed_at is None
-    return ConstructionMembers.query.filter_by(user_id=user.id, active=True, activated=None).first() is not None
+    return False
 
 
 def require_password_change(user):
@@ -29,7 +27,6 @@ def require_password_change(user):
         record = AssignedAccountActivation(user_id=user.id)
         db.session.add(record)
     record.completed_at = None
-    ConstructionMembers.query.filter_by(user_id=user.id, active=True).update({"activated": None})
 
 
 def complete_password_change(user):
@@ -39,7 +36,6 @@ def complete_password_change(user):
         record = AssignedAccountActivation(user_id=user.id)
         db.session.add(record)
     record.completed_at = completed
-    ConstructionMembers.query.filter_by(user_id=user.id, active=True).update({"activated": completed})
 
 
 def require_account_activation():

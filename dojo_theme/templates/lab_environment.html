@@ -1,37 +1,116 @@
 {% extends "base.html" %}
+{% block stylesheets %}
+{{ super() }}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/lab-environment.css', v='lab-code-trace-20261106-v1') }}">
+{% endblock %}
 {% block content %}
-<main class="container py-4" id="lab-environment" data-teacher="{{ 'true' if environment_teacher else 'false' }}">
-  <header class="mb-4">
-    <a href="/workspace?service=code">返回编码环境</a>
-    <h1 class="mt-3">{{ '编码核验证据' if environment_teacher else '工程与核验' }}</h1>
-    <p class="text-muted">{{ '查看分级得分、两个阶段的达标情况、AI 代码评价和对应源码证据。' if environment_teacher else '使用 VSCode 编码，在这里检查环境、保存恢复点，并查看核验历史。无需提交报告。' }}</p>
-  </header>
-  <p id="lab-status" role="status" aria-live="polite">正在读取环境…</p>
-  {% if not environment_teacher %}
-  <section id="lab-controls" hidden aria-label="工程操作">
-    <p id="lab-meta" class="text-muted" style="overflow-wrap:anywhere"></p>
-    <div class="d-flex flex-wrap mb-3" style="gap:.6rem">
-      <button class="btn btn-outline-secondary" data-operation="health">环境检查</button>
-      <button class="btn btn-outline-secondary" data-operation="snapshot">保存代码快照</button>
-      <button class="btn btn-outline-secondary" data-operation="history">恢复代码</button>
-      <button class="btn btn-outline-primary" data-operation="check">公开自测</button>
-      <button class="btn btn-primary" data-operation="submit">提交核验</button>
+<main class="le-shell" id="lab-environment" data-teacher="{{ 'true' if environment_teacher else 'false' }}">
+  <header class="le-page-header">
+    <div>
+      <a class="le-back" href="/workspace?service=code"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>返回编码环境</a>
+      <h1>{{ '编码核验证据' if environment_teacher else '工程与核验' }}</h1>
     </div>
-    <p class="small text-muted">核验读取当前已保存的文件；开始前请在 VSCode 中保存。恢复前会自动备份现有代码。</p>
-    <div id="lab-recovery" class="mb-3"></div>
-    <pre id="lab-result" class="border rounded p-3" style="max-height:24rem;overflow:auto;white-space:pre-wrap" hidden></pre>
-  </section>
-  {% endif %}
-  <section class="mt-4" aria-label="正式核验历史">
-    <div class="d-flex align-items-center justify-content-between mb-3"><h2 class="h4 mb-0">正式核验历史</h2><button class="btn btn-outline-secondary" id="lab-refresh">刷新记录</button></div>
-    <div class="table-responsive"><table class="table"><thead><tr><th>时间 / 学生</th><th>结果</th><th>分级得分</th><th>源码版本</th><th>环境 / 测试版本</th><th>详情</th></tr></thead><tbody id="lab-submissions"></tbody></table></div>
-    <p class="text-muted small">这里展示服务端验证过的检测记录。作业完成状态仍由课程的实验完成与提交规则确定。</p>
-    <section id="lab-grading" hidden aria-label="分级评分与 AI 评价"></section>
-    <section id="lab-detail" hidden tabindex="-1" aria-label="核验详情"><h3 class="h5">源码与分项反馈</h3><pre id="lab-source" class="border rounded p-3" style="max-height:32rem;overflow:auto;white-space:pre-wrap"></pre></section>
+    <p id="lab-status" class="le-page-status" role="status" aria-live="polite">正在读取环境…</p>
+  </header>
+  <section class="le-workspace" aria-labelledby="lab-workspace-title">
+    <header class="le-workspace-header">
+      <div class="le-workspace-copy">
+        <h2 id="lab-workspace-title">{{ '课程提交与反馈' if environment_teacher else '安全字符串实践' }}</h2>
+        <p>{{ '查看每次提交的检测结果、分级成绩及对应源码。' if environment_teacher else '保存代码，观察边界输入，再查看真实检测结果。' }}</p>
+      </div>
+      {% if not environment_teacher %}
+      <div id="lab-controls" class="le-command-bar" hidden>
+        <div class="le-primary-actions">
+          <button type="button" class="le-button le-button-primary" data-operation="check"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="m9 5 10 7-10 7V5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>公开自测</button>
+          <button type="button" class="le-button" data-operation="submit">提交核验</button>
+        </div>
+        <details class="le-tools">
+          <summary>工程工具<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></summary>
+          <div class="le-tools-body">
+            <p id="lab-meta"></p>
+            <div class="le-tool-actions">
+              <button type="button" class="le-button" data-operation="health">环境检查</button>
+              <button type="button" class="le-button" data-operation="snapshot">保存代码快照</button>
+              <button type="button" class="le-button" data-operation="history">恢复代码</button>
+            </div>
+            <p class="le-tool-note">恢复前会预览文件范围，并自动保存当前代码。</p>
+            <div id="lab-recovery" class="le-recovery"></div>
+          </div>
+        </details>
+      </div>
+      {% endif %}
+    </header>
+    <div class="le-tabs" role="tablist" aria-label="核验工作区">
+      {% if not environment_teacher %}<button type="button" id="lab-tab-check" role="tab" aria-controls="lab-panel-check" aria-selected="true" data-lab-tab="check">公开自测</button>{% endif %}
+      <button type="button" id="lab-tab-submit" role="tab" aria-controls="lab-panel-submit" aria-selected="false" tabindex="-1" data-lab-tab="submit">正式核验</button>
+      <button type="button" id="lab-tab-history" role="tab" aria-controls="lab-panel-history" aria-selected="{{ 'true' if environment_teacher else 'false' }}" tabindex="{{ '0' if environment_teacher else '-1' }}" data-lab-tab="history">提交记录</button>
+    </div>
+    {% if not environment_teacher %}
+    <section id="lab-panel-check" class="le-tab-panel" role="tabpanel" aria-labelledby="lab-tab-check" data-lab-panel="check">
+      <div id="lab-check-summary" class="le-run-summary" aria-live="polite"></div>
+      <div id="lab-check-arena-slot"><div id="lab-shared-arena" class="le-linked-arena">
+        <div class="le-case-toolbar" aria-label="选择边界用例"><div id="lab-check-cases"></div></div>
+        <div class="le-trace-workspace">
+          <section class="le-trace-source-panel" aria-labelledby="lab-trace-source-title">
+            <header class="le-trace-source-header"><div><h3 id="lab-trace-source-title">学生源码</h3><span id="lab-trace-file">strcpy_s.c</span></div><span id="lab-trace-line" class="le-status">等待执行轨迹</span></header>
+            <div id="lab-trace-source" class="le-trace-source" tabindex="0" aria-label="实际执行源码与当前行"><p class="le-trace-empty">运行自测后，显示本次代码和逐行执行轨迹。</p></div>
+            <div class="le-trace-source-footer"><span id="lab-trace-version">尚无本次源码快照</span><span id="lab-trace-locals"></span></div>
+          </section>
+          <section class="le-battle-panel" aria-labelledby="lab-battle-title">
+            <header class="le-panel-header"><div class="le-panel-heading"><h3 id="lab-battle-title">边界攻防演示</h3><span id="lab-battle-state" class="le-status" data-state="pending">等待实际执行</span></div></header>
+            <div id="lab-battle-stage" class="le-battle-stage">
+              <canvas id="lab-battle-canvas" tabindex="0" aria-label="当前源码步骤对应的8字节缓冲区和边界内存"></canvas>
+              <div id="lab-battle-labels" class="le-battle-labels" aria-hidden="true"></div>
+              <div id="lab-battle-fallback" class="le-battle-fallback" hidden>当前浏览器暂不能显示三维演示。源码步骤和实际内存变化仍可查看。</div>
+            </div>
+            <div id="lab-trace-bytes" class="le-trace-bytes" aria-label="实际缓冲区字节"></div>
+          </section>
+        </div>
+        <div class="le-trace-controls" role="group" aria-label="执行轨迹播放控制">
+          <button type="button" id="lab-trace-play" class="le-button le-button-primary" disabled>播放</button>
+          <button type="button" id="lab-trace-prev" class="le-button le-button-small" aria-label="上一步" disabled>上一步</button>
+          <button type="button" id="lab-trace-next" class="le-button le-button-small" aria-label="下一步" disabled>单步</button>
+          <input type="range" id="lab-trace-progress" min="0" max="0" value="0" step="1" aria-label="定位执行步骤" disabled>
+          <span id="lab-trace-position" class="le-trace-position">0 / 0</span>
+          <button type="button" id="lab-battle-replay" class="le-button le-button-small" disabled>重放</button>
+        </div>
+        <p id="lab-battle-caption" class="le-battle-caption" aria-live="polite">选择输入并运行自测，查看实际代码执行与内存变化。</p>
+      </div></div>
+      <section class="le-check-section" aria-labelledby="lab-checks-title"><div class="le-section-heading"><h3 id="lab-checks-title">检测项目</h3><p>按主函数与思考练习分组查看。</p></div><div id="lab-check-tests"></div></section>
+    </section>
+    {% endif %}
+    <section id="lab-panel-submit" class="le-tab-panel" role="tabpanel" aria-labelledby="lab-tab-submit" data-lab-panel="submit" hidden>
+      <div id="lab-submit-summary" class="le-run-summary" aria-live="polite"></div>
+      <ol id="lab-verification-path" class="le-verification-path" aria-label="正式核验流程">
+        <li data-evidence-step="source"><span class="le-evidence-number">1</span><div><strong>源码快照</strong><span>读取已保存的文件</span></div></li>
+        <li data-evidence-step="checks"><span class="le-evidence-number">2</span><div><strong>运行检查</strong><span>按题目约定执行</span></div></li>
+        <li data-evidence-step="record"><span class="le-evidence-number">3</span><div><strong>结果归档</strong><span>关联源码与反馈</span></div></li>
+      </ol>
+      {% if not environment_teacher %}<div id="lab-submit-arena-slot"></div>{% endif %}
+      <div id="lab-submission-summary" class="le-submission-summary"></div>
+      <section id="lab-grading" class="le-grading" hidden aria-label="分级成绩与 AI 复核"></section>
+      <div id="lab-submit-tests" class="le-submission-tests"></div>
+      <section id="lab-detail" class="le-source-panel" hidden tabindex="-1" aria-label="本次核验保存的源码">
+        <div class="le-section-heading"><h3>源码快照</h3><p>切换文件查看本次提交保存的版本。</p></div>
+        <div id="lab-source-files" class="le-source-tabs" aria-label="源码文件"></div>
+        <pre id="lab-source" class="le-source-code"></pre>
+      </section>
+    </section>
+    <section id="lab-panel-history" class="le-tab-panel" role="tabpanel" aria-labelledby="lab-tab-history" data-lab-panel="history"{% if not environment_teacher %} hidden{% endif %}>
+      <header class="le-section-heading le-history-heading"><div><h3>提交记录</h3><p id="lab-history-count">正在读取记录…</p></div><button type="button" id="lab-refresh" class="le-button le-button-small">刷新记录</button></header>
+      <div class="le-table-scroll" tabindex="0" aria-label="正式核验记录，可横向滚动">
+        <table class="le-record-table"><thead><tr><th scope="col">时间 / 学生</th><th scope="col">结果</th><th scope="col">分级成绩</th><th scope="col">源码版本</th><th scope="col">环境 / 测试版本</th><th scope="col">详情</th></tr></thead><tbody id="lab-submissions"></tbody></table>
+      </div>
+    </section>
+    {% if not environment_teacher %}
+    <details class="le-raw-output"><summary>原始运行输出</summary><pre id="lab-result" hidden></pre></details>
+    {% endif %}
   </section>
 </main>
 {% endblock %}
 {% block scripts %}
 {{ super() }}
-<script defer src="{{ url_for('views.themes', path='js/dojo/lab-environment.js', v='coding-tiered-20261012-v31') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/vendor/three-r150.min.js', v='lab-code-trace-20261106-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/lab-battle.js', v='lab-code-trace-20261106-v1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/lab-environment.js', v='lab-code-trace-20261106-v1') }}"></script>
 {% endblock %}

@@ -5,9 +5,8 @@ with app.app_context():
     from CTFd.models import Users
     from CTFd.plugins.dojo_plugin.library_sources import library_courses, list_sources
     from CTFd.plugins.dojo_plugin.models import Dojos
-    from CTFd.plugins.dojo_plugin.models.construction import ConstructionSpaces
 
-    frozen = {row.course_id for row in ConstructionSpaces.query.all()}
+    frozen = {row.dojo_id for row in Dojos.query.filter(Dojos.data["readOnly"].as_boolean().is_(True)).all()}
     print('frozen review spaces:', sorted(frozen))
 
     for name in ('build-peer', 'build-author', 'build-lead'):

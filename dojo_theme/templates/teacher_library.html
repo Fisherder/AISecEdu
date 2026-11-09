@@ -2,7 +2,7 @@
 {% block stylesheets %}<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/teacher-library.css', v='frontend-restored-20261001-1') }}">{% endblock %}
 {% block content %}
 <main id="teacher-library" class="library-shell">
-  <header class="library-header"><div><p class="library-eyebrow">教学资源 · 一次准备，多次使用</p><h1>素材库</h1><p>把课件、测验、演示和实践题存下来，随时选入自己的课程。原件和课程副本互不影响。</p></div><div class="library-actions"><a href="/teacher/construction">建设任务中心</a><a href="/teacher/projects">生成项目合集</a><button id="library-save-open" class="library-primary" type="button">＋ 保存已有内容</button></div></header>
+  <header class="library-header"><div><p class="library-eyebrow">教学资源 · 一次准备，多次使用</p><h1>素材库</h1><p>把课件、测验、演示和实践题存下来，随时选入自己的课程。原件和课程副本互不影响。</p></div><div class="library-actions"><a href="/teacher/projects">生成项目合集</a><button id="library-save-open" class="library-primary" type="button">＋ 保存已有内容</button></div></header>
   <div class="library-layout">
     <aside class="library-sidebar"><h2>课程分类</h2><button id="library-all-collections" type="button" aria-pressed="true">全部分类</button><div id="library-collections"></div><button id="library-collection-open" type="button">＋ 新建课程分类</button><p>同一素材可归入多个分类，分类不改变原课程。</p></aside>
     <section class="library-main" aria-label="素材列表">
@@ -21,4 +21,4 @@
   <dialog id="library-archive-dialog" aria-labelledby="library-archive-heading"><form id="library-archive-form"><header><h2 id="library-archive-heading">归档素材</h2><button type="button" data-library-close aria-label="关闭">×</button></header><p id="library-archive-description"></p><p id="library-archive-error" role="alert"></p><footer><button type="button" data-library-close>取消</button><button id="library-archive-submit" type="submit" class="library-primary">确认归档</button></footer></form></dialog>
 </main>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script><script src="{{ url_for('views.themes_beta', path='js/dojo/teacher-library.js', v='frontend-restored-20261001-1') }}"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script><script src="{{ url_for('views.themes_beta', path='js/dojo/teacher-library.js', v='library-native-preview-20261106-1') }}"></script>{% endblock %}

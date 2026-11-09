@@ -56,10 +56,7 @@ def _message(message):
 
 def _auth_user_data(user):
     from ...account_activation import activation_required
-    from ...models.construction import ConstructionMembers
     from ...product.capabilities import teacher_mode_available
-
-    construction_member = ConstructionMembers.query.filter_by(user_id=user.id, active=True).first() is not None
 
     return {
         "user_id": user.id,
@@ -70,7 +67,7 @@ def _auth_user_data(user):
         "team_id": user.team_id,
         "course_teacher": teacher_mode_available(user),
         "activationRequired": activation_required(user),
-        "postLoginDestination": "/teacher/construction" if construction_member else None,
+        "postLoginDestination": None,
     }
 
 

@@ -130,10 +130,20 @@ def _course_href(dojo, tab, **values):
     return "/teacher/courses?" + urlencode({"dojo": dojo.reference_id, "tab": tab, **values})
 
 
-def source_preview_href(user, item):
+def source_preview_href(user, item, *, share_snapshot=False):
     from urllib.parse import quote, urlencode
     from .agent_runtime.artifacts import artifact_for_viewer
     from .coursework import assignment_for_teacher
+    from .readonly_courses import readonly_course
+
+    if share_snapshot and item.visibility == "teachers":
+        model = {"artifact": TeachingArtifacts, "assignment": TeachingAssignments, "practice": LearningDrafts}.get(item.source_kind)
+        source = model.query.filter_by(id=item.source_id).first() if model else None
+        if source is not None and readonly_course(source.dojo_id):
+            membership = DojoAdmins.query.filter_by(dojo_id=source.dojo_id, user_id=user.id).first()
+            if membership is None:
+                db.session.add(DojoAdmins(dojo_id=source.dojo_id, user_id=user.id))
+                db.session.flush()
 
     try:
         if item.source_kind == "artifact":
@@ -246,8 +256,7 @@ def instantiate_snapshot(user, dojo, module_index, payload, provenance):
 
 
 def frozen_course_ids():
-    from .models.construction import ConstructionSpaces
-    return db.session.query(ConstructionSpaces.course_id)
+    return db.session.query(Dojos.dojo_id).filter(Dojos.data["readOnly"].as_boolean().is_(True))
 
 
 def exclude_frozen(column):
@@ -281,8 +290,7 @@ def list_sources(user, *, kind="artifact", course_id=None, search="", content_ty
     }[kind]
     query = model.query.filter(exclude_frozen(model.dojo_id))
     if for_submission:
-        from .models.construction import ConstructionSpaces
-        unavailable = db.session.query(ConstructionSpaces.course_id)
+        unavailable = frozen_course_ids()
         archived = db.session.query(Dojos.dojo_id).filter(Dojos.data['archived'].as_boolean().is_(True))
         query = query.filter(or_(model.dojo_id.is_(None),
                                  ~model.dojo_id.in_(unavailable.union(archived))))

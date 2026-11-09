@@ -454,8 +454,9 @@
       var rows = Array.from(state.selected.values());
       el.refSummary.hidden = rows.length === 0;
       el.refSummary.innerHTML = rows.map(function (item) {
-        return "<span title=\"" + esc((item.course || "") + " · " + (item.unit || "")) + "\"><i class=\"fas fa-paperclip\"></i>" + esc(refLabel(item)) +
-          "<button type=\"button\" data-remove-reference=\"" + esc(item.id) + "\"><i class=\"fas fa-times\"></i></button></span>";
+        var label = refLabel(item);
+        return "<span title=\"" + esc([label, item.course, item.unit].filter(Boolean).join(" · ")) + "\"><i class=\"fas fa-paperclip\" aria-hidden=\"true\"></i><span class=\"student-reference-label\">" + esc(label) + "</span>" +
+          "<button type=\"button\" data-remove-reference=\"" + esc(item.id) + "\" aria-label=\"" + esc("移除引用：" + label) + "\" title=\"移除引用\"><i class=\"fas fa-times\" aria-hidden=\"true\"></i></button></span>";
       }).join("");
       el.refCount.hidden = rows.length === 0; el.refCount.textContent = String(rows.length);
       el.refSelection.textContent = rows.length ? "已选择 " + rows.length + " / 6 道题目" : "尚未选择题目";

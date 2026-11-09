@@ -7,7 +7,7 @@
 {% block entrypoint %}{% endblock %}
 
 {% block stylesheets %}
-<link rel="stylesheet" href="{{ url_for('views.themes', path='css/account-settings.css', v='frontend-restored-20261001-1') }}">
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/account-settings.css', v='teacher-ui-settings-20261106-1') }}">
 {% endblock %}
 
 {% block content %}
@@ -234,6 +234,18 @@
           <span><strong>减少动态效果</strong><small>关闭大部分动画和过渡，降低视觉干扰。该偏好会应用到整个平台。</small></span>
         </label>
         <p id="settings-appearance-status" class="account-settings-status" role="status" aria-live="polite"></p>
+        {% if is_course_teacher %}
+        <section class="account-settings-subsection">
+          <div class="account-settings-subheading"><div><h3>AI 共创快捷键</h3></div></div>
+          <dl class="account-settings-shortcuts">
+            <dt>搜索与命令</dt><dd>Ctrl / ⌘ K</dd>
+            <dt>新建会话</dt><dd>Alt N</dd>
+            <dt>切换工作区</dt><dd>Ctrl / ⌘ Shift &#92;</dd>
+            <dt>多行输入</dt><dd>Shift Enter</dd>
+            <dt>切换排队 / 下一步补充</dt><dd>Ctrl / ⌘ Enter</dd>
+          </dl>
+        </section>
+        {% endif %}
       </section>
 
       <section id="settings-panel-data" class="account-settings-panel" data-settings-panel="data" aria-labelledby="settings-data-title" hidden>

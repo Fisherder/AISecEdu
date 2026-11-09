@@ -11,19 +11,23 @@ import docker.errors
 
 from flask_restx import Namespace, Resource
 from flask import abort, request, session
+from sqlalchemy import or_
 from CTFd.models import Users, db
 from CTFd.utils.user import get_current_user, is_admin
 from CTFd.utils.decorators import admins_only, authed_only
 
 logger = logging.getLogger(__name__)
 
-from ...models import LearningAttempts, LearningAuditEvents
+from ...models import LearningAttempts, LearningAuditEvents, TeachingArtifacts, DojoAdmins
+from ...agent_runtime.artifacts import artifact_for_viewer, current_artifact_revision
+from ...agent_runtime.scope import ScopeError, build_scope
 from ...product.contracts import error_envelope, success_envelope
 from ...utils import get_current_container, container_password, user_node
 from ...utils.background_stats import publish_stat_event
 from ...utils.request_logging import get_trace_id
 from ...utils.workspace import start_on_demand_service, reset_home
-from ...pages.workspace import forward_workspace, forward_port, forward_short_port
+from ...pages.workspace import forward_workspace, forward_port, forward_short_port, _challenge_for_running_container
+from ...utils.dojo import get_current_dojo_challenge
 from ...config import WORKSPACE_SECRET, WORKSPACE_SESSION_SECONDS
 from ...runtime_profiles import container_runtime_profile
 from ...assignment_workspaces import coding_workspace_options
@@ -32,6 +36,75 @@ from ...assignment_workspaces import coding_workspace_options
 workspace_namespace = Namespace(
     "workspace", description="Endpoint to manage workspace iframe urls"
 )
+
+
+def _workspace_demo_view(artifact, user, challenge, teacher):
+    if artifact.artifact_type not in {"simulation", "attack-defense-scene", "interactive-lesson"}:
+        return None
+    if artifact.status not in {"DRAFT", "PERSONAL_DRAFT", "PUBLISHED", "CHANGES_REQUESTED"}:
+        return None
+    owned = artifact.owner_id == user.id
+    published = bool(challenge and artifact.dojo_id == challenge.dojo_id
+                     and artifact.status == "PUBLISHED" and artifact.self_workspace_id is None)
+    if not published and not (owned and (artifact.self_workspace_id is not None or teacher)):
+        return None
+    role = "teacher" if owned and teacher and artifact.self_workspace_id is None else "student"
+    try:
+        artifact_for_viewer(artifact.id, user)
+        build_scope(user, role=role, dojo_id=artifact.dojo_id,
+                    module_index=artifact.module_index, workspace_id=artifact.self_workspace_id)
+    except ScopeError:
+        return None
+    if artifact.artifact_type == "interactive-lesson":
+        revision = current_artifact_revision(artifact)
+        content = (revision.content or {}) if revision else {}
+        if not isinstance(content, dict):
+            return None
+        lesson = content.get("lesson", content)
+        items = lesson.get("artifacts") if isinstance(lesson, dict) else None
+        if not isinstance(items, list) or not any(
+            isinstance(item, dict) and isinstance(item.get("content"), dict)
+            and item["content"].get("renderingMode") == "cinematic-v1"
+            for item in items
+        ):
+            return None
+    same_module = bool(challenge and artifact.dojo_id == challenge.dojo_id
+                       and artifact.module_index == challenge.module_index)
+    return {
+        "id": artifact.id,
+        "title": artifact.title,
+        "source": "本章节" if published and same_module else "本课程" if published else "我的创作",
+        "role": role,
+        "dojoId": artifact.dojo_id,
+        "moduleIndex": artifact.module_index,
+        "workspaceId": artifact.self_workspace_id,
+        "url": f"/learning/artifacts/{artifact.id}",
+        "priority": 0 if same_module else 1 if published else 2,
+    }
+
+
+@workspace_namespace.route("/demos")
+class WorkspaceDemos(Resource):
+    @authed_only
+    def get(self):
+        user = get_current_user()
+        challenge = get_current_dojo_challenge() or _challenge_for_running_container(user)
+        teacher = bool(getattr(user, "type", None) == "admin"
+                       or DojoAdmins.query.filter_by(user_id=user.id).first())
+        criteria = TeachingArtifacts.owner_id == user.id
+        if challenge:
+            criteria = or_(criteria, (TeachingArtifacts.dojo_id == challenge.dojo_id)
+                           & (TeachingArtifacts.status == "PUBLISHED")
+                           & (TeachingArtifacts.self_workspace_id.is_(None)))
+        rows = (TeachingArtifacts.query.filter(criteria,
+                TeachingArtifacts.artifact_type.in_(["simulation", "attack-defense-scene", "interactive-lesson"]),
+                TeachingArtifacts.status.in_(["DRAFT", "PERSONAL_DRAFT", "PUBLISHED", "CHANGES_REQUESTED"]))
+                .order_by(TeachingArtifacts.updated.desc()).limit(100).all())
+        items = [item for row in rows if (item := _workspace_demo_view(row, user, challenge, teacher))]
+        items.sort(key=lambda item: item["priority"])
+        for item in items:
+            item.pop("priority")
+        return {"success": True, "artifacts": items}
 
 _ADMIN_RUNTIME_IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 

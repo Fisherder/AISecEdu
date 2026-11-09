@@ -3141,3 +3141,20 @@
     animation: none;
   }
 }
+
+.account-settings-shortcuts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px 24px;
+  margin: 0;
+  font-size: var(--ae-type-caption);
+}
+.account-settings-shortcuts dt {
+  color: var(--ui-text-muted);
+  font-weight: 400;
+}
+.account-settings-shortcuts dd {
+  margin: 0;
+  text-align: right;
+}

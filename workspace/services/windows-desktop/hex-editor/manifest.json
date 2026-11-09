@@ -1,0 +1,15 @@
+{
+  "name": "HxD",
+  "version": "1.7.7.0",
+  "language": "Chinese simplified",
+  "edition": "portable",
+  "source": "https://mh-nexus.de/downloads/HxDchs.zip",
+  "vendorPage": "https://mh-nexus.de/en/hxd/",
+  "archiveSha256": "e64e7c6481d596bc62b8ec731bfadf21fe6609b953e104449cd5bb09be6744ba",
+  "archiveSha512": "85bbdcb004338cb8a77e0b04fa9a40b64427cf6d2a6ecc4691deee3cc144e01c9566b5e3df9cecb62af54ec9d830ad1b832dbdb7ea8273b0edf59b597e7bdc12",
+  "vendorSha512Verified": true,
+  "license": "Original license and every archive member retained unchanged",
+  "revision": "hxd-1.7.7.0-20261103-v1",
+  "baseEditorMediaSha256": "d841319471ee1f70dcc50e7e8048498c63c7ec75c062a847893d3ba8be4dde93",
+  "mediaSha256": "ad4956f025fd0409085eead94e091a533ec456eb73a55d768413ea28c19f4a3f"
+}

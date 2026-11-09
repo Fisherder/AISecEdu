@@ -26,7 +26,6 @@ from .v1.debate import debate_namespace
 from .v1.coursework import coursework_namespace
 from .v1.material_library import material_library_namespace
 from .v1.inquiry import inquiry_namespace
-from .v1.construction import construction_namespace
 from .v1.ui import ui_namespace
 from .v1.admin import admin_namespace
 from .v1.rainier import rainier_namespace
@@ -101,7 +100,5 @@ api_v1.add_namespace(ui_namespace, "/ui")
 api_v1.add_namespace(admin_namespace, "/admin")
 api_v1.add_namespace(rainier_namespace, "/rainier")
 
-api_v1.add_namespace(construction_namespace, "/construction")
-
-from ..construction_guards import protect_request
+from ..readonly_courses import protect_request
 api.before_request(protect_request)

@@ -23,6 +23,19 @@ export function ContextPanel() {
       </header>
       <p className="quiet">选择课程、资料和技能，为这次教学任务提供依据。</p>
       <section>
+        <label className="field">
+          学习模式
+          <select
+            aria-label="学习模式"
+            value={state.draft.learningPattern}
+            onChange={(event) => c.setDraft({ learningPattern: event.target.value as '' | 'process-inquiry' })}
+          >
+            <option value="">通用创作</option>
+            <option value="process-inquiry">流程探究 · AES-128</option>
+          </select>
+        </label>
+      </section>
+      <section>
         <h3>课程与章节</h3>
         <label className="field">
           归属课程

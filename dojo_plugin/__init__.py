@@ -315,7 +315,7 @@ def create_database_schema():
         _reconcile_teaching_thread_schema()
         from .agent_runtime.session_events import install_session_event_capture
         install_session_event_capture()
-        from .construction_guards import install_guards
+        from .readonly_courses import install_guards
         install_guards()
         # A user deletion reaches model_invocations through two paths:
         # owner_id is SET NULL directly, while owned artifacts cascade through

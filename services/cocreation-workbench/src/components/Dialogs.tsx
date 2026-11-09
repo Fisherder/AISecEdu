@@ -9,10 +9,6 @@ import {
   Check,
   BookOpen,
   WandSparkles,
-  Moon,
-  Sun,
-  Monitor,
-  Settings2,
 } from 'lucide-react';
 import { useWorkbench } from '../core/context';
 import { Button, Dialog, Empty } from './ui';
@@ -35,12 +31,6 @@ function SearchDialog() {
       shortcut: '⌘ ⇧ \\',
       icon: PanelRight,
       action: () => c.togglePanel(),
-    },
-    {
-      label: '外观与设置',
-      shortcut: '',
-      icon: Settings2,
-      action: () => c.patch({ modal: 'settings' }),
     },
   ];
   const test = (value: string) => value.toLowerCase().includes(query.toLowerCase());
@@ -204,88 +194,11 @@ function CatalogDialog({ kind }: { kind: 'sources' | 'skills' }) {
     </Dialog>
   );
 }
-function SettingsDialog() {
-  const { state, controller: c } = useWorkbench();
-  const [appearance, setAppearance] = useState(
-    document.documentElement.dataset.aiseceduAppearance || 'light',
-  );
-  const [palette, setPalette] = useState(
-    document.documentElement.dataset.aiseceduPalette || 'academy',
-  );
-  return (
-    <Dialog title="工作台设置" onClose={() => c.patch({ modal: null })}>
-      <div className="dialog-body">
-        <h3>外观</h3>
-        <div className="appearance-options">
-          {[
-            { key: 'light', label: '浅色', Icon: Sun },
-            { key: 'dark', label: '深色', Icon: Moon },
-            { key: 'system', label: '跟随系统', Icon: Monitor },
-          ].map((item) => (
-            <Button
-              className={appearance === item.key ? 'selected' : ''}
-              key={item.key}
-              onClick={() => setAppearance(item.key)}
-            >
-              <item.Icon size={19} />
-              {item.label}
-            </Button>
-          ))}
-        </div>
-        <label className="field">
-          浅色配色
-          <select
-            value={palette === 'midnight' ? 'academy' : palette}
-            onChange={(event) => setPalette(event.target.value)}
-          >
-            <option value="academy">学院蓝</option>
-            <option value="forest">森林绿</option>
-            <option value="sunrise">日出暖色</option>
-          </select>
-        </label>
-        <h3>快捷键</h3>
-        <dl className="shortcuts">
-          <dt>搜索与命令</dt>
-          <dd>Ctrl / ⌘ K</dd>
-          <dt>新建会话</dt>
-          <dd>Alt N</dd>
-          <dt>切换工作区</dt>
-          <dd>Ctrl / ⌘ Shift \</dd>
-          <dt>多行输入</dt>
-          <dd>Shift Enter</dd>
-          <dt>切换排队 / 下一步补充</dt>
-          <dd>Ctrl / ⌘ Enter</dd>
-        </dl>
-        <p className="quiet">任务由服务器持续运行；关闭页面不会丢失执行进度。</p>
-      </div>
-      <div className="dialog-actions">
-        <Button onClick={() => c.patch({ modal: null })}>关闭</Button>
-        <Button
-          className="primary"
-          disabled={state.busy}
-          onClick={() =>
-            void c.run(async () => {
-              await c.saveAppearance(
-                appearance,
-                appearance === 'dark' ? 'midnight' : palette === 'midnight' ? 'academy' : palette,
-              );
-              c.patch({ modal: null });
-            })
-          }
-        >
-          保存外观
-        </Button>
-      </div>
-    </Dialog>
-  );
-}
 export function Dialogs() {
   const { state } = useWorkbench();
   return state.modal === 'search' ? (
     <SearchDialog />
   ) : state.modal === 'sources' || state.modal === 'skills' ? (
     <CatalogDialog kind={state.modal} />
-  ) : state.modal === 'settings' ? (
-    <SettingsDialog />
   ) : null;
 }

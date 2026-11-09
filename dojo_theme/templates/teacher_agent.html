@@ -11,6 +11,7 @@
   rel="stylesheet"
   href="{{ url_for('views.themes', path='css/teaching-agent.css', v='cocreation-20261002-v2') }}"
 />
+{% if is_student_agent %}<link rel="stylesheet" href="{{ url_for('views.themes', path='css/student-guide-composer.css', v='guide-composer-20261106-v1') }}" />{% endif %}
 {% if not is_student_agent %}<link rel="stylesheet" href="{{ url_for('views.themes', path='css/teaching-agent-workbench.css', v='dark-theme-20261003-v1') }}" />{% endif %}
 {% endblock %} {% block content %}
 {% if is_student_agent %}<h1 class="sr-only">AI 学习助手</h1>{% endif %}
@@ -323,6 +324,7 @@
       <section id="teaching-source-menu" class="teaching-source-menu" aria-label="本轮引用的资料" hidden></section>
       {% endif %}
       {% if is_student_agent %}
+      <div class="student-composer-surface">
       <div id="student-reference-summary" class="student-reference-summary" aria-label="本对话引用题目" hidden></div>
       {% else %}
       <section id="teaching-skill-menu" class="teaching-skill-menu" aria-label="可用技能" hidden>
@@ -407,6 +409,7 @@
           <kbd>Enter</kbd> 换行</span
         >
       </div>
+      {% if is_student_agent %}</div>{% endif %}
     </div>
   </section>
 
@@ -819,6 +822,6 @@
 {% endif %}
 <script
   defer
-  src="{{ url_for('views.themes', path=('js/dojo/learning-guide.js' if is_student_agent else 'js/dojo/teaching-agent.js'), v=('aisecedu-student-agent-unified-v6-deadline' if is_student_agent else 'inquiry-cocreation-20261019-4')) }}"
+  src="{{ url_for('views.themes', path=('js/dojo/learning-guide.js' if is_student_agent else 'js/dojo/teaching-agent.js'), v=('guide-composer-20261106-v1' if is_student_agent else 'inquiry-cocreation-20261019-4')) }}"
 ></script>
 {% endblock %}

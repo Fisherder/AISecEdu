@@ -522,53 +522,57 @@ export function Welcome() {
     },
   ];
   return (
-    <div className="welcome">
-      <div className="welcome-heading">
-        <span className="welcome-symbol">
-          <Sparkles size={24} />
-        </span>
-        <h1>今天，一起做出什么？</h1>
-        <p>从一个教学想法，到可以直接使用的课堂成品。</p>
+    <div className="conversation">
+      <div className="transcript-scroll">
+        <div className="welcome">
+        <div className="welcome-heading">
+          <span className="welcome-symbol">
+            <Sparkles size={24} />
+          </span>
+          <h1>今天，一起做出什么？</h1>
+          <p>从一个教学想法，到可以直接使用的课堂成品。</p>
+        </div>
+        <div className="starter-grid">
+          {starters.map((item) => (
+            <Button
+              key={item.title}
+              onClick={() => {
+                c.setDraft({ text: item.prompt, artifactType: item.type });
+                window.dispatchEvent(new Event('workbench-focus-composer'));
+              }}
+            >
+              <item.icon size={18} />
+              <span>
+                <strong>{item.title}</strong>
+                <small>{item.subtitle}</small>
+              </span>
+            </Button>
+          ))}
+        </div>
+        <section className="recent-work">
+          <header>
+            <h2>继续创作</h2>
+            <Button onClick={() => c.setPanel('artifacts')}>
+              全部成品
+              <ArrowUpRight size={13} />
+            </Button>
+          </header>
+          {state.artifacts.slice(0, 4).map((artifact) => (
+            <button key={artifact.id} onClick={() => void c.openArtifact(artifact.id).catch(c.error)}>
+              <FileText size={16} />
+              <strong>{artifact.title}</strong>
+              <span>V{artifact.currentRevision}</span>
+              <small>{dateLabel(artifact.updated)}</small>
+              <ArrowUpRight size={14} />
+            </button>
+          ))}
+          {!state.artifacts.length && (
+            <p className="quiet">生成的课件、演示和题目会保存在这里，随时继续修改。</p>
+          )}
+        </section>
+        </div>
       </div>
       <Composer welcome />
-      <div className="starter-grid">
-        {starters.map((item) => (
-          <Button
-            key={item.title}
-            onClick={() => {
-              c.setDraft({ text: item.prompt, artifactType: item.type });
-              window.dispatchEvent(new Event('workbench-focus-composer'));
-            }}
-          >
-            <item.icon size={18} />
-            <span>
-              <strong>{item.title}</strong>
-              <small>{item.subtitle}</small>
-            </span>
-          </Button>
-        ))}
-      </div>
-      <section className="recent-work">
-        <header>
-          <h2>继续创作</h2>
-          <Button onClick={() => c.setPanel('artifacts')}>
-            全部成品
-            <ArrowUpRight size={13} />
-          </Button>
-        </header>
-        {state.artifacts.slice(0, 4).map((artifact) => (
-          <button key={artifact.id} onClick={() => void c.openArtifact(artifact.id).catch(c.error)}>
-            <FileText size={16} />
-            <strong>{artifact.title}</strong>
-            <span>V{artifact.currentRevision}</span>
-            <small>{dateLabel(artifact.updated)}</small>
-            <ArrowUpRight size={14} />
-          </button>
-        ))}
-        {!state.artifacts.length && (
-          <p className="quiet">生成的课件、演示和题目会保存在这里，随时继续修改。</p>
-        )}
-      </section>
     </div>
   );
 }

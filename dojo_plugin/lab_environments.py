@@ -1,4 +1,5 @@
 import json
+import re
 import time
 
 from flask import abort, request, render_template
@@ -15,6 +16,94 @@ from .learning.evidence import append_evidence
 
 ACTION = 'coding.submission.verified'
 SUPPORTED_TASKS = {'secure-copy-homework1', 'hw02-bounds-check', 'hw03-safe-sprintf', 'lab03-shellcode-layout', 'lab04-ftp-fuzz', 'lab05-exception-dispatch', 'lab06-format-audit', 'lab07-sql-injection'}
+
+def _structured_checks(output):
+    checks = []
+    declared = None
+    for line in output.splitlines():
+        match = re.match(r'^\[(PASS|ENVIRONMENT|COMPILE|TIMEOUT|RUNTIME|TEST)\] (.+)$', line)
+        if match:
+            category, name = match.groups()
+            component = 'main' if name.startswith('主实现：') else 'student-tests' if name.startswith('自编测试：') else None
+            for title, key in [('无界复制', 'unbounded'), ('没有结尾', 'termination'), ('意外截断', 'truncation'), ('差一错误', 'off_by_one')]:
+                if name.startswith('修正练习 / ' + title + '：'):
+                    component = 'repair.' + key
+            checks.append({'id': 'output-' + str(len(checks) + 1), 'name': name, 'category': category,
+                           'passed': category == 'PASS', 'component': component, 'feedback': ''})
+        elif line.startswith('  ') and checks:
+            checks[-1]['feedback'] = (checks[-1]['feedback'] + '\n' + line[2:]).strip()[:4000]
+        else:
+            total = re.match(r'^通过 (\d+) / (\d+) 项', line)
+            if total:
+                declared = {'passed': int(total[1]), 'total': int(total[2])}
+    summary = {'total': len(checks), 'passed': sum(row['passed'] for row in checks),
+               'failed': sum(not row['passed'] for row in checks), 'unknown': 0,
+               'complete': declared is not None and declared['total'] == len(checks)}
+    return {'tests': checks, 'summary': summary,
+            'checkEvidence': {'source': 'grader-output', 'verifiedReceipt': False, 'declaredSummary': declared}}
+
+
+_CHECK_RECEIPT_PROGRAM = r'''
+import hashlib,hmac,json,os,stat,subprocess,sys,time
+from pathlib import Path
+
+def demote():
+    os.setgroups([])
+    os.setgid(1000)
+    os.setuid(1000)
+
+code = """import json,os,stat,sys
+from pathlib import Path
+root=Path(json.loads(Path('/etc/aisecedu-lab.json').read_text())['workspace'])/'evidence'
+fd=os.open(root/sys.argv[1],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+with os.fdopen(fd,'rb') as stream:
+ info=os.fstat(stream.fileno())
+ if not stat.S_ISREG(info.st_mode) or info.st_size>1000000:raise ValueError('Invalid receipt')
+ print(stream.read(1000001).decode())
+"""
+try:
+    mode = sys.argv[1]
+    if mode not in ('self-test','formal'): raise ValueError('Invalid mode')
+    manifest = json.loads(Path('/etc/aisecedu-lab.json').read_text())
+    process = subprocess.run(['/usr/local/bin/python3','-I','-c',code,'self-test.json' if mode=='self-test' else 'formal-receipt.json'],preexec_fn=demote,capture_output=True,timeout=4)
+    if process.returncode: raise ValueError('No receipt')
+    receipt = json.loads(process.stdout)
+    payload = receipt['payload']
+    encoded = json.dumps(payload,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
+    key = Path('/etc/secure-coding-receipt.key').read_bytes()
+    binding = hmac.new(key,Path('/flag').read_bytes(),hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(hmac.new(key,encoded,hashlib.sha256).hexdigest(),receipt['signature']):raise ValueError('Invalid signature')
+    if receipt['id']!=hashlib.sha256(encoded).hexdigest() or payload['contextBinding']!=binding:raise ValueError('Invalid binding')
+    if payload['mode']!=mode or payload['task']!='secure-copy-homework1' or payload['testVersion']!=manifest['testVersion']:raise ValueError('Invalid scope')
+    if not float(sys.argv[2]) <= float(payload['startedAt']) <= float(payload['finishedAt']) <= time.time()+1:raise ValueError('Stale receipt')
+    rows=payload['results']
+    if not isinstance(rows,list) or any(not isinstance(row,dict) or not isinstance(row.get('passed'),bool) for row in rows):raise ValueError('Invalid results')
+    allowed={'id','name','category','passed','component','group','feedback','input','criterion'}
+    tests=[{k:v for k,v in row.items() if k in allowed} for row in rows]
+    for row in tests:
+        if isinstance(row.get('input'),dict) and isinstance(row['input'].get('capacity'),int):row['input']['capacityText']=str(row['input']['capacity'])
+    print(json.dumps({'tests':tests,'summary':{'total':len(rows),'passed':sum(row['passed'] for row in rows),'failed':sum(not row['passed'] for row in rows),'unknown':0,'complete':True},'checkEvidence':{'source':'signed-receipt','verifiedReceipt':True,'mode':mode,'receiptId':receipt['id'],'startedAt':payload['startedAt'],'finishedAt':payload['finishedAt'],'sourceSha256':payload['sourceSha256'],'submissionSha256':payload.get('submissionSha256'),'testVersion':payload['testVersion']}}))
+except (OSError,ValueError,KeyError,TypeError,subprocess.TimeoutExpired):
+    print('{}')
+'''
+
+
+def _check_snapshot(container, manifest, operation, started_at, output):
+    fallback = _structured_checks(output)
+    if manifest.get('taskId') != 'secure-copy-homework1':
+        return fallback
+    try:
+        response = container.exec_run(['/usr/bin/timeout', '7', '/usr/local/bin/python3', '-I', '-c',
+                                       _CHECK_RECEIPT_PROGRAM, 'formal' if operation == 'submit' else 'self-test', str(started_at)], user='0')
+        if response.exit_code or len(response.output) > 1000000:
+            return fallback
+        snapshot = json.loads(response.output)
+        if snapshot.get('checkEvidence', {}).get('verifiedReceipt') is True:
+            return snapshot
+    except Exception:
+        pass
+    return fallback
+
 
 def lab_context(user):
     container = get_current_container(user)
@@ -94,6 +183,7 @@ def register_api(namespace):
                 if any(key in data and data[key] != value for key, value in expected.items()):
                     return {'success': False, 'error': '当前题目或环境版本已变化，请重新预览重置范围。'}, 409
             started = time.monotonic()
+            started_at = time.time()
             if operation in {'check', 'submit'}:
                 command = ['/usr/bin/timeout', '210', '/challenge/' + operation, manifest['workspace'] + '/' + manifest['studentSource']]
             else:
@@ -107,6 +197,14 @@ def register_api(namespace):
             if operation in {'check', 'submit'}:
                 category = 'PASS' if executed.exit_code == 0 else 'ENVIRONMENT' if executed.exit_code == 70 else 'TIMEOUT' if executed.exit_code == 124 else next((name for name in ('ENVIRONMENT', 'COMPILE', 'TIMEOUT', 'RUNTIME', 'TEST') if '[' + name + ']' in output), 'TEST')
                 result = {'exitCode': executed.exit_code, 'output': output, 'category': category}
+                result.update(_check_snapshot(container, manifest, operation, started_at, output))
+                if manifest.get('taskId') == 'secure-copy-homework1':
+                    from .lab_boundary_observations import observe_safe_copy_boundary
+                    result['visualCases'] = observe_safe_copy_boundary(container, manifest)
+                    source_hash = result.get('checkEvidence', {}).get('sourceSha256')
+                    observation_hash = (result.get('visualCases') or {}).get('sourceSha256')
+                    if result['visualCases'] is not None:
+                        result['visualCases']['sourceMatchesChecks'] = source_hash == observation_hash if source_hash and observation_hash else None
             else:
                 try:
                     result = json.loads(output)

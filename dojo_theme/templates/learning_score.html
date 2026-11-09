@@ -1,7 +1,13 @@
 {% extends "base.html" %}
 
+{% block body_class %}student-learning-insights-page student-learning-score-page{% endblock %}
+
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/student-learning-insights.css', v='student-insights-20261105-v3') }}">
+{% endblock %}
+
 {% block content %}
-<div id="learning-score-page" class="learning-score-page" data-attempt-id="{{ attempt_id }}">
+<div id="learning-score-page" class="learning-score-page xj-student-insights sl-theme" data-attempt-id="{{ attempt_id }}" aria-busy="true">
   <header class="learning-score-hero">
     <div class="learning-score-hero-copy">
       <nav class="learning-score-breadcrumb" aria-label="评分页面导航">
@@ -11,9 +17,8 @@
         <i class="fas fa-chevron-right" aria-hidden="true"></i>
         <span>学习反馈</span>
       </nav>
-      <p class="learning-score-eyebrow">本次学习反馈</p>
       <h1 id="learning-score-title">{{ challenge.name }}</h1>
-      <p id="learning-score-meta">正在分别读取活动状态、评分与过程证据…</p>
+      <p id="learning-score-meta">正在加载学习反馈…</p>
     </div>
     <div class="learning-score-actions">
       {% if Session.rainier_session_id %}<a class="btn btn-outline-primary" href="/integrations/rainier/status">实验平台回传</a>{% endif %}
@@ -21,16 +26,12 @@
         <i class="fas fa-arrow-left" aria-hidden="true"></i> 返回题目
       </a>
       <a id="learning-score-course-link" class="btn btn-outline-primary" href="/dojo/{{ challenge.dojo.reference_id }}/learning">
-        <i class="fas fa-chart-line" aria-hidden="true"></i> 课程学习分析
+        <i class="fas fa-chart-line" aria-hidden="true"></i> 学习进展
       </a>
     </div>
   </header>
 
-  <div class="learning-score-notice alert alert-info" id="learning-score-policy-notice">
-    <strong>本次 AI 智能评分为实践附加分，不代表课程总成绩。</strong>
-    有效 flag 通过校验后至少获得 90 分（满分 100 分）；过程表现用于补充反馈和进一步加分。
-  </div>
-  <div id="learning-score-notice" class="learning-score-notice alert alert-info" role="status">正在加载评分详情…</div>
+  <div id="learning-score-notice" class="learning-score-notice" role="status" aria-live="polite">正在加载评分详情…</div>
 
   <div class="learning-score-content" hidden>
     <section class="learning-score-overview" aria-label="总分概览">
@@ -42,7 +43,7 @@
           </div>
         </div>
         <div>
-          <p class="learning-score-card-label">本次实践附加分</p>
+          <p class="learning-score-card-label" id="learning-score-total-label">本次评分</p>
           <h2 id="learning-score-level">正在读取评分状态</h2>
           <p id="learning-score-feedback"></p>
           <p id="learning-score-completion-credit" hidden></p>
@@ -50,11 +51,11 @@
       </div>
       <div class="learning-score-metric">
         <span class="learning-score-metric-icon is-objective"><i class="fas fa-flag-checkered"></i></span>
-        <div><small>客观结果</small><strong id="learning-score-objective-value"><span id="learning-score-objective">—</span> <span>/ 60</span></strong></div>
+        <div><small id="learning-score-objective-label">客观结果</small><strong id="learning-score-objective-value"><span id="learning-score-objective">—</span> <span>/ 60</span></strong></div>
       </div>
       <div class="learning-score-metric">
         <span class="learning-score-metric-icon is-process"><i class="fas fa-route"></i></span>
-        <div><small>过程表现</small><strong id="learning-score-process-value"><span id="learning-score-process">—</span> <span>/ 40</span></strong></div>
+        <div><small id="learning-score-process-label">过程表现</small><strong id="learning-score-process-value"><span id="learning-score-process">—</span> <span>/ 40</span></strong></div>
       </div>
       <div class="learning-score-metric">
         <span class="learning-score-metric-icon is-trust"><i class="fas fa-shield-alt"></i></span>
@@ -64,11 +65,8 @@
 
     <section class="learning-score-grid">
       <article class="learning-score-panel learning-score-breakdown">
-        <div class="learning-score-panel-header">
-          <div>
-            <p class="learning-score-eyebrow">评分明细</p>
-            <h2>每一分从哪里来</h2>
-          </div>
+        <div class="learning-score-panel-header learning-score-section-heading">
+          <h2>评分明细</h2>
           <span id="learning-score-revision" class="learning-score-badge">修订 1</span>
         </div>
         <div id="learning-score-criteria"></div>
@@ -76,21 +74,21 @@
 
       <aside class="learning-score-side">
         <article class="learning-score-panel">
-          <div class="learning-score-panel-header">
+          <div class="learning-score-panel-header learning-score-section-heading">
             <div>
-              <p class="learning-score-eyebrow">能力变化</p>
-              <h2>六维能力表现</h2>
+              <h2>本次六维表现</h2>
+              <p>本次评估的维度得分</p>
             </div>
           </div>
-          <div id="learning-score-abilities" class="learning-score-abilities"></div>
+          <div class="learning-score-ability-layout">
+            <div id="learning-score-radar" class="learning-score-radar"></div>
+            <div id="learning-score-abilities" class="learning-score-abilities"></div>
+          </div>
         </article>
 
         <article class="learning-score-panel">
-          <div class="learning-score-panel-header">
-            <div>
-              <p class="learning-score-eyebrow">本次复盘</p>
-              <h2>你的总结</h2>
-            </div>
+          <div class="learning-score-panel-header learning-score-section-heading">
+            <h2>学习复盘</h2>
           </div>
           <p id="learning-score-reflection" class="learning-score-reflection"></p>
         </article>
@@ -98,20 +96,22 @@
     </section>
 
     <section class="learning-score-panel learning-score-evidence-panel">
-      <div class="learning-score-panel-header">
-        <div>
-          <p class="learning-score-eyebrow">可信证据</p>
-          <h2>评分依据时间线</h2>
-        </div>
+      <div class="learning-score-panel-header learning-score-section-heading">
+        <h2>学习过程记录</h2>
         <span id="learning-score-chain" class="learning-score-badge"></span>
       </div>
       <div id="learning-score-evidence" class="learning-score-evidence"></div>
     </section>
+    <details id="learning-score-policy-notice" class="learning-score-policy-details">
+      <summary>评分说明</summary>
+      <p id="learning-score-policy-copy">本次 AI 智能评分为实践附加分，不代表课程总成绩。有效 flag 通过校验后至少获得 90 分（满分 100 分）；过程表现用于补充反馈和进一步加分。</p>
+    </details>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-score.js', v='coding-tiered-20261012-v31-final') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/learning-skill-chart.js', v='student-insights-20261105-v3') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/learning-score.js', v='student-insights-20261105-v3') }}"></script>
 {% endblock %}

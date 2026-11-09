@@ -3,6 +3,7 @@
 
 {% block stylesheets %}
 {{ super() }}
+<link rel="stylesheet" href="{{ url_for('views.themes', path='css/workspace-demo.css', v='workspace-demo-20261106-v2') }}">
 {% if exercise_mode in ["SIMULATION", "HYBRID"] %}
 <link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/simulation.css', v='frontend-restored-20261001-1') }}">
 {% endif %}
@@ -136,7 +137,16 @@
       <button type="button" data-workspace-mobile-panel="navigation" aria-pressed="false"><i class="fas fa-list" aria-hidden="true"></i>课程</button>
       <button type="button" data-workspace-mobile-panel="workspace" class="is-active" aria-pressed="true"><i class="fas fa-flask" aria-hidden="true"></i>实验</button>
       <button type="button" data-workspace-mobile-panel="tutor" aria-pressed="false"><i class="fas fa-lightbulb" aria-hidden="true"></i>AI 助手</button>
+      <button type="button" data-workspace-mobile-panel="demo" aria-pressed="false"><i class="fas fa-cube" aria-hidden="true"></i>演示</button>
     </nav>
+    <div class="workspace-viewbar" aria-label="工作区视图">
+      <span class="workspace-viewbar-title">{{ challenge.name }}</span>
+      <div class="workspace-view-options" role="group" aria-label="辅助面板">
+        <button type="button" data-workspace-view="code" aria-pressed="true"><i class="fas fa-code" aria-hidden="true"></i>实验环境</button>
+        <button type="button" data-workspace-view="demo" aria-pressed="false" aria-controls="workspace-demo"><i class="fas fa-cube" aria-hidden="true"></i>教学演示</button>
+        <button type="button" data-workspace-view="tutor" aria-pressed="false"><i class="fas fa-lightbulb" aria-hidden="true"></i>AI 助手</button>
+      </div>
+    </div>
     <div class="challenge-workspace-body">
       <div class="challenge-workspace-surface">
         {% if exercise_mode in ["SIMULATION", "HYBRID"] %}
@@ -148,6 +158,18 @@
           {% include "components/workspace_ssh.html" %}
         </div>
       </div>
+      <aside id="workspace-demo" class="workspace-demo" aria-label="教学演示" hidden>
+        <header class="workspace-demo-header">
+          <label class="workspace-demo-picker"><span class="sr-only">选择教学演示</span><select data-workspace-demo-select disabled><option>正在读取演示…</option></select></label>
+          <button type="button" data-workspace-demo-reload aria-label="重新加载演示" title="重新加载演示"><i class="fas fa-redo" aria-hidden="true"></i></button>
+          <a data-workspace-demo-open target="_blank" rel="noopener" aria-label="在新窗口打开演示" title="在新窗口打开演示" hidden><i class="fas fa-expand-alt" aria-hidden="true"></i></a>
+          <button type="button" data-workspace-demo-close aria-label="收起教学演示" title="收起教学演示"><i class="fas fa-times" aria-hidden="true"></i></button>
+        </header>
+        <div class="workspace-demo-stage">
+          <div class="workspace-demo-status" role="status"><p data-workspace-demo-message>正在读取可用演示…</p><button type="button" data-workspace-demo-retry hidden>重新加载</button><a href="/learning/extend" data-workspace-demo-create hidden>打开我的创作</a></div>
+          <iframe id="workspace-demo-iframe" title="教学演示播放器" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals" allow="fullscreen" allowfullscreen referrerpolicy="no-referrer" hidden></iframe>
+        </div>
+      </aside>
       {% include "components/learning_tutor.html" %}
     </div>
     {% include "components/actionbar.html" %}
@@ -166,5 +188,6 @@
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}?v=aisecedu-toast-v1"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-tutor.js') }}?v=aisecedu-student-context-v6"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/workspace.js') }}?v=aisecedu-20260922-guided-workspace"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/workspace-demo.js', v='workspace-demo-20261106-v2') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/desktop-keyboard.js') }}?v=aisecedu-desktop-keyboard-v11"></script>
 {% endblock %}

@@ -6,7 +6,7 @@ from CTFd.models import Users, db
 from ..agent_runtime.artifacts import artifact_course_teacher, content_hash
 from ..agent_runtime.scope import ScopeError, build_scope, dojo_for_user, validate_module
 from ..authoring_standards import prompt as standards_prompt, provenance, resolve
-from ..construction_guards import frozen_course
+from ..readonly_courses import readonly_course
 from ..models import LearningAuditEvents, TeachingArtifactRevisions, TeachingArtifacts, TeachingMaterials
 from ..models.inquiry import InquiryAttempts, InquiryEvents, InquiryReleases
 from .aes128 import encrypt_trace
@@ -29,7 +29,7 @@ def teacher_artifact(user, artifact_id):
     if artifact is None or artifact.owner_id != user.id or artifact.self_workspace_id is not None:
         raise ScopeError("项目不存在或无权修改。")
     build_scope(user, role="teacher", dojo_id=artifact.dojo_id)
-    if artifact.status in {"ARCHIVED", "DELETED"} or frozen_course(artifact.dojo_id):
+    if artifact.status in {"ARCHIVED", "DELETED"} or readonly_course(artifact.dojo_id):
         raise InquiryConflict("这个项目目前不可修改。")
     return artifact
 
@@ -65,7 +65,7 @@ def create_project(user, values, *, dojo=None, module_index=None, source_refs=No
         raise ValueError("章节序号必须为整数。")
     if dojo:
         validate_module(dojo, module_index)
-    if frozen_course(dojo.dojo_id if dojo else None):
+    if readonly_course(dojo.dojo_id if dojo else None):
         raise InquiryConflict("固定审核副本不能创建项目。")
     spec = make_spec(values)
     policy = standards(dojo.dojo_id if dojo else None)
@@ -176,7 +176,7 @@ def project_view(user, artifact_id):
     row = revision_for(artifact, artifact.current_revision if teacher else release.revision)
     return {"id": artifact.id, "title": row.content["title"], "revision": row.revision,
             "status": artifact.status, "spec": row.content,
-            "canEdit": teacher and artifact.owner_id == user.id and not frozen_course(artifact.dojo_id),
+            "canEdit": teacher and artifact.owner_id == user.id and not readonly_course(artifact.dojo_id),
             "teacher": teacher, "validation": row.validation if teacher else None,
             "publishedRevision": release.revision if release else None,
             "courseId": artifact.dojo_id, "moduleIndex": artifact.module_index,

@@ -1,0 +1,122 @@
+.student-agent-page .student-composer-surface {
+  box-sizing: border-box;
+  width: min(100%, 900px);
+  min-width: 0;
+  margin-inline: auto;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  background: var(--ui-field);
+  box-shadow: 0 3px 12px var(--ui-shadow);
+}
+.student-agent-page .student-composer-surface:focus-within {
+  border-color: var(--brand-blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-blue) 13%, transparent);
+}
+.student-agent-page .student-composer-surface .teaching-composer-row {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: none;
+}
+.student-agent-page .student-composer-surface .teaching-composer-tools {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  min-height: 42px;
+  margin: 0;
+  padding: 3px 12px 9px;
+  gap: 10px;
+}
+.student-agent-page .student-reference-summary {
+  box-sizing: border-box;
+  width: 100%;
+  max-height: min(180px, 28vh);
+  padding: 12px 12px 9px;
+  gap: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.student-agent-page .student-reference-summary > span {
+  box-sizing: border-box;
+  display: inline-flex;
+  max-width: min(100%, 480px);
+  min-width: 0;
+  min-height: 36px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 8px;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow: visible;
+}
+.student-agent-page .student-reference-summary > span > i {
+  flex: 0 0 auto;
+}
+.student-agent-page .student-reference-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+.student-agent-page .student-reference-summary > span > button {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  align-self: center;
+  border-radius: 6px;
+}
+.student-agent-page #student-reference-trigger {
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ui-text-muted);
+  background: transparent;
+  font: inherit;
+}
+.student-agent-page #student-reference-trigger:hover,
+.student-agent-page #student-reference-trigger[aria-expanded="true"] {
+  color: var(--brand-blue);
+  border-color: var(--ui-border);
+  background: var(--ui-surface-hover);
+}
+.student-agent-page #student-reference-trigger > span {
+  display: inline;
+}
+.student-agent-page #student-reference-trigger i {
+  color: var(--brand-blue);
+}
+.student-agent-page #student-reference-trigger b {
+  background: var(--brand-blue);
+}
+.student-agent-page #student-reference-trigger b[hidden] {
+  display: none;
+}
+.student-agent-page #student-reference-trigger:focus-visible,
+.student-agent-page .student-reference-summary > span > button:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
+}
+@media (max-width: 560px) {
+  .student-agent-page .student-reference-summary {
+    padding: 10px 10px 6px;
+    gap: 6px;
+  }
+  .student-agent-page .student-reference-summary > span {
+    max-width: 100%;
+  }
+  .student-agent-page .student-reference-summary > span > button {
+    flex-basis: 32px;
+    width: 32px;
+    height: 32px;
+  }
+  .student-agent-page .student-composer-surface .teaching-composer-tools {
+    padding-inline: 10px;
+  }
+}

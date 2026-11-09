@@ -36,6 +36,7 @@ from .challenge_corpus import search_corpus
 from .intelligence import model_json as _model_json
 from ..runtime_profiles import authoring_runtime_constraints, runtime_profile, normalize_runtime_environment, valid_windows_course_paths
 from .runtime_package import install_runtime_package
+from .legacy_runtime import linked_runtime_challenge, reject_runtime_authoring, runtime_spec
 from .simulation import (
     DOMAIN_SCENARIO_PRESETS,
     SimulationError,
@@ -7141,6 +7142,7 @@ def _revision_baseline(previous, fresh, teacher_message):
 
 
 def revise_draft(draft, teacher_message, *, progress_callback=None):
+    reject_runtime_authoring(draft)
     conversation = list(draft.conversation or [])
     conversation.append({"role": "teacher", "content": str(teacher_message)[:12000]})
     constraints = authoring_runtime_constraints(teacher_message, draft.constraints, revision=True)
@@ -7578,6 +7580,7 @@ def validate_draft(
     reuse_attested_review=False,
     reuse_current_pass=False,
 ):
+    reject_runtime_authoring(draft)
     draft.constraints = bind_constraints(draft.dojo, draft.constraints, assignment_id=(draft.spec or {}).get("id"), spec=draft.spec)
     prior_validation = copy.deepcopy(draft.validation or {})
     incoming_spec = copy.deepcopy(draft.spec or {})
@@ -8467,6 +8470,7 @@ def autonomously_validate_draft(
 ):
     """Validate, repair and independently revalidate until PASS or safe exhaustion."""
 
+    reject_runtime_authoring(draft)
     max_rounds = max(1, min(8, int(max_rounds or 1)))
     rounds = []
     stagnant_rounds = 0
@@ -9341,6 +9345,7 @@ def _snapshot_source_package(draft, challenge_id, version, source):
 
 
 def publish_draft(draft, actor):
+    reject_runtime_authoring(draft)
     try:
         draft = (
             db.session.query(LearningDrafts)
@@ -9617,7 +9622,8 @@ def publish_draft(draft, actor):
 def draft_view(draft, include_private=True):
     from .prepared_drafts import runtime_view
     from .prepared_sources import source_materials
-    spec = dict(draft.spec or {})
+    runtime_challenge = linked_runtime_challenge(draft)
+    spec = runtime_spec(draft, runtime_challenge) if runtime_challenge else dict(draft.spec or {})
     if not include_private:
         spec.pop("verificationAnswer", None)
         if isinstance(spec.get("simulation"), dict):
@@ -9657,14 +9663,15 @@ def draft_view(draft, include_private=True):
         "dojoId": draft.dojo.reference_id,
         "moduleId": module.id,
         "authorId": draft.author_id,
-        "status": draft.status,
+        "status": ("DRAFT" if (runtime_challenge.data or {}).get("publication_state") == "DRAFT" else "PUBLISHED") if runtime_challenge else draft.status,
         "level": draft.level,
         "brief": draft.brief,
         "constraints": draft.constraints,
         "conversation": draft.conversation,
         "spec": spec,
         "candidates": draft.candidates,
-        "validation": draft.validation,
+        "validation": {"status": "NOT_APPLICABLE", "checks": []} if runtime_challenge else draft.validation,
+        "runtimeManaged": bool(runtime_challenge),
         "revision": draft.revision,
         "publishedChallengeId": draft.published_challenge_id,
         "challenge": linked,
@@ -9676,7 +9683,8 @@ def draft_view(draft, include_private=True):
 
 
 def draft_student_preview_view(draft):
-    spec = draft.spec if isinstance(draft.spec, dict) else {}
+    runtime_challenge = linked_runtime_challenge(draft)
+    spec = runtime_spec(draft, runtime_challenge) if runtime_challenge else draft.spec if isinstance(draft.spec, dict) else {}
     module = draft.dojo.modules[draft.module_index]
     question = {
         "name": spec.get("name") or "未命名题目",

@@ -207,7 +207,7 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
                 : '直接提问、描述教学目标，或继续修改已有内容…'
             }
             value={draft.text}
-            rows={welcome ? 3 : 2}
+            rows={1}
             onChange={(event) => c.setDraft({ text: event.target.value })}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -272,18 +272,6 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
                 event.target.value = '';
               }}
             />
-            <span className="model-label" title="根据自然语言自动判断问答、规划或制作任务">自动理解需求</span>
-            <select
-              aria-label="学习模式"
-              value={draft.learningPattern}
-              onChange={(event) => c.setDraft({ learningPattern: event.target.value as '' | 'process-inquiry' })}
-            >
-              <option value="">通用创作</option>
-              <option value="process-inquiry">流程探究 · AES-128</option>
-            </select>
-            <span className="model-label" title="全局智能体模型">
-              DeepSeek v4.1 Flash
-            </span>
             <div className="push" />
             {active && (
               <select
@@ -327,11 +315,7 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
         </div>
       )}
       <div className="composer-footnote">
-        <span>
-          {active
-            ? '关闭页面后，任务仍在后台执行'
-            : '先明确需求，再确定方案；随时用对话补充或修改'}
-        </span>
+        {active && <span>关闭页面后，任务仍在后台执行</span>}
         <span>
           <CornerDownLeft size={11} /> 发送{' '}
           <span className="desktop-only"> · Shift Enter 换行</span>

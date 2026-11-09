@@ -1,73 +1,74 @@
 {% extends "base.html" %}
-
-{% block body_class %}learning-analysis-page{% endblock %}
-
+{% block body_class %}learning-analysis-page student-learning-insights-page{% endblock %}
+{% block stylesheets %}
+<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/student-learning-insights.css', v='student-insights-20261105-v4') }}">
+{% endblock %}
 {% block content %}
-<div id="learning-dashboard" class="learning-analysis-shell" data-dojo-id="{{ dojo.reference_id }}">
-  <nav class="course-breadcrumbs" aria-label="面包屑"><a href="/student">今天</a><i class="fas fa-chevron-right"></i><a href="/{{ dojo.reference_id }}">{{ dojo.name or dojo.id }}</a><i class="fas fa-chevron-right"></i><span>学习进展</span></nav>
-
-  <header class="learning-analysis-header product-surface">
-    <div><span class="product-kicker">可核验学习状态</span><h1>{{ dojo.name or dojo.id }}</h1><p>用完成事实、过程证据和评估结果决定下一步，而不是用页面浏览量推测学习。</p></div>
-    <div class="product-header-actions">
-      <a class="product-button" href="/{{ dojo.reference_id }}"><i class="fas fa-book-open"></i>返回课程</a>
-      {% if dojo.is_admin() %}<a class="product-button is-primary" href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}&amp;tab=students"><i class="fas fa-chart-line"></i>教师学情</a>{% else %}<a class="product-button is-primary" href="/guide"><i class="fas fa-comment-dots"></i>让 AI 帮我分析</a>{% endif %}
-    </div>
+<div id="learning-dashboard" class="learning-analysis-shell xj-student-insights" data-dojo-id="{{ dojo.reference_id }}">
+  <nav class="course-breadcrumbs" aria-label="面包屑"><a href="/student">今天</a><i class="fas fa-chevron-right" aria-hidden="true"></i><a href="/{{ dojo.reference_id }}">{{ dojo.name or dojo.id }}</a><i class="fas fa-chevron-right" aria-hidden="true"></i><span>学习进展</span></nav>
+  <header class="sl-page-header">
+    <div><h1>{{ dojo.name or dojo.id }} <span>学习进展</span></h1></div>
+    <div class="sl-page-actions"><a href="/{{ dojo.reference_id }}"><i class="fas fa-arrow-left" aria-hidden="true"></i>返回课程</a>{% if dojo.is_admin() %}<a href="/teacher/courses?dojo={{ dojo.reference_id | urlencode }}&amp;tab=students">教师学情</a>{% else %}<a href="/guide"><i class="fas fa-comment-dots" aria-hidden="true"></i>AI 学习助手</a>{% endif %}</div>
   </header>
-
-  <div id="learning-dashboard-notice" class="learning-analysis-notice" role="status" hidden></div>
-  <p class="alert alert-info" id="learning-dashboard-score-policy">本次 AI 智能评分为实践附加分，不代表课程总成绩。有效 flag 通过校验后至少获得 90 分（满分 100 分）。</p>
-
-  <section class="learning-summary-grid" aria-label="学习摘要">
-    <article class="product-surface"><span><i class="fas fa-list-check"></i></span><div><small>活动进度</small><strong id="learning-progress-percent">正在读取</strong><em id="learning-progress-value">按必修学习条件计算</em></div></article>
-    <article class="product-surface"><span><i class="fas fa-shapes"></i></span><div><small>能力掌握</small><strong id="learning-mastery-summary">正在读取</strong><em id="learning-mastery-detail">需要多次学习证据支持</em></div></article>
-    <article class="product-surface"><span><i class="fas fa-clipboard-check"></i></span><div><small>本次评分</small><strong id="learning-assessment-summary">正在读取</strong><em id="learning-assessment-detail">只表示单次作答结果</em></div></article>
-    <article class="product-surface"><span><i class="fas fa-fingerprint"></i></span><div><small>证据完整性</small><strong id="learning-evidence-summary">正在读取</strong><em id="learning-evidence-detail">只说明过程是否可复核</em></div></article>
-  </section>
-
-  <nav class="learning-analysis-tabs" id="learning-dashboard-tabs" role="tablist" aria-label="学习分析视图">
-    <a class="active" data-toggle="tab" href="#learning-path" role="tab" aria-selected="true"><i class="fas fa-compass"></i>下一步</a>
-    <a data-toggle="tab" href="#learning-skills" role="tab" aria-selected="false"><i class="fas fa-shapes"></i>能力掌握</a>
-    <a data-toggle="tab" href="#learning-attempts" role="tab" aria-selected="false"><i class="fas fa-history"></i>学习记录</a>
-  </nav>
-
-  <div class="tab-content learning-analysis-content">
-    <section id="learning-path" class="tab-pane fade show active" role="tabpanel">
-      <div class="product-section-heading"><div><span class="product-kicker">推荐</span><h2>下一项最值得完成的实训</h2><p>结合前置关系、完成状态、能力与近期尝试排序。</p></div></div>
-      <ul id="learning-recommendations" class="learning-analysis-list"><li class="learning-analysis-loading"><span></span><p>正在根据真实学习证据生成下一步建议…</p></li></ul>
-      <div id="learning-recommendations-empty" class="learning-analysis-empty" hidden>本课程暂时没有未完成的推荐题目。</div>
+  <div class="sl-workspace sl-theme">
+    <header class="sl-workspace-header"><div><h2>个人学习分析</h2><p>课程进度、能力掌握与实践记录</p></div><div class="sl-update"><span id="learning-updated-at">正在同步</span><button id="learning-refresh" type="button"><i class="fas fa-sync-alt" aria-hidden="true"></i>刷新</button></div></header>
+    <div id="learning-dashboard-notice" class="learning-analysis-notice" role="status" hidden></div>
+    <section class="sl-kpis" aria-label="学习摘要">
+      <article><small>必修进度</small><strong id="learning-progress-percent">—</strong><span id="learning-progress-value">正在读取学习进度</span><div class="sl-progress-track"><i id="learning-progress-track"></i></div></article>
+      <article><small>六维能力</small><strong id="learning-mastery-summary">—</strong><button type="button" data-learning-tab="skills">查看能力画像<i class="fas fa-arrow-right" aria-hidden="true"></i></button></article>
+      <article><small>近期实践评分</small><strong id="learning-assessment-summary">—</strong><span id="learning-assessment-detail">正在读取评估结果</span></article>
+      <article><small>过程记录</small><strong id="learning-evidence-summary">—</strong><button type="button" data-learning-tab="attempts">查看学习记录<i class="fas fa-arrow-right" aria-hidden="true"></i></button></article>
     </section>
-
-    <section id="learning-skills" class="tab-pane fade" role="tabpanel">
-      <div class="product-section-heading"><div><span class="product-kicker">能力证据</span><h2>六维能力画像</h2><p>能力变化必须能回到具体实训、证据与评估。</p></div></div>
-      <div id="learning-skills-list" class="learning-skill-grid"><div class="learning-analysis-loading"><span></span><p>正在汇总能力证据…</p></div></div>
-    </section>
-
-    <section id="learning-attempts" class="tab-pane fade" role="tabpanel">
-      <div class="product-section-heading"><div><span class="product-kicker">过程回放</span><h2>尝试与证据记录</h2><p>打开一条记录查看事件链、复盘与智能评估。</p></div></div>
-      <div class="learning-table-wrap product-surface"><table class="learning-analysis-table"><thead><tr><th>题目</th><th>章节</th><th>会话</th><th>状态</th><th>得分</th><th>开始时间</th></tr></thead><tbody id="learning-attempt-list"><tr><td colspan="6">正在载入尝试与证据…</td></tr></tbody></table></div>
-      <div id="learning-attempts-empty" class="learning-analysis-empty" hidden>启动一个题目即可创建第一条学习尝试记录。</div>
-    </section>
-
-    <ul id="learning-catalog-list" hidden aria-hidden="true"></ul>
+    <nav class="nav learning-analysis-tabs sl-tabs" id="learning-dashboard-tabs" role="tablist" aria-label="学习分析视图">
+      <a id="learning-path-tab" class="active" data-toggle="tab" href="#learning-path" role="tab" aria-controls="learning-path" aria-selected="true"><i class="fas fa-compass" aria-hidden="true"></i>学习概览</a>
+      <a id="learning-skills-tab" data-toggle="tab" href="#learning-skills" role="tab" aria-controls="learning-skills" aria-selected="false"><i class="fas fa-chart-area" aria-hidden="true"></i>能力掌握</a>
+      <a id="learning-attempts-tab" data-toggle="tab" href="#learning-attempts" role="tab" aria-controls="learning-attempts" aria-selected="false"><i class="fas fa-history" aria-hidden="true"></i>学习记录</a>
+    </nav>
+    <div class="tab-content sl-content">
+      <section id="learning-path" class="tab-pane fade show active" role="tabpanel" aria-labelledby="learning-path-tab">
+        <div class="sl-overview-layout">
+          <div class="sl-main-stack">
+            <article class="sl-panel"><header class="sl-panel-header"><div><h3>后续实践</h3><p id="learning-path-summary">正在读取课程完成情况</p></div><a href="/{{ dojo.reference_id }}">全部课程内容<i class="fas fa-arrow-right" aria-hidden="true"></i></a></header>
+              <ul id="learning-recommendations" class="sl-recommendations"><li class="sl-loading" role="status">正在读取推荐实践…</li></ul><div id="learning-recommendations-empty" class="sl-empty" hidden>本课程暂时没有未完成的推荐题目。</div>
+            </article>
+            <article class="sl-panel"><header class="sl-panel-header"><div><h3>最近学习记录</h3><p>回看实践过程与评估结果</p></div><button type="button" data-learning-tab="attempts">全部记录<i class="fas fa-arrow-right" aria-hidden="true"></i></button></header><div id="learning-recent-attempts" class="sl-recent-list"><div class="sl-loading">正在读取学习记录…</div></div></article>
+          </div>
+          <article class="sl-panel sl-overview-ability"><header class="sl-panel-header"><div><h3>六维能力画像</h3><p>当前课程的累计能力掌握</p></div></header><div id="learning-overview-radar" class="sl-radar sl-radar-compact"></div><div class="sl-chart-legend"><span><i></i>掌握度</span><span>满量程 100%</span></div><button class="sl-panel-link" type="button" data-learning-tab="skills">查看各维度与相关记录<i class="fas fa-arrow-right" aria-hidden="true"></i></button></article>
+        </div>
+      </section>
+      <section id="learning-skills" class="tab-pane fade" role="tabpanel" aria-labelledby="learning-skills-tab">
+        <header class="sl-section-header"><div><h2>六维能力画像</h2><p>选择一个维度，查看掌握情况与相关实践。</p></div><span class="sl-caption">当前课程 · 累计掌握</span></header>
+        <div class="sl-skills-layout">
+          <article class="sl-panel sl-ability-chart"><div id="learning-radar" class="sl-radar"></div><div class="sl-chart-legend"><span><i></i>掌握度</span><span>满量程 100%</span></div><div id="learning-skill-detail" class="sl-detail"><p class="sl-loading">正在读取维度详情…</p></div></article>
+          <article class="sl-panel"><header class="sl-panel-header"><div><h3>能力维度</h3><p>掌握度与评估记录</p></div><span class="sl-caption">6 个维度</span></header><div id="learning-skills-list" class="sl-skill-list"><div class="sl-loading">正在读取能力掌握…</div></div></article>
+        </div>
+      </section>
+      <section id="learning-attempts" class="tab-pane fade" role="tabpanel" aria-labelledby="learning-attempts-tab">
+        <header class="sl-section-header"><div><h2>学习记录</h2><p>查看每次实践的过程记录、评估与复盘。</p></div><span id="learning-record-count" class="sl-caption" aria-live="polite"></span></header>
+        <div class="sl-record-toolbar"><label><i class="fas fa-search" aria-hidden="true"></i><input id="learning-record-search" type="search" placeholder="搜索题目或章节" aria-label="搜索学习记录"></label><label><span>状态</span><select id="learning-record-state"><option value="all">全部状态</option><option value="COMPLETED">已完成</option><option value="IN_PROGRESS">进行中</option><option value="SUBMITTED">已提交</option><option value="NOT_STARTED">未开始</option></select></label></div>
+        <div class="sl-table-scroll"><table class="learning-analysis-table sl-record-table"><thead><tr><th scope="col">实践题目</th><th scope="col">所属章节</th><th scope="col">学习次数</th><th scope="col">状态</th><th scope="col">本次评分</th><th scope="col">开始时间</th></tr></thead><tbody id="learning-attempt-list"><tr><td colspan="6">正在读取学习记录…</td></tr></tbody></table></div><div id="learning-attempts-empty" class="sl-empty" hidden>暂无符合条件的学习记录。</div>
+      </section>
+      <ul id="learning-catalog-list" hidden aria-hidden="true"></ul>
+    </div>
+    <details class="sl-policy" id="learning-dashboard-score-policy"><summary>评分与数据说明</summary><p>能力掌握汇总当前课程的评估记录；单次评分反映本次实践表现。AI 智能评分为实践附加分，编程作业按本题评分量规计算。缺少评估记录的能力维度显示“暂无评估”。</p></details>
   </div>
 </div>
-
-<div id="learning-attempt-modal" class="modal fade learning-attempt-modal" tabindex="-1" role="dialog" aria-labelledby="learning-attempt-title" aria-hidden="true">
+<div id="learning-attempt-modal" class="modal fade learning-attempt-modal sl-theme" tabindex="-1" role="dialog" aria-labelledby="learning-attempt-title" aria-hidden="true">
   <div class="modal-dialog modal-xl" role="document">
     <div class="modal-content">
-      <div class="modal-header"><div><span class="product-kicker">学习证据</span><h2 id="learning-attempt-title" class="modal-title">尝试记录</h2><small id="learning-attempt-meta"></small></div><button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button></div>
+      <div class="modal-header"><div><h2 id="learning-attempt-title" class="modal-title">尝试记录</h2><small id="learning-attempt-meta"></small></div><button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button></div>
       <div class="modal-body">
         <div id="learning-attempt-notice" role="status" hidden></div>
         <div class="row">
-          <div class="col-lg-6">
+          <div class="col-lg-6 sl-feedback-column">
             <h3>证据时间线</h3><p id="learning-evidence-chain"></p>
             <div class="learning-evidence-scroll"><table class="table table-sm"><tbody id="learning-evidence-list"></tbody></table></div>
-            <h3>复盘</h3><textarea id="learning-reflection" class="form-control" rows="7" placeholder="说明你的初始判断、验证过的假设、关键证据、根因和修复建议。"></textarea>
+            <h3>学习复盘</h3><textarea id="learning-reflection" class="form-control" rows="7" placeholder="说明你的初始判断、验证过的假设、关键证据、根因和修复建议。"></textarea>
             <button id="learning-reflection-submit" type="button" class="btn btn-primary mt-3">保存并重新评估</button>
           </div>
-          <div class="col-lg-6">
+          <div class="col-lg-6 sl-feedback-column">
             <h3>评估与反馈</h3>
-            <p class="alert alert-info">本次 AI 智能评分为实践附加分，不代表课程总成绩。</p>
+            <details class="sl-policy"><summary>评分说明</summary><p>AI 智能评分为实践附加分，不代表课程总成绩。编程作业按本题量规计分。</p></details>
             <div id="learning-assessment-empty" class="alert alert-info">提交复盘后即可生成评估。</div>
             <div id="learning-assessment" hidden><h2 id="learning-assessment-score"></h2><p id="learning-assessment-feedback-summary"></p><div id="learning-assessment-agent" class="learning-assessment-agent"></div><p id="learning-assessment-feedback"></p><div id="learning-assessment-criteria"></div><hr><h3>申请复核</h3><textarea id="learning-appeal-reason" class="form-control" rows="4" placeholder="指出需要复核的证据或评分标准。"></textarea><button id="learning-appeal-submit" type="button" class="btn btn-outline-secondary mt-3">提交复核申请</button></div>
           </div>
@@ -77,10 +78,9 @@
   </div>
 </div>
 {% endblock %}
-
 {% block footer %}{% endblock %}
-
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='aisecedu-toast-v1') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-dashboard.js', v='practice-bonus-20261010-v1') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/learning-skill-chart.js', v='student-insights-20261105-v4') }}"></script>
+<script defer src="{{ url_for('views.themes_beta', path='js/dojo/learning-dashboard.js', v='student-insights-20261105-v4') }}"></script>
 {% endblock %}

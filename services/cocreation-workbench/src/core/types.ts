@@ -120,7 +120,7 @@ export interface WorkspaceState {
   panelOpen: boolean;
   sidebarOpen: boolean;
   taskCenter: boolean;
-  modal: 'search' | 'settings' | 'sources' | 'skills' | null;
+  modal: 'search' | 'sources' | 'skills' | null;
   error: string | null;
   notice: string | null;
   threadFilter: string;
