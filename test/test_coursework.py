@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from utils import DOJO_URL, TEST_DOJOS_LOCATION, create_dojo_yml, db_sql, get_user_id, login
+from utils import complete_teacher_command, DOJO_URL, TEST_DOJOS_LOCATION, create_dojo_yml, db_sql, get_user_id, login
 
 
 GRADING_PATH = (
@@ -501,6 +501,7 @@ def test_coursework_delivery_grading_isolation_and_agent_operations(
         headers={"Idempotency-Key": f"assignment-list-{secrets.token_hex(8)}"},
         json={"threadId": thread_id, "tool": "assignment.list", "arguments": {}, "confirmed": False},
     )
+    listed = complete_teacher_command(admin_session, listed)
     assert listed.status_code == 200, listed.text
     assert assignment_id in {item["id"] for item in data(listed)["result"]["assignments"]}
 
@@ -525,6 +526,7 @@ def test_coursework_delivery_grading_isolation_and_agent_operations(
             "confirmed": True,
         },
     )
+    closed = complete_teacher_command(admin_session, closed)
     assert closed.status_code == 200, closed.text
     closed_data = data(closed)
     assert closed_data["result"]["assignment"]["status"] == "CLOSED"

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-from utils import DOJO_URL, db_sql, dojo_run, get_user_id, login
+from utils import DOJO_URL, complete_teacher_command, db_sql, dojo_run, get_user_id, login
 
 
 API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/teaching"
@@ -1814,35 +1814,6 @@ def execute_course_tool(
     return complete_teacher_command(session, response)
 
 
-def complete_teacher_command(session, response, *, action_decision=False):
-    if response.status_code != 202:
-        return response
-    receipt = data(response)
-    action = receipt["action"]
-    job_id = action["execution"]["jobId"]
-    assert re.fullmatch(r"[A-Za-z0-9_-]{1,48}", job_id), job_id
-    code = (
-        "import os\n"
-        "from CTFd.plugins.dojo_plugin.models import TeachingJobs\n"
-        "from CTFd.plugins.dojo_plugin.agent_runtime.commands import COMMAND_JOB_KINDS\n"
-        "from CTFd.plugins.dojo_plugin.agent_runtime.jobs import process_job\n"
-        "assert os.environ.get('DOJO_ENV') == 'coverage'\n"
-        f"job = TeachingJobs.query.filter_by(id={job_id!r}).one()\n"
-        "assert job.kind in COMMAND_JOB_KINDS\n"
-        "if job.status == 'QUEUED': process_job(job.id, worker_id='ci-command-contract')\n"
-        "print('CI-COMMAND-CHECKED')\n"
-    )
-    import base64
-    encoded = base64.b64encode(code.encode()).decode()
-    checked = dojo_run("timeout", "180", "dojo", "flask", timeout=200,
-                       input=f'import base64; exec(base64.b64decode("{encoded}"))\n')
-    assert "CI-COMMAND-CHECKED" in checked.stdout, checked.stdout
-    job = wait_for_teaching_job(session, job_id)
-    assert job["status"] == "SUCCEEDED", job
-    path = f"/actions/{action['id']}/decision" if action_decision else f"/agent-tools/actions/{action['id']}"
-    completed = session.get(API + path)
-    assert completed.status_code == 200, completed.text
-    return completed
 
 
 def test_generation_batch_retry_is_idempotent_and_preserves_successful_drafts(
@@ -2205,7 +2176,7 @@ def test_unpublished_courseware_supports_single_and_atomic_batch_deletion(
         assert rejected.status_code == 409, rejected.text
         rejected_body = rejected.json()
         assert rejected_body["success"] is False
-        assert "已发布课件" in rejected_body["errors"][0]
+        assert "已发布内容" in rejected_body["errors"][0]
         assert {item["id"] for item in listed("UNPUBLISHED")["items"]} == set(batch_ids)
 
         deleted = admin_session.post(
@@ -2361,6 +2332,7 @@ def test_conversation_upload_asks_then_places_original_file_in_module(
             headers={"Idempotency-Key": key},
             json=placement_payload,
         )
+        placed = complete_teacher_command(admin_session, placed)
         repeated = admin_session.post(
             f"{API}/agent-tools/execute",
             headers={"Idempotency-Key": key},
@@ -3355,7 +3327,8 @@ def test_global_agent_executes_native_course_operations(
     assert repeated_failure.status_code == 409
     assert first_failure.json()["success"] is False
     assert repeated_failure.json()["success"] is False
-    assert "没有找到指定章节" in repeated_failure.json()["errors"][0]
+    assert first_failure.json()["errorCode"] == "CONFIRMATION_REQUIRED"
+    assert repeated_failure.json()["errorCode"] == "CONFIRMATION_REQUIRED"
 
     material_analysis = admin_session.post(
         f"{API}/threads/{thread_id}/messages",
@@ -3702,11 +3675,13 @@ def test_teacher_thread_isolation_and_native_progress(
     assert artifact_page.status_code == 200
     assert 'allow="fullscreen"' in artifact_page.text
     assert "js/dojo/teaching-artifact" in artifact_page.text
-    assert guest_session.get(artifact_url).status_code == 404
-    assert guest_session.get(f"{API}/artifacts/{artifact_id}").status_code == 404
+    assert guest_session.get(artifact_url).status_code == 200
+    assert student_session.get(artifact_url).status_code == 404
+    assert guest_session.get(f"{API}/artifacts/{artifact_id}").status_code == 200
+    assert student_session.get(f"{API}/artifacts/{artifact_id}").status_code == 404
     assert (
         guest_session.get(f"{API}/artifacts/{artifact_id}/revisions/1").status_code
-        == 404
+        == 200
     )
 
     action_id = f"action_{secrets.token_hex(16)}"

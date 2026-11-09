@@ -41,7 +41,7 @@ def main():
         def app_db_sql(sql):
             result = db.session.execute(text(sql))
             rows = result.fetchall() if result.returns_rows else []
-            output = '\n'.join('|'.join('' if value is None else str(value) for value in row) for row in rows)
+            output = '\n'.join('|'.join('' if value is None else json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value) for value in row) for row in rows)
             db.session.commit()
             return output + ('\n' if rows else '')
 
