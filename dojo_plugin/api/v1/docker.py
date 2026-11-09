@@ -496,11 +496,12 @@ def start_challenge(user, dojo_challenge, practice, *, as_user=None):
     return container
 
 
-def preserved_state():
-    try:
-        container = optional_container(get_current_user())
-    except Exception:
-        container = None
+def preserved_state(container=None):
+    if container is None:
+        try:
+            container = optional_container(get_current_user())
+        except Exception:
+            container = None
     if container is None:
         return {"kind": "none", "message": "重新启动后会从初始状态开始。"}
     try:
@@ -728,6 +729,7 @@ class RunDocker(Resource):
                     return {"success": False, "error": f"该用户不是此课程的正式学生（{as_user_id}）。"}
                 as_user = student.user
 
+        started_container = None
         try:
             exercise_mode = challenge_exercise_mode(dojo_challenge)
             actual_user = as_user or user
@@ -747,7 +749,7 @@ class RunDocker(Resource):
             else:
                 if exercise_mode == "CONTAINER":
                     interrupt_simulation_runs(user.id, reason="container-started")
-                _, attempt = start_challenge_session(
+                started_container, attempt = start_challenge_session(
                     user,
                     dojo_challenge,
                     practice,
@@ -774,7 +776,7 @@ class RunDocker(Resource):
             "success": True,
             "exerciseMode": exercise_mode,
             "simulationRunId": simulation_run.id if simulation_run else None,
-            "statePreserved": preserved_state(),
+            "statePreserved": preserved_state(started_container),
         }
 
     @authed_only_cli
