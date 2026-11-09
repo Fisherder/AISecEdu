@@ -139,6 +139,7 @@ jobs:
             type=local,dest=/mnt/cache/test-image,mode=max
 
       - name: Start the dojo in ${{ matrix.mode }} mode
+        id: startup
         timeout-minutes: 25
         run: |
           ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C
@@ -148,6 +149,7 @@ jobs:
         run: python3 ops/team/app_units.py --container dojo
 
       - name: Run ${{ matrix.mode }} dojo tests
+        if: ${{ !cancelled() && steps.startup.outcome == 'success' }}
         timeout-minutes: 15
         run: |
           ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -N -t --ignore=test_model_router.py --ignore=test_runtime_profiles.py
