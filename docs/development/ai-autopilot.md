@@ -51,4 +51,6 @@ AI 不自动解决人的审查讨论，不部署共享平台或生产，不把�
 
 `make dev-check` 包含调度与发布边界的离线回归，以及启动配置回归；课件模块存在时也执行其单测。Team quick checks 还会在课件浏览器组件测试存在时安装固定 Playwright 并执行该测试。完整 DOJO CI 继续作为独立必需检查。
 
+完整 CI 的 `coverage` 环境只加载仓库基础 Compose，从源码构建组件；服务器的本地镜像标签、迁移后 Nix 路径和发布覆盖文件不进入临时 Runner。生产及共享开发环境继续按原有方式加载覆盖文件。GitHub 构建使用其 Ubuntu Azure 镜像源，并为软件包下载设置有限重试；索引下载失败直接报错，避免带着不完整索引继续安装。
+
 参考：[Codex GitHub Action](https://learn.chatgpt.com/docs/github-action)、[DeepSeek Codex 接入](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)、[GitHub 自动合并](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request)。

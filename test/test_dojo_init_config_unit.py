@@ -106,6 +106,31 @@ def test_generated_source_list_round_trips_through_docker_compose_when_available
         assert json.loads(result.stdout)["services"]["probe"]["environment"]["VALUE"] == value
 
 
+def test_coverage_uses_source_compose_and_preserves_deployment_overlays():
+    script = (ROOT / "dojo/dojo").read_text().split('    "compose")\n', 1)[1].split('\n        ;;', 1)[0]
+    script = script.replace('/data/config.env', 'config.env')
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        for name in ('docker-compose.override.yml', 'docker-compose.staging.yml',
+                     'docker-compose.generation-release.yml'):
+            (folder / name).touch()
+        for mode in ('coverage', 'production'):
+            result = subprocess.run(
+                ['/bin/bash', '-e', '-c',
+                 'jq() { echo false; }; docker() { printf "%s\\n" "$@"; };\n' + script,
+                 'compose-test', 'config'], cwd=folder, capture_output=True, text=True,
+                env={'PATH': os.environ['PATH'], 'DOJO_ENV': mode, 'WORKSPACE_NODE': '0'},
+            )
+            assert result.returncode == 0, result.stderr
+            arguments = result.stdout.splitlines()
+            assert 'docker-compose.yml' in arguments
+            assert '--profile' in arguments and 'main' in arguments and 'workspace' in arguments
+            assert arguments[-1] == 'config'
+            for name in ('docker-compose.override.yml', 'docker-compose.staging.yml',
+                         'docker-compose.generation-release.yml'):
+                assert (name in arguments) == (mode == 'production'), (mode, arguments)
+
+
 if __name__ == "__main__":
     suite = unittest.TestSuite(unittest.FunctionTestCase(value) for name, value in list(globals().items())
                                if name.startswith("test_") and callable(value))

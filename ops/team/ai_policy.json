@@ -7,6 +7,7 @@
   "max_patch_bytes": 250000,
   "manual_paths": [
     ".github/**", ".codex/**", ".agents/**", "AGENTS.md", "**/AGENTS.md",
+    "Makefile", ".git*", ".lfsconfig", ".npmrc", ".dockerignore", "**/conftest.py", "**/pytest.ini",
     "ops/**", "dojo/**", "etc/**", "Dockerfile*", "docker-compose*", "deploy.sh",
     "sshd/**", "homefs/**", "workspace/**", "workspacefs/**",
     "dojo_plugin/api/**", "dojo_plugin/models/**", "dojo_plugin/agent_runtime/**",

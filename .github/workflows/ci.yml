@@ -113,6 +113,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          build-args: UBUNTU_ARCHIVE_MIRROR=http://azure.archive.ubuntu.com/ubuntu
           tags: pwncollege/dojo
           load: true
           cache-from: type=local,src=/mnt/cache/dojo-image
@@ -122,6 +123,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: test
+          build-args: UBUNTU_ARCHIVE_MIRROR=http://azure.archive.ubuntu.com/ubuntu
           tags: dojo-test
           load: true
           cache-from: type=local,src=/mnt/cache/test-image
