@@ -22,7 +22,11 @@ def vscode_terminal(browser):
     browser.get(f"{DOJO_URL}/workspace?service=code")
 
     wait = WebDriverWait(browser, 30)
-    workspace_iframe = wait.until(EC.presence_of_element_located((By.ID, "workspace-iframe")))
+    workspace_iframe = wait.until(lambda driver: (
+        (frame := driver.find_element(By.ID, "workspace-iframe"))
+        and ("folder=%2Fchallenge" in (frame.get_attribute("src") or "")
+             or "folder=/challenge" in (frame.get_attribute("src") or ""))
+        and frame))
     iframe_src = workspace_iframe.get_attribute("src") or ""
     assert "folder=%2Fchallenge" in iframe_src or "folder=/challenge" in iframe_src
     browser.switch_to.frame(workspace_iframe)
@@ -86,21 +90,17 @@ def desktop_terminal(browser, user_id):
     workspace_run("DISPLAY=:0 xfce4-terminal &", user=user_id)
     wait = WebDriverWait(browser, 30)
     browser.switch_to.frame("workspace")
-    def locate_input(driver):
-        try:
-            return driver.find_element(By.ID, "noVNC_keyboardinput")
-        except NoSuchElementException:
-            return driver.find_element(By.ID, "keyboardinput")
-    e = wait.until(locate_input)
     wait.until(
         lambda driver: driver.execute_script(
-            "return document.documentElement.dataset.aiseceduWorkspaceBridge;"
+            "return document.documentElement.dataset.consoleBridge;"
         )
         == "ready"
     )
-    container = browser.find_element(By.ID, "noVNC_container")
-    container.click()
-    browser.execute_script("window.AISecEduWorkspaceBridge.focusRemoteKeyboard();")
+    wait.until(lambda driver: driver.execute_script(
+        "return window.AISecEduNoVNC.UI.rfb._rfbConnectionState === 'connected';"))
+    e = browser.find_element(By.ID, "noVNC_canvas")
+    e.click()
+    browser.execute_script("window.AISecEduNoVNC.UI.rfb.focus();")
     wait.until(
         lambda driver: driver.execute_script(
             "return document.activeElement && "
@@ -109,7 +109,7 @@ def desktop_terminal(browser, user_id):
             "document.activeElement.tagName === 'CANVAS');"
         )
     )
-    assert e.tag_name.lower() == "textarea"
+    assert e.tag_name.lower() == "canvas"
     assert browser.find_elements(By.CSS_SELECTOR, 'script[src*="aisecedu-workspace-bridge.js"]')
     time.sleep(2)
 
@@ -171,7 +171,7 @@ def challenge_start(browser, idx, practice=False):
 
 def challenge_submit(browser, idx, flag):
     body = browser.find_element("id", f"challenges-body-{idx}")
-    body.find_element(By.CSS_SELECTOR, ".challenge-answer").send_keys(flag)
+    body.find_element(By.CSS_SELECTOR, ".workspace-controls .flag-input").send_keys(flag)
 
     banner = WebDriverWait(browser, 20, ignored_exceptions=(NoSuchElementException, StaleElementReferenceException)).until(
         lambda driver: next(
@@ -205,6 +205,16 @@ def workspace_launcher(browser, idx):
         By.CSS_SELECTOR, f'#challenges-body-{idx} [data-workspace-dedicated-hint] a')))
 
 
+def lecture_player(browser):
+    for attempt in range(2):
+        try:
+            return WebDriverWait(browser, 15).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
+        except TimeoutException:
+            if attempt:
+                raise
+            browser.execute_script("window.location.reload();")
+
+
 # Gets the accordion entry index
 def challenge_idx(browser, name):
     headers = browser.find_elements(By.CSS_SELECTOR, "[data-challenge-index][data-challenge-name]")
@@ -223,6 +233,19 @@ def read_flag(user_id):
     raise AssertionError("flag not found")
 
 
+def workspace_clipboard(browser, text=None):
+    result = browser.execute_async_script("""
+        const text = arguments[0], done = arguments[arguments.length - 1];
+        const control = window.AISecEduRemoteConsole.forElement(document.getElementById('workspace-iframe'));
+        if (!control || !control.ready) return done({ok: false, error: 'Console is not ready'});
+        control.api(text === null ? 'GET' : 'POST', text === null ? null : {text})
+            .then(value => done({ok: value.workspaceId === control.workspaceId, text: value.text || ''}),
+                  error => done({ok: false, error: error.message}));
+    """, text)
+    assert result["ok"], result
+    return result["text"]
+
+
 def test_welcome_desktop(random_user_browser, random_user_name, welcome_dojo):
     random_user_browser.get(f"{DOJO_URL}/welcome/welcome")
     idx = challenge_idx(random_user_browser, "The Flag File")
@@ -239,10 +262,7 @@ def test_welcome_desktop(random_user_browser, random_user_name, welcome_dojo):
 
         clipboard_in = "玄甲 clipboard into desktop"
         random_user_browser.switch_to.parent_frame()
-        assert random_user_browser.execute_script(
-            "return sendDesktopClipboard($('.workspace-controls'), arguments[0]);",
-            clipboard_in,
-        )
+        workspace_clipboard(random_user_browser, clipboard_in)
         random_user_browser.switch_to.frame("workspace")
         for _ in range(20):
             copied = workspace_run(
@@ -261,9 +281,7 @@ def test_welcome_desktop(random_user_browser, random_user_name, welcome_dojo):
         )
         random_user_browser.switch_to.parent_frame()
         WebDriverWait(random_user_browser, 10).until(
-            lambda driver: driver.execute_script(
-                "return document.getElementById('workspace-iframe').workspaceRemoteClipboard;"
-            ) == clipboard_out
+            lambda driver: workspace_clipboard(driver) == clipboard_out
         )
         random_user_browser.switch_to.frame("workspace")
 
@@ -424,7 +442,8 @@ def test_actionbar_service_buttons(random_user_browser, random_user_name, interf
     terminal_button.click()
     loading = random_user_browser.find_element(By.CSS_SELECTOR, "[data-workspace-loading]")
     wait.until(lambda driver: loading.is_displayed())
-    assert "正在加载终端" in loading.text
+    assert loading.find_element(By.CSS_SELECTOR, "[data-workspace-loading-mode]").text == "终端"
+    assert loading.find_element(By.CSS_SELECTOR, "[data-workspace-loading-title]").text
     wait.until(lambda driver: "/7681/" in (driver.find_element(By.ID, "workspace-iframe").get_attribute("src") or ""))
     wait.until(lambda driver: not loading.is_displayed())
     assert "active" in terminal_button.get_attribute("class")
@@ -468,16 +487,19 @@ def test_actionbar_ssh_only_challenge(random_user_browser, random_user_name, int
 
     wait = WebDriverWait(random_user_browser, 30)
     assert not body.find_elements(By.ID, "workspace-iframe")
-    assert body.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed()
-    assert "active" in buttons[0].get_attribute("class")
+    assert not body.find_elements(By.CSS_SELECTOR, ".workspace-ssh")
+    assert workspace_launcher(random_user_browser, idx).is_displayed()
 
+    random_user_browser.get(f"{DOJO_URL}/workspace?service=ssh")
+    body = random_user_browser.find_element(By.CSS_SELECTOR, ".challenge-workspace")
+    buttons = body.find_elements(By.CSS_SELECTOR, ".workspace-service")
+    wait.until(lambda driver: body.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed())
     handles = len(random_user_browser.window_handles)
-    random_user_browser.execute_script("arguments[0].click();", buttons[0])
+    buttons[0].click()
     time.sleep(1)
     assert len(random_user_browser.window_handles) == handles
     assert body.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed()
     assert "active" in buttons[0].get_attribute("class")
-    random_user_browser.get(f"{DOJO_URL}/workspace?service=ssh")
     iframe = wait.until(EC.presence_of_element_located((By.ID, "workspace-iframe")))
     wait.until(lambda driver: "SSH" in (iframe.get_attribute("class") or ""))
     assert iframe.size["height"] == 0
@@ -651,7 +673,7 @@ def test_actionbar_popout_mode(random_user_browser, random_user_name, interfaces
     assert controls.get_attribute("data-popout") == "true"
     assert not controls.find_elements(By.CSS_SELECTOR, ".workspace-fullscreen")
     assert not body.find_elements(By.ID, "workspace-select")
-    assert not body.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed()
+    assert not body.find_elements(By.CSS_SELECTOR, ".workspace-ssh")
 
     buttons = controls.find_elements(By.CSS_SELECTOR, ".workspace-service")
     assert [button.get_attribute("data-service") for button in buttons] == ["ssh: ", "terminal: 7681"]
@@ -802,7 +824,7 @@ def test_welcome_graded_lecture(random_user_browser, random_user_name, example_d
     assert lecture_iframe_src.rstrip("/").endswith("/80")
 
     random_user_browser.switch_to.frame(lecture_iframe)
-    youtube_iframe_inline = wait.until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
+    youtube_iframe_inline = lecture_player(random_user_browser)
     assert youtube_iframe_inline.is_displayed()
     inline_iframe_src = youtube_iframe_inline.get_attribute("src")
     assert "youtube.com" in inline_iframe_src or "youtube-nocookie.com" in inline_iframe_src
@@ -823,7 +845,7 @@ def test_welcome_graded_lecture(random_user_browser, random_user_name, example_d
     if "workspace.localhost" in iframe_src:
         assert iframe_src.rstrip("/").endswith("/80")
         random_user_browser.switch_to.frame(youtube_iframe)
-        nested_iframe = wait.until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
+        nested_iframe = lecture_player(random_user_browser)
         assert nested_iframe.is_displayed()
         nested_src = nested_iframe.get_attribute("src")
         assert "youtube.com" in nested_src or "youtube-nocookie.com" in nested_src

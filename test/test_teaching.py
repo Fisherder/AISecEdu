@@ -350,6 +350,7 @@ def test_teacher_agent_approval_tray_browser_flow(
 ):
     selenium_by = pytest.importorskip("selenium.webdriver.common.by")
     selenium_wait = pytest.importorskip("selenium.webdriver.support.ui")
+    selenium_errors = pytest.importorskip("selenium.common.exceptions")
     created = admin_session.post(
         f"{API}/threads",
         json={"title": "输入框审批条浏览器验收"},
@@ -407,11 +408,16 @@ def test_teacher_agent_approval_tray_browser_flow(
         assert "下一步操作" not in browser.find_element(
             selenium_by.By.ID, "teaching-messages"
         ).text
-        reject = tray.find_element(
-            selenium_by.By.CSS_SELECTOR,
-            '[data-approval-decision="REJECTED"]',
-        )
-        reject.click()
+        def reject_proposal(driver):
+            for close in reversed(driver.find_elements(selenium_by.By.CSS_SELECTOR, ".popup-overlay #closePopup")):
+                if close.is_displayed():
+                    close.click()
+            driver.find_element(selenium_by.By.CSS_SELECTOR,
+                                '#teaching-approval-tray [data-approval-decision="REJECTED"]').click()
+            return True
+        selenium_wait.WebDriverWait(browser, 10, ignored_exceptions=(
+            selenium_errors.ElementClickInterceptedException, selenium_errors.StaleElementReferenceException,
+        )).until(reject_proposal)
         wait.until(lambda _driver: not tray.is_displayed())
         browser.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard&thread={thread_id}")
         wait.until(

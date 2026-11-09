@@ -170,7 +170,7 @@
       try{
         await desktop();if(!rfb)return;
         const response=await fetch(PLATFORM+'/pwncollege_api/v1/workspace',{credentials:'same-origin'}),data=await response.json();if(!data.workspace_id)return;
-        const script=document.createElement('script');script.src=PLATFORM+'/themes/dojo_theme/static/js/dojo/remote-console.js?v=console-20261012-2';script.onload=()=>{standalone=window.AISecEduRemoteConsole.standalone(document.body,{workspaceId:data.workspace_id,csrfNonce:data.csrf_nonce,readonly:rfb.viewOnly,command});ready();};document.head.append(script);
+        const script=document.createElement('script');script.src=PLATFORM+'/themes/dojo_theme/static/js/dojo/remote-console.js?v=console-fixed-toggle-20261023-1';script.onload=()=>{standalone=window.AISecEduRemoteConsole.standalone(document.body,{workspaceId:data.workspace_id,csrfNonce:data.csrf_nonce,readonly:rfb.viewOnly,command});ready();};document.head.append(script);
       }catch(error){}
     }
     document.readyState==='loading'?document.addEventListener('DOMContentLoaded',startStandalone,{once:true}):startStandalone();

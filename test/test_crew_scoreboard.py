@@ -415,7 +415,20 @@ def test_crew_view_toggle_race(browser_fixture, example_dojo):
 def test_crew_empty_states(browser_fixture, admin_session, example_dojo):
     browser = browser_fixture
     suffix = "".join(random.choices(string.ascii_lowercase, k=8))
-    spec = CREW_DOJO_SPEC.replace("crew-dojo", f"crew-empty-{suffix}")
+    spec = f"""
+id: crew-empty-{suffix}
+type: public
+modules:
+  - id: hello
+    challenges:
+      - id: apple
+files:
+  - type: text
+    path: hello/apple/apple
+    content: |
+      #!/opt/pwn.college/bash
+      cat /flag
+"""
     dojo = create_dojo_yml(spec, session=admin_session)
 
     name, password, session = register_user()

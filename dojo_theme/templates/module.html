@@ -309,9 +309,9 @@
                   <div data-workspace-state hidden></div>
                   {% include "components/workspace_loading.html" %}
                   <div class="workspace-dedicated-hint" data-workspace-dedicated-hint hidden>
-                    {% set entrance = namespace(service='') %}
-                    {% for service in challenge.interfaces %}{% if service.port and not entrance.service %}{% set entrance.service = service.name | lower %}{% endif %}{% endfor %}
-                    <a class="btn btn-primary" href="/workspace{% if entrance.service %}?service={{ entrance.service }}{% endif %}" target="_blank" rel="noopener">进入实验环境 <i class="fas fa-external-link-alt" aria-hidden="true"></i></a>
+                    {% set entrance = namespace(service='', port='') %}
+                    {% for service in challenge.interfaces %}{% if service.port and not entrance.port %}{% set entrance.service = service.name | lower %}{% set entrance.port = service.port %}{% endif %}{% endfor %}
+                    <a class="btn btn-primary" href="/workspace{% if entrance.service in ['terminal', 'code', 'desktop'] %}?service={{ entrance.service }}{% elif entrance.port %}?port={{ entrance.port }}{% endif %}" target="_blank" rel="noopener">进入实验环境 <i class="fas fa-external-link-alt" aria-hidden="true"></i></a>
                   </div>
 
                 </div>

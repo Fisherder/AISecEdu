@@ -555,11 +555,11 @@ def view_module(dojo, module, scroll_to_challenge=None):
         row for row in dojo.modules
         if row.visible() or dojo.is_admin(user)
     ]
-    module_position = visible_modules.index(module)
+    module_position = visible_modules.index(module) if module in visible_modules else None
     previous_module = visible_modules[module_position - 1] if module_position else None
     next_module = (
         visible_modules[module_position + 1]
-        if module_position < len(visible_modules) - 1
+        if module_position is not None and module_position < len(visible_modules) - 1
         else None
     )
 

@@ -118,7 +118,7 @@ async function prepareDedicatedWorkspace(root, service) {
     clearTimeout(content.workspaceLoadStageTimer);
     setWorkspaceStage(workspaceLoadingPanel(content), "service", "正在准备实验入口", "正在启动远程服务，准备好后即可打开实验环境。请稍候…");
     try {
-        const query = new URLSearchParams({service:serviceName(service)});
+        const query = new URL(workspaceModeUrl(service), window.location.origin).searchParams;
         const result = await apiRequest("/pwncollege_api/v1/workspace?" + query, {method:"GET",credentials:"same-origin"});
         if (root.attr("data-workspace-prepare-sequence") !== sequence || !actionbarIsRunning(root)) return;
         if (result.active === false) {
@@ -1379,13 +1379,22 @@ function loadWorkspace(log=true, requestedRoot=null) {
         }
         else {
             content.attr("src", "");
+            if (isCourseLauncher(root)) {
+                cancelWorkspaceLoad(content[0], {silentTelemetry: true});
+                content[0].hidden = true;
+                content[0].dataset.workspaceReady = "true";
+                workspaceLoadingPanel(content[0]).removeClass("is-active is-error is-stopped is-cancelled");
+                root.attr("data-workspace-dedicated-ready", "true");
+                showDedicatedHint(root, true);
+                return true;
+            }
             toggleSshInstructions(root, true);
         }
         return;
     }
     var recent = requestedWorkspaceService(root) || getRecentService(root);
     if (recent == null) {
-        recent = root.find(".workspace-service").first().attr("data-service");
+        recent = portedService(root) || root.find(".workspace-service").first().attr("data-service");
     }
     if (content.length == 0) {
         return;

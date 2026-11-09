@@ -15,6 +15,7 @@ let
     postInstall = (oldAttrs.postInstall or "") + ''
       patch -p1 -d $out < ${reconnectPatch}
       cp ${./desktop/keyboard-capture.js} $out/share/webapps/novnc/app/aisecedu-workspace-bridge.js
+      cp ${./remote-console-frame.js} $out/share/webapps/novnc/app/aisecedu-console-frame.js
       substituteInPlace $out/share/webapps/novnc/vnc.html \
         --replace-fail \
         '<script type="module" crossorigin="anonymous" src="app/error-handler.js"></script>' \

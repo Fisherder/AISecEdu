@@ -46,7 +46,7 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
         watcher.get(f"{DOJO_URL}/feed")
         WebDriverWait(watcher, 20).until(lambda driver: driver.execute_script(
             "return Number(window.init && window.init.userId) > 0 && "
-            "getComputedStyle(document.getElementById('connection-status')).display === 'none'"))
+            "document.getElementById('feed-container').dataset.connectionState === 'connected'"))
         events_after_start = watcher.find_element(By.ID, "events-list").find_elements(By.CLASS_NAME, "event-card")
 
         found_start_event = False

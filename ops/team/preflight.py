@@ -38,6 +38,8 @@ def main():
         version = subprocess.check_output([node, '-p', 'process.versions.node'], text=True).strip()
         if int(version.split('.')[0]) != 22:
             failures.append(f'团队 Node.js 基线为 22.x，当前 {version}')
+        elif subprocess.run([node, '--experimental-vm-modules', 'test/browser/desktop-console-bootstrap.cjs'], cwd=ROOT).returncode:
+            failures.append('桌面桥接来源与握手回归')
     else:
         failures.append('未找到 Node.js 22.x')
     print(json.dumps({'status': 'FAIL' if failures else 'PASS', 'failures': failures,
