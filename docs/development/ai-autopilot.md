@@ -61,6 +61,8 @@ AI 不自动解决人的审查讨论，不部署共享平台或生产，不把�
 
 `make dev-check` 包含调度与发布边界的离线回归，以及启动配置回归；课件模块存在时也执行其单测。Team quick checks 还会在课件浏览器组件测试存在时安装固定 Playwright 并执行该测试。完整 DOJO CI 继续作为独立必需检查。
 
+完整 CI 在每种节点模式中先执行应用上下文单测：`test_model_router.py` 和 `test_runtime_profiles.py` 在实际 CTFd 容器及请求上下文中运行，由 `ops/team/app_units.py` 调度，限于隔离的 `coverage` 环境。其余单测和 HTTP 客户端用例在测试镜像运行；两部分共同覆盖完整文件集合，任一步失败都阻止合并。客户端测试所需 Flask、SQLAlchemy 等版本与平台保持一致，任务可靠性单测直接加载生产模块，避免依赖缺失的测试文件。
+
 完整 CI 的 `coverage` 环境只加载仓库基础 Compose，从源码构建组件；服务器的本地镜像标签、迁移后 Nix 路径和发布覆盖文件不进入临时 Runner。生产及共享开发环境继续按原有方式加载覆盖文件。GitHub 构建使用其 Ubuntu Azure 镜像源，并为软件包下载设置有限重试；索引下载失败直接报错，避免带着不完整索引继续安装。
 
 外层与测试镜像分别使用 GitHub BuildKit 缓存，构建成功即保存，避免整套测试尚未通过就丢失已完成的编译结果。合入 `develop` 后也运行 CI，建立供后续 PR 读取的基线缓存。缓存仅加速构建，不替代测试；远程缓存保存失败不改变测试结论。参见 [Docker Actions 缓存说明](https://docs.docker.com/build/ci/github-actions/cache/)。

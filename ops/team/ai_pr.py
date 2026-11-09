@@ -428,6 +428,7 @@ def publish(folder, candidate):
         git(candidate, 'merge', '--abort', check=False)
         report = {'summary': '同步 develop 出现冲突，已停止自动更新，原分支保持不变。',
                   'requires_human': True, 'human_reason': '需要解决分支冲突。', 'findings': []}
+        record_check(client, context, 'completed', '同步 develop 出现冲突', report['summary'], 'failure')
         post_comment(client, context, report, '等待维护者处理分支冲突。')
         return
     report = validate_report(json.loads((folder / 'review.json').read_text()))

@@ -144,8 +144,9 @@ def test_stale_head_prevents_all_publication():
 
 
 def publish_fixture(folder, *, requires_human=False, manual=False, failures=False, moving=False,
-                    feedback_changed=False, ci_changed=False):
-    context = {'number': 1, 'node_id': 'synthetic-node', 'mode': 'analyze', 'head': 'a' * 40,
+                    feedback_changed=False, ci_changed=False, update=False):
+    context = {'number': 1, 'node_id': 'synthetic-node', 'mode': 'update' if update else 'analyze', 'head': 'a' * 40,
+               'base': 'b' * 40,
                'branch': 'feat/member/test', 'model': 'synthetic', 'rounds': 0, 'signature': 'sig',
                'manual_reasons': ['protected path'] if manual else [],
                'failures': [{'name': 'audit', 'id': 3}] if failures else []}
@@ -402,6 +403,20 @@ def test_review_format_recovery_only_removes_null_extras_without_changing_findin
                 assert recovered['findings'] == [expected]
                 assert recovered['requires_human'] is True and recovered['human_reason'] == value['human_reason']
                 assert (folder / 'initial-review.raw.json').read_text() == original
+
+
+def test_base_merge_conflict_finishes_the_check_and_preserves_the_task_branch():
+    with tempfile.TemporaryDirectory() as directory, patch.object(ai, 'git') as command, \
+            patch.object(ai, 'post_comment') as comment:
+        command.return_value.returncode = 1
+        calls = publish_fixture(Path(directory), update=True)
+    assert [call.args[1:] for call in command.call_args_list] == [
+        ('merge', '--no-edit', 'b' * 40), ('merge', '--abort'),
+    ]
+    checks = [data for path, data, method in calls if path == '/check-runs' and method == 'POST']
+    assert checks[0]['status'] == 'completed' and checks[0]['conclusion'] == 'failure'
+    assert comment.call_args.args[2]['requires_human'] is True
+    assert not any(path == '/pulls/1/reviews' or path == '/graphql' for path, _, _ in calls)
 
 
 if __name__ == '__main__':

@@ -63,6 +63,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: read
       actions: read
       checks: write
     outputs:
@@ -89,11 +90,13 @@ jobs:
     environment:
       name: aisecedu-ai-model
       deployment: false
-    timeout-minutes: 45
+    timeout-minutes: 50
     permissions:
       contents: read
       pull-requests: read
+      issues: read
       actions: read
+      checks: read
     outputs:
       mode: ${{ steps.prepare.outputs.mode }}
       number: ${{ steps.prepare.outputs.number }}

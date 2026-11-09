@@ -143,10 +143,14 @@ jobs:
         run: |
           ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C
 
+      - name: Run application-context unit tests
+        timeout-minutes: 5
+        run: python3 ops/team/app_units.py --container dojo
+
       - name: Run ${{ matrix.mode }} dojo tests
         timeout-minutes: 15
         run: |
-          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -N -t
+          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -N -t --ignore=test_model_router.py --ignore=test_runtime_profiles.py
 
       - name: Upload coverage reports to Codecov
         if: matrix.mode == 'singlenode'
