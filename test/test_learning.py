@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import secrets
 import time
 from types import SimpleNamespace
@@ -11,7 +12,7 @@ try:
 except ModuleNotFoundError:
     WebDriverWait = None
 
-from utils import DOJO_URL, db_sql, get_user_id, solve_challenge, start_challenge, workspace_run
+from utils import DOJO_URL, db_sql, dojo_run, get_user_id, solve_challenge, start_challenge, workspace_run
 
 
 API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/learning"
@@ -2910,7 +2911,7 @@ def test_custom_challenge_public_description_redacts_complete_sql_payload():
     assert spec["publicSanitization"]["sqlPayloadRedactions"] == 1
 
 
-def wait_for_authoring(session, response, timeout=180):
+def wait_for_authoring(session, response, timeout=180, *, expected_status="COMPLETED"):
     """Wait for the durable authoring worker and return its private draft."""
 
     assert response.status_code == 202, response.text
@@ -2920,15 +2921,54 @@ def wait_for_authoring(session, response, timeout=180):
         polled = session.get(f"{API}/authoring/jobs/{job['id']}")
         assert polled.status_code == 200, polled.text
         job = polled.json()["job"]
-        if job["status"] == "FAILED":
-            pytest.fail(job.get("error") or "authoring job failed")
-        if job["status"] == "COMPLETED":
+        if job["status"] in {"FAILED", "COMPLETED"}:
+            assert job["status"] == expected_status, job.get("error") or job
             assert job["draftId"]
             draft_response = session.get(f"{API}/drafts/{job['draftId']}")
             assert draft_response.status_code == 200, draft_response.text
             return draft_response.json()["draft"], job
         time.sleep(0.5)
     pytest.fail(f"authoring job {job['id']} did not complete within {timeout}s")
+
+
+def prepared_evidence_draft(session, reference_id, challenge_id, brief):
+    import base64
+
+    package = json.loads((pathlib.Path(__file__).parent / "fixtures/native-evidence-package.json").read_text())
+    values = base64.b64encode(json.dumps({"reference": reference_id, "challengeId": challenge_id,
+                                        "brief": brief, "package": package}).encode()).decode()
+    code = f'''
+import base64,json,os
+from CTFd.models import Users,db
+from CTFd.plugins.dojo_plugin import config
+from CTFd.plugins.dojo_plugin.models import Dojos,LearningDrafts
+from CTFd.plugins.dojo_plugin.learning import authoring
+assert os.environ.get('DOJO_ENV') == 'coverage' and not config.DOJO_AI_ENABLED
+values=json.loads(base64.b64decode({values!r}))
+dojo=Dojos.from_id(values['reference']).one()
+owner=Users.query.filter_by(name='admin').one()
+constraints={{'id':values['challengeId'],'title':'Evidence Chain Verification','category':'FORENSICS',
+             'difficulty':2,'exerciseMode':'CONTAINER','workspaceLayout':values['package']['workspaceLayout']}}
+spec=authoring._base_spec(values['brief'],constraints,'L3',[])
+spec.update(values['package'])
+spec['authoringPipeline']={{'provider':'OFFLINE_FIXTURE'}}
+draft=LearningDrafts(dojo_id=dojo.dojo_id,module_index=0,author_id=owner.id,level='L3',
+                     brief=values['brief'],constraints=constraints,spec=spec)
+db.session.add(draft)
+db.session.flush()
+report=authoring.validate_draft(draft,allow_agent_repair=False)
+assert report['status']=='PASS', [row for row in report['checks'] if row['status']=='BLOCK']
+db.session.commit()
+print('CI-PREPARED-DRAFT',draft.id)
+'''
+    encoded = base64.b64encode(code.encode()).decode()
+    result = dojo_run('timeout', '180', 'dojo', 'flask', timeout=200,
+                      input=f'import base64; exec(base64.b64decode("{encoded}"))\n')
+    match = re.search(r'CI-PREPARED-DRAFT (draft_[a-f0-9]{32})', result.stdout)
+    assert match, result.stdout
+    response = session.get(f"{API}/drafts/{match[1]}")
+    assert response.status_code == 200, response.text
+    return response.json()['draft']
 
 
 def test_learning_overview_and_teacher_permissions(
@@ -4519,20 +4559,22 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
             },
         },
     )
-    draft, _ = wait_for_authoring(admin_session, created)
+    blocked, job = wait_for_authoring(admin_session, created, expected_status="FAILED")
+    assert job["status"] == "FAILED"
+    assert blocked["validation"]["status"] == "BLOCK"
+    assert any(check["status"] == "BLOCK" and check["id"] == "standard-workspace-manifest"
+               for check in blocked["validation"]["checks"])
+    refused = admin_session.post(f"{API}/drafts/{blocked['id']}/publish", json={})
+    assert refused.status_code == 400, refused.text
+    challenge_id += "-ready"
+    draft = prepared_evidence_draft(admin_session, simple_award_dojo, challenge_id, brief)
     assert draft["spec"]["mode"] == "GENERATE_CUSTOM"
     assert draft["spec"]["sourceChallengeId"] is None
     assert draft["spec"]["verificationAnswer"] is None
     assert draft["spec"]["oracleContract"]["type"] == "FLAG_GATE_V1"
     assert "solution.json" not in draft["spec"]["description"]
     assert "动态 Flag" in draft["spec"]["description"]
-    assert draft["spec"]["authoringPipeline"]["plan"]["model"] == "deepseek-v4-flash"
-    assert draft["spec"]["authoringPipeline"]["build"]["model"] == "deepseek-v4-flash"
-    assert draft["spec"]["authoringPipeline"]["review"]["model"] == "deepseek-v4-flash"
-    assert (
-        draft["spec"]["authoringPipeline"]["postReview"]["model"] == "deepseek-v4-flash"
-    )
-    assert draft["spec"]["authoringPipeline"]["validate"]["model"] == "deepseek-v4-flash"
+    assert draft["spec"]["authoringPipeline"]["provider"] == "OFFLINE_FIXTURE"
 
     validated_response = admin_session.post(
         f"{API}/drafts/{draft['id']}/validate", json={}

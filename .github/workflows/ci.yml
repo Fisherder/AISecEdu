@@ -148,7 +148,7 @@ jobs:
         id: startup
         timeout-minutes: ${{ matrix.mode == 'multinode' && 30 || 25 }}
         run: |
-          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C
+          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -e DOJO_AI_ENABLED=false
 
       - name: Run application-context unit tests
         timeout-minutes: 5
@@ -160,7 +160,7 @@ jobs:
         env:
           AISECEDU_SPLIT_APP_TESTS: '1'
         run: |
-          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -N -t -- --color=no
+          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -e DOJO_AI_ENABLED=false -N -t -- --color=no
 
       - name: Upload coverage reports to Codecov
         if: matrix.mode == 'singlenode'
