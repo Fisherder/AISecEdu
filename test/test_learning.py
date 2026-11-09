@@ -12,7 +12,7 @@ try:
 except ModuleNotFoundError:
     WebDriverWait = None
 
-from utils import DOJO_URL, db_sql, dojo_run, get_user_id, solve_challenge, start_challenge, workspace_run
+from utils import DOJO_URL, db_sql, dojo_run, enroll, get_user_id, solve_challenge, start_challenge, workspace_run
 
 
 API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/learning"
@@ -3940,6 +3940,7 @@ def test_simulation_challenge_uses_unified_attempt_solve_tutor_and_replay(
     simple_award_dojo,
 ):
     user_name, user_session = random_user
+    enroll(user_session, simple_award_dojo)
     challenge_id = f"wireless-sim-{secrets.token_hex(4)}"
     created = admin_session.post(
         f"{API}/dojos/{simple_award_dojo}/authoring",
@@ -4538,6 +4539,7 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     simple_award_dojo,
 ):
     user_name, user_session = random_user
+    enroll(user_session, simple_award_dojo)
     challenge_id = f"evidence-{secrets.token_hex(4)}"
     verification_answer = secrets.token_hex(8)
     brief = (
