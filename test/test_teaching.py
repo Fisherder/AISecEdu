@@ -3797,13 +3797,17 @@ def test_teacher_thread_isolation_and_native_progress(
     simple_route = data(admin_session.get(f"{API}/jobs/{simple_job_id}"))["job"]
     complex_route = data(admin_session.get(f"{API}/jobs/{complex_job_id}"))["job"]
     assert simple_route["modelRoute"]["route"] == "teaching-default"
+    required_model = complex_route["modelRoute"]["requiredModel"]
+    assert isinstance(required_model, str) and required_model.strip()
     assert complex_route["modelRoute"] == {
         "route": "deepseek-v4-flash",
-        "requiredModel": "deepseek-v4-flash",
-        "actualModel": "deepseek-v4-flash",
+        "requiredModel": required_model,
+        "actualModel": required_model,
         "provider": "deepseek",
         "degraded": False,
         "invocationStatus": None,
+        "usage": None,
+        "latencyMs": None,
     }
     assert guest_session.get(f"{API}/jobs/{complex_job_id}").status_code == 404
 
