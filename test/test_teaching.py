@@ -413,7 +413,7 @@ def test_teacher_agent_approval_tray_browser_flow(
         )
         reject.click()
         wait.until(lambda _driver: not tray.is_displayed())
-        browser.refresh()
+        browser.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard&thread={thread_id}")
         wait.until(
             lambda driver: driver.find_element(
                 selenium_by.By.ID, "teaching-input"
