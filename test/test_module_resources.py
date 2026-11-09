@@ -1,8 +1,13 @@
-from bs4 import BeautifulSoup
 import pytest
 import requests
 
 from utils import DOJO_URL, create_dojo_yml, TEST_DOJOS_LOCATION
+
+
+def _module_content_html(html):
+    _, marker, content = html.partition('id="module-content"')
+    assert marker, "Module content accordion was not rendered"
+    return content.partition('</main>')[0]
 
 
 @pytest.fixture(scope="session")
@@ -15,7 +20,7 @@ def test_module_resources(module_resources_dojo, admin_session, example_dojo):
     
     response = admin_session.get(f"{DOJO_URL}/{dojo_id}/test/")
     assert response.status_code == 200
-    page_content = str(BeautifulSoup(response.text, "html.parser").select_one("#module-content"))
+    page_content = _module_content_html(response.text)
     
     assert "Resource A" in page_content
     assert "Resource B" in page_content
@@ -39,7 +44,7 @@ def test_module_resources_order(module_resources_dojo, admin_session, example_do
     
     response = admin_session.get(f"{DOJO_URL}/{dojo_id}/test/")
     assert response.status_code == 200
-    page_content = str(BeautifulSoup(response.text, "html.parser").select_one("#module-content"))
+    page_content = _module_content_html(response.text)
     
     pos_a = page_content.find("Resource A")
     pos_b = page_content.find("Resource B")
@@ -56,7 +61,7 @@ def test_module_resources_with_challenges(module_resources_dojo, admin_session, 
     
     response = admin_session.get(f"{DOJO_URL}/{dojo_id}/test/")
     assert response.status_code == 200
-    page_content = str(BeautifulSoup(response.text, "html.parser").select_one("#module-content"))
+    page_content = _module_content_html(response.text)
     
     assert "Challenge A" in page_content
     assert "Challenge B" in page_content
@@ -80,7 +85,7 @@ def test_unified_ordering(module_resources_dojo, admin_session, example_dojo):
     
     response = admin_session.get(f"{DOJO_URL}/{dojo_id}/test/")
     assert response.status_code == 200
-    page_content = str(BeautifulSoup(response.text, "html.parser").select_one("#module-content"))
+    page_content = _module_content_html(response.text)
     
     items = [
         "DESC789",  # First description
@@ -111,7 +116,7 @@ def test_header_resources(module_resources_dojo, admin_session, example_dojo):
     
     response = admin_session.get(f"{DOJO_URL}/{dojo_id}/test/")
     assert response.status_code == 200
-    page_content = str(BeautifulSoup(response.text, "html.parser").select_one("#module-content"))
+    page_content = _module_content_html(response.text)
     
     assert "<br>" in page_content
     assert "<h2>Advanced Section</h2>" in page_content
@@ -129,7 +134,7 @@ def test_non_expandable_markdown_resources(module_resources_dojo, admin_session,
     
     response = admin_session.get(f"{DOJO_URL}/{dojo_id}/test/")
     assert response.status_code == 200
-    page_content = str(BeautifulSoup(response.text, "html.parser").select_one("#module-content"))
+    page_content = _module_content_html(response.text)
     
     # Check all non-expandable markdown resources exist
     assert "DESC789" in page_content
@@ -165,7 +170,7 @@ def test_markdown_file_loading(module_resources_dojo, admin_session, example_doj
     
     response = admin_session.get(f"{DOJO_URL}/{dojo_id}/test/")
     assert response.status_code == 200
-    page_content = str(BeautifulSoup(response.text, "html.parser").select_one("#module-content"))
+    page_content = _module_content_html(response.text)
     
     # Check that file-loaded content appears
     assert "FILE_CONTENT_123" in page_content

@@ -33,11 +33,7 @@ def main():
         subprocess.run(['docker', 'cp', str(archive), f'{args.container}:{outer_archive}'], check=True)
         subprocess.run([*outer, 'docker', 'cp', outer_archive, 'ctfd:/tmp/aisecedu-ci-app-source.tar'], check=True)
     subprocess.run([*inner, 'tar', '-xf', '/tmp/aisecedu-ci-app-source.tar', '-C', DESTINATION], check=True)
-    credentials = subprocess.check_output([*outer, 'cat', '/data/admin-password.txt'], text=True).strip()
-    settings = {'admin_username': 'admin', 'admin_password': credentials}
-    if '=' in credentials:
-        values = dict(line.partition('=')[::2] for line in credentials.splitlines() if '=' in line)
-        settings.update(admin_username=values.get('username', 'admin'), admin_password=values['password'])
+    settings = {'admin_username': 'admin', 'admin_password': 'admin'}
     subprocess.run(['docker', 'exec', '-i', args.container, 'docker', 'exec', '-i', 'ctfd',
                     'python', DESTINATION + '/ops/team/app_test_runner.py'],
                    input=json.dumps(settings), text=True, check=True)

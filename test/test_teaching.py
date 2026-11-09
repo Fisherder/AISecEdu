@@ -2459,7 +2459,7 @@ def test_manual_course_chapter_and_practice_creation(admin_session):
     assert created.status_code == 201, created.text
     created_data = data(created)
     course = created_data["course"]
-    assert re.fullmatch(r"course-[a-f0-9]{8}", course["slug"])
+    assert re.fullmatch(r"[a-z0-9-]+-[a-f0-9]{8}~[a-f0-9]{8}", course["referenceId"])
     assert created_data["module"]["id"] == "chapter-1"
     reference = course["referenceId"]
 
