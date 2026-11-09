@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-from utils import DOJO_URL, complete_teacher_command, db_sql, dojo_run, get_user_id, login
+from utils import DOJO_URL, complete_teacher_command, db_sql, dojo_run, enroll, get_user_id, login
 
 
 API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/teaching"
@@ -1784,11 +1784,6 @@ def dojo_context(session, reference_id, role):
     return next(
         item for item in context[collection] if item["referenceId"] == reference_id
     )
-
-
-def enroll(session, reference_id):
-    response = session.post(f"{DOJOS_API}/{reference_id}/enrollment", json={})
-    assert response.status_code in {200, 201}, response.text
 
 
 def copy_session(source):

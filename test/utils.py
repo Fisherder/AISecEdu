@@ -200,6 +200,11 @@ def workspace_run(cmd, *, user, root=False, **kwargs):
     )
 
 
+def enroll(session, reference_id):
+    response = session.post(f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/dojos/{reference_id}/enrollment", json={})
+    assert response.status_code in {200, 201}, response.text
+
+
 def start_challenge(dojo, module, challenge, practice=False, *, session, as_user=None, wait=0):
     start_challenge_json = dict(dojo=dojo, module=module, challenge=challenge, practice=practice)
     if as_user:
