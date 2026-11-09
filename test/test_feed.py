@@ -103,6 +103,9 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
         start_challenge(simple_award_dojo, "hello", "banana", session=random_user_session)
         solve_challenge(simple_award_dojo, "hello", "banana", session=random_user_session, user=random_user_name)
         wait_for_background_worker(timeout=1)
+        WebDriverWait(watcher, 20).until(lambda driver: any(
+            random_user_name in event.text and "获得了" in event.text and "🧪" in event.text
+            for event in driver.find_elements(By.CSS_SELECTOR, "#events-list .event-card")))
         events_with_emoji = watcher.find_element(By.ID, "events-list").find_elements(By.CLASS_NAME, "event-card")
         
         found_emoji_event = False

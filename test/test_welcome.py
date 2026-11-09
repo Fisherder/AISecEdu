@@ -3,6 +3,7 @@ import re
 import time
 import string
 import random
+from urllib.parse import urlsplit
 
 from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException, TimeoutException
 from selenium.webdriver.common.by import By
@@ -177,7 +178,7 @@ def challenge_submit(browser, idx, flag):
             (
                 element
                 for element in driver.find_element("id", f"challenges-body-{idx}")
-                .find_elements(By.CSS_SELECTOR, "#workspace-notification-banner")
+                .find_elements(By.CSS_SELECTOR, ".workspace-notification-banner")
                 if element.is_displayed() and element.text.strip()
             ),
             False,
@@ -185,6 +186,24 @@ def challenge_submit(browser, idx, flag):
     )
     assert banner.text.strip()
     assert not browser.find_elements(By.CSS_SELECTOR, ".aisecedu-dialog-layer.is-visible")
+
+
+def workspace_dialog(browser, *, accept=True):
+    wait = WebDriverWait(browser, 10)
+    dialog = wait.until(EC.visibility_of_element_located(
+        (By.CSS_SELECTOR, ".aisecedu-dialog-layer.is-visible")))
+    message = dialog.text
+    action = "confirm" if accept else "cancel"
+    dialog.find_element(By.CSS_SELECTOR, f'[data-dialog-action="{action}"]').click()
+    wait.until(EC.invisibility_of_element(dialog))
+    return message
+
+
+def workspace_launcher(browser, idx):
+    wait = WebDriverWait(browser, 30)
+    return wait.until(EC.visibility_of_element_located((
+        By.CSS_SELECTOR, f'#challenges-body-{idx} [data-workspace-dedicated-hint] a')))
+
 
 # Gets the accordion entry index
 def challenge_idx(browser, name):
@@ -370,17 +389,19 @@ def test_actionbar_service_buttons(random_user_browser, random_user_name, interf
     handles = set(random_user_browser.window_handles)
     wait = WebDriverWait(random_user_browser, 30)
 
-    body.find_element(By.CSS_SELECTOR, '.workspace-service[data-service="terminal: 7681"]').click()
+    workspace_launcher(random_user_browser, idx).click()
     wait.until(lambda driver: len(driver.window_handles) == len(handles) + 1)
     popout_handle = (set(random_user_browser.window_handles) - handles).pop()
     random_user_browser.switch_to.window(popout_handle)
     wait.until(lambda driver: driver.current_url.endswith("/workspace?service=terminal"))
 
     random_user_browser.switch_to.window(module_handle)
-    random_user_browser.find_element("id", f"challenges-body-{idx}") \
-        .find_element(By.CSS_SELECTOR, '.workspace-service[data-service="terminal: 7681"]').click()
-    time.sleep(2)
-    assert len(random_user_browser.window_handles) == len(handles) + 1
+    workspace_launcher(random_user_browser, idx).click()
+    wait.until(lambda driver: len(driver.window_handles) == len(handles) + 2)
+    second_handle = (set(random_user_browser.window_handles) - handles - {popout_handle}).pop()
+    random_user_browser.switch_to.window(second_handle)
+    wait.until(lambda driver: driver.current_url.endswith("/workspace?service=terminal"))
+    random_user_browser.close()
     random_user_browser.switch_to.window(popout_handle)
     assert random_user_browser.current_url.endswith("/workspace?service=terminal")
     random_user_browser.switch_to.window(module_handle)
@@ -426,15 +447,15 @@ def test_actionbar_port_popout(random_user_browser, random_user_name, interfaces
     handles = set(random_user_browser.window_handles)
     wait = WebDriverWait(random_user_browser, 30)
 
-    body.find_element(By.CSS_SELECTOR, '.workspace-service[data-service="web: 80"]').click()
+    workspace_launcher(random_user_browser, idx).click()
     wait.until(lambda driver: len(driver.window_handles) == len(handles) + 1)
     popout_handle = (set(random_user_browser.window_handles) - handles).pop()
     random_user_browser.switch_to.window(popout_handle)
     wait.until(lambda driver: driver.current_url.endswith("/workspace?port=80"))
     address = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-workspace-web-address]")))
     link = address.find_element(By.CSS_SELECTOR, "[data-workspace-web-link]")
-    assert link.get_attribute("href").startswith("https://")
-    assert "https://" in link.text
+    assert urlsplit(link.get_attribute("href")).scheme == urlsplit(DOJO_URL).scheme
+    assert link.text == link.get_attribute("href")
     random_user_browser.close()
 
 def test_actionbar_ssh_only_challenge(random_user_browser, random_user_name, interfaces_dojo):
@@ -446,35 +467,38 @@ def test_actionbar_ssh_only_challenge(random_user_browser, random_user_name, int
     assert [button.get_attribute("data-service") for button in buttons] == ["ssh: "]
 
     wait = WebDriverWait(random_user_browser, 30)
-    iframe = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, f"#challenges-body-{idx} #workspace-iframe")))
-    wait.until(lambda driver: "SSH" in (iframe.get_attribute("class") or ""))
-    assert iframe.size["height"] == 0
+    assert not body.find_elements(By.ID, "workspace-iframe")
     assert body.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed()
     assert "active" in buttons[0].get_attribute("class")
 
     handles = len(random_user_browser.window_handles)
-    buttons[0].click()
+    random_user_browser.execute_script("arguments[0].click();", buttons[0])
     time.sleep(1)
     assert len(random_user_browser.window_handles) == handles
     assert body.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed()
     assert "active" in buttons[0].get_attribute("class")
-    assert "SSH" in (iframe.get_attribute("class") or "")
+    random_user_browser.get(f"{DOJO_URL}/workspace?service=ssh")
+    iframe = wait.until(EC.presence_of_element_located((By.ID, "workspace-iframe")))
+    wait.until(lambda driver: "SSH" in (iframe.get_attribute("class") or ""))
+    assert iframe.size["height"] == 0
+    assert random_user_browser.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed()
     random_user_browser.close()
 
 def test_actionbar_ssh_toggle(random_user_browser, random_user_name, interfaces_dojo):
     random_user_browser.get(f"{DOJO_URL}/testing-interfaces/test")
     idx = challenge_idx(random_user_browser, "test1")
     challenge_start(random_user_browser, idx)
-    body = random_user_browser.find_element("id", f"challenges-body-{idx}")
+    random_user_browser.get(f"{DOJO_URL}/workspace?service=terminal")
+    body = random_user_browser.find_element(By.CSS_SELECTOR, ".challenge-workspace")
     wait = WebDriverWait(random_user_browser, 30)
-    iframe = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, f"#challenges-body-{idx} #workspace-iframe")))
+    iframe = wait.until(EC.presence_of_element_located((By.ID, "workspace-iframe")))
     wait.until(lambda driver: "/7681/" in (iframe.get_attribute("src") or ""))
 
     ssh_button = body.find_element(By.CSS_SELECTOR, '.workspace-service[data-service="ssh: "]')
     terminal_button = body.find_element(By.CSS_SELECTOR, '.workspace-service[data-service="terminal: 7681"]')
-    assert ssh_button.find_elements(By.CSS_SELECTOR, ".hint-icon")
+    assert ssh_button.find_elements(By.CSS_SELECTOR, ".fa-key")
     assert not ssh_button.find_elements(By.CSS_SELECTOR, ".popout-icon")
-    assert terminal_button.find_elements(By.CSS_SELECTOR, ".popout-icon")
+    assert terminal_button.find_elements(By.CSS_SELECTOR, ".fa-terminal")
     assert not terminal_button.find_elements(By.CSS_SELECTOR, ".hint-icon")
 
     ssh_box = body.find_element(By.CSS_SELECTOR, ".workspace-ssh")
@@ -483,23 +507,27 @@ def test_actionbar_ssh_toggle(random_user_browser, random_user_name, interfaces_
 
     ssh_button.click()
     wait.until(lambda driver: ssh_box.is_displayed())
+    assert random_user_browser.current_url.endswith("/workspace?service=ssh")
     assert "active" in ssh_button.get_attribute("class")
     assert "SSH" in (iframe.get_attribute("class") or "")
     assert iframe.size["height"] == 0
     assert len(random_user_browser.window_handles) == handles
 
-    restart_button = body.find_element(By.CSS_SELECTOR, "#challenge-restart")
+    restart_button = body.find_element(By.CSS_SELECTOR, ".challenge-restart")
     restart_button.click()
+    workspace_dialog(random_user_browser)
     wait.until(lambda driver: restart_button.get_attribute("disabled") is None)
     time.sleep(1)
     assert ssh_box.is_displayed()
+    assert random_user_browser.current_url.endswith("/workspace?service=ssh")
     assert "active" in ssh_button.get_attribute("class")
     assert "SSH" in (iframe.get_attribute("class") or "")
 
-    ssh_button.click()
+    terminal_button.click()
     wait.until(lambda driver: not ssh_box.is_displayed())
     assert "active" not in ssh_button.get_attribute("class")
     assert "SSH" not in (iframe.get_attribute("class") or "")
+    wait.until(lambda driver: "/7681/" in (iframe.get_attribute("src") or ""))
     assert "/7681/" in (iframe.get_attribute("src") or "")
     random_user_browser.close()
 
@@ -507,25 +535,22 @@ def test_actionbar_sudo_checkbox(random_user_browser, random_user_name, interfac
     random_user_browser.get(f"{DOJO_URL}/testing-interfaces/test")
     idx = challenge_idx(random_user_browser, "test1")
     challenge_start(random_user_browser, idx)
-    body = random_user_browser.find_element("id", f"challenges-body-{idx}")
+    random_user_browser.get(f"{DOJO_URL}/workspace?service=terminal")
+    body = random_user_browser.find_element(By.CSS_SELECTOR, ".challenge-workspace")
     wait = WebDriverWait(random_user_browser, 30)
 
-    control = body.find_element(By.CSS_SELECTOR, "#workspace-change-privilege")
+    control = body.find_element(By.CSS_SELECTOR, ".workspace-change-privilege")
     checkbox = control.find_element(By.CSS_SELECTOR, "input")
     assert not checkbox.is_selected()
     assert control.get_attribute("data-privileged") == "false"
 
     checkbox.click()
-    wait.until(EC.alert_is_present())
-    alert = random_user_browser.switch_to.alert
-    assert "sudo" in alert.text
-    alert.dismiss()
+    assert "sudo" in workspace_dialog(random_user_browser, accept=False)
     assert not checkbox.is_selected()
     assert control.get_attribute("data-privileged") == "false"
 
     checkbox.click()
-    wait.until(EC.alert_is_present())
-    random_user_browser.switch_to.alert.accept()
+    workspace_dialog(random_user_browser)
     wait.until(lambda driver: control.get_attribute("data-privileged") == "true")
     wait.until(lambda driver: checkbox.is_enabled())
     assert checkbox.is_selected()
@@ -546,14 +571,12 @@ def test_actionbar_sudo_checkbox(random_user_browser, random_user_name, interfac
     assert workspace_output("sudo id -u || echo nosudo").strip() == "0"
 
     checkbox.click()
-    wait.until(EC.alert_is_present())
-    random_user_browser.switch_to.alert.dismiss()
+    workspace_dialog(random_user_browser, accept=False)
     assert checkbox.is_selected()
     assert control.get_attribute("data-privileged") == "true"
 
     checkbox.click()
-    wait.until(EC.alert_is_present())
-    random_user_browser.switch_to.alert.accept()
+    workspace_dialog(random_user_browser)
     wait.until(lambda driver: control.get_attribute("data-privileged") == "false")
     wait.until(lambda driver: checkbox.is_enabled())
     assert not checkbox.is_selected()
@@ -566,13 +589,14 @@ def test_actionbar_stop_and_restart(random_user_browser, random_user_name, inter
     random_user_browser.get(f"{DOJO_URL}/testing-interfaces/test")
     idx = challenge_idx(random_user_browser, "test1")
     challenge_start(random_user_browser, idx)
-    body = random_user_browser.find_element("id", f"challenges-body-{idx}")
+    random_user_browser.get(f"{DOJO_URL}/workspace?service=terminal")
+    body = random_user_browser.find_element(By.CSS_SELECTOR, ".challenge-workspace")
     controls = body.find_element(By.CSS_SELECTOR, ".workspace-controls")
     wait = WebDriverWait(random_user_browser, 60)
 
-    restart_button = controls.find_element(By.ID, "challenge-restart")
-    stop_button = controls.find_element(By.ID, "challenge-stop")
-    reset_button = controls.find_element(By.ID, "challenge-reset")
+    restart_button = controls.find_element(By.CSS_SELECTOR, ".challenge-restart")
+    stop_button = controls.find_element(By.CSS_SELECTOR, ".challenge-stop")
+    reset_button = controls.find_element(By.CSS_SELECTOR, ".challenge-reset")
     assert restart_button.text.strip() == "重启"
     assert stop_button.text.strip() == "停止"
     assert reset_button.text.strip() == "重置"
@@ -582,10 +606,7 @@ def test_actionbar_stop_and_restart(random_user_browser, random_user_name, inter
         user=random_user_name,
     )
     stop_button.click()
-    wait.until(EC.alert_is_present())
-    alert = random_user_browser.switch_to.alert
-    assert "/home/hacker" in alert.text
-    alert.accept()
+    assert "保留 Home" in workspace_dialog(random_user_browser)
     wait.until(
         lambda driver: controls.get_attribute("data-workspace-running") == "false"
         and restart_button.is_enabled()
@@ -594,11 +615,12 @@ def test_actionbar_stop_and_restart(random_user_browser, random_user_name, inter
         By.CSS_SELECTOR,
         "[data-workspace-loading-title]",
     )
-    assert stopped_title.text == "题目容器已停止"
+    assert stopped_title.text == "实验环境已停止"
     assert not stop_button.is_enabled()
     assert not reset_button.is_enabled()
 
     restart_button.click()
+    workspace_dialog(random_user_browser)
     wait.until(
         lambda driver: controls.get_attribute("data-workspace-running") == "true"
         and stop_button.is_enabled()
@@ -627,21 +649,25 @@ def test_actionbar_popout_mode(random_user_browser, random_user_name, interfaces
     body = random_user_browser.find_element("id", f"challenges-body-{idx}")
     controls = body.find_element(By.CSS_SELECTOR, ".workspace-controls")
     assert controls.get_attribute("data-popout") == "true"
-    assert not controls.find_elements(By.ID, "fullscreen")
+    assert not controls.find_elements(By.CSS_SELECTOR, ".workspace-fullscreen")
     assert not body.find_elements(By.ID, "workspace-select")
     assert not body.find_element(By.CSS_SELECTOR, ".workspace-ssh").is_displayed()
 
     buttons = controls.find_elements(By.CSS_SELECTOR, ".workspace-service")
     assert [button.get_attribute("data-service") for button in buttons] == ["ssh: ", "terminal: 7681"]
 
-    wait = WebDriverWait(random_user_browser, 30)
-    iframe = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, f"#challenges-body-{idx} #workspace-iframe")))
-    wait.until(lambda driver: "/7681/" in (iframe.get_attribute("src") or ""))
+    assert all(not button.is_displayed() for button in buttons)
+    assert not body.find_elements(By.ID, "workspace-iframe")
+    assert workspace_launcher(random_user_browser, idx).get_attribute("target") == "_blank"
 
     random_user_browser.get(f"{DOJO_URL}/workspace")
     controls = random_user_browser.find_element(By.CSS_SELECTOR, ".workspace-controls")
     assert controls.get_attribute("data-popout") == "false"
-    assert controls.find_elements(By.ID, "fullscreen")
+    assert controls.find_elements(By.CSS_SELECTOR, ".workspace-fullscreen")
+    iframe = WebDriverWait(random_user_browser, 30).until(
+        EC.presence_of_element_located((By.ID, "workspace-iframe")))
+    WebDriverWait(random_user_browser, 30).until(
+        lambda driver: "/7681/" in (iframe.get_attribute("src") or ""))
     services = [button.get_attribute("data-service") for button in controls.find_elements(By.CSS_SELECTOR, ".workspace-service")]
     assert services == ["ssh: ", "terminal: 7681"]
     random_user_browser.close()
@@ -655,7 +681,7 @@ def test_actionbar_popout_reload(random_user_browser, random_user_name, interfac
     handles = set(random_user_browser.window_handles)
     wait = WebDriverWait(random_user_browser, 30)
 
-    body.find_element(By.CSS_SELECTOR, '.workspace-service[data-service="terminal: 7681"]').click()
+    workspace_launcher(random_user_browser, idx).click()
     wait.until(lambda driver: len(driver.window_handles) == len(handles) + 1)
     popout_handle = (set(random_user_browser.window_handles) - handles).pop()
     random_user_browser.switch_to.window(popout_handle)
@@ -663,8 +689,9 @@ def test_actionbar_popout_reload(random_user_browser, random_user_name, interfac
     popout_page = random_user_browser.find_element(By.TAG_NAME, "body")
 
     random_user_browser.switch_to.window(module_handle)
-    restart_button = body.find_element(By.CSS_SELECTOR, "#challenge-restart")
+    restart_button = body.find_element(By.CSS_SELECTOR, ".challenge-restart")
     restart_button.click()
+    workspace_dialog(random_user_browser)
     wait.until(lambda driver: restart_button.get_attribute("disabled") is None)
 
     random_user_browser.switch_to.window(popout_handle)
@@ -678,8 +705,11 @@ def test_actionbar_first_ported_inline(random_user_browser, random_user_name, in
     random_user_browser.get(f"{DOJO_URL}/testing-interfaces/test")
     idx = challenge_idx(random_user_browser, "test2")
     challenge_start(random_user_browser, idx)
+    assert workspace_launcher(random_user_browser, idx).get_attribute("href").endswith("/workspace?service=code")
+    assert not random_user_browser.find_elements(By.CSS_SELECTOR, f"#challenges-body-{idx} #workspace-iframe")
+    random_user_browser.get(f"{DOJO_URL}/workspace")
     wait = WebDriverWait(random_user_browser, 30)
-    iframe = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, f"#challenges-body-{idx} #workspace-iframe")))
+    iframe = wait.until(EC.presence_of_element_located((By.ID, "workspace-iframe")))
     wait.until(lambda driver: "/8080/" in (iframe.get_attribute("src") or ""))
     random_user_browser.close()
 
@@ -691,12 +721,14 @@ def test_actionbar_popup_blocked(random_user_browser, random_user_name, interfac
     handles = len(random_user_browser.window_handles)
     random_user_browser.execute_script("window.open = function() { return null; };")
 
-    body.find_element(By.CSS_SELECTOR, '.workspace-service[data-service="terminal: 7681"]').click()
+    # The hidden legacy service component still handles blocked programmatic popouts.
+    random_user_browser.execute_script("arguments[0].click();", body.find_element(
+        By.CSS_SELECTOR, '.workspace-service[data-service="terminal: 7681"]'))
     banner = WebDriverWait(random_user_browser, 30).until(
         lambda driver: next(
             (
                 element
-                for element in body.find_elements(By.CSS_SELECTOR, "#workspace-notification-banner")
+                for element in body.find_elements(By.CSS_SELECTOR, ".workspace-notification-banner")
                 if element.is_displayed() and "浏览器阻止" in element.text
             ),
             False,
@@ -757,7 +789,14 @@ def test_welcome_graded_lecture(random_user_browser, random_user_name, example_d
     challenge_start(random_user_browser, idx)
 
     wait = WebDriverWait(random_user_browser, 30)
-    lecture_iframe = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, f"#challenges-body-{idx} #workspace-iframe")))
+    module_window = random_user_browser.current_window_handle
+    handles = set(random_user_browser.window_handles)
+    assert not random_user_browser.find_elements(By.CSS_SELECTOR, f"#challenges-body-{idx} #workspace-iframe")
+    workspace_launcher(random_user_browser, idx).click()
+    wait.until(lambda driver: len(driver.window_handles) == len(handles) + 1)
+    random_user_browser.switch_to.window((set(random_user_browser.window_handles) - handles).pop())
+    lecture_iframe = wait.until(EC.presence_of_element_located((By.ID, "workspace-iframe")))
+    wait.until(lambda driver: "/80" in (lecture_iframe.get_attribute("src") or ""))
     assert lecture_iframe.is_displayed()
     lecture_iframe_src = lecture_iframe.get_attribute("src")
     assert lecture_iframe_src.rstrip("/").endswith("/80")
@@ -769,6 +808,8 @@ def test_welcome_graded_lecture(random_user_browser, random_user_name, example_d
     assert "youtube.com" in inline_iframe_src or "youtube-nocookie.com" in inline_iframe_src
     assert "hh4XAU6XYP0" in inline_iframe_src
     random_user_browser.switch_to.default_content()
+    random_user_browser.close()
+    random_user_browser.switch_to.window(module_window)
 
     challenge_window = random_user_browser.current_window_handle
     random_user_browser.switch_to.new_window("tab")

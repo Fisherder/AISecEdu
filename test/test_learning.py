@@ -4058,9 +4058,11 @@ def test_simulation_challenge_uses_unified_attempt_solve_tutor_and_replay(
         },
     )
     assert tutor.status_code == 200
-    assert tutor.json()["reply"]["context"]["live"]
-    assert tutor.json()["reply"]["context"]["environmentType"] == "SIMULATION"
-    assert tutor.json()["reply"]["context"]["simulationRunId"] == run_id
+    tutor_context = tutor.json()["reply"]["context"]
+    assert tutor_context["live"] is False
+    assert tutor_context["environmentType"] == "NONE"
+    assert tutor_context["evidenceEvents"] >= 2
+    assert tutor_context["liveMatchesAttempt"] is not True
 
     act("inspect-client")
     act("form-hypothesis", {"cause": "co-channel-interference"})

@@ -752,7 +752,7 @@ function loadIframe(service, content) {
 
 function workspaceModeUrl(service) {
     const url = new URL("/workspace", window.location.origin);
-    if (isSpecialService(service)) {
+    if (isSpecialService(service) || (serviceName(service) === "ssh" && servicePort(service) === "")) {
         url.searchParams.set("service", serviceName(service));
     }
     else {
@@ -820,6 +820,9 @@ function selectService(service, log=true) {
         $(this).attr("aria-pressed", active ? "true" : "false");
     });
     content.hidden = false;
+    if (!isPopout(root)) {
+        updateWorkspaceModeUrl(service);
+    }
     if (serviceName(service) == "ssh" && servicePort(service) == "") {
         cancelWorkspaceLoad(content, {silentTelemetry: true});
         window.dispatchEvent(new CustomEvent("dojo:ssh-opened"));
@@ -835,9 +838,6 @@ function selectService(service, log=true) {
     else {
         $(content).removeClass("SSH");
         $(".workspace-ssh").hide();
-    }
-    if (!isPopout(root)) {
-        updateWorkspaceModeUrl(service);
     }
     loadIframe(service, content);
 }
