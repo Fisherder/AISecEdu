@@ -72,6 +72,7 @@
       "test_platform_image_name_does_not_turn_forensics_into_pwn",
       "test_platform_injected_challenge_check_is_not_reported_as_missing",
       "test_platform_started_runtime_instructions_are_synchronized",
+      "test_prepared_native_evidence_fixture_passes_deterministic_gates",
       "test_profile_lookup_skips_transient_source_without_challenge_id",
       "test_public_spec_excludes_internal_authoring_and_repair_metadata",
       "test_publish_gate_rejects_stale_or_blocked_validation",

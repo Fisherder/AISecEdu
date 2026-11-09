@@ -1,0 +1,100 @@
+{
+  "starterFiles": [
+    {
+      "path": "server.py",
+      "content": "from http.server import BaseHTTPRequestHandler, HTTPServer\nclass Handler(BaseHTTPRequestHandler):\n    def do_GET(self):\n        self.send_response(200)\n        self.send_header('Content-Type', 'application/json')\n        self.end_headers()\n        self.wfile.write(b'{\"ready\":true,\"evidence\":\"fixture-record\"}')\n    def log_message(self, *args):\n        pass\nHTTPServer(('127.0.0.1', 8123), Handler).serve_forever()\n"
+    },
+    {
+      "path": "README.md",
+      "content": "通过已启动的本地服务读取证据，确认响应后运行 /challenge/check。"
+    },
+    {
+      "path": "work/notes.txt",
+      "content": "记录观察到的服务证据。\n"
+    }
+  ],
+  "workspaceLayout": {
+    "schemaVersion": 1,
+    "course": "ci-evidence",
+    "assignment": "lab01-service-evidence",
+    "studentRoot": "/home/hacker/courses/ci-evidence/lab01-service-evidence",
+    "editablePaths": [
+      "work/notes.txt"
+    ],
+    "materialPaths": [
+      "README.md"
+    ],
+    "graderRoot": "/challenge",
+    "checkEntry": "curl http://127.0.0.1:8123/",
+    "submitEntry": "/challenge/check",
+    "testVersion": "ci-native-v1",
+    "reportRequired": false
+  },
+  "runtimeContract": {
+    "services": [
+      {
+        "name": "evidence",
+        "interpreter": "python3",
+        "entrypoint": "server.py",
+        "arguments": [],
+        "port": 8123
+      }
+    ]
+  },
+  "oracleContract": {
+    "type": "FLAG_GATE_V1",
+    "requiredFields": [
+      "ready"
+    ],
+    "assertions": [
+      {
+        "field": "ready",
+        "operator": "equals",
+        "value": true
+      }
+    ],
+    "liveBindings": [
+      {
+        "field": "ready",
+        "service": "evidence",
+        "method": "GET",
+        "path": "/",
+        "headers": {},
+        "capture": "json_field",
+        "selector": "ready"
+      }
+    ],
+    "integrityFiles": [
+      "server.py",
+      "README.md",
+      "work/notes.txt"
+    ]
+  },
+  "privateSolution": {
+    "overview": "检查平台已启动的本地证据服务，并由私有检查器确认实时响应与文件完整性。",
+    "steps": [
+      {
+        "goal": "建立当前服务基线",
+        "action": "curl http://127.0.0.1:8123/",
+        "expectedEvidence": "返回 ready=true 与 fixture-record 证据。",
+        "files": [
+          "server.py"
+        ]
+      },
+      {
+        "goal": "完成平台核验",
+        "action": "/challenge/check",
+        "expectedEvidence": "私有检查器重新请求真实服务并签发当前账号绑定的动态 Flag。"
+      }
+    ],
+    "successIndicators": [
+      "真实服务响应 ready=true",
+      "平台接收本次账号绑定的动态 Flag"
+    ],
+    "commonFailureModes": [
+      "服务尚未启动时先检查监听端口，不要重复启动。"
+    ],
+    "protectedFacts": {}
+  },
+  "verificationAnswer": null
+}

@@ -249,6 +249,24 @@ def test_authoring_request_preserves_supported_exercise_mode(mode):
     assert original == {'exercise_mode': mode.lower(), 'simulation': {'preset': 'WIRELESS'}}
 
 
+def test_prepared_native_evidence_fixture_passes_deterministic_gates(monkeypatch):
+    from CTFd.plugins.dojo_plugin.learning import authoring
+
+    package = json.loads((pathlib.Path(__file__).parent / 'fixtures/native-evidence-package.json').read_text())
+    brief = '检查已启动的本地证据服务，验证实时响应与文件完整性，并提交当前账号绑定的动态 Flag。'
+    constraints = {'id': 'ci-native-fixture', 'title': '本地证据核验', 'exerciseMode': 'CONTAINER',
+                   'workspaceLayout': package['workspaceLayout']}
+    spec = authoring._base_spec(brief, constraints, 'L3', [])
+    spec.update(package)
+    draft = SimpleNamespace(id='draft-fixture', brief=brief, constraints=constraints, level='L3',
+                            candidates=[], spec=spec, status='DRAFT', validation={},
+                            published_challenge_id=None, module_index=0, author_id=1,
+                            dojo=SimpleNamespace(dojo_id=1, modules=[SimpleNamespace(challenges=[])]))
+    monkeypatch.setattr(authoring, '_audit', lambda *_args, **_kwargs: None)
+    report = authoring.validate_draft(draft, allow_agent_repair=False)
+    assert report['status'] == 'PASS', [check for check in report['checks'] if check['status'] == 'BLOCK']
+
+
 def test_artifact_response_contract_rejects_placeholders_before_repair():
     from CTFd.plugins.dojo_plugin.learning import authoring
 
