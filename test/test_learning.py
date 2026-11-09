@@ -3130,10 +3130,7 @@ def test_student_snapshot_excludes_future_course_modules(
     random_user_session,
     visibility_test_dojo,
 ):
-    enrolled = random_user_session.get(
-        f"{DOJO_URL.rstrip('/')}/dojo/{visibility_test_dojo}/join/"
-    )
-    assert enrolled.status_code == 200, enrolled.text
+    enroll(random_user_session, visibility_test_dojo)
     overview = random_user_session.get(f"{API}/overview")
     assert overview.status_code == 200, overview.text
     course = next(

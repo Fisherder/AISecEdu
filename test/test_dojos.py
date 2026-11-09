@@ -5,7 +5,7 @@ import string
 import time
 import yaml
 
-from utils import TEST_DOJOS_LOCATION, DOJO_URL, create_dojo_yml, start_challenge, solve_challenge, workspace_run, login, db_sql, get_user_id, wait_for_background_worker
+from utils import TEST_DOJOS_LOCATION, DOJO_URL, create_dojo_yml, enroll, start_challenge, solve_challenge, workspace_run, login, db_sql, get_user_id, wait_for_background_worker
 
 
 def get_dojo_modules(dojo):
@@ -130,12 +130,18 @@ def test_admin_page_shows_deploy_key(admin_session, example_dojo):
 
 
 def test_promote_dojo_member(admin_session, guest_dojo_admin, example_dojo):
-    random_user_name, _ = guest_dojo_admin
+    random_user_name, random_session = guest_dojo_admin
     random_user_id = get_user_id(random_user_name)
+    rejected = admin_session.post(f"{DOJO_URL}/pwncollege_api/v1/dojos/{example_dojo}/admins/promote", json={"user_id": random_user_id})
+    assert rejected.status_code == 400, rejected.text
+    enroll(random_session, example_dojo)
     response = admin_session.post(f"{DOJO_URL}/pwncollege_api/v1/dojos/{example_dojo}/admins/promote", json={"user_id": random_user_id})
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     response = admin_session.get(f"{DOJO_URL}/dojo/{example_dojo}/admin/")
-    assert random_user_name in response.text and response.text.index("Members") > response.text.index(random_user_name)
+    assert response.status_code == 200
+    assert random_user_name in response.text.partition('id="dojo-promote-admin-form"')[0]
+    assert f'id="name-for-{random_user_id}"' not in response.text
+    assert random_session.get(f"{DOJO_URL}/dojo/{example_dojo}/admin/").status_code == 200
 
 
 def test_dojo_completion_emoji(simple_award_dojo, codepoints_award_dojo, completionist_user):
