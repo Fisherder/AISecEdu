@@ -492,3 +492,80 @@ def test_invalid_launch_redirects_before_rendering_shared_template(integration):
     assert b"private-test-sequence" not in clean.data
     assert b"not-registered_123" not in clean.data
     assert not e.launch_cache.rows
+
+
+def configure_course(env):
+    config = env.service.validate_application({"dojoId": 10, "scope": "course", "projectTitle": "软件安全",
+                                               "enabled": True, "sendEnabled": True, "ssoToken": ""})
+    env.Configs.query.filter_by(key=env.service.CONFIG_KEY).first().value = json.dumps({"test-app": config})
+    env.db.session.commit()
+    return config
+
+
+def test_course_project_uses_one_app_and_keeps_sso_placeholder_empty(integration):
+    e = integration
+    config = configure_course(e)
+    assert config["challengeId"] == 0 and config["ssoToken"] == ""
+    with pytest.raises(e.contracts.ContractError, match="留空"):
+        e.service.validate_application({**config, "ssoToken": "invented-provider-token"})
+    response = e.client.put("/rainier/applications/course-app", json=config, headers={"X-Test-User": "3"})
+    assert response.status_code == 200
+
+
+def test_course_reservation_links_multiple_experiments_but_not_other_users_or_courses(integration):
+    e = integration
+    run, _, _ = seeded(e)
+    configure_course(e)
+    run.challenge_id = 0
+    e.db.session.add(e.DojoChallenges(dojo_id=10, challenge_id=21, name="第二项实验"))
+    e.db.session.add(e.DojoChallenges(dojo_id=11, challenge_id=22, name="其他课程"))
+    e.db.session.commit()
+    with e.app.test_request_context("/"):
+        from flask import session
+        session["rainier_session_id"] = run.id
+        values = [("second", 1, 10, 21), ("foreign-course", 1, 11, 22), ("foreign-user", 2, 10, 21)]
+        for identifier, user, dojo, challenge in values:
+            attempt = e.LearningAttempts(id=identifier, user_id=user, dojo_id=dojo, challenge_id=challenge,
+                                         started=BASE + dt.timedelta(seconds=2))
+            e.db.session.add(attempt); e.db.session.flush(); e.service.bind_attempt(attempt)
+        e.db.session.commit()
+    assert e.db.session.get(e.storage.RainierAttemptLinks, "second").session_id == run.id
+    assert e.db.session.get(e.storage.RainierAttemptLinks, "foreign-course") is None
+    assert e.db.session.get(e.storage.RainierAttemptLinks, "foreign-user") is None
+
+
+def test_course_report_uses_latest_grade_per_experiment_and_ignores_ungraded_work(integration):
+    e = integration
+    run, first, old = seeded(e, score=10)
+    configure_course(e)
+    run.challenge_id = 0
+    e.db.session.add(e.DojoChallenges(dojo_id=10, challenge_id=21, name="第二项实验"))
+    second = e.LearningAttempts(id="second", user_id=1, dojo_id=10, challenge_id=21, started=BASE+dt.timedelta(seconds=2))
+    newer = e.LearningAssessments(id="first-new", attempt_id=first.id, created=BASE+dt.timedelta(seconds=410), total_score=80)
+    current = e.LearningAssessments(id="second-grade", attempt_id=second.id, created=BASE+dt.timedelta(seconds=420), total_score=100)
+    e.db.session.add_all([second, newer, current]);e.db.session.flush()
+    e.db.session.add(e.storage.RainierAttemptLinks(attempt_id=second.id, session_id=run.id));e.db.session.commit()
+    _, payload = e.service.preview_assessment(current)
+    assert payload["appId"] == "test-app" and payload["expScoreDetails"][-1]["score"] == 90
+    score_text = payload["reportData"][1]["text2"]["text"]
+    assert "80/100" in score_text and "100/100" in score_text and "10/100" not in score_text
+    assert "不替代课程总评" in score_text
+    assert old.total_score == 10 and newer.total_score == 80
+
+
+def test_course_launch_returns_course_entry_after_verified_reservation(integration, monkeypatch):
+    e = integration
+    configure_course(e)
+    class Remote:
+        def __init__(self, host):
+            pass
+        def authenticate(self, app, sequence):
+            return {"expList": [{"expId": 123}], "user": {"id": 89, "name": "学生"}}
+        def close(self):
+            pass
+    original = e.pages.create_session
+    monkeypatch.setattr(e.pages, "create_session", lambda user, launch: original(user, launch, client_factory=Remote))
+    e.client.get("/integrations/rainier/launch", query_string={"token": "test-app_123", "sequenceCode": "sequence", "host": "https://api.vr-mooc.com"})
+    response = e.client.post("/integrations/rainier/launch")
+    assert response.status_code == 303 and response.location == "/dojo/test-course"
+    assert e.storage.RainierSessions.query.one().challenge_id == 0

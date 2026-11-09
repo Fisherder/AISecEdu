@@ -49,7 +49,10 @@ class Application(Resource):
             if not re.fullmatch(r"[A-Za-z0-9-]{1,80}", app_id):
                 raise ContractError("appId 格式错误")
             config = validate_application(request.get_json(silent=True))
-            if not DojoChallenges.query.filter_by(dojo_id=config["dojoId"], challenge_id=config["challengeId"]).first():
+            mapped = DojoChallenges.query.filter_by(dojo_id=config["dojoId"])
+            if config["scope"] != "course":
+                mapped = mapped.filter_by(challenge_id=config["challengeId"])
+            if not mapped.first():
                 raise ContractError("课程与题目映射不存在")
             row = Configs.query.filter_by(key=CONFIG_KEY).with_for_update().first()
             if row is None:

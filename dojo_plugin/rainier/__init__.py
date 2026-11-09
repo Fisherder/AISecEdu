@@ -16,7 +16,7 @@ from ..models.rainier import (RainierAICalls, RainierAttemptLinks, RainierIdenti
                              RainierSessions, RainierSubmissions)
 from .client import DeliveryUncertain, RainierClient
 from .contracts import (ContractError, DEPLOYMENTS, MAX_INTEGER, origin,
-                        payload_for_assessment, text, verified_user)
+                        payload_for_assessment, payload_for_course, text, verified_user)
 
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,8 @@ def application_for(run, *, sending=False):
 
 def validate_application(body):
     allowed = {"host", "dojoId", "challengeId", "enabled", "sendEnabled", "autoSubmit",
-               "strictIlab", "expectedSeconds", "timezone", "reportKeys", "modelDeployment", "modelProvider"}
+               "strictIlab", "expectedSeconds", "timezone", "reportKeys", "modelDeployment", "modelProvider",
+               "scope", "projectTitle", "ssoToken"}
     if not isinstance(body, dict) or set(body) - allowed:
         raise ContractError("项目配置字段无效")
     result = {"host": origin(body.get("host", "https://api.vr-mooc.com")),
@@ -52,15 +53,27 @@ def validate_application(body):
               "reportKeys": body.get("reportKeys", {"summary": "text1", "score": "text2"}),
               "modelDeployment": body.get("modelDeployment", "公有云服务"),
               "modelProvider": body.get("modelProvider", "DeepSeek")}
+    result["scope"] = body.get("scope", "experiment")
+    if result["scope"] not in {"experiment", "course"}:
+        raise ContractError("scope 必须是 experiment 或 course")
+    result["projectTitle"] = text(body.get("projectTitle", "课程实验项目"), "项目名称", 160)
+    if body.get("ssoToken", "") != "":
+        raise ContractError("单点登录协议尚待提供，ssoToken 当前应留空")
+    result["ssoToken"] = ""
     for key, default in (("enabled", False), ("sendEnabled", False), ("autoSubmit", False), ("strictIlab", True)):
         value = body.get(key, default)
         if type(value) is not bool:
             raise ContractError(f"{key} 必须是布尔值")
         result[key] = value
     for key in ("dojoId", "challengeId"):
-        if type(body.get(key)) is not int:
+        value = body.get(key, 0 if key == "challengeId" and result["scope"] == "course" else None)
+        if type(value) is not int:
             raise ContractError(f"{key} 必须使用实际数据库整数标识")
-        result[key] = body[key]
+        result[key] = value
+    if result["dojoId"] <= 0 or (result["scope"] == "course" and result["challengeId"] != 0):
+        raise ContractError("课程项目使用实际 dojoId，challengeId 固定为 0")
+    if result["scope"] == "experiment" and result["challengeId"] <= 0:
+        raise ContractError("单题项目必须指定实际 challengeId")
     if type(result["expectedSeconds"]) is not int or not 1 <= result["expectedSeconds"] <= MAX_INTEGER:
         raise ContractError("expectedSeconds 必须是合理用时的正整数")
     if result["timezone"] != "Asia/Shanghai":
@@ -84,7 +97,10 @@ def create_session(user, launch, *, client_factory=RainierClient):
     from ..agent_runtime.scope import dojo_for_user
     from ..models import DojoChallenges
     dojo_for_user(user, app["dojoId"])
-    challenge = DojoChallenges.query.filter_by(dojo_id=app["dojoId"], challenge_id=app["challengeId"]).first()
+    candidates = DojoChallenges.query.filter_by(dojo_id=app["dojoId"])
+    if app.get("scope") != "course":
+        candidates = candidates.filter_by(challenge_id=app["challengeId"])
+    challenge = next((item for item in candidates.all() if item.visible()), None)
     if challenge is None or not challenge.visible():
         raise ContractError("实验题目不存在或当前不可见")
     client = client_factory(launch["host"])
@@ -120,12 +136,16 @@ def bind_attempt(attempt):
     if not has_request_context() or not session.get("rainier_session_id"):
         return
     run = RainierSessions.query.filter_by(id=session["rainier_session_id"], user_id=attempt.user_id,
-                                         dojo_id=attempt.dojo_id, challenge_id=attempt.challenge_id).first()
+                                         dojo_id=attempt.dojo_id).first()
     if run is None or run.closed or run.expires <= datetime.datetime.utcnow() or attempt.started < run.created:
         return
     try:
-        application_for(run)
+        app = application_for(run)
     except ContractError:
+        return
+    if app.get("scope") != "course" and run.challenge_id != attempt.challenge_id:
+        return
+    if not attempt.dojo_challenge or not attempt.dojo_challenge.visible():
         return
     db.session.add(RainierAttemptLinks(attempt_id=attempt.id, session_id=run.id))
 
@@ -190,6 +210,8 @@ def settle_model_dispatch(identifier, response=None):
 
 
 def preview_assessment(assessment):
+    if getattr(assessment, "status", "FINAL") != "FINAL":
+        raise ContractError("只能回传已保存的正式评测")
     attempt = db.session.get(LearningAttempts, assessment.attempt_id)
     link = db.session.get(RainierAttemptLinks, assessment.attempt_id)
     if link is None:
@@ -200,10 +222,12 @@ def preview_assessment(assessment):
     app = application_for(run)
     linked = RainierAttemptLinks.query.filter_by(session_id=run.id).all()
     attempt_ids = [row.attempt_id for row in linked]
-    attempts = LearningAttempts.query.filter(LearningAttempts.id.in_(attempt_ids),
-                                             LearningAttempts.user_id == run.user_id,
-                                             LearningAttempts.dojo_id == run.dojo_id,
-                                             LearningAttempts.challenge_id == run.challenge_id).all()
+    query = LearningAttempts.query.filter(LearningAttempts.id.in_(attempt_ids),
+                                          LearningAttempts.user_id == run.user_id,
+                                          LearningAttempts.dojo_id == run.dojo_id)
+    if app.get("scope") != "course":
+        query = query.filter(LearningAttempts.challenge_id == run.challenge_id)
+    attempts = query.all()
     if len(attempts) != len(attempt_ids):
         raise ContractError("预约关联作答身份不完整")
     from ..learning.evidence import verify_evidence_chain
@@ -217,12 +241,28 @@ def preview_assessment(assessment):
     if any(row.status == "DISPATCHED" for row in calls):
         raise ContractError("尚有 AI 请求未取得终态，暂不能冻结统计")
     fields = ("model", "version", "provider", "deployment", "scenario", "input_tokens", "output_tokens")
-    payload = payload_for_assessment(run.app_id, run.exp_id, attempt.dojo_challenge.name,
-        min(item.started for item in attempts), assessment.created, assessment.total_score,
-        [{"type": event.event_type, "sequence": event.sequence, "occurred": event.occurred} for event in events],
-        [{field: getattr(row, field) for field in fields} for row in calls],
-        expected_seconds=app["expectedSeconds"], strict=app["strictIlab"],
-        timezone=app["timezone"], report_keys=app["reportKeys"])
+    sources = {item.id: item for item in attempts}
+    event_data = [{"type": event.event_type, "sequence": event.sequence, "occurred": event.occurred,
+                   "title": sources[event.attempt_id].dojo_challenge.name} for event in events]
+    call_data = [{field: getattr(row, field) for field in fields} for row in calls]
+    options = dict(expected_seconds=app["expectedSeconds"], strict=app["strictIlab"],
+                   timezone=app["timezone"], report_keys=app["reportKeys"])
+    started = min(item.started for item in attempts)
+    if app.get("scope") == "course":
+        latest = {}
+        for item in LearningAssessments.query.filter(LearningAssessments.attempt_id.in_(attempt_ids),
+                LearningAssessments.created <= assessment.created).order_by(
+                    LearningAssessments.created.desc(), LearningAssessments.id.desc()).all():
+            if getattr(item, "status", "FINAL") != "FINAL":
+                continue
+            source = sources[item.attempt_id]
+            if source.challenge_id not in latest:
+                latest[source.challenge_id] = {"title": source.dojo_challenge.name, "score": item.total_score}
+        payload = payload_for_course(run.app_id, run.exp_id, app["projectTitle"], started,
+                                      assessment.created, list(latest.values()), event_data, call_data, **options)
+    else:
+        payload = payload_for_assessment(run.app_id, run.exp_id, attempt.dojo_challenge.name,
+            started, assessment.created, assessment.total_score, event_data, call_data, **options)
     return run, payload
 
 

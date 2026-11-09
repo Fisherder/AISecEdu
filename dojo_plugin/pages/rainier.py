@@ -64,6 +64,8 @@ def launch():
         cache.delete(f"rainier:launch:{nonce}")
         session.pop("rainier_pending", None)
         session["rainier_session_id"] = run.id
+        if applications()[run.app_id].get("scope") == "course":
+            return private_response(redirect(f"/dojo/{challenge.dojo.reference_id}", code=303))
         return private_response(redirect(f"/{challenge.dojo.reference_id}/{challenge.module.id}/{challenge.id}", code=303))
     except (ContractError, IntegrityError, DeliveryUncertain) as error:
         db.session.rollback()
@@ -104,4 +106,5 @@ def status():
         error = "请先新启动本题、完成实验并保存正式评测，再回到此处提交。"
     return private_response(render_template("rainier_status.html", run=run, error=error,
         preview=preview, record=record, assessment=assessment,
+        course_project=applications().get(run.app_id, {}).get("scope") == "course",
         send_enabled=bool(applications().get(run.app_id, {}).get("sendEnabled"))))

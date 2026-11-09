@@ -1,0 +1,17 @@
+{
+  "host": "https://api.vr-mooc.com",
+  "dojoId": 3839952,
+  "scope": "course",
+  "challengeId": 0,
+  "projectTitle": "软件安全",
+  "ssoToken": "",
+  "enabled": false,
+  "sendEnabled": false,
+  "autoSubmit": false,
+  "strictIlab": true,
+  "expectedSeconds": 180,
+  "timezone": "Asia/Shanghai",
+  "reportKeys": {"summary": "text1", "score": "text2"},
+  "modelDeployment": "公有云服务",
+  "modelProvider": "DeepSeek"
+}

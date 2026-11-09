@@ -178,7 +178,7 @@ def payload_for_assessment(app_id, exp_id, title, started, finished, score, even
         group = observations[offset:offset + group_size]
         event = group[-1]
         at, label = event["at"], event["label"]
-        rows.append({"moduleFlag": title[:160], "questionNumber": len(rows) + 1,
+        rows.append({"moduleFlag": event.get("title", title)[:160], "questionNumber": len(rows) + 1,
                      "questionStem": label, "score": 0, "trueOrFalse": "False",
                      "startTime": stamp(cursor), "endTime": stamp(at),
                      "expectTime": expected_seconds, "maxScore": 100, "repeatCount": len(group),
@@ -202,4 +202,27 @@ def payload_for_assessment(app_id, exp_id, title, started, finished, score, even
     statistics = ai_data(calls)
     if statistics is not None:
         payload["ai_data"] = statistics
+    return payload
+
+
+def payload_for_course(app_id, exp_id, title, started, finished, assessments, events, calls, **options):
+    if not assessments:
+        raise ContractError("本次预约尚无已保存的正式评测")
+    scores = [Decimal(str(item["score"])) for item in assessments]
+    if any(not score.is_finite() or not 0 <= score <= 100 for score in scores):
+        raise ContractError("实验正式成绩超出 0–100，不能汇总")
+    average = sum(scores) / len(scores)
+    payload = payload_for_assessment(app_id, exp_id, title, started, finished,
+                                     float(average), events, calls, **options)
+    keys = options.get("report_keys") or {"summary": "text1", "score": "text2"}
+    details = "；".join(f"{item['title']}：{item['score']:g}/100" for item in assessments)
+    payload["reportData"] = [
+        {keys["summary"]: {"text": f"{title}；本次预约已评 {len(assessments)} 项实验，每项采用最新正式评测。步骤和 AI 数据仅来自本次预约。"}},
+        {keys["score"]: {"text": f"本次预约已评实验均分：{average:.2f}/100。{details}。未评实验不计入；此值为对接项目统计，不替代课程总评或单题原始成绩。"}},
+    ]
+    payload["expScoreDetails"][-1].update(
+        questionStem="本次预约已评实验均分",
+        scoringModel="每项实验最新正式评测等权均分",
+        remarks=f"已评 {len(assessments)} 项；未评实验不计入；原始分数保存在报告中；不修改课程总评",
+    )
     return payload
