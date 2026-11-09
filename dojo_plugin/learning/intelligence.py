@@ -22,6 +22,7 @@ from ..config import (
     DOJO_AI_MAX_CONTEXT_CHARS,
     DOJO_AI_SOLUTION_MODEL,
     DOJO_AI_TUTOR_MODEL,
+    DOJO_AI_TUTOR_VISION_ENABLED,
     DOJO_AI_TIMEOUT_SECONDS,
     DOJO_AI_TOTAL_TIMEOUT_SECONDS,
 )
@@ -1095,7 +1096,11 @@ def tutor_reply(attempt, user, question, challenge_profile=None, container=None)
     live_available = bool(live_container.get("available"))
     safety_reference = private_safety_reference(context, solution_reference)
     digest = context_digest(context)
-    screenshot = capture_workspace_screenshot(attempt, container)
+    screenshot = (
+        capture_workspace_screenshot(attempt, container)
+        if DOJO_AI_TUTOR_VISION_ENABLED
+        else {"available": False, "reason": "MODEL_TEXT_ONLY", "elapsedMs": 0.0}
+    )
     timings.mark("screenshot", screenshot.get("elapsedMs", 0.0) / 1000.0)
     if screenshot.get("available"):
         context["workspaceScreenshot"] = {

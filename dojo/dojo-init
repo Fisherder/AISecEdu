@@ -104,6 +104,9 @@ define DOJO_WORKSPACE_START_CONCURRENCY 16
 define DOJO_CODE_START_CONCURRENCY 64
 define DOJO_DESKTOP_START_CONCURRENCY 64
 define DOJO_AI_TUTOR_MODEL deepseek-v4-flash
+define DOJO_AI_TUTOR_VISION_ENABLED true
+define DOJO_AI_SIMULATION_MODEL deepseek-v4.1-flash
+define DOJO_AI_COMPLEX_SCENE_MODEL deepseek-v4.1-flash
 define DOJO_AI_GUIDE_MODEL deepseek-v4-flash
 define DOJO_AI_GRADER_MODEL deepseek-v4-flash
 define DOJO_AI_SOLUTION_MODEL deepseek-v4-flash
