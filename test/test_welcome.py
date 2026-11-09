@@ -155,7 +155,12 @@ def challenge_start(browser, idx, practice=False):
 
     body.find_element(By.CSS_SELECTOR, ".challenge-priv" if practice else ".challenge-start").click()
     WebDriverWait(browser, 120, ignored_exceptions=(NoSuchElementException, StaleElementReferenceException)).until(
-        lambda driver: "challenge-hidden" not in (
+        lambda driver: "challenge-active" in (
+            driver.find_element(By.CSS_SELECTOR, f'[data-challenge-index="{idx}"]')
+            .get_attribute("class") or ""
+        ) and driver.find_element("id", f"challenges-body-{idx}")
+        .find_element(By.CSS_SELECTOR, ".challenge-start").is_enabled()
+        and "challenge-hidden" not in (
             driver.find_element("id", f"challenges-body-{idx}")
             .find_element(By.CSS_SELECTOR, ".challenge-workspace").get_attribute("class") or ""
         )
