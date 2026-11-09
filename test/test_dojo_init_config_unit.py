@@ -5,7 +5,9 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 
 
@@ -155,6 +157,78 @@ def test_workspace_builder_exit_status_is_not_confused_with_docker_wait_success(
         assert result.returncode == (0 if status == 0 else 1), result.stdout + result.stderr
         if status:
             assert 'workspace-builder failed (exit 3)' in result.stdout
+
+
+def workspace_builder_fixture(folder):
+    entrypoint = (ROOT / 'workspace/Dockerfile').read_text().split(
+        "COPY --chmod=755 <<'EOF' /docker-entrypoint.sh\n", 1
+    )[1].split('\nSUID_FILE=', 1)[0]
+    script = folder / 'entrypoint.sh'
+    script.write_text(entrypoint.replace('/nix/var/nix', str(folder / 'nix/var/nix')))
+    binaries = folder / 'bin'
+    binaries.mkdir()
+    nix = binaries / 'nix'
+    nix.write_text(f'#!{sys.executable}\n' + '''import json,os,pathlib,sys,time
+args=sys.argv
+source=pathlib.Path(args[args.index('--reference-lock-file')+1])
+target=pathlib.Path(args[args.index('--output-lock-file')+1])
+state=json.loads(source.read_text())
+active=pathlib.Path('active-build')
+active.touch(exist_ok=False)
+try:
+    target.write_text('')
+    time.sleep(0.2)
+    if os.environ.get('FAIL_BUILD')=='1':sys.exit(3)
+    target.write_text(json.dumps({'generation':state['generation']+1}))
+finally:
+    active.unlink()
+''')
+    nix.chmod(0o755)
+    if not shutil.which('flock'):
+        portable = binaries / 'flock'
+        portable.write_text(f'#!{sys.executable}\nimport fcntl,sys\nfcntl.flock(int(sys.argv[-1]),fcntl.LOCK_EX)\n')
+        portable.chmod(0o755)
+    (folder / 'flake.lock').write_text('{"generation":0}')
+    environment = {'PATH': str(binaries) + os.pathsep + os.environ['PATH']}
+    return script, environment, folder / 'nix/var/nix/dojo-workspace-flake.lock'
+
+
+def test_shared_workspace_builds_serialize_and_publish_only_complete_lockfiles():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        script, environment, lockfile = workspace_builder_fixture(folder)
+        processes = [subprocess.Popen(['/bin/sh', '-e', str(script)], cwd=folder,
+                                      env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      text=True) for _ in range(3)]
+        deadline = time.monotonic() + 15
+        while any(process.poll() is None for process in processes):
+            if lockfile.exists():
+                assert json.loads(lockfile.read_text())['generation'] in {1, 2, 3}
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        for process in processes:
+            stdout, stderr = process.communicate()
+            assert process.returncode == 0, (stdout, stderr)
+        assert json.loads(lockfile.read_text()) == {'generation': 3}
+        assert not (folder / 'active-build').exists()
+
+
+def test_failed_workspace_build_preserves_previous_lockfile_and_releases_lock():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        script, environment, lockfile = workspace_builder_fixture(folder)
+        lockfile.parent.mkdir(parents=True)
+        lockfile.write_text('{"generation":7}')
+        failed = subprocess.run(['/bin/sh', '-e', str(script)], cwd=folder,
+                                env={**environment, 'FAIL_BUILD': '1'}, capture_output=True,
+                                text=True, timeout=15)
+        assert failed.returncode == 3, failed.stderr
+        assert json.loads(lockfile.read_text()) == {'generation': 7}
+        assert not list(lockfile.parent.glob('dojo-workspace-flake.??????'))
+        succeeded = subprocess.run(['/bin/sh', '-e', str(script)], cwd=folder,
+                                   env=environment, capture_output=True, text=True, timeout=15)
+        assert succeeded.returncode == 0, succeeded.stderr
+        assert json.loads(lockfile.read_text()) == {'generation': 8}
 
 
 def test_ci_test_arguments_reach_pytest_without_becoming_deployment_options():
