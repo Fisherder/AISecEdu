@@ -4581,7 +4581,11 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     )
     validated, _ = wait_for_authoring(admin_session, validated_response)
     assert validated["validation"]["summary"]["blocked"] == 0
-    assert validated["validation"]["agentReview"]["model"] == "deepseek-v4-flash"
+    review = validated["validation"]["agentReview"]
+    assert review["provider"] == "DETERMINISTIC"
+    assert review["verdict"] == "FALLBACK"
+    assert any(check["id"] == "agent-validation-fallback" and check["status"] == "WARN"
+               for check in validated["validation"]["checks"])
 
     published = admin_session.post(f"{API}/drafts/{draft['id']}/publish", json={})
     assert published.status_code == 200
