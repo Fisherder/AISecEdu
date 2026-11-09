@@ -5,7 +5,7 @@ ENV TZ=Asia/Shanghai
 COPY --chmod=0444 seed/course-seed.qcow2 /opt/windows/course-seed.qcow2
 COPY --chmod=0444 seed/vars.fd /opt/windows/firmware-vars.fd
 COPY seed/tpm/ /opt/windows/tpm-base/
-COPY runtime.py gateway.py client.py /usr/local/lib/windows-runtime/
+COPY runtime.py gateway.py client.py acceleration.py /usr/local/lib/windows-runtime/
 COPY install-display.py /usr/local/lib/windows-runtime/install-display.py
 RUN python3 /usr/local/lib/windows-runtime/install-display.py \
     && chmod 0755 /usr/local/lib/windows-runtime/runtime.py /usr/local/lib/windows-runtime/client.py \

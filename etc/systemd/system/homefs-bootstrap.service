@@ -1,0 +1,12 @@
+[Unit]
+Description=Restore Homefs volume metadata before Docker starts
+After=local-fs.target
+Before=docker.service
+RequiresMountsFor=/run/homefs
+PartOf=docker.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/python3 /opt/pwn.college/ops/homefs-bootstrap.py
+TimeoutStartSec=15

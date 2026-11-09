@@ -123,6 +123,7 @@ DOJO_AI_BASE_URL = (
 DOJO_LINUX_RUNTIME_IMAGE = os.getenv("DOJO_LINUX_RUNTIME_IMAGE") or "pwncollege/challenge-legacy:latest"
 DOJO_WINDOWS_RUNTIME_IMAGE = os.getenv("DOJO_WINDOWS_RUNTIME_IMAGE") or "aisecedu/windows-runtime:1"
 DOJO_WINDOWS2000_RUNTIME_IMAGE = os.getenv("DOJO_WINDOWS2000_RUNTIME_IMAGE") or "aisecedu/windows2000-runtime:1"
+DOJO_WINDOWS_ACCELERATOR = os.getenv("DOJO_WINDOWS_ACCELERATOR") or "auto"
 
 DOJO_AI_TUTOR_MODEL = os.getenv("DOJO_AI_TUTOR_MODEL") or "deepseek-v4-flash"
 DOJO_AI_SIMULATION_MODEL = os.getenv("DOJO_AI_SIMULATION_MODEL") or "deepseek-v4.1-flash"

@@ -1,0 +1,4 @@
+ARG BASE_IMAGE=aisecedu/windows-runtime:1
+FROM ${BASE_IMAGE}
+COPY runtime.py acceleration.py /usr/local/lib/windows-runtime/
+RUN chmod 0755 /usr/local/lib/windows-runtime/runtime.py

@@ -34,6 +34,7 @@ x-ctfd-env: &ctfd-env
   DOJO_LINUX_RUNTIME_IMAGE: ${DOJO_LINUX_RUNTIME_IMAGE:-pwncollege/challenge-legacy:latest}
   DOJO_WINDOWS_RUNTIME_IMAGE: ${DOJO_WINDOWS_RUNTIME_IMAGE:-aisecedu/windows-runtime:1}
   DOJO_WINDOWS2000_RUNTIME_IMAGE: ${DOJO_WINDOWS2000_RUNTIME_IMAGE:-aisecedu/windows2000-runtime:1}
+  DOJO_WINDOWS_ACCELERATOR: ${DOJO_WINDOWS_ACCELERATOR:-auto}
   DOJO_AI_TUTOR_MODEL: ${DOJO_AI_TUTOR_MODEL:-deepseek-v4-flash}
   DOJO_AI_SIMULATION_MODEL: ${DOJO_AI_SIMULATION_MODEL:-deepseek-v4.1-flash}
   DOJO_AI_GUIDE_MODEL: ${DOJO_AI_GUIDE_MODEL:-deepseek-v4.1-flash}
@@ -143,6 +144,15 @@ services:
     restart: always
     privileged: true
     build: ./homefs
+    command:
+      - gunicorn
+      - homefs:create_app()
+      - --bind=unix:/run/docker/plugins/homefs.sock
+      - --bind=0.0.0.0:4201
+      - --workers=${HOMEFS_WORKERS:-32}
+      - --threads=8
+      - --access-logfile=-
+      - --timeout=300
     environment:
       - STORAGE_ROOT=/run/homefs
       - STORAGE_HOST=192.168.42.1

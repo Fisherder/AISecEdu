@@ -26,6 +26,7 @@ from ...config import (
     SECCOMP,
     USER_FIREWALL_ALLOWED,
     WORKSPACE_SESSION_SECONDS,
+    DOJO_WINDOWS_ACCELERATOR,
 )
 from ...models import DojoModules, DojoChallenges
 from ...utils import (
@@ -263,6 +264,7 @@ def start_container(docker_client, user, as_user, user_mounts, dojo_challenge, p
             "SHELL": f"{dojo_bin_path}/bash",
             "DOJO_CHALLENGE_DIR": "/challenge",
             "DOJO_RUNTIME_ENVIRONMENT": profile.id,
+            "DOJO_WINDOWS_ACCELERATOR": DOJO_WINDOWS_ACCELERATOR,
             "DOJO_AUTH_TOKEN": auth_token,
         },
         labels={
