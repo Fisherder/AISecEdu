@@ -70,7 +70,7 @@
   <header class="unit-detail-header">
     <div class="unit-header-row">
       <div>
-        <span class="product-kicker">{% if course_outline.position %}第 {{ course_outline.position }} / {{ course_outline.total }} 章{% else %}章节尚未开放{% endif %} · {% if visible_challenges %}{{ visible_challenges | length }} 项实训{% endif %}{% if inquiry_activities %}{{ ' · ' if visible_challenges else '' }}{{ inquiry_activities | length }} 项流程探究{% elif not visible_challenges %}阅读章节 · 无必修实践{% endif %}</span>
+        <span class="product-kicker">{% if course_outline.position %}第 {{ course_outline.position }} / {{ course_outline.total }} 章 · {% if visible_challenges %}{{ visible_challenges | length }} 项实训{% endif %}{% if inquiry_activities %}{{ ' · ' if visible_challenges else '' }}{{ inquiry_activities | length }} 项流程探究{% elif not visible_challenges %}阅读章节 · 无必修实践{% endif %}{% else %}章节尚未开放{% endif %}</span>
         <h1>{{ module.name or module.id }}</h1>
         <p>{{ (module.description | striptags | truncate(180)) if module.description else '阅读课程内容，在同一页面启动 CTF 实践题或模拟实训，并随时使用题目内 AI 助手。' }}</p>
       </div>
@@ -347,7 +347,7 @@
 
   <nav class="unit-mobile-sequence" aria-label="章节前后导航">
     {% if course_outline.previous %}<a href="/{{ dojo.reference_id }}/{{ course_outline.previous.id }}?returnTo={{ request.full_path | urlencode }}" data-learning-transition="module"><i class="fas fa-arrow-left" aria-hidden="true"></i><span><small>上一章</small><strong>{{ course_outline.previous.name or course_outline.previous.id }}</strong></span></a>{% else %}<span></span>{% endif %}
-    {% if course_outline.next %}<a class="is-next" href="/{{ dojo.reference_id }}/{{ course_outline.next.id }}?returnTo={{ request.full_path | urlencode }}" data-learning-transition="module"><span><small>下一章</small><strong>{{ course_outline.next.name or course_outline.next.id }}</strong></span><i class="fas fa-arrow-right" aria-hidden="true"></i></a>{% else %}<a class="is-next" href="/dojo/{{ dojo.reference_id }}/learning" data-learning-transition="progress"><span><small>课程完成</small><strong>查看学习进展</strong></span><i class="fas fa-chart-line" aria-hidden="true"></i></a>{% endif %}
+    {% if course_outline.next %}<a class="is-next" href="/{{ dojo.reference_id }}/{{ course_outline.next.id }}?returnTo={{ request.full_path | urlencode }}" data-learning-transition="module"><span><small>下一章</small><strong>{{ course_outline.next.name or course_outline.next.id }}</strong></span><i class="fas fa-arrow-right" aria-hidden="true"></i></a>{% elif course_outline.position %}<a class="is-next" href="/dojo/{{ dojo.reference_id }}/learning" data-learning-transition="progress"><span><small>课程完成</small><strong>查看学习进展</strong></span><i class="fas fa-chart-line" aria-hidden="true"></i></a>{% else %}<a class="is-next" href="{{ url_for('pwncollege_dojo.view_dojo', dojo=dojo.reference_id) }}"><span><small>章节尚未开放</small><strong>返回课程目录</strong></span><i class="fas fa-arrow-right" aria-hidden="true"></i></a>{% endif %}
   </nav>
 
   <br>
