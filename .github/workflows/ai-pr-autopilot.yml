@@ -105,7 +105,9 @@ jobs:
         run: |
           sudo mkdir -p /opt/aisecedu-toolchains/node22/bin
           sudo ln -s "$(command -v node)" /opt/aisecedu-toolchains/node22/bin/node
-          mkdir -p "$RUNNER_TEMP/ai-codex"
+          mkdir -p "$RUNNER_TEMP/ai-codex-repair" "$RUNNER_TEMP/ai-codex-review"
+          printf '[features]\nmulti_agent = false\n' > "$RUNNER_TEMP/ai-codex-repair/config.toml"
+          printf '[features]\nmulti_agent = false\n' > "$RUNNER_TEMP/ai-codex-review/config.toml"
           python3 policy/ops/team/ai_pr.py prompts --folder "$RUNNER_TEMP/ai-result"
       - name: Review and repair bounded regressions
         if: steps.prepare.outputs.mode == 'analyze' && steps.prepare.outputs.can_repair == 'true'
@@ -118,11 +120,11 @@ jobs:
           effort: high
           sandbox: workspace-write
           safety-strategy: drop-sudo
-          codex-home: ${{ runner.temp }}/ai-codex
+          codex-home: ${{ runner.temp }}/ai-codex-repair
           working-directory: ${{ github.workspace }}/candidate
           prompt-file: ${{ runner.temp }}/ai-result/repair.txt
           output-file: ${{ runner.temp }}/ai-result/repair-summary.txt
-          codex-args: '["--ephemeral", "--ignore-rules", "--disable", "multi_agent", "-c", "web_search=\"disabled\"", "-c", "model_catalog_json=\"${{ github.workspace }}/policy/ops/team/deepseek-models.json\""]'
+          codex-args: '["--ephemeral", "-c", "web_search=\"disabled\"", "-c", "model_catalog_json=\"${{ github.workspace }}/policy/ops/team/deepseek-models.json\""]'
           allow-bot-users: github-actions[bot]
       - name: Independently review the resulting changes
         if: steps.prepare.outputs.mode == 'analyze'
@@ -135,12 +137,12 @@ jobs:
           effort: high
           sandbox: read-only
           safety-strategy: drop-sudo
-          codex-home: ${{ runner.temp }}/ai-codex
+          codex-home: ${{ runner.temp }}/ai-codex-review
           working-directory: ${{ github.workspace }}/candidate
           prompt-file: ${{ runner.temp }}/ai-result/review.txt
           output-file: ${{ runner.temp }}/ai-result/review.json
           output-schema-file: ${{ github.workspace }}/policy/ops/team/ai_review.schema.json
-          codex-args: '["--ephemeral", "--ignore-rules", "--disable", "multi_agent", "-c", "web_search=\"disabled\"", "-c", "model_catalog_json=\"${{ github.workspace }}/policy/ops/team/deepseek-models.json\""]'
+          codex-args: '["--ephemeral", "-c", "web_search=\"disabled\"", "-c", "model_catalog_json=\"${{ github.workspace }}/policy/ops/team/deepseek-models.json\""]'
           allow-bot-users: github-actions[bot]
       - name: Validate review and repair scope
         if: steps.prepare.outputs.mode != 'skip' && steps.prepare.outputs.mode != ''
