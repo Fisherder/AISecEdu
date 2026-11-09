@@ -1,6 +1,8 @@
 import json
 import os
 from pathlib import Path
+import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -153,6 +155,22 @@ def test_workspace_builder_exit_status_is_not_confused_with_docker_wait_success(
         assert result.returncode == (0 if status == 0 else 1), result.stdout + result.stderr
         if status:
             assert 'workspace-builder failed (exit 3)' in result.stdout
+
+
+def test_ci_test_arguments_reach_pytest_without_becoming_deployment_options():
+    command = next(line.strip() for line in (ROOT / '.github/workflows/ci.yml').read_text().splitlines()
+                   if './deploy.sh ' in line and ' -t ' in line)
+    parser = (ROOT / 'deploy.sh').read_text().split('ENV_ARGS=( )\n', 1)[1].split('\nif [ "$START"', 1)[0]
+    script = 'DEFAULT_CONTAINER_NAME=synthetic\nENV_ARGS=()\n' + parser
+    script += '\nprintf "%s\\0" "$TEST" "$START" "$DOJO_CONTAINER" "$MULTINODE" "$@"\n'
+    for mode, flag in (('singlenode', ''), ('multinode', '-M')):
+        arguments = shlex.split(re.sub(r'\$\{\{.*?\}\}', flag, command))[1:]
+        result = subprocess.run(['/bin/bash', '-eu', '-c', script, 'ci-parser', *arguments], capture_output=True, text=True)
+        assert result.returncode == 0 and not result.stderr, result.stderr
+        assert result.stdout.split('\0') == [
+            'yes', 'no', 'dojo', 'yes' if mode == 'multinode' else 'no',
+            '--ignore=test_model_router.py', '--ignore=test_runtime_profiles.py', '',
+        ], result.stdout
 
 
 if __name__ == "__main__":

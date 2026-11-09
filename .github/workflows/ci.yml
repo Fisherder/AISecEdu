@@ -20,6 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate deployment configuration and test argument forwarding
+        run: python3 test/test_dojo_init_config_unit.py
+
       - name: Host information
         run: |
           echo "::group::Host information"
@@ -152,7 +155,7 @@ jobs:
         if: ${{ !cancelled() && steps.startup.outcome == 'success' }}
         timeout-minutes: 15
         run: |
-          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -N -t --ignore=test_model_router.py --ignore=test_runtime_profiles.py
+          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -N -t -- --ignore=test_model_router.py --ignore=test_runtime_profiles.py
 
       - name: Upload coverage reports to Codecov
         if: matrix.mode == 'singlenode'
