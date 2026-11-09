@@ -64,6 +64,20 @@ function log_endgroup {
 	fi
 }
 
+function wait_for_http_ready {
+	local endpoint="$1"
+	local deadline=$((SECONDS + 300))
+	while [ "$SECONDS" -lt "$deadline" ]; do
+		if curl --fail --silent --show-error --location --connect-timeout 2 --max-time 5 --output /dev/null "$endpoint"; then
+			return 0
+		fi
+		sleep 2
+	done
+	echo "Platform did not return a successful HTTP response within 300 seconds" >&2
+	docker exec "$DOJO_CONTAINER" docker logs --tail 100 ctfd >&2 || true
+	return 1
+}
+
 TEST_CONTAINER_EXTRA_ARGS=()
 
 function test_container {
@@ -339,7 +353,7 @@ if [ -n "$DB_RESTORE" ]; then
 fi
 
 log_newgroup "Waiting for dojo to be ready"
-until curl -Ls "http://${CONTAINER_IP}" | grep -q pwn; do sleep 1; done
+wait_for_http_ready "http://${CONTAINER_IP}"
 log_endgroup
 
 if [ "$TEST" == "yes" ]; then

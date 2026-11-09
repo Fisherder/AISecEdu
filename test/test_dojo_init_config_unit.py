@@ -131,6 +131,30 @@ def test_coverage_uses_source_compose_and_preserves_deployment_overlays():
                 assert (name in arguments) == (mode == 'production'), (mode, arguments)
 
 
+def test_http_readiness_accepts_rebranded_pages_and_stops_with_diagnostics_on_failure():
+    function = (ROOT / 'deploy.sh').read_text().split('function wait_for_http_ready {', 1)[1].split('\n}\n', 1)[0]
+    for success in (True, False):
+        curl = 'curl() { printf "<html>玄甲</html>"; return 0; };' if success else 'curl() { SECONDS=$((SECONDS + 300)); return 22; };'
+        result = subprocess.run(['/bin/bash', '-c',
+                                 'docker() { echo ctfd-diagnostic; }; sleep() { :; };\n' + curl +
+                                 '\nwait_for_http_ready() {' + function + '\n}; wait_for_http_ready http://synthetic.invalid'],
+                                capture_output=True, text=True, env={'PATH': os.environ['PATH']})
+        assert result.returncode == (0 if success else 1), result.stderr
+        if not success:
+            assert '300 seconds' in result.stderr and 'ctfd-diagnostic' in result.stderr
+
+
+def test_workspace_builder_exit_status_is_not_confused_with_docker_wait_success():
+    body = (ROOT / 'dojo/dojo').read_text().split('    "wait")\n', 1)[1].split('\n        ;;', 1)[0]
+    for status in (0, 3):
+        script = 'dojo() { echo "Finished pwn.college.service - pwn.college docker compose service"; };\n'
+        script += 'docker() { case "$1" in inspect) return 0;; wait) echo ' + str(status) + ';; logs) echo builder-diagnostic;; ps) :;; esac; };\n'
+        result = subprocess.run(['/bin/bash', '-e', '-c', script + body], capture_output=True, text=True)
+        assert result.returncode == (0 if status == 0 else 1), result.stdout + result.stderr
+        if status:
+            assert 'workspace-builder failed (exit 3)' in result.stdout
+
+
 if __name__ == "__main__":
     suite = unittest.TestSuite(unittest.FunctionTestCase(value) for name, value in list(globals().items())
                                if name.startswith("test_") and callable(value))

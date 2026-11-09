@@ -226,6 +226,8 @@ def prepare(folder):
         'model': os.environ.get('AI_MODEL', 'deepseek-v4.1-flash-1017'),
         'previous_findings': cache['report']['findings'] if cache else [],
         'review_feedback': feedback,
+        'check_id': max((row['id'] for row in checks if row['name'] == CHECK
+                         and row.get('app', {}).get('slug') == 'github-actions'), default=None),
     }
     context['repairable_files'] = [path for path in context['files'] if matches(path, POLICY['repair_paths'])
                                   and not matches(path, POLICY['manual_paths']) and not path.startswith('test/')]
@@ -236,7 +238,7 @@ def prepare(folder):
         context['bootstrap_authorized'] = True
     mode = 'update' if comparison['behind_by'] else 'analyze'
     retry = event.get('inputs', {}).get('retry') == 'true' and rounds < POLICY['max_rounds']
-    if mode == 'analyze' and cache and not retry and (cache['signature'] == signature or rounds >= POLICY['max_rounds']):
+    if mode == 'analyze' and cache and not retry and cache['signature'] == signature:
         mode = 'cached'
         (folder / 'review.json').write_text(json.dumps(cache['report'], ensure_ascii=False))
     context['mode'] = mode
@@ -266,7 +268,9 @@ def prompts(folder):
     bootstrap = ('本次为维护者按精确提交授权的自动化初始化。不要仅因涉及自动化配置就要求重复授权；仍须报告具体缺陷、权限扩大或缺失的验证。\n'
                  if context.get('bootstrap_authorized') else '')
     (folder / 'review.txt').write_text(common + bootstrap + '''你是独立复审者，之前编码模型的结论不是证据。检查基线以来全部变更及当前未提交修复，必要时阅读调用方与周边实现。
-只读审查，不修改代码，不运行风格检查器。聚焦实际改动与直接调用链；只报告此次变更引入且实际可成立的问题：P0/P1 为严重问题，P2 为明确功能缺陷，P3 为建议；给出真实文件与当前行号及触发条件。不要以风格偏好阻塞交付。
+只读审查，不修改代码，不运行测试、风格检查器或创建临时文件。只读沙箱不支持依赖临时目录的测试；测试由独立 CI 和可写修复任务运行，不尝试绕过沙箱。
+最多十次工具调用，尽量批量读取，十分钟内给出最终 JSON。只检查基线到当前的改动和直接调用链，不阅读旧提交或搜索未改动的全平台评分、权限实现。若预算内未覆盖变更，requires_human 设为 true 并指出未覆盖范围，不能把未完成审查标成通过。
+只报告此次变更引入且实际可成立的问题：P0/P1 为严重问题，P2 为明确功能缺陷，P3 为建议；给出真实文件与当前行号及触发条件。不要以风格偏好阻塞交付。
 对权限、评分、数据迁移、真实联调尚未证明或业务需求不明确的变更，将 requires_human 设为 true 并说明需要的证据。
 按给定 JSON Schema 返回 summary、requires_human、human_reason、findings。没有明确问题时 findings 返回空数组，不编造通过的测试。
 ''')
@@ -353,6 +357,17 @@ def post_comment(client, context, report, outcome):
         client.repo_api(f'/issues/{context["number"]}/comments', {'body': body}, 'POST')
 
 
+def record_check(client, context, status, title, summary, conclusion=None):
+    data = {'status': status, 'output': {'title': title, 'summary': summary[:60000]}}
+    if conclusion:
+        data['conclusion'] = conclusion
+    if context.get('check_id'):
+        result = client.repo_api(f'/check-runs/{int(context["check_id"])}', data, 'PATCH')
+    else:
+        result = client.repo_api('/check-runs', {**data, 'head_sha': context['head'], 'name': CHECK}, 'POST')
+    return result.get('id') if isinstance(result, dict) else None
+
+
 def publish(folder, candidate):
     context = json.loads((folder / 'context.json').read_text())
     client = GitHub()
@@ -396,11 +411,8 @@ def publish(folder, candidate):
     blocking = [row for row in report['findings'] if row['priority'] <= 2]
     passed = not blocking
     summary = report['summary'] + ('\n' + report['human_reason'] if report['requires_human'] else '')
-    client.repo_api('/check-runs', {
-        'name': CHECK, 'head_sha': context['head'], 'status': 'completed',
-        'conclusion': 'success' if passed else 'failure',
-        'output': {'title': 'AI 审查通过' if passed else 'AI 发现待处理问题', 'summary': summary[:60000]},
-    }, 'POST')
+    record_check(client, context, 'completed', 'AI 审查通过' if passed else 'AI 发现待处理问题',
+                 summary, 'success' if passed else 'failure')
     automatic = passed and not report['requires_human'] and not context['manual_reasons'] and not context['failures']
     if automatic:
         current = client.repo_api(f'/pulls/{context["number"]}')
@@ -451,29 +463,61 @@ def dispatch_updates():
             dispatch_pr(client, pr)
 
 
-def failure(folder):
-    context = json.loads((folder / 'context.json').read_text())
+def gate(folder):
+    prepare(folder)
+    context_path = folder / 'context.json'
+    if not context_path.exists():
+        return
+    context = json.loads(context_path.read_text())
+    if context['mode'] == 'cached':
+        return
     client = GitHub()
+    pr = client.repo_api(f'/pulls/{context["number"]}')
+    if pr['state'] != 'open' or pr['head']['sha'] != context['head']:
+        return
+    check_id = record_check(client, context, 'in_progress', '正在重新审查当前输入',
+                            '提交、基线、反馈或失败检查发生变化，旧结论不再作为本轮通过依据。')
+    set_outputs(check_id=check_id or '')
+    if pr.get('auto_merge'):
+        client.api('/graphql', {'query': 'mutation($id:ID!){disablePullRequestAutoMerge(input:{pullRequestId:$id}){pullRequest{id}}}',
+                                'variables': {'id': context['node_id']}}, 'POST')
+    for review in client.pages(f'/pulls/{context["number"]}/reviews'):
+        if review['user']['login'] == 'github-actions[bot]' and review['state'] == 'APPROVED':
+            client.repo_api(f'/pulls/{context["number"]}/reviews/{review["id"]}/dismissals',
+                            {'message': '当前输入需要重新审查，暂时撤回旧机器人审批。'}, 'PUT')
+
+
+def failure(folder):
+    client = GitHub()
+    context_path = folder / 'context.json'
+    if context_path.exists():
+        context = json.loads(context_path.read_text())
+    else:
+        context = {'number': int(os.environ['AI_FAILURE_PR']), 'head': os.environ['AI_FAILURE_HEAD'],
+                   'model': os.environ.get('AI_MODEL', 'deepseek-v4.1-flash-1017'),
+                   'manual_reasons': [], 'failures': [], 'signature': '', 'rounds': 0,
+                   'check_id': os.environ.get('AI_CHECK_ID')}
     pr = client.repo_api(f'/pulls/{context["number"]}')
     if pr['state'] != 'open' or pr['head']['sha'] != context['head']:
         return
     context['failed_run'] = True
     report = {'summary': 'AI 任务或发布步骤失败，未将本次运行标记为通过。', 'requires_human': True,
               'human_reason': f'查看 Actions 运行 {os.environ.get("GITHUB_RUN_ID", "")}，修复模型、配额、权限或执行错误后重试。', 'findings': []}
-    client.repo_api('/check-runs', {'name': CHECK, 'head_sha': context['head'], 'status': 'completed', 'conclusion': 'failure',
-                                  'output': {'title': 'AI 执行失败', 'summary': report['human_reason']}}, 'POST')
+    record_check(client, context, 'completed', 'AI 执行失败', report['human_reason'], 'failure')
     post_comment(client, context, report, '自动流程已停止；没有宣称测试或模型审查通过。')
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=('prepare', 'prompts', 'plan', 'changed', 'package', 'publish', 'dispatch', 'failure'))
+    parser.add_argument('command', choices=('prepare', 'gate', 'prompts', 'plan', 'changed', 'package', 'publish', 'dispatch', 'failure'))
     parser.add_argument('--folder', type=Path, required=True)
     parser.add_argument('--candidate', type=Path)
     args = parser.parse_args()
     try:
         if args.command == 'prepare':
             prepare(args.folder)
+        elif args.command == 'gate':
+            gate(args.folder)
         elif args.command == 'prompts':
             prompts(args.folder)
         elif args.command == 'plan':

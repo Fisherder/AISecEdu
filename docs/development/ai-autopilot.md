@@ -15,6 +15,8 @@
 
 AI 不自动解决人的审查讨论，不部署共享平台或生产，不把学生数据、测试账号或服务器密钥交给云端任务。完整平台 CI 使用 GitHub 的隔离环境；私有课程、真实模型质量及评分联调仍按维护者任务记录执行。
 
+新反馈、基线或失败检查变化后，独立的可信门禁任务先将 AI 检查恢复为进行中，并撤回旧机器人审批和自动合并，再交给模型重审。两轮限制只约束自动修复，不允许用旧结论忽略新的人工反馈。审查任务只读代码，测试在 CI 或可写修复任务中执行；超时、取消或缺少结果文件都会报告失败。
+
 ## 模型和凭据
 
 模型固定为 `deepseek-v4.1-flash-1017`，通过维护者授权的 OpenAI Responses 兼容网关调用，不自动降级或切换模型。编码执行使用固定版本的 Codex CLI；推理请求走该网关，不使用 ChatGPT 登录或 OpenAI API 额度。
@@ -52,5 +54,9 @@ AI 不自动解决人的审查讨论，不部署共享平台或生产，不把�
 `make dev-check` 包含调度与发布边界的离线回归，以及启动配置回归；课件模块存在时也执行其单测。Team quick checks 还会在课件浏览器组件测试存在时安装固定 Playwright 并执行该测试。完整 DOJO CI 继续作为独立必需检查。
 
 完整 CI 的 `coverage` 环境只加载仓库基础 Compose，从源码构建组件；服务器的本地镜像标签、迁移后 Nix 路径和发布覆盖文件不进入临时 Runner。生产及共享开发环境继续按原有方式加载覆盖文件。GitHub 构建使用其 Ubuntu Azure 镜像源，并为软件包下载设置有限重试；索引下载失败直接报错，避免带着不完整索引继续安装。
+
+外层与测试镜像分别使用 GitHub BuildKit 缓存，构建成功即保存，避免整套测试尚未通过就丢失已完成的编译结果。合入 `develop` 后也运行 CI，建立供后续 PR 读取的基线缓存。缓存仅加速构建，不替代测试；远程缓存保存失败不改变测试结论。参见 [Docker Actions 缓存说明](https://docs.docker.com/build/ci/github-actions/cache/)。
+
+CI 统一使用 `dojo` 容器名，确保构建的测试镜像和失败诊断指向实际容器。启动就绪依据成功的 HTTP 响应，最长等待五分钟；不依赖页面品牌字样。工作区构建器按实际进程退出码判断，失败不能因 `docker wait` 命令本身成功而被忽略。
 
 参考：[Codex GitHub Action](https://learn.chatgpt.com/docs/github-action)、[DeepSeek Codex 接入](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)、[GitHub 自动合并](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request)。

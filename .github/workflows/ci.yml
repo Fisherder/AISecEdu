@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches:
+      - develop
       - master
   schedule:
     - cron: "42 06 * * *"
@@ -116,8 +117,12 @@ jobs:
           build-args: UBUNTU_ARCHIVE_MIRROR=http://azure.archive.ubuntu.com/ubuntu
           tags: pwncollege/dojo
           load: true
-          cache-from: type=local,src=/mnt/cache/dojo-image
-          cache-to: type=local,dest=/mnt/cache/dojo-image,mode=max
+          cache-from: |
+            type=gha,scope=dojo-outer-v1
+            type=local,src=/mnt/cache/dojo-image
+          cache-to: |
+            type=gha,scope=dojo-outer-v1,mode=max,ignore-error=true
+            type=local,dest=/mnt/cache/dojo-image,mode=max
 
       - name: Build test docker image
         uses: docker/build-push-action@v5
@@ -126,18 +131,22 @@ jobs:
           build-args: UBUNTU_ARCHIVE_MIRROR=http://azure.archive.ubuntu.com/ubuntu
           tags: dojo-test
           load: true
-          cache-from: type=local,src=/mnt/cache/test-image
-          cache-to: type=local,dest=/mnt/cache/test-image,mode=max
+          cache-from: |
+            type=gha,scope=dojo-test-v1
+            type=local,src=/mnt/cache/test-image
+          cache-to: |
+            type=gha,scope=dojo-test-v1,mode=max,ignore-error=true
+            type=local,dest=/mnt/cache/test-image,mode=max
 
       - name: Start the dojo in ${{ matrix.mode }} mode
         timeout-minutes: 15
         run: |
-          ./deploy.sh -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C
+          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C
 
       - name: Run ${{ matrix.mode }} dojo tests
         timeout-minutes: 15
         run: |
-          ./deploy.sh -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -N -t
+          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -N -t
 
       - name: Upload coverage reports to Codecov
         if: matrix.mode == 'singlenode'
@@ -178,7 +187,7 @@ jobs:
       - name: Prepare the cache
         if: env.SAVE_CACHE == 'yes'
         run: |
-          ./deploy.sh -K -g
+          ./deploy.sh -c dojo -K -g
           df -h
           sudo umount /mnt/cache
           du -sm /mnt/cache.img

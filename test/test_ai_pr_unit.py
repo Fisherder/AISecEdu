@@ -217,10 +217,10 @@ def test_signature_detects_comment_edits_within_the_same_timestamp():
     assert ai.state_signature(pr, [], first) != ai.state_signature(pr, [], second)
 
 
-def prepare_fixture(folder, *, behind=0, fork=False, feedback=False, renamed=False):
+def prepare_fixture(folder, *, behind=0, fork=False, feedback=False, renamed=False, rounds=0):
     head = 'a' * 40
     signature = ai.state_signature({'head': {'sha': head}, 'base': {'sha': 'b' * 40}, 'title': 'synthetic', 'body': ''}, [], [])
-    cached_context = {'head': head, 'model': 'synthetic', 'manual_reasons': [], 'failures': [], 'signature': signature, 'rounds': 0}
+    cached_context = {'head': head, 'model': 'synthetic', 'manual_reasons': [], 'failures': [], 'signature': signature, 'rounds': rounds}
     body = ai.comment_body(cached_context, report(), '合成缓存')
     class Client:
         repo = 'Fisherder/AISecEdu'
@@ -315,6 +315,56 @@ def test_changed_detects_untracked_regression_tests_before_final_review():
             (candidate / 'test/test_added_unit.py').write_text('assert True\n')
             ai.changed(result, candidate)
             assert outputs['has_patch'] is True
+
+
+def test_new_feedback_is_reviewed_even_after_repair_budget_is_exhausted():
+    with tempfile.TemporaryDirectory() as directory:
+        outputs, context = prepare_fixture(Path(directory), feedback=True, rounds=2)
+        assert outputs['mode'] == 'analyze'
+        assert context['rounds'] == 2
+
+
+def test_gate_revokes_old_approval_and_reuses_the_current_check_before_analysis():
+    context = {'mode': 'analyze', 'number': 1, 'node_id': 'node', 'head': 'a' * 40, 'check_id': 17}
+    calls = []
+    class Client:
+        def repo_api(self, path, data=None, method=None):
+            calls.append((path, data, method))
+            if path == '/pulls/1':
+                return {'state': 'open', 'head': {'sha': context['head']}, 'auto_merge': {'enabled': True}}
+            if path == '/check-runs/17':
+                return {'id': 17}
+        def api(self, path, data, method):
+            calls.append((path, data, method))
+        def pages(self, path):
+            return [{'id': 9, 'user': {'login': 'github-actions[bot]'}, 'state': 'APPROVED'},
+                    {'id': 10, 'user': {'login': 'Fisherder'}, 'state': 'APPROVED'}]
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        (folder / 'context.json').write_text(json.dumps(context))
+        with patch.object(ai, 'prepare'), patch.object(ai, 'GitHub', Client), patch.object(ai, 'set_outputs') as outputs:
+            ai.gate(folder)
+        outputs.assert_called_once_with(check_id=17)
+    assert calls[1][0] == '/check-runs/17' and calls[1][1]['status'] == 'in_progress'
+    assert any(row[0] == '/graphql' for row in calls)
+    assert any(row[0] == '/pulls/1/reviews/9/dismissals' for row in calls)
+    assert not any(row[0] == '/pulls/1/reviews/10/dismissals' for row in calls)
+
+
+def test_timeout_without_an_artifact_closes_the_pending_check_as_failure():
+    calls = []
+    class Client:
+        def repo_api(self, path, data=None, method=None):
+            calls.append((path, data, method))
+            if path == '/pulls/1':
+                return {'state': 'open', 'head': {'sha': 'a' * 40}}
+    with tempfile.TemporaryDirectory() as directory, \
+            patch.dict(os.environ, {'AI_FAILURE_PR': '1', 'AI_FAILURE_HEAD': 'a' * 40, 'AI_CHECK_ID': '17'}), \
+            patch.object(ai, 'GitHub', Client), patch.object(ai, 'post_comment') as comment:
+        ai.failure(Path(directory) / 'missing-artifact')
+        assert comment.call_args.args[1]['failed_run'] is True
+    assert calls[-1][0] == '/check-runs/17'
+    assert calls[-1][1]['status'] == 'completed' and calls[-1][1]['conclusion'] == 'failure'
 
 
 if __name__ == '__main__':

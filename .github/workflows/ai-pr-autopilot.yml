@@ -50,7 +50,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: python3 ops/team/ai_pr.py dispatch --folder "$RUNNER_TEMP/ai-result"
-  analyze:
+  gate:
     if: >-
       vars.AI_AUTOPILOT_ENABLED == 'true' &&
       github.event_name != 'push' &&
@@ -62,7 +62,34 @@ jobs:
        (github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD &&
         github.event.pull_request.user.login == 'Fisherder'))
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+      checks: write
+    outputs:
+      mode: ${{ steps.gate.outputs.mode }}
+      number: ${{ steps.gate.outputs.number }}
+      head: ${{ steps.gate.outputs.head }}
+      check_id: ${{ steps.gate.outputs.check_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
+          persist-credentials: false
+      - name: Suspend outdated approval before reviewing
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AI_MODEL: ${{ vars.DEEPSEEK_MODEL }}
+          AI_AUTOPILOT_BOOTSTRAP_HEAD: ${{ vars.AI_AUTOPILOT_BOOTSTRAP_HEAD }}
+        run: python3 ops/team/ai_pr.py gate --folder "$RUNNER_TEMP/ai-gate"
+  analyze:
+    needs: gate
+    if: needs.gate.outputs.mode != 'skip' && needs.gate.outputs.mode != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       pull-requests: read
@@ -217,10 +244,11 @@ jobs:
           git -C candidate config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           python3 policy/ops/team/ai_pr.py publish --folder "$RUNNER_TEMP/ai-result" --candidate "$GITHUB_WORKSPACE/candidate"
   report-failure:
-    needs: [analyze, publish]
+    needs: [gate, analyze, publish]
     if: >-
-      always() && needs.analyze.outputs.number != '' &&
-      (needs.analyze.result == 'failure' || needs.publish.result == 'failure')
+      always() && needs.gate.outputs.number != '' &&
+      (needs.gate.result == 'failure' || needs.analyze.result == 'failure' || needs.publish.result == 'failure' ||
+       needs.analyze.result == 'cancelled' || needs.publish.result == 'cancelled')
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
@@ -234,9 +262,14 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
-          name: deepseek-pr-${{ needs.analyze.outputs.number }}-${{ github.run_id }}
+          name: deepseek-pr-${{ needs.gate.outputs.number }}-${{ github.run_id }}
           path: ${{ runner.temp }}/ai-result
       - env:
           GH_TOKEN: ${{ github.token }}
+          AI_FAILURE_PR: ${{ needs.gate.outputs.number }}
+          AI_FAILURE_HEAD: ${{ needs.gate.outputs.head }}
+          AI_CHECK_ID: ${{ needs.gate.outputs.check_id }}
+          AI_MODEL: ${{ vars.DEEPSEEK_MODEL }}
         run: python3 ops/team/ai_pr.py failure --folder "$RUNNER_TEMP/ai-result"
