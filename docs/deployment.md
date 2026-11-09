@@ -261,3 +261,5 @@ Error response from daemon: path /run/homefs is mounted on /run/homefs but it is
 - If the problem persists: rebuild the outer docker container
 
 云端演示可设置 `DOJO_MAX_ACTIVE_WORKSPACES=1`、`DOJO_WORKSPACE_START_CONCURRENCY=1`、`DOJO_CODE_START_CONCURRENCY=1` 和 `DOJO_DESKTOP_START_CONCURRENCY=1`。总容量检查在共享锁内执行，容量已满时提示等待，不停止其他使用者；同一使用者仍可切换实验。默认总容量为 `0`，保持正式教学环境原来的容量策略。
+
+克隆时还应核对运行中服务的实际挂载，不能只复制卷目录。Prometheus 镜像的 `/prometheus` 可能是匿名卷，需在本机的 `docker-compose.deployment.yml` 中以 external 卷挂回源站对应的卷名。Grafana 的 `/var/lib/grafana` 可能在容器可写层，需要从一致性快照中恢复并改为 `/data/grafana` 持久绑定。`dojo compose` 在该文件存在时合并它，文件纳入本机私有配置；没有该文件时保持原来的 Compose 加载方式。

@@ -33,6 +33,7 @@ test-results/
 !.env.example
 !*.env.example
 ops/deployment.env
+/docker-compose.deployment.yml
 
 # Runtime state, build caches and verification artifacts
 /data/
