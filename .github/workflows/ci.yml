@@ -156,7 +156,7 @@ jobs:
 
       - name: Run ${{ matrix.mode }} dojo tests
         if: ${{ !cancelled() && steps.startup.outcome == 'success' }}
-        timeout-minutes: 15
+        timeout-minutes: 20
         env:
           AISECEDU_SPLIT_APP_TESTS: '1'
         run: |

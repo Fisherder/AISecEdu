@@ -59,19 +59,30 @@ def validate_restart(username, mode):
             assert False, f"\"dojo restart\" should not have result: {(result.stdout, result.stderr)}"
         except subprocess.CalledProcessError as error:
             restart_error = (error.returncode, error.stdout, error.stderr)
-            if "Already starting a challenge" not in (error.stderr or ""):
+            if not any(message in (error.stderr or "") for message in (
+                "Already starting a challenge", "题目正在启动或排队中",
+            )):
                 break
             time.sleep(3)
 
     # Validate that the container is the same, and it is not the same container.
-    assert validate_current_container(
+    valid = validate_current_container(
         username,
         labels["dojo.dojo_id"],
         labels["dojo.module_id"],
         labels["dojo.challenge_id"],
         mode = labels["dojo.mode"] if mode == "current" else mode,
         after = datetime.datetime.fromisoformat(container["Created"]) # Should be created after the old container.
-    ), f"Failed to restart (\"dojo restart\" exited {restart_error[0]}, stdout={restart_error[1]!r}, stderr={restart_error[2]!r}):\nOriginal Container:\n{container}\nNewest Container:\n{inspect_container(username)}"
+    )
+    latest = inspect_container(username) if not valid else {}
+    safe_fields = lambda value: {
+        "id": value.get("Id"), "created": value.get("Created"),
+        "mode": value.get("Config", {}).get("Labels", {}).get("dojo.mode"),
+    }
+    assert valid, (
+        f"Failed to restart (exit={restart_error[0]}, stderr={restart_error[2]!r}); "
+        f"original={safe_fields(container)}, latest={safe_fields(latest)}"
+    )
 
 def test_whoami(random_user, welcome_dojo):
     name, session = random_user

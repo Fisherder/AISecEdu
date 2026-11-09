@@ -18,6 +18,7 @@ from utils import DOJO_URL, db_sql, dojo_run, enroll, get_user_id, solve_challen
 API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/learning"
 COURSES_API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/dojos"
 TEACHING_API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/teaching"
+SIMULATION_API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/simulations"
 
 
 def test_catalog_order_plan_reorders_and_moves_questions_between_chapters():
@@ -2953,7 +2954,8 @@ spec=authoring._base_spec(values['brief'],constraints,'L3',[])
 spec.update(values['package'])
 spec['authoringPipeline']={{'provider':'OFFLINE_FIXTURE'}}
 draft=LearningDrafts(dojo_id=dojo.dojo_id,module_index=0,author_id=owner.id,level='L3',
-                     brief=values['brief'],constraints=constraints,spec=spec)
+                     brief=values['brief'],constraints=constraints,spec=spec,
+                     conversation=[{{'role':'teacher','content':values['brief']}}])
 db.session.add(draft)
 db.session.flush()
 report=authoring.validate_draft(draft,allow_agent_repair=False)
@@ -4540,7 +4542,7 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     challenge_id = f"evidence-{secrets.token_hex(4)}"
     verification_answer = secrets.token_hex(8)
     brief = (
-        "Create a self-contained incident verification exercise for a beginner. "
+        "Create a new custom challenge from scratch: a self-contained incident verification exercise for a beginner. "
         "The learner must inspect runtime evidence, validate one hypothesis, and explain remediation."
     )
     created = admin_session.post(
@@ -4601,6 +4603,8 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     )
     revised, _ = wait_for_authoring(admin_session, revised_response)
     assert revised["revision"] == 2
+    assert revised["spec"]["mode"] == "GENERATE_CUSTOM"
+    assert revised["spec"]["oracleContract"]["type"] == "FLAG_GATE_V1"
     revalidated_response = admin_session.post(
         f"{API}/drafts/{draft['id']}/validate", json={}
     )

@@ -335,7 +335,7 @@ def test_high_volume_admin_collections_use_bounded_product_pages(
     assert response.status_code == 200
     assert 'class="admin-product' in response.text
     assert heading in response.text
-    assert re.search(r"vendor\.bundle(?:\.min)?\.js", response.text) is None
+    assert re.search(r"vendor\.bundle(?:\.(?:min|dev))?\.js", response.text) is None
     rendered_rows = sum(
         len(re.findall(r"<tr(?:\s|>)", body))
         for body in re.findall(r"<tbody[^>]*>(.*?)</tbody>", response.text, re.S)
@@ -511,7 +511,7 @@ def test_admin_config_default_is_query_bounded_and_code_split(admin_session):
     assert advanced.status_code == 200
     assert 'data-admin-config-section="ctftime"' in advanced.text
     assert re.search(r"js/pages/configs(?:\.(?:min|dev))?\.js", advanced.text)
-    assert re.search(r"vendor\.bundle(?:\.min)?\.js", advanced.text)
+    assert re.search(r"vendor\.bundle(?:\.(?:min|dev))?\.js", advanced.text)
 
 
 @pytest.mark.parametrize(

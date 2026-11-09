@@ -39,7 +39,14 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
         wait_for_background_worker(timeout=1)
 
         # 确认页面初次加载时会显示已有事件。
+        watcher.get(DOJO_URL)
+        for cookie in random_user_session.cookies:
+            watcher.add_cookie({"name": cookie.name, "value": cookie.value,
+                                "path": cookie.path or "/", "secure": bool(cookie.secure)})
         watcher.get(f"{DOJO_URL}/feed")
+        WebDriverWait(watcher, 20).until(lambda driver: driver.execute_script(
+            "return Number(window.init && window.init.userId) > 0 && "
+            "getComputedStyle(document.getElementById('connection-status')).display === 'none'"))
         events_after_start = watcher.find_element(By.ID, "events-list").find_elements(By.CLASS_NAME, "event-card")
 
         found_start_event = False

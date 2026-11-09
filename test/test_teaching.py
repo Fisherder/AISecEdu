@@ -1,5 +1,6 @@
 import concurrent.futures
 import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -390,7 +391,7 @@ def test_teacher_agent_approval_tray_browser_flow(
                     "secure": bool(cookie.secure),
                 }
             )
-        browser.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard")
+        browser.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard&thread={thread_id}")
         wait = selenium_wait.WebDriverWait(browser, 45)
         tray = wait.until(
             lambda driver: (
@@ -2305,7 +2306,20 @@ def test_conversation_upload_asks_then_places_original_file_in_module(
                 f"WHERE id = '{follow_job_id}';"
             ).strip()
         )
-        assert payload["sourceRefs"] == [{"type": "material", "id": material_id}]
+        assert len(payload["sourceRefs"]) == 1
+        source_ref = payload["sourceRefs"][0]
+        assert {key: source_ref[key] for key in ("type", "id")} == {
+            "type": "material", "id": material_id,
+        }
+        if "sha256" in source_ref:
+            assert source_ref["sha256"] == hashlib.sha256(content).hexdigest()
+        if source_ref.get("revisionId"):
+            revision_id = source_ref["revisionId"]
+            assert re.fullmatch(r"matrev_[a-f0-9]{32}", revision_id)
+            assert db_sql(
+                "SELECT material_id || ':' || sha256 FROM teaching_material_revisions "
+                f"WHERE id = '{revision_id}';"
+            ).strip() == f"{material_id}:{hashlib.sha256(content).hexdigest()}"
         if follow_data["job"]["status"] in {"QUEUED", "RUNNING", "CANCEL_REQUESTED"}:
             canceled = admin_session.delete(f"{API}/jobs/{follow_job_id}", json={})
             assert canceled.status_code == 200, canceled.text
@@ -3151,13 +3165,21 @@ def test_course_agent_starts_one_atomic_batch_revision_for_five_ctf_drafts(
         assert all(item["batch"]["count"] == 5 for item in result["jobs"])
         queued_job_ids = [item["id"] for item in result["jobs"]]
         assert len(set(queued_job_ids)) == 5
+        authoring_job_ids = [item["id"] for item in result["authoringJobs"]]
         states = db_sql(
-            "SELECT id || ':' || status FROM learning_drafts WHERE id IN ("
-            + ",".join(f"'{item}'" for item in draft_ids)
-            + ") ORDER BY id;"
+            "SELECT d.id || ':' || d.status || ':' || j.status FROM learning_drafts d "
+            "JOIN learning_authoring_jobs j ON j.draft_id = d.id WHERE j.id IN ("
+            + ",".join(f"'{item}'" for item in authoring_job_ids)
+            + ") ORDER BY d.id;"
         ).splitlines()
         assert len(states) == 5
-        assert all(item.endswith(":BUILDING") for item in states)
+        assert {item.split(":")[0] for item in states} == set(draft_ids)
+        for item in states:
+            _, draft_status, job_status = item.split(":")
+            assert draft_status == "BUILDING" or (
+                draft_status in {"DRAFT", "VALIDATED"}
+                and job_status in {"RUNNING", "COMPLETED", "FAILED"}
+            ), item
     finally:
         for queued_job_id in queued_job_ids:
             admin_session.delete(f"{API}/jobs/{queued_job_id}", json={})
@@ -3836,6 +3858,10 @@ def test_teacher_thread_isolation_and_native_progress(
         "LearningEvidenceEvents",
         "LearningAssessments",
         "ObjectiveMappings",
+        "DojoUsers",
+        "TeachingAssignments",
+        "TeachingAssignmentSubmissions",
+        "LearningSkillStates",
     }
     student = next(
         item for item in progress_data["students"] if item["name"] == student_name

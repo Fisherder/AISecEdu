@@ -4,7 +4,7 @@ import time
 import string
 import random
 
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException, TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -154,9 +154,10 @@ def challenge_start(browser, idx, practice=False):
     body = browser.find_element("id", f"challenges-body-{idx}")
 
     body.find_element(By.CSS_SELECTOR, ".challenge-priv" if practice else ".challenge-start").click()
-    WebDriverWait(browser, 120).until(
+    WebDriverWait(browser, 120, ignored_exceptions=(NoSuchElementException, StaleElementReferenceException)).until(
         lambda driver: "challenge-hidden" not in (
-            body.find_element(By.CSS_SELECTOR, ".challenge-workspace").get_attribute("class") or ""
+            driver.find_element("id", f"challenges-body-{idx}")
+            .find_element(By.CSS_SELECTOR, ".challenge-workspace").get_attribute("class") or ""
         )
     )
     time.sleep(1)
@@ -166,11 +167,12 @@ def challenge_submit(browser, idx, flag):
     body = browser.find_element("id", f"challenges-body-{idx}")
     body.find_element(By.CSS_SELECTOR, ".challenge-answer").send_keys(flag)
 
-    banner = WebDriverWait(browser, 20).until(
+    banner = WebDriverWait(browser, 20, ignored_exceptions=(NoSuchElementException, StaleElementReferenceException)).until(
         lambda driver: next(
             (
                 element
-                for element in body.find_elements(By.CSS_SELECTOR, "#workspace-notification-banner")
+                for element in driver.find_element("id", f"challenges-body-{idx}")
+                .find_elements(By.CSS_SELECTOR, "#workspace-notification-banner")
                 if element.is_displayed() and element.text.strip()
             ),
             False,
@@ -747,16 +749,7 @@ def test_welcome_graded_lecture(random_user_browser, random_user_name, example_d
     random_user_browser.get(f"{DOJO_URL}/{example_dojo}/lectures")
     idx = challenge_idx(random_user_browser, "Graded Lecture")
 
-    challenge_expand(random_user_browser, idx)
-    body = random_user_browser.find_element("id", f"challenges-body-{idx}")
-
-    body.find_element(By.CSS_SELECTOR, ".challenge-start").click()
-    WebDriverWait(random_user_browser, 120).until(
-        lambda driver: "challenge-hidden" not in (
-            body.find_element(By.CSS_SELECTOR, ".challenge-workspace").get_attribute("class") or ""
-        )
-    )
-    time.sleep(1)
+    challenge_start(random_user_browser, idx)
 
     wait = WebDriverWait(random_user_browser, 30)
     lecture_iframe = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, f"#challenges-body-{idx} #workspace-iframe")))
