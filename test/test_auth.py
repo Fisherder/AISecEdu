@@ -536,7 +536,11 @@ def test_student_and_teacher_agents_share_one_workbench(
     admin_session,
 ):
     student = random_user_session.get(f"{DOJO_URL}/guide")
-    teacher = admin_session.get(f"{DOJO_URL}/teacher")
+    workbench = admin_session.get(f"{DOJO_URL}/teacher")
+    assert workbench.status_code == 200
+    assert 'id="cocreation-workbench"' in workbench.text
+    assert "js/dojo/workbench-v3/app-" in workbench.text
+    teacher = admin_session.get(f"{DOJO_URL}/teacher?view=dashboard")
 
     assert student.status_code == 200
     assert teacher.status_code == 200

@@ -237,6 +237,18 @@ def test_base_spec_accepts_empty_and_non_string_briefs(brief):
     assert spec["mode"] == "GENERATE_CUSTOM"
 
 
+@pytest.mark.parametrize('mode', ['CONTAINER', 'SIMULATION', 'HYBRID'])
+def test_authoring_request_preserves_supported_exercise_mode(mode):
+    from CTFd.plugins.dojo_plugin.api.v1.learning import _container_authoring_constraints
+
+    original = {'exercise_mode': mode.lower(), 'simulation': {'preset': 'WIRELESS'}}
+    result = _container_authoring_constraints(original)
+    assert result['exerciseMode'] == mode
+    assert 'exercise_mode' not in result
+    assert ('simulation' in result) is (mode != 'CONTAINER')
+    assert original == {'exercise_mode': mode.lower(), 'simulation': {'preset': 'WIRELESS'}}
+
+
 def test_artifact_response_contract_rejects_placeholders_before_repair():
     from CTFd.plugins.dojo_plugin.learning import authoring
 

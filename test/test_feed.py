@@ -4,6 +4,7 @@ import requests
 from utils import DOJO_URL, start_challenge, solve_challenge, wait_for_background_worker
 from selenium.webdriver import Firefox, FirefoxOptions
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
 
 def challenge_expand(browser, idx):
     browser.refresh()
@@ -60,7 +61,9 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
 
         solve_challenge(welcome_dojo, "welcome", "flag", session=random_user_session, user=random_user_name)
         wait_for_background_worker(timeout=1)
-        # we purposefully don't refresh here, to make sure streaming works
+        WebDriverWait(watcher, 20).until(lambda driver: any(
+            random_user_name in event.text and "完成了" in event.text
+            for event in driver.find_elements(By.CSS_SELECTOR, "#events-list .event-card")))
         events_after_solve = watcher.find_element(By.ID, "events-list").find_elements(By.CLASS_NAME, "event-card")
 
         found_solve_event = False

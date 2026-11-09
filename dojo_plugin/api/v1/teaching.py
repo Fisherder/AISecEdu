@@ -10528,6 +10528,7 @@ class MaterialDownload(Resource):
                 max_age=0,
             )
             response.headers["Cache-Control"] = "private, no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
             return response
         except (ScopeError, ValueError):
             return _error("Material not found", 404, code="NOT_FOUND")
@@ -10560,6 +10561,7 @@ class MaterialPreview(Resource):
             )
             response.headers["Cache-Control"] = "private, no-store"
             response.headers["X-Frame-Options"] = "SAMEORIGIN"
+            response.headers["X-Content-Type-Options"] = "nosniff"
             return response
         except (ScopeError, ValueError):
             return _error("Material not found", 404, code="NOT_FOUND")

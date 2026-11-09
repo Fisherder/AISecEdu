@@ -290,6 +290,9 @@ def test_tool_proposal_decision_is_persistent_and_idempotent(
         f"{API}/threads/{thread_id}/messages/{message_id}/"
         "tool-proposals/0/decision"
     )
+    snapshot = data(admin_session.get(f"{API}/threads/{thread_id}"))["thread"]
+    proposal_message = next(item for item in snapshot["messages"] if int(item["id"]) == message_id)
+    approval = proposal_message["metadata"]["toolProposalApprovalRequests"]["0"]
     try:
         denied = student_session.post(
             endpoint,
@@ -304,7 +307,7 @@ def test_tool_proposal_decision_is_persistent_and_idempotent(
 
         rejected = admin_session.post(
             endpoint,
-            json={"decision": "REJECTED", "confirmed": True},
+            json={"decision": "REJECTED", "confirmed": True, "approvalRequest": approval},
         )
         assert rejected.status_code == 200, rejected.text
         rejected_data = rejected.json()["data"]
@@ -321,17 +324,17 @@ def test_tool_proposal_decision_is_persistent_and_idempotent(
 
         repeated = admin_session.post(
             endpoint,
-            json={"decision": "REJECTED", "confirmed": True},
+            json={"decision": "REJECTED", "confirmed": True, "approvalRequest": approval},
         )
         assert repeated.status_code == 200, repeated.text
         assert repeated.json()["data"]["deduplicated"] is True
 
         conflicting = admin_session.post(
             endpoint,
-            json={"decision": "APPROVED", "confirmed": True},
+            json={"decision": "APPROVED", "confirmed": True, "approvalRequest": approval},
         )
         assert conflicting.status_code == 409, conflicting.text
-        assert conflicting.json()["errorCode"] == "PROPOSAL_ALREADY_DECIDED"
+        assert conflicting.json()["errorCode"] == "ALREADY_DECIDED"
     finally:
         cleanup = admin_session.delete(
             f"{API}/threads/{thread_id}", json={"confirmed": True}
@@ -387,7 +390,7 @@ def test_teacher_agent_approval_tray_browser_flow(
                     "secure": bool(cookie.secure),
                 }
             )
-        browser.get(f"{DOJO_URL.rstrip('/')}/teacher")
+        browser.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard")
         wait = selenium_wait.WebDriverWait(browser, 45)
         tray = wait.until(
             lambda driver: (
@@ -1798,7 +1801,7 @@ def copy_session(source):
 def execute_course_tool(
     session, thread_id, tool, arguments=None, *, confirmed=True, key=None
 ):
-    return session.post(
+    response = session.post(
         f"{API}/agent-tools/execute",
         headers={"Idempotency-Key": key or f"test-{tool}-{secrets.token_hex(8)}"},
         json={
@@ -1808,6 +1811,38 @@ def execute_course_tool(
             "confirmed": confirmed,
         },
     )
+    return complete_teacher_command(session, response)
+
+
+def complete_teacher_command(session, response, *, action_decision=False):
+    if response.status_code != 202:
+        return response
+    receipt = data(response)
+    action = receipt["action"]
+    job_id = action["execution"]["jobId"]
+    assert re.fullmatch(r"[A-Za-z0-9_-]{1,48}", job_id), job_id
+    code = (
+        "import os\n"
+        "from CTFd.plugins.dojo_plugin.models import TeachingJobs\n"
+        "from CTFd.plugins.dojo_plugin.agent_runtime.commands import COMMAND_JOB_KINDS\n"
+        "from CTFd.plugins.dojo_plugin.agent_runtime.jobs import process_job\n"
+        "assert os.environ.get('DOJO_ENV') == 'coverage'\n"
+        f"job = TeachingJobs.query.filter_by(id={job_id!r}).one()\n"
+        "assert job.kind in COMMAND_JOB_KINDS\n"
+        "if job.status == 'QUEUED': process_job(job.id, worker_id='ci-command-contract')\n"
+        "print('CI-COMMAND-CHECKED')\n"
+    )
+    import base64
+    encoded = base64.b64encode(code.encode()).decode()
+    checked = dojo_run("timeout", "180", "dojo", "flask", timeout=200,
+                       input=f'import base64; exec(base64.b64decode("{encoded}"))\n')
+    assert "CI-COMMAND-CHECKED" in checked.stdout, checked.stdout
+    job = wait_for_teaching_job(session, job_id)
+    assert job["status"] == "SUCCEEDED", job
+    path = f"/actions/{action['id']}/decision" if action_decision else f"/agent-tools/actions/{action['id']}"
+    completed = session.get(API + path)
+    assert completed.status_code == 200, completed.text
+    return completed
 
 
 def test_generation_batch_retry_is_idempotent_and_preserves_successful_drafts(
@@ -2405,7 +2440,7 @@ def test_manual_course_chapter_and_practice_creation(admin_session):
     new_course_page = admin_session.get(f"{DOJO_URL.rstrip('/')}/teacher/courses/new")
     assert new_course_page.status_code == 200, new_course_page.text
     assert 'id="manual-create-form"' in new_course_page.text
-    assert 'id="manual-agent-shortcut"' in new_course_page.text
+    assert 'class="hub-back-link"' in new_course_page.text
     assert "课程标识" not in new_course_page.text
     assert "章节标识" not in new_course_page.text
     assert 'id="manual-id"' not in new_course_page.text
@@ -2434,7 +2469,7 @@ def test_manual_course_chapter_and_practice_creation(admin_session):
         )
         assert chapter_page.status_code == 200, chapter_page.text
         assert 'data-create-kind="chapter"' in chapter_page.text
-        assert 'id="manual-agent-shortcut"' in chapter_page.text
+        assert 'class="hub-back-link"' in chapter_page.text
         assert "章节标识" not in chapter_page.text
         assert 'id="manual-id"' not in chapter_page.text
 
@@ -2456,7 +2491,7 @@ def test_manual_course_chapter_and_practice_creation(admin_session):
         assert practice_page.status_code == 200, practice_page.text
         assert 'data-create-kind="practice"' in practice_page.text
         assert f'<option value="{module_id}"' in practice_page.text
-        assert 'id="manual-agent-shortcut"' in practice_page.text
+        assert 'class="hub-back-link"' in practice_page.text
         assert "题目标识" not in practice_page.text
         assert 'id="manual-id"' not in practice_page.text
 
@@ -2982,6 +3017,7 @@ def test_ctf_generation_option_selection_starts_five_independent_flag_jobs(
                 },
             },
         )
+        started = complete_teacher_command(admin_session, started)
         assert started.status_code == 200, started.text
         started_data = data(started)
         assert started_data["action"]["request"]["arguments"] == proposal["arguments"]
@@ -3165,12 +3201,12 @@ def test_course_agent_starts_one_atomic_batch_revision_for_five_ctf_drafts(
 
 
 def test_teacher_agent_links_to_the_canonical_question_workspace(admin_session):
-    page = admin_session.get(f"{DOJO_URL.rstrip('/')}/teacher")
+    page = admin_session.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard")
     assert page.status_code == 200
     assert 'id="teaching-authoring-workspace"' not in page.text
     assert 'id="teaching-authoring-frame"' not in page.text
-    assert "aisecedu-agent-workbench-v36" in page.text
-    assert "aisecedu-global-agent-v72" in page.text
+    assert "js/dojo/teaching-agent" in page.text
+    assert "js/dojo/teaching-agent" in page.text
     root = pathlib.Path(__file__).resolve().parents[1]
     script = (root / "dojo_theme/static/js/dojo/teaching-agent.js").read_text()
     assert "function authoringManagementHref(job)" in script
@@ -3189,14 +3225,14 @@ def test_global_agent_executes_native_course_operations(
     simple_award_dojo,
 ):
     student_name, _student_session = random_user
-    teacher_page = admin_session.get(f"{DOJO_URL.rstrip('/')}/teacher")
+    teacher_page = admin_session.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard")
     assert teacher_page.status_code == 200
     assert 'id="teaching-drawer"' in teacher_page.text
     assert 'id="teaching-job-list"' in teacher_page.text
     assert 'id="teaching-authoring-workspace"' not in teacher_page.text
     assert 'id="teaching-authoring-frame"' not in teacher_page.text
     assert 'id="teaching-current-run"' not in teacher_page.text
-    assert 'id="teaching-stop"' not in teacher_page.text
+    assert 'id="teaching-stop"' in teacher_page.text
     assert "data-transcript-mode=" not in teacher_page.text
     assert 'id="teaching-live-status"' not in teacher_page.text
     assert "data-drawer-tab=" not in teacher_page.text
@@ -3219,8 +3255,8 @@ def test_global_agent_executes_native_course_operations(
     assert "生成三套" not in teacher_page.text
     assert "/teacher/courses" in teacher_page.text
     assert "/teacher?phase=" not in teacher_page.text
-    assert "aisecedu-agent-workbench-v36" in teacher_page.text
-    assert "aisecedu-global-agent-v72" in teacher_page.text
+    assert "js/dojo/teaching-agent" in teacher_page.text
+    assert "js/dojo/teaching-agent" in teacher_page.text
     assert teacher_page.text.index(
         'id="teaching-approval-tray"'
     ) < teacher_page.text.index('class="teaching-composer-row"')
@@ -3665,7 +3701,7 @@ def test_teacher_thread_isolation_and_native_progress(
     artifact_page = admin_session.get(artifact_url)
     assert artifact_page.status_code == 200
     assert 'allow="fullscreen"' in artifact_page.text
-    assert "aisecedu-teaching-v14" in artifact_page.text
+    assert "js/dojo/teaching-artifact" in artifact_page.text
     assert guest_session.get(artifact_url).status_code == 404
     assert guest_session.get(f"{API}/artifacts/{artifact_id}").status_code == 404
     assert (
@@ -3976,14 +4012,14 @@ def test_student_workspace_ticket_and_agent_runtime_gateway_isolation(
         requests.delete(review_lesson_url, headers=reviewer_headers).status_code == 403
     )
 
-    assert (
-        admin_session.get(f"{API}/actions/{review_action_id}/decision").status_code
-        == 200
-    )
+    approval_response = admin_session.get(f"{API}/actions/{review_action_id}/decision")
+    assert approval_response.status_code == 200, approval_response.text
+    approval_reference = data(approval_response)["action"]["approvalRequest"]
     reviewed = admin_session.post(
         f"{API}/actions/{review_action_id}/decision",
-        json={"decision": "APPROVED", "confirmed": True},
+        json={"decision": "APPROVED", "confirmed": True, "approvalRequest": approval_reference},
     )
+    reviewed = complete_teacher_command(admin_session, reviewed, action_decision=True)
     assert reviewed.status_code == 200, reviewed.text
     reviewed_action = data(reviewed)["action"]
     assert reviewed_action["result"]["reviewedArtifactId"]
