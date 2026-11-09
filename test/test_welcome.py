@@ -145,7 +145,7 @@ def ttyd_terminal(browser):
 # Expands the accordion entry of the challenge
 def challenge_expand(browser, idx):
     browser.refresh()
-    browser.find_element("id", f"challenges-header-button-{idx}").click()
+    browser.find_element(By.CSS_SELECTOR, f'[data-challenge-index="{idx}"]').click()
     time.sleep(0.5)
 
 
@@ -153,7 +153,7 @@ def challenge_start(browser, idx, practice=False):
     challenge_expand(browser, idx)
     body = browser.find_element("id", f"challenges-body-{idx}")
 
-    body.find_element("id", "challenge-priv" if practice else "challenge-start").click()
+    body.find_element(By.CSS_SELECTOR, ".challenge-priv" if practice else ".challenge-start").click()
     WebDriverWait(browser, 120).until(
         lambda driver: "challenge-hidden" not in (
             body.find_element(By.CSS_SELECTOR, ".challenge-workspace").get_attribute("class") or ""
@@ -164,7 +164,7 @@ def challenge_start(browser, idx, practice=False):
 
 def challenge_submit(browser, idx, flag):
     body = browser.find_element("id", f"challenges-body-{idx}")
-    body.find_element("id", "flag-input").send_keys(flag)
+    body.find_element(By.CSS_SELECTOR, ".challenge-answer").send_keys(flag)
 
     banner = WebDriverWait(browser, 20).until(
         lambda driver: next(
@@ -181,9 +181,10 @@ def challenge_submit(browser, idx, flag):
 
 # Gets the accordion entry index
 def challenge_idx(browser, name):
-    num_challenges = len(browser.find_elements("id", "challenge-start"))
-    idx = next(n for n in range(num_challenges) if browser.find_element("id", f"challenges-header-button-{n+1}").text.split("\n")[0] == name)
-    return idx+1
+    headers = browser.find_elements(By.CSS_SELECTOR, "[data-challenge-index][data-challenge-name]")
+    matches = [header for header in headers if header.get_attribute("data-challenge-name") == name]
+    assert len(matches) == 1, [(header.get_attribute("data-challenge-name")) for header in headers]
+    return int(matches[0].get_attribute("data-challenge-index"))
 
 
 def read_flag(user_id):
@@ -749,7 +750,7 @@ def test_welcome_graded_lecture(random_user_browser, random_user_name, example_d
     challenge_expand(random_user_browser, idx)
     body = random_user_browser.find_element("id", f"challenges-body-{idx}")
 
-    body.find_element("id", "challenge-start").click()
+    body.find_element(By.CSS_SELECTOR, ".challenge-start").click()
     WebDriverWait(random_user_browser, 120).until(
         lambda driver: "challenge-hidden" not in (
             body.find_element(By.CSS_SELECTOR, ".challenge-workspace").get_attribute("class") or ""

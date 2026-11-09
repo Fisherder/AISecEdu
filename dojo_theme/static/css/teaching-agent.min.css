@@ -4457,7 +4457,7 @@ button.activity-artifact {
   padding: 3px 9px;
   border: 1px solid var(--ui-border-soft);
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: max(0.75rem, 14px);
 }
 
 .teacher-agent-page .agent-run-empty {
@@ -4482,7 +4482,7 @@ button.activity-artifact {
 .teacher-agent-page .agent-run-attempt-label {
   margin: 0 0 12px 36px;
   color: var(--ui-text-muted);
-  font-size: 0.75rem;
+  font-size: max(0.75rem, 14px);
   font-weight: 700;
 }
 
@@ -4511,7 +4511,7 @@ button.activity-artifact {
   border-radius: 8px;
   background: color-mix(in srgb, var(--brand-green) 10%, var(--ui-field));
   color: var(--brand-green);
-  font-size: 0.76rem;
+  font-size: max(0.76rem, 14px);
 }
 
 .teacher-agent-page .agent-run-item.is-running .agent-run-item-icon {
@@ -4544,13 +4544,13 @@ button.activity-artifact {
 
 .teacher-agent-page .agent-run-item-heading > i {
   color: var(--brand-green);
-  font-size: 0.7rem;
+  font-size: max(0.7rem, 14px);
 }
 
 .teacher-agent-page .agent-run-item-heading time {
   margin-left: auto;
   color: var(--ui-text-muted);
-  font-size: 0.75rem;
+  font-size: max(0.75rem, 14px);
 }
 
 .teacher-agent-page .agent-run-item-heading code {
@@ -4558,12 +4558,12 @@ button.activity-artifact {
   border-radius: 4px;
   background: var(--ui-field);
   color: var(--ui-text-muted);
-  font: 0.72rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: max(0.72rem, 14px)/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .teacher-agent-page .agent-run-item-kind {
   color: var(--ui-text-muted);
-  font-size: 0.75rem;
+  font-size: max(0.75rem, 14px);
   font-weight: 700;
 }
 
@@ -4648,7 +4648,7 @@ button.activity-artifact {
 }
 .teacher-agent-page .teaching-question-pending span {
   color: var(--ui-text-muted);
-  font-size: 0.76rem;
+  font-size: max(0.76rem, 14px);
 }
 .teacher-agent-page .teaching-question-pending button {
   padding: 8px 11px;
@@ -4691,7 +4691,7 @@ button.activity-artifact {
   display: block;
   margin-bottom: 5px;
   color: var(--brand-blue);
-  font-size: 0.75rem;
+  font-size: max(0.75rem, 14px);
   font-weight: 750;
 }
 .teacher-agent-page .teaching-question-dialog h2 {
@@ -4754,14 +4754,14 @@ button.activity-artifact {
   border: 1px solid var(--ui-border);
   border-radius: 6px;
   color: var(--ui-text-muted);
-  font-size: 0.75rem;
+  font-size: max(0.75rem, 14px);
 }
 .teacher-agent-page .teaching-question-options button > i { margin-left: auto; color: var(--brand-blue); }
 .teacher-agent-page .teaching-question-step label {
   display: block;
   margin-bottom: 8px;
   color: var(--ui-text-muted);
-  font-size: 0.76rem;
+  font-size: max(0.76rem, 14px);
   font-weight: 650;
 }
 .teacher-agent-page .teaching-question-step textarea {
@@ -8585,7 +8585,7 @@ button.activity-artifact {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   overflow: hidden;
 }
 .teaching-pending-turn small {
@@ -8629,7 +8629,7 @@ button.activity-artifact {
 }
 .teacher-agent-page .teaching-live-draft-status {
   color: var(--ui-text-muted);
-  font-size: 0.76rem;
+  font-size: max(0.76rem, 14px);
 }
 .teacher-agent-page .teaching-live-draft .teaching-answer-content {
   margin: 6px 0 0;
@@ -8723,7 +8723,7 @@ button.activity-artifact {
 
 .teacher-agent-page .agent-run-item-kind {
   min-width: 26px;
-  font-size: 0.7rem;
+  font-size: max(0.7rem, 14px);
 }
 
 .teacher-agent-page .agent-run-item.is-running .agent-run-item-heading strong {
@@ -8761,7 +8761,7 @@ button.activity-artifact {
 
 .teacher-agent-page .agent-run-audit time {
   color: var(--ui-text-muted);
-  font: 0.74rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: max(0.74rem, 14px)/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .teacher-agent-page .agent-run-audit .is-repairing-content span,
@@ -8802,7 +8802,7 @@ button.activity-artifact {
 
 .teacher-agent-page .teaching-answer-trace-toggle small {
   color: var(--ui-text-muted);
-  font-size: 0.75rem;
+  font-size: max(0.75rem, 14px);
 }
 
 .teacher-agent-page .teaching-answer-trace-toggle > .job-disclosure-chevron {

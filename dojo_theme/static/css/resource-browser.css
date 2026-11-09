@@ -18,7 +18,7 @@
 .ui-resource-card { position: relative; display: flex; min-width: 0; border: 1px solid var(--product-border); border-radius: 10px; flex-direction: column; background: var(--product-surface); transition: border-color var(--ae-duration-fast), box-shadow var(--ae-duration-fast); }
 .ui-resource-card:hover { border-color: var(--product-border-strong); box-shadow: var(--ae-shadow-sm); }
 .ui-resource-card.is-selected { border-color: var(--product-accent); box-shadow: 0 0 0 1px var(--product-accent); }
-.ui-resource-cover { display: flex; min-height: 80px; padding: 18px 20px; border-bottom: 1px solid var(--product-border-soft); border-radius: 9px 9px 0 0; align-items: center; gap: 12px; color: var(--product-accent); background: var(--product-surface-raised); }
+.ui-resource-cover { display: flex; min-height: 80px; padding: 18px 20px; border-bottom: 1px solid var(--product-border); border-radius: 9px 9px 0 0; align-items: center; gap: 12px; color: var(--product-accent); background: var(--product-surface-raised); }
 .ui-resource-cover .ui-icon { width: 32px; height: 32px; }
 .ui-resource-cover strong { font-size: 14px; font-weight: 550; }
 .ui-resource-cover[data-type="practice"], .ui-resource-cover[data-type="challenge"] { color: var(--product-blue); }

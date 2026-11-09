@@ -183,7 +183,7 @@ def test_ssh_command_execution(random_user_name, random_user_session, temp_ssh_k
     
     commands = [
         ("whoami", "hacker"),
-        ("pwd", "/home/hacker"),
+        ("pwd", "/challenge"),
         ("id -un", "hacker"),
         ("ls /", "bin"),
     ]

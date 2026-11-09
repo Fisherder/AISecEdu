@@ -106,6 +106,7 @@ def test_teacher_history_provenance_uses_existing_scope_checked_option_lookup_wi
         if message_id == 21:
             raise ValueError("来源未通过用户/对话/成功任务校验")
         return {"sourceJob": SimpleNamespace(id="job-verified", payload={"prompt": "真实用户原始请求"}),
+                "sourcePayload": {"prompt": "真实用户原始请求"},
                 "bundle": {"options": [{"id": "option-1", "title": "正确来源", "rewrittenPrompt": "模型方案"}]},
                 "selection": None}
     namespace["_generation_option_context"] = lookup
@@ -182,7 +183,8 @@ def test_teacher_agent_uses_one_persistent_composer_approval_surface():
     assert "grid-template-columns: 34px minmax(0, 1fr) auto;" in styles
     assert "class TeachingToolProposalDecision(Resource):" in teaching
     assert 'metadata["toolProposalDecisions"] = decisions' in teaching
-    assert 'code="PROPOSAL_ALREADY_DECIDED"' in teaching
+    journal = (root / "dojo_plugin/agent_runtime/approval_journal.py").read_text()
+    assert "ALREADY_DECIDED" in journal
 
 
 def test_candidate_materialization_preserves_original_generation_contract():
@@ -457,7 +459,7 @@ def test_teacher_agent_uses_compact_expandable_task_surfaces():
     assert "expandedJobIds: new Set()" in script
     assert "bindJobDisclosureButtons(elements.messages, false)" in script
     assert "bindJobDisclosureButtons(elements.jobList, true)" in script
-    assert "jobTimelineMarkup(job, false)" in script
+    assert "agentRunMarkup(job)" in script
     assert "messageExecutionMarkup" not in script
     assert "taskGroupMarkup" in task_list.group("body")
     assert 'taskGroupMarkup("active", "进行中", active)' in task_list.group("body")
@@ -469,7 +471,7 @@ def test_teacher_agent_uses_compact_expandable_task_surfaces():
     assert "jumpToJobConversation" in script
     assert "jobEventListMarkup" not in script
     assert "loadJobActivity" not in script
-    assert "执行记录" not in script
+    assert 'class="job-detail-view"' not in script
     assert "teaching-answer-surface" in script
     assert "renderGenerationOptions" in script
     assert "selectGenerationOption" in script
@@ -489,15 +491,16 @@ def test_teacher_agent_uses_compact_expandable_task_surfaces():
     assert "is-stop" in script
     assert 'id="teaching-job-list"' in template
     assert 'id="teaching-current-run"' not in template
-    assert 'id="teaching-stop"' not in template
+    assert 'id="teaching-stop"' in template
+    assert 'aria-label="停止当前任务"' in template
     assert 'id="teaching-current-thread-actions"' not in template
     assert "currentThreadActions" not in script
     assert "执行记录" not in template
-    assert template.count('data-quick-action="') == 4
+    assert template.count('data-quick-action="') == 5
     assert 'id="teaching-quick-scope-dialog"' in template
     assert 'value="course"' in template
     assert 'value="module"' in template
-    assert "不限定课程（自由描述）" in script
+    assert "生成项目合集（无需课程）" in script
     assert 'prompt = "帮我"' in script
     assert "为整门课程“${dojo.name}”" in script
     assert "为课程“${dojo.name}”的章节“" in script
@@ -574,6 +577,7 @@ def test_teacher_agent_progress_is_compact_live_and_stable():
         re.S,
     )
 
+    progress = (root / "dojo_theme/static/js/dojo/core/teaching-job-progress.js").read_text()
     assert disclosure and task_item
 
     assert "function authoringStagePresentation(stage)" in script
@@ -587,22 +591,22 @@ def test_teacher_agent_progress_is_compact_live_and_stable():
         "保存可追溯草稿",
         "独立验证与复验",
     ):
-        assert stage_copy in script
-    assert "第 ${validation[1]} 轮独立验证" in script
-    assert "第 ${validationRepair[1]} 轮自主修复" in script
+        assert stage_copy in progress
+    assert "第 ${validation[1]} 轮独立验证" in progress
+    assert "第 ${validationRepair[1]} 轮自主修复" in progress
     assert 'aria-live="polite"' in script
-    assert "Array.isArray(job.events) ? job.events : []" in script
-    assert "latestStage !== stage" in script
+    assert "Array.isArray(job.events) ? job.events : []" in progress
+    assert "latestStage !== stage" in progress
     assert "jobProgressOverviewMarkup" not in script
     assert "jobRecentProgressMarkup" not in script
     assert "最新进展" not in script
-    assert "jobTimelineMarkup(job, false)" in disclosure.group("body")
+    assert "agentRunMarkup(job)" in disclosure.group("body")
     assert "jobProgressBarMarkup" not in disclosure.group("body")
     assert "function jobAttemptLabel(job)" in script
     assert "function jobDurationMarkup(job, compact)" in script
-    assert 'data-job-duration-prefix="${prefix}"' in script
+    assert 'data-job-duration-prefix="${prefix}"' in progress
     assert "window.setInterval" in script
-    assert "formatJobDuration" in script
+    assert "formatJobDuration" in progress
     assert "function jobProgressBarMarkup(job, className, key)" in script
     assert "data-job-progress-target" in script
     assert "animateJobProgressBars(elements.messages)" in script
@@ -615,7 +619,7 @@ def test_teacher_agent_progress_is_compact_live_and_stable():
     assert "state.lastTranscriptSignature === nextSignature" in script
     assert "state.lastJobListSignature === nextSignature" in script
     assert "job-event-details" not in script
-    assert "执行记录" not in script
+    assert 'class="job-detail-view"' not in script
 
     for selector in (
         ".teaching-task-progress",
@@ -686,7 +690,8 @@ def test_independent_question_batch_never_uses_first_job_as_batch_status():
     assert 'target.href || ""' in script
     assert 'cardResult.draftId || ""' in script
     assert 'cardTarget.href || ""' in script
-    assert 'else f"CTF 实践题 {batch_index}/{challenge_count}"' in teaching
+    practice = (root / "dojo_plugin/agent_runtime/tool_handlers_practice.py").read_text()
+    assert "CTF 实践题 {batch_index}/{challenge_count}" in practice
 
 
 def test_live_active_card_state_wins_over_stale_message_metadata():
@@ -709,10 +714,11 @@ def test_active_job_cannot_be_presented_as_completed_without_a_result():
     script = (root / "dojo_theme/static/js/dojo/teaching-agent.js").read_text()
     jobs = (root / "dojo_plugin/agent_runtime/jobs.py").read_text()
 
-    assert 'activeJobStatuses.has(status) ? 99 : 100' in script
-    assert 'label: "正在保存结果"' in script
+    progress = (root / "dojo_theme/static/js/dojo/core/teaching-job-progress.js").read_text()
+    assert 'activeJobStatuses.has(status) ? 99 : 100' in progress
+    assert 'label: "正在保存结果"' in progress
     assert "核心处理已结束，正在保存结果；入口生成后页面会自动刷新" in script
-    assert '/^(complete|completed|finalizing)$/.test(stage)' in script
+    assert '/^(complete|completed|finalizing)$/.test(stage)' in progress
     assert 'stage = "finalizing"' in jobs
     assert 'progress = min(99, max(0, int(progress or 0)))' in jobs
     assert "任务不会被标记为完成" in jobs
@@ -763,7 +769,7 @@ def test_terminal_tasks_can_be_removed_without_deleting_conversation_results():
     assert ".filter((job) => job.taskListHidden !== true)" in script
     assert "def dismiss_job_from_task_list(job, user_id):" in jobs
     assert '"taskListHidden": True' in jobs
-    assert '"taskListHidden": False' in jobs
+    assert 'payload.pop("taskListHidden", None)' in jobs
     assert '@teaching_namespace.route("/jobs/<string:job_id>/task-list")' in teaching
     assert "dismiss_job_from_task_list(job, user.id)" in teaching
 
@@ -1291,17 +1297,39 @@ def test_process_job_prioritizes_persisted_cancellation_over_runtime_error():
     assert '"retryable": retryable' in solution
 
 
-def test_agent_runtime_startup_outage_retries_without_consuming_job_attempts():
-    root = pathlib.Path(__file__).resolve().parents[1]
-    jobs = (root / "dojo_plugin/agent_runtime/jobs.py").read_text()
-    invoke = jobs.split("def _invoke_agent_runtime(job, route, payload=None):", 1)[1]
+def test_agent_runtime_startup_outage_retries_without_consuming_job_attempts(monkeypatch):
+    from CTFd.plugins.dojo_plugin.agent_runtime import jobs
 
-    assert "AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS = (1, 2, 4, 8)" in jobs
-    assert "def _agent_runtime_startup_connection_error(exc):" in jobs
-    assert "requests.exceptions.ConnectionError" in invoke
-    assert "_agent_runtime_startup_connection_error(exc)" in invoke
-    assert "AGENT_RUNTIME_RETRYABLE_STATUS_CODES" in invoke
-    assert invoke.count("time.sleep(retry_delay)") == 2
+    task = SimpleNamespace(id="connect-retry", kind="material.analyze", payload={}, trace_id="test",
+                           owner_id=1, dojo_id=None, module_index=None, thread_id=None, attempt_count=1)
+    delays, calls = [], []
+    response = requests.Response()
+    response.status_code = 503
+    response._content = b'{"failureCategory":"service","error":"Unavailable"}'
+    response._content_consumed = True
+
+    def post(*_args, **_kwargs):
+        calls.append(1)
+        if len(calls) <= len(jobs.AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS):
+            raise requests.exceptions.ConnectionError("Connection refused")
+        return response
+
+    monkeypatch.setattr(jobs.requests, "post", post)
+    monkeypatch.setattr(jobs.time, "sleep", delays.append)
+    with pytest.raises(jobs.RuntimeJobError) as error:
+        jobs._invoke_agent_runtime(task, {"provider": "test", "actual_model": "test"})
+    assert error.value.category == "service"
+    assert delays == [1, 2, 4, 8]
+    assert len(calls) == 5
+    assert task.attempt_count == 1
+
+    calls.clear()
+    delays.clear()
+    monkeypatch.setattr(jobs.requests, "post", lambda *_args, **_kwargs: calls.append(1) or response)
+    with pytest.raises(jobs.RuntimeJobError):
+        jobs._invoke_agent_runtime(task, {})
+    assert calls == [1]
+    assert delays == []
 
 
 def test_agent_runtime_stream_yields_real_events_and_preserves_failure_category(monkeypatch):
@@ -1447,34 +1475,21 @@ def test_agent_harness_records_only_the_tool_it_actually_executes(monkeypatch):
 def test_teacher_agent_upload_is_conversation_scoped_until_teacher_decides():
     root = pathlib.Path(__file__).resolve().parents[1]
     script = (root / "dojo_theme/static/js/dojo/teaching-agent.js").read_text()
-    styles = (root / "dojo_theme/static/css/teaching-agent.css").read_text()
     teaching = (root / "dojo_plugin/api/v1/teaching.py").read_text()
     jobs = (root / "dojo_plugin/agent_runtime/jobs.py").read_text()
-    runtime = (
-        root / "services/agent-runtime/lib/server/teacher-agent.ts"
-    ).read_text()
-
-    upload = re.search(
-        r"async function uploadMaterial\(file\) \{(?P<body>.*?)\n  \}\n\n  function resizeComposer",
-        script,
-        re.S,
-    )
+    runtime = (root / "services/agent-runtime/lib/server/agent-harness/teacher-prompts.ts").read_text()
+    upload = re.search(r"async function processUploadQueue\(\) \{(?P<body>.*?)\n  \}\n\n  function uploadMaterials", script, re.S)
     assert upload
-    upload_body = upload.group("body")
-    assert 'form.set("conversationUpload", "1")' in upload_body
-    assert 'form.set("askIntent", askIntent ? "1" : "0")' in upload_body
-    assert 'form.set("dojoId"' not in upload_body
-    assert "elements.status" not in upload_body
-    assert "syncAttachmentSources(state.thread)" in upload_body
-    assert "async function sendUploadedInstruction(flow)" in script
-    assert 'flow.phase === "send-error"' in script
-    assert "return sendUploadedInstruction(flow)" in script
+    body = upload.group("body")
+    for field, value in (("conversationUpload", "1"), ("stageOnly", "1"), ("askIntent", "0")):
+        assert f'form.set("{field}", "{value}")' in body
+    assert 'form.set("dojoId"' not in body
+    assert 'form.set("threadId", flow.threadId)' in body
+    assert 'flow.threadId' in body
+    assert 'item.controller' in body
     assert "function validateUploadFile(file)" in script
-    assert 'id="teaching-upload-status"' in (
-        root / "dojo_theme/templates/teacher_agent.html"
-    ).read_text()
+    assert 'id="teaching-upload-status"' in (root / "dojo_theme/templates/teacher_agent.html").read_text()
     assert "renderUploadedAttachments(message)" in script
-    assert ".teaching-uploaded-attachments" in styles
     assert "def _record_conversation_upload" in teaching
     assert 'status="AWAITING_INTENT" if ask_intent else "ACTIVE"' in teaching
     assert '"material.add_to_module": (' in jobs
@@ -1482,7 +1497,6 @@ def test_teacher_agent_upload_is_conversation_scoped_until_teacher_decides():
     assert "Dojos.from_id(reference_id).first()" in jobs
     assert "platformFacts.pendingAttachments" in runtime
     assert "不得自行把上传等同于课件生成" in runtime
-    assert "一次提出 material.add_to_module 完成落位和作用域切换" in runtime
 
 
 def test_global_agent_question_constraints_preserve_only_explicit_modes():

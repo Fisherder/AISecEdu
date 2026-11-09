@@ -108,7 +108,7 @@ def test_create_import_dojo(example_import_dojo, admin_session):
 
 def test_join_dojo(admin_session, guest_dojo_admin, example_dojo):
     random_user_name, random_session = guest_dojo_admin
-    response = random_session.get(f"{DOJO_URL}/dojo/{example_dojo}/join/")
+    response = random_session.post(f"{DOJO_URL}/dojo/{example_dojo}/join/")
     assert response.status_code == 200
     response = admin_session.get(f"{DOJO_URL}/dojo/{example_dojo}/admin/")
     assert response.status_code == 200
@@ -156,7 +156,7 @@ def test_dojo_completion_emoji(simple_award_dojo, codepoints_award_dojo, complet
 
 def test_no_practice(no_practice_challenge_dojo, no_practice_dojo, random_user_session):
     for dojo in [ no_practice_challenge_dojo, no_practice_dojo ]:
-        response = random_user_session.get(f"{DOJO_URL}/dojo/{dojo}/join/")
+        response = random_user_session.post(f"{DOJO_URL}/dojo/{dojo}/join/")
         assert response.status_code == 200
         response = random_user_session.post(f"{DOJO_URL}/pwncollege_api/v1/docker", json={
             "dojo": dojo,
@@ -166,7 +166,7 @@ def test_no_practice(no_practice_challenge_dojo, no_practice_dojo, random_user_s
         })
         assert response.status_code == 200
         assert not response.json()["success"]
-        assert "practice" in response.json()["error"]
+        assert "此题目不支持练习模式" in response.json()["error"]
 
 
 def test_no_import(no_import_challenge_dojo, admin_session):
@@ -215,7 +215,7 @@ def test_dojo_removes_emoji(simple_award_dojo, admin_session, completionist_user
 
 
 def test_lfs(lfs_dojo, random_user_name, random_user_session):
-    assert random_user_session.get(f"{DOJO_URL}/dojo/{lfs_dojo}/join/").status_code == 200
+    assert random_user_session.post(f"{DOJO_URL}/dojo/{lfs_dojo}/join/").status_code == 200
     start_challenge(lfs_dojo, "test", "test", session=random_user_session)
     try:
         workspace_run("[ -f '/challenge/dojo.txt' ]", user=random_user_name)
@@ -224,7 +224,7 @@ def test_lfs(lfs_dojo, random_user_name, random_user_session):
 
 
 def test_import_override(import_override_dojo, random_user_name, random_user_session):
-    assert random_user_session.get(f"{DOJO_URL}/dojo/{import_override_dojo}/join/").status_code == 200
+    assert random_user_session.post(f"{DOJO_URL}/dojo/{import_override_dojo}/join/").status_code == 200
     start_challenge(import_override_dojo, "test", "test", session=random_user_session)
     try:
         workspace_run("[ -f '/challenge/boom' ]", user=random_user_name)
@@ -234,8 +234,8 @@ def test_import_override(import_override_dojo, random_user_name, random_user_ses
 
 
 def test_challenge_transfer(transfer_src_dojo, transfer_dst_dojo, random_user_name, random_user_session):
-    assert random_user_session.get(f"{DOJO_URL}/dojo/{transfer_src_dojo}/join/").status_code == 200
-    assert random_user_session.get(f"{DOJO_URL}/dojo/{transfer_dst_dojo}/join/").status_code == 200
+    assert random_user_session.post(f"{DOJO_URL}/dojo/{transfer_src_dojo}/join/").status_code == 200
+    assert random_user_session.post(f"{DOJO_URL}/dojo/{transfer_dst_dojo}/join/").status_code == 200
     start_challenge(transfer_dst_dojo, "dst-module", "dst-challenge", session=random_user_session)
     solve_challenge(transfer_dst_dojo, "dst-module", "dst-challenge", session=random_user_session, user=random_user_name)
     wait_for_background_worker()
@@ -246,7 +246,7 @@ def test_challenge_transfer(transfer_src_dojo, transfer_dst_dojo, random_user_na
 
 def test_hidden_challenges(admin_session, random_user_session, hidden_challenges_dojo):
     assert "CHALLENGE" in admin_session.get(f"{DOJO_URL}/{hidden_challenges_dojo}/module/").text
-    assert random_user_session.get(f"{DOJO_URL}/dojo/{hidden_challenges_dojo}/join/").status_code == 200
+    assert random_user_session.post(f"{DOJO_URL}/dojo/{hidden_challenges_dojo}/join/").status_code == 200
     assert random_user_session.get(f"{DOJO_URL}/{hidden_challenges_dojo}/module/").status_code == 200
     assert "CHALLENGE" not in random_user_session.get(f"{DOJO_URL}/{hidden_challenges_dojo}/module/").text
 

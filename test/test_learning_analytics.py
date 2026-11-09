@@ -7,21 +7,13 @@ def test_teacher_learning_dashboard_exposes_deep_diagnostics_and_drilldown():
     script = (root / "dojo_theme/static/js/dojo/teacher-courses.js").read_text()
     analytics = (root / "dojo_plugin/learning/analytics.py").read_text()
 
-    for identifier in (
-        "cs-insight-coverage",
-        "cs-insight-mastery",
-        "cs-bottleneck-list",
-        "cs-intervention-list",
-        "cs-intervention-effect-summary",
-        "cs-student-insight-drawer",
-        "cs-data-quality",
-    ):
-        assert f'id="{identifier}"' in template
-    assert "function renderStudentDrawer(student)" in script
-    assert "function renderLearningTimeline()" in script
-    assert "function renderAbilityOverview()" in script
-    assert "function logStudentIntervention(studentId, trigger)" in script
-    assert "function reviewStudentIntervention(interventionId, studentId, trigger)" in script
+    insights = (root / "dojo_theme/static/js/dojo/learning-insights.js").read_text()
+    assert 'id="learning-insights"' in template
+    assert "js/dojo/learning-insights.js" in template
+    assert 'window.DojoAnalytics?.create(document.getElementById("learning-insights")' in script
+    for contract in ("async function openStudent", "function renderEvidence", "function followupForm",
+                     "function reviewForm", 'action === "export"', 'action === "more-evidence"'):
+        assert contract in insights
     assert "不能据此判断学生能力" in analytics
     assert "页面浏览" in analytics
     assert "不等同于干预造成了该变化" in analytics
@@ -37,20 +29,15 @@ def test_teacher_learning_dashboard_exposes_deep_diagnostics_and_drilldown():
         '"evidenceCount"',
     ):
         assert contract_key in analytics
-    assert 'ANALYTICS_DEFINITION_VERSION = "2026-08-27.v1"' in analytics
+    assert '"definitionVersion": ANALYTICS_DEFINITION_VERSION' in analytics
     assert '"minimumReliableClassSample": 3' in analytics
     assert '"minimumReliableQuestionSample": 3' in analytics
     assert '"riskModel"' in analytics
     assert '"automaticGradeImpact": False' in analytics
-    assert "至少 3 人后展示班级均值" in script
-    assert "至少 ${Number(item.minimumReliableSample || 3)} 人后展示成功率" in script
-    assert template.index("cs-learning-action-card") < template.index("cs-learning-kpis")
-    assert "new URLSearchParams({timeRange:" in script
-    assert 'params.set("studentId"' in script
-    assert 'params.set("moduleIndex"' in script
-    assert 'params.set("challengeId"' in script
-    assert "function learningScopeParams(values)" in script
-    assert 'id="cs-export-learning"' in template
+    assert 'data-ix="export"' in insights
+    assert 'taskKey' in insights and 'moduleIndex' in insights and 'studentId' in insights
+    assert '任务发生变化时，不把两个不同范围直接相减' in insights
+    assert '"/teaching/insights/' in insights or '`/teaching/insights/' in insights
 
 
 def test_teacher_learning_interventions_are_auditable_and_teacher_scoped():

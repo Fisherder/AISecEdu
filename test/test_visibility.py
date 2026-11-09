@@ -6,7 +6,7 @@ from utils import TEST_DOJOS_LOCATION, DOJO_URL, create_dojo_yml
 
 def test_module_and_challenge_visibility(visibility_test_dojo, random_user_session, admin_session):
     # Random user needs to join the dojo first
-    join_response = random_user_session.get(f"{DOJO_URL}/dojo/{visibility_test_dojo}/join/")
+    join_response = random_user_session.post(f"{DOJO_URL}/dojo/{visibility_test_dojo}/join/")
     assert join_response.status_code == 200
     
     random_response = random_user_session.get(f"{DOJO_URL}/pwncollege_api/v1/dojos/{visibility_test_dojo}/modules")
@@ -44,7 +44,7 @@ def test_module_and_challenge_visibility(visibility_test_dojo, random_user_sessi
 
 def test_module_and_challenge_visibility_rendered_page(visibility_test_dojo, random_user_session, admin_session):
     # Test the actual rendered module pages for visibility
-    join_response = random_user_session.get(f"{DOJO_URL}/dojo/{visibility_test_dojo}/join/")
+    join_response = random_user_session.post(f"{DOJO_URL}/dojo/{visibility_test_dojo}/join/")
     assert join_response.status_code == 200
     
     # Try to access module1 directly as random user - module has future visibility

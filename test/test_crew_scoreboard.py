@@ -10,6 +10,7 @@ from utils import DOJO_URL, dojo_run, login, create_dojo_yml, start_challenge, s
 
 CREW_DOJO_SPEC = """
 id: crew-dojo
+type: public
 name: Crew Dojo
 modules:
   - id: hello
@@ -45,7 +46,7 @@ def register_user(tag=None, name_prefix=None):
 
 
 def join_dojo(session, dojo):
-    response = session.get(f"{DOJO_URL}/dojo/{dojo}/join/")
+    response = session.post(f"{DOJO_URL}/dojo/{dojo}/join/")
     assert response.status_code == 200
 
 

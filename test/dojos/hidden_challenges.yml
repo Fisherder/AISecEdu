@@ -1,3 +1,4 @@
+type: public
 id: hide-challenges
 name: Dojo With Hidden Challenges
 description: This dojo hides its challenges.

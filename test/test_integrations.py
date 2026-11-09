@@ -137,7 +137,7 @@ def test_restart_no_practice(random_user, welcome_dojo):
         result = workspace_run("dojo restart -P", user=name)
         assert False, f"\"dojo restart\" should not have succeeded: {(result.stdout, result.stderr)}"
     except subprocess.CalledProcessError as error:
-        assert "does not support practice mode" in error.stderr, f"Should not be able to restart in privileged mode, got: {(error.stdout, error.stderr)}"
+        assert "此题目不支持练习模式" in error.stderr, f"Should not be able to restart in privileged mode, got: {(error.stdout, error.stderr)}"
 
 def format_path(name):
     container = inspect_container(name)
@@ -179,7 +179,7 @@ def test_start_no_privileged(random_user, welcome_dojo):
         result = workspace_run("dojo start challenge -P", user=name)
         assert False, f"\"dojo start\" should not have succeeded: {(result.stdout, result.stderr)}"
     except subprocess.CalledProcessError as error:
-        assert "does not support practice mode" in error.stderr, f"Should not be able to start in privileged mode, got: {(error.stdout, error.stderr)}"
+        assert "此题目不支持练习模式" in error.stderr, f"Should not be able to start in privileged mode, got: {(error.stdout, error.stderr)}"
 
 def test_list_dojos(random_user, welcome_dojo):
     name, session = random_user

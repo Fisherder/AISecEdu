@@ -1176,6 +1176,13 @@ def test_publish_gate_reuses_current_pass_without_calling_model(monkeypatch):
         "steps": [{"goal": "完成目标", "action": "执行允许的场景动作"}],
         "successIndicators": ["所有必需目标均已完成"],
     }
+    spec["workspaceLayout"] = {
+        "schemaVersion": 1, "course": "publish-regression", "assignment": "lab01-validation",
+        "studentRoot": "/home/hacker/courses/publish-regression/lab01-validation",
+        "editablePaths": ["work/answer.txt"], "materialPaths": [], "graderRoot": "/challenge",
+        "checkEntry": "check", "submitEntry": "platform-dynamic-flag", "testVersion": "fixture-v1",
+        "reportRequired": False,
+    }
     draft = SimpleNamespace(
         id="draft-fast-publish",
         brief=brief,
@@ -1217,7 +1224,7 @@ def test_publish_gate_reuses_current_pass_without_calling_model(monkeypatch):
         reuse_current_pass=True,
     )
 
-    assert report["status"] == "PASS"
+    assert report["status"] == "PASS", report
     assert report["agentReview"]["provider"] == "DETERMINISTIC"
     assert report["agentReview"]["reused"] is True
     assert report["agentReview"]["reusedProvider"] == "MODEL_FALLBACK"
@@ -3084,13 +3091,13 @@ def test_membership_is_authoritative_for_stale_active_attempt(
         session=student_session,
     )
     user_id = get_user_id(user_name)
-    dojo_name, dojo_suffix = simple_award_dojo.split("~", 1)
-    db_sql(
+    _, dojo_suffix = simple_award_dojo.split("~", 1)
+    dojo_id = int.from_bytes(bytes.fromhex(dojo_suffix), "big", signed=True)
+    removed = db_sql(
         "DELETE FROM dojo_users "
-        f"WHERE user_id = {user_id} AND dojo_id = "
-        f"(SELECT dojo_id FROM dojos WHERE id = '{dojo_name}' "
-        f"AND right(to_hex(dojo_id), 8) = '{dojo_suffix}');"
+        f"WHERE user_id = {user_id} AND dojo_id = {dojo_id} RETURNING user_id;"
     )
+    assert str(user_id) in removed.splitlines(), removed
     overview = student_session.get(f"{API}/overview")
     assert overview.status_code == 200, overview.text
     payload = overview.json()
@@ -3218,7 +3225,7 @@ def test_teacher_course_center_separates_questions_and_demos():
     assert 'data-create-kind="demo"' in template
     assert 'id: "simulation"' in script
     assert 'id: "attack-defense"' in script
-    assert 'new Set(["simulation", "attack-defense-scene", "classroom-scenario"])' in script
+    assert 'new Set(["simulation", "attack-defense-scene", "classroom-scenario", "debate"])' in script
     assert all("tab=labs" not in path.read_text() for path in navigation_sources)
     assert all("tab=questions" in path.read_text() for path in navigation_sources)
 
@@ -3567,7 +3574,7 @@ def test_legacy_learning_studio_is_migrated_to_the_course_shell():
     assert "页面状态已自动刷新" not in script
     assert "题目已删除（可重新发布）" not in script
     assert "已发布草稿会保留" not in script
-    assert "aisecedu-toast-v2" in base_template
+    assert "js/dojo/ui.js" in base_template
     assert "--semantic-success: var(--theme-success, #198754)" in custom_css
     assert ".aisecedu-toast.is-success" in custom_css
     assert "border-left-color: var(--semantic-success)" in custom_css
