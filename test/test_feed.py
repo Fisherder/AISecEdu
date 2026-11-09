@@ -90,7 +90,7 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
         assert container_events > 0, f"No container start events found for {random_user_name}"
         assert found_solve_event, f"Challenge solve event for {random_user_name} not found"
 
-        random_user_session.post(f"{DOJO_URL}/dojo/{simple_award_dojo}/join/")
+        random_user_session.post(f"{DOJO_URL}/dojo/{simple_award_dojo}/join/", json={})
         start_challenge(simple_award_dojo, "hello", "apple", session=random_user_session)
         solve_challenge(simple_award_dojo, "hello", "apple", session=random_user_session, user=random_user_name)
         start_challenge(simple_award_dojo, "hello", "banana", session=random_user_session)

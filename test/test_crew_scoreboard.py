@@ -47,7 +47,7 @@ def register_user(tag=None, name_prefix=None):
 
 
 def join_dojo(session, dojo):
-    response = session.post(f"{DOJO_URL}/dojo/{dojo}/join/")
+    response = session.post(f"{DOJO_URL}/dojo/{dojo}/join/", json={})
     assert response.status_code == 200
 
 
