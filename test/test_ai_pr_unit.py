@@ -45,7 +45,8 @@ def test_sensitive_and_large_changes_require_maintainer_review():
     for path in ('.github/workflows/check.yml', 'AGENTS.md', 'ops/team/ai_pr.py',
                  'dojo_plugin/api/v1/teaching.py', 'dojo_plugin/models/teaching.py',
                  'dojo_plugin/coursework.py', 'dojo_plugin/agent_runtime/tool_executor.py',
-                 'dojo_plugin/authoring_standards/global.md', 'docker-compose.yml'):
+                 'dojo_plugin/authoring_standards/global.md', 'docker-compose.yml',
+                 'test/Dockerfile', 'nginx/nginx.conf', 'Makefile', 'requirements-dev.txt', 'conftest.py'):
         assert ai.manual_reasons([path], 1, 0), path
     assert not ai.manual_reasons(['dojo_plugin/courseware_quiz.py', 'test/test_example_unit.py'], 100, 1)
     assert ai.manual_reasons(['dojo_theme/templates/example.html'], 1501, 0)
@@ -368,7 +369,7 @@ def test_timeout_without_an_artifact_closes_the_pending_check_as_failure():
 
 
 def test_review_format_recovery_only_removes_null_extras_without_changing_findings():
-    for kind in ('null-extra', 'substantive-extra', 'missing', 'wrong-type'):
+    for kind in ('null-extra', 'trigger', 'substantive-extra', 'missing', 'wrong-type'):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             value = report()
@@ -378,6 +379,8 @@ def test_review_format_recovery_only_removes_null_extras_without_changing_findin
             value['findings'] = [dict(finding)]
             if kind == 'null-extra':
                 value['findings'][0]['message_placeholder'] = None
+            elif kind == 'trigger':
+                value['findings'][0]['trigger'] = '保留原触发条件'
             elif kind == 'substantive-extra':
                 value['findings'][0]['unexpected_decision'] = 'different judgment'
             elif kind == 'missing':
@@ -387,13 +390,16 @@ def test_review_format_recovery_only_removes_null_extras_without_changing_findin
             path = folder / 'initial-review.json'
             original = json.dumps(value, ensure_ascii=False)
             path.write_text(original)
-            if kind != 'null-extra':
+            if kind not in ('null-extra', 'trigger'):
                 rejects(lambda: ai.check_report(folder))
                 assert path.read_text() == original
             else:
                 ai.check_report(folder)
                 recovered = ai.validate_report(json.loads(path.read_text()))
-                assert recovered['findings'] == [finding]
+                expected = dict(finding)
+                if kind == 'trigger':
+                    expected['message'] += '\n触发条件：保留原触发条件'
+                assert recovered['findings'] == [expected]
                 assert recovered['requires_human'] is True and recovered['human_reason'] == value['human_reason']
                 assert (folder / 'initial-review.raw.json').read_text() == original
 

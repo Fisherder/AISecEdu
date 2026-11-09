@@ -2,9 +2,6 @@ name: DeepSeek PR Autopilot
 on:
   push:
     branches: [develop]
-  pull_request_target:
-    branches: [develop]
-    types: [opened, synchronize, reopened, ready_for_review, edited]
   pull_request:
     branches: [develop]
     types: [opened, synchronize, reopened, ready_for_review, edited]
@@ -57,7 +54,7 @@ jobs:
       (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') &&
       (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') &&
       (github.event_name != 'pull_request_review' || github.event.review.user.type != 'Bot') &&
-      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure') &&
+      (github.event_name != 'workflow_run' || contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)) &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD &&
         github.event.pull_request.user.login == 'Fisherder'))
@@ -89,6 +86,9 @@ jobs:
     needs: gate
     if: needs.gate.outputs.mode != 'skip' && needs.gate.outputs.mode != ''
     runs-on: ubuntu-latest
+    environment:
+      name: aisecedu-ai-model
+      deployment: false
     timeout-minutes: 45
     permissions:
       contents: read
@@ -138,7 +138,7 @@ jobs:
           printf '[features]\nmulti_agent = false\n' > "$RUNNER_TEMP/ai-codex-final/config.toml"
           python3 policy/ops/team/ai_pr.py prompts --folder "$RUNNER_TEMP/ai-result"
       - name: Review the current PR
-        timeout-minutes: 12
+        timeout-minutes: ${{ github.event_name == 'pull_request' && 18 || 12 }}
         if: steps.prepare.outputs.mode == 'analyze'
         uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
         with:
@@ -218,6 +218,9 @@ jobs:
     needs: analyze
     if: needs.analyze.outputs.mode != 'skip' && needs.analyze.outputs.mode != ''
     runs-on: ubuntu-latest
+    environment:
+      name: aisecedu-ai-publish
+      deployment: false
     timeout-minutes: 5
     permissions:
       contents: write
