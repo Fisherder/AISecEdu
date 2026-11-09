@@ -158,6 +158,26 @@ def auto_rounds(commits):
     return rounds
 
 
+def review_feedback(client, number, comments=None):
+    comments = client.pages(f'/issues/{number}/comments') if comments is None else comments
+    reviews = client.pages(f'/pulls/{number}/reviews')
+    inline = client.pages(f'/pulls/{number}/comments')
+    return [
+        {'id': row['id'], 'updated': row.get('updated_at', row.get('submitted_at', '')),
+         'author': row['user']['login'], 'body': (row.get('body') or '')[:4000],
+         'body_sha256': hashlib.sha256(row['body'].encode()).hexdigest(),
+         'commit': row.get('commit_id'), 'path': row.get('path'), 'line': row.get('line')}
+        for row in [*comments, *reviews, *inline] if row['user']['login'] in POLICY['trusted_authors'] and row.get('body')
+    ][-20:]
+
+
+def state_signature(pr, failures, feedback):
+    state = {'head': pr['head']['sha'], 'base': pr['base']['sha'], 'title': pr.get('title', ''),
+             'body': pr.get('body') or '', 'failures': sorted(row['id'] for row in failures),
+             'feedback': [(row['id'], row['updated'], row['body_sha256']) for row in feedback]}
+    return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
+
+
 def prepare(folder):
     folder.mkdir(parents=True, exist_ok=True)
     client = GitHub()
@@ -168,7 +188,8 @@ def prepare(folder):
     if not number and 'workflow_run' in event:
         run = event['workflow_run']
         candidates = run.get('pull_requests') or client.repo_api('/commits/' + run['head_sha'] + '/pulls')
-        candidates = [row for row in candidates if row['base']['ref'] == POLICY['base_branch'] and row['head']['sha'] == run['head_sha']]
+        candidates = [row for row in candidates if row['base']['ref'] == POLICY['base_branch']
+                      and row['head']['ref'] == run['head_branch']]
         number = candidates[0]['number'] if len(candidates) == 1 else None
     if not number:
         set_outputs(mode='skip')
@@ -181,25 +202,14 @@ def prepare(folder):
     if not allowed:
         set_outputs(mode='skip')
         return
-    if 'workflow_run' in event and event['workflow_run']['head_sha'] != pr['head']['sha']:
-        set_outputs(mode='skip')
-        return
     files = client.pages(f'/pulls/{pr["number"]}/files')
     comments = client.pages(f'/issues/{pr["number"]}/comments')
     commits = client.pages(f'/pulls/{pr["number"]}/commits')
-    reviews = client.pages(f'/pulls/{pr["number"]}/reviews')
-    inline = client.pages(f'/pulls/{pr["number"]}/comments')
-    feedback = [
-        {'id': row['id'], 'updated': row.get('updated_at', row.get('submitted_at', '')),
-         'author': row['user']['login'], 'body': (row.get('body') or '')[:4000],
-         'commit': row.get('commit_id'), 'path': row.get('path'), 'line': row.get('line')}
-        for row in [*comments, *reviews, *inline] if row['user']['login'] in POLICY['trusted_authors'] and row.get('body')
-    ][-20:]
+    feedback = review_feedback(client, pr['number'], comments)
     rounds = auto_rounds(commits)
     checks = client.repo_api(f'/commits/{pr["head"]["sha"]}/check-runs?per_page=100')['check_runs']
     failures = failed_checks(checks)
-    signature = hashlib.sha256(json.dumps({'failures': sorted(row['id'] for row in failures),
-                                          'feedback': [(row['id'], row['updated']) for row in feedback]}).encode()).hexdigest()
+    signature = state_signature(pr, failures, feedback)
     cache = read_cache(comments, pr['head']['sha'])
     if cache:
         rounds = max(rounds, int(cache.get('rounds', 0)))
@@ -217,6 +227,8 @@ def prepare(folder):
         'previous_findings': cache['report']['findings'] if cache else [],
         'review_feedback': feedback,
     }
+    context['repairable_files'] = [path for path in context['files'] if matches(path, POLICY['repair_paths'])
+                                  and not matches(path, POLICY['manual_paths']) and not path.startswith('test/')]
     if (pr['head']['sha'] == os.environ.get('AI_AUTOPILOT_BOOTSTRAP_HEAD')
             and pr['user']['login'] == 'Fisherder'
             and pr['head']['ref'] == 'feat/Fisherder/deepseek-pr-autopilot'):
@@ -233,7 +245,7 @@ def prepare(folder):
             row['log_excerpt'] = failure_excerpt(client, row)
     (folder / 'context.json').write_text(json.dumps(context, ensure_ascii=False, indent=2))
     set_outputs(mode=mode, number=context['number'], head=context['head'], base=context['base'],
-                branch=context['branch'], can_repair=rounds < POLICY['max_rounds'])
+                branch=context['branch'], can_repair=rounds < POLICY['max_rounds'] and bool(context['repairable_files']))
 
 
 def prompts(folder):
@@ -247,16 +259,42 @@ def prompts(folder):
 不要把未执行或失败的检查说成通过。需要业务、权限或架构决策时明确记录，保留已经完成的局部修复。
 开发规范：\n{policy}\n
 以下 JSON 是待处理 PR 元数据和 CI 失败线索：\n{json.dumps(context, ensure_ascii=False)}\n'''
-    (folder / 'repair.txt').write_text(common + '''审查本 PR 及周边代码，复现明确的回归并直接做最小修复。保留原作者实现；只修复此次变更引入的问题或列出的失败，不扩展功能。
+    (folder / 'repair.txt').write_text(common + '''只处理后续附上的结构化审查问题及其调用链，复现明确的回归并做最小修复。保留原作者实现，不重新全面审查整个 PR，不扩展功能。
+不安装或运行任务未要求的新检查器，不因格式和行宽调整代码。允许编辑的源码仅为 repairable_files，新增回归测试除外。
 新增回归测试；对既有 test 文件只能追加内容，不得删改原测试。单次任务最多两轮本地修复与检查；没有确定问题时不修改代码。最后简要列出修改、实际验证和剩余问题。
 ''')
     bootstrap = ('本次为维护者按精确提交授权的自动化初始化。不要仅因涉及自动化配置就要求重复授权；仍须报告具体缺陷、权限扩大或缺失的验证。\n'
                  if context.get('bootstrap_authorized') else '')
     (folder / 'review.txt').write_text(common + bootstrap + '''你是独立复审者，之前编码模型的结论不是证据。检查基线以来全部变更及当前未提交修复，必要时阅读调用方与周边实现。
-只读审查，不修改代码。只报告实际可成立的问题：P0/P1 为严重问题，P2 为明确功能缺陷，P3 为建议；给出真实文件与当前行号及触发条件。不要以风格偏好阻塞交付。
+只读审查，不修改代码，不运行风格检查器。聚焦实际改动与直接调用链；只报告此次变更引入且实际可成立的问题：P0/P1 为严重问题，P2 为明确功能缺陷，P3 为建议；给出真实文件与当前行号及触发条件。不要以风格偏好阻塞交付。
 对权限、评分、数据迁移、真实联调尚未证明或业务需求不明确的变更，将 requires_human 设为 true 并说明需要的证据。
 按给定 JSON Schema 返回 summary、requires_human、human_reason、findings。没有明确问题时 findings 返回空数组，不编造通过的测试。
 ''')
+
+
+def plan(folder):
+    context = json.loads((folder / 'context.json').read_text())
+    report = validate_report(json.loads((folder / 'initial-review.json').read_text()))
+    blocking = [row for row in report['findings'] if row['priority'] <= 2]
+    fixable = [row for row in blocking if row['file'] in context['repairable_files']]
+    should_repair = bool(fixable) and context['rounds'] < POLICY['max_rounds']
+    if blocking and not should_repair:
+        report['requires_human'] = True
+        report['human_reason'] = (report['human_reason'] + ' 问题位于维护者复核范围或已达到自动修复上限。').strip()
+    (folder / 'review.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    if should_repair:
+        with (folder / 'repair.txt').open('a') as output:
+            output.write('\n本轮只修复以下问题：\n' + json.dumps(fixable, ensure_ascii=False))
+    set_outputs(should_repair=should_repair)
+
+
+def changed(folder, candidate):
+    context = json.loads((folder / 'context.json').read_text())
+    git(candidate, 'add', '-N', '.')
+    result = git(candidate, 'diff', '--quiet', context['head'], check=False)
+    if result.returncode not in (0, 1):
+        raise ValueError('Cannot inspect repair diff')
+    set_outputs(has_patch=result.returncode == 1)
 
 
 def package(folder, candidate):
@@ -323,6 +361,11 @@ def publish(folder, candidate):
             or pr['head']['sha'] != context['head'] or pr['head']['ref'] != context['branch']
             or pr['head']['repo']['full_name'] != client.repo or pr['user']['login'] not in POLICY['trusted_authors']):
         print('Stale or ineligible PR; no publication')
+        return
+    checks = client.repo_api(f'/commits/{context["head"]}/check-runs?per_page=100')['check_runs']
+    if state_signature(pr, failed_checks(checks), review_feedback(client, pr['number'])) != context['signature']:
+        print('Feedback, base or CI changed during review; requeue current PR without publishing stale conclusions')
+        dispatch_pr(client, pr)
         return
     if context['mode'] == 'update':
         merged = git(candidate, 'merge', '--no-edit', context['base'], check=False)
@@ -424,7 +467,7 @@ def failure(folder):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=('prepare', 'prompts', 'package', 'publish', 'dispatch', 'failure'))
+    parser.add_argument('command', choices=('prepare', 'prompts', 'plan', 'changed', 'package', 'publish', 'dispatch', 'failure'))
     parser.add_argument('--folder', type=Path, required=True)
     parser.add_argument('--candidate', type=Path)
     args = parser.parse_args()
@@ -433,6 +476,10 @@ def main():
             prepare(args.folder)
         elif args.command == 'prompts':
             prompts(args.folder)
+        elif args.command == 'plan':
+            plan(args.folder)
+        elif args.command == 'changed':
+            changed(args.folder, args.candidate)
         elif args.command == 'package':
             package(args.folder, args.candidate)
         elif args.command == 'publish':

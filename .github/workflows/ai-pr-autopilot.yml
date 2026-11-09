@@ -4,10 +4,10 @@ on:
     branches: [develop]
   pull_request_target:
     branches: [develop]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   pull_request:
     branches: [develop]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
     inputs:
       pr:
@@ -31,7 +31,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: deepseek-pr-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch || inputs.head_branch }}
+  group: deepseek-pr-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: false
 jobs:
   dispatch-updates:
@@ -105,12 +105,35 @@ jobs:
         run: |
           sudo mkdir -p /opt/aisecedu-toolchains/node22/bin
           sudo ln -s "$(command -v node)" /opt/aisecedu-toolchains/node22/bin/node
-          mkdir -p "$RUNNER_TEMP/ai-codex-repair" "$RUNNER_TEMP/ai-codex-review"
+          mkdir -p "$RUNNER_TEMP/ai-codex-repair" "$RUNNER_TEMP/ai-codex-review" "$RUNNER_TEMP/ai-codex-final"
           printf '[features]\nmulti_agent = false\n' > "$RUNNER_TEMP/ai-codex-repair/config.toml"
           printf '[features]\nmulti_agent = false\n' > "$RUNNER_TEMP/ai-codex-review/config.toml"
+          printf '[features]\nmulti_agent = false\n' > "$RUNNER_TEMP/ai-codex-final/config.toml"
           python3 policy/ops/team/ai_pr.py prompts --folder "$RUNNER_TEMP/ai-result"
+      - name: Review the current PR
+        if: steps.prepare.outputs.mode == 'analyze'
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
+        with:
+          openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          responses-api-endpoint: ${{ vars.DEEPSEEK_BASE_URL }}/responses
+          codex-version: '0.144.1'
+          model: ${{ vars.DEEPSEEK_MODEL }}
+          effort: low
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          codex-home: ${{ runner.temp }}/ai-codex-review
+          working-directory: ${{ github.workspace }}/candidate
+          prompt-file: ${{ runner.temp }}/ai-result/review.txt
+          output-file: ${{ runner.temp }}/ai-result/initial-review.json
+          output-schema-file: ${{ github.workspace }}/policy/ops/team/ai_review.schema.json
+          codex-args: '["--ephemeral", "-c", "web_search=\"disabled\"", "-c", "model_catalog_json=\"${{ github.workspace }}/policy/ops/team/deepseek-models.json\""]'
+          allow-bot-users: github-actions[bot]
+      - name: Select actionable repairs
+        id: plan
+        if: steps.prepare.outputs.mode == 'analyze'
+        run: python3 policy/ops/team/ai_pr.py plan --folder "$RUNNER_TEMP/ai-result"
       - name: Review and repair bounded regressions
-        if: steps.prepare.outputs.mode == 'analyze' && steps.prepare.outputs.can_repair == 'true'
+        if: steps.plan.outputs.should_repair == 'true'
         uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
         with:
           openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -126,8 +149,12 @@ jobs:
           output-file: ${{ runner.temp }}/ai-result/repair-summary.txt
           codex-args: '["--ephemeral", "-c", "web_search=\"disabled\"", "-c", "model_catalog_json=\"${{ github.workspace }}/policy/ops/team/deepseek-models.json\""]'
           allow-bot-users: github-actions[bot]
+      - name: Inspect actual repair changes
+        id: changed
+        if: steps.plan.outputs.should_repair == 'true'
+        run: python3 policy/ops/team/ai_pr.py changed --folder "$RUNNER_TEMP/ai-result" --candidate "$GITHUB_WORKSPACE/candidate"
       - name: Independently review the resulting changes
-        if: steps.prepare.outputs.mode == 'analyze'
+        if: steps.changed.outputs.has_patch == 'true'
         uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
         with:
           openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -137,7 +164,7 @@ jobs:
           effort: high
           sandbox: read-only
           safety-strategy: drop-sudo
-          codex-home: ${{ runner.temp }}/ai-codex-review
+          codex-home: ${{ runner.temp }}/ai-codex-final
           working-directory: ${{ github.workspace }}/candidate
           prompt-file: ${{ runner.temp }}/ai-result/review.txt
           output-file: ${{ runner.temp }}/ai-result/review.json

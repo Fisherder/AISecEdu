@@ -142,11 +142,16 @@ def test_stale_head_prevents_all_publication():
             ai.publish(result, result / 'candidate')
 
 
-def publish_fixture(folder, *, requires_human=False, manual=False, failures=False, moving=False):
+def publish_fixture(folder, *, requires_human=False, manual=False, failures=False, moving=False,
+                    feedback_changed=False, ci_changed=False):
     context = {'number': 1, 'node_id': 'synthetic-node', 'mode': 'analyze', 'head': 'a' * 40,
                'branch': 'feat/member/test', 'model': 'synthetic', 'rounds': 0, 'signature': 'sig',
                'manual_reasons': ['protected path'] if manual else [],
-               'failures': [{'name': 'audit'}] if failures else []}
+               'failures': [{'name': 'audit', 'id': 3}] if failures else []}
+    pr = {'number': 1, 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
+          'auto_merge': None, 'user': {'login': 'hunry-1-code'},
+          'head': {'sha': context['head'], 'ref': context['branch'], 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
+    context['signature'] = ai.state_signature(pr, context['failures'], [])
     value = report()
     value['requires_human'] = requires_human
     value['human_reason'] = '业务判断' if requires_human else ''
@@ -160,15 +165,16 @@ def publish_fixture(folder, *, requires_human=False, manual=False, failures=Fals
             calls.append((path, data, method))
             if path == '/pulls/1' and data is None:
                 self.reads += 1
-                return {'state': 'open', 'draft': False, 'base': {'ref': 'develop'}, 'auto_merge': None,
-                        'user': {'login': 'hunry-1-code'},
-                        'head': {'sha': 'b' * 40 if moving and self.reads > 1 else context['head'],
-                                 'ref': context['branch'], 'repo': {'full_name': self.repo}}}
+                return {**pr, 'head': {**pr['head'], 'sha': 'b' * 40 if moving and self.reads > 1 else context['head']}}
+            if '/check-runs' in path:
+                return {'check_runs': [{'name': 'audit', 'id': 3, 'conclusion': 'failure'}] if failures or ci_changed else []}
             return {}
         def api(self, path, data=None, method=None):
             calls.append((path, data, method))
             return {}
         def pages(self, path):
+            if path == '/issues/1/comments' and feedback_changed:
+                return [{'id': 7, 'user': {'login': 'Fisherder'}, 'body': '新的复核意见', 'updated_at': 'synthetic'}]
             return []
     with patch.object(ai, 'GitHub', Client):
         ai.publish(folder, folder / 'candidate')
@@ -193,9 +199,27 @@ def test_manual_decisions_and_failed_ci_never_receive_bot_approval():
         assert not any(path == '/graphql' for path, _, _ in calls), options
 
 
+def test_new_feedback_or_ci_failure_requeues_without_publishing_old_approval():
+    for options in ({'feedback_changed': True}, {'ci_changed': True}):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = publish_fixture(Path(directory), **options)
+        assert not any(path == '/pulls/1/reviews' for path, _, _ in calls)
+        assert not any(path == '/graphql' for path, _, _ in calls)
+        assert not any(path == '/check-runs' and method == 'POST' for path, _, method in calls)
+        requests = [data for path, data, method in calls if path.endswith('/dispatches')]
+        assert len(requests) == 1 and requests[0]['ref'] == 'develop'
+
+
+def test_signature_detects_comment_edits_within_the_same_timestamp():
+    pr = {'head': {'sha': 'a' * 40}, 'base': {'sha': 'b' * 40}}
+    first = [{'id': 1, 'updated': 'same-second', 'body_sha256': 'first'}]
+    second = [{'id': 1, 'updated': 'same-second', 'body_sha256': 'second'}]
+    assert ai.state_signature(pr, [], first) != ai.state_signature(pr, [], second)
+
+
 def prepare_fixture(folder, *, behind=0, fork=False, feedback=False, renamed=False):
     head = 'a' * 40
-    signature = ai.hashlib.sha256(json.dumps({'failures': [], 'feedback': []}).encode()).hexdigest()
+    signature = ai.state_signature({'head': {'sha': head}, 'base': {'sha': 'b' * 40}, 'title': 'synthetic', 'body': ''}, [], [])
     cached_context = {'head': head, 'model': 'synthetic', 'manual_reasons': [], 'failures': [], 'signature': signature, 'rounds': 0}
     body = ai.comment_body(cached_context, report(), '合成缓存')
     class Client:
@@ -257,6 +281,40 @@ def test_forks_are_skipped_and_renaming_cannot_hide_protected_paths():
     with tempfile.TemporaryDirectory() as directory:
         outputs, context = prepare_fixture(Path(directory), renamed=True)
         assert any('models/teaching.py' in row for row in context['manual_reasons'])
+
+
+def test_repair_plan_only_invokes_coder_for_actionable_allowed_findings():
+    for kind in ('clean', 'allowed', 'protected', 'exhausted'):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            context = {'repairable_files': ['dojo_plugin/example.py'], 'rounds': 2 if kind == 'exhausted' else 0}
+            value = report()
+            if kind != 'clean':
+                value['findings'] = [{'priority': 2, 'file': 'ops/team/ai_pr.py' if kind == 'protected' else 'dojo_plugin/example.py',
+                                      'line': 1, 'message': '合成缺陷'}]
+            (folder / 'context.json').write_text(json.dumps(context))
+            (folder / 'initial-review.json').write_text(json.dumps(value))
+            (folder / 'repair.txt').write_text('trusted repair instructions')
+            outputs = {}
+            with patch.object(ai, 'set_outputs', side_effect=lambda **rows: outputs.update(rows)):
+                ai.plan(folder)
+            assert outputs['should_repair'] is (kind == 'allowed')
+            final = json.loads((folder / 'review.json').read_text())
+            assert final['requires_human'] is (kind in ('protected', 'exhausted'))
+            if kind == 'allowed':
+                assert '合成缺陷' in (folder / 'repair.txt').read_text()
+
+
+def test_changed_detects_untracked_regression_tests_before_final_review():
+    with tempfile.TemporaryDirectory() as directory:
+        candidate, result, _ = fixture(Path(directory))
+        outputs = {}
+        with patch.object(ai, 'set_outputs', side_effect=lambda **rows: outputs.update(rows)):
+            ai.changed(result, candidate)
+            assert outputs['has_patch'] is False
+            (candidate / 'test/test_added_unit.py').write_text('assert True\n')
+            ai.changed(result, candidate)
+            assert outputs['has_patch'] is True
 
 
 if __name__ == '__main__':
