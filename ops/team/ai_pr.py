@@ -289,6 +289,7 @@ def prompts(folder):
 不得修改 GitHub 工作流、ops、配置、依赖、权限、评分、迁移和出题标准。不得删除、跳过或放宽既有测试。不要提交、推送、合并代码或写 GitHub 评论，这些由可信发布步骤负责。
 只运行不连接平台的相关检查。make dev-check 是快速检查；若存在 test/test_courseware_quiz_unit.py 可直接运行；浏览器组件测试用合成数据，不等于真实联调。
 可写修复任务已将可信检查依赖预装至 .venv，使用 .venv/bin/python 执行相关 Python 单测或运行 make dev-check，不重新安装平台依赖。
+独立复审仍有 P0–P2 问题的补丁不得提交或推送。无阻断缺陷的范围内修复可先追加为待审阅提交；整份 PR 的 requires_human 仍原样输出并保留，追加候选修复不代表审批或合并。
 不要把未执行或失败的检查说成通过。需要业务、权限或架构决策时明确记录，保留已经完成的局部修复。
 开发规范：\n{policy}\n
 以下 JSON 是待处理 PR 元数据和 CI 失败线索：\n{json.dumps(context, ensure_ascii=False)}\n'''
@@ -471,6 +472,8 @@ def publish(folder, candidate):
         post_comment(client, context, report, '等待维护者处理分支冲突。')
         return
     report = validate_report(json.loads((folder / 'review.json').read_text()))
+    blocking = [row for row in report['findings'] if row['priority'] <= 2]
+    summary = report['summary'] + ('\n' + report['human_reason'] if report['requires_human'] else '')
     patch = folder / 'repair.patch'
     if patch.exists() and patch.stat().st_size:
         cache = read_cache(client.pages(f'/issues/{pr["number"]}/comments'), context['head'])
@@ -478,6 +481,14 @@ def publish(folder, candidate):
                                 int(cache.get('rounds', 0)) if cache else 0)
         if context['rounds'] >= POLICY['max_rounds']:
             raise ValueError('Automatic repair limit exceeded')
+        if blocking:
+            context['rounds'] += 1
+            suspend_approval(client, context, pr)
+            record_check(client, context, 'completed', '修复未通过独立复审', summary, 'failure')
+            post_comment(client, context, report, '独立复审仍有 P0–P2 问题，补丁未提交或推送，原分支保持不变。')
+            if not report['requires_human'] and context['rounds'] < POLICY['max_rounds']:
+                dispatch_pr(client, pr, retry=True)
+            return
         if patch.stat().st_size > POLICY['max_patch_bytes']:
             raise ValueError('Repair patch exceeds size limit')
         git(candidate, 'apply', '--check', str(patch.resolve()))
@@ -489,11 +500,9 @@ def publish(folder, candidate):
             print('Branch moved; patch was not pushed')
             return
         git(candidate, 'push', 'origin', 'HEAD:refs/heads/' + context['branch'])
-        post_comment(client, context, report, '已追加自动修复提交；等待新提交的 CI 和独立复审，不代表验收通过。')
+        post_comment(client, context, report, '已追加自动修复提交；等待新提交的 CI 和独立复审，既有人工复核要求继续保留，不代表验收通过。')
         return
-    blocking = [row for row in report['findings'] if row['priority'] <= 2]
     passed = not blocking
-    summary = report['summary'] + ('\n' + report['human_reason'] if report['requires_human'] else '')
     record_check(client, context, 'completed', 'AI 审查通过' if passed else 'AI 发现待处理问题',
                  summary, 'success' if passed else 'failure')
     automatic = passed and not report['requires_human'] and not context['manual_reasons'] and not context['failures']

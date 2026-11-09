@@ -572,6 +572,89 @@ def test_base_merge_conflict_finishes_the_check_and_preserves_the_task_branch():
     assert not any(path == '/pulls/1/reviews' or path == '/graphql' for path, _, _ in calls)
 
 
+def prepared_repair_publication(folder, value, rounds=0):
+    candidate, result, context = fixture(folder)
+    remote = folder / 'remote.git'
+    remote.mkdir()
+    ai.git(remote, 'init', '--bare', '-q')
+    ai.git(candidate, 'remote', 'add', 'origin', str(remote))
+    context.update(number=1, node_id='node', branch='feat/member/task', rounds=rounds,
+                   model='synthetic', manual_reasons=[], failures=[])
+    ai.git(candidate, 'push', 'origin', 'HEAD:refs/heads/' + context['branch'])
+    (candidate / 'dojo_plugin/example.py').write_text('value = 2\n')
+    (result / 'repair.patch').write_text(ai.repair_patch(context, candidate))
+    ai.git(candidate, 'reset', '--hard', context['head'])
+    pr = {'number': 1, 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
+          'user': {'login': 'hunry-1-code'},
+          'head': {'sha': context['head'], 'ref': context['branch'], 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
+    context['signature'] = ai.state_signature(pr, [], [])
+    (result / 'context.json').write_text(json.dumps(context))
+    (result / 'review.json').write_text(json.dumps(value))
+
+    class Client:
+        repo = 'Fisherder/AISecEdu'
+
+        def repo_api(self, path, data=None, method=None):
+            assert data is None
+            return pr if path == '/pulls/1' else {'check_runs': []}
+
+        def pages(self, path):
+            if path.endswith('/files'):
+                return [{'filename': 'dojo_plugin/example.py'}]
+            if path.endswith('/commits'):
+                return [{'commit': {'message': ai.AUTO_COMMIT + f'round {index + 1}'}}
+                        for index in range(rounds)]
+            return []
+
+    return candidate, result, context, remote, Client
+
+
+def test_independent_blocking_review_prevents_patch_application_commit_and_push():
+    for priority in (0, 1, 2):
+        for human in (False, True):
+            for rounds in (0, 1):
+                with tempfile.TemporaryDirectory() as directory:
+                    value = report()
+                    value.update(requires_human=human, human_reason='保留人工判断' if human else '')
+                    value['findings'] = [{'priority': priority, 'file': 'dojo_plugin/example.py',
+                                          'line': 1, 'message': '独立复审发现修复仍有明确缺陷'}]
+                    candidate, result, context, remote, client = prepared_repair_publication(Path(directory), value, rounds)
+                    with patch.object(ai, 'GitHub', client), patch.object(ai, 'record_check') as check, \
+                            patch.object(ai, 'post_comment') as comment, patch.object(ai, 'dispatch_pr') as retry, \
+                            patch.object(ai, 'git', wraps=ai.git) as commands:
+                        ai.publish(result, candidate)
+                        commands.assert_not_called()
+                    assert ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip() == context['head']
+                    assert ai.git(candidate, 'status', '--porcelain').stdout == ''
+                    assert (candidate / 'dojo_plugin/example.py').read_text() == 'value = 1\n'
+                    assert check.call_args.args[-1] == 'failure'
+                    assert comment.call_args.args[2] == value
+                    assert comment.call_args.args[1]['rounds'] == rounds + 1
+                    assert '补丁未提交或推送' in comment.call_args.args[3]
+                    assert retry.called is (not human and rounds == 0)
+                    if retry.called:
+                        assert retry.call_args.kwargs == {'retry': True}
+
+
+def test_clear_repair_preserves_whole_pr_human_review_without_approving_or_merging():
+    with tempfile.TemporaryDirectory() as directory:
+        value = report()
+        value.update(requires_human=True, human_reason='整份 PR 的业务决策仍须维护者复核')
+        value['findings'] = [{'priority': 3, 'file': 'dojo_plugin/example.py', 'line': 1, 'message': '非阻断建议'}]
+        candidate, result, context, remote, client = prepared_repair_publication(Path(directory), value)
+        with patch.object(ai, 'GitHub', client), patch.object(ai, 'post_comment') as comment, \
+                patch.object(ai, 'record_check') as check, patch.object(ai, 'dispatch_pr') as retry:
+            ai.publish(result, candidate)
+        tip = ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip()
+        assert tip != context['head']
+        assert ai.git(remote, 'rev-parse', tip + '^').stdout.strip() == context['head']
+        assert ai.git(remote, 'show', tip + ':dojo_plugin/example.py').stdout == 'value = 2\n'
+        assert comment.call_args.args[2] == value
+        assert '人工复核要求继续保留' in comment.call_args.args[3]
+        check.assert_not_called()
+        retry.assert_not_called()
+
+
 if __name__ == '__main__':
     suite = unittest.TestSuite(unittest.FunctionTestCase(value) for name, value in list(globals().items())
                                if name.startswith('test_') and callable(value))
