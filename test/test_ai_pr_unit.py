@@ -159,7 +159,7 @@ def test_stale_head_prevents_all_publication():
 
 
 def publish_fixture(folder, *, requires_human=False, manual=False, failures=False, moving=False,
-                    feedback_changed=False, ci_changed=False, update=False, cached=False, paused=False):
+                    feedback_changed=False, ci_changed=False, update=False, cached=False, paused=False, hidden_manual=False):
     context = {'number': 1, 'node_id': 'synthetic-node', 'mode': 'update' if update else 'cached' if cached else 'analyze', 'head': 'a' * 40,
                'base': 'b' * 40,
                'branch': 'feat/member/test', 'model': 'synthetic', 'rounds': 0, 'signature': 'sig',
@@ -190,6 +190,8 @@ def publish_fixture(folder, *, requires_human=False, manual=False, failures=Fals
             calls.append((path, data, method))
             return {}
         def pages(self, path):
+            if path.endswith('/files') and hidden_manual:
+                return [{'filename': 'dojo_plugin/models/teaching.py'}]
             if path == '/issues/1/comments' and feedback_changed:
                 return [{'id': 7, 'user': {'login': 'Fisherder'}, 'body': '新的复核意见', 'updated_at': 'synthetic'}]
             return []
@@ -222,8 +224,80 @@ def test_pause_label_blocks_repairs_and_approval_even_for_a_clean_report():
     assert any(path == '/check-runs' and data.get('conclusion') == 'failure' for path, data, _ in calls)
 
 
+def test_publisher_independently_rejects_tampered_patch_artifacts_before_commit():
+    for kind in ('protected', 'unrelated', 'existing-test', 'exhausted-rounds'):
+        with tempfile.TemporaryDirectory() as directory:
+            candidate, result, context = fixture(Path(directory))
+            if kind == 'protected':
+                (candidate / 'AGENTS.md').write_text('untrusted policy change\n')
+            elif kind == 'unrelated':
+                (candidate / 'dojo_plugin/unrelated.py').write_text('value = 2\n')
+            elif kind == 'existing-test':
+                (candidate / 'test/test_example_unit.py').write_text('assert False\n')
+            else:
+                (candidate / 'dojo_plugin/example.py').write_text('value = 2\n')
+            ai.git(candidate, 'add', '-N', '.')
+            malicious = ai.git(candidate, 'diff', '--no-ext-diff', '--binary', context['head']).stdout
+            ai.git(candidate, 'reset', '--hard', context['head'])
+            context.update(number=1, node_id='node', branch='feat/member/task', rounds=-99, manual_reasons=[], failures=[])
+            pr = {'number': 1, 'node_id': 'node', 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
+                  'user': {'login': 'hunry-1-code'},
+                  'head': {'sha': context['head'], 'ref': context['branch'], 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
+            context['signature'] = ai.state_signature(pr, [], [])
+            (result / 'context.json').write_text(json.dumps(context))
+            (result / 'repair.patch').write_text(malicious)
+            class Client:
+                repo = 'Fisherder/AISecEdu'
+                def repo_api(self, path, data=None, method=None):
+                    assert data is None
+                    return pr if path == '/pulls/1' else {'check_runs': []}
+                def pages(self, path):
+                    if path.endswith('/commits') and kind == 'exhausted-rounds':
+                        return [{'commit': {'message': ai.AUTO_COMMIT + 'round 1'}},
+                                {'commit': {'message': ai.AUTO_COMMIT + 'round 2'}}]
+                    return [{'filename': 'dojo_plugin/example.py'}] if path.endswith('/files') else []
+            with patch.object(ai, 'GitHub', Client), patch.object(ai, 'git', wraps=ai.git) as commands:
+                rejects(lambda: ai.publish(result, candidate))
+                assert not any(call.args[1] in ('commit', 'push') for call in commands.call_args_list), kind
+
+
+def test_validated_repair_is_an_append_only_commit_on_the_original_remote_branch():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        candidate, result, context = fixture(folder)
+        remote = folder / 'remote.git'
+        remote.mkdir()
+        ai.git(remote, 'init', '--bare', '-q')
+        ai.git(candidate, 'remote', 'add', 'origin', str(remote))
+        context.update(number=1, node_id='node', branch='feat/member/task', rounds=0, manual_reasons=[], failures=[])
+        ai.git(candidate, 'push', 'origin', 'HEAD:refs/heads/' + context['branch'])
+        (candidate / 'dojo_plugin/example.py').write_text('value = 2\n')
+        (result / 'repair.patch').write_text(ai.repair_patch(context, candidate))
+        ai.git(candidate, 'reset', '--hard', context['head'])
+        pr = {'number': 1, 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
+              'user': {'login': 'hunry-1-code'},
+              'head': {'sha': context['head'], 'ref': context['branch'], 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
+        context['signature'] = ai.state_signature(pr, [], [])
+        (result / 'context.json').write_text(json.dumps(context))
+        class Client:
+            repo = 'Fisherder/AISecEdu'
+            def repo_api(self, path, data=None, method=None):
+                assert data is None
+                return pr if path == '/pulls/1' else {'check_runs': []}
+            def pages(self, path):
+                return [{'filename': 'dojo_plugin/example.py'}] if path.endswith('/files') else []
+        with patch.object(ai, 'GitHub', Client), patch.object(ai, 'post_comment') as comment:
+            ai.publish(result, candidate)
+        tip = ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip()
+        assert tip != context['head']
+        assert ai.git(remote, 'rev-parse', tip + '^').stdout.strip() == context['head']
+        assert ai.git(remote, 'show', tip + ':dojo_plugin/example.py').stdout == 'value = 2\n'
+        assert ai.git(remote, 'log', '-1', '--format=%s', tip).stdout.startswith(ai.AUTO_COMMIT)
+        assert '等待新提交的 CI' in comment.call_args.args[3]
+
+
 def test_manual_decisions_and_failed_ci_never_receive_bot_approval():
-    for options in ({'requires_human': True}, {'manual': True}, {'failures': True}, {'moving': True}):
+    for options in ({'requires_human': True}, {'manual': True}, {'hidden_manual': True}, {'failures': True}, {'moving': True}):
         with tempfile.TemporaryDirectory() as directory:
             calls = publish_fixture(Path(directory), **options)
         assert not any(path == '/pulls/1/reviews' for path, _, _ in calls), options

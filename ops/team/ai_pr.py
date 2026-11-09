@@ -368,6 +368,12 @@ def package(folder, candidate):
         return
     check_report(folder, 'review.json')
     report = validate_report(json.loads((folder / 'review.json').read_text()))
+    patch = repair_patch(context, candidate)
+    (folder / 'repair.patch').write_text(patch)
+    (folder / 'review.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
+
+
+def repair_patch(context, candidate):
     git(candidate, 'add', '-N', '.')
     patch = git(candidate, 'diff', '--no-ext-diff', '--binary', context['head']).stdout
     if len(patch.encode()) > POLICY['max_patch_bytes']:
@@ -387,8 +393,7 @@ def package(folder, candidate):
         changed_lines += int(additions) + int(deletions)
     if changed_lines > POLICY['max_changed_lines']:
         raise ValueError('Repair exceeds changed-line limit')
-    (folder / 'repair.patch').write_text(patch)
-    (folder / 'review.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    return patch
 
 
 def comment_body(context, report, outcome):
@@ -448,6 +453,10 @@ def publish(folder, candidate):
         suspend_approval(client, context, pr)
         record_check(client, context, 'completed', '自动流程已暂停', PAUSE_LABEL + ' 标签仍在，等待维护者恢复。', 'failure')
         return
+    files = client.pages(f'/pulls/{pr["number"]}/files')
+    live_files = sorted({path for row in files for path in (row['filename'], row.get('previous_filename')) if path})
+    context['manual_reasons'] = sorted(set(context['manual_reasons'] + manual_reasons(
+        live_files, pr.get('additions', 0), pr.get('deletions', 0))))
     if context['mode'] == 'update':
         merged = git(candidate, 'merge', '--no-edit', context['base'], check=False)
         if merged.returncode == 0:
@@ -463,10 +472,16 @@ def publish(folder, candidate):
     report = validate_report(json.loads((folder / 'review.json').read_text()))
     patch = folder / 'repair.patch'
     if patch.exists() and patch.stat().st_size:
+        cache = read_cache(client.pages(f'/issues/{pr["number"]}/comments'), context['head'])
+        context['rounds'] = max(auto_rounds(client.pages(f'/pulls/{pr["number"]}/commits')),
+                                int(cache.get('rounds', 0)) if cache else 0)
         if context['rounds'] >= POLICY['max_rounds']:
             raise ValueError('Automatic repair limit exceeded')
+        if patch.stat().st_size > POLICY['max_patch_bytes']:
+            raise ValueError('Repair patch exceeds size limit')
         git(candidate, 'apply', '--check', str(patch.resolve()))
         git(candidate, 'apply', '--index', str(patch.resolve()))
+        repair_patch({**context, 'files': live_files}, candidate)
         git(candidate, 'commit', '-m', AUTO_COMMIT + f'round {context["rounds"] + 1}', '-m', 'Reviewed-head: ' + context['head'])
         current = client.repo_api(f'/pulls/{context["number"]}')
         if current['head']['sha'] != context['head']:
