@@ -112,7 +112,8 @@ def test_join_dojo(admin_session, guest_dojo_admin, example_dojo):
     assert response.status_code == 200
     response = admin_session.get(f"{DOJO_URL}/dojo/{example_dojo}/admin/")
     assert response.status_code == 200
-    assert random_user_name in response.text and response.text.index("Members") < response.text.index(random_user_name)
+    user_id = get_user_id(random_user_name)
+    assert f'id="name-for-{user_id}">{random_user_name}</strong>' in response.text
 
 
 def test_admin_page_shows_deploy_key(admin_session, example_dojo):
