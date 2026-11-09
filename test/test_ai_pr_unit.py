@@ -367,6 +367,37 @@ def test_timeout_without_an_artifact_closes_the_pending_check_as_failure():
     assert calls[-1][1]['status'] == 'completed' and calls[-1][1]['conclusion'] == 'failure'
 
 
+def test_review_format_recovery_only_removes_null_extras_without_changing_findings():
+    for kind in ('null-extra', 'substantive-extra', 'missing', 'wrong-type'):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            value = report()
+            value['requires_human'] = True
+            value['human_reason'] = '保留原人工要求'
+            finding = {'priority': 2, 'file': 'dojo_plugin/example.py', 'line': 3, 'message': '保留原问题'}
+            value['findings'] = [dict(finding)]
+            if kind == 'null-extra':
+                value['findings'][0]['message_placeholder'] = None
+            elif kind == 'substantive-extra':
+                value['findings'][0]['unexpected_decision'] = 'different judgment'
+            elif kind == 'missing':
+                value['findings'][0].pop('priority')
+            else:
+                value['findings'][0]['priority'] = '2'
+            path = folder / 'initial-review.json'
+            original = json.dumps(value, ensure_ascii=False)
+            path.write_text(original)
+            if kind != 'null-extra':
+                rejects(lambda: ai.check_report(folder))
+                assert path.read_text() == original
+            else:
+                ai.check_report(folder)
+                recovered = ai.validate_report(json.loads(path.read_text()))
+                assert recovered['findings'] == [finding]
+                assert recovered['requires_human'] is True and recovered['human_reason'] == value['human_reason']
+                assert (folder / 'initial-review.raw.json').read_text() == original
+
+
 if __name__ == '__main__':
     suite = unittest.TestSuite(unittest.FunctionTestCase(value) for name, value in list(globals().items())
                                if name.startswith('test_') and callable(value))
