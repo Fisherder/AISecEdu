@@ -88,6 +88,7 @@ function test_container {
                 --name "${DOJO_CONTAINER}-test"
                 -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}"
                 -e "DOJO_CONTAINER=${DOJO_CONTAINER}"
+                -e "AISECEDU_SPLIT_APP_TESTS=${AISECEDU_SPLIT_APP_TESTS:-}"
         )
 
         args+=("${TEST_CONTAINER_EXTRA_ARGS[@]}")

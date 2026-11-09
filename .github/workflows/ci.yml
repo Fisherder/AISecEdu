@@ -8,11 +8,14 @@ on:
       - master
   schedule:
     - cron: "42 06 * * *"
+concurrency:
+  group: dojo-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     name: "${{ matrix.mode }} DOJO Test"
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     strategy:
       matrix:
         mode: [singlenode, multinode]
@@ -143,7 +146,7 @@ jobs:
 
       - name: Start the dojo in ${{ matrix.mode }} mode
         id: startup
-        timeout-minutes: 25
+        timeout-minutes: ${{ matrix.mode == 'multinode' && 30 || 25 }}
         run: |
           ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C
 
@@ -154,8 +157,10 @@ jobs:
       - name: Run ${{ matrix.mode }} dojo tests
         if: ${{ !cancelled() && steps.startup.outcome == 'success' }}
         timeout-minutes: 15
+        env:
+          AISECEDU_SPLIT_APP_TESTS: '1'
         run: |
-          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -N -t -- --ignore=test_model_router.py --ignore=test_runtime_profiles.py
+          ./deploy.sh -c dojo -g -D /mnt/data/docker -W /mnt/data/workspace ${{ matrix.mode == 'multinode' && '-M' || '' }} -C -N -t -- --color=no
 
       - name: Upload coverage reports to Codecov
         if: matrix.mode == 'singlenode'

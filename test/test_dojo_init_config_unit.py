@@ -169,7 +169,7 @@ def test_ci_test_arguments_reach_pytest_without_becoming_deployment_options():
         assert result.returncode == 0 and not result.stderr, result.stderr
         assert result.stdout.split('\0') == [
             'yes', 'no', 'dojo', 'yes' if mode == 'multinode' else 'no',
-            '--ignore=test_model_router.py', '--ignore=test_runtime_profiles.py', '',
+            '--color=no', '',
         ], result.stdout
 
 

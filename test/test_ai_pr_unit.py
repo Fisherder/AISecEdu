@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -50,6 +51,22 @@ def test_sensitive_and_large_changes_require_maintainer_review():
         assert ai.manual_reasons([path], 1, 0), path
     assert not ai.manual_reasons(['dojo_plugin/courseware_quiz.py', 'test/test_example_unit.py'], 100, 1)
     assert ai.manual_reasons(['dojo_theme/templates/example.html'], 1501, 0)
+
+
+def test_irreversible_model_execution_uses_one_action_per_fresh_job_and_no_publish_key():
+    source = (ROOT / '.github/workflows/ai-pr-autopilot.yml').read_text().split('\njobs:\n', 1)[1]
+    starts = list(re.finditer(r'(?m)^  ([a-z][a-z0-9_-]*):[ \t]*$', source))
+    jobs = {match.group(1): source[match.end():starts[index + 1].start() if index + 1 < len(starts) else len(source)]
+            for index, match in enumerate(starts)}
+    model_jobs = {name: body for name, body in jobs.items() if 'uses: openai/codex-action@' in body}
+    assert set(model_jobs) == {'analyze', 'repair', 'final_review'}
+    for name, body in model_jobs.items():
+        assert body.count('uses: openai/codex-action@') == 1, name
+        assert 'safety-strategy: drop-sudo' in body and 'runs-on: ubuntu-latest' in body
+        assert 'name: aisecedu-ai-model' in body and 'AI_AUTOPILOT_SSH_KEY' not in body
+        assert 'contents: write' not in body and 'pull-requests: write' not in body
+    assert 'uses: openai/codex-action@' not in jobs['publish']
+    assert 'needs: [analyze, repair, final_review]' in jobs['publish']
 
 
 def test_only_latest_required_check_results_affect_failure_context():

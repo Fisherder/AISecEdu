@@ -39,6 +39,8 @@ def _get_dojo_container():
 DOJO_CONTAINER = _get_dojo_container()
 
 def _get_container_ip(container_name):
+    if os.getenv('DOJO_IP'):
+        return os.environ['DOJO_IP']
     result = subprocess.run(
         ["docker", "inspect", container_name],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True

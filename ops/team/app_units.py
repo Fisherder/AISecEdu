@@ -1,28 +1,15 @@
 import argparse
+import json
 from pathlib import Path
 import re
 import subprocess
+import tempfile
+
+from app_test_layout import load_manifest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-APP_TESTS = ('test_model_router.py', 'test_runtime_profiles.py')
-DESTINATION = '/tmp/aisecedu-ci-app-units'
-RUNNER = '''
-import sys
-import pytest
-from CTFd import create_app
-
-app = create_app()
-with app.test_request_context('/'):
-    for name, module in list(sys.modules.items()):
-        if name == 'CTFd.plugins.dojo_plugin' or name.startswith('CTFd.plugins.dojo_plugin.'):
-            sys.modules[name.removeprefix('CTFd.plugins.')] = module
-    raise SystemExit(pytest.main([
-        '--rootdir=/tmp/aisecedu-ci-app-units', '--confcutdir=/tmp/aisecedu-ci-app-units', '-v',
-        '/tmp/aisecedu-ci-app-units/test_model_router.py',
-        '/tmp/aisecedu-ci-app-units/test_runtime_profiles.py',
-    ]))
-'''
+DESTINATION = '/tmp/aisecedu-ci-app-project'
 
 
 def main():
@@ -31,18 +18,29 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]*', args.container):
         parser.error('Invalid container name')
+    load_manifest()
     outer = ['docker', 'exec', args.container]
     inner = [*outer, 'docker', 'exec', 'ctfd']
     subprocess.run([*inner, 'python', '-c',
                     'import os; assert os.environ.get("DOJO_ENV") == "coverage", "Only an isolated coverage environment is allowed"'], check=True)
     subprocess.run([*inner, 'python', '-m', 'pip', 'install', '--disable-pip-version-check', 'pytest==8.3.5'], check=True)
-    subprocess.run([*outer, 'mkdir', '-p', DESTINATION], check=True)
     subprocess.run([*inner, 'mkdir', '-p', DESTINATION], check=True)
-    for filename in APP_TESTS:
-        subprocess.run(['docker', 'cp', str(ROOT / 'test' / filename), f'{args.container}:{DESTINATION}/{filename}'], check=True)
-        subprocess.run([*outer, 'docker', 'cp', f'{DESTINATION}/{filename}', f'ctfd:{DESTINATION}/{filename}'], check=True)
-    subprocess.run(['docker', 'exec', '-i', args.container, 'docker', 'exec', '-i', 'ctfd', 'python', '-'],
-                   input=RUNNER, text=True, check=True)
+    with tempfile.TemporaryDirectory(prefix='aisecedu-app-tests-') as directory:
+        archive = Path(directory) / 'source.tar'
+        with archive.open('wb') as output:
+            subprocess.run(['git', 'archive', '--format=tar', 'HEAD'], cwd=ROOT, stdout=output, check=True)
+        outer_archive = '/tmp/aisecedu-ci-app-source.tar'
+        subprocess.run(['docker', 'cp', str(archive), f'{args.container}:{outer_archive}'], check=True)
+        subprocess.run([*outer, 'docker', 'cp', outer_archive, 'ctfd:/tmp/aisecedu-ci-app-source.tar'], check=True)
+    subprocess.run([*inner, 'tar', '-xf', '/tmp/aisecedu-ci-app-source.tar', '-C', DESTINATION], check=True)
+    credentials = subprocess.check_output([*outer, 'cat', '/data/admin-password.txt'], text=True).strip()
+    settings = {'admin_username': 'admin', 'admin_password': credentials}
+    if '=' in credentials:
+        values = dict(line.partition('=')[::2] for line in credentials.splitlines() if '=' in line)
+        settings.update(admin_username=values.get('username', 'admin'), admin_password=values['password'])
+    subprocess.run(['docker', 'exec', '-i', args.container, 'docker', 'exec', '-i', 'ctfd',
+                    'python', DESTINATION + '/ops/team/app_test_runner.py'],
+                   input=json.dumps(settings), text=True, check=True)
 
 
 if __name__ == '__main__':

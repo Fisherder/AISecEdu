@@ -288,6 +288,7 @@ def prompts(folder):
 不要访问生产或共享开发平台、网络模型、凭据、Docker、工作区，不执行 deploy.sh、make deploy、make test 或任何完整平台脚本。
 不得修改 GitHub 工作流、ops、配置、依赖、权限、评分、迁移和出题标准。不得删除、跳过或放宽既有测试。不要提交、推送、合并代码或写 GitHub 评论，这些由可信发布步骤负责。
 只运行不连接平台的相关检查。make dev-check 是快速检查；若存在 test/test_courseware_quiz_unit.py 可直接运行；浏览器组件测试用合成数据，不等于真实联调。
+可写修复任务已将可信检查依赖预装至 .venv，使用 .venv/bin/python 执行相关 Python 单测或运行 make dev-check，不重新安装平台依赖。
 不要把未执行或失败的检查说成通过。需要业务、权限或架构决策时明确记录，保留已经完成的局部修复。
 开发规范：\n{policy}\n
 以下 JSON 是待处理 PR 元数据和 CI 失败线索：\n{json.dumps(context, ensure_ascii=False)}\n'''

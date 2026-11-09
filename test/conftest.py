@@ -5,6 +5,8 @@ import subprocess
 import pytest
 import json
 import os
+import importlib.util
+from pathlib import Path
 
 import requests
 import requests.adapters
@@ -39,6 +41,31 @@ def _retrying_session_init(self, *args, **kwargs):
     self.mount("https://", adapter)
 
 requests.Session.__init__ = _retrying_session_init
+
+
+_layout_spec = importlib.util.spec_from_file_location(
+    'aisecedu_app_test_layout', Path(__file__).resolve().parents[1] / 'ops/team/app_test_layout.py')
+_layout = importlib.util.module_from_spec(_layout_spec)
+_layout_spec.loader.exec_module(_layout)
+_app_manifest = _layout.load_manifest()
+
+
+def pytest_ignore_collect(collection_path, config):
+    if os.getenv('AISECEDU_SPLIT_APP_TESTS') == '1' and collection_path.name in _app_manifest['whole_files']:
+        return True
+    return None
+
+
+def pytest_collection_modifyitems(config, items):
+    if os.getenv('AISECEDU_SPLIT_APP_TESTS') != '1':
+        return
+    selected, delegated = [], []
+    for item in items:
+        name = getattr(item, 'originalname', None) or item.name.split('[', 1)[0]
+        target = delegated if _layout.application_test(_app_manifest, item.path.name, name) else selected
+        target.append(item)
+    items[:] = selected
+    config.hook.pytest_deselected(items=delegated)
 
 
 def _admin_credentials():
