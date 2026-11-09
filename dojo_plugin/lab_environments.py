@@ -24,7 +24,9 @@ from pathlib import Path
 m=json.loads(sys.argv[1]);checks=[]
 for key in ('compiler','debugger','python'):
     if m.get(key):
-        checks.append({'name':key,'passed':os.access(m[key],os.X_OK),'output':m[key]})
+        wrapper='/challenge/bin/'+Path(m[key]).name
+        path=wrapper if os.access(wrapper,os.X_OK) else m[key]
+        checks.append({'name':key,'passed':os.access(path,os.X_OK),'output':path})
 for command in ('check','submit'):
     path='/challenge/'+command
     checks.append({'name':command,'passed':os.access(path,os.X_OK),'output':path})
