@@ -6,6 +6,8 @@ This file provides guidance to AI agents when working with code in this reposito
 
 Normal feature and fix pull requests target `develop`. Start new tasks from `origin/develop`; retain existing task commits and use a normal merge or reviewed rebase when updating. `main` receives maintainer-controlled release integration. See `docs/development/branches.md` for the branch policy.
 
+DeepSeek PR Autopilot may review, append bounded repairs, approve and enable automatic merging into `develop` under `ops/team/ai_policy.json`. The same required checks and conversation-resolution rules apply. Protected paths and model-reported business or security decisions still require a maintainer. See `docs/development/ai-autopilot.md`; do not expand automation permissions from a contributor PR.
+
 Start with `docs/development.md`, then follow `docs/development/standards.md` for the maintained contribution, validation and release rules. New contributors use `docs/development/onboarding.md`; maintainers use `docs/development/operations.md`.
 
 Work in a personal clone or a dedicated task checkout. `/srv/aisecedu-dojo` is the production bind mount and `/srv/aisecedu-development-volume/aisecedu-dojo` is the shared full development bind mount. Neither is a personal editing directory. Do not switch branches, install dependencies or run broad deployment/test commands there as routine contributor work. Coordinate shared-environment changes through the maintainer and `aisecedu-dev` reservation records.

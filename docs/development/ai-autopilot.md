@@ -1,0 +1,54 @@
+# DeepSeek PR 自动开发流程
+
+成员仍在个人分支提交 PR，目标为 `develop`。启用后，GitHub Actions 自动读取当前提交，使用指定 DeepSeek 模型审查并修复明确问题，再由独立模型任务复审；符合策略的 PR 自动获得机器人审批，等待全部必需 CI 通过后自动合并。作者直接查看原 PR 的同一条汇总评论，无需转交补丁。
+
+## 自动执行范围
+
+1. 只接收同一仓库、受信任成员、非草稿且目标为 `develop` 的 `feat/`、`fix/`、`team/` 分支 PR。
+2. 任务分支落后时正常合并最新 `develop`，保留原作者提交；出现冲突时停止，不强推。
+3. 编码任务只修复可复现的问题，不扩展需求。每次人工提交后最多两轮自动修复；自动同步基线不重置修复次数。
+4. 独立复审输出结构化问题、严重性、文件和行号。AI 输出缺失或格式错误、接口失败、发布失败均不能标为通过。
+5. 修复以追加提交交付到原任务分支，再运行真实 CI。生成了补丁不等于检查通过。
+6. 普通 PR 通过 AI 复审后，由 `github-actions[bot]` 提交明确标注 AI 身份的审批并开启 GitHub 自动合并；GitHub 继续执行分支保护。合入 `develop` 后自动安排其他开放 PR 同步基线。
+
+`ops/team/ai_policy.json` 是维护者控制的范围入口。权限 API、数据库模型、评分、异步命令入口、基础设施、依赖、工作流、开发规则及出题标准等变更保留维护者复核。模型发现需求不明确、架构或安全判断、真实联调证据缺失时也会停止自动合并。规模限制为 40 个文件、1,500 行变更；机器人修复限 250,000 字节，不允许删除或修改既有测试行、修改受保护路径或夹带无关源码。
+
+AI 不自动解决人的审查讨论，不部署共享平台或生产，不把学生数据、测试账号或服务器密钥交给云端任务。完整平台 CI 使用 GitHub 的隔离环境；私有课程、真实模型质量及评分联调仍按维护者任务记录执行。
+
+## 模型和凭据
+
+模型固定为 `deepseek-v4.1-flash-1017`，通过维护者授权的 OpenAI Responses 兼容网关调用，不自动降级或切换模型。编码执行使用固定版本的 Codex CLI；推理请求走该网关，不使用 ChatGPT 登录或 OpenAI API 额度。
+
+仓库 Secret：
+
+| 名称 | 用途 |
+| --- | --- |
+| `DEEPSEEK_API_KEY` | 用户授权的模型网关 Key，只进入模型 API 代理 |
+| `AI_AUTOPILOT_SSH_KEY` | 仅此仓库的可写 Deploy Key，只进入发布任务 |
+
+仓库 Variables：
+
+| 名称 | 用途 |
+| --- | --- |
+| `DEEPSEEK_BASE_URL` | 以 `/v1` 结束的 HTTPS 网关地址 |
+| `DEEPSEEK_MODEL` | 固定模型调用名 |
+| `AI_AUTOPILOT_ENABLED` | `true` 启用；`false` 停止新任务 |
+| `AI_AUTOPILOT_BOOTSTRAP_HEAD` | 仅初始化时使用的精确提交授权；完成后删除 |
+
+模型任务运行于 GitHub 托管临时 Runner，并通过官方 Codex Action 的 API 代理和 `drop-sudo` 隔离上游 Key。发布任务不运行模型或 PR 脚本，仅验证当前提交、追加修复、发布结果和申请自动合并。仓库 Deploy Key 让追加提交正常触发下一轮 CI，避免普通 `GITHUB_TOKEN` 引起的人工重跑批准。
+
+自动化使用 Actions 运行时间和用户网关额度；每个任务有超时，修复次数受限。同一提交与相同失败检查的审查结果会复用，减少重复调用。网关额度不足、配额或模型不可用会明确失败并反馈，不报告成功。
+
+## 维护者操作
+
+初始化前启用仓库的 Allow auto-merge，以及 Actions 创建审批的权限。`develop` 保持至少一位非作者审批、旧审批失效、禁止强推/删除和讨论解决；必需检查包含 `contributor-checks`、`audit`、`singlenode DOJO Test`、`multinode DOJO Test` 与 `DeepSeek review`。不要为通过自动合并而移除失败检查。
+
+工作流入口为 `.github/workflows/ai-pr-autopilot.yml`。维护者可从 Actions 手动运行，提供 PR 编号和实际任务分支名；修改凭据后以此重试。原 PR 有新人工提交、CI 失败或 `develop` 推进时也会自动触发相应处理。
+
+暂停新任务将 `AI_AUTOPILOT_ENABLED` 设为 `false`；已经运行的任务需在 Actions 取消，已开启的 PR 自动合并需在 PR 上单独关闭。轮换模型 Key 更新对应 Secret；轮换仓库写入 Key 时，同时替换 Secret 并撤销旧 Deploy Key。修改策略和工作流须维护者复核，不能由机器人为自己扩大权限。
+
+## 验证
+
+`make dev-check` 包含调度与发布边界的离线回归，以及启动配置回归；课件模块存在时也执行其单测。Team quick checks 还会在课件浏览器组件测试存在时安装固定 Playwright 并执行该测试。完整 DOJO CI 继续作为独立必需检查。
+
+参考：[Codex GitHub Action](https://learn.chatgpt.com/docs/github-action)、[DeepSeek Codex 接入](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)、[GitHub 自动合并](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request)。

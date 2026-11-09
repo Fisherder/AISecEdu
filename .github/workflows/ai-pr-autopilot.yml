@@ -1,0 +1,213 @@
+name: DeepSeek PR Autopilot
+on:
+  push:
+    branches: [develop]
+  pull_request_target:
+    branches: [develop]
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request:
+    branches: [develop]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+      head_branch:
+        description: Current pull request head branch
+        required: true
+      retry:
+        description: Retry after independent review
+        default: 'false'
+  workflow_run:
+    workflows: [Team quick checks, Repository hygiene, DOJO CI]
+    types: [completed]
+  issue_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created, edited]
+permissions:
+  contents: read
+concurrency:
+  group: deepseek-pr-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch || inputs.head_branch }}
+  cancel-in-progress: false
+jobs:
+  dispatch-updates:
+    if: vars.AI_AUTOPILOT_ENABLED == 'true' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ops/team/ai_pr.py dispatch --folder "$RUNNER_TEMP/ai-result"
+  analyze:
+    if: >-
+      vars.AI_AUTOPILOT_ENABLED == 'true' &&
+      github.event_name != 'push' &&
+      (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') &&
+      (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') &&
+      (github.event_name != 'pull_request_review' || github.event.review.user.type != 'Bot') &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure') &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD &&
+        github.event.pull_request.user.login == 'Fisherder'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      mode: ${{ steps.prepare.outputs.mode }}
+      number: ${{ steps.prepare.outputs.number }}
+      head: ${{ steps.prepare.outputs.head }}
+      base: ${{ steps.prepare.outputs.base }}
+      branch: ${{ steps.prepare.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
+          path: policy
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Inspect current PR and previous outcomes
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AI_MODEL: ${{ vars.DEEPSEEK_MODEL }}
+          AI_AUTOPILOT_BOOTSTRAP_HEAD: ${{ vars.AI_AUTOPILOT_BOOTSTRAP_HEAD }}
+        run: python3 policy/ops/team/ai_pr.py prepare --folder "$RUNNER_TEMP/ai-result"
+      - uses: actions/checkout@v4
+        if: steps.prepare.outputs.mode == 'analyze'
+        with:
+          ref: ${{ steps.prepare.outputs.head }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.prepare.outputs.mode == 'analyze'
+        with:
+          node-version: '22'
+      - name: Preserve the contributor Node baseline
+        if: steps.prepare.outputs.mode == 'analyze'
+        run: |
+          sudo mkdir -p /opt/aisecedu-toolchains/node22/bin
+          sudo ln -s "$(command -v node)" /opt/aisecedu-toolchains/node22/bin/node
+          mkdir -p "$RUNNER_TEMP/ai-codex"
+          python3 policy/ops/team/ai_pr.py prompts --folder "$RUNNER_TEMP/ai-result"
+      - name: Review and repair bounded regressions
+        if: steps.prepare.outputs.mode == 'analyze' && steps.prepare.outputs.can_repair == 'true'
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
+        with:
+          openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          responses-api-endpoint: ${{ vars.DEEPSEEK_BASE_URL }}/responses
+          codex-version: '0.144.1'
+          model: ${{ vars.DEEPSEEK_MODEL }}
+          effort: high
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+          codex-home: ${{ runner.temp }}/ai-codex
+          working-directory: ${{ github.workspace }}/candidate
+          prompt-file: ${{ runner.temp }}/ai-result/repair.txt
+          output-file: ${{ runner.temp }}/ai-result/repair-summary.txt
+          codex-args: '["--ephemeral", "--ignore-rules", "--disable", "multi_agent", "-c", "web_search=\"disabled\"", "-c", "model_catalog_json=\"${{ github.workspace }}/policy/ops/team/deepseek-models.json\""]'
+          allow-bot-users: github-actions[bot]
+      - name: Independently review the resulting changes
+        if: steps.prepare.outputs.mode == 'analyze'
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
+        with:
+          openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          responses-api-endpoint: ${{ vars.DEEPSEEK_BASE_URL }}/responses
+          codex-version: '0.144.1'
+          model: ${{ vars.DEEPSEEK_MODEL }}
+          effort: high
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          codex-home: ${{ runner.temp }}/ai-codex
+          working-directory: ${{ github.workspace }}/candidate
+          prompt-file: ${{ runner.temp }}/ai-result/review.txt
+          output-file: ${{ runner.temp }}/ai-result/review.json
+          output-schema-file: ${{ github.workspace }}/policy/ops/team/ai_review.schema.json
+          codex-args: '["--ephemeral", "--ignore-rules", "--disable", "multi_agent", "-c", "web_search=\"disabled\"", "-c", "model_catalog_json=\"${{ github.workspace }}/policy/ops/team/deepseek-models.json\""]'
+          allow-bot-users: github-actions[bot]
+      - name: Validate review and repair scope
+        if: steps.prepare.outputs.mode != 'skip' && steps.prepare.outputs.mode != ''
+        run: python3 policy/ops/team/ai_pr.py package --folder "$RUNNER_TEMP/ai-result" --candidate "$GITHUB_WORKSPACE/candidate"
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.prepare.outputs.mode != 'skip' && steps.prepare.outputs.mode != ''
+        with:
+          name: deepseek-pr-${{ steps.prepare.outputs.number }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/ai-result/
+          retention-days: 7
+          if-no-files-found: error
+  publish:
+    needs: analyze
+    if: needs.analyze.outputs.mode != 'skip' && needs.analyze.outputs.mode != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      checks: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
+          path: policy
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: deepseek-pr-${{ needs.analyze.outputs.number }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/ai-result
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.analyze.outputs.head }}
+          path: candidate
+          fetch-depth: 0
+          ssh-key: ${{ secrets.AI_AUTOPILOT_SSH_KEY }}
+          persist-credentials: true
+      - name: Publish reviewed result against the unchanged head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git -C candidate config user.name 'github-actions[bot]'
+          git -C candidate config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 policy/ops/team/ai_pr.py publish --folder "$RUNNER_TEMP/ai-result" --candidate "$GITHUB_WORKSPACE/candidate"
+  report-failure:
+    needs: [analyze, publish]
+    if: >-
+      always() && needs.analyze.outputs.number != '' &&
+      (needs.analyze.result == 'failure' || needs.publish.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: deepseek-pr-${{ needs.analyze.outputs.number }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/ai-result
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ops/team/ai_pr.py failure --folder "$RUNNER_TEMP/ai-result"

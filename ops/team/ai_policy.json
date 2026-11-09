@@ -1,0 +1,20 @@
+{
+  "base_branch": "develop",
+  "trusted_authors": ["Fisherder", "yunie666", "hunry-1-code"],
+  "max_rounds": 2,
+  "max_files": 40,
+  "max_changed_lines": 1500,
+  "max_patch_bytes": 250000,
+  "manual_paths": [
+    ".github/**", ".codex/**", ".agents/**", "AGENTS.md", "**/AGENTS.md",
+    "ops/**", "dojo/**", "etc/**", "Dockerfile*", "docker-compose*", "deploy.sh",
+    "sshd/**", "homefs/**", "workspace/**", "workspacefs/**",
+    "dojo_plugin/api/**", "dojo_plugin/models/**", "dojo_plugin/agent_runtime/**",
+    "dojo_plugin/config.py", "dojo_plugin/coursework.py", "dojo_plugin/jobs.py",
+    "dojo_plugin/authoring_standards/**", "dojo_plugin/*grad*", "dojo_plugin/*auth*",
+    "services/**", "ctfd/**", "docs/development*", "docs/development/**",
+    "**/package.json", "**/*lock*", "**/requirements*", "**/pyproject.toml"
+  ],
+  "repair_paths": ["dojo_plugin/**", "dojo_theme/**", "test/**", "docs/**"],
+  "required_checks": ["contributor-checks", "audit", "singlenode DOJO Test", "multinode DOJO Test"]
+}
