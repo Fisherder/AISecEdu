@@ -101,6 +101,17 @@ def login(name, password, *, success=True, register=False, email=None):
     return session
 
 
+def browser_login(browser, name, password):
+    from selenium.webdriver.support.ui import WebDriverWait
+
+    browser.get(f"{DOJO_URL}/login")
+    browser.find_element("id", "name").send_keys(name)
+    browser.find_element("id", "password").send_keys(password)
+    browser.find_element("id", "_submit").click()
+    WebDriverWait(browser, 20).until(lambda driver: driver.execute_script(
+        "return location.pathname !== '/login' && Number(window.init && window.init.userId) > 0;"))
+
+
 def make_dojo_official(dojo_rid, admin_session):
     response = admin_session.post(f"{DOJO_URL}/pwncollege_api/v1/dojos/{dojo_rid}/promote", json={})
     assert response.status_code == 200, f"Expected status code 200, but got {response.status_code} - {response.json()}"

@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from utils import DOJO_URL, dojo_run, login, create_dojo_yml, start_challenge, solve_challenge, workspace_run, wait_for_background_worker, remove_workspace_container
+from utils import DOJO_URL, dojo_run, login, browser_login, create_dojo_yml, start_challenge, solve_challenge, workspace_run, wait_for_background_worker, remove_workspace_container
 
 
 CREW_DOJO_SPEC = """
@@ -56,13 +56,6 @@ def solve(dojo, user_name, session, challenge):
     result = workspace_run(f"/challenge/{challenge}", user=user_name)
     flag = re.search(r"pwn\.college{\S+}", result.stdout).group()
     solve_challenge(dojo, "hello", challenge, session=session, flag=flag)
-
-
-def browser_login(browser, name, password):
-    browser.get(f"{DOJO_URL}/login")
-    browser.find_element("id", "name").send_keys(name)
-    browser.find_element("id", "password").send_keys(password)
-    browser.find_element("id", "_submit").click()
 
 
 def wait_until(predicate, timeout=15):

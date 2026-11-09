@@ -22,7 +22,7 @@ except ModuleNotFoundError:
 
 #pylint:disable=redefined-outer-name,use-dict-literal,missing-timeout,unspecified-encoding,consider-using-with
 
-from utils import TEST_DOJOS_LOCATION, DOJO_URL, login, make_dojo_official, create_dojo, create_dojo_yml, start_challenge, solve_challenge, wait_for_background_worker, db_sql, dojo_run
+from utils import TEST_DOJOS_LOCATION, DOJO_URL, login, browser_login, make_dojo_official, create_dojo, create_dojo_yml, start_challenge, solve_challenge, wait_for_background_worker, db_sql, dojo_run
 
 # Nested-docker port publishing drops for a few seconds while user containers
 # attach/detach networks; retry connection establishment (never sent requests)
@@ -66,6 +66,17 @@ def pytest_collection_modifyitems(config, items):
         target.append(item)
     items[:] = selected
     config.hook.pytest_deselected(items=delegated)
+
+
+def pytest_runtest_logreport(report):
+    if os.getenv('AISECEDU_SPLIT_APP_TESTS') != '1' or not report.failed:
+        return
+    crash = getattr(report.longrepr, 'reprcrash', None)
+    print('\nCI_TEST_FAILURE ' + json.dumps({
+        'node': report.nodeid, 'phase': report.when,
+        'path': getattr(crash, 'path', ''), 'line': getattr(crash, 'lineno', None),
+        'error': str(getattr(crash, 'message', '')).split('\n', 1)[0][:500],
+    }, ensure_ascii=False), flush=True)
 
 
 def _admin_credentials():
@@ -341,8 +352,5 @@ def browser_fixture():
 
 @pytest.fixture
 def random_user_browser(browser_fixture, random_user_name):
-    browser_fixture.get(f"{DOJO_URL}/login")
-    browser_fixture.find_element("id", "name").send_keys(random_user_name)
-    browser_fixture.find_element("id", "password").send_keys(random_user_name)
-    browser_fixture.find_element("id", "_submit").click()
+    browser_login(browser_fixture, random_user_name, random_user_name)
     return browser_fixture
