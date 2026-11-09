@@ -25,6 +25,7 @@ let
       cp ${rgScript} $out/$rgBin/rg
       cp ${pkgs.code-server}/$rgBin/rg $out/$rgBin/rg.orig
       cp -ru ${pkgs.code-server}/libexec/code-server/. $out/libexec/code-server
+      chmod -R u+w $out/libexec/code-server
       rm -rf $out/libexec/code-server/lib/vscode/extensions/git $out/libexec/code-server/lib/vscode/extensions/git-base $out/libexec/code-server/lib/vscode/extensions/github $out/libexec/code-server/lib/vscode/extensions/github-authentication
       cp ${./remote-console-frame.js} $out/libexec/code-server/lib/vscode/out/xuanjia-console.js
       substituteInPlace $out/libexec/code-server/lib/vscode/out/vs/code/browser/workbench/workbench.html \
