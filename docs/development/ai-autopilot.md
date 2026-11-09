@@ -53,7 +53,7 @@ AI 不自动解决人的审查讨论，不部署共享平台或生产，不把�
 
 工作流入口为 `.github/workflows/ai-pr-autopilot.yml`。维护者可从 Actions 手动运行，提供 PR 编号和实际任务分支名；修改凭据后以此重试。原 PR 有新人工提交、CI 失败或 `develop` 推进时也会自动触发相应处理。
 
-暂停新任务将 `AI_AUTOPILOT_ENABLED` 设为 `false`；已经运行的任务需在 Actions 取消，已开启的 PR 自动合并需在 PR 上单独关闭。轮换模型 Key 更新对应 Secret；轮换仓库写入 Key 时，同时替换 Secret 并撤销旧 Deploy Key。修改策略和工作流须维护者复核，不能由机器人为自己扩大权限。
+暂停全部新任务将 `AI_AUTOPILOT_ENABLED` 设为 `false`；已经运行的任务需在 Actions 取消，已开启的 PR 自动合并需在 PR 上单独关闭。持久暂停单个 PR 时添加 `ai:paused` 标签并关闭其自动合并；标签存在期间不调用模型、不追加修复，也不审批合并。恢复时移除标签并从 Actions 手动重审（retry 设为 true）。复用缓存不会重新开启手动关闭的自动合并或补发审批；新输入需要持续暂停时应保留标签。轮换模型 Key 更新对应 Secret；轮换仓库写入 Key 时，同时替换 Secret 并撤销旧 Deploy Key。修改策略和工作流须维护者复核，不能由机器人为自己扩大权限。
 
 `.github/CODEOWNERS` 只为维护者复核路径指定 `@Fisherder`，并启用 GitHub 的必需 Code Owner 审批。普通路径仍允许独立 AI 审批；涉及自动化、权限、容器、依赖或开发规则的 PR 必须获得维护者审批，不能只凭机器人审批合并。初始化 PR 由维护者完成最终集成，不为初始化移除失败 CI。
 

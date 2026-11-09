@@ -51,9 +51,9 @@ jobs:
     if: >-
       vars.AI_AUTOPILOT_ENABLED == 'true' &&
       github.event_name != 'push' &&
-      (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') &&
-      (github.event_name != 'pull_request_review_comment' || github.event.comment.user.type != 'Bot') &&
-      (github.event_name != 'pull_request_review' || github.event.review.user.type != 'Bot') &&
+      (github.event_name != 'issue_comment' || contains(fromJSON('["Fisherder", "yunie666", "hunry-1-code"]'), github.event.comment.user.login)) &&
+      (github.event_name != 'pull_request_review_comment' || contains(fromJSON('["Fisherder", "yunie666", "hunry-1-code"]'), github.event.comment.user.login)) &&
+      (github.event_name != 'pull_request_review' || contains(fromJSON('["Fisherder", "yunie666", "hunry-1-code"]'), github.event.review.user.login)) &&
       (github.event_name != 'workflow_run' || contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)) &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD &&
@@ -258,9 +258,9 @@ jobs:
   report-failure:
     needs: [gate, analyze, publish]
     if: >-
-      always() && needs.gate.outputs.number != '' &&
+      always() &&
       (needs.gate.result == 'failure' || needs.analyze.result == 'failure' || needs.publish.result == 'failure' ||
-       needs.analyze.result == 'cancelled' || needs.publish.result == 'cancelled')
+       needs.gate.result == 'cancelled' || needs.analyze.result == 'cancelled' || needs.publish.result == 'cancelled')
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:

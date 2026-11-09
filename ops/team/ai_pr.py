@@ -2,6 +2,7 @@
 import argparse
 import fnmatch
 import hashlib
+import html
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ MARKER = '<!-- aisecedu-deepseek-autopilot -->'
 CACHE = re.compile(r'<!-- aisecedu-ai-cache:(\{.*\}) -->')
 AUTO_COMMIT = 'fix(ai): AISecEdu automatic repair '
 CHECK = 'DeepSeek review'
+PAUSE_LABEL = 'ai:paused'
 
 
 def git(folder, *args, check=True):
@@ -112,7 +114,10 @@ def read_cache(comments, head):
     for comment in reversed(comments):
         if comment['user']['login'] != 'github-actions[bot]':
             continue
-        match = CACHE.search(comment.get('body', ''))
+        body = comment.get('body', '')
+        if not body.startswith(MARKER + '\n'):
+            continue
+        match = CACHE.fullmatch(body.rstrip().rsplit('\n', 1)[-1])
         if match:
             try:
                 value = json.loads(match.group(1))
@@ -178,14 +183,12 @@ def review_feedback(client, number, comments=None):
 def state_signature(pr, failures, feedback):
     state = {'head': pr['head']['sha'], 'base': pr['base']['sha'], 'title': pr.get('title', ''),
              'body': pr.get('body') or '', 'failures': sorted(row['id'] for row in failures),
-             'feedback': [(row['id'], row['updated'], row['body_sha256']) for row in feedback]}
+             'feedback': [(row['id'], row['updated'], row['body_sha256']) for row in feedback],
+             'paused': is_paused(pr)}
     return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
 
 
-def prepare(folder):
-    folder.mkdir(parents=True, exist_ok=True)
-    client = GitHub()
-    event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+def event_number(client, event):
     number = event.get('number') or event.get('inputs', {}).get('pr') or event.get('pull_request', {}).get('number')
     if not number and 'pull_request' in event.get('issue', {}):
         number = event['issue']['number']
@@ -195,18 +198,40 @@ def prepare(folder):
         candidates = [row for row in candidates if row['base']['ref'] == POLICY['base_branch']
                       and row['head']['ref'] == run['head_branch']]
         number = candidates[0]['number'] if len(candidates) == 1 else None
+    return int(number) if number else None
+
+
+def eligible(client, pr):
+    return (pr['state'] == 'open' and not pr['draft'] and pr['base']['ref'] == POLICY['base_branch']
+            and pr['head']['repo'] and pr['head']['repo']['full_name'] == client.repo
+            and pr['user']['login'] in POLICY['trusted_authors']
+            and pr['head']['ref'].startswith(('feat/', 'fix/', 'team/')))
+
+
+def is_paused(pr):
+    return any(row['name'] == PAUSE_LABEL for row in pr.get('labels', []))
+
+
+def prepare(folder):
+    folder.mkdir(parents=True, exist_ok=True)
+    client = GitHub()
+    event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+    number = event_number(client, event)
     if not number:
         set_outputs(mode='skip')
         return
+    set_outputs(number=number)
     pr = client.repo_api(f'/pulls/{int(number)}')
-    allowed = (pr['state'] == 'open' and not pr['draft'] and pr['base']['ref'] == POLICY['base_branch']
-               and pr['head']['repo'] and pr['head']['repo']['full_name'] == client.repo
-               and pr['user']['login'] in POLICY['trusted_authors']
-               and pr['head']['ref'].startswith(('feat/', 'fix/', 'team/')))
-    if not allowed:
+    if not eligible(client, pr):
         set_outputs(mode='skip')
         return
     set_outputs(number=pr['number'], head=pr['head']['sha'], base=pr['base']['sha'], branch=pr['head']['ref'])
+    if is_paused(pr):
+        (folder / 'context.json').write_text(json.dumps({
+            'mode': 'paused', 'number': pr['number'], 'node_id': pr['node_id'], 'head': pr['head']['sha'],
+        }))
+        set_outputs(mode='skip')
+        return
     files = client.pages(f'/pulls/{pr["number"]}/files')
     comments = client.pages(f'/issues/{pr["number"]}/comments')
     commits = client.pages(f'/pulls/{pr["number"]}/commits')
@@ -368,12 +393,12 @@ def package(folder, candidate):
 
 def comment_body(context, report, outcome):
     lines = [MARKER, '### DeepSeek 自动审查', f'提交：`{context["head"][:12]}`；模型：`{context["model"]}`。',
-             '', outcome, '', report['summary']]
+             '', outcome, '', html.escape(report['summary'])]
     for item in report['findings']:
-        lines.append(f'- **P{item["priority"]}** `{item["file"]}:{item["line"]}`：{item["message"]}')
+        lines.append(f'- **P{item["priority"]}** `{html.escape(item["file"])}:{item["line"]}`：{html.escape(item["message"])}')
     reasons = context['manual_reasons'] + ([report['human_reason']] if report['requires_human'] else [])
     if reasons:
-        lines.extend(['', '需要维护者复核：', *['- ' + row for row in reasons]])
+        lines.extend(['', '需要维护者复核：', *['- ' + html.escape(row) for row in reasons]])
     if context['failures']:
         lines.extend(['', '当前失败的必需 CI：' + '、'.join(row['name'] for row in context['failures'])])
     lines.extend(['', '轻量检查和模型审查不代表真实模型、数据库、角色隔离或整个平台联调已经通过。'])
@@ -419,6 +444,10 @@ def publish(folder, candidate):
         print('Feedback, base or CI changed during review; requeue current PR without publishing stale conclusions')
         dispatch_pr(client, pr)
         return
+    if is_paused(pr):
+        suspend_approval(client, context, pr)
+        record_check(client, context, 'completed', '自动流程已暂停', PAUSE_LABEL + ' 标签仍在，等待维护者恢复。', 'failure')
+        return
     if context['mode'] == 'update':
         merged = git(candidate, 'merge', '--no-edit', context['base'], check=False)
         if merged.returncode == 0:
@@ -452,7 +481,10 @@ def publish(folder, candidate):
     record_check(client, context, 'completed', 'AI 审查通过' if passed else 'AI 发现待处理问题',
                  summary, 'success' if passed else 'failure')
     automatic = passed and not report['requires_human'] and not context['manual_reasons'] and not context['failures']
-    if automatic:
+    if automatic and context['mode'] == 'cached':
+        outcome = ('已复用当前输入的审查结论；自动合并保持当前开启状态。' if pr.get('auto_merge') else
+                   '已复用当前输入的审查结论；自动合并当前关闭，本次不重新开启或追加审批。维护者可手动重审恢复。')
+    elif automatic:
         current = client.repo_api(f'/pulls/{context["number"]}')
         if current['head']['sha'] != context['head'] or current['base']['ref'] != POLICY['base_branch']:
             print('PR changed before approval; no approval or auto-merge')
@@ -513,9 +545,17 @@ def gate(folder):
     pr = client.repo_api(f'/pulls/{context["number"]}')
     if pr['state'] != 'open' or pr['head']['sha'] != context['head']:
         return
+    if context['mode'] == 'paused':
+        suspend_approval(client, context, pr)
+        record_check(client, context, 'completed', '自动流程已暂停', PAUSE_LABEL + ' 标签仍在，等待维护者恢复。', 'failure')
+        return
     check_id = record_check(client, context, 'in_progress', '正在重新审查当前输入',
                             '提交、基线、反馈或失败检查发生变化，旧结论不再作为本轮通过依据。')
     set_outputs(check_id=check_id or '')
+    suspend_approval(client, context, pr)
+
+
+def suspend_approval(client, context, pr):
     if pr.get('auto_merge'):
         client.api('/graphql', {'query': 'mutation($id:ID!){disablePullRequestAutoMerge(input:{pullRequestId:$id}){pullRequest{id}}}',
                                 'variables': {'id': context['node_id']}}, 'POST')
@@ -531,13 +571,22 @@ def failure(folder):
     if context_path.exists():
         context = json.loads(context_path.read_text())
     else:
-        context = {'number': int(os.environ['AI_FAILURE_PR']), 'head': os.environ['AI_FAILURE_HEAD'],
+        number = os.environ.get('AI_FAILURE_PR')
+        if not number:
+            event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+            number = event_number(client, event)
+        if not number:
+            print('No unique pull request identified for failure reporting')
+            return
+        context = {'number': int(number), 'head': os.environ.get('AI_FAILURE_HEAD', ''),
                    'model': os.environ.get('AI_MODEL', 'deepseek-v4.1-flash-1017'),
                    'manual_reasons': [], 'failures': [], 'signature': '', 'rounds': 0,
                    'check_id': os.environ.get('AI_CHECK_ID')}
     pr = client.repo_api(f'/pulls/{context["number"]}')
-    if pr['state'] != 'open' or pr['head']['sha'] != context['head']:
+    if not eligible(client, pr) or (context['head'] and pr['head']['sha'] != context['head']):
         return
+    context.update(head=pr['head']['sha'], node_id=pr['node_id'])
+    suspend_approval(client, context, pr)
     context['failed_run'] = True
     report = {'summary': 'AI 任务或发布步骤失败，未将本次运行标记为通过。', 'requires_human': True,
               'human_reason': f'查看 Actions 运行 {os.environ.get("GITHUB_RUN_ID", "")}，修复模型、配额、权限或执行错误后重试。', 'findings': []}
