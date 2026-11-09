@@ -1187,7 +1187,7 @@ def test_publish_gate_reuses_current_pass_without_calling_model(monkeypatch):
         validation={},
         published_challenge_id=None,
         module_index=0,
-        dojo=SimpleNamespace(modules=[SimpleNamespace(challenges=[])]),
+        dojo=SimpleNamespace(dojo_id=1, modules=[SimpleNamespace(challenges=[])]),
         author_id=1,
     )
     draft.validation = {
@@ -1469,6 +1469,7 @@ def test_model_json_total_deadline_includes_retries(monkeypatch):
     (10000, ('length', 'malformed'), [10000, 20000, 20000]),
 ])
 def test_model_json_truncation_grows_a_bounded_output_limit(monkeypatch, initial_limit, failures, expected_limits):
+    import io
     import requests
     from CTFd.plugins.dojo_plugin.learning import intelligence
 
@@ -1480,6 +1481,7 @@ def test_model_json_truncation_grows_a_bounded_output_limit(monkeypatch, initial
         response = requests.Response()
         response.status_code = 200
         response._content = json.dumps({'choices': [{'finish_reason': 'length' if failure == 'length' else 'stop', 'message': {'content': '{' if failure else '{"ok":true}'}}]}).encode()
+        response.raw = io.BytesIO(response._content)
         return response
 
     monkeypatch.setattr(intelligence, 'DOJO_AI_ENABLED', True)

@@ -26,6 +26,7 @@ def main():
                       DOJO_TEST_ALLOW_HTTP_SECURE_COOKIE='1', AISECEDU_SPLIT_APP_TESTS='')
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(ROOT / 'test'))
+    sys.path.insert(0, '/opt/CTFd')
     from CTFd import create_app
     from CTFd.models import db
     from sqlalchemy import text

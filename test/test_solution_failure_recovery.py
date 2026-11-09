@@ -1,3 +1,4 @@
+import io
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ def test_model_account_errors_are_not_retried(monkeypatch, status):
 
     response = requests.Response()
     response.status_code = status
+    response.raw = io.BytesIO(b'')
     calls = []
 
     def post(*args, **kwargs):

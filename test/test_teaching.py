@@ -27,7 +27,8 @@ def _teacher_history_serializers():
     selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {
         "_serialize_teacher_agent_history", "_teacher_agent_history_context",
     }]
-    namespace = {}
+    namespace = {"__name__": "CTFd.plugins.dojo_plugin.api.v1.teaching",
+                 "__package__": "CTFd.plugins.dojo_plugin.api.v1"}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(source_path), "exec"), namespace)
     return namespace
 
@@ -908,7 +909,8 @@ def test_teaching_worker_isolates_native_authoring_from_interactive_queue(
     client = RedisClient()
     payload = {"job_id": native.id, "trace_id": "trace-native"}
 
-    assert jobs._stream_for_job_kind("material.analyze") == jobs.STREAM
+    assert jobs._stream_for_job_kind("material.analyze") == jobs.MATERIAL_INDEX_STREAM
+    assert jobs.MATERIAL_INDEX_STREAM not in {jobs.STREAM, jobs.AUTHORING_STREAM}
     assert jobs._stream_for_job_kind("learning.authoring") == jobs.AUTHORING_STREAM
     assert jobs._stream_for_job_kind("learning.solution") == jobs.AUTHORING_STREAM
     assert jobs._reroute_queued_job_message(client, jobs.STREAM, payload)
@@ -975,6 +977,9 @@ def test_retry_job_reuses_a_terminal_retry_for_the_same_idempotency_token(
             return self
 
         def with_for_update(self):
+            return self
+
+        def populate_existing(self):
             return self
 
         def first(self):
@@ -1310,16 +1315,20 @@ def test_agent_runtime_stream_yields_real_events_and_preserves_failure_category(
             self.events = events
             self.closed = False
 
-        def iter_lines(self, decode_unicode=False):
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size):
             for event in self.events:
-                yield json.dumps({"protocol": "aisecedu.agent-run.v1", "event": event})
+                event = {"protocol": jobs.AGENT_RUN_PROTOCOL, "time": 1, **event}
+                yield (json.dumps({"protocol": jobs.AGENT_RUN_PROTOCOL, "event": event}) + "\n").encode()
 
         def close(self):
             self.closed = True
 
     job = SimpleNamespace(
         id="stream-test", kind="agent.chat", payload={}, trace_id="trace",
-        owner_id=1, dojo_id=None, module_index=None,
+        owner_id=1, dojo_id=None, module_index=None, thread_id="stream-thread", attempt_count=1,
     )
     route = {"provider": "deepseek", "actual_model": "deepseek-v4-flash"}
     seen = []
@@ -1337,10 +1346,11 @@ def test_agent_runtime_stream_yields_real_events_and_preserves_failure_category(
         return success
 
     monkeypatch.setattr(jobs.requests, "post", post)
-    monkeypatch.setattr(jobs, "_agent_trace_event", lambda _job, event: seen.append(event))
+    monkeypatch.setattr(jobs, "_record_runtime_dispatch", lambda *_args: None)
+    monkeypatch.setattr(jobs, "_record_agent_run_progress", lambda _job, event: seen.append(event))
     result = jobs._invoke_agent_runtime(job, route)
     assert result["result"]["answer"] == "ok"
-    assert [event["type"] for event in seen] == ["run.started", "item.started"]
+    assert [event["type"] for event in seen] == ["run.started", "item.started", "run.completed"]
     assert posted[0]["headers"]["Accept"] == "application/x-ndjson"
     assert posted[0]["stream"] is True
     assert success.closed
@@ -1381,7 +1391,10 @@ def test_agent_activity_preserves_model_and_tool_events_across_harness_jobs(monk
     }
     monkeypatch.setattr(teaching, "TeachingJobs", SimpleNamespace(query=JobQuery()))
     monkeypatch.setattr(teaching, "job_view", lambda _job: {"result": {}})
-    monkeypatch.setattr(teaching, "job_events_view", lambda job_id: events[job_id])
+    monkeypatch.setattr(teaching.db.session, "query", lambda *_args: SimpleNamespace(
+        filter=lambda *_filters: SimpleNamespace(scalar=lambda: 1)))
+    monkeypatch.setattr(teaching, "job_events_view", lambda job_id, after_sequence=0:
+                        [event for event in events[job_id] if event["sequence"] > after_sequence])
 
     activity = teaching._job_activity_view(root)
     assert [event["sequence"] for event in activity["events"]] == [1, 2]
@@ -1390,47 +1403,45 @@ def test_agent_activity_preserves_model_and_tool_events_across_harness_jobs(monk
 
 def test_agent_harness_records_only_the_tool_it_actually_executes(monkeypatch):
     from CTFd.models import Users, db
-    from CTFd.plugins.dojo_plugin.models import TeachingAgentMessages, TeachingAgentThreads
+    from CTFd.plugins.dojo_plugin.models import TeachingAgentMessages, TeachingAgentThreads, TeachingJobs
     from CTFd.plugins.dojo_plugin.agent_runtime import harness, jobs
     from CTFd.plugins.dojo_plugin.api.v1 import teaching
 
-    class Query:
-        def __init__(self, row):
-            self.row = row
-
-        def filter_by(self, **_values):
-            return self
-
-        def first(self):
-            return self.row
-
-    owner = SimpleNamespace(id=7)
-    thread = SimpleNamespace(id="thread-1", status="ACTIVE")
-    source = SimpleNamespace(id=3, metadata_json={
+    token = secrets.token_hex(8)
+    owner = Users(name="harness-" + token, email=token + "@example.invalid", password="test-only")
+    db.session.add(owner)
+    db.session.flush()
+    thread = TeachingAgentThreads(user_id=owner.id)
+    db.session.add(thread)
+    db.session.flush()
+    source = TeachingAgentMessages(user_id=owner.id, thread_id=thread.id, role="assistant", content="读取材料", metadata_json={
         "toolProposals": [{"tool": "material.list", "arguments": {}}],
         "agentLoopDepth": teaching.MAX_AGENT_LOOP_STEPS - 1,
+        "executionMode": "execute",
     })
-    job = SimpleNamespace(
-        id="driver", owner_id=7, thread_id=thread.id, kind="agent.advance",
+    db.session.add(source)
+    db.session.flush()
+    job = TeachingJobs(
+        owner_id=owner.id, thread_id=thread.id, kind="agent.advance", idempotency_key=token,
         payload={"sourceMessageId": source.id},
     )
+    db.session.add(job)
+    db.session.commit()
     events = []
-    monkeypatch.setattr(Users, "query", Query(owner))
-    monkeypatch.setattr(TeachingAgentThreads, "query", Query(thread))
-    monkeypatch.setattr(TeachingAgentMessages, "query", Query(source))
-    monkeypatch.setattr(db.session, "refresh", lambda _row: None)
-    monkeypatch.setattr(db.session, "commit", lambda: None)
     monkeypatch.setattr(teaching, "_require_teacher", lambda _owner: None)
     monkeypatch.setattr(teaching, "_teacher_agent_context", lambda _owner, _thread: {})
     monkeypatch.setattr(jobs, "heartbeat", lambda current, **_kwargs: current)
     monkeypatch.setattr(jobs, "assert_job_lease", lambda current: current)
-    monkeypatch.setattr(jobs, "_agent_trace_event", lambda _job, event: events.append(event))
+    monkeypatch.setattr(jobs, "_record_agent_run_progress", lambda _job, event: events.append(event))
 
     result = harness.advance_turn(job)
     assert result["state"] == "complete"
-    assert [event["type"] for event in events] == ["item.started", "item.completed"]
-    assert events[0]["item"]["title"] == "读取课程材料"
-    assert events[1]["status"] == "completed"
+    assert [event["type"] for event in events] == ["run.started", "item.started", "item.completed", "run.completed"]
+    assert events[1]["item"]["title"] == "读取课程材料"
+    assert events[2]["status"] == "completed"
+    assert source.metadata_json["toolExecutionResults"]["0"]["tool"] == "material.list"
+    db.session.delete(owner)
+    db.session.commit()
 
 
 def test_teacher_agent_upload_is_conversation_scoped_until_teacher_decides():
