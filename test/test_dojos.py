@@ -130,8 +130,8 @@ def test_admin_page_shows_deploy_key(admin_session, example_dojo):
     assert public_key in response.text
 
 
-def test_promote_dojo_member(admin_session, guest_dojo_admin, example_dojo):
-    random_user_name, random_session = guest_dojo_admin
+def test_promote_dojo_member(admin_session, random_user, example_dojo):
+    random_user_name, random_session = random_user
     random_user_id = get_user_id(random_user_name)
     rejected = admin_session.post(f"{DOJO_URL}/pwncollege_api/v1/dojos/{example_dojo}/admins/promote", json={"user_id": random_user_id})
     assert rejected.status_code == 400, rejected.text
