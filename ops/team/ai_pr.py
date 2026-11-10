@@ -460,6 +460,8 @@ def publish(folder, candidate):
     context['manual_reasons'] = sorted(set(context['manual_reasons'] + manual_reasons(
         live_files, pr.get('additions', 0), pr.get('deletions', 0))))
     if context['mode'] == 'update':
+        if context.get('base') != pr['base']['sha']:
+            raise ValueError('Base synchronization target does not match current develop')
         merged = git(candidate, 'merge', '--no-edit', context['base'], check=False)
         if merged.returncode == 0:
             git(candidate, 'push', 'origin', 'HEAD:refs/heads/' + context['branch'])

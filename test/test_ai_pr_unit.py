@@ -655,6 +655,47 @@ def test_clear_repair_preserves_whole_pr_human_review_without_approving_or_mergi
         retry.assert_not_called()
 
 
+def test_base_sync_rejects_a_forged_artifact_merge_target_before_git_mutation():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        candidate, result, context = fixture(folder)
+        remote = folder / 'remote.git'
+        remote.mkdir()
+        ai.git(remote, 'init', '--bare', '-q')
+        ai.git(candidate, 'remote', 'add', 'origin', str(remote))
+        branch = 'feat/member/task'
+        ai.git(candidate, 'push', 'origin', 'HEAD:refs/heads/' + branch)
+        (candidate / 'AGENTS.md').write_text('forged protected policy\n')
+        ai.git(candidate, 'add', 'AGENTS.md')
+        ai.git(candidate, 'commit', '-qm', 'synthetic forbidden target')
+        forged_base = ai.git(candidate, 'rev-parse', 'HEAD').stdout.strip()
+        ai.git(candidate, 'reset', '--hard', context['head'])
+        pr = {'number': 1, 'state': 'open', 'draft': False, 'node_id': 'node',
+              'base': {'ref': 'develop', 'sha': context['head']}, 'user': {'login': 'hunry-1-code'},
+              'head': {'sha': context['head'], 'ref': branch, 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
+        context.update(number=1, node_id='node', branch=branch, mode='update', base=forged_base,
+                       model='synthetic', rounds=0, manual_reasons=[], failures=[],
+                       signature=ai.state_signature(pr, [], []))
+        (result / 'context.json').write_text(json.dumps(context))
+
+        class Client:
+            repo = 'Fisherder/AISecEdu'
+
+            def repo_api(self, path, data=None, method=None):
+                assert data is None
+                return pr if path == '/pulls/1' else {'check_runs': []}
+
+            def pages(self, path):
+                return []
+
+        with patch.object(ai, 'GitHub', Client), patch.object(ai, 'git', wraps=ai.git) as commands:
+            rejects(lambda: ai.publish(result, candidate))
+            commands.assert_not_called()
+        assert ai.git(remote, 'rev-parse', 'refs/heads/' + branch).stdout.strip() == context['head']
+        assert ai.git(candidate, 'status', '--porcelain').stdout == ''
+        assert not (candidate / 'AGENTS.md').exists()
+
+
 if __name__ == '__main__':
     suite = unittest.TestSuite(unittest.FunctionTestCase(value) for name, value in list(globals().items())
                                if name.startswith('test_') and callable(value))
