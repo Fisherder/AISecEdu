@@ -2,6 +2,8 @@
 
 参与现有服务器上的团队开发，从 [开发入口](docs/development.md) 和 [新成员开发手册](docs/development/onboarding.md) 开始。下方完整部署命令用于维护和新机器安装；团队成员在自己的代码副本工作，通过独立开发平台联调。
 
+工作区 Code 终端的 Esc、焦点或扩展加载异常，参见[工作区终端按键排查](docs/workspace-console-troubleshooting.md)，先核对实际运行版本与安装产物。
+
 玄甲是基于 [pwn.college DOJO](https://github.com/pwncollege/dojo) 代码基础演进的一体化网络安全课程与学生题目平台。平台直接扩展 `dojo_theme` 的 Jinja/Bootstrap 源码和成熟交互，不另建或仿写一套学生 UI；所有公开页面、产品文案和课程领域语言均统一为玄甲。身份、权限、业务 API、页面和运行时编排由同一个 CTFd 插件进程承担，并共享一个 PostgreSQL 与同一套 Docker/Kata/Nix 实验运行时。
 
 平台复用真实安全环境、动态答案判定、浏览器 Terminal/Code/Desktop、SSH、持久化 Home 和隔离工作区，并在同一应用内提供：
