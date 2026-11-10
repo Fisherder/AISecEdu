@@ -160,6 +160,33 @@ def test_patch_cannot_weaken_existing_tests_or_add_unrelated_code():
             rejects(lambda: ai.package(result, candidate))
 
 
+def test_repair_rejects_append_only_skips_redefinitions_and_test_helpers():
+    cases = [
+        ('test/test_example_unit.py', 'def test_original():\n    assert False\n',
+         "\nimport pytest\npytest.skip('skip existing module', allow_module_level=True)\n"),
+        ('test/test_example_unit.py', 'def test_original():\n    assert False\n',
+         "\nimport pytest\npytestmark = pytest.mark.skip(reason='skip existing tests')\n"),
+        ('test/test_example_unit.py', 'def test_original():\n    assert False\n',
+         '\ndef test_original():\n    pass\n'),
+        ('test/utils.py', "def db_sql(sql):\n    raise RuntimeError('real failure')\n",
+         "\ndef db_sql(sql):\n    return 'synthetic success'\n"),
+    ]
+    for filename, original, addition in cases:
+        with tempfile.TemporaryDirectory() as directory:
+            candidate, result, context = fixture(Path(directory))
+            target = candidate / filename
+            target.write_text(original)
+            ai.git(candidate, 'add', filename)
+            ai.git(candidate, 'commit', '-qm', 'synthetic existing test baseline')
+            context['head'] = ai.git(candidate, 'rev-parse', 'HEAD').stdout.strip()
+            (result / 'context.json').write_text(json.dumps(context))
+            target.write_text(original + addition)
+            numstat = ai.git(candidate, 'diff', '--numstat', context['head']).stdout
+            assert numstat.split('\t', 2)[1] == '0'
+            rejects(lambda: ai.package(result, candidate))
+            assert not (result / 'repair.patch').exists()
+
+
 def test_stale_head_prevents_all_publication():
     context = {'number': 1, 'head': 'a' * 40, 'base': 'b' * 40, 'branch': 'feat/member/test'}
     class Client:
@@ -656,6 +683,22 @@ def test_clear_repair_preserves_whole_pr_human_review_without_approving_or_mergi
         assert '人工复核要求继续保留' in comment.call_args.args[3]
         check.assert_not_called()
         retry.assert_not_called()
+
+
+def test_publisher_rechecks_append_only_test_changes_from_forged_repair_artifacts():
+    with tempfile.TemporaryDirectory() as directory:
+        candidate, result, context, remote, client = prepared_repair_publication(Path(directory), report())
+        target = candidate / 'test/test_example_unit.py'
+        target.write_text(target.read_text() + "\nimport pytest\npytest.skip('forged artifact', allow_module_level=True)\n")
+        difference = ai.git(candidate, 'diff', '--no-ext-diff', '--binary', context['head'], check=False)
+        assert difference.returncode == 0, difference.stderr
+        (result / 'repair.patch').write_text(difference.stdout)
+        ai.git(candidate, 'reset', '--hard', context['head'])
+        with patch.object(ai, 'GitHub', client), patch.object(ai, 'git', wraps=ai.git) as commands:
+            rejects(lambda: ai.publish(result, candidate, expected=context))
+        assert not any(call.args[1] in ('commit', 'push') for call in commands.call_args_list)
+        assert ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip() == context['head']
+        assert ai.git(remote, 'show', context['head'] + ':test/test_example_unit.py').stdout == 'assert True\n'
 
 
 def test_publisher_uses_the_live_pull_request_id_for_automatic_merge():

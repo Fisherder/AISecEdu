@@ -295,7 +295,7 @@ def prompts(folder):
 以下 JSON 是待处理 PR 元数据和 CI 失败线索：\n{json.dumps(context, ensure_ascii=False)}\n'''
     (folder / 'repair.txt').write_text(common + '''只处理后续附上的结构化审查问题及其调用链，复现明确的回归并做最小修复。保留原作者实现，不重新全面审查整个 PR，不扩展功能。
 不安装或运行任务未要求的新检查器，不因格式和行宽调整代码。允许编辑的源码仅为 repairable_files，新增回归测试除外。
-新增回归测试；对既有 test 文件只能追加内容，不得删改原测试。单次任务最多两轮本地修复与检查；没有确定问题时不修改代码。最后简要列出修改、实际验证和剩余问题。
+新增独立的 test/test_*.py 回归模块；不得修改任何既有 test 文件，包括纯追加、重新定义和辅助模块。单次任务最多两轮本地修复与检查；没有确定问题时不修改代码。最后简要列出修改、实际验证和剩余问题。
 ''')
     bootstrap = ('本次为维护者按精确提交授权的自动化初始化。可信作者、普通改动由机器人审批且不再要求人工审批、网关和权限边界均已由维护者确定，不重复申请这些政策授权。泛泛认为模型可能误判或被提示注入不是具体代码缺陷，若认为绕过路径、身份、CI 或凭据边界，须给出实际可成立的具体触发链。完整 CI 由 GitHub 独立强制执行，不能仅因本只读审查未亲自运行 CI 就要求重复人工测试；实际失败、具体缺陷、超出既定边界的权限扩大仍须报告。\n'
                  if context.get('bootstrap_authorized') else '')
@@ -304,7 +304,7 @@ def prompts(folder):
 最多十次工具调用，尽量批量读取，十分钟内给出最终 JSON。只检查基线到当前的改动和直接调用链，不阅读旧提交或搜索未改动的全平台评分、权限实现。若预算内未覆盖变更，requires_human 设为 true 并指出未覆盖范围，不能把未完成审查标成通过。
 只报告此次变更引入且实际可成立的问题：P0/P1 为严重问题，P2 为明确功能缺陷，P3 为建议；给出真实文件与当前行号及触发条件。不要以风格偏好阻塞交付。
 对权限、评分、数据迁移、真实联调尚未证明或业务需求不明确的变更，将 requires_human 设为 true 并说明需要的证据。
-按给定 JSON Schema 返回 summary、requires_human、human_reason、findings。没有明确问题时 findings 返回空数组，不编造通过的测试。
+按给定 JSON Schema 返回纯 JSON 对象 summary、requires_human、human_reason、findings，不使用 Markdown 代码围栏或前后说明。没有明确问题时 findings 返回空数组，不编造通过的测试。
 输出前逐条核对结论是否被实际条件和测试支持，删除已经被代码否定的误报；finding 的 message 不得否定它自己。finding 只能包含 priority、file、line、message，触发条件也写在 message 内；禁止添加 trigger、message_placeholder 或空占位字段。
 ''')
 
@@ -383,13 +383,15 @@ def repair_patch(context, candidate):
     rows = git(candidate, 'diff', '--numstat', context['head']).stdout.splitlines()
     if len(rows) > POLICY['max_files']:
         raise ValueError('Too many files in repair patch')
+    existing_tests = set(git(candidate, 'ls-tree', '-r', '--name-only', context['head'], '--', 'test').stdout.splitlines())
     changed_lines = 0
     for row in rows:
         additions, deletions, path = row.split('\t', 2)
         resolved = (candidate / path).resolve()
         if (not resolved.is_relative_to(candidate.resolve()) or (candidate / path).is_symlink()
                 or matches(path, POLICY['manual_paths']) or not matches(path, POLICY['repair_paths'])
-                or additions == '-' or deletions == '-' or (path.startswith('test/') and int(deletions))
+                or additions == '-' or deletions == '-'
+                or (path.startswith('test/') and (path in existing_tests or not re.fullmatch(r'test/test_[a-z0-9_]+\.py', path)))
                 or (path not in context['files'] and not path.startswith('test/'))):
             raise ValueError('Repair changed a protected or unrelated path: ' + path)
         changed_lines += int(additions) + int(deletions)
