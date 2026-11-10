@@ -34,7 +34,12 @@ for manifest in sorted(root.glob('*/package.json')):
         print(manifest.parent.name, type(error).__name__)
         continue
     if (package.get('publisher'), package.get('name')) == ('xuanjia', 'assignment-reader'):
-        print(manifest.parent.name, package.get('version'), package.get('keybindings'))
+        bindings = package.get('contributes', {}).get('keybindings', [])
+        print(manifest.parent.name, package.get('version'), [
+            (binding.get('key'), binding.get('command'))
+            for binding in bindings
+            if binding.get('key') == 'escape' or binding.get('command') == 'workbench.action.terminal.sendSequence'
+        ])
 index = root / 'extensions.json'
 if index.exists():
     for entry in json.loads(index.read_text()):
