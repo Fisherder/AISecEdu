@@ -422,12 +422,10 @@ modules:
   - id: hello
     challenges:
       - id: apple
-files:
-  - type: text
-    path: hello/apple/apple
-    content: |
-      #!/run/dojo/bin/bash
-      cat /flag
+        import:
+          dojo: example
+          module: hello
+          challenge: apple
 """
     dojo = create_dojo_yml(spec, session=admin_session)
 

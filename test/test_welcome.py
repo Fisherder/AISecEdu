@@ -99,7 +99,7 @@ def desktop_terminal(browser, user_id):
     )
     wait.until(lambda driver: driver.execute_script(
         "return window.AISecEduNoVNC.UI.rfb._rfbConnectionState === 'connected';"))
-    e = browser.find_element(By.ID, "noVNC_canvas")
+    e = browser.find_element(By.CSS_SELECTOR, "#noVNC_canvas, #noVNC_container canvas")
     e.click()
     browser.execute_script("window.AISecEduNoVNC.UI.rfb.focus();")
     wait.until(

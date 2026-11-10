@@ -176,16 +176,19 @@ def test_stale_head_prevents_all_publication():
 
 
 def publish_fixture(folder, *, requires_human=False, manual=False, failures=False, moving=False,
-                    feedback_changed=False, ci_changed=False, update=False, cached=False, paused=False, hidden_manual=False):
+                    feedback_changed=False, ci_changed=False, update=False, cached=False, paused=False, hidden_manual=False,
+                    forged_node=False):
     context = {'number': 1, 'node_id': 'synthetic-node', 'mode': 'update' if update else 'cached' if cached else 'analyze', 'head': 'a' * 40,
                'base': 'b' * 40,
                'branch': 'feat/member/test', 'model': 'synthetic', 'rounds': 0, 'signature': 'sig',
                'manual_reasons': ['protected path'] if manual else [],
                'failures': [{'name': 'audit', 'id': 3}] if failures else []}
-    pr = {'number': 1, 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
+    pr = {'number': 1, 'node_id': 'synthetic-node', 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
           'auto_merge': None, 'user': {'login': 'hunry-1-code'}, 'labels': [{'name': ai.PAUSE_LABEL}] if paused else [],
           'head': {'sha': context['head'], 'ref': context['branch'], 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
     context['signature'] = ai.state_signature(pr, context['failures'], [])
+    if forged_node:
+        context['node_id'] = 'different-pull-request'
     value = report()
     value['requires_human'] = requires_human
     value['human_reason'] = '业务判断' if requires_human else ''
@@ -291,7 +294,7 @@ def test_validated_repair_is_an_append_only_commit_on_the_original_remote_branch
         (candidate / 'dojo_plugin/example.py').write_text('value = 2\n')
         (result / 'repair.patch').write_text(ai.repair_patch(context, candidate))
         ai.git(candidate, 'reset', '--hard', context['head'])
-        pr = {'number': 1, 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
+        pr = {'number': 1, 'node_id': 'node', 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
               'user': {'login': 'hunry-1-code'},
               'head': {'sha': context['head'], 'ref': context['branch'], 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
         context['signature'] = ai.state_signature(pr, [], [])
@@ -584,7 +587,7 @@ def prepared_repair_publication(folder, value, rounds=0):
     (candidate / 'dojo_plugin/example.py').write_text('value = 2\n')
     (result / 'repair.patch').write_text(ai.repair_patch(context, candidate))
     ai.git(candidate, 'reset', '--hard', context['head'])
-    pr = {'number': 1, 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
+    pr = {'number': 1, 'node_id': 'node', 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
           'user': {'login': 'hunry-1-code'},
           'head': {'sha': context['head'], 'ref': context['branch'], 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
     context['signature'] = ai.state_signature(pr, [], [])
@@ -653,6 +656,15 @@ def test_clear_repair_preserves_whole_pr_human_review_without_approving_or_mergi
         assert '人工复核要求继续保留' in comment.call_args.args[3]
         check.assert_not_called()
         retry.assert_not_called()
+
+
+def test_publisher_uses_the_live_pull_request_id_for_automatic_merge():
+    with tempfile.TemporaryDirectory() as directory:
+        calls = publish_fixture(Path(directory), forged_node=True)
+    merges = [data for path, data, _ in calls if path == '/graphql' and 'enablePullRequestAutoMerge' in data['query']]
+    assert len(merges) == 1
+    assert merges[0]['variables']['id'] == 'synthetic-node'
+    assert merges[0]['variables']['head'] == 'a' * 40
 
 
 def test_base_sync_rejects_a_forged_artifact_merge_target_before_git_mutation():

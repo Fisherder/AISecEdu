@@ -67,6 +67,7 @@
       if(this.currentWorkspaceId!==this.workspaceId){this.currentWorkspaceId=this.workspaceId;this.close(false);this.copyText='';this.draftText='';this.ready=false;this.connected=false;this.nonce=nonce();for(const job of this.pending.values()){clearTimeout(job.timer);job.reject(Error('实验环境已变化，请重新操作。'));}this.pending.clear();}
     }
     bindFrame(){
+      this.peerOrigin=null;
       this.update();
       if(this.frame.dataset.workspaceService?.split(':')[0].trim()==='code')this.kind='code';else this.kind='desktop';
       try{
@@ -78,9 +79,15 @@
     }
     initializeFrame(){
       if(!this.frame?.contentWindow)return;
-      this.frame.contentWindow.postMessage({channel:CHANNEL,type:'init',nonce:this.nonce,kind:this.kind,workspaceId:this.workspaceId,readonly:this.readonly},this.frameOrigin());
+      for(const origin of this.frameOrigins())this.frame.contentWindow.postMessage({channel:CHANNEL,type:'init',nonce:this.nonce,kind:this.kind,workspaceId:this.workspaceId,readonly:this.readonly},origin);
     }
-    frameOrigin(){return new URL(this.frame.src,location.href).origin;}
+    frameOrigins(){
+      const url=new URL(this.frame.src,location.href),origins=[url.origin];
+      const node=url.pathname.match(/^\/workspace\/[a-f0-9]{12}:192\.168\.42\.(\d+)\//);
+      if(node&&Number(node[1])>1&&Number(node[1])<256){url.hostname='node-'+(Number(node[1])-1)+'.'+url.hostname;origins.push(url.origin);}
+      return origins;
+    }
+    frameOrigin(){return this.frameOrigins().includes(this.peerOrigin)?this.peerOrigin:new URL(this.frame.src,location.href).origin;}
     command(action,payload={}){
       if(this.adapter)return this.adapter.command(action,payload);
       if(!this.ready)return Promise.reject(Error('环境工具仍在连接，请稍后重试。'));
@@ -200,7 +207,7 @@
   }
   window.addEventListener('message',event=>{
     if(event.data?.channel!==CHANNEL)return;
-    for(const console of consoles)if(console.frame?.contentWindow===event.source&&event.origin===console.frameOrigin()){console.receive(event.data);break;}
+    for(const console of consoles)if(console.frame?.contentWindow===event.source&&console.frameOrigins().includes(event.origin)&&(event.data.type==='hello'||event.data.nonce===console.nonce)){console.peerOrigin=event.origin;console.receive(event.data);break;}
   });
   function attach(){for(const item of consoles){if(item.frame&&!document.contains(item.frame)){clearTimeout(item.statusTimer);item.close(false);item.copyText='';for(const job of item.pending.values()){clearTimeout(job.timer);job.reject(Error('环境面板已关闭。'));}item.pending.clear();consoles.delete(item);}}for(const frame of document.querySelectorAll('#workspace-iframe')){if(instances.has(frame))continue;const surface=frame.closest('.challenge-workspace-surface');if(!surface||frame.closest('.unit-detail-page,[data-workspace-presentation="launcher"]')||frame.closest('.challenge-workspace')?.querySelector('.workspace-controls')?.dataset.popout==='true')continue;const instance=new Console(surface,frame);instances.set(frame,instance);}}
   window.AISecEduRemoteConsole={attach,forElement:element=>{const workspace=element?.closest?.('.challenge-workspace');return workspace?instances.get(workspace.querySelector('#workspace-iframe')):null;},standalone:(surface,adapter)=>new Console(surface,null,adapter),channel:CHANNEL};

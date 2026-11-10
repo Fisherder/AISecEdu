@@ -446,6 +446,7 @@ def publish(folder, candidate):
             or pr['head']['repo']['full_name'] != client.repo or pr['user']['login'] not in POLICY['trusted_authors']):
         print('Stale or ineligible PR; no publication')
         return
+    context['node_id'] = pr['node_id']
     checks = client.repo_api(f'/commits/{context["head"]}/check-runs?per_page=100')['check_runs']
     if state_signature(pr, failed_checks(checks), review_feedback(client, pr['number'])) != context['signature']:
         print('Feedback, base or CI changed during review; requeue current PR without publishing stale conclusions')
