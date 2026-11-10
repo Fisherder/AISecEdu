@@ -24,6 +24,7 @@ def main():
         [sys.executable, '-m', 'unittest', 'discover', '-s', 'test', '-p', 'test_generation_release_unit.py'],
         [sys.executable, '-m', 'unittest', 'discover', '-s', 'test', '-p', 'test_team_control_unit.py'],
         [sys.executable, 'test/test_dojo_init_config_unit.py'],
+        [sys.executable, 'test/test_workspace_extension_package_unit.py'],
         [sys.executable, 'test/test_ai_pr_unit.py'],
         [sys.executable, 'test/test_app_test_layout_unit.py'],
         *([[sys.executable, 'test/test_courseware_quiz_unit.py']] if (ROOT / 'test/test_courseware_quiz_unit.py').is_file() else []),

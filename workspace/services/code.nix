@@ -61,7 +61,8 @@ let
 
   readerExtension = pkgs.runCommand "xuanjia-assignment-reader" {} ''
     mkdir -p $out/share/vscode/extensions/xuanjia.assignment-reader
-    cp ${./assignment-reader/package.json} ${./assignment-reader/extension.js} $out/share/vscode/extensions/xuanjia.assignment-reader/
+    cp ${./assignment-reader/package.json} $out/share/vscode/extensions/xuanjia.assignment-reader/package.json
+    cp ${./assignment-reader/extension.js} $out/share/vscode/extensions/xuanjia.assignment-reader/extension.js
   '';
 
   codeExtensions = pkgs.symlinkJoin {

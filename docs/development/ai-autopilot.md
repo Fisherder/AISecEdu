@@ -67,7 +67,7 @@ AI 不自动解决人的审查讨论，不部署共享平台或生产，不把�
 
 `make dev-check` 包含调度与发布边界的离线回归、启动配置回归，以及桌面桥接父窗口来源、nonce 和本地脚本加载的协议回归；课件模块存在时也执行其单测。Team quick checks 还会在课件浏览器组件测试存在时安装固定 Playwright 并执行该测试。完整 DOJO CI 继续作为独立必需检查。
 
-代码工作区的 Esc 由托管扩展 `xuanjia.assignment-reader` 的静态按键声明交给 VS Code 内置 `workbench.action.terminal.sendSequence`，只向普通聚焦终端发送一个 ESC 字节，不在 DOM 桥接中合成键盘事件。终端查找、文本选择、建议和辅助阅读等界面保留原有 Esc 行为。此修复需要更新工作区 profile，并在新工作区实际核验；只重启 Web 服务不能更新已构建的托管扩展。协议检查核对声明与资源副本，真实 Vim/Esc/结果文件测试仍由完整 CI 执行。
+代码工作区的 Esc 由托管扩展 `xuanjia.assignment-reader` 的静态按键声明交给 VS Code 内置 `workbench.action.terminal.sendSequence`，只向普通聚焦终端发送一个 ESC 字节，不在 DOM 桥接中合成键盘事件。终端查找、文本选择、建议和辅助阅读等界面保留原有 Esc 行为。扩展安装必须显式生成规范文件名 `package.json` 和 `extension.js`，不能把 Nix store 路径的哈希基名直接复制到扩展目录；快速回归执行真实安装脚本段并通过托管扩展索引引导验证。此修复需要更新工作区 profile，并在新工作区实际核验；只重启 Web 服务不能更新已构建的托管扩展。协议检查核对声明与资源副本，真实 Vim/Esc/结果文件测试仍由完整 CI 执行。
 
 完整 CI 按 `ops/team/app_test_manifest.json` 分组：依赖 CTFd 的完整模块和混合文件中的指定用例，在实际 CTFd 容器及请求上下文中运行；其余单测、HTTP 和浏览器用例在客户端镜像运行。应用阶段使用冻结源码、真实应用依赖及同一隔离实例的合成数据库，保留所需 HTTP 夹具；客户端会明确报告已交给应用阶段的用例。两部分均为必需步骤，任一步失败都阻止合并。`ops/team/app_units.py` 与应用 Runner 只接受 `coverage` 环境。快速检查核验分组清单及直接导入 CTFd 的用例，防止遗漏或重复分组。
 
