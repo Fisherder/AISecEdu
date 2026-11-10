@@ -26,6 +26,8 @@ def vscode_terminal(browser):
         (frame := driver.find_element(By.ID, "workspace-iframe"))
         and ("folder=%2Fchallenge" in (frame.get_attribute("src") or "")
              or "folder=/challenge" in (frame.get_attribute("src") or ""))
+        and frame.get_attribute("data-workspace-ready") == "true"
+        and frame.get_attribute("aria-busy") == "false"
         and frame))
     iframe_src = workspace_iframe.get_attribute("src") or ""
     assert "folder=%2Fchallenge" in iframe_src or "folder=/challenge" in iframe_src
@@ -53,27 +55,17 @@ def vscode_terminal(browser):
 
     surface = wait_for_selector(".monaco-workbench", "div.getting-started-step", "button.getting-started-step")
     surface.click()
-    def send_terminal_shortcut():
-        browser.execute_script("if (document.activeElement) document.activeElement.blur();")
-        ActionChains(browser).key_down(Keys.CONTROL).key_down(Keys.SHIFT).send_keys("`").key_up(Keys.SHIFT).key_up(Keys.CONTROL).perform()
-
-    send_terminal_shortcut()
-    try:
-        terminal = WebDriverWait(browser, 10).until(
-            lambda driver: (driver.find_elements(By.CSS_SELECTOR, "textarea.xterm-helper-textarea") or [None])[-1])
-    except TimeoutException:
-        browser.execute_script("if (document.activeElement) document.activeElement.blur();")
-        ActionChains(browser).send_keys(Keys.F1).perform()
-        palette = WebDriverWait(browser, 10).until(EC.visibility_of_element_located(
-            (By.CSS_SELECTOR, ".quick-input-widget .quick-input-box input")))
-        palette.send_keys(Keys.CONTROL, "a", Keys.NULL, ">Terminal: Create New Terminal")
-        WebDriverWait(browser, 10).until(lambda driver: any(
-            "Terminal: Create New Terminal" in item.text
-            for item in driver.find_elements(By.CSS_SELECTOR, ".quick-input-list .monaco-list-row")))
-        palette.send_keys(Keys.ENTER)
-        terminal = wait_for_selector("textarea.xterm-helper-textarea")
-    time.sleep(2)
-    browser.execute_script("arguments[0].focus();", terminal)
+    ActionChains(browser).send_keys(Keys.F1).perform()
+    WebDriverWait(browser, 10).until(EC.visibility_of_element_located(
+        (By.CSS_SELECTOR, ".quick-input-widget .quick-input-box input")))
+    ActionChains(browser).key_down(Keys.CONTROL).send_keys("a").key_up(Keys.CONTROL) \
+        .send_keys(">Terminal: Focus Terminal").perform()
+    WebDriverWait(browser, 10).until(lambda driver: any(
+        "Terminal: Focus Terminal" in item.text
+        for item in driver.find_elements(By.CSS_SELECTOR, ".quick-input-list .monaco-list-row")))
+    ActionChains(browser).send_keys(Keys.ENTER).perform()
+    terminal = wait.until(lambda driver: driver.execute_script(
+        "const input=document.activeElement;return input?.matches('textarea.xterm-helper-textarea')?input:null;"))
 
     yield terminal
 
@@ -311,6 +303,14 @@ def test_welcome_vscode(random_user_browser, random_user_name, welcome_dojo):
 
     challenge_start(random_user_browser, idx)
     with vscode_terminal(random_user_browser) as vs:
+        random_user_browser.execute_script("""
+            window.__workspaceKeyEvents=[];
+            for(const type of ['keydown','focusin','blur']) window.addEventListener(type,event=>{
+                window.__workspaceKeyEvents.push({type,key:event.key,code:event.code,
+                    trusted:event.isTrusted,target:event.target?.className,time:performance.now()});
+                if(window.__workspaceKeyEvents.length>60)window.__workspaceKeyEvents.shift();
+            },true);
+        """)
         vs.send_keys("vim -Nu NONE -n /tmp/code-escape-check\n")
         wait_for_vim(random_user_browser, random_user_name)
         time.sleep(2)
@@ -318,7 +318,13 @@ def test_welcome_vscode(random_user_browser, random_user_name, welcome_dojo):
         vs.send_keys(Keys.ESCAPE)
         vs.send_keys(":wq\n")
         time.sleep(2)
-        assert workspace_run("cat /tmp/code-escape-check", user=random_user_name).stdout.strip() == "CODE_ESCAPE_OK"
+        result = workspace_run("cat /tmp/code-escape-check", user=random_user_name, check=False)
+        if result.returncode or result.stdout.strip() != "CODE_ESCAPE_OK":
+            print("VSCODE_KEYBOARD_DIAGNOSTIC", random_user_browser.execute_script(
+                "return {events:window.__workspaceKeyEvents,bridge:document.documentElement.dataset.consoleBridge,"
+                "kind:window.XuanjiaConsoleKind,active:document.activeElement?.outerHTML.slice(0,1000)};"))
+            print(random_user_browser.get_full_page_screenshot_as_base64())
+        assert result.returncode == 0 and result.stdout.strip() == "CODE_ESCAPE_OK", result.stderr
         vs.send_keys("/challenge/solve | tee /tmp/out\n")
         time.sleep(5)
         flag = read_flag(random_user_name)
