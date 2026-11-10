@@ -354,6 +354,10 @@ jobs:
       - name: Publish reviewed result against the unchanged head
         env:
           GH_TOKEN: ${{ github.token }}
+          AI_EXPECTED_NUMBER: ${{ needs.analyze.outputs.number }}
+          AI_EXPECTED_HEAD: ${{ needs.analyze.outputs.head }}
+          AI_EXPECTED_BASE: ${{ needs.analyze.outputs.base }}
+          AI_EXPECTED_BRANCH: ${{ needs.analyze.outputs.branch }}
         run: |
           git -C candidate config user.name 'github-actions[bot]'
           git -C candidate config user.email '41898282+github-actions[bot]@users.noreply.github.com'

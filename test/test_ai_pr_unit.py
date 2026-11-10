@@ -129,7 +129,7 @@ def fixture(folder):
     head = ai.git(candidate, 'rev-parse', 'HEAD').stdout.strip()
     result = folder / 'result'
     result.mkdir()
-    context = {'mode': 'analyze', 'head': head, 'files': ['dojo_plugin/example.py', 'test/test_example_unit.py']}
+    context = {'mode': 'analyze', 'head': head, 'base': 'b' * 40, 'files': ['dojo_plugin/example.py', 'test/test_example_unit.py']}
     (result / 'context.json').write_text(json.dumps(context))
     (result / 'review.json').write_text(json.dumps(report()))
     return candidate, result, context
@@ -161,7 +161,7 @@ def test_patch_cannot_weaken_existing_tests_or_add_unrelated_code():
 
 
 def test_stale_head_prevents_all_publication():
-    context = {'number': 1, 'head': 'a' * 40, 'branch': 'feat/member/test'}
+    context = {'number': 1, 'head': 'a' * 40, 'base': 'b' * 40, 'branch': 'feat/member/test'}
     class Client:
         repo = 'Fisherder/AISecEdu'
         def repo_api(self, path, data=None, method=None):
@@ -172,15 +172,15 @@ def test_stale_head_prevents_all_publication():
         result = Path(directory)
         (result / 'context.json').write_text(json.dumps(context))
         with patch.object(ai, 'GitHub', Client), patch.object(ai, 'git', side_effect=AssertionError('No git mutation allowed')):
-            ai.publish(result, result / 'candidate')
+            ai.publish(result, result / 'candidate', expected=context)
 
 
 def publish_fixture(folder, *, requires_human=False, manual=False, failures=False, moving=False,
                     feedback_changed=False, ci_changed=False, update=False, cached=False, paused=False, hidden_manual=False,
-                    forged_node=False):
+                    forged_node=False, branch='feat/member/test'):
     context = {'number': 1, 'node_id': 'synthetic-node', 'mode': 'update' if update else 'cached' if cached else 'analyze', 'head': 'a' * 40,
                'base': 'b' * 40,
-               'branch': 'feat/member/test', 'model': 'synthetic', 'rounds': 0, 'signature': 'sig',
+               'branch': branch, 'model': 'synthetic', 'rounds': 0, 'signature': 'sig',
                'manual_reasons': ['protected path'] if manual else [],
                'failures': [{'name': 'audit', 'id': 3}] if failures else []}
     pr = {'number': 1, 'node_id': 'synthetic-node', 'state': 'open', 'draft': False, 'base': {'ref': 'develop', 'sha': 'b' * 40},
@@ -216,7 +216,7 @@ def publish_fixture(folder, *, requires_human=False, manual=False, failures=Fals
                 return [{'id': 7, 'user': {'login': 'Fisherder'}, 'body': '新的复核意见', 'updated_at': 'synthetic'}]
             return []
     with patch.object(ai, 'GitHub', Client):
-        ai.publish(folder, folder / 'candidate')
+        ai.publish(folder, folder / 'candidate', expected=context)
     return calls
 
 
@@ -277,7 +277,7 @@ def test_publisher_independently_rejects_tampered_patch_artifacts_before_commit(
                                 {'commit': {'message': ai.AUTO_COMMIT + 'round 2'}}]
                     return [{'filename': 'dojo_plugin/example.py'}] if path.endswith('/files') else []
             with patch.object(ai, 'GitHub', Client), patch.object(ai, 'git', wraps=ai.git) as commands:
-                rejects(lambda: ai.publish(result, candidate))
+                rejects(lambda: ai.publish(result, candidate, expected=context))
                 assert not any(call.args[1] in ('commit', 'push') for call in commands.call_args_list), kind
 
 
@@ -307,7 +307,7 @@ def test_validated_repair_is_an_append_only_commit_on_the_original_remote_branch
             def pages(self, path):
                 return [{'filename': 'dojo_plugin/example.py'}] if path.endswith('/files') else []
         with patch.object(ai, 'GitHub', Client), patch.object(ai, 'post_comment') as comment:
-            ai.publish(result, candidate)
+            ai.publish(result, candidate, expected=context)
         tip = ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip()
         assert tip != context['head']
         assert ai.git(remote, 'rev-parse', tip + '^').stdout.strip() == context['head']
@@ -625,7 +625,7 @@ def test_independent_blocking_review_prevents_patch_application_commit_and_push(
                     with patch.object(ai, 'GitHub', client), patch.object(ai, 'record_check') as check, \
                             patch.object(ai, 'post_comment') as comment, patch.object(ai, 'dispatch_pr') as retry, \
                             patch.object(ai, 'git', wraps=ai.git) as commands:
-                        ai.publish(result, candidate)
+                        ai.publish(result, candidate, expected=context)
                         commands.assert_not_called()
                     assert ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip() == context['head']
                     assert ai.git(candidate, 'status', '--porcelain').stdout == ''
@@ -647,7 +647,7 @@ def test_clear_repair_preserves_whole_pr_human_review_without_approving_or_mergi
         candidate, result, context, remote, client = prepared_repair_publication(Path(directory), value)
         with patch.object(ai, 'GitHub', client), patch.object(ai, 'post_comment') as comment, \
                 patch.object(ai, 'record_check') as check, patch.object(ai, 'dispatch_pr') as retry:
-            ai.publish(result, candidate)
+            ai.publish(result, candidate, expected=context)
         tip = ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip()
         assert tip != context['head']
         assert ai.git(remote, 'rev-parse', tip + '^').stdout.strip() == context['head']
@@ -701,11 +701,69 @@ def test_base_sync_rejects_a_forged_artifact_merge_target_before_git_mutation():
                 return []
 
         with patch.object(ai, 'GitHub', Client), patch.object(ai, 'git', wraps=ai.git) as commands:
-            rejects(lambda: ai.publish(result, candidate))
+            rejects(lambda: ai.publish(result, candidate, expected=context))
             commands.assert_not_called()
         assert ai.git(remote, 'rev-parse', 'refs/heads/' + branch).stdout.strip() == context['head']
         assert ai.git(candidate, 'status', '--porcelain').stdout == ''
         assert not (candidate / 'AGENTS.md').exists()
+
+
+def test_publication_artifact_cannot_switch_the_workflow_pull_request_or_refs():
+    for key, forged in (('number', 99), ('head', 'f' * 40), ('base', 'f' * 40), ('branch', 'feat/another/task')):
+        with tempfile.TemporaryDirectory() as directory:
+            candidate, result, context, remote, _ = prepared_repair_publication(Path(directory), report())
+            expected = dict(context)
+            (result / 'context.json').write_text(json.dumps({**context, key: forged}))
+            with patch.object(ai, 'GitHub', side_effect=AssertionError('Unbound artifact cannot access publication API')), \
+                    patch.object(ai, 'git', side_effect=AssertionError('Unbound artifact cannot mutate git')):
+                rejects(lambda: ai.publish(result, candidate, expected=expected))
+            assert ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip() == context['head']
+            assert ai.git(candidate, 'status', '--porcelain').stdout == ''
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        (folder / 'context.json').write_text(json.dumps({'number': 1}))
+        rejects(lambda: ai.publish(folder, folder / 'candidate', expected={}))
+
+
+def test_publisher_independently_rejects_release_branch_pull_requests():
+    for branch in ('main', 'deployment/example', 'develop'):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(ai, 'git', side_effect=AssertionError('Release branches cannot change git')):
+            calls = publish_fixture(Path(directory), branch=branch)
+        assert all(data is None and method is None for _, data, method in calls)
+
+
+def test_failure_artifact_cannot_redirect_pr_or_check_updates():
+    calls = []
+
+    class Client:
+        repo = 'Fisherder/AISecEdu'
+
+        def repo_api(self, path, data=None, method=None):
+            calls.append((path, data, method))
+            assert path in ('/pulls/1', '/check-runs/17')
+            if path == '/pulls/1':
+                return {'number': 1, 'node_id': 'actual-node', 'state': 'open', 'draft': False,
+                        'base': {'ref': 'develop'}, 'user': {'login': 'hunry-1-code'},
+                        'head': {'sha': 'a' * 40, 'ref': 'feat/member/task', 'repo': {'full_name': self.repo}}}
+            return {}
+
+        def pages(self, path):
+            assert path == '/pulls/1/reviews'
+            return []
+
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        (folder / 'context.json').write_text(json.dumps({
+            'number': 2, 'head': 'b' * 40, 'node_id': 'forged-node', 'check_id': 999,
+            'model': 'synthetic', 'manual_reasons': [], 'failures': [], 'signature': '', 'rounds': 0,
+        }))
+        with patch.dict(os.environ, {'AI_FAILURE_PR': '1', 'AI_FAILURE_HEAD': 'a' * 40, 'AI_CHECK_ID': '17'}), \
+                patch.object(ai, 'GitHub', Client), patch.object(ai, 'post_comment') as comment:
+            ai.failure(folder)
+        assert comment.call_args.args[1]['number'] == 1
+        assert comment.call_args.args[1]['node_id'] == 'actual-node'
+        assert calls[-1][0] == '/check-runs/17' and calls[-1][1]['conclusion'] == 'failure'
 
 
 if __name__ == '__main__':

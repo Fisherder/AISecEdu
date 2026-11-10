@@ -437,13 +437,19 @@ def record_check(client, context, status, title, summary, conclusion=None):
     return result.get('id') if isinstance(result, dict) else None
 
 
-def publish(folder, candidate):
+def publish(folder, candidate, *, expected):
     context = json.loads((folder / 'context.json').read_text())
+    binding_fields = ('number', 'head', 'base', 'branch')
+    if not all(expected.get(key) for key in binding_fields) or any(
+        str(context.get(key, '')) != str(expected[key]) for key in binding_fields
+    ):
+        raise ValueError('Publication artifact does not match trusted workflow outputs')
     client = GitHub()
     pr = client.repo_api(f'/pulls/{context["number"]}')
     if (pr['state'] != 'open' or pr['draft'] or pr['base']['ref'] != POLICY['base_branch']
             or pr['head']['sha'] != context['head'] or pr['head']['ref'] != context['branch']
-            or pr['head']['repo']['full_name'] != client.repo or pr['user']['login'] not in POLICY['trusted_authors']):
+            or pr['head']['repo']['full_name'] != client.repo or pr['user']['login'] not in POLICY['trusted_authors']
+            or not pr['head']['ref'].startswith(('feat/', 'fix/', 'team/'))):
         print('Stale or ineligible PR; no publication')
         return
     context['node_id'] = pr['node_id']
@@ -598,6 +604,10 @@ def failure(folder):
     context_path = folder / 'context.json'
     if context_path.exists():
         context = json.loads(context_path.read_text())
+        if os.environ.get('AI_FAILURE_PR'):
+            context.update(number=int(os.environ['AI_FAILURE_PR']),
+                           head=os.environ.get('AI_FAILURE_HEAD', ''),
+                           check_id=os.environ.get('AI_CHECK_ID') or None)
     else:
         number = os.environ.get('AI_FAILURE_PR')
         if not number:
@@ -644,7 +654,10 @@ def main():
         elif args.command == 'package':
             package(args.folder, args.candidate)
         elif args.command == 'publish':
-            publish(args.folder, args.candidate)
+            publish(args.folder, args.candidate, expected={
+                key: os.environ.get('AI_EXPECTED_' + key.upper(), '')
+                for key in ('number', 'head', 'base', 'branch')
+            })
         elif args.command == 'failure':
             failure(args.folder)
         else:
