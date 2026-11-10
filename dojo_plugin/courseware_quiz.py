@@ -53,7 +53,17 @@ def _evidence_text(value):
 
 
 def _stem_key(value):
-    return "".join(char for char in _evidence_text(value).casefold() if char.isalnum())
+    text = _evidence_text(value).casefold()
+    kept, index = [], 0
+    while index < len(text):
+        if text.startswith("!=", index):
+            kept.append("!=")
+            index += 2
+            continue
+        char, index = text[index], index + 1
+        if char.isalnum() or char in "$%&*+-/<=>^|~_" or unicodedata.category(char) in ("Sm", "Sc"):
+            kept.append(char)
+    return "".join(kept)
 
 
 def _digest(value):
