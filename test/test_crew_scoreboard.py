@@ -426,7 +426,7 @@ files:
   - type: text
     path: hello/apple/apple
     content: |
-      #!/opt/pwn.college/bash
+      #!/run/dojo/bin/bash
       cat /flag
 """
     dojo = create_dojo_yml(spec, session=admin_session)

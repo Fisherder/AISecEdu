@@ -42,5 +42,40 @@ const vm = require('node:vm');
     await receive({source: parent, origin: 'https://later.example', data});
     assert.equal(imports.length, 1);
     assert.equal(window.XuanjiaConsoleParentOrigin, 'http://isolated-ci.example:8080');
+    const proxy = fs.readFileSync(path.resolve(__dirname, '../../nginx/templates/workspace.conf.template'), 'utf8');
+    assert.doesNotMatch(proxy, /if\s*\([^\n]*aisecedu-workspace-bridge/,
+        'The workspace proxy must serve the bundled bridge instead of redirecting it to the legacy bootstrap');
+    const frameListeners = new Map(), replies = [];
+    const frameParent = {postMessage: (message, origin) => replies.push({message, origin})};
+    const document = {documentElement: {dataset: {}, classList: {add() {}}},
+        addEventListener() {}, createElement: () => ({}), head: {append() {}}};
+    const frameWindow = {XuanjiaConsoleKind: 'code', XuanjiaConsoleParentOrigin: 'https://stale.example',
+        addEventListener: (name, handler) => frameListeners.set(name, handler)};
+    const frame = fs.readFileSync(path.resolve(__dirname, '../../workspace/services/remote-console-frame.js'), 'utf8');
+    vm.runInNewContext(frame, {window: frameWindow, parent: frameParent, document,
+        location: {origin: 'https://workspace.example'}, navigator: {clipboard: {}},
+        setInterval() {}, setTimeout, clearTimeout, TextEncoder});
+    assert.equal(replies.length, 1);assert.equal(replies[0].message.type, 'hello');
+    const initializeFrame = frameListeners.get('message');
+    const init = {...data, kind: 'code', readonly: true};
+    for (const event of [
+        {source: {}, origin: 'https://platform.example', data: init},
+        {source: frameParent, origin: 'null', data: init},
+        {source: frameParent, origin: 'https://platform.example', data: {...init, nonce: 'bad'}},
+    ]) await initializeFrame(event);
+    assert.equal(document.documentElement.dataset.consoleBridge, 'loaded');
+    await initializeFrame({source: frameParent, origin: 'https://platform.example', data: init});
+    assert.equal(document.documentElement.dataset.consoleBridge, 'ready');
+    assert.equal(replies.at(-1).origin, 'https://platform.example');
+    assert.equal(replies.at(-1).message.readonly, true);
+    const count = replies.length;
+    await initializeFrame({source: frameParent, origin: 'https://later.example', data: init});
+    await initializeFrame({source: frameParent, origin: 'https://platform.example',
+        data: {...init, type: 'command', action: 'paste', nonce: 'b'.repeat(32)}});
+    assert.equal(replies.length, count);
+    await initializeFrame({source: frameParent, origin: 'https://platform.example',
+        data: {...init, type: 'command', action: 'paste', request: 'readonly-check', payload: {text: 'denied'}}});
+    assert.equal(replies.at(-1).message.request, 'readonly-check');
+    assert.match(replies.at(-1).message.error, /只读/);
     console.log('Desktop bootstrap origin, nonce, bundled code and single initialization: PASS');
 })().catch(error => {console.error(error);process.exitCode = 1;});

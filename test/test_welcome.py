@@ -94,7 +94,8 @@ def desktop_terminal(browser, user_id):
         lambda driver: driver.execute_script(
             "return document.documentElement.dataset.consoleBridge;"
         )
-        == "ready"
+        == "ready",
+        message="Desktop bridge did not initialize",
     )
     wait.until(lambda driver: driver.execute_script(
         "return window.AISecEduNoVNC.UI.rfb._rfbConnectionState === 'connected';"))
@@ -211,6 +212,7 @@ def lecture_player(browser):
             return WebDriverWait(browser, 15).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
         except TimeoutException:
             if attempt:
+                print("LECTURE_FRAME_DIAGNOSTIC", browser.current_url, browser.page_source[:12000])
                 raise
             browser.execute_script("window.location.reload();")
 
@@ -244,6 +246,17 @@ def workspace_clipboard(browser, text=None):
     """, text)
     assert result["ok"], result
     return result["text"]
+
+
+def wait_for_vim(browser, user):
+    def running(_driver):
+        return workspace_run("pgrep -u 1000 -x vim || true", user=user).stdout.strip()
+    try:
+        WebDriverWait(browser, 15).until(running)
+    except TimeoutException:
+        print("TERMINAL_DIAGNOSTIC", browser.execute_script(
+            "return Array.from(document.querySelectorAll('.xterm-screen')).map(node => node.innerText);"))
+        raise
 
 
 def test_welcome_desktop(random_user_browser, random_user_name, welcome_dojo):
@@ -299,6 +312,7 @@ def test_welcome_vscode(random_user_browser, random_user_name, welcome_dojo):
     challenge_start(random_user_browser, idx)
     with vscode_terminal(random_user_browser) as vs:
         vs.send_keys("vim -Nu NONE -n /tmp/code-escape-check\n")
+        wait_for_vim(random_user_browser, random_user_name)
         time.sleep(2)
         vs.send_keys("iCODE_ESCAPE_OK")
         vs.send_keys(Keys.ESCAPE)

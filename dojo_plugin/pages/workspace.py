@@ -422,9 +422,10 @@ register_pages(workspace)
 
 @workspace.route("/workspace/console-bootstrap.js")
 def console_bootstrap():
+    from flask import current_app
     origin = os.environ.get("AISECEDU_PUBLIC_ORIGIN") or json.loads((Path(__file__).resolve().parents[1]/"agent_runtime/assets/console-origin.json").read_text())["publicOrigin"]
     source = "window.XuanjiaConsoleParentOrigin=" + json.dumps(origin) + ";"
-    source += "if(!window.XuanjiaConsoleFrame){const s=document.createElement('script');s.src=window.XuanjiaConsoleParentOrigin+'/themes/dojo_theme/static/js/dojo/remote-console-frame.js?v=console-fixed-toggle-20261023-1';s.dataset.consoleFrame='1';document.head.append(s);}"
+    source += (Path(current_app.root_path)/"themes/dojo_theme/static/js/dojo/remote-console-frame.js").read_text()
     response = make_response(source)
     response.headers["Content-Type"] = "application/javascript; charset=utf-8"
     response.headers["Cache-Control"] = "no-cache"
