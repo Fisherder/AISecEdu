@@ -5,7 +5,7 @@ import string
 import random
 from urllib.parse import urlsplit
 
-from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException, TimeoutException
+from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException, TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -323,7 +323,11 @@ def test_welcome_vscode(random_user_browser, random_user_name, welcome_dojo):
             print("VSCODE_KEYBOARD_DIAGNOSTIC", random_user_browser.execute_script(
                 "return {events:window.__workspaceKeyEvents,bridge:document.documentElement.dataset.consoleBridge,"
                 "kind:window.XuanjiaConsoleKind,active:document.activeElement?.outerHTML.slice(0,1000)};"))
-            print(random_user_browser.get_full_page_screenshot_as_base64())
+            try:
+                random_user_browser.switch_to.default_content()
+                print(random_user_browser.get_screenshot_as_base64())
+            except WebDriverException as error:
+                print("VSCODE_SCREENSHOT_UNAVAILABLE", str(error)[:300])
         assert result.returncode == 0 and result.stdout.strip() == "CODE_ESCAPE_OK", result.stderr
         vs.send_keys("/challenge/solve | tee /tmp/out\n")
         time.sleep(5)

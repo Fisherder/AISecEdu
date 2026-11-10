@@ -103,11 +103,6 @@
     if(!event.isTrusted)return;
     const mod=event.ctrlKey||event.metaKey,key=event.key.toLowerCase();
     if(kind==='code') {
-      if(key==='escape'&&!mod&&!event.altKey&&event.target?.classList?.contains('xterm-helper-textarea')){
-        event.preventDefault();event.stopImmediatePropagation();
-        event.target.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',keyCode:27,which:27,bubbles:true,cancelable:true,shiftKey:event.shiftKey}));
-        return;
-      }
       if(mod&&key==='v'&&inputTarget(document.activeElement))event.stopImmediatePropagation();
       return;
     }

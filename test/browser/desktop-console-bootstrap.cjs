@@ -54,7 +54,6 @@ const vm = require('node:vm');
     const frame = fs.readFileSync(path.resolve(__dirname, '../../workspace/services/remote-console-frame.js'), 'utf8');
     vm.runInNewContext(frame, {window: frameWindow, parent: frameParent, document,
         location: {origin: 'https://workspace.example'}, navigator: {clipboard: {}},
-        KeyboardEvent: class {constructor(type, values) {this.type = type;Object.assign(this, values);}},
         setInterval() {}, setTimeout, clearTimeout, TextEncoder});
     assert.equal(replies.length, 1);assert.equal(replies[0].message.type, 'hello');
     const initializeFrame = frameListeners.get('message');
@@ -87,8 +86,13 @@ const vm = require('node:vm');
         dispatchEvent: event => {delivered.push(event);frameListeners.get('keydown')(event);}};
     frameListeners.get('keydown')({key: 'Escape', isTrusted: true, target,
         preventDefault: () => effects.push('prevented'), stopImmediatePropagation: () => effects.push('stopped')});
-    assert.deepEqual(effects, ['prevented', 'stopped']);assert.equal(delivered.length, 1);
-    assert.equal(delivered[0].key, 'Escape');assert.equal(delivered[0].keyCode, 27);
+    assert.deepEqual(effects, []);assert.equal(delivered.length, 0);
+    const reader = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../workspace/services/assignment-reader/package.json'), 'utf8'));
+    const escape = reader.contributes.keybindings.find(binding => binding.key === 'escape');
+    assert.equal(escape.command, 'workbench.action.terminal.sendSequence');
+    assert.equal(escape.args.text, '\x1b');
+    for (const scope of ['terminalFocus', '!terminalFindVisible', '!terminalTextSelected', '!terminalSuggestWidgetVisible'])
+        assert(escape.when.split(' && ').includes(scope));
     const parentSource = fs.readFileSync(path.resolve(__dirname, '../../dojo_theme/static/js/dojo/remote-console.js'), 'utf8');
     const parentWindow = {addEventListener() {}};
     vm.runInNewContext(parentSource.replace('window.AISecEduRemoteConsole={', 'window.TestConsole=Console;window.AISecEduRemoteConsole={'), {
