@@ -2,11 +2,14 @@
 
 FROM ubuntu:24.04 AS kata-builder
 
+ARG UBUNTU_ARCHIVE_MIRROR=http://archive.ubuntu.com/ubuntu
 ENV KATA_VERSION=3.19.1
 
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i "s|http://archive.ubuntu.com/ubuntu|${UBUNTU_ARCHIVE_MIRROR}|g" /etc/apt/sources.list.d/ubuntu.sources \
+    && printf 'Acquire::Retries "3";\nAPT::Update::Error-Mode "any";\n' > /etc/apt/apt.conf.d/80-reliable-downloads \
+    && apt-get update && apt-get install -y --no-install-recommends \
       build-essential bc flex bison libssl-dev libelf-dev dwarves \
       curl ca-certificates yq \
     && rm -rf /var/lib/apt/lists/*
@@ -40,6 +43,7 @@ EOF
 
 FROM ubuntu:24.04 AS dojo
 
+ARG UBUNTU_ARCHIVE_MIRROR=http://archive.ubuntu.com/ubuntu
 SHELL ["/bin/bash", "-ceox", "pipefail"]
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -47,6 +51,8 @@ ENV LC_CTYPE=C.UTF-8
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    sed -i "s|http://archive.ubuntu.com/ubuntu|${UBUNTU_ARCHIVE_MIRROR}|g" /etc/apt/sources.list.d/ubuntu.sources && \
+    printf 'Acquire::Retries "3";\nAPT::Update::Error-Mode "any";\n' > /etc/apt/apt.conf.d/80-reliable-downloads && \
     apt-get update && xargs apt-get install -yqq <<EOF && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
         build-essential

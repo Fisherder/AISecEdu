@@ -8,7 +8,7 @@ from types import SimpleNamespace
 def load_policy():
     path = pathlib.Path(__file__).resolve().parents[1] / 'dojo_plugin/api/v1/debate.py'
     tree = ast.parse(path.read_text())
-    selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {'_access', '_view', '_request_key'}]
+    selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {'_access', '_view', '_request_key', '_phase_index'}]
     namespace = {'time': time, 'ScopeError': PermissionError, 're': __import__('re')}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(path), 'exec'), namespace)
     return namespace

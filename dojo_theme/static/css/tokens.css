@@ -1,4 +1,6 @@
 :root {
+  --ae-font-sans: "Space Grotesk", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ae-font-display: var(--ae-font-sans);
   --ae-color-neutral-0: #ffffff;
   --ae-color-neutral-50: #f7f9f7;
   --ae-color-neutral-100: #eef2ed;

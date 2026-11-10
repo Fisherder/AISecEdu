@@ -1,15 +1,17 @@
 import random
+import pathlib
 import re
 import string
 import time
 
 import pytest
 
-from utils import DOJO_URL, dojo_run, login, create_dojo_yml, start_challenge, solve_challenge, workspace_run, wait_for_background_worker, remove_workspace_container
+from utils import DOJO_URL, dojo_run, login, browser_login, create_dojo_yml, start_challenge, solve_challenge, workspace_run, wait_for_background_worker, remove_workspace_container
 
 
 CREW_DOJO_SPEC = """
 id: crew-dojo
+type: public
 name: Crew Dojo
 modules:
   - id: hello
@@ -45,7 +47,7 @@ def register_user(tag=None, name_prefix=None):
 
 
 def join_dojo(session, dojo):
-    response = session.get(f"{DOJO_URL}/dojo/{dojo}/join/")
+    response = session.post(f"{DOJO_URL}/dojo/{dojo}/join/", json={})
     assert response.status_code == 200
 
 
@@ -54,13 +56,6 @@ def solve(dojo, user_name, session, challenge):
     result = workspace_run(f"/challenge/{challenge}", user=user_name)
     flag = re.search(r"pwn\.college{\S+}", result.stdout).group()
     solve_challenge(dojo, "hello", challenge, session=session, flag=flag)
-
-
-def browser_login(browser, name, password):
-    browser.get(f"{DOJO_URL}/login")
-    browser.find_element("id", "name").send_keys(name)
-    browser.find_element("id", "password").send_keys(password)
-    browser.find_element("id", "_submit").click()
 
 
 def wait_until(predicate, timeout=15):
@@ -73,9 +68,21 @@ def wait_until(predicate, timeout=15):
     raise AssertionError("timed out waiting for condition")
 
 
+def mount_scoreboard(browser, dojo, fragment=""):
+    """Exercise the retained component independently of the course progress page."""
+    browser.get(f"{DOJO_URL}/dojo/{dojo}{fragment}")
+    wait_until(lambda: browser.execute_script("return typeof $ === 'function' && typeof CTFd !== 'undefined'"))
+    source = (pathlib.Path(__file__).resolve().parents[1] / "dojo_theme/templates/macros/scoreboard.html").read_text()
+    markup = source.split("{% macro scoreboard() -%}", 1)[1].split("{%- endmacro %}", 1)[0]
+    browser.execute_script("document.querySelector('#main-content').innerHTML = '<h2 id=scoreboard-heading></h2>' + arguments[0]; init.dojo = arguments[1]; init.module = null;", markup, dojo)
+    loaded = browser.execute_async_script("const done=arguments[arguments.length-1]; const script=document.createElement('script'); script.src=arguments[0]; script.onload=()=>done(true); script.onerror=()=>done(false); document.body.append(script);", f"{DOJO_URL.rstrip('/')}/themes/dojo_theme/static/js/dojo/scoreboard.js")
+    assert loaded
+    browser.execute_script("loadScoreboard(0, 1)")
+    wait_until(lambda: browser.execute_script("return $('#scoreboard .scoreboard-loading').length === 0 && $('#scoreboard tr').length > 0"))
+
+
 def open_crew_view(browser, dojo):
-    browser.get(f"{DOJO_URL}/dojo/{dojo}")
-    wait_until(lambda: browser.execute_script("return typeof setScoreboardView === 'function' && $('#scoreboard tr').length > 0"))
+    mount_scoreboard(browser, dojo)
     browser.execute_script("setScoreboardView('crews')")
     wait_until(lambda: browser.execute_script("return $('#scoreboard .scoreboard-loading').length === 0 && $('#scoreboard tr').length > 0"))
 
@@ -122,14 +129,14 @@ def test_crew_scoreboard_happy_path(browser_fixture, crew_dojo):
     assert name_c not in browser.execute_script("return $('#scoreboard').text()")
 
     browser.execute_script("setCrewMode('unique')")
-    wait_until(lambda: browser.execute_script("return $('#scoreboard-th-score').text() === 'Unique' && $('#scoreboard .crew-row').length > 0"))
+    wait_until(lambda: browser.execute_script("return $('#scoreboard-th-score').text() === '去重完成数' && $('#scoreboard .crew-row').length > 0"))
     unique_crew_row = wait_until(lambda: next(
         (row for row in browser.find_elements("css selector", ".crew-row")
          if row.find_element("css selector", ".crew-tag-text").text == tag), None))
     assert unique_crew_row.find_element("css selector", ".crew-score").text == "2"
     assert browser.execute_script("return location.hash") == "#crews-unique"
     browser.execute_script("setCrewMode('cumulative')")
-    wait_until(lambda: browser.execute_script("return $('#scoreboard-th-score').text() === 'Score' && $('#scoreboard .crew-row').length > 0"))
+    wait_until(lambda: browser.execute_script("return $('#scoreboard-th-score').text() === '完成数' && $('#scoreboard .crew-row').length > 0"))
 
     browser.execute_script("setScoreboardView('hackers')")
     wait_until(lambda: browser.execute_script("return $('#scoreboard .crew-row').length === 0 && $('#scoreboard .scoreboard-name').length > 0"))
@@ -140,9 +147,9 @@ def test_crew_scoreboard_happy_path(browser_fixture, crew_dojo):
     assert chip_tags.count(tag) == 2
 
     browser.get(f"{DOJO_URL}/login")
-    browser.get(f"{DOJO_URL}/dojo/{crew_dojo}#crews-unique")
+    mount_scoreboard(browser, crew_dojo, "#crews-unique")
     wait_until(lambda: browser.execute_script("return $('#scoreboard .crew-row').length > 0"))
-    assert browser.execute_script("return $('#scoreboard-th-score').text()") == "Unique"
+    assert browser.execute_script("return $('#scoreboard-th-score').text()") == "去重完成数"
     assert browser.execute_script("return $('#scoreboard-crew-mode-unique').hasClass('scoreboard-view-selected')")
     assert browser.execute_script("return $('#scoreboard-view-crews').hasClass('scoreboard-view-selected')")
 
@@ -378,21 +385,21 @@ print("DOJO-ID", Dojos.from_id({crew_dojo!r}).first().dojo_id)
 
 def test_crew_view_toggle_race(browser_fixture, example_dojo):
     browser = browser_fixture
-    browser.get(f"{DOJO_URL}/dojo/{example_dojo}")
+    mount_scoreboard(browser, example_dojo)
     wait_until(lambda: browser.execute_script("return typeof setScoreboardView === 'function' && $('#scoreboard tr').length > 0"))
 
     browser.execute_script("loadScoreboard(7, 1); loadScoreboard(0, 1);")
     wait_until(lambda: browser.execute_script("return $('#scoreboard .scoreboard-loading').length === 0 && $('#scoreboard tr').length > 0"))
     time.sleep(1)
-    assert browser.execute_script("return $('#scoreboard-heading').text()") == "All-Time Scoreboard:"
+    assert browser.execute_script("return $('#scoreboard-heading').text()") == "全部时间学习者排行榜"
     assert browser.execute_script("return $('#scoreboard-control-all').hasClass('scoreboard-page-selected')")
 
     browser.execute_script("setScoreboardView('crews'); setScoreboardView('hackers');")
     wait_until(lambda: browser.execute_script("return $('#scoreboard .scoreboard-loading').length === 0 && $('#scoreboard tr').length > 0"))
     time.sleep(1)
     assert browser.execute_script("return $('#scoreboard .crew-row').length") == 0
-    assert browser.execute_script("return $('#scoreboard-heading').text()") == "All-Time Scoreboard:"
-    assert browser.execute_script("return $('#scoreboard-th-name').text()") == "Hacker"
+    assert browser.execute_script("return $('#scoreboard-heading').text()") == "全部时间学习者排行榜"
+    assert browser.execute_script("return $('#scoreboard-th-name').text()") == "学习者"
 
     browser.execute_script("setScoreboardView('crews')")
     wait_until(lambda: browser.execute_script("return $('#scoreboard .scoreboard-loading').length === 0 && $('#scoreboard tr').length > 0"))
@@ -401,14 +408,27 @@ def test_crew_view_toggle_race(browser_fixture, example_dojo):
     wait_until(lambda: browser.execute_script("return $('#scoreboard .scoreboard-loading').length === 0 && $('#scoreboard tr').length > 0"))
     time.sleep(1)
     assert browser.execute_script("return $('#scoreboard .crew-row').length") == rows
-    assert browser.execute_script("return $('#scoreboard-heading').text()") == "All-Time Crew Scoreboard:"
+    assert browser.execute_script("return $('#scoreboard-heading').text()") == "全部时间团队排行榜"
 
 
 @pytest.mark.timeout(180)
 def test_crew_empty_states(browser_fixture, admin_session, example_dojo):
     browser = browser_fixture
     suffix = "".join(random.choices(string.ascii_lowercase, k=8))
-    spec = CREW_DOJO_SPEC.replace("crew-dojo", f"crew-empty-{suffix}")
+    spec = f"""
+id: crew-empty-{suffix}
+type: public
+modules:
+  - id: hello
+    challenges:
+      - id: apple
+files:
+  - type: text
+    path: hello/apple/apple
+    content: |
+      #!/run/dojo/bin/exec-suid -- /run/dojo/bin/bash -p
+      cat /flag
+"""
     dojo = create_dojo_yml(spec, session=admin_session)
 
     name, password, session = register_user()
@@ -417,7 +437,7 @@ def test_crew_empty_states(browser_fixture, admin_session, example_dojo):
     browser_login(browser, name, password)
     open_crew_view(browser, dojo)
     note = wait_until(lambda: browser.execute_script("return $('#scoreboard .crew-note').text()") or None)
-    assert note == "No solves yet — no crews to show."
+    assert note == "尚无题目完成记录，因此没有可显示的团队。"
 
     solve(dojo, name, session, "apple")
     remove_workspace_container(name)
@@ -425,5 +445,5 @@ def test_crew_empty_states(browser_fixture, admin_session, example_dojo):
 
     open_crew_view(browser, dojo)
     title = wait_until(lambda: browser.execute_script("return $('#scoreboard .crew-empty-title').text()") or None)
-    assert title == "No crews yet."
-    assert "add a tag in brackets" in browser.execute_script("return $('#scoreboard .crew-empty-hint').text()")
+    assert title == "暂时还没有团队。"
+    assert "为显示名称添加方括号标签" in browser.execute_script("return $('#scoreboard .crew-empty-hint').text()")

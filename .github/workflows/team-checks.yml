@@ -1,6 +1,7 @@
 name: Team quick checks
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   push:
     branches:
       - develop
@@ -24,3 +25,11 @@ jobs:
         with:
           node-version: '22'
       - run: make dev-check
+      - name: Courseware editor browser component checks
+        if: hashFiles('test/browser/courseware-quiz-editor.cjs') != ''
+        env:
+          NODE_PATH: ${{ runner.temp }}/aisecedu-browser/node_modules
+        run: |
+          npm install --prefix "$RUNNER_TEMP/aisecedu-browser" --no-audit --no-fund playwright@1.65.0
+          "$RUNNER_TEMP/aisecedu-browser/node_modules/.bin/playwright" install --with-deps chromium
+          node --test test/browser/courseware-quiz-editor.cjs

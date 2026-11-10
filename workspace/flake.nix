@@ -59,7 +59,7 @@
               {
                 ida-free = legacyIda.overrideAttrs (oldAttrs: {
                   src = final.fetchurl {
-                    url = "https://out7.hex-rays.com/files/idafree84_linux.run";
+                    url = "https://web.archive.org/web/20240718072537id_/https://out7.hex-rays.com/files/idafree84_linux.run";
                     hash = "sha256-lB8ijOSJvwoUJomA7a0WFAvil+B0kkXXg5oqOwIHCmI=";
                   };
                   postInstall = (oldAttrs.postInstall or "") + ''

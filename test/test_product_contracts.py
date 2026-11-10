@@ -143,9 +143,9 @@ def test_ellipsis_menus_float_above_clipping_and_close_consistently():
     assert "new MutationObserver" in source
     assert ".aisecedu-floating-menu" in styles
     assert "inset: auto !important" not in styles
-    assert "aisecedu-product-shell-v9-floating-menu" in base
-    assert "aisecedu-product-shell-source-v6-floating-menu" in minified_styles
-    assert "aisecedu-ui-v7-floating-menu" in base
+    assert "css/product-shell.css" in base
+    assert '@import url("./product-shell.css?v=' in minified_styles
+    assert "js/dojo/ui.js" in base
 
 
 def test_xuanjia_is_the_only_user_facing_product_name():

@@ -51,6 +51,12 @@ aisecedu-dev resolve 真实任务编号 SUCCEEDED --note '实际命令、退出�
 
 原文档中的 `make deploy`、`./deploy.sh -t` 和 `ops/verify-*` 包含能改变平台的命令。先检查实际目标、当前预约和测试数据范围，再决定在完整开发环境执行。
 
+## 启动配置中的嵌入来源列表
+
+`GLOBAL_AGENT_RUNTIME_FRAME_ANCESTORS` 为以空格分隔的 CSP 来源列表，例如 `https://platform.example http://platform.example`，也可包含 `'self'`。维护者通过环境变量提供原始列表；`dojo-init` 在生成的 `config.env` 中添加一层双引号，供 Shell 与 Compose 读取。再次初始化会保留列表，旧版未加引号的同名配置会在初始化时转为新格式。环境变量、已有非空配置、默认值的优先级保持不变。
+
+来源列表不接受双引号、反斜杠、美元符号、反引号或控制字符；遇到这些值时初始化报错并保留原配置。默认来源使用本次选定的 `DOJO_HOST`。此修复只处理配置生成，不会自动重启或更新运行平台。`make dev-check` 包含离线配置回归；完整单节点、多节点启动仍需 DOJO CI 验证。
+
 ## 准备项回退
 
 本轮新增内容集中在 `/srv/aisecedu-team`、`/opt/aisecedu-toolchains`、固定 CLI 路径、专用 sudoers 文件及 Git 的单一路径 safe.directory。业务服务不依赖这些工具。回退时先保留预约和任务数据库、源码提交与归档，再移除专用 CLI 和 sudoers 条目；不要连带改动系统 Docker、业务配置、生产数据或现有开发卷。

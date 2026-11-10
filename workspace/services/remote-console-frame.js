@@ -5,13 +5,13 @@
   document.documentElement.dataset.consoleVersion='20261012-22';
   const CHANNEL='xuanjia:console-v1';
   const MAX=65536;
-  const PLATFORM=window.XuanjiaConsoleParentOrigin||location.origin;
+  let platform=parent===window?(window.XuanjiaConsoleParentOrigin||location.origin):null;
   let session=null, rfb=null, ui=null, kind='desktop', standalone=null, lastTarget=null, lastCopy='', stagedText=null;
   const down=new Map(), clipboardReads=new Map();
   let readSequence=0;
   let keyQueue=Promise.resolve();
   function valid(text) { if(typeof text!=='string'||text.includes('\0')||new TextEncoder().encode(text).length>MAX) throw Error('仅支持 64 KB 以内、不含空字符的文本。'); return text; }
-  function emit(type,data={}) { if(standalone) standalone.receive({type,nonce:standalone.nonce,...data}); else if(session) parent.postMessage({channel:CHANNEL,type,nonce:session.nonce,...data},PLATFORM); }
+  function emit(type,data={}) { if(standalone) standalone.receive({type,nonce:standalone.nonce,...data}); else if(session) parent.postMessage({channel:CHANNEL,type,nonce:session.nonce,...data},platform); }
   function inputTarget(node) { return node && (node.tagName==='TEXTAREA'||node.tagName==='INPUT'||node.isContentEditable); }
   function remoteTarget(node) { return node?.tagName==='CANVAS'||node?.id==='noVNC_keyboardinput'; }
   function focused() { return kind==='code'?lastTarget:document.querySelector('#noVNC_canvas')||document.querySelector('#noVNC_container canvas'); }
@@ -139,13 +139,15 @@
   window.addEventListener('blur',release);
   document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
   window.addEventListener('message',async event=>{
-    if(event.source!==parent||event.origin!==PLATFORM||event.data?.channel!==CHANNEL||parent===window)return;
+    if(event.source!==parent||event.data?.channel!==CHANNEL||parent===window||!/^https?:\/\//.test(event.origin))return;
+    if(platform!==null&&event.origin!==platform)return;
     const data=event.data;
-    if(data.type==='init'&&/^[a-f0-9]{32}$/.test(data.nonce||'')) {
+    if(data.type==='init'&&/^[a-f0-9]{32}$/.test(data.nonce||'')&&['code','desktop'].includes(data.kind)) {
+      platform=event.origin;
       if(session?.nonce!==data.nonce){release();lastCopy='';for(const job of clipboardReads.values()){clearTimeout(job.timer);job.reject(Error('环境已变化'));}clipboardReads.clear();}
       session={nonce:data.nonce,readonly:Boolean(data.readonly)};kind=data.kind;document.documentElement.dataset.consoleBridge='initialized';ready();return;
     }
-    if(data.nonce!==session?.nonce||data.type!=='command')return;
+    if(!session||data.nonce!==session.nonce||data.type!=='command')return;
     try{emit('reply',{request:data.request,result:await command(data.action,data.payload)});}catch(error){emit('reply',{request:data.request,error:error.message});}
   });
   function ready(){if(!session&&!standalone)return;if(kind==='desktop'&&!rfb)return;document.documentElement.dataset.consoleBridge='ready';emit('ready',{connected:kind==='code'||rfb?._rfbConnectionState==='connected',readonly:Boolean(session?.readonly||rfb?.viewOnly)});if(kind==='desktop')document.documentElement.classList.add('xuanjia-console-ready');}
@@ -163,14 +165,14 @@
     }
   }
   window.XuanjiaConsoleFrame={command};
-  if(parent!==window)parent.postMessage({channel:CHANNEL,type:'hello'},PLATFORM);
+  if(parent!==window)parent.postMessage({channel:CHANNEL,type:'hello'},'*');
   else {
     async function startStandalone(){
       if(kind!=='desktop')return;
       try{
         await desktop();if(!rfb)return;
-        const response=await fetch(PLATFORM+'/pwncollege_api/v1/workspace',{credentials:'same-origin'}),data=await response.json();if(!data.workspace_id)return;
-        const script=document.createElement('script');script.src=PLATFORM+'/themes/dojo_theme/static/js/dojo/remote-console.js?v=console-20261012-2';script.onload=()=>{standalone=window.AISecEduRemoteConsole.standalone(document.body,{workspaceId:data.workspace_id,csrfNonce:data.csrf_nonce,readonly:rfb.viewOnly,command});ready();};document.head.append(script);
+        const response=await fetch(platform+'/pwncollege_api/v1/workspace',{credentials:'same-origin'}),data=await response.json();if(!data.workspace_id)return;
+        const script=document.createElement('script');script.src=platform+'/themes/dojo_theme/static/js/dojo/remote-console.js?v=console-fixed-toggle-20261023-1';script.onload=()=>{standalone=window.AISecEduRemoteConsole.standalone(document.body,{workspaceId:data.workspace_id,csrfNonce:data.csrf_nonce,readonly:rfb.viewOnly,command});ready();};document.head.append(script);
       }catch(error){}
     }
     document.readyState==='loading'?document.addEventListener('DOMContentLoaded',startStandalone,{once:true}):startStandalone();

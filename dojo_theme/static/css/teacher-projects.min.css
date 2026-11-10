@@ -15,9 +15,9 @@
 .project-status-filters { display: flex; flex-wrap: wrap; gap: 10px; }
 .project-status-filters button { display: inline-flex; gap: 12px; align-items: center; border-radius: 24px; font-weight: 600; }
 .project-status-filters [aria-pressed="true"] { color: var(--theme-on-primary); background: var(--theme-primary); border-color: var(--theme-primary); }
-.project-status-filters [data-status-count] { min-width: 24px; text-align: center; padding: 1px 7px; border-radius: 12px; background: color-mix(in srgb, var(--theme-primary) 7%, transparent); font-size: 13px; font-variant-numeric: tabular-nums; }
+.project-status-filters [data-status-count] { min-width: 24px; text-align: center; padding: 1px 7px; border-radius: 12px; background: color-mix(in srgb, var(--theme-primary) 7%, transparent); font-size: 14px; font-variant-numeric: tabular-nums; }
 .project-status-filters [aria-pressed="true"] [data-status-count] { background: var(--theme-surface)fff2e; }
-.projects-shell .project-help { font-size: 13px; margin: 12px 0 20px; }
+.projects-shell .project-help { font-size: 14px; margin: 12px 0 20px; }
 .projects-shell .project-error { color: var(--theme-danger); }
 #project-notice { min-height: 24px; }
 .projects-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 20px; }
@@ -38,9 +38,9 @@
 .project-card.is-selected { border-color: var(--theme-primary); box-shadow: 0 0 0 2px #126481; }
 .is-bulk-mode .project-card footer { visibility: hidden; }
 .projects-shell #project-bulk-delete { color: var(--theme-danger); border-color: var(--theme-danger); }
-.projects-shell #project-bulk-bar p { margin: 4px 0 0; font-size: 12px; }
+.projects-shell #project-bulk-bar p { margin: 4px 0 0; font-size: 14px; }
 .projects-shell #project-bulk-toggle[aria-pressed="true"] { background: var(--theme-primary); color: var(--theme-on-primary); }
-.project-tag, .project-status { border-radius: 6px; padding: 5px 8px; font-size: 13px; }
+.project-tag, .project-status { border-radius: 6px; padding: 5px 8px; font-size: 14px; }
 .project-tag { color: var(--theme-text-muted); background: var(--theme-surface-soft); }
 .project-status { font-weight: 600; }
 .project-status--succeeded { color: var(--theme-success); background: color-mix(in srgb, var(--theme-success) 14%, transparent); }

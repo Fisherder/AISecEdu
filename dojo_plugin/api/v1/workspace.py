@@ -242,13 +242,15 @@ class view_desktop(Resource):
             if start_on_demand_service(user, service) is False:
                 return {"success": False, "active": True, "error": f"无法启动工作区服务：{service}"}
         elif port:
-            iframe_src, web_url = forward_short_port(
+            bootstrap_url, _ = forward_short_port(
                 port=port,
                 service_path="",
                 user=user,
                 signature=signature,
                 message=message,
             )
+            iframe_src = forward_port(port=port, signature=signature, message=message, user=user)
+            web_url = bootstrap_url
 
         return {
             "success": True,

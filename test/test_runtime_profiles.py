@@ -138,7 +138,7 @@ def test_runtime_tools_reach_teacher_and_solution_contexts(monkeypatch, environm
     from CTFd.plugins.dojo_plugin.learning.solution_agent import _public_challenge_context
     monkeypatch.setattr(teaching, '_teacher_dojos', lambda user: [])
     monkeypatch.setattr(teaching, '_thread_attachment_views', lambda thread, user: [])
-    thread = SimpleNamespace(id='runtime-tools', dojo_id=None, module_index=None, phase='PRE_CLASS')
+    thread = SimpleNamespace(id='runtime-tools', dojo_id=None, module_index=None, phase='PRE_CLASS', context={})
     teacher = teaching._teacher_agent_context(SimpleNamespace(id=1), thread)
     selected = next(item for item in teacher['runtimeEnvironments'] if item['id'] == environment)
     challenge = SimpleNamespace(dojo=SimpleNamespace(name='Programming', reference_id='programming'), module=SimpleNamespace(name='C', id='c'), name='Compile C', id='compile', description='Compile and run the provided C program.', interfaces=[], runtime_environment=environment)

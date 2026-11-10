@@ -6,7 +6,7 @@ from utils import TEST_DOJOS_LOCATION, DOJO_URL, create_dojo_yml
 
 def test_module_and_challenge_visibility(visibility_test_dojo, random_user_session, admin_session):
     # Random user needs to join the dojo first
-    join_response = random_user_session.get(f"{DOJO_URL}/dojo/{visibility_test_dojo}/join/")
+    join_response = random_user_session.post(f"{DOJO_URL}/dojo/{visibility_test_dojo}/join/", json={})
     assert join_response.status_code == 200
     
     random_response = random_user_session.get(f"{DOJO_URL}/pwncollege_api/v1/dojos/{visibility_test_dojo}/modules")
@@ -44,7 +44,7 @@ def test_module_and_challenge_visibility(visibility_test_dojo, random_user_sessi
 
 def test_module_and_challenge_visibility_rendered_page(visibility_test_dojo, random_user_session, admin_session):
     # Test the actual rendered module pages for visibility
-    join_response = random_user_session.get(f"{DOJO_URL}/dojo/{visibility_test_dojo}/join/")
+    join_response = random_user_session.post(f"{DOJO_URL}/dojo/{visibility_test_dojo}/join/", json={})
     assert join_response.status_code == 200
     
     # Try to access module1 directly as random user - module has future visibility
@@ -81,6 +81,7 @@ def test_module_and_challenge_visibility_rendered_page(visibility_test_dojo, ran
     })
     # Challenge C should be startable
     assert start_challenge_c.status_code == 200, "Random user should be able to start challenge-c"
+    assert start_challenge_c.json().get("success"), start_challenge_c.text
     
     start_challenge_b = random_user_session.post(f"{DOJO_URL}/pwncollege_api/v1/docker", json={
         "dojo": visibility_test_dojo,
@@ -117,6 +118,6 @@ def test_module_and_challenge_visibility_rendered_page(visibility_test_dojo, ran
     assert 'Challenge C' in admin_module2_text, "Admin should see Challenge C in module2"
     
     # Admin should see the "hidden" indicator for Challenge B
-    assert 'hidden' in admin_module2_text.lower(), "Admin should see hidden indicator for Challenge B"
-    assert 'this challenge is accessible because you are this dojo\'s administrator' in admin_module2_text.lower(), \
+    assert '已隐藏' in admin_module2_text, "Admin should see hidden indicator for Challenge B"
+    assert '因你是本课程教师，此题对你可见' in admin_module2_text, \
         "Admin should see explanation that challenge is accessible due to admin privileges"

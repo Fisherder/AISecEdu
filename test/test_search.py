@@ -9,7 +9,7 @@ def test_searchable_content(searchable_dojo, admin_session):
     cases = [
         # Matches in name only — verify name field
         ("searchable", lambda r: any("searchable dojo" in d["name"].lower() for d in r["dojos"])),
-        ("hello", lambda r: any("hello module" in m["name"].lower() for m in r["modules"])),
+        ("hello module", lambda r: any("hello module" in m["name"].lower() for m in r["modules"])),
         ("Apple Challenge", lambda r: any("apple challenge" in c["name"].lower() for c in r["challenges"])),
 
         # Matches in description — verify description contains the query

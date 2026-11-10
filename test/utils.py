@@ -39,6 +39,8 @@ def _get_dojo_container():
 DOJO_CONTAINER = _get_dojo_container()
 
 def _get_container_ip(container_name):
+    if os.getenv('DOJO_IP'):
+        return os.environ['DOJO_IP']
     result = subprocess.run(
         ["docker", "inspect", container_name],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
@@ -97,6 +99,17 @@ def login(name, password, *, success=True, register=False, email=None):
     _allow_isolated_http_cookie(session)
     session.headers["CSRF-Token"] = parse_csrf_token(home_page.text)
     return session
+
+
+def browser_login(browser, name, password):
+    from selenium.webdriver.support.ui import WebDriverWait
+
+    browser.get(f"{DOJO_URL}/login")
+    browser.find_element("id", "name").send_keys(name)
+    browser.find_element("id", "password").send_keys(password)
+    browser.find_element("id", "_submit").click()
+    WebDriverWait(browser, 20).until(lambda driver: driver.execute_script(
+        "return location.pathname !== '/login' && Number(window.init && window.init.userId) > 0;"))
 
 
 def make_dojo_official(dojo_rid, admin_session):
@@ -198,6 +211,11 @@ def workspace_run(cmd, *, user, root=False, **kwargs):
     )
 
 
+def enroll(session, reference_id):
+    response = session.post(f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/dojos/{reference_id}/enrollment", json={})
+    assert response.status_code in {200, 201}, response.text
+
+
 def start_challenge(dojo, module, challenge, practice=False, *, session, as_user=None, wait=0):
     start_challenge_json = dict(dojo=dojo, module=module, challenge=challenge, practice=practice)
     if as_user:
@@ -231,3 +249,45 @@ def wait_for_background_worker(timeout=5):
         if result.returncode == 0 and int(result.stdout.strip()) == 0:
             return
         time.sleep(0.1)
+
+
+def complete_teacher_command(session, response, *, action_decision=False):
+    if response.status_code != 202:
+        return response
+    api = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/teaching"
+    payload = response.json()
+    assert payload["success"] is True, payload
+    receipt = payload["data"]
+    action = receipt["action"]
+    job_id = action["execution"]["jobId"]
+    assert re.fullmatch(r"[A-Za-z0-9_-]{1,48}", job_id), job_id
+    code = (
+        "import os\n"
+        "from CTFd.plugins.dojo_plugin.models import TeachingJobs\n"
+        "from CTFd.plugins.dojo_plugin.agent_runtime.commands import COMMAND_JOB_KINDS\n"
+        "from CTFd.plugins.dojo_plugin.agent_runtime.jobs import process_job\n"
+        "assert os.environ.get('DOJO_ENV') == 'coverage'\n"
+        f"job = TeachingJobs.query.filter_by(id={job_id!r}).one()\n"
+        "assert job.kind in COMMAND_JOB_KINDS\n"
+        "if job.status == 'QUEUED': process_job(job.id, worker_id='ci-command-contract')\n"
+        "print('CI-COMMAND-CHECKED')\n"
+    )
+    import base64
+    encoded = base64.b64encode(code.encode()).decode()
+    checked = dojo_run("timeout", "180", "dojo", "flask", timeout=200,
+                       input=f'import base64; exec(base64.b64decode("{encoded}"))\n')
+    assert "CI-COMMAND-CHECKED" in checked.stdout, checked.stdout
+    deadline = time.monotonic() + 45
+    job = None
+    while time.monotonic() < deadline:
+        polled = session.get(f"{api}/jobs/{job_id}")
+        assert polled.status_code == 200, polled.text
+        job = polled.json()["data"]["job"]
+        if job["status"] in {"SUCCEEDED", "FAILED", "CANCELED"}:
+            break
+        time.sleep(0.25)
+    assert job and job["status"] == "SUCCEEDED", job
+    path = f"/actions/{action['id']}/decision" if action_decision else f"/agent-tools/actions/{action['id']}"
+    completed = session.get(api + path)
+    assert completed.status_code == 200, completed.text
+    return completed

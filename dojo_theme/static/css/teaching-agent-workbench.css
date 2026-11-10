@@ -38,14 +38,14 @@
   gap: 7px;
   padding: 17px 20px 2px;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: .04em;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-workspace-caption strong {
   color: var(--wb-ink);
-  font-size: 12px;
+  font-size: 14px;
   letter-spacing: 0;
 }
 
@@ -111,7 +111,7 @@
 .teacher-agent-page:not(.student-agent-page) .teaching-thread-group > h2 {
   padding: 13px 10px 5px;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 650;
 }
 
@@ -134,14 +134,14 @@
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-thread-item-title strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 620;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-thread-open small {
   margin-top: 5px;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-thread-item.is-active .teaching-thread-open small {
@@ -175,12 +175,12 @@
   gap: 8px;
   margin-bottom: 4px;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-workbench-breadcrumb i {
-  font-size: 8px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-brand-copy strong {
@@ -200,12 +200,12 @@
   border-radius: 7px;
   color: var(--wb-muted);
   background: var(--wb-raised);
-  font-size: 11px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-run-status i {
-  font-size: 7px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-run-status[data-state=running],
@@ -217,7 +217,7 @@
 
 .teacher-agent-page:not(.student-agent-page) .teaching-run-status[data-state=running] i,
 .teacher-agent-page:not(.student-agent-page) .teaching-run-status[data-state=stopping] i {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-run-status[data-state=waiting-retry] {
@@ -232,7 +232,7 @@
   border-radius: 8px;
   background: var(--wb-canvas);
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-messages {
@@ -342,7 +342,7 @@
 
 .teacher-agent-page:not(.student-agent-page) .teaching-activity-state {
   color: var(--wb-blue);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 690;
 }
 
@@ -354,7 +354,7 @@
 .teacher-agent-page:not(.student-agent-page) .teaching-message.is-activity .teaching-activity-copy strong {
   min-width: 0;
   color: var(--wb-ink);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 580;
 }
 
@@ -362,14 +362,14 @@
   grid-column: 1 / -1;
   margin: 3px 0 0;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-activity-facts {
   grid-column: 1 / -1;
   margin-top: 3px;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-message.is-activity .job-disclosure-details {
@@ -387,11 +387,11 @@
 .teacher-agent-page:not(.student-agent-page) .agent-run-trace-head {
   margin: 0 0 9px;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .agent-run-trace-head strong {
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 650;
 }
 
@@ -422,7 +422,7 @@
   justify-content: space-between;
   padding: 6px 3px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .agent-run-attempt-label {
@@ -431,7 +431,7 @@
   justify-content: space-between;
   margin: 10px 0 6px;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .agent-run-item {
@@ -452,7 +452,7 @@
   border-radius: 5px;
   background: var(--wb-sidebar);
   color: var(--wb-muted);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .agent-run-item-heading {
@@ -465,7 +465,7 @@
 .teacher-agent-page:not(.student-agent-page) .agent-run-item-heading strong {
   overflow: hidden;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 570;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -474,14 +474,14 @@
 .teacher-agent-page:not(.student-agent-page) .agent-run-item-kind,
 .teacher-agent-page:not(.student-agent-page) .agent-run-item-heading time {
   color: var(--wb-muted);
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 500;
 }
 
 .teacher-agent-page:not(.student-agent-page) .agent-run-item-heading > i {
   margin-left: auto;
   color: var(--wb-success);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .agent-run-item.is-failed .agent-run-item-heading > i {
@@ -582,13 +582,13 @@
 }
 
 .teacher-agent-page:not(.student-agent-page) .failed-draft-card strong {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .failed-draft-card small,
 .teacher-agent-page:not(.student-agent-page) .failed-draft-card > i:last-child {
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-composer {
@@ -616,7 +616,7 @@
   border-radius: 7px;
   background: var(--wb-raised);
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-quick-prompts button i {
@@ -644,7 +644,7 @@
   min-height: 38px;
   padding: 7px 2px;
   color: var(--wb-ink) !important;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-composer-row #teaching-send {
@@ -672,7 +672,7 @@
 
 .teacher-agent-page:not(.student-agent-page) .teaching-composer-tools {
   margin-top: 8px;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-upload-label:hover,
@@ -700,7 +700,7 @@
 
 .teacher-agent-page:not(.student-agent-page) .teaching-empty > p {
   color: var(--wb-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .teacher-agent-page:not(.student-agent-page) .teaching-empty-capabilities {
@@ -767,20 +767,20 @@
   border-left: 1px solid var(--wb-border);
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-run-live .agent-run-item { padding: 6px 0; }
-.teacher-agent-page:not(.student-agent-page) .agent-run-record-warning { color: var(--wb-warning); font-size: 12px; line-height: 1.6; }
+.teacher-agent-page:not(.student-agent-page) .agent-run-record-warning { color: var(--wb-warning); font-size: 14px; line-height: 1.6; }
 .teacher-agent-page:not(.student-agent-page) .agent-run-detail-tools { display: flex; justify-content: flex-end; padding: 4px 6px; }
-.teacher-agent-page:not(.student-agent-page) .agent-run-detail-tools button { border: 0; color: var(--wb-muted); background: transparent; font-size: 11px; }
+.teacher-agent-page:not(.student-agent-page) .agent-run-detail-tools button { border: 0; color: var(--wb-muted); background: transparent; font-size: 14px; }
 .teacher-agent-page:not(.student-agent-page) .agent-run-item.is-incomplete .agent-run-item-icon { color: var(--wb-warning); }
 .teacher-agent-page:not(.student-agent-page) .teaching-streamed-answer { margin: 15px 0; }
-.teacher-agent-page:not(.student-agent-page) .teaching-delivery-control { display: inline-flex; align-items: center; gap: 7px; color: var(--wb-muted); font-size: 11px; margin: 0; }
-.teacher-agent-page:not(.student-agent-page) .teaching-delivery-control select { max-width: 130px; border: 1px solid var(--wb-border); border-radius: 6px; padding: 4px 6px; background: var(--wb-canvas); color: var(--wb-ink); font-size: 12px; }
+.teacher-agent-page:not(.student-agent-page) .teaching-delivery-control { display: inline-flex; align-items: center; gap: 7px; color: var(--wb-muted); font-size: 14px; margin: 0; }
+.teacher-agent-page:not(.student-agent-page) .teaching-delivery-control select { max-width: 130px; border: 1px solid var(--wb-border); border-radius: 6px; padding: 4px 6px; background: var(--wb-canvas); color: var(--wb-ink); font-size: 14px; }
 .teacher-agent-page:not(.student-agent-page) .teaching-artifact-review { display: flex; flex-direction: column; flex: 0 0 46%; min-width: 0; max-width: 760px; border-left: 1px solid var(--wb-border); background: var(--wb-canvas); }
 .teacher-agent-page:not(.student-agent-page) .teaching-artifact-review[hidden] { display: none; }
 .teacher-agent-page:not(.student-agent-page) .teaching-artifact-review > header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--wb-border); min-height: 69px; }
 .teacher-agent-page:not(.student-agent-page) .teaching-artifact-review > header > div { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
-.teacher-agent-page:not(.student-agent-page) .teaching-artifact-review > header span { color: var(--wb-muted); font-size: 10px; }
-.teacher-agent-page:not(.student-agent-page) .teaching-artifact-review > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.teacher-agent-page:not(.student-agent-page) .teaching-artifact-review > header a { color: var(--wb-blue); font-size: 11px; }
+.teacher-agent-page:not(.student-agent-page) .teaching-artifact-review > header span { color: var(--wb-muted); font-size: 14px; }
+.teacher-agent-page:not(.student-agent-page) .teaching-artifact-review > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.teacher-agent-page:not(.student-agent-page) .teaching-artifact-review > header a { color: var(--wb-blue); font-size: 14px; }
 .teacher-agent-page:not(.student-agent-page) .teaching-artifact-review > iframe { width: 100%; flex: 1; min-height: 0; border: 0; }
 .teacher-agent-page:not(.student-agent-page) .has-artifact-review .teaching-messages { padding-right: 20px; padding-left: 20px; }
 .teacher-agent-page:not(.student-agent-page) .has-artifact-review .teaching-composer { padding-right: 20px; padding-left: 20px; }
@@ -813,7 +813,7 @@
   border-radius: 6px;
   color: var(--wb-muted);
   background: transparent;
-  font-size: 11px;
+  font-size: 14px;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-view-switch button[aria-pressed="true"] {
   color: var(--wb-ink);
@@ -847,7 +847,7 @@
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-inner > header p,
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-muted {
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-item {
@@ -879,7 +879,7 @@
   border-radius: 50%;
   color: var(--wb-blue);
   background: var(--wb-canvas);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-card {
@@ -896,11 +896,11 @@
   align-items: center;
   gap: 8px;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-meta strong {
   color: var(--wb-ink);
-  font-size: 12px;
+  font-size: 14px;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-meta span {
   padding: 2px 7px;
@@ -919,7 +919,7 @@
   margin: 12px 0 0;
   overflow-wrap: anywhere;
   color: var(--wb-ink);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-card > section {
@@ -930,19 +930,19 @@
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-card > section h3 {
   margin: 0 0 9px;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-card ol {
   margin: 0;
   padding-left: 19px;
   color: var(--wb-ink);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-card details {
   margin-top: 9px;
   color: var(--wb-blue);
-  font-size: 11px;
+  font-size: 14px;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-trajectory-card button {
   margin-top: 11px;
@@ -992,7 +992,7 @@
 .teacher-agent-page:not(.student-agent-page) .teaching-skill-list button small {
   margin-top: 3px;
   color: var(--wb-muted);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.45;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-skill-menu-header button {
@@ -1044,7 +1044,7 @@
 .teacher-agent-page:not(.student-agent-page) .teaching-skill-list p {
   margin: 9px;
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .teacher-agent-page:not(.student-agent-page) .teaching-used-skills {
   flex-wrap: wrap;
@@ -1057,7 +1057,7 @@
   border-radius: 6px;
   color: var(--wb-blue);
   background: var(--wb-blue-soft);
-  font-size: 11px;
+  font-size: 14px;
 }
 @media (max-width: 560px) {
   .teacher-agent-page:not(.student-agent-page) .teaching-view-switch button span {

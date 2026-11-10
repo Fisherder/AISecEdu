@@ -99,7 +99,7 @@
 .teaching-artifact-page .artifact-operation-status { position: static; width: auto; margin: 0 0 14px; max-width: none; transform: none; box-shadow: none; }
 .teaching-artifact-page .artifact-inspector-footer { display: grid; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--ui-border-soft); background: var(--ui-surface); }
 .teaching-artifact-page .artifact-inspector-footer small,
-.teaching-artifact-page .artifact-inspector-footer > strong { color: var(--ui-text-muted); font-size: 11px; font-weight: 400; }
+.teaching-artifact-page .artifact-inspector-footer > strong { color: var(--ui-text-muted); font-size: 14px; font-weight: 400; }
 .teaching-artifact-page .artifact-inspector-footer .artifact-preview-actions { flex-wrap: wrap; gap: 6px; }
 .teaching-artifact-page .artifact-inspector-footer [hidden] { display: none !important; }
 .teaching-artifact-page #artifact-placeholder-progress { margin-top: 12px; }
@@ -113,7 +113,7 @@
 
 @media (max-width: 640px) {
   .teaching-artifact-page .artifact-detail-header { padding: 4px 6px; gap: 6px; }
-  .teaching-artifact-page .artifact-detail-header h1 { font-size: 13px; }
+  .teaching-artifact-page .artifact-detail-header h1 { font-size: 14px; }
   .teaching-artifact-page .artifact-header-button { width: 34px; padding: 0; }
   .teaching-artifact-page .artifact-header-button span { display: none; }
   .teaching-artifact-page .artifact-progress-toggle { color: var(--brand-blue); }
@@ -131,11 +131,11 @@
 .artifact-cocreation-embed .artifact-breadcrumb { display: none; }
 .artifact-cocreation-embed .artifact-detail-header { gap: 8px; }
 .artifact-cocreation-embed .artifact-heading-copy h1 { font-size: 15px; }
-.artifact-cocreation-embed .artifact-header-button { font-size: 11px; padding: 6px 8px; }
+.artifact-cocreation-embed .artifact-header-button { font-size: 14px; padding: 6px 8px; }
 .artifact-diff-row { padding: 10px 0; border-bottom: 1px solid var(--ui-border, #e7e9ed); }
-.artifact-diff-row > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; font-size: 12px; }
-.artifact-diff-row > summary code { overflow-wrap: anywhere; white-space: pre-wrap; font-size: 11px; }
+.artifact-diff-row > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; font-size: 14px; }
+.artifact-diff-row > summary code { overflow-wrap: anywhere; white-space: pre-wrap; font-size: 14px; }
 .artifact-diff-row.is-added > summary b { color: var(--theme-success); }
 .artifact-diff-row.is-removed > summary b { color: var(--theme-danger); }
 .artifact-diff-row.is-changed > summary b { color: var(--theme-primary); }
-.artifact-diff-summary { font-size: 12px; color: var(--ui-text-muted, #697586); }
+.artifact-diff-summary { font-size: 14px; color: var(--ui-text-muted, #697586); }

@@ -1,6 +1,9 @@
 FROM ubuntu:24.04
+ARG UBUNTU_ARCHIVE_MIRROR=http://archive.ubuntu.com/ubuntu
 
-RUN apt-get update && apt-get install -y \
+RUN sed -i "s|http://archive.ubuntu.com/ubuntu|${UBUNTU_ARCHIVE_MIRROR}|g" /etc/apt/sources.list.d/ubuntu.sources \
+    && printf 'Acquire::Retries "3";\nAPT::Update::Error-Mode "any";\n' > /etc/apt/apt.conf.d/80-reliable-downloads \
+    && apt-get update && apt-get install -y \
     curl \
     git \
     wget \
