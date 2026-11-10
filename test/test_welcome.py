@@ -58,19 +58,19 @@ def vscode_terminal(browser):
         ActionChains(browser).key_down(Keys.CONTROL).key_down(Keys.SHIFT).send_keys("`").key_up(Keys.SHIFT).key_up(Keys.CONTROL).perform()
 
     send_terminal_shortcut()
-    terminal = None
-    for _ in range(5):
-        try:
-            terminal = WebDriverWait(browser, 10).until(
-                lambda driver: (driver.find_elements(By.CSS_SELECTOR, "textarea.xterm-helper-textarea") or [None])[-1])
-            break
-        except TimeoutException:
-            # The Getting Started webview steals focus into a cross-origin iframe, swallowing keybindings;
-            # only resend the shortcut if focus is still trapped there, lest we spawn a second terminal.
-            if not browser.execute_script("return document.activeElement !== null && document.activeElement.tagName === 'IFRAME';"):
-                break
-            send_terminal_shortcut()
-    if terminal is None:
+    try:
+        terminal = WebDriverWait(browser, 10).until(
+            lambda driver: (driver.find_elements(By.CSS_SELECTOR, "textarea.xterm-helper-textarea") or [None])[-1])
+    except TimeoutException:
+        browser.execute_script("if (document.activeElement) document.activeElement.blur();")
+        ActionChains(browser).send_keys(Keys.F1).perform()
+        palette = WebDriverWait(browser, 10).until(EC.visibility_of_element_located(
+            (By.CSS_SELECTOR, ".quick-input-widget .quick-input-box input")))
+        palette.send_keys(Keys.CONTROL, "a", Keys.NULL, ">Terminal: Create New Terminal")
+        WebDriverWait(browser, 10).until(lambda driver: any(
+            "Terminal: Create New Terminal" in item.text
+            for item in driver.find_elements(By.CSS_SELECTOR, ".quick-input-list .monaco-list-row")))
+        palette.send_keys(Keys.ENTER)
         terminal = wait_for_selector("textarea.xterm-helper-textarea")
     time.sleep(2)
     browser.execute_script("arguments[0].focus();", terminal)

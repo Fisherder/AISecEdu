@@ -66,6 +66,7 @@ const vm = require('node:vm');
         {source: {}, origin: 'https://platform.example', data: init},
         {source: frameParent, origin: 'null', data: init},
         {source: frameParent, origin: 'https://platform.example', data: {...init, nonce: 'bad'}},
+        {source: frameParent, origin: 'https://platform.example', data: {...init, kind: undefined}},
     ]) await initializeFrame(event);
     assert.equal(document.documentElement.dataset.consoleBridge, 'loaded');
     await initializeFrame({source: frameParent, origin: 'https://platform.example', data: init});
@@ -102,6 +103,8 @@ const vm = require('node:vm');
     control.nonce = 'a'.repeat(32);control.kind = 'desktop';control.workspaceId = 'aaaaaaaaaaaa';
     assert.deepEqual(Array.from(control.frameOrigins()), ['https://workspace.example', 'https://node-1.workspace.example']);
     control.initializeFrame();assert.deepEqual(sent.map(row => row.origin), Array.from(control.frameOrigins()));
+    sent.length=0;control.frame.dataset={workspaceService: 'code: 8080'};control.kind='desktop';
+    control.initializeFrame();assert(sent.length>0&&sent.every(row=>row.message.kind==='code'));
     control.peerOrigin = 'https://node-1.workspace.example';assert.equal(control.frameOrigin(), control.peerOrigin);
     control.peerOrigin = 'https://unapproved.example';assert.equal(control.frameOrigin(), 'https://workspace.example');
     control.frame.src = 'https://workspace.example/workspace/aaaaaaaaaaaa/signature/6080/vnc.html';

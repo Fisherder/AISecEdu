@@ -147,7 +147,7 @@
     if(event.source!==parent||event.data?.channel!==CHANNEL||parent===window||!/^https?:\/\//.test(event.origin))return;
     if(platform!==null&&event.origin!==platform)return;
     const data=event.data;
-    if(data.type==='init'&&/^[a-f0-9]{32}$/.test(data.nonce||'')) {
+    if(data.type==='init'&&/^[a-f0-9]{32}$/.test(data.nonce||'')&&['code','desktop'].includes(data.kind)) {
       platform=event.origin;
       if(session?.nonce!==data.nonce){release();lastCopy='';for(const job of clipboardReads.values()){clearTimeout(job.timer);job.reject(Error('环境已变化'));}clipboardReads.clear();}
       session={nonce:data.nonce,readonly:Boolean(data.readonly)};kind=data.kind;document.documentElement.dataset.consoleBridge='initialized';ready();return;

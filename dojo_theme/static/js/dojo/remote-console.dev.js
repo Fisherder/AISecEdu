@@ -78,7 +78,8 @@
       }catch(error){this.initializeFrame();}
     }
     initializeFrame(){
-      if(!this.frame?.contentWindow)return;
+      if(!this.frame?.contentWindow||!this.frame.src||this.frame.src==='about:blank')return;
+      this.kind=String(this.frame.dataset?.workspaceService||'').split(':')[0].trim()==='code'?'code':'desktop';
       for(const origin of this.frameOrigins())this.frame.contentWindow.postMessage({channel:CHANNEL,type:'init',nonce:this.nonce,kind:this.kind,workspaceId:this.workspaceId,readonly:this.readonly},origin);
     }
     frameOrigins(){
