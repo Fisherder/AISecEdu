@@ -128,6 +128,7 @@ def test_coverage_uses_source_compose_and_preserves_deployment_overlays():
             assert result.returncode == 0, result.stderr
             arguments = result.stdout.splitlines()
             assert 'docker-compose.yml' in arguments
+            assert ('docker-compose.coverage.yml' in arguments) == (mode == 'coverage'), (mode, arguments)
             assert '--profile' in arguments and 'main' in arguments and 'workspace' in arguments
             assert arguments[-1] == 'config'
             for name in ('docker-compose.override.yml', 'docker-compose.staging.yml',
