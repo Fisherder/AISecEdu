@@ -18,11 +18,11 @@ def test_artifact_preview_is_content_first_and_keeps_editing_on_demand():
         assert selector in template
 
     assert 'data-inspector-open="false"' in template
-    assert "aisecedu-teaching-v22-readability-v1" in template
-    assert "aisecedu-teaching-v23" in template
+    assert "css/teaching-agent.css" in template
+    assert "js/dojo/teaching-artifact.js" in template
     assert "function setInspectorOpen" in script
     assert "function activateInspectorTab" in script
-    assert "previewPanel.requestFullscreen()" in script
+    assert "root.requestFullscreen()" in script
     assert "setPreviewState(\"error\"" in script
     assert '[data-inspector-open="true"] .artifact-detail-grid' in styles
     assert ".artifact-preview-panel:fullscreen" in styles
@@ -69,7 +69,7 @@ def test_student_preview_uses_a_minimal_server_serialization_boundary():
     ):
         assert f'"{private_key}"' in artifacts
     assert 'if student_safe:\n                data["history"]' in teaching
-    assert 'if not student_safe:\n                active_jobs' in teaching
+    assert 'if not student_safe:\n                progress = _artifact_progress_view(artifact, user)' in teaching
     assert 'data["lineage"] = {' in teaching
 
 

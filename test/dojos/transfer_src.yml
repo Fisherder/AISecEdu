@@ -1,5 +1,5 @@
 id: src-dojo
-type: topic
+type: public
 modules:
   - id: src-module
     challenges:

@@ -285,13 +285,13 @@ def test_auth_pages_use_unified_course_onboarding_ui():
         assert 'class="account-auth-shell"' in response.text
         assert any(
             asset in response.text
-            for asset in ("css/account-auth.css", "css/account-auth.min.css")
+            for asset in ("css/account-auth.css", "css/account-auth.min.css", "css/account-auth.dev.css")
         )
         assert any(
             asset in response.text
             for asset in (
                 "js/dojo/account-auth.js",
-                "js/dojo/account-auth.min.js",
+                "js/dojo/account-auth.min.js", "js/dojo/account-auth.dev.js",
             )
         )
 
@@ -335,7 +335,7 @@ def test_high_volume_admin_collections_use_bounded_product_pages(
     assert response.status_code == 200
     assert 'class="admin-product' in response.text
     assert heading in response.text
-    assert re.search(r"vendor\.bundle(?:\.min)?\.js", response.text) is None
+    assert re.search(r"vendor\.bundle(?:\.(?:min|dev))?\.js", response.text) is None
     rendered_rows = sum(
         len(re.findall(r"<tr(?:\s|>)", body))
         for body in re.findall(r"<tbody[^>]*>(.*?)</tbody>", response.text, re.S)
@@ -503,15 +503,15 @@ def test_admin_config_default_is_query_bounded_and_code_split(admin_session):
     assert 'data-admin-config-section="settings"' in response.text
     assert "js/dojo/admin-config.js" in response.text
     assert re.search(r"vendor\.bundle(?:\.min)?\.js", response.text) is None
-    assert re.search(r"js/pages/configs(?:\.min)?\.js", response.text) is None
+    assert re.search(r"js/pages/configs(?:\.(?:min|dev))?\.js", response.text) is None
 
     advanced = admin_session.get(
         f"{DOJO_URL}/admin/config?section=ctftime", allow_redirects=False
     )
     assert advanced.status_code == 200
     assert 'data-admin-config-section="ctftime"' in advanced.text
-    assert re.search(r"js/pages/configs(?:\.min)?\.js", advanced.text)
-    assert re.search(r"vendor\.bundle(?:\.min)?\.js", advanced.text)
+    assert re.search(r"js/pages/configs(?:\.(?:min|dev))?\.js", advanced.text)
+    assert re.search(r"vendor\.bundle(?:\.(?:min|dev))?\.js", advanced.text)
 
 
 @pytest.mark.parametrize(
@@ -536,7 +536,11 @@ def test_student_and_teacher_agents_share_one_workbench(
     admin_session,
 ):
     student = random_user_session.get(f"{DOJO_URL}/guide")
-    teacher = admin_session.get(f"{DOJO_URL}/teacher")
+    workbench = admin_session.get(f"{DOJO_URL}/teacher")
+    assert workbench.status_code == 200
+    assert 'id="cocreation-workbench"' in workbench.text
+    assert "js/dojo/workbench-v3/app-" in workbench.text
+    teacher = admin_session.get(f"{DOJO_URL}/teacher?view=dashboard")
 
     assert student.status_code == 200
     assert teacher.status_code == 200
@@ -546,7 +550,7 @@ def test_student_and_teacher_agents_share_one_workbench(
             asset in response.text
             for asset in (
                 "css/teaching-agent.css",
-                "css/teaching-agent.min.css",
+                "css/teaching-agent.min.css", "css/teaching-agent.dev.css",
             )
         )
         assert 'id="teaching-thread-list"' in response.text
@@ -558,7 +562,7 @@ def test_student_and_teacher_agents_share_one_workbench(
         asset in student.text
         for asset in (
             "js/dojo/learning-guide.js",
-            "js/dojo/learning-guide.min.js",
+            "js/dojo/learning-guide.min.js", "js/dojo/learning-guide.dev.js",
         )
     )
     assert 'id="student-reference-dialog"' in student.text
@@ -568,7 +572,7 @@ def test_student_and_teacher_agents_share_one_workbench(
         asset in teacher.text
         for asset in (
             "js/dojo/teaching-agent.js",
-            "js/dojo/teaching-agent.min.js",
+            "js/dojo/teaching-agent.min.js", "js/dojo/teaching-agent.dev.js",
         )
     )
     assert 'id="student-reference-dialog"' not in teacher.text

@@ -1,8 +1,35 @@
+import io
 from types import SimpleNamespace
 
 import pytest
 import requests
 from sqlalchemy.orm.exc import DetachedInstanceError
+
+
+@pytest.mark.parametrize('retryable', [False, True])
+def test_authoring_failure_survives_detached_queue_record(monkeypatch, retryable):
+    from CTFd.plugins.dojo_plugin import models
+    from CTFd.plugins.dojo_plugin.api.v1 import learning
+    from CTFd.plugins.dojo_plugin.agent_runtime import jobs
+
+    class Job(SimpleNamespace):
+        def __getattribute__(self, name):
+            if name in {'attempt_count', 'max_attempts'} and self.detached:
+                raise DetachedInstanceError('Native runner removed its session')
+            return super().__getattribute__(name)
+
+    job = Job(id='queue-authoring', kind='learning.authoring', owner_id=1, action_id=None,
+              payload={'legacyJobId': 'author-test'}, attempt_count=1, max_attempts=3, detached=False)
+    legacy = SimpleNamespace(id='author-test', status='FAILED', error='test provider failure')
+    monkeypatch.setattr(models, 'LearningAuthoringJobs', SimpleNamespace(
+        query=SimpleNamespace(filter_by=lambda **_kwargs: SimpleNamespace(first=lambda: legacy))))
+    monkeypatch.setattr(jobs, '_native_authoring_retryable_error', lambda _legacy: legacy.error if retryable else None)
+    monkeypatch.setattr(jobs, '_reset_native_authoring_compatibility_job', lambda _legacy: True)
+    monkeypatch.setattr(jobs, 'db', SimpleNamespace(session=SimpleNamespace(commit=lambda: None)))
+    monkeypatch.setattr(learning, '_run_authoring_job', lambda *_args, **_kwargs: setattr(job, 'detached', True))
+    expected = jobs.RetryableJobError if retryable else jobs.PermanentJobError
+    with pytest.raises(expected, match='test provider failure'):
+        jobs._execute_local_job(job)
 
 
 @pytest.mark.parametrize('status', [401, 402, 403])
@@ -11,6 +38,7 @@ def test_model_account_errors_are_not_retried(monkeypatch, status):
 
     response = requests.Response()
     response.status_code = status
+    response.raw = io.BytesIO(b'')
     calls = []
 
     def post(*args, **kwargs):

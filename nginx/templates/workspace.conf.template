@@ -31,7 +31,7 @@ location ~ "^/w/(?P<container_id>[0-9a-f]{12})/(?P<port>\d+)(?:/(?P<path>.*))?$"
 
     error_page 418 = @workspace_console_bootstrap;
     error_page 419 = @workspace_console_code;
-    if ($path ~ "^app/(native-keyboard|aisecedu-workspace-bridge)\.js$") { return 418; }
+    if ($path = "app/native-keyboard.js") { return 418; }
     if ($path = "console-compat.js") { return 419; }
 
     proxy_set_header Accept-Encoding "";
@@ -72,7 +72,7 @@ location ~ ^/workspace/(?P<container_id>[^/:]+)/(?P<sig>[^/]+)/(?P<port>\d+)(?:/
 
     error_page 418 = @workspace_console_bootstrap;
     error_page 419 = @workspace_console_code;
-    if ($path ~ "^app/(native-keyboard|aisecedu-workspace-bridge)\.js$") { return 418; }
+    if ($path = "app/native-keyboard.js") { return 418; }
     if ($path = "console-compat.js") { return 419; }
 
     proxy_set_header Accept-Encoding "";
@@ -121,7 +121,7 @@ location ~ ^/workspace/(?P<container_id>[^/]+):(?P<target_host>[^/]+)/(?P<sig>[^
 
     error_page 418 = @workspace_console_bootstrap;
     error_page 419 = @workspace_console_code;
-    if ($path ~ "^app/(native-keyboard|aisecedu-workspace-bridge)\.js$") { return 418; }
+    if ($path = "app/native-keyboard.js") { return 418; }
     if ($path = "console-compat.js") { return 419; }
 
     proxy_set_header Accept-Encoding "";

@@ -2753,14 +2753,14 @@ body.guide-page-body > main {
     align-items: center;
     justify-content: space-between;
     margin: .65rem .35rem .3rem;
-    color: var(--body-color, #334155);
+    color: var(--theme-text);
     font-size: var(--ae-type-caption);
     letter-spacing: .02em;
 }
 
 .guide-agent-context-heading a,
 .guide-agent-context-heading span {
-    color: var(--muted-color, #64748b);
+    color: var(--theme-text-dim);
     font-size: var(--ae-type-caption);
     font-weight: 500;
 }
@@ -2810,7 +2810,7 @@ body.guide-page-body > main {
 
 .guide-agent-context-item small,
 .guide-agent-context-empty {
-    color: var(--muted-color, #64748b);
+    color: var(--theme-text-dim);
     font-size: var(--ae-type-caption);
 }
 
@@ -2820,7 +2820,7 @@ body.guide-page-body > main {
     padding: 0;
     border: 0;
     border-radius: 50%;
-    color: var(--muted-color, #64748b);
+    color: var(--theme-text-dim);
     background: transparent;
 }
 
@@ -3163,7 +3163,7 @@ body.guide-page-body > main {
 
 .guide-agent-result small {
     margin-top: .12rem;
-    color: var(--muted-color, #64748b);
+    color: var(--theme-text-dim);
 }
 
 .guide-agent-result.is-static {
@@ -4439,7 +4439,7 @@ samp {
 .teaching-skills-panel footer small {
     display: block;
     margin-top: 0.25rem;
-    color: var(--ui-muted, #5b6b7b);
+    color: var(--theme-text-dim);
 }
 
 .teaching-skills-panel header button {
@@ -4474,7 +4474,7 @@ samp {
 .teaching-skills-badge {
     padding: 0.05rem 0.4rem;
     border-radius: 0.5rem;
-    font-size: 0.72rem;
+    font-size: max(0.72rem, 14px);
     background: #e8eef6;
 }
 
@@ -4488,7 +4488,7 @@ samp {
 
 .teaching-skills-item p {
     margin: 0.35rem 0;
-    color: var(--ui-muted, #5b6b7b);
+    color: var(--theme-text-dim);
 }
 
 .teaching-skills-actions {
@@ -4547,7 +4547,7 @@ samp {
 .teaching-skills-message {
     min-height: 1.2rem;
     margin: 0.4rem 0 0;
-    color: var(--ui-muted, #5b6b7b);
+    color: var(--theme-text-dim);
 }
 
 .teaching-skills-message.is-success {

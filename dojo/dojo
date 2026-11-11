@@ -99,7 +99,9 @@ case "$ACTION" in
         [ "${ENABLE_SPLUNK}" = "true" ] && profiles+=("splunk")
 
         args=(--env-file=/data/config.env)
-        if [[ -f docker-compose.staging.yml || -f docker-compose.generation-release.yml ]]; then
+        if [[ "$DOJO_ENV" == "coverage" ]]; then
+            args+=(-f docker-compose.yml -f docker-compose.coverage.yml)
+        elif [[ -f docker-compose.staging.yml || -f docker-compose.generation-release.yml ]]; then
             args+=(-f docker-compose.yml)
             [[ ! -f docker-compose.override.yml ]] || args+=(-f docker-compose.override.yml)
             [[ ! -f docker-compose.staging.yml ]] || args+=(-f docker-compose.staging.yml)
@@ -196,12 +198,13 @@ case "$ACTION" in
             esac
         done
 
-        if docker inspect workspace-builder >/dev/null 2>&1 \
-            && ! docker wait workspace-builder
-        then
-            docker logs --tail 100 workspace-builder
-            echo "Error: workspace-builder failed"
-            exit 1
+        if docker inspect workspace-builder >/dev/null 2>&1; then
+            builder_status=$(docker wait workspace-builder) || builder_status=unknown
+            if [ "$builder_status" != "0" ]; then
+                docker logs --tail 100 workspace-builder
+                echo "Error: workspace-builder failed (exit $builder_status)"
+                exit 1
+            fi
         fi
 
         if docker ps --format '{{.Names}}' | grep -q '^stats-worker$'; then

@@ -1,5 +1,5 @@
 id: dst-dojo
-type: topic
+type: public
 modules:
   - id: dst-module
     challenges:

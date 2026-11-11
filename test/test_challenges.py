@@ -38,7 +38,7 @@ def test_workspace_full_security_toolchain(admin_session, example_dojo):
     start_challenge(example_dojo, "hello", "apple", session=admin_session)
     result = workspace_run(
         "set -e; "
-        "for tool in gcc clang make nasm vim nvim gdb gef pwndbg strace ltrace "
+        "for tool in gcc clang make nasm vim nvim gdb gef bata24-gef strace ltrace "
         "python3 pwn file strings objdump readelf burpsuite ghidra cutter nmap "
         "wireshark tshark tcpdump radare2 r2 tmux curl wget; "
         'do command -v "$tool"; done; '
@@ -90,7 +90,7 @@ def test_active_module_endpoint(random_user_session, example_dojo):
 
 
 def test_progression_locked(progression_locked_dojo, random_user_name, random_user_session):
-    assert random_user_session.get(f"{DOJO_URL}/dojo/{progression_locked_dojo}/join/").status_code == 200
+    assert random_user_session.post(f"{DOJO_URL}/dojo/{progression_locked_dojo}/join/", json={}).status_code == 200
     start_challenge(progression_locked_dojo, "progression-locked-module", "unlocked-challenge", session=random_user_session)
 
     with pytest.raises(AssertionError, match="Failed to start challenge: 此题目尚未解锁"):
@@ -213,14 +213,21 @@ def test_complete_challenge_reset(random_user_name, random_user_session, example
         user=random_user_name,
     )
 
+    reset_url = f"{DOJO_URL}/pwncollege_api/v1/docker/reset"
+    preview = random_user_session.get(reset_url)
+    assert preview.status_code == 200, preview.text
+    scope = preview.json()
+    assert scope["preservesHome"] and scope["preservesGrades"]
+    rejected = random_user_session.post(reset_url, json={})
+    assert rejected.status_code == 409, rejected.text
     response = random_user_session.post(
         f"{DOJO_URL}/pwncollege_api/v1/docker/reset",
-        json={},
+        json={key: scope[key] for key in ("challengeId", "dojoId", "containerId", "scope")},
     )
     assert response.status_code == 200
     assert response.json()["success"], response.json()
     workspace_run(
-        "test ! -e /home/hacker/full-reset-home && test ! -e /tmp/full-reset-container",
+        "test -e /home/hacker/full-reset-home && test ! -e /tmp/full-reset-container && rm /home/hacker/full-reset-home",
         user=random_user_name,
     )
 

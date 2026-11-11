@@ -3802,6 +3802,8 @@ def _execute_local_job(job):
     outer_job_id = job.id
     job_owner_id = job.owner_id
     job_action_id = job.action_id
+    attempt_count = int(job.attempt_count or 0)
+    max_attempts = max(1, int(job.max_attempts or 1))
     legacy_job_id = job_payload.get("legacyJobId")
     if not legacy_job_id:
         raise PermanentJobError("Missing legacy authoring job id")
@@ -3874,7 +3876,7 @@ def _execute_local_job(job):
         raise PermanentJobError("Authoring job no longer exists")
     if legacy.status == "CANCELED":
         raise JobCanceled("Native authoring task was canceled")
-    if job.attempt_count > 1 and _reset_native_authoring_compatibility_job(legacy):
+    if attempt_count > 1 and _reset_native_authoring_compatibility_job(legacy):
         db.session.commit()
 
     try:
@@ -3892,8 +3894,7 @@ def _execute_local_job(job):
         raise JobCanceled("Native authoring task was canceled")
     if legacy.status != "COMPLETED":
         retryable_error = _native_authoring_retryable_error(legacy)
-        max_attempts = max(1, int(job.max_attempts or 1))
-        if retryable_error and job.attempt_count < max_attempts:
+        if retryable_error and attempt_count < max_attempts:
             # Keep the artifact/action in their in-flight state.  The outer
             # worker will persist QUEUED and re-publish this same idempotent
             # job; marking either object failed here would make a transient

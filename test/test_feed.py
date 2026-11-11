@@ -4,6 +4,7 @@ import requests
 from utils import DOJO_URL, start_challenge, solve_challenge, wait_for_background_worker
 from selenium.webdriver import Firefox, FirefoxOptions
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
 
 def challenge_expand(browser, idx):
     browser.refresh()
@@ -38,7 +39,14 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
         wait_for_background_worker(timeout=1)
 
         # 确认页面初次加载时会显示已有事件。
+        watcher.get(DOJO_URL)
+        for cookie in random_user_session.cookies:
+            watcher.add_cookie({"name": cookie.name, "value": cookie.value,
+                                "path": cookie.path or "/", "secure": bool(cookie.secure)})
         watcher.get(f"{DOJO_URL}/feed")
+        WebDriverWait(watcher, 20).until(lambda driver: driver.execute_script(
+            "return Number(window.init && window.init.userId) > 0 && "
+            "document.getElementById('feed-container').dataset.connectionState === 'connected'"))
         events_after_start = watcher.find_element(By.ID, "events-list").find_elements(By.CLASS_NAME, "event-card")
 
         found_start_event = False
@@ -60,7 +68,9 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
 
         solve_challenge(welcome_dojo, "welcome", "flag", session=random_user_session, user=random_user_name)
         wait_for_background_worker(timeout=1)
-        # we purposefully don't refresh here, to make sure streaming works
+        WebDriverWait(watcher, 20).until(lambda driver: any(
+            random_user_name in event.text and "完成了" in event.text
+            for event in driver.find_elements(By.CSS_SELECTOR, "#events-list .event-card")))
         events_after_solve = watcher.find_element(By.ID, "events-list").find_elements(By.CLASS_NAME, "event-card")
 
         found_solve_event = False
@@ -87,12 +97,15 @@ def test_feed_shows_all_events(welcome_dojo, simple_award_dojo, random_user_name
         assert container_events > 0, f"No container start events found for {random_user_name}"
         assert found_solve_event, f"Challenge solve event for {random_user_name} not found"
 
-        random_user_session.get(f"{DOJO_URL}/dojo/{simple_award_dojo}/join/")
+        random_user_session.post(f"{DOJO_URL}/dojo/{simple_award_dojo}/join/", json={})
         start_challenge(simple_award_dojo, "hello", "apple", session=random_user_session)
         solve_challenge(simple_award_dojo, "hello", "apple", session=random_user_session, user=random_user_name)
         start_challenge(simple_award_dojo, "hello", "banana", session=random_user_session)
         solve_challenge(simple_award_dojo, "hello", "banana", session=random_user_session, user=random_user_name)
         wait_for_background_worker(timeout=1)
+        WebDriverWait(watcher, 20).until(lambda driver: any(
+            random_user_name in event.text and "获得了" in event.text and "🧪" in event.text
+            for event in driver.find_elements(By.CSS_SELECTOR, "#events-list .event-card")))
         events_with_emoji = watcher.find_element(By.ID, "events-list").find_elements(By.CLASS_NAME, "event-card")
         
         found_emoji_event = False

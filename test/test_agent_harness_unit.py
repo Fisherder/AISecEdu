@@ -1,6 +1,7 @@
 import ast
 import datetime
 import hashlib
+import importlib.util
 import json
 import re
 from pathlib import Path
@@ -8,11 +9,14 @@ from types import SimpleNamespace, ModuleType
 import sys
 
 import pytest
-from test_generation_reliability_unit import reliability
 from sqlalchemy import Column, Integer, String, JSON, DateTime, create_engine, text as sql_text
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
+from sqlalchemy.dialects.postgresql import JSONB
 
 ROOT = Path(__file__).resolve().parents[1]
+reliability_spec = importlib.util.spec_from_file_location('agent_harness_reliability', ROOT / 'dojo_plugin/agent_runtime/reliability.py')
+reliability = importlib.util.module_from_spec(reliability_spec)
+reliability_spec.loader.exec_module(reliability)
 Base = declarative_base()
 
 
@@ -23,6 +27,8 @@ class Job(Base):
     thread_id = Column(String)
     idempotency_key = Column(String, unique=True)
     kind = Column(String, default="agent.chat")
+    dojo_id = Column(Integer)
+    module_index = Column(Integer)
     status = Column(String, default="QUEUED")
     stage = Column(String, default="queued")
     progress = Column(Integer, default=0)
@@ -70,6 +76,14 @@ class Outbox(Base):
     last_error = Column(String)
 
 
+class Event(Base):
+    __tablename__ = 'events'
+    id = Column(Integer, primary_key=True)
+    thread_id = Column(String)
+    event_type = Column(String)
+    payload = Column(JSONB().with_variant(JSON, 'sqlite'))
+
+
 def load(path, namespace):
     tree = ast.parse((ROOT / path).read_text())
     tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or node.level == 0]
@@ -78,19 +92,34 @@ def load(path, namespace):
 
 
 @pytest.fixture
-def setup():
+def setup(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     session = scoped_session(sessionmaker(bind=engine))
-    for table in [Job, Thread, Message, User, Outbox]:
+    for table in [Job, Thread, Message, User, Outbox, Event]:
         table.query = session.query_property()
     thread = Thread(id="thread", user_id=7)
     session.add_all([thread, User(id=7)])
     session.commit()
-    module = load("dojo_plugin/agent_runtime/conversation.py", {"TeachingJobs": Job})
+    package = 'harness_fixture'
+    for name, path in [(package, ROOT / 'dojo_plugin'),
+                       (package + '.agent_runtime', ROOT / 'dojo_plugin/agent_runtime'),
+                       (package + '.api', None), (package + '.api.v1', None), ('CTFd', None)]:
+        module = ModuleType(name)
+        module.__path__ = [str(path)] if path else []
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setitem(sys.modules, 'CTFd.models', SimpleNamespace(Users=User, db=SimpleNamespace(session=session)))
+    monkeypatch.setitem(sys.modules, package + '.models', SimpleNamespace(
+        TeachingJobs=Job, TeachingAgentMessages=Message, TeachingAgentThreads=Thread,
+        TeachingAgentEventOutbox=Event, TeachingAgentActions=SimpleNamespace(),
+    ))
+    module = importlib.import_module(package + '.agent_runtime.conversation')
     yield session, thread, module
     session.remove()
     engine.dispose()
+    for name in list(sys.modules):
+        if name.startswith(package + '.') and name not in {package + '.agent_runtime', package + '.api', package + '.api.v1', package + '.models'}:
+            sys.modules.pop(name, None)
 
 
 def add_job(session, id, **values):
@@ -167,6 +196,7 @@ def test_worker_claim_reloads_canceled_state_before_execution(setup):
         "TeachingJobs": Job,
         "db": SimpleNamespace(session=session),
         "_job_cancellation_requested": lambda job: False,
+        "TeachingAgentThreads": Thread,
         "recovery_due": lambda job, now: True,
         "turn_wait_state": lambda session, job: "ready",
         "_runtime_job_lease_seconds": lambda job: 60,
@@ -431,7 +461,8 @@ def test_question_replies_keep_initial_request_across_clarification_rounds(setup
     c = setup[2]
     first = c.question_reply_context({"prompt": "做一段DNA演示"}, [{"id": "level", "text": "面向谁？"}], {"level": "高中生"})
     second = c.question_reply_context({"prompt": "高中生", "context": {"questionReply": first}}, [{"id": "time", "text": "多长？"}], {"time": "一分钟"})
-    assert second == {"originalRequest": "做一段DNA演示", "answers": [{"question": "面向谁？", "answer": "高中生"}, {"question": "多长？", "answer": "一分钟"}]}
+    assert second == {"originalRequest": "做一段DNA演示", "round": 2, "intentDecision": None,
+                      "answers": [{"question": "面向谁？", "answer": "高中生"}, {"question": "多长？", "answer": "一分钟"}]}
     assert c.question_reply_prompt(second) == "做一段DNA演示\n\n教师补充信息：\n\n面向谁？：高中生\n\n多长？：一分钟"
     with pytest.raises(c.ConversationConflict):
         c.question_reply_prompt({"originalRequest": "长" * 48000, "answers": second["answers"]})
@@ -449,6 +480,7 @@ def test_outbox_scans_past_blocked_page_without_starving_ready_tools(setup):
     tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
     selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {"_pending_outbox_rows", "publish_pending_outbox"}]
     namespace = {"TeachingJobOutbox": Outbox, "TeachingJobs": Job, "datetime": datetime, "json": json,
+                 "request_payload": importlib.import_module('harness_fixture.agent_runtime.model_inputs').request_payload,
                  "db": SimpleNamespace(session=session), "turn_wait_state": c.turn_wait_state,
                  "_redis": lambda: SimpleNamespace(xadd=lambda stream, body, **kw: published.append(json.loads(body["data"])["job_id"])),
                  "_stream_for_job": lambda _: "test", "recovery_due": reliability.recovery_due}
@@ -460,9 +492,10 @@ def test_outbox_scans_past_blocked_page_without_starving_ready_tools(setup):
 
 def attempt_functions(session, **extra):
     tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
-    names = {"JobCanceled", "JobLeaseLost", "_owned_job_attempt", "assert_job_lease", "process_job"}
+    names = {"JobCanceled", "JobLeaseLost", "_owned_job_attempt", "assert_job_lease", "_job_cancellation_requested", "process_job"}
     selected = [node for node in tree.body if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in names]
     namespace = {"TeachingJobs": Job, "db": SimpleNamespace(session=session),
+                 "COMMAND_JOB_KINDS": importlib.import_module('harness_fixture.agent_runtime.commands').COMMAND_JOB_KINDS,
                  "logger": SimpleNamespace(info=lambda *_: None), "TurnDeferred": type("TurnDeferred", (RuntimeError,), {}), **extra}
     exec(compile(ast.Module(body=selected, type_ignores=[]), "jobs.py", "exec"), namespace)
     return namespace
@@ -527,12 +560,9 @@ def test_policy_never_auto_approves_or_auto_selects():
 def test_driver_durable_replay_tool_completion_and_continuation(setup, monkeypatch, outcome, child_count):
     session, thread, c = setup
     package = "harness_fixture"
-    for name in [package, package + ".agent_runtime", package + ".api", package + ".api.v1", "CTFd"]:
-        module = ModuleType(name); module.__path__ = []
-        monkeypatch.setitem(sys.modules, name, module)
-    monkeypatch.setitem(sys.modules, "CTFd.models", SimpleNamespace(Users=User, db=SimpleNamespace(session=session)))
-    monkeypatch.setitem(sys.modules, package + ".models", SimpleNamespace(TeachingJobs=Job, TeachingAgentMessages=Message, TeachingAgentThreads=Thread))
-    source = Message(id=1, user_id=7, thread_id=thread.id, metadata_json={"jobId": "root", "toolProposals": [{"tool": "artifact.revise", "arguments": {"artifactId": "artifact", "instruction": "更清楚"}}]})
+    source = Message(id=1, user_id=7, thread_id=thread.id, metadata_json={"jobId": "root", "executionMode": "execute",
+                     "intentDecision": {"version": "teacher-intent-v1", "intent": "revise", "executionMode": "execute", "clarification": {"state": "confirmed"}},
+                     "toolProposals": [{"tool": "artifact.revise", "arguments": {"artifactId": "artifact", "instruction": "更清楚"}}]})
     session.add(source)
     add_job(session, "root", status="SUCCEEDED")
     driver = add_job(session, "driver", kind="agent.advance", payload={"sourceMessageId": 1, "harnessRootJobId": "root", "harnessInternal": True})
@@ -547,10 +577,11 @@ def test_driver_durable_replay_tool_completion_and_continuation(setup, monkeypat
     def continue_message(owner, thread_id, body, key):
         continues.append((body, key))
         return {"success": True, "data": {"job": {"id": "followup"}}}, 202
-    api = SimpleNamespace(_require_teacher=lambda user: None, COURSE_TOOL_NAMES=set(), COURSE_NAVIGATION_TOOLS=set(),
+    api = SimpleNamespace(_require_teacher=lambda user: None, COURSE_TOOL_NAMES=set(), SKILL_TOOL_NAMES=set(), COURSE_NAVIGATION_TOOLS=set(),
                           MAX_AGENT_LOOP_STEPS=6, revise_teacher_artifact=revise, submit_teacher_message=continue_message)
     monkeypatch.setitem(sys.modules, package + ".api.v1.teaching", api)
     jobs = SimpleNamespace(AGENT_TOOL_SCHEMAS={"artifact.revise": ("R2", {})}, heartbeat=lambda job, **kw: job, assert_job_lease=lambda job: job,
+                           _record_agent_run_progress=lambda *args: None,
                            _job_failure_message=lambda job: "工具未完成")
     monkeypatch.setitem(sys.modules, package + ".agent_runtime.jobs", jobs)
     h = load("dojo_plugin/agent_runtime/harness.py", {"__name__": package + ".agent_runtime.harness", "__package__": package + ".agent_runtime"})
@@ -562,12 +593,15 @@ def test_driver_durable_replay_tool_completion_and_continuation(setup, monkeypat
         h.advance_turn(driver)
     assert len(calls) == 1 and not continues
     child = Job.query.filter_by(id="child").first()
-    child.status = outcome; session.commit()
+    child.status = outcome
+    session.add(Event(thread_id=thread.id, event_type='job.event', payload={'jobId': child.id, 'status': outcome, 'details': {}}))
+    session.commit()
     if child_count == 2:
         with pytest.raises(h.TurnDeferred):
             h.advance_turn(driver)
         assert not continues
         Job.query.filter_by(id="child2").first().status = "SUCCEEDED"
+        session.add(Event(thread_id=thread.id, event_type='job.event', payload={'jobId': 'child2', 'status': 'SUCCEEDED', 'details': {}}))
         session.commit()
     if outcome != "SUCCEEDED":
         with pytest.raises(ValueError, match="工具未完成"):

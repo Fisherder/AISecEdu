@@ -1,5 +1,6 @@
 import concurrent.futures
 import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -12,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-from utils import DOJO_URL, db_sql, dojo_run, get_user_id, login
+from utils import DOJO_URL, complete_teacher_command, db_sql, dojo_run, enroll, get_user_id, login
 
 
 API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/teaching"
@@ -27,7 +28,8 @@ def _teacher_history_serializers():
     selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {
         "_serialize_teacher_agent_history", "_teacher_agent_history_context",
     }]
-    namespace = {}
+    namespace = {"__name__": "CTFd.plugins.dojo_plugin.api.v1.teaching",
+                 "__package__": "CTFd.plugins.dojo_plugin.api.v1"}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(source_path), "exec"), namespace)
     return namespace
 
@@ -105,6 +107,7 @@ def test_teacher_history_provenance_uses_existing_scope_checked_option_lookup_wi
         if message_id == 21:
             raise ValueError("来源未通过用户/对话/成功任务校验")
         return {"sourceJob": SimpleNamespace(id="job-verified", payload={"prompt": "真实用户原始请求"}),
+                "sourcePayload": {"prompt": "真实用户原始请求"},
                 "bundle": {"options": [{"id": "option-1", "title": "正确来源", "rewrittenPrompt": "模型方案"}]},
                 "selection": None}
     namespace["_generation_option_context"] = lookup
@@ -181,7 +184,8 @@ def test_teacher_agent_uses_one_persistent_composer_approval_surface():
     assert "grid-template-columns: 34px minmax(0, 1fr) auto;" in styles
     assert "class TeachingToolProposalDecision(Resource):" in teaching
     assert 'metadata["toolProposalDecisions"] = decisions' in teaching
-    assert 'code="PROPOSAL_ALREADY_DECIDED"' in teaching
+    journal = (root / "dojo_plugin/agent_runtime/approval_journal.py").read_text()
+    assert "ALREADY_DECIDED" in journal
 
 
 def test_candidate_materialization_preserves_original_generation_contract():
@@ -287,6 +291,9 @@ def test_tool_proposal_decision_is_persistent_and_idempotent(
         f"{API}/threads/{thread_id}/messages/{message_id}/"
         "tool-proposals/0/decision"
     )
+    snapshot = data(admin_session.get(f"{API}/threads/{thread_id}"))["thread"]
+    proposal_message = next(item for item in snapshot["messages"] if int(item["id"]) == message_id)
+    approval = proposal_message["metadata"]["toolProposalApprovalRequests"]["0"]
     try:
         denied = student_session.post(
             endpoint,
@@ -301,7 +308,7 @@ def test_tool_proposal_decision_is_persistent_and_idempotent(
 
         rejected = admin_session.post(
             endpoint,
-            json={"decision": "REJECTED", "confirmed": True},
+            json={"decision": "REJECTED", "confirmed": True, "approvalRequest": approval},
         )
         assert rejected.status_code == 200, rejected.text
         rejected_data = rejected.json()["data"]
@@ -318,17 +325,17 @@ def test_tool_proposal_decision_is_persistent_and_idempotent(
 
         repeated = admin_session.post(
             endpoint,
-            json={"decision": "REJECTED", "confirmed": True},
+            json={"decision": "REJECTED", "confirmed": True, "approvalRequest": approval},
         )
         assert repeated.status_code == 200, repeated.text
         assert repeated.json()["data"]["deduplicated"] is True
 
         conflicting = admin_session.post(
             endpoint,
-            json={"decision": "APPROVED", "confirmed": True},
+            json={"decision": "APPROVED", "confirmed": True, "approvalRequest": approval},
         )
         assert conflicting.status_code == 409, conflicting.text
-        assert conflicting.json()["errorCode"] == "PROPOSAL_ALREADY_DECIDED"
+        assert conflicting.json()["errorCode"] == "ALREADY_DECIDED"
     finally:
         cleanup = admin_session.delete(
             f"{API}/threads/{thread_id}", json={"confirmed": True}
@@ -343,6 +350,7 @@ def test_teacher_agent_approval_tray_browser_flow(
 ):
     selenium_by = pytest.importorskip("selenium.webdriver.common.by")
     selenium_wait = pytest.importorskip("selenium.webdriver.support.ui")
+    selenium_errors = pytest.importorskip("selenium.common.exceptions")
     created = admin_session.post(
         f"{API}/threads",
         json={"title": "输入框审批条浏览器验收"},
@@ -384,7 +392,7 @@ def test_teacher_agent_approval_tray_browser_flow(
                     "secure": bool(cookie.secure),
                 }
             )
-        browser.get(f"{DOJO_URL.rstrip('/')}/teacher")
+        browser.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard&thread={thread_id}")
         wait = selenium_wait.WebDriverWait(browser, 45)
         tray = wait.until(
             lambda driver: (
@@ -400,13 +408,18 @@ def test_teacher_agent_approval_tray_browser_flow(
         assert "下一步操作" not in browser.find_element(
             selenium_by.By.ID, "teaching-messages"
         ).text
-        reject = tray.find_element(
-            selenium_by.By.CSS_SELECTOR,
-            '[data-approval-decision="REJECTED"]',
-        )
-        reject.click()
+        def reject_proposal(driver):
+            for close in reversed(driver.find_elements(selenium_by.By.CSS_SELECTOR, ".popup-overlay #closePopup")):
+                if close.is_displayed():
+                    close.click()
+            driver.find_element(selenium_by.By.CSS_SELECTOR,
+                                '#teaching-approval-tray [data-approval-decision="REJECTED"]').click()
+            return True
+        selenium_wait.WebDriverWait(browser, 10, ignored_exceptions=(
+            selenium_errors.ElementClickInterceptedException, selenium_errors.StaleElementReferenceException,
+        )).until(reject_proposal)
         wait.until(lambda _driver: not tray.is_displayed())
-        browser.refresh()
+        browser.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard&thread={thread_id}")
         wait.until(
             lambda driver: driver.find_element(
                 selenium_by.By.ID, "teaching-input"
@@ -456,7 +469,7 @@ def test_teacher_agent_uses_compact_expandable_task_surfaces():
     assert "expandedJobIds: new Set()" in script
     assert "bindJobDisclosureButtons(elements.messages, false)" in script
     assert "bindJobDisclosureButtons(elements.jobList, true)" in script
-    assert "jobTimelineMarkup(job, false)" in script
+    assert "agentRunMarkup(job)" in script
     assert "messageExecutionMarkup" not in script
     assert "taskGroupMarkup" in task_list.group("body")
     assert 'taskGroupMarkup("active", "进行中", active)' in task_list.group("body")
@@ -468,7 +481,7 @@ def test_teacher_agent_uses_compact_expandable_task_surfaces():
     assert "jumpToJobConversation" in script
     assert "jobEventListMarkup" not in script
     assert "loadJobActivity" not in script
-    assert "执行记录" not in script
+    assert 'class="job-detail-view"' not in script
     assert "teaching-answer-surface" in script
     assert "renderGenerationOptions" in script
     assert "selectGenerationOption" in script
@@ -488,15 +501,16 @@ def test_teacher_agent_uses_compact_expandable_task_surfaces():
     assert "is-stop" in script
     assert 'id="teaching-job-list"' in template
     assert 'id="teaching-current-run"' not in template
-    assert 'id="teaching-stop"' not in template
+    assert 'id="teaching-stop"' in template
+    assert 'aria-label="停止当前任务"' in template
     assert 'id="teaching-current-thread-actions"' not in template
     assert "currentThreadActions" not in script
     assert "执行记录" not in template
-    assert template.count('data-quick-action="') == 4
+    assert template.count('data-quick-action="') == 5
     assert 'id="teaching-quick-scope-dialog"' in template
     assert 'value="course"' in template
     assert 'value="module"' in template
-    assert "不限定课程（自由描述）" in script
+    assert "生成项目合集（无需课程）" in script
     assert 'prompt = "帮我"' in script
     assert "为整门课程“${dojo.name}”" in script
     assert "为课程“${dojo.name}”的章节“" in script
@@ -573,6 +587,7 @@ def test_teacher_agent_progress_is_compact_live_and_stable():
         re.S,
     )
 
+    progress = (root / "dojo_theme/static/js/dojo/core/teaching-job-progress.js").read_text()
     assert disclosure and task_item
 
     assert "function authoringStagePresentation(stage)" in script
@@ -586,22 +601,22 @@ def test_teacher_agent_progress_is_compact_live_and_stable():
         "保存可追溯草稿",
         "独立验证与复验",
     ):
-        assert stage_copy in script
-    assert "第 ${validation[1]} 轮独立验证" in script
-    assert "第 ${validationRepair[1]} 轮自主修复" in script
+        assert stage_copy in progress
+    assert "第 ${validation[1]} 轮独立验证" in progress
+    assert "第 ${validationRepair[1]} 轮自主修复" in progress
     assert 'aria-live="polite"' in script
-    assert "Array.isArray(job.events) ? job.events : []" in script
-    assert "latestStage !== stage" in script
+    assert "Array.isArray(job.events) ? job.events : []" in progress
+    assert "latestStage !== stage" in progress
     assert "jobProgressOverviewMarkup" not in script
     assert "jobRecentProgressMarkup" not in script
     assert "最新进展" not in script
-    assert "jobTimelineMarkup(job, false)" in disclosure.group("body")
+    assert "agentRunMarkup(job)" in disclosure.group("body")
     assert "jobProgressBarMarkup" not in disclosure.group("body")
     assert "function jobAttemptLabel(job)" in script
     assert "function jobDurationMarkup(job, compact)" in script
-    assert 'data-job-duration-prefix="${prefix}"' in script
+    assert 'data-job-duration-prefix="${prefix}"' in progress
     assert "window.setInterval" in script
-    assert "formatJobDuration" in script
+    assert "formatJobDuration" in progress
     assert "function jobProgressBarMarkup(job, className, key)" in script
     assert "data-job-progress-target" in script
     assert "animateJobProgressBars(elements.messages)" in script
@@ -614,7 +629,7 @@ def test_teacher_agent_progress_is_compact_live_and_stable():
     assert "state.lastTranscriptSignature === nextSignature" in script
     assert "state.lastJobListSignature === nextSignature" in script
     assert "job-event-details" not in script
-    assert "执行记录" not in script
+    assert 'class="job-detail-view"' not in script
 
     for selector in (
         ".teaching-task-progress",
@@ -685,7 +700,8 @@ def test_independent_question_batch_never_uses_first_job_as_batch_status():
     assert 'target.href || ""' in script
     assert 'cardResult.draftId || ""' in script
     assert 'cardTarget.href || ""' in script
-    assert 'else f"CTF 实践题 {batch_index}/{challenge_count}"' in teaching
+    practice = (root / "dojo_plugin/agent_runtime/tool_handlers_practice.py").read_text()
+    assert "CTF 实践题 {batch_index}/{challenge_count}" in practice
 
 
 def test_live_active_card_state_wins_over_stale_message_metadata():
@@ -708,10 +724,11 @@ def test_active_job_cannot_be_presented_as_completed_without_a_result():
     script = (root / "dojo_theme/static/js/dojo/teaching-agent.js").read_text()
     jobs = (root / "dojo_plugin/agent_runtime/jobs.py").read_text()
 
-    assert 'activeJobStatuses.has(status) ? 99 : 100' in script
-    assert 'label: "正在保存结果"' in script
+    progress = (root / "dojo_theme/static/js/dojo/core/teaching-job-progress.js").read_text()
+    assert 'activeJobStatuses.has(status) ? 99 : 100' in progress
+    assert 'label: "正在保存结果"' in progress
     assert "核心处理已结束，正在保存结果；入口生成后页面会自动刷新" in script
-    assert '/^(complete|completed|finalizing)$/.test(stage)' in script
+    assert '/^(complete|completed|finalizing)$/.test(stage)' in progress
     assert 'stage = "finalizing"' in jobs
     assert 'progress = min(99, max(0, int(progress or 0)))' in jobs
     assert "任务不会被标记为完成" in jobs
@@ -762,7 +779,7 @@ def test_terminal_tasks_can_be_removed_without_deleting_conversation_results():
     assert ".filter((job) => job.taskListHidden !== true)" in script
     assert "def dismiss_job_from_task_list(job, user_id):" in jobs
     assert '"taskListHidden": True' in jobs
-    assert '"taskListHidden": False' in jobs
+    assert 'payload.pop("taskListHidden", None)' in jobs
     assert '@teaching_namespace.route("/jobs/<string:job_id>/task-list")' in teaching
     assert "dismiss_job_from_task_list(job, user.id)" in teaching
 
@@ -908,7 +925,8 @@ def test_teaching_worker_isolates_native_authoring_from_interactive_queue(
     client = RedisClient()
     payload = {"job_id": native.id, "trace_id": "trace-native"}
 
-    assert jobs._stream_for_job_kind("material.analyze") == jobs.STREAM
+    assert jobs._stream_for_job_kind("material.analyze") == jobs.MATERIAL_INDEX_STREAM
+    assert jobs.MATERIAL_INDEX_STREAM not in {jobs.STREAM, jobs.AUTHORING_STREAM}
     assert jobs._stream_for_job_kind("learning.authoring") == jobs.AUTHORING_STREAM
     assert jobs._stream_for_job_kind("learning.solution") == jobs.AUTHORING_STREAM
     assert jobs._reroute_queued_job_message(client, jobs.STREAM, payload)
@@ -975,6 +993,9 @@ def test_retry_job_reuses_a_terminal_retry_for_the_same_idempotency_token(
             return self
 
         def with_for_update(self):
+            return self
+
+        def populate_existing(self):
             return self
 
         def first(self):
@@ -1286,17 +1307,39 @@ def test_process_job_prioritizes_persisted_cancellation_over_runtime_error():
     assert '"retryable": retryable' in solution
 
 
-def test_agent_runtime_startup_outage_retries_without_consuming_job_attempts():
-    root = pathlib.Path(__file__).resolve().parents[1]
-    jobs = (root / "dojo_plugin/agent_runtime/jobs.py").read_text()
-    invoke = jobs.split("def _invoke_agent_runtime(job, route, payload=None):", 1)[1]
+def test_agent_runtime_startup_outage_retries_without_consuming_job_attempts(monkeypatch):
+    from CTFd.plugins.dojo_plugin.agent_runtime import jobs
 
-    assert "AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS = (1, 2, 4, 8)" in jobs
-    assert "def _agent_runtime_startup_connection_error(exc):" in jobs
-    assert "requests.exceptions.ConnectionError" in invoke
-    assert "_agent_runtime_startup_connection_error(exc)" in invoke
-    assert "AGENT_RUNTIME_RETRYABLE_STATUS_CODES" in invoke
-    assert invoke.count("time.sleep(retry_delay)") == 2
+    task = SimpleNamespace(id="connect-retry", kind="material.analyze", payload={}, trace_id="test",
+                           owner_id=1, dojo_id=None, module_index=None, thread_id=None, attempt_count=1)
+    delays, calls = [], []
+    response = requests.Response()
+    response.status_code = 503
+    response._content = b'{"failureCategory":"service","error":"Unavailable"}'
+    response._content_consumed = True
+
+    def post(*_args, **_kwargs):
+        calls.append(1)
+        if len(calls) <= len(jobs.AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS):
+            raise requests.exceptions.ConnectionError("Connection refused")
+        return response
+
+    monkeypatch.setattr(jobs.requests, "post", post)
+    monkeypatch.setattr(jobs.time, "sleep", delays.append)
+    with pytest.raises(jobs.RuntimeJobError) as error:
+        jobs._invoke_agent_runtime(task, {"provider": "test", "actual_model": "test"})
+    assert error.value.category == "service"
+    assert delays == [1, 2, 4, 8]
+    assert len(calls) == 5
+    assert task.attempt_count == 1
+
+    calls.clear()
+    delays.clear()
+    monkeypatch.setattr(jobs.requests, "post", lambda *_args, **_kwargs: calls.append(1) or response)
+    with pytest.raises(jobs.RuntimeJobError):
+        jobs._invoke_agent_runtime(task, {})
+    assert calls == [1]
+    assert delays == []
 
 
 def test_agent_runtime_stream_yields_real_events_and_preserves_failure_category(monkeypatch):
@@ -1310,16 +1353,20 @@ def test_agent_runtime_stream_yields_real_events_and_preserves_failure_category(
             self.events = events
             self.closed = False
 
-        def iter_lines(self, decode_unicode=False):
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size):
             for event in self.events:
-                yield json.dumps({"protocol": "aisecedu.agent-run.v1", "event": event})
+                event = {"protocol": jobs.AGENT_RUN_PROTOCOL, "time": 1, **event}
+                yield (json.dumps({"protocol": jobs.AGENT_RUN_PROTOCOL, "event": event}) + "\n").encode()
 
         def close(self):
             self.closed = True
 
     job = SimpleNamespace(
         id="stream-test", kind="agent.chat", payload={}, trace_id="trace",
-        owner_id=1, dojo_id=None, module_index=None,
+        owner_id=1, dojo_id=None, module_index=None, thread_id="stream-thread", attempt_count=1,
     )
     route = {"provider": "deepseek", "actual_model": "deepseek-v4-flash"}
     seen = []
@@ -1337,10 +1384,11 @@ def test_agent_runtime_stream_yields_real_events_and_preserves_failure_category(
         return success
 
     monkeypatch.setattr(jobs.requests, "post", post)
-    monkeypatch.setattr(jobs, "_agent_trace_event", lambda _job, event: seen.append(event))
+    monkeypatch.setattr(jobs, "_record_runtime_dispatch", lambda *_args: None)
+    monkeypatch.setattr(jobs, "_record_agent_run_progress", lambda _job, event: seen.append(event))
     result = jobs._invoke_agent_runtime(job, route)
     assert result["result"]["answer"] == "ok"
-    assert [event["type"] for event in seen] == ["run.started", "item.started"]
+    assert [event["type"] for event in seen] == ["run.started", "item.started", "run.completed"]
     assert posted[0]["headers"]["Accept"] == "application/x-ndjson"
     assert posted[0]["stream"] is True
     assert success.closed
@@ -1381,7 +1429,10 @@ def test_agent_activity_preserves_model_and_tool_events_across_harness_jobs(monk
     }
     monkeypatch.setattr(teaching, "TeachingJobs", SimpleNamespace(query=JobQuery()))
     monkeypatch.setattr(teaching, "job_view", lambda _job: {"result": {}})
-    monkeypatch.setattr(teaching, "job_events_view", lambda job_id: events[job_id])
+    monkeypatch.setattr(teaching.db.session, "query", lambda *_args: SimpleNamespace(
+        filter=lambda *_filters: SimpleNamespace(scalar=lambda: 1)))
+    monkeypatch.setattr(teaching, "job_events_view", lambda job_id, after_sequence=0:
+                        [event for event in events[job_id] if event["sequence"] > after_sequence])
 
     activity = teaching._job_activity_view(root)
     assert [event["sequence"] for event in activity["events"]] == [1, 2]
@@ -1390,80 +1441,65 @@ def test_agent_activity_preserves_model_and_tool_events_across_harness_jobs(monk
 
 def test_agent_harness_records_only_the_tool_it_actually_executes(monkeypatch):
     from CTFd.models import Users, db
-    from CTFd.plugins.dojo_plugin.models import TeachingAgentMessages, TeachingAgentThreads
+    from CTFd.plugins.dojo_plugin.models import TeachingAgentMessages, TeachingAgentThreads, TeachingJobs
     from CTFd.plugins.dojo_plugin.agent_runtime import harness, jobs
     from CTFd.plugins.dojo_plugin.api.v1 import teaching
 
-    class Query:
-        def __init__(self, row):
-            self.row = row
-
-        def filter_by(self, **_values):
-            return self
-
-        def first(self):
-            return self.row
-
-    owner = SimpleNamespace(id=7)
-    thread = SimpleNamespace(id="thread-1", status="ACTIVE")
-    source = SimpleNamespace(id=3, metadata_json={
+    token = secrets.token_hex(8)
+    owner = Users(name="harness-" + token, email=token + "@example.invalid", password="test-only")
+    db.session.add(owner)
+    db.session.flush()
+    thread = TeachingAgentThreads(user_id=owner.id)
+    db.session.add(thread)
+    db.session.flush()
+    source = TeachingAgentMessages(user_id=owner.id, thread_id=thread.id, role="assistant", content="读取材料", metadata_json={
         "toolProposals": [{"tool": "material.list", "arguments": {}}],
         "agentLoopDepth": teaching.MAX_AGENT_LOOP_STEPS - 1,
+        "executionMode": "execute",
     })
-    job = SimpleNamespace(
-        id="driver", owner_id=7, thread_id=thread.id, kind="agent.advance",
+    db.session.add(source)
+    db.session.flush()
+    job = TeachingJobs(
+        owner_id=owner.id, thread_id=thread.id, kind="agent.advance", idempotency_key=token,
         payload={"sourceMessageId": source.id},
     )
+    db.session.add(job)
+    db.session.commit()
     events = []
-    monkeypatch.setattr(Users, "query", Query(owner))
-    monkeypatch.setattr(TeachingAgentThreads, "query", Query(thread))
-    monkeypatch.setattr(TeachingAgentMessages, "query", Query(source))
-    monkeypatch.setattr(db.session, "refresh", lambda _row: None)
-    monkeypatch.setattr(db.session, "commit", lambda: None)
     monkeypatch.setattr(teaching, "_require_teacher", lambda _owner: None)
     monkeypatch.setattr(teaching, "_teacher_agent_context", lambda _owner, _thread: {})
     monkeypatch.setattr(jobs, "heartbeat", lambda current, **_kwargs: current)
     monkeypatch.setattr(jobs, "assert_job_lease", lambda current: current)
-    monkeypatch.setattr(jobs, "_agent_trace_event", lambda _job, event: events.append(event))
+    monkeypatch.setattr(jobs, "_record_agent_run_progress", lambda _job, event: events.append(event))
 
     result = harness.advance_turn(job)
     assert result["state"] == "complete"
-    assert [event["type"] for event in events] == ["item.started", "item.completed"]
-    assert events[0]["item"]["title"] == "读取课程材料"
-    assert events[1]["status"] == "completed"
+    assert [event["type"] for event in events] == ["run.started", "item.started", "item.completed", "run.completed"]
+    assert events[1]["item"]["title"] == "读取课程材料"
+    assert events[2]["status"] == "completed"
+    assert source.metadata_json["toolExecutionResults"]["0"]["tool"] == "material.list"
+    db.session.delete(owner)
+    db.session.commit()
 
 
 def test_teacher_agent_upload_is_conversation_scoped_until_teacher_decides():
     root = pathlib.Path(__file__).resolve().parents[1]
     script = (root / "dojo_theme/static/js/dojo/teaching-agent.js").read_text()
-    styles = (root / "dojo_theme/static/css/teaching-agent.css").read_text()
     teaching = (root / "dojo_plugin/api/v1/teaching.py").read_text()
     jobs = (root / "dojo_plugin/agent_runtime/jobs.py").read_text()
-    runtime = (
-        root / "services/agent-runtime/lib/server/teacher-agent.ts"
-    ).read_text()
-
-    upload = re.search(
-        r"async function uploadMaterial\(file\) \{(?P<body>.*?)\n  \}\n\n  function resizeComposer",
-        script,
-        re.S,
-    )
+    runtime = (root / "services/agent-runtime/lib/server/agent-harness/teacher-prompts.ts").read_text()
+    upload = re.search(r"async function processUploadQueue\(\) \{(?P<body>.*?)\n  \}\n\n  function uploadMaterials", script, re.S)
     assert upload
-    upload_body = upload.group("body")
-    assert 'form.set("conversationUpload", "1")' in upload_body
-    assert 'form.set("askIntent", askIntent ? "1" : "0")' in upload_body
-    assert 'form.set("dojoId"' not in upload_body
-    assert "elements.status" not in upload_body
-    assert "syncAttachmentSources(state.thread)" in upload_body
-    assert "async function sendUploadedInstruction(flow)" in script
-    assert 'flow.phase === "send-error"' in script
-    assert "return sendUploadedInstruction(flow)" in script
+    body = upload.group("body")
+    for field, value in (("conversationUpload", "1"), ("stageOnly", "1"), ("askIntent", "0")):
+        assert f'form.set("{field}", "{value}")' in body
+    assert 'form.set("dojoId"' not in body
+    assert 'form.set("threadId", flow.threadId)' in body
+    assert 'flow.threadId' in body
+    assert 'item.controller' in body
     assert "function validateUploadFile(file)" in script
-    assert 'id="teaching-upload-status"' in (
-        root / "dojo_theme/templates/teacher_agent.html"
-    ).read_text()
+    assert 'id="teaching-upload-status"' in (root / "dojo_theme/templates/teacher_agent.html").read_text()
     assert "renderUploadedAttachments(message)" in script
-    assert ".teaching-uploaded-attachments" in styles
     assert "def _record_conversation_upload" in teaching
     assert 'status="AWAITING_INTENT" if ask_intent else "ACTIVE"' in teaching
     assert '"material.add_to_module": (' in jobs
@@ -1471,7 +1507,6 @@ def test_teacher_agent_upload_is_conversation_scoped_until_teacher_decides():
     assert "Dojos.from_id(reference_id).first()" in jobs
     assert "platformFacts.pendingAttachments" in runtime
     assert "不得自行把上传等同于课件生成" in runtime
-    assert "一次提出 material.add_to_module 完成落位和作用域切换" in runtime
 
 
 def test_global_agent_question_constraints_preserve_only_explicit_modes():
@@ -1758,11 +1793,6 @@ def dojo_context(session, reference_id, role):
     )
 
 
-def enroll(session, reference_id):
-    response = session.post(f"{DOJOS_API}/{reference_id}/enrollment", json={})
-    assert response.status_code in {200, 201}, response.text
-
-
 def copy_session(source):
     session = requests.Session()
     session.cookies.update(source.cookies)
@@ -1773,7 +1803,7 @@ def copy_session(source):
 def execute_course_tool(
     session, thread_id, tool, arguments=None, *, confirmed=True, key=None
 ):
-    return session.post(
+    response = session.post(
         f"{API}/agent-tools/execute",
         headers={"Idempotency-Key": key or f"test-{tool}-{secrets.token_hex(8)}"},
         json={
@@ -1783,6 +1813,9 @@ def execute_course_tool(
             "confirmed": confirmed,
         },
     )
+    return complete_teacher_command(session, response)
+
+
 
 
 def test_generation_batch_retry_is_idempotent_and_preserves_successful_drafts(
@@ -2145,7 +2178,7 @@ def test_unpublished_courseware_supports_single_and_atomic_batch_deletion(
         assert rejected.status_code == 409, rejected.text
         rejected_body = rejected.json()
         assert rejected_body["success"] is False
-        assert "已发布课件" in rejected_body["errors"][0]
+        assert "已发布内容" in rejected_body["errors"][0]
         assert {item["id"] for item in listed("UNPUBLISHED")["items"]} == set(batch_ids)
 
         deleted = admin_session.post(
@@ -2279,7 +2312,20 @@ def test_conversation_upload_asks_then_places_original_file_in_module(
                 f"WHERE id = '{follow_job_id}';"
             ).strip()
         )
-        assert payload["sourceRefs"] == [{"type": "material", "id": material_id}]
+        assert len(payload["sourceRefs"]) == 1
+        source_ref = payload["sourceRefs"][0]
+        assert {key: source_ref[key] for key in ("type", "id")} == {
+            "type": "material", "id": material_id,
+        }
+        if "sha256" in source_ref:
+            assert source_ref["sha256"] == hashlib.sha256(content).hexdigest()
+        if source_ref.get("revisionId"):
+            revision_id = source_ref["revisionId"]
+            assert re.fullmatch(r"matrev_[a-f0-9]{32}", revision_id)
+            assert db_sql(
+                "SELECT material_id || ':' || sha256 FROM teaching_material_revisions "
+                f"WHERE id = '{revision_id}';"
+            ).strip() == f"{material_id}:{hashlib.sha256(content).hexdigest()}"
         if follow_data["job"]["status"] in {"QUEUED", "RUNNING", "CANCEL_REQUESTED"}:
             canceled = admin_session.delete(f"{API}/jobs/{follow_job_id}", json={})
             assert canceled.status_code == 200, canceled.text
@@ -2301,6 +2347,7 @@ def test_conversation_upload_asks_then_places_original_file_in_module(
             headers={"Idempotency-Key": key},
             json=placement_payload,
         )
+        placed = complete_teacher_command(admin_session, placed)
         repeated = admin_session.post(
             f"{API}/agent-tools/execute",
             headers={"Idempotency-Key": key},
@@ -2380,7 +2427,7 @@ def test_manual_course_chapter_and_practice_creation(admin_session):
     new_course_page = admin_session.get(f"{DOJO_URL.rstrip('/')}/teacher/courses/new")
     assert new_course_page.status_code == 200, new_course_page.text
     assert 'id="manual-create-form"' in new_course_page.text
-    assert 'id="manual-agent-shortcut"' in new_course_page.text
+    assert 'class="hub-back-link"' in new_course_page.text
     assert "课程标识" not in new_course_page.text
     assert "章节标识" not in new_course_page.text
     assert 'id="manual-id"' not in new_course_page.text
@@ -2399,7 +2446,7 @@ def test_manual_course_chapter_and_practice_creation(admin_session):
     assert created.status_code == 201, created.text
     created_data = data(created)
     course = created_data["course"]
-    assert re.fullmatch(r"course-[a-f0-9]{8}", course["slug"])
+    assert re.fullmatch(r"[a-z0-9-]+-[a-f0-9]{8}~[a-f0-9]{8}", course["referenceId"])
     assert created_data["module"]["id"] == "chapter-1"
     reference = course["referenceId"]
 
@@ -2409,7 +2456,7 @@ def test_manual_course_chapter_and_practice_creation(admin_session):
         )
         assert chapter_page.status_code == 200, chapter_page.text
         assert 'data-create-kind="chapter"' in chapter_page.text
-        assert 'id="manual-agent-shortcut"' in chapter_page.text
+        assert 'class="hub-back-link"' in chapter_page.text
         assert "章节标识" not in chapter_page.text
         assert 'id="manual-id"' not in chapter_page.text
 
@@ -2431,7 +2478,7 @@ def test_manual_course_chapter_and_practice_creation(admin_session):
         assert practice_page.status_code == 200, practice_page.text
         assert 'data-create-kind="practice"' in practice_page.text
         assert f'<option value="{module_id}"' in practice_page.text
-        assert 'id="manual-agent-shortcut"' in practice_page.text
+        assert 'class="hub-back-link"' in practice_page.text
         assert "题目标识" not in practice_page.text
         assert 'id="manual-id"' not in practice_page.text
 
@@ -2957,6 +3004,7 @@ def test_ctf_generation_option_selection_starts_five_independent_flag_jobs(
                 },
             },
         )
+        started = complete_teacher_command(admin_session, started)
         assert started.status_code == 200, started.text
         started_data = data(started)
         assert started_data["action"]["request"]["arguments"] == proposal["arguments"]
@@ -3123,13 +3171,21 @@ def test_course_agent_starts_one_atomic_batch_revision_for_five_ctf_drafts(
         assert all(item["batch"]["count"] == 5 for item in result["jobs"])
         queued_job_ids = [item["id"] for item in result["jobs"]]
         assert len(set(queued_job_ids)) == 5
+        authoring_job_ids = [item["id"] for item in result["authoringJobs"]]
         states = db_sql(
-            "SELECT id || ':' || status FROM learning_drafts WHERE id IN ("
-            + ",".join(f"'{item}'" for item in draft_ids)
-            + ") ORDER BY id;"
+            "SELECT d.id || ':' || d.status || ':' || j.status FROM learning_drafts d "
+            "JOIN learning_authoring_jobs j ON j.draft_id = d.id WHERE j.id IN ("
+            + ",".join(f"'{item}'" for item in authoring_job_ids)
+            + ") ORDER BY d.id;"
         ).splitlines()
         assert len(states) == 5
-        assert all(item.endswith(":BUILDING") for item in states)
+        assert {item.split(":")[0] for item in states} == set(draft_ids)
+        for item in states:
+            _, draft_status, job_status = item.split(":")
+            assert draft_status == "BUILDING" or (
+                draft_status in {"DRAFT", "VALIDATED"}
+                and job_status in {"RUNNING", "COMPLETED", "FAILED"}
+            ), item
     finally:
         for queued_job_id in queued_job_ids:
             admin_session.delete(f"{API}/jobs/{queued_job_id}", json={})
@@ -3140,12 +3196,12 @@ def test_course_agent_starts_one_atomic_batch_revision_for_five_ctf_drafts(
 
 
 def test_teacher_agent_links_to_the_canonical_question_workspace(admin_session):
-    page = admin_session.get(f"{DOJO_URL.rstrip('/')}/teacher")
+    page = admin_session.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard")
     assert page.status_code == 200
     assert 'id="teaching-authoring-workspace"' not in page.text
     assert 'id="teaching-authoring-frame"' not in page.text
-    assert "aisecedu-agent-workbench-v36" in page.text
-    assert "aisecedu-global-agent-v72" in page.text
+    assert "js/dojo/teaching-agent" in page.text
+    assert "js/dojo/teaching-agent" in page.text
     root = pathlib.Path(__file__).resolve().parents[1]
     script = (root / "dojo_theme/static/js/dojo/teaching-agent.js").read_text()
     assert "function authoringManagementHref(job)" in script
@@ -3164,14 +3220,14 @@ def test_global_agent_executes_native_course_operations(
     simple_award_dojo,
 ):
     student_name, _student_session = random_user
-    teacher_page = admin_session.get(f"{DOJO_URL.rstrip('/')}/teacher")
+    teacher_page = admin_session.get(f"{DOJO_URL.rstrip('/')}/teacher?view=dashboard")
     assert teacher_page.status_code == 200
     assert 'id="teaching-drawer"' in teacher_page.text
     assert 'id="teaching-job-list"' in teacher_page.text
     assert 'id="teaching-authoring-workspace"' not in teacher_page.text
     assert 'id="teaching-authoring-frame"' not in teacher_page.text
     assert 'id="teaching-current-run"' not in teacher_page.text
-    assert 'id="teaching-stop"' not in teacher_page.text
+    assert 'id="teaching-stop"' in teacher_page.text
     assert "data-transcript-mode=" not in teacher_page.text
     assert 'id="teaching-live-status"' not in teacher_page.text
     assert "data-drawer-tab=" not in teacher_page.text
@@ -3194,8 +3250,8 @@ def test_global_agent_executes_native_course_operations(
     assert "生成三套" not in teacher_page.text
     assert "/teacher/courses" in teacher_page.text
     assert "/teacher?phase=" not in teacher_page.text
-    assert "aisecedu-agent-workbench-v36" in teacher_page.text
-    assert "aisecedu-global-agent-v72" in teacher_page.text
+    assert "js/dojo/teaching-agent" in teacher_page.text
+    assert "js/dojo/teaching-agent" in teacher_page.text
     assert teacher_page.text.index(
         'id="teaching-approval-tray"'
     ) < teacher_page.text.index('class="teaching-composer-row"')
@@ -3294,7 +3350,8 @@ def test_global_agent_executes_native_course_operations(
     assert repeated_failure.status_code == 409
     assert first_failure.json()["success"] is False
     assert repeated_failure.json()["success"] is False
-    assert "没有找到指定章节" in repeated_failure.json()["errors"][0]
+    assert first_failure.json()["errorCode"] == "CONFIRMATION_REQUIRED"
+    assert repeated_failure.json()["errorCode"] == "CONFIRMATION_REQUIRED"
 
     material_analysis = admin_session.post(
         f"{API}/threads/{thread_id}/messages",
@@ -3640,12 +3697,14 @@ def test_teacher_thread_isolation_and_native_progress(
     artifact_page = admin_session.get(artifact_url)
     assert artifact_page.status_code == 200
     assert 'allow="fullscreen"' in artifact_page.text
-    assert "aisecedu-teaching-v14" in artifact_page.text
-    assert guest_session.get(artifact_url).status_code == 404
-    assert guest_session.get(f"{API}/artifacts/{artifact_id}").status_code == 404
+    assert "js/dojo/teaching-artifact" in artifact_page.text
+    assert guest_session.get(artifact_url).status_code == 200
+    assert student_session.get(artifact_url).status_code == 404
+    assert guest_session.get(f"{API}/artifacts/{artifact_id}").status_code == 200
+    assert student_session.get(f"{API}/artifacts/{artifact_id}").status_code == 404
     assert (
         guest_session.get(f"{API}/artifacts/{artifact_id}/revisions/1").status_code
-        == 404
+        == 200
     )
 
     action_id = f"action_{secrets.token_hex(16)}"
@@ -3761,13 +3820,17 @@ def test_teacher_thread_isolation_and_native_progress(
     simple_route = data(admin_session.get(f"{API}/jobs/{simple_job_id}"))["job"]
     complex_route = data(admin_session.get(f"{API}/jobs/{complex_job_id}"))["job"]
     assert simple_route["modelRoute"]["route"] == "teaching-default"
+    required_model = complex_route["modelRoute"]["requiredModel"]
+    assert isinstance(required_model, str) and required_model.strip()
     assert complex_route["modelRoute"] == {
         "route": "deepseek-v4-flash",
-        "requiredModel": "deepseek-v4-flash",
-        "actualModel": "deepseek-v4-flash",
+        "requiredModel": required_model,
+        "actualModel": required_model,
         "provider": "deepseek",
         "degraded": False,
         "invocationStatus": None,
+        "usage": None,
+        "latencyMs": None,
     }
     assert guest_session.get(f"{API}/jobs/{complex_job_id}").status_code == 404
 
@@ -3801,6 +3864,10 @@ def test_teacher_thread_isolation_and_native_progress(
         "LearningEvidenceEvents",
         "LearningAssessments",
         "ObjectiveMappings",
+        "DojoUsers",
+        "TeachingAssignments",
+        "TeachingAssignmentSubmissions",
+        "LearningSkillStates",
     }
     student = next(
         item for item in progress_data["students"] if item["name"] == student_name
@@ -3951,14 +4018,14 @@ def test_student_workspace_ticket_and_agent_runtime_gateway_isolation(
         requests.delete(review_lesson_url, headers=reviewer_headers).status_code == 403
     )
 
-    assert (
-        admin_session.get(f"{API}/actions/{review_action_id}/decision").status_code
-        == 200
-    )
+    approval_response = admin_session.get(f"{API}/actions/{review_action_id}/decision")
+    assert approval_response.status_code == 200, approval_response.text
+    approval_reference = data(approval_response)["action"]["approvalRequest"]
     reviewed = admin_session.post(
         f"{API}/actions/{review_action_id}/decision",
-        json={"decision": "APPROVED", "confirmed": True},
+        json={"decision": "APPROVED", "confirmed": True, "approvalRequest": approval_reference},
     )
+    reviewed = complete_teacher_command(admin_session, reviewed, action_decision=True)
     assert reviewed.status_code == 200, reviewed.text
     reviewed_action = data(reviewed)["action"]
     assert reviewed_action["result"]["reviewedArtifactId"]

@@ -1,3 +1,4 @@
+type: public
 id: visibility-test
 name: Visibility Test Dojo
 description: This dojo tests module and challenge visibility.

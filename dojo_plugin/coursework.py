@@ -763,7 +763,7 @@ def publish_assignment(assignment, user):
             artifact = TeachingArtifacts.query.filter_by(id=config["libraryArtifactDependency"], dojo_id=assignment.dojo_id).first()
             if artifact is None or artifact.status != "PUBLISHED":
                 raise ValueError(f"请先检查并发布素材中配套的教学内容：{item.title}")
-    standards = resolve_standards(course_id=assignment.dojo_id, question_type="quiz" if any(item.type != "CHALLENGE" for item in assignment.items) else "practice")
+    standards = resolve_standards(course_id=assignment.dojo_id, question_type="quiz" if any(item.item_type != "CHALLENGE" for item in assignment.items) else "practice")
     assignment.settings = {**(assignment.settings or {}), "publishedStandards": standards_provenance(standards)}
     assignment.status = "PUBLISHED"
     assignment.published_at = assignment.published_at or utcnow()

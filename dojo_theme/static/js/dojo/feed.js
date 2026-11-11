@@ -362,6 +362,8 @@
     }
     
     function updateConnectionStatus(status, message) {
+        const feed = document.getElementById('feed-container');
+        if (feed) feed.dataset.connectionState = status;
         const statusDiv = document.getElementById('connection-status');
         const messageSpan = document.getElementById('connection-message');
         if (!statusDiv || !messageSpan) return;

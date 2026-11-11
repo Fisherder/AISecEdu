@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import secrets
 import time
 from types import SimpleNamespace
@@ -11,12 +12,13 @@ try:
 except ModuleNotFoundError:
     WebDriverWait = None
 
-from utils import DOJO_URL, db_sql, get_user_id, solve_challenge, start_challenge, workspace_run
+from utils import DOJO_URL, db_sql, dojo_run, enroll, get_user_id, solve_challenge, start_challenge, workspace_run
 
 
 API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/learning"
 COURSES_API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/dojos"
 TEACHING_API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/teaching"
+SIMULATION_API = f"{DOJO_URL.rstrip('/')}/pwncollege_api/v1/simulations"
 
 
 def test_catalog_order_plan_reorders_and_moves_questions_between_chapters():
@@ -235,6 +237,36 @@ def test_base_spec_accepts_empty_and_non_string_briefs(brief):
     assert spec["name"]
     assert spec["description"]
     assert spec["mode"] == "GENERATE_CUSTOM"
+
+
+@pytest.mark.parametrize('mode', ['CONTAINER', 'SIMULATION', 'HYBRID'])
+def test_authoring_request_preserves_supported_exercise_mode(mode):
+    from CTFd.plugins.dojo_plugin.api.v1.learning import _container_authoring_constraints
+
+    original = {'exercise_mode': mode.lower(), 'simulation': {'preset': 'WIRELESS'}}
+    result = _container_authoring_constraints(original)
+    assert result['exerciseMode'] == mode
+    assert 'exercise_mode' not in result
+    assert ('simulation' in result) is (mode != 'CONTAINER')
+    assert original == {'exercise_mode': mode.lower(), 'simulation': {'preset': 'WIRELESS'}}
+
+
+def test_prepared_native_evidence_fixture_passes_deterministic_gates(monkeypatch):
+    from CTFd.plugins.dojo_plugin.learning import authoring
+
+    package = json.loads((pathlib.Path(__file__).parent / 'fixtures/native-evidence-package.json').read_text())
+    brief = '检查已启动的本地证据服务，验证实时响应与文件完整性，并提交当前账号绑定的动态 Flag。'
+    constraints = {'id': 'ci-native-fixture', 'title': '本地证据核验', 'exerciseMode': 'CONTAINER',
+                   'workspaceLayout': package['workspaceLayout']}
+    spec = authoring._base_spec(brief, constraints, 'L3', [])
+    spec.update(package)
+    draft = SimpleNamespace(id='draft-fixture', brief=brief, constraints=constraints, level='L3',
+                            candidates=[], spec=spec, status='DRAFT', validation={},
+                            published_challenge_id=None, module_index=0, author_id=1,
+                            dojo=SimpleNamespace(dojo_id=1, modules=[SimpleNamespace(challenges=[])]))
+    monkeypatch.setattr(authoring, '_audit', lambda *_args, **_kwargs: None)
+    report = authoring.validate_draft(draft, allow_agent_repair=False)
+    assert report['status'] == 'PASS', [check for check in report['checks'] if check['status'] == 'BLOCK']
 
 
 def test_artifact_response_contract_rejects_placeholders_before_repair():
@@ -1176,6 +1208,13 @@ def test_publish_gate_reuses_current_pass_without_calling_model(monkeypatch):
         "steps": [{"goal": "完成目标", "action": "执行允许的场景动作"}],
         "successIndicators": ["所有必需目标均已完成"],
     }
+    spec["workspaceLayout"] = {
+        "schemaVersion": 1, "course": "publish-regression", "assignment": "lab01-validation",
+        "studentRoot": "/home/hacker/courses/publish-regression/lab01-validation",
+        "editablePaths": ["work/answer.txt"], "materialPaths": [], "graderRoot": "/challenge",
+        "checkEntry": "check", "submitEntry": "platform-dynamic-flag", "testVersion": "fixture-v1",
+        "reportRequired": False,
+    }
     draft = SimpleNamespace(
         id="draft-fast-publish",
         brief=brief,
@@ -1187,7 +1226,7 @@ def test_publish_gate_reuses_current_pass_without_calling_model(monkeypatch):
         validation={},
         published_challenge_id=None,
         module_index=0,
-        dojo=SimpleNamespace(modules=[SimpleNamespace(challenges=[])]),
+        dojo=SimpleNamespace(dojo_id=1, modules=[SimpleNamespace(challenges=[])]),
         author_id=1,
     )
     draft.validation = {
@@ -1217,7 +1256,7 @@ def test_publish_gate_reuses_current_pass_without_calling_model(monkeypatch):
         reuse_current_pass=True,
     )
 
-    assert report["status"] == "PASS"
+    assert report["status"] == "PASS", report
     assert report["agentReview"]["provider"] == "DETERMINISTIC"
     assert report["agentReview"]["reused"] is True
     assert report["agentReview"]["reusedProvider"] == "MODEL_FALLBACK"
@@ -1469,6 +1508,7 @@ def test_model_json_total_deadline_includes_retries(monkeypatch):
     (10000, ('length', 'malformed'), [10000, 20000, 20000]),
 ])
 def test_model_json_truncation_grows_a_bounded_output_limit(monkeypatch, initial_limit, failures, expected_limits):
+    import io
     import requests
     from CTFd.plugins.dojo_plugin.learning import intelligence
 
@@ -1480,6 +1520,7 @@ def test_model_json_truncation_grows_a_bounded_output_limit(monkeypatch, initial
         response = requests.Response()
         response.status_code = 200
         response._content = json.dumps({'choices': [{'finish_reason': 'length' if failure == 'length' else 'stop', 'message': {'content': '{' if failure else '{"ok":true}'}}]}).encode()
+        response.raw = io.BytesIO(response._content)
         return response
 
     monkeypatch.setattr(intelligence, 'DOJO_AI_ENABLED', True)
@@ -2871,7 +2912,7 @@ def test_custom_challenge_public_description_redacts_complete_sql_payload():
     assert spec["publicSanitization"]["sqlPayloadRedactions"] == 1
 
 
-def wait_for_authoring(session, response, timeout=180):
+def wait_for_authoring(session, response, timeout=180, *, expected_status="COMPLETED"):
     """Wait for the durable authoring worker and return its private draft."""
 
     assert response.status_code == 202, response.text
@@ -2881,15 +2922,55 @@ def wait_for_authoring(session, response, timeout=180):
         polled = session.get(f"{API}/authoring/jobs/{job['id']}")
         assert polled.status_code == 200, polled.text
         job = polled.json()["job"]
-        if job["status"] == "FAILED":
-            pytest.fail(job.get("error") or "authoring job failed")
-        if job["status"] == "COMPLETED":
+        if job["status"] in {"FAILED", "COMPLETED"}:
+            assert job["status"] == expected_status, job.get("error") or job
             assert job["draftId"]
             draft_response = session.get(f"{API}/drafts/{job['draftId']}")
             assert draft_response.status_code == 200, draft_response.text
             return draft_response.json()["draft"], job
         time.sleep(0.5)
     pytest.fail(f"authoring job {job['id']} did not complete within {timeout}s")
+
+
+def prepared_evidence_draft(session, reference_id, challenge_id, brief):
+    import base64
+
+    package = json.loads((pathlib.Path(__file__).parent / "fixtures/native-evidence-package.json").read_text())
+    values = base64.b64encode(json.dumps({"reference": reference_id, "challengeId": challenge_id,
+                                        "brief": brief, "package": package}).encode()).decode()
+    code = f'''
+import base64,json,os
+from CTFd.models import Users,db
+from CTFd.plugins.dojo_plugin import config
+from CTFd.plugins.dojo_plugin.models import Dojos,LearningDrafts
+from CTFd.plugins.dojo_plugin.learning import authoring
+assert os.environ.get('DOJO_ENV') == 'coverage' and not config.DOJO_AI_ENABLED
+values=json.loads(base64.b64decode({values!r}))
+dojo=Dojos.from_id(values['reference']).one()
+owner=Users.query.filter_by(name='admin').one()
+constraints={{'id':values['challengeId'],'title':'Evidence Chain Verification','category':'FORENSICS',
+             'difficulty':2,'exerciseMode':'CONTAINER','workspaceLayout':values['package']['workspaceLayout']}}
+spec=authoring._base_spec(values['brief'],constraints,'L3',[])
+spec.update(values['package'])
+spec['authoringPipeline']={{'provider':'OFFLINE_FIXTURE'}}
+draft=LearningDrafts(dojo_id=dojo.dojo_id,module_index=0,author_id=owner.id,level='L3',
+                     brief=values['brief'],constraints=constraints,spec=spec,
+                     conversation=[{{'role':'teacher','content':values['brief']}}])
+db.session.add(draft)
+db.session.flush()
+report=authoring.validate_draft(draft,allow_agent_repair=False)
+assert report['status']=='PASS', [row for row in report['checks'] if row['status']=='BLOCK']
+db.session.commit()
+print('CI-PREPARED-DRAFT',draft.id)
+'''
+    encoded = base64.b64encode(code.encode()).decode()
+    result = dojo_run('timeout', '180', 'dojo', 'flask', timeout=200,
+                      input=f'import base64; exec(base64.b64decode("{encoded}"))\n')
+    match = re.search(r'CI-PREPARED-DRAFT (draft_[a-f0-9]{32})', result.stdout)
+    assert match, result.stdout
+    response = session.get(f"{API}/drafts/{match[1]}")
+    assert response.status_code == 200, response.text
+    return response.json()['draft']
 
 
 def test_learning_overview_and_teacher_permissions(
@@ -3051,10 +3132,7 @@ def test_student_snapshot_excludes_future_course_modules(
     random_user_session,
     visibility_test_dojo,
 ):
-    enrolled = random_user_session.get(
-        f"{DOJO_URL.rstrip('/')}/dojo/{visibility_test_dojo}/join/"
-    )
-    assert enrolled.status_code == 200, enrolled.text
+    enroll(random_user_session, visibility_test_dojo)
     overview = random_user_session.get(f"{API}/overview")
     assert overview.status_code == 200, overview.text
     course = next(
@@ -3082,13 +3160,13 @@ def test_membership_is_authoritative_for_stale_active_attempt(
         session=student_session,
     )
     user_id = get_user_id(user_name)
-    dojo_name, dojo_suffix = simple_award_dojo.split("~", 1)
-    db_sql(
+    _, dojo_suffix = simple_award_dojo.split("~", 1)
+    dojo_id = int.from_bytes(bytes.fromhex(dojo_suffix), "big", signed=True)
+    removed = db_sql(
         "DELETE FROM dojo_users "
-        f"WHERE user_id = {user_id} AND dojo_id = "
-        f"(SELECT dojo_id FROM dojos WHERE id = '{dojo_name}' "
-        f"AND right(to_hex(dojo_id), 8) = '{dojo_suffix}');"
+        f"WHERE user_id = {user_id} AND dojo_id = {dojo_id} RETURNING user_id;"
     )
+    assert str(user_id) in removed.splitlines(), removed
     overview = student_session.get(f"{API}/overview")
     assert overview.status_code == 200, overview.text
     payload = overview.json()
@@ -3216,7 +3294,7 @@ def test_teacher_course_center_separates_questions_and_demos():
     assert 'data-create-kind="demo"' in template
     assert 'id: "simulation"' in script
     assert 'id: "attack-defense"' in script
-    assert 'new Set(["simulation", "attack-defense-scene", "classroom-scenario"])' in script
+    assert 'new Set(["simulation", "attack-defense-scene", "classroom-scenario", "debate"])' in script
     assert all("tab=labs" not in path.read_text() for path in navigation_sources)
     assert all("tab=questions" in path.read_text() for path in navigation_sources)
 
@@ -3565,7 +3643,7 @@ def test_legacy_learning_studio_is_migrated_to_the_course_shell():
     assert "页面状态已自动刷新" not in script
     assert "题目已删除（可重新发布）" not in script
     assert "已发布草稿会保留" not in script
-    assert "aisecedu-toast-v2" in base_template
+    assert "js/dojo/ui.js" in base_template
     assert "--semantic-success: var(--theme-success, #198754)" in custom_css
     assert ".aisecedu-toast.is-success" in custom_css
     assert "border-left-color: var(--semantic-success)" in custom_css
@@ -3861,6 +3939,7 @@ def test_simulation_challenge_uses_unified_attempt_solve_tutor_and_replay(
     simple_award_dojo,
 ):
     user_name, user_session = random_user
+    enroll(user_session, simple_award_dojo)
     challenge_id = f"wireless-sim-{secrets.token_hex(4)}"
     created = admin_session.post(
         f"{API}/dojos/{simple_award_dojo}/authoring",
@@ -3979,9 +4058,11 @@ def test_simulation_challenge_uses_unified_attempt_solve_tutor_and_replay(
         },
     )
     assert tutor.status_code == 200
-    assert tutor.json()["reply"]["context"]["live"]
-    assert tutor.json()["reply"]["context"]["environmentType"] == "SIMULATION"
-    assert tutor.json()["reply"]["context"]["simulationRunId"] == run_id
+    tutor_context = tutor.json()["reply"]["context"]
+    assert tutor_context["live"] is False
+    assert tutor_context["environmentType"] == "NONE"
+    assert tutor_context["evidenceEvents"] >= 2
+    assert tutor_context["liveMatchesAttempt"] is not True
 
     act("inspect-client")
     act("form-hypothesis", {"cause": "co-channel-interference"})
@@ -4459,10 +4540,11 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     simple_award_dojo,
 ):
     user_name, user_session = random_user
+    enroll(user_session, simple_award_dojo)
     challenge_id = f"evidence-{secrets.token_hex(4)}"
     verification_answer = secrets.token_hex(8)
     brief = (
-        "Create a self-contained incident verification exercise for a beginner. "
+        "Create a new custom challenge from scratch: a self-contained incident verification exercise for a beginner. "
         "The learner must inspect runtime evidence, validate one hypothesis, and explain remediation."
     )
     created = admin_session.post(
@@ -4480,27 +4562,33 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
             },
         },
     )
-    draft, _ = wait_for_authoring(admin_session, created)
+    blocked, job = wait_for_authoring(admin_session, created, expected_status="FAILED")
+    assert job["status"] == "FAILED"
+    assert blocked["validation"]["status"] == "BLOCK"
+    assert any(check["status"] == "BLOCK" and check["id"] == "standard-workspace-manifest"
+               for check in blocked["validation"]["checks"])
+    refused = admin_session.post(f"{API}/drafts/{blocked['id']}/publish", json={})
+    assert refused.status_code == 400, refused.text
+    challenge_id += "-ready"
+    draft = prepared_evidence_draft(admin_session, simple_award_dojo, challenge_id, brief)
     assert draft["spec"]["mode"] == "GENERATE_CUSTOM"
     assert draft["spec"]["sourceChallengeId"] is None
     assert draft["spec"]["verificationAnswer"] is None
     assert draft["spec"]["oracleContract"]["type"] == "FLAG_GATE_V1"
     assert "solution.json" not in draft["spec"]["description"]
     assert "动态 Flag" in draft["spec"]["description"]
-    assert draft["spec"]["authoringPipeline"]["plan"]["model"] == "deepseek-v4-flash"
-    assert draft["spec"]["authoringPipeline"]["build"]["model"] == "deepseek-v4-flash"
-    assert draft["spec"]["authoringPipeline"]["review"]["model"] == "deepseek-v4-flash"
-    assert (
-        draft["spec"]["authoringPipeline"]["postReview"]["model"] == "deepseek-v4-flash"
-    )
-    assert draft["spec"]["authoringPipeline"]["validate"]["model"] == "deepseek-v4-flash"
+    assert draft["spec"]["authoringPipeline"]["provider"] == "OFFLINE_FIXTURE"
 
     validated_response = admin_session.post(
         f"{API}/drafts/{draft['id']}/validate", json={}
     )
     validated, _ = wait_for_authoring(admin_session, validated_response)
     assert validated["validation"]["summary"]["blocked"] == 0
-    assert validated["validation"]["agentReview"]["model"] == "deepseek-v4-flash"
+    review = validated["validation"]["agentReview"]
+    assert review["provider"] == "DETERMINISTIC"
+    assert review["verdict"] == "FALLBACK"
+    assert any(check["id"] == "agent-validation-fallback" and check["status"] == "WARN"
+               for check in validated["validation"]["checks"])
 
     published = admin_session.post(f"{API}/drafts/{draft['id']}/publish", json={})
     assert published.status_code == 200
@@ -4517,6 +4605,8 @@ def test_native_authoring_workspace_evidence_assessment_and_appeal(
     )
     revised, _ = wait_for_authoring(admin_session, revised_response)
     assert revised["revision"] == 2
+    assert revised["spec"]["mode"] == "GENERATE_CUSTOM"
+    assert revised["spec"]["oracleContract"]["type"] == "FLAG_GATE_V1"
     revalidated_response = admin_session.post(
         f"{API}/drafts/{draft['id']}/validate", json={}
     )

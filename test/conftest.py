@@ -5,6 +5,8 @@ import subprocess
 import pytest
 import json
 import os
+import importlib.util
+from pathlib import Path
 
 import requests
 import requests.adapters
@@ -20,7 +22,7 @@ except ModuleNotFoundError:
 
 #pylint:disable=redefined-outer-name,use-dict-literal,missing-timeout,unspecified-encoding,consider-using-with
 
-from utils import TEST_DOJOS_LOCATION, DOJO_URL, login, make_dojo_official, create_dojo, create_dojo_yml, start_challenge, solve_challenge, wait_for_background_worker, db_sql, dojo_run
+from utils import TEST_DOJOS_LOCATION, DOJO_URL, login, browser_login, make_dojo_official, create_dojo, create_dojo_yml, start_challenge, solve_challenge, wait_for_background_worker, db_sql, dojo_run
 
 # Nested-docker port publishing drops for a few seconds while user containers
 # attach/detach networks; retry connection establishment (never sent requests)
@@ -39,6 +41,42 @@ def _retrying_session_init(self, *args, **kwargs):
     self.mount("https://", adapter)
 
 requests.Session.__init__ = _retrying_session_init
+
+
+_layout_spec = importlib.util.spec_from_file_location(
+    'aisecedu_app_test_layout', Path(__file__).resolve().parents[1] / 'ops/team/app_test_layout.py')
+_layout = importlib.util.module_from_spec(_layout_spec)
+_layout_spec.loader.exec_module(_layout)
+_app_manifest = _layout.load_manifest()
+
+
+def pytest_ignore_collect(collection_path, config):
+    if os.getenv('AISECEDU_SPLIT_APP_TESTS') == '1' and collection_path.name in _app_manifest['whole_files']:
+        return True
+    return None
+
+
+def pytest_collection_modifyitems(config, items):
+    if os.getenv('AISECEDU_SPLIT_APP_TESTS') != '1':
+        return
+    selected, delegated = [], []
+    for item in items:
+        name = getattr(item, 'originalname', None) or item.name.split('[', 1)[0]
+        target = delegated if _layout.application_test(_app_manifest, item.path.name, name) else selected
+        target.append(item)
+    items[:] = selected
+    config.hook.pytest_deselected(items=delegated)
+
+
+def pytest_runtest_logreport(report):
+    if os.getenv('AISECEDU_SPLIT_APP_TESTS') != '1' or not report.failed:
+        return
+    crash = getattr(report.longrepr, 'reprcrash', None)
+    print('\nCI_TEST_FAILURE ' + json.dumps({
+        'node': report.nodeid, 'phase': report.when,
+        'path': getattr(crash, 'path', ''), 'line': getattr(crash, 'lineno', None),
+        'error': str(getattr(crash, 'message', '')).split('\n', 1)[0][:500],
+    }, ensure_ascii=False), flush=True)
 
 
 def _admin_credentials():
@@ -103,13 +141,13 @@ def completionist_user(simple_award_dojo, codepoints_award_dojo):
     random_id = "".join(random.choices(string.ascii_lowercase, k=16))
     session = login(random_id, random_id, register=True)
 
-    response = session.get(f"{DOJO_URL}/dojo/{simple_award_dojo}/join/")
+    response = session.post(f"{DOJO_URL}/dojo/{simple_award_dojo}/join/", json={})
     assert response.status_code == 200
     for module, challenge in [ ("hello", "apple"), ("hello", "banana") ]:
         start_challenge(simple_award_dojo, module, challenge, session=session)
         solve_challenge(simple_award_dojo, module, challenge, session=session, user=random_id)
 
-    response = session.get(f"{DOJO_URL}/dojo/{codepoints_award_dojo}/join/")
+    response = session.post(f"{DOJO_URL}/dojo/{codepoints_award_dojo}/join/", json={})
     assert response.status_code == 200
     for module, challenge in [ ("hello", "apple"), ("hello", "banana") ]:
         start_challenge(codepoints_award_dojo, module, challenge, session=session)
@@ -314,8 +352,5 @@ def browser_fixture():
 
 @pytest.fixture
 def random_user_browser(browser_fixture, random_user_name):
-    browser_fixture.get(f"{DOJO_URL}/login")
-    browser_fixture.find_element("id", "name").send_keys(random_user_name)
-    browser_fixture.find_element("id", "password").send_keys(random_user_name)
-    browser_fixture.find_element("id", "_submit").click()
+    browser_login(browser_fixture, random_user_name, random_user_name)
     return browser_fixture

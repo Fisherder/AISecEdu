@@ -637,9 +637,11 @@ def _supported_authoring_job(job):
 
 def _container_authoring_constraints(value):
     constraints = dict(value) if isinstance(value, dict) else {}
-    constraints["exerciseMode"] = "CONTAINER"
+    requested = exercise_mode(constraints.get("exerciseMode") or constraints.get("exercise_mode"))
+    constraints["exerciseMode"] = requested if is_supported_exercise(requested) else "CONTAINER"
     constraints.pop("exercise_mode", None)
-    constraints.pop("simulation", None)
+    if constraints["exerciseMode"] == "CONTAINER":
+        constraints.pop("simulation", None)
     return constraints
 
 

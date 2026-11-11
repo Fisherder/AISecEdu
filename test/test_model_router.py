@@ -1,4 +1,29 @@
-from dojo_plugin.agent_runtime.model_router import is_complex_scene, route_model
+import pytest
+
+from dojo_plugin import config
+from dojo_plugin.agent_runtime.model_router import (
+    is_complex_scene,
+    route_model,
+    validate_actual_model,
+)
+
+
+def test_routes_follow_configured_models_and_reject_silent_fallback(monkeypatch):
+    monkeypatch.setattr(config, "DOJO_AI_AUTHORING_PLAN_MODEL", "configured-planner")
+    monkeypatch.setattr(config, "DOJO_AI_COMPLEX_SCENE_MODEL", "configured-complex")
+    simple = route_model("candidate.generate", payload={"artifactType": "lesson-plan"})
+    complex_route = route_model(
+        "candidate.generate", payload={"artifactType": "vulnerable-lab"}
+    )
+    assert simple["actual_model"] == "configured-planner"
+    assert simple["required_model"] is None
+    assert complex_route["actual_model"] == "configured-complex"
+    assert complex_route["required_model"] == "configured-complex"
+    assert validate_actual_model(complex_route, "configured-complex") == complex_route
+    with pytest.raises(ValueError, match="silent fallback"):
+        validate_actual_model(complex_route, "configured-planner")
+    explicit_degraded = {**complex_route, "allow_degraded": True}
+    assert validate_actual_model(explicit_degraded, "configured-planner")["degraded"]
 
 
 def test_course_context_does_not_promote_simple_slide_deck():
