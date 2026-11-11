@@ -212,6 +212,14 @@ def is_paused(pr):
     return any(row['name'] == PAUSE_LABEL for row in pr.get('labels', []))
 
 
+def live_base(client, pr):
+    reference = client.repo_api('/git/ref/heads/' + POLICY['base_branch'])
+    sha = reference['object']['sha']
+    if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{40}', sha):
+        raise ValueError('Invalid current integration branch reference')
+    return {**pr, 'base': {**pr['base'], 'sha': sha}}
+
+
 def prepare(folder):
     folder.mkdir(parents=True, exist_ok=True)
     client = GitHub()
@@ -225,6 +233,7 @@ def prepare(folder):
     if not eligible(client, pr):
         set_outputs(mode='skip')
         return
+    pr = live_base(client, pr)
     set_outputs(number=pr['number'], head=pr['head']['sha'], base=pr['base']['sha'], branch=pr['head']['ref'])
     if is_paused(pr):
         (folder / 'context.json').write_text(json.dumps({
@@ -454,6 +463,7 @@ def publish(folder, candidate, *, expected):
             or not pr['head']['ref'].startswith(('feat/', 'fix/', 'team/'))):
         print('Stale or ineligible PR; no publication')
         return
+    pr = live_base(client, pr)
     context['node_id'] = pr['node_id']
     checks = client.repo_api(f'/commits/{context["head"]}/check-runs?per_page=100')['check_runs']
     if state_signature(pr, failed_checks(checks), review_feedback(client, pr['number'])) != context['signature']:
