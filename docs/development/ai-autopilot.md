@@ -41,7 +41,7 @@ AI 不自动解决人的审查讨论，不部署共享平台或生产，不把�
 | `AI_AUTOPILOT_ENABLED` | `true` 启用；`false` 停止新任务 |
 | `AI_AUTOPILOT_BOOTSTRAP_HEAD` | 仅初始化时使用的精确提交授权；完成后删除 |
 
-模型任务运行于 GitHub 托管临时 Runner，并通过官方 Codex Action 的 API 代理和 `drop-sudo` 隔离上游 Key。发布任务不运行模型或 PR 脚本，仅验证当前提交、追加修复、发布结果和申请自动合并。仓库 Deploy Key 让追加提交正常触发下一轮 CI，避免普通 `GITHUB_TOKEN` 引起的人工重跑批准。
+模型任务运行于 GitHub 托管的 Ubuntu 24.04 临时 Runner，并通过官方 Codex Action 的 API 代理和 `drop-sudo` 隔离上游 Key。发布任务不运行模型或 PR 脚本，仅验证当前提交、追加修复、发布结果和申请自动合并。仓库 Deploy Key 让追加提交正常触发下一轮 CI，避免普通 `GITHUB_TOKEN` 引起的人工重跑批准。
 
 首次审查、可写修复和独立复审分别运行于新的临时 Runner，每个任务只调用一次 Codex Action。`drop-sudo` 对当前任务不可逆，不能在同一 Runner 中恢复权限后再次调用；独立复审从原 head 重新检出并应用已验证补丁，包含新增测试文件。各阶段通过限定保存期的产物传递结果，只有受隔离写入凭据控制的发布任务可以推送。参见 [官方执行与权限说明](https://learn.chatgpt.com/docs/github-action#manage-privileges)。
 
