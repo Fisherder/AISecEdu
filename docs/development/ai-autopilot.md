@@ -73,11 +73,11 @@ PR 接口中的 `base.sha` 可能保留旧快照，不能代表目标分支的�
 
 完整 CI 按 `ops/team/app_test_manifest.json` 分组：依赖 CTFd 的完整模块和混合文件中的指定用例，在实际 CTFd 容器及请求上下文中运行；其余单测、HTTP 和浏览器用例在客户端镜像运行。应用阶段使用冻结源码、真实应用依赖及同一隔离实例的合成数据库，保留所需 HTTP 夹具；客户端会明确报告已交给应用阶段的用例。两部分均为必需步骤，任一步失败都阻止合并。`ops/team/app_units.py` 与应用 Runner 只接受 `coverage` 环境。快速检查核验分组清单及直接导入 CTFd 的用例，防止遗漏或重复分组。
 
-完整 CI 的 `coverage` 环境加载仓库基础 Compose 和专用 `docker-compose.coverage.yml`，从源码构建组件；专用覆盖仅将 cAdvisor 切换到官方 `gcr.io/cadvisor/cadvisor`，固定已核验的多架构 manifest 摘要，避免 GitHub Runner 依赖校园镜像的连通性。监控服务、挂载与权限仍保留。服务器的本地镜像标签、迁移后 Nix 路径和发布覆盖文件不进入临时 Runner。生产及共享开发环境不加载 coverage 覆盖，继续按原有方式运行。GitHub 构建使用其 Ubuntu Azure 镜像源，并为软件包下载设置有限重试；索引下载失败直接报错，避免带着不完整索引继续安装。
+完整 CI 的 `coverage` 环境加载仓库基础 Compose 和专用 `docker-compose.coverage.yml`，从源码构建组件；专用覆盖将 cAdvisor 切换到官方 `gcr.io/cadvisor/cadvisor`，固定已核验的多架构 manifest 摘要，避免 GitHub Runner 依赖校园镜像的连通性。监控服务、挂载与权限仍保留。空数据库启动时，PgBouncer 等 PostgreSQL TCP 就绪，后台 Worker 等 CTFd 完成迁移并通过健康检查。服务器的本地镜像标签、迁移后 Nix 路径和发布覆盖文件不进入临时 Runner。生产及共享开发环境不加载 coverage 覆盖，继续按原有方式运行。GitHub 构建使用其 Ubuntu Azure 镜像源，并为软件包下载设置有限重试；索引下载失败直接报错，避免带着不完整索引继续安装。
 
 同一 PR 的新提交会自动取消旧版本的 DOJO CI，最新提交继续执行全部必需检查。启动配置与测试参数透传在镜像构建前验证；平台启动成功后，应用上下文和客户端测试两部分分别执行并保留失败结果。
 
-外层与测试镜像分别使用 GitHub BuildKit 缓存，构建成功即保存，避免整套测试尚未通过就丢失已完成的编译结果。合入 `develop` 后也运行 CI，建立供后续 PR 读取的基线缓存。缓存仅加速构建，不替代测试；远程缓存保存失败不改变测试结论。参见 [Docker Actions 缓存说明](https://docs.docker.com/build/ci/github-actions/cache/)。
+外层与测试镜像分别使用 GitHub BuildKit 缓存，构建成功即保存，避免整套测试尚未通过就丢失已完成的编译结果。合入 `develop` 后也运行 CI，建立供后续 PR 读取的基线缓存。Runner 加载构建镜像后清理本地 BuildKit 缓存，为多节点工作区和客户端测试留出空间。远程缓存仅加速构建，保存失败不改变测试结论。参见 [Docker Actions 缓存说明](https://docs.docker.com/build/ci/github-actions/cache/)。
 
 CI 统一使用 `dojo` 容器名，确保构建的测试镜像和失败诊断指向实际容器。启动就绪依据成功的 HTTP 响应，最长等待五分钟；不依赖页面品牌字样。工作区构建器按实际进程退出码判断，失败不能因 `docker wait` 命令本身成功而被忽略。
 
