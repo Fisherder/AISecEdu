@@ -62,7 +62,7 @@ def test_irreversible_model_execution_uses_one_action_per_fresh_job_and_no_publi
     assert set(model_jobs) == {'analyze', 'repair', 'final_review'}
     for name, body in model_jobs.items():
         assert body.count('uses: openai/codex-action@') == 1, name
-        assert 'safety-strategy: drop-sudo' in body and 'runs-on: ubuntu-latest' in body
+        assert 'safety-strategy: drop-sudo' in body and 'runs-on: ubuntu-24.04' in body
         assert 'name: aisecedu-ai-model' in body and 'AI_AUTOPILOT_SSH_KEY' not in body
         assert 'contents: write' not in body and 'pull-requests: write' not in body
     assert 'uses: openai/codex-action@' not in jobs['publish']
@@ -204,7 +204,7 @@ def test_stale_head_prevents_all_publication():
 
 def publish_fixture(folder, *, requires_human=False, manual=False, failures=False, moving=False,
                     feedback_changed=False, ci_changed=False, update=False, cached=False, paused=False, hidden_manual=False,
-                    forged_node=False, branch='feat/member/test'):
+                    forged_node=False, branch='feat/member/test', base_advanced=False):
     context = {'number': 1, 'node_id': 'synthetic-node', 'mode': 'update' if update else 'cached' if cached else 'analyze', 'head': 'a' * 40,
                'base': 'b' * 40,
                'branch': branch, 'model': 'synthetic', 'rounds': 0, 'signature': 'sig',
@@ -227,6 +227,8 @@ def publish_fixture(folder, *, requires_human=False, manual=False, failures=Fals
         reads = 0
         def repo_api(self, path, data=None, method=None):
             calls.append((path, data, method))
+            if path == '/git/ref/heads/develop':
+                return {'object': {'sha': ('c' if base_advanced else 'b') * 40}}
             if path == '/pulls/1' and data is None:
                 self.reads += 1
                 return {**pr, 'head': {**pr['head'], 'sha': 'b' * 40 if moving and self.reads > 1 else context['head']}}
@@ -297,6 +299,8 @@ def test_publisher_independently_rejects_tampered_patch_artifacts_before_commit(
                 repo = 'Fisherder/AISecEdu'
                 def repo_api(self, path, data=None, method=None):
                     assert data is None
+                    if path == '/git/ref/heads/develop':
+                        return {'object': {'sha': pr['base']['sha']}}
                     return pr if path == '/pulls/1' else {'check_runs': []}
                 def pages(self, path):
                     if path.endswith('/commits') and kind == 'exhausted-rounds':
@@ -330,6 +334,8 @@ def test_validated_repair_is_an_append_only_commit_on_the_original_remote_branch
             repo = 'Fisherder/AISecEdu'
             def repo_api(self, path, data=None, method=None):
                 assert data is None
+                if path == '/git/ref/heads/develop':
+                    return {'object': {'sha': pr['base']['sha']}}
                 return pr if path == '/pulls/1' else {'check_runs': []}
             def pages(self, path):
                 return [{'filename': 'dojo_plugin/example.py'}] if path.endswith('/files') else []
@@ -370,7 +376,8 @@ def test_signature_detects_comment_edits_within_the_same_timestamp():
     assert ai.state_signature(pr, [], first) != ai.state_signature({**pr, 'labels': [{'name': ai.PAUSE_LABEL}]}, [], first)
 
 
-def prepare_fixture(folder, *, behind=0, fork=False, feedback=False, renamed=False, rounds=0):
+def prepare_fixture(folder, *, behind=0, fork=False, feedback=False, renamed=False, rounds=0,
+                    snapshot_base='b' * 40, current_base='b' * 40, check=None):
     head = 'a' * 40
     signature = ai.state_signature({'head': {'sha': head}, 'base': {'sha': 'b' * 40}, 'title': 'synthetic', 'body': ''}, [], [])
     cached_context = {'head': head, 'model': 'synthetic', 'manual_reasons': [], 'failures': [], 'signature': signature, 'rounds': rounds}
@@ -380,12 +387,16 @@ def prepare_fixture(folder, *, behind=0, fork=False, feedback=False, renamed=Fal
         def repo_api(self, path, data=None, method=None):
             if path == '/pulls/1':
                 return {'number': 1, 'node_id': 'node', 'state': 'open', 'draft': False, 'title': 'synthetic', 'body': '',
-                        'user': {'login': 'hunry-1-code'}, 'base': {'ref': 'develop', 'sha': 'b' * 40},
+                        'user': {'login': 'hunry-1-code'}, 'base': {'ref': 'develop', 'sha': snapshot_base},
                         'head': {'sha': head, 'ref': 'feat/member/test', 'repo': {'full_name': 'external/fork' if fork else self.repo}},
                         'additions': 10, 'deletions': 1}
             if '/check-runs' in path:
-                return {'check_runs': []}
+                return {'check_runs': [{**check, 'name': ai.CHECK, 'id': 17,
+                                        'app': {'slug': 'github-actions'}}] if check else []}
+            if path == '/git/ref/heads/develop':
+                return {'object': {'sha': current_base}}
             if path.startswith('/compare/'):
+                assert path == f'/compare/{current_base}...{head}'
                 return {'behind_by': behind}
             raise AssertionError(path)
         def pages(self, path):
@@ -427,6 +438,26 @@ def test_base_updates_and_new_feedback_override_cached_passes():
         assert outputs['mode'] == 'cached'
 
 
+def test_recheck_uses_new_pending_run_after_completed_review():
+    completed = {'status': 'completed', 'conclusion': 'success'}
+    with tempfile.TemporaryDirectory() as directory:
+        outputs, context = prepare_fixture(Path(directory), feedback=True, check=completed)
+        assert outputs['mode'] == 'analyze'
+        assert context['check_id'] is None
+
+    with tempfile.TemporaryDirectory() as directory:
+        outputs, context = prepare_fixture(Path(directory), check={'status': 'in_progress'})
+        assert outputs['mode'] == 'analyze'
+        assert context['check_id'] == 17
+
+    with tempfile.TemporaryDirectory() as directory:
+        outputs, context = prepare_fixture(
+            Path(directory), check={'status': 'completed', 'conclusion': 'failure'},
+        )
+        assert outputs['mode'] == 'analyze'
+        assert context['check_id'] is None
+
+
 def test_forks_are_skipped_and_renaming_cannot_hide_protected_paths():
     with tempfile.TemporaryDirectory() as directory:
         outputs, context = prepare_fixture(Path(directory), fork=True)
@@ -434,6 +465,22 @@ def test_forks_are_skipped_and_renaming_cannot_hide_protected_paths():
     with tempfile.TemporaryDirectory() as directory:
         outputs, context = prepare_fixture(Path(directory), renamed=True)
         assert any('models/teaching.py' in row for row in context['manual_reasons'])
+
+
+def test_prepare_compares_the_live_target_reference_instead_of_a_pr_base_snapshot():
+    with tempfile.TemporaryDirectory() as directory:
+        outputs, context = prepare_fixture(Path(directory), behind=1, snapshot_base='c' * 40, current_base='d' * 40)
+    assert outputs['mode'] == 'update'
+    assert outputs['base'] == context['base'] == 'd' * 40
+
+
+def test_live_base_advance_invalidates_an_unchanged_pr_snapshot_before_approval():
+    with tempfile.TemporaryDirectory() as directory:
+        calls = publish_fixture(Path(directory), base_advanced=True)
+    assert not any(path == '/pulls/1/reviews' or path == '/graphql' for path, _, _ in calls)
+    assert not any(path == '/check-runs' and method == 'POST' for path, _, method in calls)
+    requests = [data for path, data, _ in calls if path.endswith('/dispatches')]
+    assert len(requests) == 1 and requests[0]['ref'] == 'develop'
 
 
 def test_repair_plan_only_invokes_coder_for_actionable_allowed_findings():
@@ -523,6 +570,32 @@ def test_timeout_without_an_artifact_closes_the_pending_check_as_failure():
         assert comment.call_args.args[1]['failed_run'] is True
     assert calls[-1][0] == '/check-runs/17'
     assert calls[-1][1]['status'] == 'completed' and calls[-1][1]['conclusion'] == 'failure'
+
+
+def test_failure_records_blocking_check_even_when_disabling_auto_merge_is_rejected():
+    calls = []
+
+    class Client:
+        repo = 'Fisherder/AISecEdu'
+
+        def repo_api(self, path, data=None, method=None):
+            calls.append((path, data, method))
+            if path == '/pulls/1':
+                return {'state': 'open', 'draft': False, 'base': {'ref': 'develop'}, 'node_id': 'node',
+                        'user': {'login': 'hunry-1-code'}, 'auto_merge': {'enabled': True},
+                        'head': {'sha': 'a' * 40, 'ref': 'feat/member/task', 'repo': {'full_name': self.repo}}}
+
+        def api(self, path, data, method):
+            calls.append((path, data, method))
+            raise RuntimeError('Synthetic GitHub permission denial')
+
+    with tempfile.TemporaryDirectory() as directory, \
+            patch.dict(os.environ, {'AI_FAILURE_PR': '1', 'AI_FAILURE_HEAD': 'a' * 40, 'AI_CHECK_ID': '17'}), \
+            patch.object(ai, 'GitHub', Client):
+        with unittest.TestCase().assertRaisesRegex(RuntimeError, 'Synthetic GitHub permission denial'):
+            ai.failure(Path(directory))
+    assert calls[1][0] == '/check-runs/17' and calls[1][1]['conclusion'] == 'failure'
+    assert calls[2][0] == '/graphql'
 
 
 def test_gate_failure_before_outputs_recovers_pr_from_event_and_revokes_approval():
@@ -626,6 +699,8 @@ def prepared_repair_publication(folder, value, rounds=0):
 
         def repo_api(self, path, data=None, method=None):
             assert data is None
+            if path == '/git/ref/heads/develop':
+                return {'object': {'sha': pr['base']['sha']}}
             return pr if path == '/pulls/1' else {'check_runs': []}
 
         def pages(self, path):
@@ -738,6 +813,8 @@ def test_base_sync_rejects_a_forged_artifact_merge_target_before_git_mutation():
 
             def repo_api(self, path, data=None, method=None):
                 assert data is None
+                if path == '/git/ref/heads/develop':
+                    return {'object': {'sha': pr['base']['sha']}}
                 return pr if path == '/pulls/1' else {'check_runs': []}
 
             def pages(self, path):
@@ -807,6 +884,51 @@ def test_failure_artifact_cannot_redirect_pr_or_check_updates():
         assert comment.call_args.args[1]['number'] == 1
         assert comment.call_args.args[1]['node_id'] == 'actual-node'
         assert calls[-1][0] == '/check-runs/17' and calls[-1][1]['conclusion'] == 'failure'
+
+
+def test_base_sync_publishes_the_live_develop_commit_when_the_pr_snapshot_is_old():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        candidate, result, context = fixture(folder)
+        original_head = context['head']
+        (candidate / 'dojo_plugin/example.py').write_text('value = 3\n')
+        ai.git(candidate, 'add', 'dojo_plugin/example.py')
+        ai.git(candidate, 'commit', '-qm', 'synthetic current develop')
+        current_base = ai.git(candidate, 'rev-parse', 'HEAD').stdout.strip()
+        ai.git(candidate, 'reset', '--hard', original_head)
+        remote = folder / 'remote.git'
+        remote.mkdir()
+        ai.git(remote, 'init', '--bare', '-q')
+        ai.git(candidate, 'remote', 'add', 'origin', str(remote))
+        context.update(number=1, node_id='node', mode='update', base=current_base,
+                       branch='feat/member/task', manual_reasons=[], failures=[])
+        ai.git(candidate, 'push', 'origin', 'HEAD:refs/heads/' + context['branch'])
+        pr = {'number': 1, 'node_id': 'node', 'state': 'open', 'draft': False,
+              'base': {'ref': 'develop', 'sha': original_head}, 'user': {'login': 'hunry-1-code'},
+              'head': {'sha': original_head, 'ref': context['branch'], 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
+        context['signature'] = ai.state_signature({**pr, 'base': {**pr['base'], 'sha': current_base}}, [], [])
+        (result / 'context.json').write_text(json.dumps(context))
+
+        class Client:
+            repo = 'Fisherder/AISecEdu'
+
+            def repo_api(self, path, data=None, method=None):
+                assert data is None
+                if path == '/pulls/1':
+                    return pr
+                if path == '/git/ref/heads/develop':
+                    return {'object': {'sha': current_base}}
+                assert '/check-runs' in path
+                return {'check_runs': []}
+
+            def pages(self, path):
+                return []
+
+        with patch.object(ai, 'GitHub', Client), patch.object(ai, 'dispatch_pr') as retry:
+            ai.publish(result, candidate, expected=context)
+        retry.assert_not_called()
+        assert ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip() == current_base
+        assert ai.git(remote, 'show', current_base + ':dojo_plugin/example.py').stdout == 'value = 3\n'
 
 
 if __name__ == '__main__':

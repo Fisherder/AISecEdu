@@ -128,11 +128,56 @@ def test_coverage_uses_source_compose_and_preserves_deployment_overlays():
             assert result.returncode == 0, result.stderr
             arguments = result.stdout.splitlines()
             assert 'docker-compose.yml' in arguments
+            assert ('docker-compose.coverage.yml' in arguments) == (mode == 'coverage'), (mode, arguments)
             assert '--profile' in arguments and 'main' in arguments and 'workspace' in arguments
             assert arguments[-1] == 'config'
             for name in ('docker-compose.override.yml', 'docker-compose.staging.yml',
                          'docker-compose.generation-release.yml'):
                 assert (name in arguments) == (mode == 'production'), (mode, arguments)
+
+
+def test_coverage_compose_waits_for_schema_and_keeps_worker_dependencies():
+    if not shutil.which("docker") or subprocess.run(
+        ["docker", "compose", "version"], capture_output=True,
+    ).returncode:
+        raise unittest.SkipTest("Docker Compose is unavailable")
+
+    def resolve(*files, profiles):
+        command = ["docker", "compose"]
+        for file in files:
+            command.extend(("-f", file))
+        for profile in profiles:
+            command.extend(("--profile", profile))
+        result = subprocess.run(
+            [*command, "config", "--format", "json"], cwd=ROOT, capture_output=True,
+            text=True, timeout=20, env={
+                "PATH": os.environ["PATH"], "DOJO_HOST": "synthetic.example",
+                "DOJO_ENV": "coverage", "GLOBAL_AGENT_RUNTIME_TICKET_SECRET": "synthetic-ticket",
+                "GLOBAL_AGENT_RUNTIME_SERVICE_SECRET": "synthetic-service",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)["services"]
+
+    base = "docker-compose.yml"
+    overlay = "docker-compose.coverage.yml"
+    ordinary = resolve(base, profiles=("main", "workspace"))
+    for profiles in (("main",), ("main", "workspace")):
+        coverage = resolve(base, overlay, profiles=profiles)
+        assert coverage["db"]["healthcheck"]["test"] == ["CMD", "pg_isready", "-h", "127.0.0.1"]
+        assert coverage["pgbouncer"]["depends_on"]["db"]["condition"] == "service_healthy"
+        assert coverage["ctfd"]["depends_on"] == ordinary["ctfd"]["depends_on"]
+        for name, service in coverage.items():
+            if not any(str(part).endswith(("/worker/__main__.py", "/worker/image_pulls_main.py",
+                                           "/worker/teaching_main.py")) for part in (service.get("command") or [])):
+                continue
+            previous = ordinary[name]["depends_on"]
+            assert "ctfd" not in previous
+            dependencies = service["depends_on"]
+            assert dependencies["ctfd"]["condition"] == "service_healthy", name
+            assert all(dependencies[key] == value for key, value in previous.items()), name
+    workers_only = resolve(base, overlay, profiles=("workspace", "workspace_exclusive"))
+    assert "ctfd" not in workers_only and "workspace-builder" in workers_only
 
 
 def test_http_readiness_accepts_rebranded_pages_and_stops_with_diagnostics_on_failure():

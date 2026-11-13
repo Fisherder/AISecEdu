@@ -1,0 +1,37 @@
+x-worker-after-ctfd: &worker-after-ctfd
+  depends_on:
+    ctfd:
+      condition: service_healthy
+
+services:
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
+  db:
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1"]
+      start_period: 60s
+  pgbouncer:
+    depends_on:
+      db:
+        condition: service_healthy
+  ctfd:
+    healthcheck:
+      start_period: 60s
+  stats-worker:
+    <<: *worker-after-ctfd
+  image-pull-worker:
+    <<: *worker-after-ctfd
+  teaching-worker:
+    <<: *worker-after-ctfd
+  teaching-interactive-worker:
+    <<: *worker-after-ctfd
+  teaching-coding-worker:
+    <<: *worker-after-ctfd
+  teaching-material-index-worker:
+    <<: *worker-after-ctfd
+  teaching-material-worker:
+    <<: *worker-after-ctfd
+  teaching-authoring-worker:
+    <<: *worker-after-ctfd
+  teaching-authoring-worker-2:
+    <<: *worker-after-ctfd

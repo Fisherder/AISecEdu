@@ -14,7 +14,7 @@ concurrency:
 jobs:
   test:
     name: "${{ matrix.mode }} DOJO Test"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
       matrix:
@@ -52,55 +52,11 @@ jobs:
           docker images
           echo "::endgroup::"
 
-      - name: Set cache mode
+      - name: Prepare isolated Docker and workspace directories
         run: |
-          if [ "${{ matrix.mode }}" = "singlenode" ] && \
-             { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; }; then
-            echo "SAVE_CACHE=yes" >> "$GITHUB_ENV"
-          else
-            echo "LOAD_CACHE=yes" >> "$GITHUB_ENV"
-            sudo chown $USER:$USER /mnt
-          fi
-
-      - name: Restore docker and workspace cache
-        if: env.LOAD_CACHE == 'yes'
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            /mnt/cache.img
-          key: dojo-cache-${{ matrix.mode }}-${{ github.run_id }}
-          restore-keys: |
-            dojo-cache-
-
-      - name: Setup cache filesystem
-        run: |
-          sudo chown root:root /mnt
-          set -x
-          df -h
-          sudo mkdir -p /mnt/cache
-          sudo mkdir -p /mnt/data
-          if [ ! -e /mnt/cache.img ]; then
-            sudo fallocate -l 9.8G /mnt/cache.img
-            sudo mkfs.btrfs -L cache /mnt/cache.img
-          fi
-
-          if [ "$SAVE_CACHE" != "yes" ]; then
-            sudo truncate -s +20G /mnt/cache.img
-          fi
-
-          sudo mount -o loop,compress=zstd:9 /mnt/cache.img /mnt/cache
-          sudo btrfs filesystem resize max /mnt/cache
-
-          sudo chown $USER:$USER /mnt/cache
-          sudo chown $USER:$USER /mnt/data
-          mkdir -p /mnt/cache/dojo-image
-          mkdir -p /mnt/cache/test-image
-          mkdir -p /mnt/data/docker
-          mkdir -p /mnt/data/workspace
+          sudo install -d -o "$USER" -g "$(id -gn)" /mnt/data/docker /mnt/data/workspace
           if [ "${{ matrix.mode }}" = "multinode" ]; then
-            sudo rm -rf /mnt/data/docker-node1 /mnt/data/docker-node2
-            sudo cp -a /mnt/data/docker /mnt/data/docker-node1
-            sudo cp -a /mnt/data/docker /mnt/data/docker-node2
+            sudo install -d -o "$USER" -g "$(id -gn)" /mnt/data/docker-node1 /mnt/data/docker-node2
           fi
 
       - name: Set up Docker storage
@@ -123,12 +79,8 @@ jobs:
           build-args: UBUNTU_ARCHIVE_MIRROR=http://azure.archive.ubuntu.com/ubuntu
           tags: pwncollege/dojo
           load: true
-          cache-from: |
-            type=gha,scope=dojo-outer-v1
-            type=local,src=/mnt/cache/dojo-image
-          cache-to: |
-            type=gha,scope=dojo-outer-v1,mode=max,ignore-error=true
-            type=local,dest=/mnt/cache/dojo-image,mode=max
+          cache-from: type=gha,scope=dojo-outer-v1
+          cache-to: type=gha,scope=dojo-outer-v1,mode=max,ignore-error=true
 
       - name: Build test docker image
         uses: docker/build-push-action@v5
@@ -137,12 +89,14 @@ jobs:
           build-args: UBUNTU_ARCHIVE_MIRROR=http://azure.archive.ubuntu.com/ubuntu
           tags: dojo-test
           load: true
-          cache-from: |
-            type=gha,scope=dojo-test-v1
-            type=local,src=/mnt/cache/test-image
-          cache-to: |
-            type=gha,scope=dojo-test-v1,mode=max,ignore-error=true
-            type=local,dest=/mnt/cache/test-image,mode=max
+          cache-from: type=gha,scope=dojo-test-v1
+          cache-to: type=gha,scope=dojo-test-v1,mode=max,ignore-error=true
+
+      - name: Reclaim temporary build storage
+        run: |
+          docker image inspect pwncollege/dojo:latest dojo-test:latest --format '{{.Id}}'
+          docker buildx prune --all --force
+          df -h /mnt
 
       - name: Start the dojo in ${{ matrix.mode }} mode
         id: startup
@@ -197,22 +151,6 @@ jobs:
             docker exec dojo-node2 dojo compose logs || echo "No node2 outer container..."
             echo "::endgroup::"
           fi
-
-      - name: Prepare the cache
-        if: env.SAVE_CACHE == 'yes'
-        run: |
-          ./deploy.sh -c dojo -K -g
-          df -h
-          sudo umount /mnt/cache
-          du -sm /mnt/cache.img
-
-      - name: Save docker and workspace cache
-        if: env.SAVE_CACHE == 'yes'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            /mnt/cache.img
-          key: dojo-cache-${{ matrix.mode }}-${{ github.run_id }}
 
       - name: Final filesystem information
         if: always()
