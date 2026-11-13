@@ -62,7 +62,7 @@ def test_irreversible_model_execution_uses_one_action_per_fresh_job_and_no_publi
     assert set(model_jobs) == {'analyze', 'repair', 'final_review'}
     for name, body in model_jobs.items():
         assert body.count('uses: openai/codex-action@') == 1, name
-        assert 'safety-strategy: drop-sudo' in body and 'runs-on: ubuntu-latest' in body
+        assert 'safety-strategy: drop-sudo' in body and 'runs-on: ubuntu-24.04' in body
         assert 'name: aisecedu-ai-model' in body and 'AI_AUTOPILOT_SSH_KEY' not in body
         assert 'contents: write' not in body and 'pull-requests: write' not in body
     assert 'uses: openai/codex-action@' not in jobs['publish']
@@ -377,7 +377,7 @@ def test_signature_detects_comment_edits_within_the_same_timestamp():
 
 
 def prepare_fixture(folder, *, behind=0, fork=False, feedback=False, renamed=False, rounds=0,
-                    snapshot_base='b' * 40, current_base='b' * 40):
+                    snapshot_base='b' * 40, current_base='b' * 40, check=None):
     head = 'a' * 40
     signature = ai.state_signature({'head': {'sha': head}, 'base': {'sha': 'b' * 40}, 'title': 'synthetic', 'body': ''}, [], [])
     cached_context = {'head': head, 'model': 'synthetic', 'manual_reasons': [], 'failures': [], 'signature': signature, 'rounds': rounds}
@@ -391,7 +391,8 @@ def prepare_fixture(folder, *, behind=0, fork=False, feedback=False, renamed=Fal
                         'head': {'sha': head, 'ref': 'feat/member/test', 'repo': {'full_name': 'external/fork' if fork else self.repo}},
                         'additions': 10, 'deletions': 1}
             if '/check-runs' in path:
-                return {'check_runs': []}
+                return {'check_runs': [{**check, 'name': ai.CHECK, 'id': 17,
+                                        'app': {'slug': 'github-actions'}}] if check else []}
             if path == '/git/ref/heads/develop':
                 return {'object': {'sha': current_base}}
             if path.startswith('/compare/'):
@@ -435,6 +436,26 @@ def test_base_updates_and_new_feedback_override_cached_passes():
     with tempfile.TemporaryDirectory() as directory:
         outputs, context = prepare_fixture(Path(directory))
         assert outputs['mode'] == 'cached'
+
+
+def test_recheck_uses_new_pending_run_after_completed_review():
+    completed = {'status': 'completed', 'conclusion': 'success'}
+    with tempfile.TemporaryDirectory() as directory:
+        outputs, context = prepare_fixture(Path(directory), feedback=True, check=completed)
+        assert outputs['mode'] == 'analyze'
+        assert context['check_id'] is None
+
+    with tempfile.TemporaryDirectory() as directory:
+        outputs, context = prepare_fixture(Path(directory), check={'status': 'in_progress'})
+        assert outputs['mode'] == 'analyze'
+        assert context['check_id'] == 17
+
+    with tempfile.TemporaryDirectory() as directory:
+        outputs, context = prepare_fixture(
+            Path(directory), check={'status': 'completed', 'conclusion': 'failure'},
+        )
+        assert outputs['mode'] == 'analyze'
+        assert context['check_id'] is None
 
 
 def test_forks_are_skipped_and_renaming_cannot_hide_protected_paths():
@@ -549,6 +570,32 @@ def test_timeout_without_an_artifact_closes_the_pending_check_as_failure():
         assert comment.call_args.args[1]['failed_run'] is True
     assert calls[-1][0] == '/check-runs/17'
     assert calls[-1][1]['status'] == 'completed' and calls[-1][1]['conclusion'] == 'failure'
+
+
+def test_failure_records_blocking_check_even_when_disabling_auto_merge_is_rejected():
+    calls = []
+
+    class Client:
+        repo = 'Fisherder/AISecEdu'
+
+        def repo_api(self, path, data=None, method=None):
+            calls.append((path, data, method))
+            if path == '/pulls/1':
+                return {'state': 'open', 'draft': False, 'base': {'ref': 'develop'}, 'node_id': 'node',
+                        'user': {'login': 'hunry-1-code'}, 'auto_merge': {'enabled': True},
+                        'head': {'sha': 'a' * 40, 'ref': 'feat/member/task', 'repo': {'full_name': self.repo}}}
+
+        def api(self, path, data, method):
+            calls.append((path, data, method))
+            raise RuntimeError('Synthetic GitHub permission denial')
+
+    with tempfile.TemporaryDirectory() as directory, \
+            patch.dict(os.environ, {'AI_FAILURE_PR': '1', 'AI_FAILURE_HEAD': 'a' * 40, 'AI_CHECK_ID': '17'}), \
+            patch.object(ai, 'GitHub', Client):
+        with unittest.TestCase().assertRaisesRegex(RuntimeError, 'Synthetic GitHub permission denial'):
+            ai.failure(Path(directory))
+    assert calls[1][0] == '/check-runs/17' and calls[1][1]['conclusion'] == 'failure'
+    assert calls[2][0] == '/graphql'
 
 
 def test_gate_failure_before_outputs_recovers_pr_from_event_and_revokes_approval():

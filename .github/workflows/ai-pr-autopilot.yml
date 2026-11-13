@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
       issues: read
       actions: read
@@ -86,7 +86,7 @@ jobs:
   analyze:
     needs: gate
     if: needs.gate.outputs.mode != 'skip' && needs.gate.outputs.mode != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: aisecedu-ai-model
       deployment: false
@@ -178,7 +178,7 @@ jobs:
   repair:
     needs: analyze
     if: needs.analyze.outputs.should_repair == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: aisecedu-ai-model
       deployment: false
@@ -250,7 +250,7 @@ jobs:
   final_review:
     needs: [analyze, repair]
     if: needs.repair.outputs.has_patch == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: aisecedu-ai-model
       deployment: false
@@ -371,7 +371,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
       issues: write
       checks: write
