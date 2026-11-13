@@ -62,7 +62,7 @@ def test_irreversible_model_execution_uses_one_action_per_fresh_job_and_no_publi
     assert set(model_jobs) == {'analyze', 'repair', 'final_review'}
     for name, body in model_jobs.items():
         assert body.count('uses: openai/codex-action@') == 1, name
-        assert 'safety-strategy: drop-sudo' in body and 'runs-on: ubuntu-latest' in body
+        assert 'safety-strategy: drop-sudo' in body and 'runs-on: ubuntu-24.04' in body
         assert 'name: aisecedu-ai-model' in body and 'AI_AUTOPILOT_SSH_KEY' not in body
         assert 'contents: write' not in body and 'pull-requests: write' not in body
     assert 'uses: openai/codex-action@' not in jobs['publish']
