@@ -47,7 +47,10 @@ class GitHub:
             with urllib.request.urlopen(request, timeout=45) as response:
                 result = json.load(response) if response.status != 204 else None
                 if isinstance(result, dict) and result.get('errors'):
-                    raise RuntimeError('GitHub GraphQL rejected the operation')
+                    operation = next((name for name in ('enablePullRequestAutoMerge', 'disablePullRequestAutoMerge')
+                                      if name in (data or {}).get('query', '')), 'request')
+                    types = sorted({item.get('type', 'UNKNOWN') for item in result['errors']})
+                    raise RuntimeError(f'GitHub GraphQL rejected {operation} ({", ".join(types)})')
                 return result
         except urllib.error.HTTPError as error:
             try:
@@ -127,6 +130,12 @@ def read_cache(comments, head):
             except (ValueError, KeyError, TypeError):
                 continue
     return None
+
+
+def latest_ai_check(checks):
+    return max((row for row in checks if row['name'] == CHECK
+                and row.get('app', {}).get('slug') == 'github-actions'),
+               key=lambda row: row['id'], default={})
 
 
 def failed_checks(checks):
@@ -265,9 +274,11 @@ def prepare(folder):
         'model': os.environ.get('AI_MODEL', 'deepseek-v4.1-flash-1017'),
         'previous_findings': cache['report']['findings'] if cache else [],
         'review_feedback': feedback,
-        'check_id': max((row['id'] for row in checks if row['name'] == CHECK
-                         and row.get('app', {}).get('slug') == 'github-actions'), default=None),
+        'check_id': None,
     }
+    latest_check = latest_ai_check(checks)
+    if latest_check.get('status') == 'in_progress':
+        context['check_id'] = latest_check['id']
     context['repairable_files'] = [path for path in context['files'] if matches(path, POLICY['repair_paths'])
                                   and not matches(path, POLICY['manual_paths']) and not path.startswith('test/')]
     if (pr['head']['sha'] == os.environ.get('AI_AUTOPILOT_BOOTSTRAP_HEAD')
@@ -278,8 +289,10 @@ def prepare(folder):
     mode = 'update' if comparison['behind_by'] else 'analyze'
     retry = event.get('inputs', {}).get('retry') == 'true' and rounds < POLICY['max_rounds']
     if mode == 'analyze' and cache and not retry and cache['signature'] == signature:
-        mode = 'cached'
-        (folder / 'review.json').write_text(json.dumps(cache['report'], ensure_ascii=False))
+        expected = 'failure' if any(row['priority'] <= 2 for row in cache['report']['findings']) else 'success'
+        if not latest_check or (latest_check.get('status') == 'completed' and latest_check.get('conclusion') == expected):
+            mode = 'cached'
+            (folder / 'review.json').write_text(json.dumps(cache['report'], ensure_ascii=False))
     context['mode'] = mode
     if mode == 'analyze' and rounds < POLICY['max_rounds']:
         for row in context['failures'][:2]:
@@ -470,9 +483,11 @@ def publish(folder, candidate, *, expected):
         print('Feedback, base or CI changed during review; requeue current PR without publishing stale conclusions')
         dispatch_pr(client, pr)
         return
+    latest_check = latest_ai_check(checks)
+    context['check_id'] = latest_check['id'] if latest_check.get('status') == 'in_progress' else None
     if is_paused(pr):
-        suspend_approval(client, context, pr)
         record_check(client, context, 'completed', '自动流程已暂停', PAUSE_LABEL + ' 标签仍在，等待维护者恢复。', 'failure')
+        suspend_approval(client, context, pr)
         return
     files = client.pages(f'/pulls/{pr["number"]}/files')
     live_files = sorted({path for row in files for path in (row['filename'], row.get('previous_filename')) if path})
@@ -524,8 +539,6 @@ def publish(folder, candidate, *, expected):
         post_comment(client, context, report, '已追加自动修复提交；等待新提交的 CI 和独立复审，既有人工复核要求继续保留，不代表验收通过。')
         return
     passed = not blocking
-    record_check(client, context, 'completed', 'AI 审查通过' if passed else 'AI 发现待处理问题',
-                 summary, 'success' if passed else 'failure')
     automatic = passed and not report['requires_human'] and not context['manual_reasons'] and not context['failures']
     if automatic and context['mode'] == 'cached':
         outcome = ('已复用当前输入的审查结论；自动合并保持当前开启状态。' if pr.get('auto_merge') else
@@ -542,23 +555,20 @@ def publish(folder, candidate, *, expected):
                 'commit_id': context['head'], 'event': 'APPROVE',
                 'body': f'DeepSeek 自动复审：{context["model"]}，提交 {context["head"]}。实际合并仍受所有必需 CI、讨论解决和分支保护约束。',
             }, 'POST')
-        if not pr.get('auto_merge'):
+        if not current.get('auto_merge'):
             client.api('/graphql', {'query': 'mutation($id:ID!,$head:GitObjectID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:SQUASH}){pullRequest{id}}}',
                                     'variables': {'id': context['node_id'], 'head': context['head']}}, 'POST')
         outcome = '已提交 AI 审批并启用自动合并；所有必需 CI 通过、分支保持最新且讨论已解决后，GitHub 才会合入 develop。'
     else:
-        if pr.get('auto_merge'):
-            client.api('/graphql', {'query': 'mutation($id:ID!){disablePullRequestAutoMerge(input:{pullRequestId:$id}){pullRequest{id}}}',
-                                    'variables': {'id': context['node_id']}}, 'POST')
-        for review in client.pages(f'/pulls/{context["number"]}/reviews'):
-            if review['user']['login'] == 'github-actions[bot]' and review['state'] == 'APPROVED':
-                client.repo_api(f'/pulls/{context["number"]}/reviews/{review["id"]}/dismissals',
-                                {'message': '最新检查需要继续修复或维护者复核。'}, 'PUT')
+        suspend_approval(client, context, pr)
         outcome = '尚未启用自动合并；需要处理以下问题或由维护者复核。'
         if context['mode'] == 'analyze' and (blocking or context['failures']):
             context['rounds'] += 1
         if context['rounds'] >= POLICY['max_rounds']:
             outcome += '本次人工提交后的两轮自动修复额度已用完。'
+    if context['mode'] != 'cached' or not latest_check:
+        record_check(client, context, 'completed', 'AI 审查通过' if passed else 'AI 发现待处理问题',
+                     summary, 'success' if passed else 'failure')
     post_comment(client, context, report, outcome)
     if blocking and not report['requires_human'] and context['rounds'] < POLICY['max_rounds']:
         dispatch_pr(client, pr, retry=True)
@@ -592,8 +602,8 @@ def gate(folder):
     if pr['state'] != 'open' or pr['head']['sha'] != context['head']:
         return
     if context['mode'] == 'paused':
-        suspend_approval(client, context, pr)
         record_check(client, context, 'completed', '自动流程已暂停', PAUSE_LABEL + ' 标签仍在，等待维护者恢复。', 'failure')
+        suspend_approval(client, context, pr)
         return
     check_id = record_check(client, context, 'in_progress', '正在重新审查当前输入',
                             '提交、基线、反馈或失败检查发生变化，旧结论不再作为本轮通过依据。')
@@ -636,11 +646,11 @@ def failure(folder):
     if not eligible(client, pr) or (context['head'] and pr['head']['sha'] != context['head']):
         return
     context.update(head=pr['head']['sha'], node_id=pr['node_id'])
-    suspend_approval(client, context, pr)
     context['failed_run'] = True
     report = {'summary': 'AI 任务或发布步骤失败，未将本次运行标记为通过。', 'requires_human': True,
               'human_reason': f'查看 Actions 运行 {os.environ.get("GITHUB_RUN_ID", "")}，修复模型、配额、权限或执行错误后重试。', 'findings': []}
     record_check(client, context, 'completed', 'AI 执行失败', report['human_reason'], 'failure')
+    suspend_approval(client, context, pr)
     post_comment(client, context, report, '自动流程已停止；没有宣称测试或模型审查通过。')
 
 
