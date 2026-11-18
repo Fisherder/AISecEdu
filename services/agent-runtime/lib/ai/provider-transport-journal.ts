@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type { ActiveModelCall, ModelCallJournalEventType } from './model-call-journal';
 import type { ProviderFetch, ProviderTransportIdentity } from './provider-fetch';
 
+export const PROVIDER_TRANSPORT_JOURNAL_VERSION = 2;
+
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 const MAX_FRAME_BYTES = 64 * 1024;
@@ -64,7 +66,10 @@ export async function journalProviderTransport(
     throw active.journalFailure;
   }
   const callId = `${active.callId}:http:${ordinal}`;
-  const common = { parentCallId: active.callId, transportNumber: ordinal };
+  const common = {
+    parentCallId: active.callId, transportNumber: ordinal,
+    journalVersion: PROVIDER_TRANSPORT_JOURNAL_VERSION,
+  };
   const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
   const write = async (type: ModelCallJournalEventType, key: string, detail: Record<string, unknown>) => {
     try { await active.journal.write(type, key, { ...common, ...detail }); }
@@ -78,8 +83,7 @@ export async function journalProviderTransport(
     ...identity,
     url: safeUrl(input), method: init?.method ?? (input instanceof Request ? input.method : 'GET'),
     headers: safeHeaders(init?.headers ?? (input instanceof Request ? input.headers : undefined)),
-    bodyBase64: bytes.toString('base64'), byteLength: bytes.byteLength,
-    bodySha256: createHash('sha256').update(bytes).digest('hex'), bodyEncoding: 'base64',
+    byteLength: bytes.byteLength, bodySha256: createHash('sha256').update(bytes).digest('hex'),
   });
   state.unfinished.add(callId);
   let settled!: () => void;
@@ -92,9 +96,10 @@ export async function journalProviderTransport(
     if (finished) return;
     finished = true;
     try {
+      const errorType = error instanceof Error ? error.name : 'UnknownError';
       await write('provider.finished', callId, {
         status, chunksCount: frames, byteLength, bodySha256: hash.copy().digest('hex'),
-        ...(error ? { errorType: error instanceof Error ? error.name : 'UnknownError' } : {}),
+        ...(error ? { errorType: /^[a-zA-Z0-9_]{1,64}$/.test(errorType) ? errorType : 'UnknownError' } : {}),
       });
       state.unfinished.delete(callId);
     } finally { settled(); }
@@ -105,7 +110,7 @@ export async function journalProviderTransport(
     response = await transport(input, init);
     await write('provider.response', callId, {
       status: response.status, headers: safeHeaders(response.headers),
-      bodyEncoding: 'base64', bodySemantics: 'fetch-decoded-body',
+      bodySemantics: 'fetch-decoded-body',
     });
   } catch (error) {
     await response?.body?.cancel().catch(() => {});
@@ -135,13 +140,12 @@ export async function journalProviderTransport(
         }
         if (frames >= MAX_FRAMES) throw new Error('Provider response exceeds the durable frame limit');
         const frame = Buffer.from(pending.subarray(pendingOffset, pendingOffset + MAX_FRAME_BYTES));
-        const offset = byteLength;
+        hash.update(frame);
         await write('provider.chunk', `${callId}:chunk:${frames + 1}`, {
-          chunkNumber: frames + 1, offset, byteLength: frame.byteLength,
-          bodyBase64: frame.toString('base64'), bodySha256: createHash('sha256').update(frame).digest('hex'),
+          chunkNumber: frames + 1, offset: byteLength, byteLength: frame.byteLength,
+          prefixSha256: hash.copy().digest('hex'),
         });
         pendingOffset += frame.byteLength;
-        hash.update(frame);
         byteLength += frame.byteLength;
         frames++;
         if (cancelled) return;

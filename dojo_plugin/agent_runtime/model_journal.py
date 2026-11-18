@@ -12,7 +12,7 @@ from CTFd.models import db
 
 from ..models import TeachingAgentEventOutbox, TeachingJobs
 from .provider_journal import (
-    PROVIDER_EVENT_TYPES, canceled_provider_details, require_finished_provider_calls,
+    PROVIDER_EVENT_TYPES, SUPPORTED_PROVIDER_JOURNAL_VERSIONS, canceled_provider_details, require_finished_provider_calls,
     validate_provider_chain, validate_provider_event,
 )
 
@@ -24,12 +24,49 @@ EVENT_TYPES = {
 EVENT_TYPES.update(PROVIDER_EVENT_TYPES)
 MAX_DETAIL_BYTES = 8 * 1024 * 1024
 MODEL_TERMINAL_TYPES = frozenset({"model.settled", "model.failed", "model.cancelled"})
+MODEL_AUDIT_VERSION = 2
+MODEL_AUDIT_FIELDS = {
+    "model.requested": {
+        "auditVersion", "stepJournalVersion", "transportJournalVersion", "source", "attempt", "modelId",
+        "providerId", "toolCount", "thinkingMode", "maxOutputTokens", "temperature", "topP", "maxRetries",
+    },
+    "model.step": {"parentCallId", "stepNumber", "finishReason", "usage", "toolCallCount", "toolResultCount"},
+    "model.settled": {"finishReason", "usage", "totalUsage", "stepsCount"},
+    "model.failed": {"source", "attempt", "errorType", "retryable"},
+}
+USAGE_FIELDS = {
+    "inputTokens", "outputTokens", "totalTokens", "inputTokenDetails", "outputTokenDetails",
+}
+TOKEN_DETAIL_FIELDS = {
+    "inputTokenDetails": {"noCacheTokens", "cacheReadTokens", "cacheWriteTokens"},
+    "outputTokenDetails": {"textTokens", "reasoningTokens"},
+}
 
 
 class ModelJournalError(ValueError):
     def __init__(self, message, status=400):
         super().__init__(message)
         self.status = status
+
+
+def validate_model_audit_metadata(event_type, detail):
+    if detail.keys() - MODEL_AUDIT_FIELDS[event_type]:
+        raise ModelJournalError("Unexpected model audit metadata field")
+    for field in ("usage", "totalUsage"):
+        if field not in detail:
+            continue
+        usage = detail[field]
+        if not isinstance(usage, dict) or usage.keys() - USAGE_FIELDS:
+            raise ModelJournalError("Invalid model audit usage metadata")
+        for key, value in usage.items():
+            if key in TOKEN_DETAIL_FIELDS:
+                if not isinstance(value, dict) or value.keys() - TOKEN_DETAIL_FIELDS[key]:
+                    raise ModelJournalError("Invalid model audit token details")
+                counters = value.values()
+            else:
+                counters = (value,)
+            if any(type(count) is not int or count < 0 for count in counters):
+                raise ModelJournalError("Invalid model audit token count")
 
 
 def record_model_event(job_id, body):
@@ -139,6 +176,10 @@ def record_model_event(job_id, body):
     # also require their parent model attempt, so the event chain is complete.
     if is_provider_event:
         validate_provider_chain(job, call_id, event_type, detail, transport_id)
+    elif event_type == "model.requested":
+        if detail.get("auditVersion") != MODEL_AUDIT_VERSION or detail.get("transportJournalVersion") not in (None, 2):
+            raise ModelJournalError("New model requests require metadata-only audit events")
+        validate_model_audit_metadata(event_type, detail)
     elif is_tool_event or is_step_event:
         requested = (
             TeachingAgentEventOutbox.query.filter_by(
@@ -150,7 +191,10 @@ def record_model_event(job_id, body):
         if requested is None:
             raise ModelJournalError("Parent model request event is missing", 409)
         if is_step_event:
-            if (requested.payload or {}).get("detail", {}).get("stepJournalVersion") != 1:
+            request_detail = (requested.payload or {}).get("detail", {})
+            if request_detail.get("auditVersion") == MODEL_AUDIT_VERSION:
+                validate_model_audit_metadata(event_type, detail)
+            if request_detail.get("stepJournalVersion") != 1:
                 raise ModelJournalError("Parent model request has no step journal", 409)
             terminal = (
                 TeachingAgentEventOutbox.query.filter(
@@ -194,7 +238,7 @@ def record_model_event(job_id, body):
             )
             if terminal is not None:
                 raise ModelJournalError("Parent model call already finished", 409)
-    elif event_type != "model.requested":
+    else:
         requested = (
             TeachingAgentEventOutbox.query.filter_by(
                 thread_id=job.thread_id, event_type="model.requested",
@@ -214,8 +258,11 @@ def record_model_event(job_id, body):
         )
         if conflict is not None:
             raise ModelJournalError("Model call already has a different outcome", 409)
+        request_detail = (requested.payload or {}).get("detail", {})
+        if request_detail.get("auditVersion") == MODEL_AUDIT_VERSION:
+            validate_model_audit_metadata(event_type, detail)
         if event_type == "model.settled":
-            if (requested.payload or {}).get("detail", {}).get("transportJournalVersion") == 1:
+            if request_detail.get("transportJournalVersion") in SUPPORTED_PROVIDER_JOURNAL_VERSIONS:
                 require_finished_provider_calls(job, call_id)
             if (requested.payload or {}).get("detail", {}).get("stepJournalVersion") == 1:
                 steps_count = detail.get("stepsCount")

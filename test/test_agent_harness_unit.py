@@ -651,3 +651,103 @@ def test_upstream_teacher_turn_only_enqueues_approved_teaching_operations():
     assert validate(job, {"toolProposals": [{"tool": "challenge.generate", "arguments": {}}]}) == []
     assert "toolProposals" not in project({"executionMode": "ask"}, text)
     assert "toolProposals" not in project({"context": {"agentLoop": {"trace": [{"status": "verified"}]}}}, text)
+
+
+def test_provider_audit_records_only_fingerprints_and_compatible_legacy_retries(setup):
+    session, thread, _ = setup
+    journal = importlib.import_module("harness_fixture.agent_runtime.model_journal")
+    job = add_job(session, "audit", status="RUNNING")
+    job.attempt_count, job.lease_owner = 1, "worker"
+    session.commit()
+
+    parent = "audit:1:1"
+    transport = f"{parent}:http:1"
+    common = {"parentCallId": parent, "transportNumber": 1, "journalVersion": 2}
+    request = {"auditVersion": 2, "stepJournalVersion": 1, "transportJournalVersion": 2, "source": "synthetic"}
+
+    def record(kind, call_id, detail):
+        return journal.record_model_event(job.id, {"type": kind, "callId": call_id, "attemptCount": 1, "detail": detail})
+
+    assert record("model.requested", parent, request)["accepted"]
+    with pytest.raises(journal.ModelJournalError, match="metadata-only"):
+        record("model.requested", "audit:1:3", {"transportJournalVersion": 1, "prompt": "synthetic legacy prompt"})
+    request_bytes = b"synthetic student input"
+    response_bytes = b"synthetic provider response"
+    request_detail = {
+        **common, "providerId": "test", "providerType": "openai", "modelId": "test",
+        "url": "https://provider.example/chat", "method": "POST", "headers": {},
+        "byteLength": len(request_bytes), "bodySha256": hashlib.sha256(request_bytes).hexdigest(),
+    }
+    with pytest.raises(journal.ModelJournalError, match="Unexpected provider journal metadata field"):
+        record("provider.request", transport, {**request_detail, "bodyBase64": "c3ludGhldGlj"})
+    assert record("provider.request", transport, request_detail)["accepted"]
+    assert record("provider.request", transport, request_detail)["duplicate"]
+    response_detail = {**common, "status": 200, "headers": {}, "bodySemantics": "fetch-decoded-body"}
+    assert record("provider.response", transport, response_detail)["accepted"]
+    digest = hashlib.sha256(response_bytes).hexdigest()
+    chunk = {**common, "chunkNumber": 1, "offset": 0, "byteLength": len(response_bytes), "prefixSha256": digest}
+    with pytest.raises(journal.ModelJournalError, match="Unexpected provider journal metadata field"):
+        record("provider.chunk", f"{transport}:chunk:1", {**chunk, "body": "synthetic raw response"})
+    assert record("provider.chunk", f"{transport}:chunk:1", chunk)["accepted"]
+    done = {**common, "status": "completed", "chunksCount": 1, "byteLength": len(response_bytes), "bodySha256": digest}
+    with pytest.raises(journal.ModelJournalError, match="does not match"):
+        record("provider.finished", transport, {**done, "bodySha256": "0" * 64})
+    assert record("provider.finished", transport, done)["accepted"]
+    step = {"parentCallId": parent, "stepNumber": 0, "usage": {"totalTokens": 9}}
+    with pytest.raises(journal.ModelJournalError, match="Invalid model audit usage metadata"):
+        record("model.step", f"{parent}:step:1", {**step, "usage": {"raw": {"text": "synthetic raw"}}})
+    assert record("model.step", f"{parent}:step:1", step)["accepted"]
+    assert record("model.settled", parent, {"stepsCount": 1, "totalUsage": {"totalTokens": 9}})["accepted"]
+
+    legacy_parent = "audit:1:2"
+    legacy_transport = f"{legacy_parent}:http:1"
+    legacy = {"transportJournalVersion": 1, "prompt": "synthetic historic input"}
+    canonical = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    session.add(Event(thread_id=thread.id, event_type="model.requested", payload={
+        "callId": legacy_parent, "detail": legacy, "detailSha256": hashlib.sha256(canonical).hexdigest(),
+    }))
+    session.commit()
+    assert record("model.requested", legacy_parent, legacy)["duplicate"]
+    legacy_common = {"parentCallId": legacy_parent, "transportNumber": 1}
+    legacy_request = {**request_detail, **legacy_common, "bodyEncoding": "base64", "bodyBase64": "eA==",
+                      "byteLength": 1, "bodySha256": hashlib.sha256(b"x").hexdigest()}
+    legacy_request.pop("journalVersion")
+    assert record("provider.request", legacy_transport, legacy_request)["accepted"]
+    assert record("provider.response", legacy_transport, {
+        **legacy_common, "status": 200, "headers": {}, "bodySemantics": "fetch-decoded-body", "bodyEncoding": "base64",
+    })["accepted"]
+    legacy_chunk = {**legacy_common, "chunkNumber": 1, "offset": 0, "byteLength": 1,
+                    "bodyBase64": "eQ==", "bodySha256": hashlib.sha256(b"y").hexdigest()}
+    assert record("provider.chunk", f"{legacy_transport}:chunk:1", legacy_chunk)["accepted"]
+    assert record("provider.finished", legacy_transport, {
+        **legacy_common, "status": "completed", "chunksCount": 1, "byteLength": 1, "bodySha256": legacy_chunk["bodySha256"],
+    })["accepted"]
+    assert record("model.settled", legacy_parent, {"text": "synthetic historic result"})["accepted"]
+
+
+def test_canceling_provider_audit_uses_the_last_committed_response_fingerprint(setup):
+    session, thread, _ = setup
+    journal = importlib.import_module("harness_fixture.agent_runtime.model_journal")
+    job = add_job(session, "cancel-audit", status="CANCELED", attempt_count=1)
+    parent = f"{job.id}:1:1"
+    transport = f"{parent}:http:1"
+    common = {"parentCallId": parent, "transportNumber": 1, "journalVersion": 2}
+    body = b"private synthetic stream"
+    fingerprint = hashlib.sha256(body).hexdigest()
+    samples = [
+        ("model.requested", parent, {"auditVersion": 2, "transportJournalVersion": 2}),
+        ("provider.request", transport, common),
+        ("provider.chunk", f"{transport}:chunk:1",
+         {**common, "chunkNumber": 1, "offset": 0, "byteLength": len(body), "prefixSha256": fingerprint}),
+    ]
+    for kind, call_id, detail in samples:
+        session.add(Event(thread_id=thread.id, event_type=kind, payload={
+            "jobId": job.id, "attemptCount": "1", "callId": call_id, "detail": detail,
+        }))
+    session.commit()
+    assert journal.close_canceled_model_calls(job) == {"models": 1, "tools": 0}
+    result = Event.query.filter_by(thread_id=thread.id, event_type="provider.finished").one().payload["detail"]
+    assert result == {
+        **common, "status": "cancelled", "terminationSource": "job-cancellation", "providerOutcomeKnown": False,
+        "chunksCount": 1, "byteLength": len(body), "bodySha256": fingerprint,
+    }
