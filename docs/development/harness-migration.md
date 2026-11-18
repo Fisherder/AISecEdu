@@ -42,9 +42,15 @@ flowchart LR
 | 课堂辩论 `/api/integration/debate/respond` | 回合与反思使用实际模型，保留论据校验和检查点 | 重试核验请求身份与模型，凭实际模型回执登记用量 |
 | 正式原生课件 | 当前授课教师的 `native-v2` 课件制作通过 Harness，保留原有的产物、渲染和逐页恢复检查点 | 验收覆盖重复请求恢复已完成页面；机器执行类作业和其他产物有独立执行契约 |
 
-对普通教学课程，管理员可在开发实例的受保护配置中填写 `HARNESS_ORDINARY_TEACHING_COURSE_IDS`，值为逗号分隔的课程数字 ID，初始为空。授权教师的已索引教材摘要、教案和课件候选、指定静态页的文字润色由官方引擎处理。队列在生成前核实课程和材料归属，保留产物格式和原有保存检查。旧的专用生成和其他修订仍有独立路径。
+对普通教学课程，管理员可在开发实例的受保护配置中填写 `HARNESS_ORDINARY_TEACHING_COURSE_IDS`，值为逗号分隔的课程数字 ID，初始为空。授权教师的已索引教材摘要、教案和课件候选，以及原生静态课件的文字润色和版式修订由官方引擎处理。队列在生成前核实课程和材料归属，保留产物格式和原有保存检查。专用生成器和其他类型的修订仍有独立路径。
 
 教师在课件产物页可以输入「请仅润色第2、4页的文字：让植物观察结论更适合初学者」。也可以写「第2页和第4页」。每张选中页分别提交可编辑的文字和需保留的字面量，平台在本地验证改动、检查渲染并保存一个新版本。页码重复、越界或选中不支持的页面时，任务返回错误。任何一张未通过验收，原版本继续生效。已入队的新任务会保留指定引擎，重试时复核课程与课件权限。
+
+### 按教师看到的页码修改课件版式
+
+在工作台打开原生静态课件，在「局部修改」输入「请调整第1、2页的版式：将比较区居中，左右各留 84 像素」。要统一整份课件，可以输入「请调整整份课件的版式：将标题右对齐」。页码以课件编辑器当前显示的顺序为准。已经选中源码时，先点击「取消源码选区」再提交按页修改。
+
+DSH 每页接收本轮版式要求、页序、区域类型和坐标。正文、图片、讲者备注及其他页面的内容留在平台。生成后，平台重新编译选中的页面，用浏览器检查排版，再保存一个可比较和恢复的新版本。如果某一页超出画布、排版发生冲突或无法保留已有的手工移动，工作台会显示失败原因，教师可调整要求后重试。这个入口使用独立的内部服务路径 `/api/integration/jobs/ordinary-slide-layout`，部署时先升级课堂服务和检查器，再启用新版 Worker。
 
 ### 从普通教案候选打开成品
 
@@ -106,7 +112,7 @@ python -m pytest -q \
   test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_tutor_illustrations_unit.py \
   test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py \
   test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py \
-  test/test_ordinary_lesson_plan_unit.py
+  test/test_ordinary_lesson_plan_unit.py test/test_ordinary_slide_layout_unit.py
 npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev
 npm test --prefix services/deepseek-harness
 python test/harness_client_contract.py

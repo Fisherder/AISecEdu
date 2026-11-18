@@ -143,7 +143,7 @@ jobs:
             test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_tutor_illustrations_unit.py \
             test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py \
             test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py \
-            test/test_ordinary_lesson_plan_unit.py
+            test/test_ordinary_lesson_plan_unit.py test/test_ordinary_slide_layout_unit.py
       - name: Verify cross-course navigation in desktop and mobile viewports
         run: CHROME_BIN="$(command -v google-chrome)" node test/browser/teacher-course-navigation.mjs
       - name: Courseware editor browser component checks

@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { coursewareSlideDataSchema } from '@/lib/courseware/schema';
@@ -120,18 +124,27 @@ it('centers static slide headers vertically without shifting the comparison body
 });
 
 describe('ordinary teaching worker service routes', () => {
-  beforeEach(() => {
+  let layoutCheckpointDirectory: string;
+  beforeEach(async () => {
     vi.resetAllMocks();
+    layoutCheckpointDirectory = await mkdtemp(join(tmpdir(), 'ordinary-layout-checkpoint-'));
+    vi.stubEnv('COURSEWARE_CHECKPOINT_DIR', layoutCheckpointDirectory);
     vi.stubEnv('DOJO_AI_ENABLED', 'true');
     vi.stubEnv('HARNESS_INTERNAL_URL', 'http://fixture-harness.invalid:3081');
     vi.stubEnv('HARNESS_SERVICE_SECRET', 'fixture-secret');
     vi.stubEnv('HARNESS_DEEPSEEK_MODEL', 'official-model');
     mocks.resolveModel.mockRejectedValue(new Error('legacy route fixture'));
     mocks.inspectRendered.mockImplementation(async studio => ({
-      issues: [], evidence: {status: 'PASS', pageId: studio.page.id},
+      issues: [], evidence: {
+        status: 'PASS', pageId: studio.page.id, mode: 'headless-chromium-dom-and-pixels',
+        sourceSha256: createHash('sha256').update(JSON.stringify(studio)).digest('hex'),
+        inspectedAt: '2026-01-01T00:00:00Z',
+        frames: [{step: -1, screenshotSha256: 'b'.repeat(64)}],
+      },
     }));
   });
-  afterEach(() => {
+  afterEach(async () => {
+    await rm(layoutCheckpointDirectory, {recursive: true, force: true});
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -410,6 +423,195 @@ describe('ordinary teaching worker service routes', () => {
     expect((await POST(disabled)).status).toBe(503);
     expect(fetch).not.toHaveBeenCalled();
     expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  function mathLayoutDeck(legacyFirst = false) {
+    return plantDeck().slice(0, 3).map((fixture, index) => {
+      const title = ['分数比较', '等分练习', '数学复习'][index];
+      const studio = coursewareSlideDataSchema.parse({
+        ...fixture.content.studio,
+        page: {
+          ...fixture.content.studio.page,
+          title,
+          objective: '识别分母相同的分数',
+          takeaway: '分母相同，分子大的分数更大',
+          layout: index === 0 && legacyFirst ? undefined : {
+            title: {box: {left: 32, top: 26, width: 600, height: 64}, fontSize: 34},
+            takeaway: {box: {left: 32, top: 98, width: 750, height: 44}, fontSize: 22},
+            supporting: [],
+            visual: {left: 40, top: 160, width: 920, height: 355},
+          },
+          visual: {kind: 'comparison', columns: ['三分之一', '三分之二'],
+            rows: [{label: '分母', values: ['3', '3']}, {label: '分子', values: ['1', '2']}]},
+        },
+      });
+      const rendered = compileCoursewareSlide(studio);
+      return {...fixture, title, content: {...fixture.content, ...rendered,
+        studio: {...studio, privateMarker: 'PRIVATE STUDIO', page: {...studio.page, privateMarker: 'PRIVATE PAGE'}},
+      }};
+    });
+  }
+
+  const layoutJob = (artifacts: ReturnType<typeof mathLayoutDeck>, pageSelection: number[] | 'all',
+    instruction = '将标题放到右上角', endpoint = 'ordinary-slide-layout', token = 'integration-secret') =>
+    request('artifact.revise', 'slide-layout', {
+      artifactType: 'slide-deck', revisionBackend: 'ordinary-slide-layout', artifactId: 'math-deck', expectedRevision: 4,
+      pageSelection, instruction, currentContent: {lesson: {title: '分数课', artifacts}},
+      privateContext: 'PRIVATE HISTORY', sourceSnippet: 'PRIVATE RAW',
+    }, token, 'official-model', 'official-model', endpoint);
+
+  function layoutTurn(change: (layout: any, packet: any) => void) {
+    return vi.fn(async (url, init) => {
+      expect(String(url)).toBe(harness);
+      expect(init.body).not.toMatch(/PRIVATE|分数|分母|数学|data:image/);
+      const body = JSON.parse(init.body);
+      expect(Object.keys(body)).toEqual(['messages']);
+      expect(body.messages.map((item: {role: string}) => item.role)).toEqual(['system', 'user']);
+      const packet = JSON.parse(body.messages[1].content);
+      expect(Object.keys(packet).sort()).toEqual(['instruction', 'layout', 'lockedRegions', 'pageCount', 'pageNumber', 'role', 'visualKind']);
+      change(packet.layout, packet);
+      return modelResponse({layout: packet.layout});
+    });
+  }
+
+  it('revises multiple math pages atomically and keeps manually positioned canvas geometry and unselected pages', async () => {
+    const deck = mathLayoutDeck();
+    const pinned = deck[0].content.elements.find(item => item.id === 'page-promise')!;
+    pinned.left += 25;
+    const fetch = layoutTurn((layout, packet) => {
+      expect(packet.lockedRegions).toEqual(packet.pageNumber === 1 ? ['takeaway'] : []);
+      layout.title.box = {left: 596, top: 24, width: 364, height: 64};
+      layout.title.align = 'right';
+    });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
+    const response = await POST(layoutJob(deck, [3, 1]));
+    const output = await response.json();
+    expect(response.status, JSON.stringify(output)).toBe(200);
+    const content = output.result.content;
+    expect(content.lesson.artifacts[1]).toEqual(deck[1]);
+    const revised = content.lesson.artifacts[0];
+    expect(revised.title).toBe(deck[0].title);
+    expect(revised.content.studio.page).toMatchObject({title: deck[0].title, privateMarker: 'PRIVATE PAGE',
+      visual: deck[0].content.studio.page.visual, speakerNotes: deck[0].content.studio.page.speakerNotes});
+    expect(revised.content.elements.find((item: {id: string}) => item.id === 'page-promise')).toEqual(pinned);
+    expect(revised.content.elements.find((item: {id: string}) => item.id === 'page-title')).toMatchObject({left: 596, top: 24});
+    expect(content.revisionMetadata).toMatchObject({mode: 'ordinary-slide-layout', pageIds: ['plant-1', 'plant-3'],
+      changedPageIds: ['plant-1', 'plant-3'], renderEvidence: [{pageId: 'plant-1'}, {pageId: 'plant-3'}]});
+    expect(output.model).toMatchObject({executionMode: 'ordinary-slide-layout', actualModel: 'official-model',
+      usage: {inputTokens: 20, outputTokens: 10, totalTokens: 30}});
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.inspectRendered).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('revises the entire static deck including a legacy page with exact compiler geometry and original typography', async () => {
+    const deck = mathLayoutDeck(true);
+    expect(deck[0].content.studio.page.layout).toBeUndefined();
+    const fetch = layoutTurn((layout) => {
+      layout.title.box = {left: 594, top: 24, width: 365, height: 64};
+      layout.title.align = 'right';
+    });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
+    const response = await POST(layoutJob(deck, 'all'));
+    const result = await response.json();
+    expect(response.status, JSON.stringify(result)).toBe(200);
+    const revised = result.result.content.lesson.artifacts[0];
+    expect(revised.content.studio.page.legacyCompositionTypography).toBe(true);
+    expect(revised.content.elements.filter((item: {id: string}) => item.id !== 'page-title'))
+      .toEqual(deck[0].content.elements.filter(item => item.id !== 'page-title'));
+    expect(result.result.content.revisionMetadata.pageIds).toEqual(['plant-1', 'plant-2', 'plant-3']);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects raw selection text, off-route dispatch, and saved canvas conflicts without a model call', async () => {
+    const deck = mathLayoutDeck();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
+    expect((await POST(layoutJob(deck, [1], '右上对齐', 'ordinary-slide-layout', 'wrong-secret'))).status).toBe(401);
+    expect((await POST(layoutJob(deck, [1], '右上对齐', 'execute'))).status).toBe(422);
+    for (const bad of ['右上对齐\n\n仅修改当前版本 V4 中所选范围（源码第 1 行），保留其余内容与交互：\nPRIVATE RAW',
+      '右上对齐\n', '右上对齐，修改源码第 1 行']) {
+      expect((await POST(layoutJob(deck, [1], bad))).status).toBe(422);
+    }
+    const title = deck[0].content.elements.find(item => item.id === 'page-title');
+    if (title?.type !== 'text') throw new Error('Fixture title missing');
+    title.rotate = 12;
+    expect((await POST(layoutJob(deck, [1]))).status).toBe(409);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('withholds layout results for no-op, invalid geometry, and missing browser acceptance', async () => {
+    const deck = mathLayoutDeck();
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
+    vi.stubGlobal('fetch', layoutTurn(() => {}));
+    let response = await POST(layoutJob(deck, [1]));
+    expect(response.status).toBe(422);
+    expect(await response.json()).not.toHaveProperty('result');
+    vi.stubGlobal('fetch', layoutTurn(layout => {layout.title.box.left = -2;}));
+    response = await POST(layoutJob(deck, [1], '将标题移到左上角'));
+    expect(response.status).toBe(422);
+    expect(await response.json()).not.toHaveProperty('result');
+    mocks.inspectRendered.mockRejectedValueOnce(new Error('browser unavailable'));
+    vi.stubGlobal('fetch', layoutTurn(layout => {layout.title.align = 'right';}));
+    response = await POST(layoutJob(deck, [1], '标题右对齐'));
+    expect(response.status).toBe(503);
+    expect(await response.json()).not.toHaveProperty('result');
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('resumes the same ordered deck after browser outage without redelivering model proposals or verified pages', async () => {
+    const [first, second, third] = mathLayoutDeck();
+    const stored = [{...third, order: 5}, {...first, order: 0}, {...second, order: 5}];
+    const fetch = layoutTurn(layout => {layout.title.align = 'right';});
+    vi.stubGlobal('fetch', fetch);
+    const inspect = mocks.inspectRendered.getMockImplementation()!;
+    let fail = true;
+    mocks.inspectRendered.mockImplementation(async (...args) => {
+      if (fail && args[0].page.id === 'plant-3') throw new Error('synthetic temporary inspector outage');
+      return inspect(...args);
+    });
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
+    const failed = await POST(layoutJob(stored, [2, 3]));
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).not.toHaveProperty('result');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.inspectRendered).toHaveBeenCalledTimes(2);
+    fail = false;
+    const retried = await POST(layoutJob(stored, [2, 3]));
+    const result = await retried.json();
+    expect(retried.status, JSON.stringify(result)).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.inspectRendered).toHaveBeenCalledTimes(3);
+    expect(mocks.inspectRendered.mock.calls.at(-1)?.[0].page.id).toBe('plant-3');
+    expect(result.model.usage).toEqual({inputTokens: 20, outputTokens: 10, totalTokens: 30});
+    expect(result.result.content.revisionMetadata).toMatchObject({pageIds: ['plant-3', 'plant-2'],
+      changedPageIds: ['plant-3', 'plant-2'], renderEvidence: [{pageId: 'plant-3'}, {pageId: 'plant-2'}]});
+    expect(result.result.content.lesson.artifacts.map((artifact: {id: string}) => artifact.id))
+      .toEqual(stored.map(artifact => artifact.id));
+    expect(result.result.content.lesson.artifacts[1]).toEqual(stored[1]);
+  });
+
+  it('uses editor display numbering for wording with tied and reordered artifacts', async () => {
+    const [first, second, third, fourth] = plantDeck();
+    const stored = [{...fourth, order: 2}, {...first, order: 0}, {...third, order: 8}, {...second, order: 2}];
+    const fetch = vi.fn(async (url, init) => {
+      const page = assertScopedSlidePrompt(url, init, [4]);
+      return modelResponse({changes: [{op: 'set', path: ['title'], value: revisedTitles[page]}]});
+    });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request('artifact.revise', 'slide-wording', {artifactType: 'slide-deck',
+      instruction: '只润色第2页的文字：把标题写成清晰的问题', currentContent: {lesson: {artifacts: stored}}}));
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.result.content.revisionMetadata.pageIds).toEqual(['plant-4']);
+    expect(result.result.content.lesson.artifacts[0].title).toBe(revisedTitles[4]);
+    expect(result.result.content.lesson.artifacts.slice(1)).toEqual(stored.slice(1));
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it('summarizes the authorized extracted text without executing it and retains grounded chunk coverage', async () => {

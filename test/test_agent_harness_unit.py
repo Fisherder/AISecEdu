@@ -1000,7 +1000,19 @@ def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_target
             ) else None)
         return SimpleNamespace(query=SimpleNamespace(filter_by=filter_by))
 
+    policy_path = ROOT / "dojo_plugin/agent_runtime/ordinary_slide_layout.py"
+    policy_nodes = [
+        node for node in ast.parse(policy_path.read_text()).body
+        if (isinstance(node, ast.FunctionDef) and node.name == "pinned")
+        or (isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id in {"BACKEND", "PIN"} for target in node.targets
+        ))
+    ]
+    policy = {}
+    exec(compile(ast.Module(body=policy_nodes, type_ignores=[]), str(policy_path), "exec"), policy)
+
     namespace = {
+        "ordinary_slide_layout": SimpleNamespace(pinned=policy["pinned"]),
         "ordinary_teaching_course": turn.ordinary_teaching_course, "re": re, "upstream_enabled": lambda: True,
         "ordinary_slide_wording_request": turn.ordinary_slide_wording_request,
         "_harness_courseware_authorized": lambda job, payload: False, "PermanentJobError": RuntimeError,

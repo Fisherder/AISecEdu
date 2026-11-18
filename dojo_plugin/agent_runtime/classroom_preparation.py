@@ -22,7 +22,7 @@ _UNSAFE_MARKUP = re.compile(
 _RASTER_IMAGE = re.compile(r"data:image/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=]+")
 
 
-def ordinary_static_lesson(content):
+def ordinary_static_lesson(content, *, allow_missing_layout=False):
     lesson = content.get("lesson", content) if isinstance(content, dict) else None
     slides = lesson.get("artifacts") if isinstance(lesson, dict) else None
     if not isinstance(slides, list) or not 1 <= len(slides) <= 120:
@@ -50,7 +50,8 @@ def ordinary_static_lesson(content):
             not isinstance(page_id, str) or not page_id or page_id in identifiers
             or page.get("schema") != "courseware-page-v2"
             or page.get("beats", []) != [] or page.get("check") is not None
-            or not isinstance(page.get("layout"), dict)
+            or (not isinstance(page.get("layout"), dict)
+                and not (allow_missing_layout and "layout" not in page))
             or not isinstance(visual, dict) or visual.get("kind") not in _STATIC_VISUALS
         ):
             return None

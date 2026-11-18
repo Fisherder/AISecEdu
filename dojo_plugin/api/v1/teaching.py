@@ -112,6 +112,7 @@ from ...models import (
     TeachingSessions,
 )
 from ...agent_runtime.ordinary_lesson_plan import GENERATION_REASON as ORDINARY_PLAN_REASON, OrdinaryLessonPlanError
+from ...agent_runtime import ordinary_slide_layout
 from ...agent_runtime.artifacts import (
     PERSONAL_REVIEWABLE_ARTIFACT_STATUSES,
     RevisionConflict,
@@ -9224,22 +9225,26 @@ def revise_teacher_artifact(user, artifact_id, body, request_key=None):
         source_issue = artifact_revision_source_issue(artifact.artifact_type, current_content)
         if source_issue:
             return _error(source_issue, 409, code="REVISION_SOURCE_NOT_READY")
+        payload = ordinary_slide_layout.admit(user, artifact, {
+            "artifactId": artifact.id,
+            "expectedRevision": expected,
+            "instruction": instruction,
+            "currentContent": current_content,
+            "artifactType": artifact.artifact_type,
+            "allowDegraded": bool(body.get("allowDegraded")),
+        })
         job, _ = enqueue_job(
             owner_id=user.id,
             kind="artifact.revise",
             idempotency_key=operation_key,
-            payload={
-                "artifactId": artifact.id,
-                "expectedRevision": expected,
-                "instruction": instruction,
-                "currentContent": current_content,
-                "artifactType": artifact.artifact_type,
-                "allowDegraded": bool(body.get("allowDegraded")),
-            },
+            payload=payload,
             dojo_id=artifact.dojo_id,
             module_index=artifact.module_index,
         )
         return _ok({"job": job_view(job)}, 202)
+    except ordinary_slide_layout.OrdinarySlideLayoutError as exc:
+        db.session.rollback()
+        return _error(exc, 409, code="ORDINARY_SLIDE_REVISION_CONFLICT")
     except ScopeError as exc:
         return _error(exc, 404, code="NOT_FOUND")
 

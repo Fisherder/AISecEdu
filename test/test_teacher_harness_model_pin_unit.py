@@ -41,6 +41,7 @@ def router():
         {"config": config, "hashlib": hashlib, "json": json, "re": re},
         assignment_names={
             "UPSTREAM_TEACHER_ROUTE", "UPSTREAM_LESSON_PLAN_ROUTE", "UPSTREAM_LESSON_CANDIDATE_ROUTE",
+            "UPSTREAM_SLIDE_LAYOUT_ROUTE",
             "COMPLEX_KINDS", "COMPLEX_HINTS",
         },
     )

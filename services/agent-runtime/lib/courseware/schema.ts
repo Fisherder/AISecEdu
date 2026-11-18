@@ -21,6 +21,10 @@ const box = z
         message: 'Keep the complete region inside the 1000×562.5 canvas with a safe margin',
       });
   });
+// Exact rectangle rendered by the original wide/centerpiece templates.
+const legacyTakeawayBox = z.object({
+  left: z.literal(50), top: z.literal(494), width: z.literal(898), height: z.literal(53),
+});
 const textRegion = z.object({
   box,
   fontSize: z.number().min(18).max(60),
@@ -29,7 +33,7 @@ const textRegion = z.object({
 export const coursewareLayoutSchema = z
   .object({
     title: textRegion.extend({ fontSize: z.number().min(30).max(60) }),
-    takeaway: textRegion,
+    takeaway: textRegion.extend({ box: z.union([box, legacyTakeawayBox]) }),
     supporting: z.array(textRegion).max(3),
     visual: box,
   })
@@ -243,6 +247,7 @@ export const coursewarePageSchema = z
     objective: shortText,
     composition: z.enum(['wide', 'split', 'centerpiece', 'editorial']),
     layout: coursewareLayoutSchema.optional(),
+    legacyCompositionTypography: z.literal(true).optional(),
     role: z.enum([
       'opening',
       'explanation',
@@ -276,6 +281,11 @@ export const coursewarePageSchema = z
   .superRefine((page, ctx) => {
     const issue = (message: string, path: (string | number)[] = []) =>
       ctx.addIssue({ code: 'custom', message, path });
+    const takeawayBox = page.layout?.takeaway.box;
+    if (takeawayBox && takeawayBox.top + takeawayBox.height > 542.5 &&
+        (!page.legacyCompositionTypography || !['wide', 'centerpiece'].includes(page.composition))) {
+      issue('Only the exact legacy wide takeaway may extend beyond the standard safe margin', ['layout', 'takeaway', 'box']);
+    }
     if (page.layout && page.layout.supporting.length !== page.supporting.length)
       issue('Every supporting point needs exactly one visible layout region', [
         'layout',

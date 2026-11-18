@@ -528,7 +528,7 @@ def revision_view(revision, *, include_content=True, student_safe=False):
 
 
 def create_revision(artifact, user, *, expected_revision, instruction, content, commit=True):
-    artifact = TeachingArtifacts.query.filter_by(id=artifact.id).with_for_update().first()
+    artifact = TeachingArtifacts.query.filter_by(id=artifact.id).with_for_update().populate_existing().first()
     if artifact is None or artifact.owner_id != user.id:
         raise ScopeError("Artifact not found")
     if artifact.current_revision != expected_revision:

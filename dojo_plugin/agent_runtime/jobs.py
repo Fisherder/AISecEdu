@@ -62,10 +62,10 @@ from .artifacts import (
 )
 from .files import persist_agent_deliverables, public_agent_file
 from .model_router import (
-    UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_TEACHER_ROUTE,
+    UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_TEACHER_ROUTE,
     route_model, validate_actual_model,
 )
-from . import ordinary_lesson_plan
+from . import ordinary_lesson_plan, ordinary_slide_layout
 from .model_journal import close_canceled_model_calls
 from .model_inputs import ModelInputError, accepted_input, freeze_input, freeze_prepared, prepared_input, request_payload, restore_input_cache
 from .conversation import turn_wait_state, execution_chain
@@ -2642,6 +2642,15 @@ def _runtime_payload(job):
     payload = dict(admitted["payload"] if admitted else (job.payload or {}))
     if job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload):
         return ordinary_lesson_plan.prepare(job, payload)
+    if job.kind == "artifact.revise":
+        if ordinary_slide_layout.pinned(payload):
+            return ordinary_slide_layout.prepare(job, payload)
+        if payload.get("artifactType") == "slide-deck" and not payload.get("workspaceId"):
+            ordinary_slide_layout.reject_source_selection(
+                payload.get("instruction"),
+                include_wording=(payload.get("revisionBackend") == "ordinary-slide-wording"
+                                 or ordinary_teaching_course(job.dojo_id)),
+            )
     if job.kind == "agent.chat" and payload.get("waitForJobIds"):
         from ..api.v1.teaching import _teacher_agent_context, _teacher_agent_history_context
         from .session_events import (
@@ -2898,6 +2907,15 @@ def _ordinary_teaching_job_scope(job, payload):
 
 
 def _runtime_request_body(job, route, payload):
+    if job.kind == "artifact.revise" and ordinary_slide_layout.pinned(payload):
+        return {
+            "jobId": job.id, "kind": job.kind,
+            "scope": {
+                "ownerId": job.owner_id, "dojoId": job.dojo_id, "moduleIndex": job.module_index,
+                "ordinaryTeaching": ordinary_slide_layout.SCOPE,
+            },
+            "payload": ordinary_slide_layout.wire_payload(payload), "modelRoute": route,
+        }
     if job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload):
         return {
             "jobId": job.id,
@@ -3375,7 +3393,9 @@ def _invoke_agent_runtime(job, route, payload=None):
             "usage": response["usage"],
         }}
     endpoint = "execute"
-    if ((job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload))
+    if job.kind == "artifact.revise" and ordinary_slide_layout.pinned(payload):
+        endpoint = "ordinary-slide-layout"
+    elif ((job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload))
             or (job.kind == "candidate.generate" and ordinary_lesson_plan.explicit_generation(payload))):
         endpoint = "ordinary-lesson-plan"
     url = f"{config.AGENT_RUNTIME_INTERNAL_URL}/api/integration/jobs/{endpoint}"
@@ -3387,6 +3407,8 @@ def _invoke_agent_runtime(job, route, payload=None):
         },
         "timeout": (10, _runtime_read_timeout(job, payload)),
     }
+    if endpoint == "ordinary-slide-layout":
+        request_kwargs["allow_redirects"] = False
     if job.kind == "agent.chat" and job.thread_id:
         encoded = _runtime_json_bytes(body)
         _record_runtime_dispatch(job, body, encoded)
@@ -3423,6 +3445,9 @@ def _invoke_agent_runtime(job, route, payload=None):
         # to the durable scheduler, never another untracked immediate POST.
         break
     try:
+        if endpoint == "ordinary-slide-layout" and (response.status_code == 404 or 300 <= response.status_code < 400):
+            raise RuntimeJobError("课堂服务尚未提供普通课件版式接口，请核对部署版本。",
+                                  category="service", code="ORDINARY_SLIDE_LAYOUT_ROUTE_UNAVAILABLE", retry_after=30)
         if endpoint == "ordinary-lesson-plan" and response.status_code == 404:
             raise RuntimeJobError("课堂服务尚未提供普通教案接口，请核对部署版本。",
                                   category="service", code="ORDINARY_LESSON_PLAN_ROUTE_UNAVAILABLE", retry_after=30)
@@ -3862,12 +3887,17 @@ def _persist_result(job, result):
             raise PermanentJobError("Artifact or owner no longer exists")
         expected_revision = int(job.payload.get("expectedRevision"))
         revision_content = result.get("content")
-        revision = TeachingArtifactRevisions.query.filter_by(
-            artifact_id=artifact.id,
-            parent_revision=expected_revision,
-            content_hash=content_hash(revision_content),
-            created_by=user.id,
-        ).first()
+        pinned_layout = ordinary_slide_layout.pinned(job.payload or {})
+        if pinned_layout:
+            ordinary_slide_layout.prepare(job, job.payload, lock=True)
+            revision = None
+        else:
+            revision = TeachingArtifactRevisions.query.filter_by(
+                artifact_id=artifact.id,
+                parent_revision=expected_revision,
+                content_hash=content_hash(revision_content),
+                created_by=user.id,
+            ).first()
         if revision is None:
             revision = create_revision(
                 artifact,
@@ -3875,12 +3905,17 @@ def _persist_result(job, result):
                 expected_revision=expected_revision,
                 instruction=str(job.payload.get("instruction") or ""),
                 content=revision_content,
+                **({"commit": False} if pinned_layout else {}),
             )
         invocation = (
             ModelInvocations.query.filter_by(job_id=job.id, status="SUCCEEDED")
             .order_by(ModelInvocations.created.desc())
             .first()
         )
+        if pinned_layout and (invocation is None or invocation.route != UPSTREAM_SLIDE_LAYOUT_ROUTE
+                              or invocation.actual_model != ordinary_slide_layout.model(job.payload)
+                              or invocation.degraded):
+            raise PermanentJobError("版式修订缺少可核验的模型用量回执。")
         if invocation:
             invocation.artifact_revision_id = revision.id
             revision.validation = {
@@ -4734,13 +4769,18 @@ def process_job(job_id, *, worker_id=None):
                     model_meta.setdefault(
                         "latencyMs", int((time.monotonic() - started) * 1000)
                     )
-                if route.get("route") in {UPSTREAM_TEACHER_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE}:
+                if route.get("route") in {
+                    UPSTREAM_TEACHER_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE,
+                    UPSTREAM_SLIDE_LAYOUT_ROUTE,
+                }:
                     # A mismatched receipt still represents a measured model invocation.
                     failed_model_meta = model_meta
                 if route.get("route") == UPSTREAM_LESSON_PLAN_ROUTE:
                     ordinary_lesson_plan.validate_receipt(route, response)
                 elif route.get("route") == UPSTREAM_LESSON_CANDIDATE_ROUTE:
                     ordinary_lesson_plan.validate_generation_receipt(route, response)
+                elif route.get("route") == UPSTREAM_SLIDE_LAYOUT_ROUTE:
+                    ordinary_slide_layout.validate_receipt(route, runtime_payload, response)
                 _record_invocation(job, route, model_meta, status="SUCCEEDED")
                 failed_model_meta = {}
                 checkpoint_job = _owned_job_attempt(job_id, identity)
@@ -4763,11 +4803,13 @@ def process_job(job_id, *, worker_id=None):
                 ordinary_lesson_plan.generation_model(
                     job, job.payload or {}, _ordinary_teaching_job_scope(job, job.payload or {}),
                 )
+            if route.get("route") == UPSTREAM_SLIDE_LAYOUT_ROUTE:
+                ordinary_slide_layout.validate_receipt(route, runtime_payload, response)
             model_mode = str((response.get("model") or {}).get("executionMode") or "")
             if (job.kind == "artifact.revise" and runtime_payload.get("revisionBackend") == "ordinary-slide-wording"
                     and model_mode != "ordinary-slide-wording"):
                 raise PermanentJobError("课件文字修订未取得指定教学服务的回执。")
-            if model_mode.startswith("ordinary-"):
+            if model_mode.startswith("ordinary-") and route.get("route") != UPSTREAM_SLIDE_LAYOUT_ROUTE:
                 authorized_scope = _ordinary_teaching_job_scope(job, runtime_payload)
                 if not authorized_scope or model_mode != f"ordinary-{authorized_scope}":
                     raise PermanentJobError("普通教学作业的课程或资料授权已变化，请重新发起。")

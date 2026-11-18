@@ -63,6 +63,10 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
   const [launching, setLaunching] = useState(false);
   const [frameError, setFrameError] = useState(false);
   const source = contentSource(artifact);
+  const pageRequestWithSelection = selection && artifact.type === 'slide-deck' && (
+    /^(?:请\s*)?(?:(?:只|仅)\s*)?(?:调整|修改|更改|优化|统一|重新设计)[^：:\n]*(?:版式|布局|排版)\s*[:：]/.test(instruction.trim()) ||
+    /^(?:请\s*)?(?:只|仅)\s*(?:修改|调整|润色)[^：:\n]*页\s*(?:的\s*)?(?:文字|文案|措辞)\s*[:：]/.test(instruction.trim())
+  );
   const codeRef = useRef<HTMLTextAreaElement>(null);
   const preview = state.previews[artifact.id];
   const launch = async () => {
@@ -278,6 +282,7 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
           className="revision-composer"
           onSubmit={(event) => {
             event.preventDefault();
+            if (pageRequestWithSelection) return;
             const request = selection
               ? `${instruction}\n\n仅修改当前版本 V${artifact.currentRevision} 中所选范围（源码第 ${selection.start}–${selection.end} 行），保留其余内容与交互：\n${selection.text}`
               : instruction;
@@ -303,7 +308,9 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
           <div className="revision-input">
             <textarea
               aria-label="成品局部修改要求"
-              placeholder="例如：为这个场景增加一个决策分支，保留其他交互…"
+              placeholder={artifact.type === 'slide-deck'
+                ? '例如：请调整第2页的版式：把标题移到右上方'
+                : '例如：为这个场景增加一个决策分支，保留其他交互…'}
               rows={2}
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
@@ -311,12 +318,14 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
             <button
               className="button send-button"
               aria-label="提交局部修改"
-              disabled={!instruction.trim() || state.busy || generating}
+              disabled={!instruction.trim() || state.busy || generating || Boolean(pageRequestWithSelection)}
             >
               <ArrowUp size={17} />
             </button>
           </div>
-          <small>修改会保存为新版本，可以比较或恢复。</small>
+          {pageRequestWithSelection
+            ? <small role="status">请先取消源码选区，再提交按页修改。</small>
+            : <small>修改会保存为新版本，可以比较或恢复。</small>}
         </form>
       )}
       {restoring !== null && (

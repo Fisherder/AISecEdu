@@ -96,8 +96,15 @@ export function textHtml(text: string): string {
     '</p>'
   );
 }
+export function coursewareDisplayPositions(artifacts: ReadonlyArray<{order?: unknown}>) {
+  const order = (index: number) => {
+    const value = artifacts[index].order;
+    return typeof value === 'number' && Number.isFinite(value) ? value : index;
+  };
+  return artifacts.map((_, index) => index).sort((left, right) => order(left) - order(right));
+}
 export function ordered(lesson: Lesson): LessonArtifact[] {
-  return [...lesson.artifacts].sort((a, b) => a.order - b.order);
+  return coursewareDisplayPositions(lesson.artifacts).map(index => lesson.artifacts[index]);
 }
 export function documentKey(lesson: Lesson): string {
   return JSON.stringify({ title: lesson.title, artifacts: lesson.artifacts });

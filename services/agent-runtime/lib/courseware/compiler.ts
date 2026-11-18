@@ -218,13 +218,14 @@ export function compileCoursewareSlide(
       'page-title', page.title, title.box, title.fontSize, theme.foreground, 750, title.align,
       undefined, headerVAlign,
     );
+    const legacyWide = page.legacyCompositionTypography && !['split', 'editorial'].includes(page.composition);
     text(
       'page-promise',
       page.takeaway,
       takeaway.box,
       takeaway.fontSize,
-      theme.foreground,
-      600,
+      legacyWide ? theme.muted : theme.foreground,
+      legacyWide ? 500 : page.legacyCompositionTypography ? 650 : 600,
       takeaway.align,
     );
     supporting.forEach((region, index) =>

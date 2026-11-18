@@ -1,5 +1,6 @@
 import type { CoursewareSlideData } from './schema';
 import { createHash } from 'node:crypto';
+import { setTimeout } from 'node:timers/promises';
 
 export class CoursewareInspectorUnavailableError extends Error {
   name = 'CoursewareInspectorUnavailableError';
@@ -7,6 +8,7 @@ export class CoursewareInspectorUnavailableError extends Error {
 
 export async function inspectRenderedCourseware(
   data: CoursewareSlideData,
+  signal?: AbortSignal,
 ): Promise<{ issues: string[]; evidence: Record<string, unknown> }> {
   const origin = process.env.COURSEWARE_INSPECTOR_URL;
   const secret = process.env.AISECEDU_SERVICE_SECRET;
@@ -15,19 +17,21 @@ export async function inspectRenderedCourseware(
       'Modern courseware requires a configured browser inspector; unverified template fallback is disabled',
     );
   for (let attempt = 0; attempt < 4; attempt++) {
+    signal?.throwIfAborted();
     const bodyText = JSON.stringify(data);
+    const timeout = AbortSignal.timeout(90000);
     const response = await fetch(origin.replace(/\/$/, '') + '/inspect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-AISecEdu-Service-Token': secret },
       body: bodyText,
-      signal: AbortSignal.timeout(90000),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     }).catch(() => {
       throw new CoursewareInspectorUnavailableError(
         'Browser inspection connection failed; keep the checkpoint and retry when available',
       );
     });
     if (response.status === 429 && attempt < 3) {
-      await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+      await setTimeout(1500 * (attempt + 1), undefined, {signal});
       continue;
     }
     if (!response.ok)

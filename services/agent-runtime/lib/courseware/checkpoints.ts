@@ -31,6 +31,38 @@ export type CoursewareCheckpoint = {
   ) => Promise<void>;
 };
 
+async function writeCoursewareCheckpoint(file: string, content: unknown) {
+  const temporary = file + '.' + randomUUID() + '.tmp';
+  await writeFile(temporary, JSON.stringify(content), { mode: 0o600 });
+  await rename(temporary, file);
+}
+
+export async function openCoursewareLayoutCheckpoint<T>(
+  identity: unknown,
+  parse: (value: unknown) => T,
+  directory = path.join(process.cwd(), 'data', 'courseware-checkpoints'),
+) {
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await access(directory, constants.W_OK);
+  const fingerprint = createHash('sha256').update(JSON.stringify({version: 'ordinary-layout-v1', identity})).digest('hex');
+  const pageFile = (id: string) => {
+    if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,47}$/.test(id)) throw new Error('Invalid layout checkpoint page');
+    return path.join(directory, `ordinary-layout-${fingerprint}-${id}.json`);
+  };
+  return {
+    read: async (id: string) => {
+      try {
+        const saved = JSON.parse(await readFile(pageFile(id), 'utf8'));
+        if (saved.fingerprint !== fingerprint || saved.id !== id) throw new Error('Layout checkpoint identity mismatch');
+        return parse(saved.result);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    },
+    save: async (id: string, result: T) => writeCoursewareCheckpoint(pageFile(id), {fingerprint, id, result}),
+  };
+}
+
 export async function openCoursewareCheckpoint(
   identity: unknown,
   directory = path.join(process.cwd(), 'data', 'courseware-checkpoints'),
@@ -76,22 +108,16 @@ export async function openCoursewareCheckpoint(
   const persist = () => {
     writes = writes.then(async () => {
       await mkdir(directory, { recursive: true, mode: 0o700 });
-      const temporary = file + '.' + randomUUID() + '.tmp';
-      await writeFile(
-        temporary,
-        JSON.stringify({
-          fingerprint,
-          ...saved,
-          pageHashes: Object.fromEntries(
-            Object.entries(saved.pages).map(([id, item]) => [
-              id,
-              createHash('sha256').update(JSON.stringify(item.value)).digest('hex'),
-            ]),
-          ),
-        }),
-        { mode: 0o600 },
-      );
-      await rename(temporary, file);
+      await writeCoursewareCheckpoint(file, {
+        fingerprint,
+        ...saved,
+        pageHashes: Object.fromEntries(
+          Object.entries(saved.pages).map(([id, item]) => [
+            id,
+            createHash('sha256').update(JSON.stringify(item.value)).digest('hex'),
+          ]),
+        ),
+      });
     });
     return writes;
   };

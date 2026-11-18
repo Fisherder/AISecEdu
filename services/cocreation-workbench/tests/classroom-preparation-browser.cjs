@@ -27,6 +27,10 @@ const approval = { id: 'proposal:ordinary-teacher-thread:21:0', sha256: 'e'.repe
 const prepared = { sessionId, artifactId: 'published-plant-deck', artifactRevision: 4 };
 const ordinary = { id: originThread, dojoId: -11, moduleIndex: 0, status: 'ACTIVE', title: '植物课堂准备' };
 const other = { id: otherThread, dojoId: -12, moduleIndex: 1, status: 'ACTIVE', title: '其他独立会话' };
+const deck = {
+  id: 'synthetic-math-deck', type: 'slide-deck', title: '三角形的内角', status: 'READY',
+  currentRevision: 2, capabilities: { edit: true }, revision: { content: { note: 'PRIVATE-CANVAS-SELECTION' } },
+};
 const fixture = { writes: [], decision: null, receipt: null, rejectPrepare: true, pauseDecision: null };
 const message = () => ({
   id: 21, role: 'assistant', content: '请核对植物观察课件。',
@@ -66,7 +70,14 @@ const server = createServer(async (request, response) => {
   const path = url.pathname.slice(prefix.length);
   if (path === '/context') return ok(response, { teacherDojos: [] });
   if (path === '/threads') return ok(response, { threads: [ordinary, other] });
-  if (path === '/artifacts') return ok(response, { artifacts: [] });
+  if (path === '/artifacts') return ok(response, { artifacts: [deck] });
+  if (path === '/artifacts/' + deck.id) return ok(response, { artifact: deck });
+  if (path === '/artifacts/' + deck.id + '/revise' && request.method === 'POST') {
+    let raw = '';
+    for await (const chunk of request) raw += chunk;
+    fixture.writes.push({ path, body: JSON.parse(raw) });
+    return ok(response, {});
+  }
   if (path === '/jobs') return ok(response, { jobs: [] });
   if (/\/events$/.test(path)) return ok(response, { events: [], nextCursor: 0 });
   if (path === '/threads/' + originThread) return ok(response, { thread: { ...ordinary, messages: [message()] } });
@@ -160,8 +171,34 @@ async function main() {
     assert.equal(await continuation.count(), 0);
     assert.equal(fixture.writes.length, 5);
     assert.equal(fixture.writes.at(-1).body.decision, 'REJECTED');
+    await page.getByRole('tab', { name: '成品', exact: true }).click();
+    await page.getByRole('button', { name: new RegExp(deck.title) }).click();
+    await page.getByRole('tab', { name: '源码', exact: true }).click();
+    const source = page.getByRole('textbox', { name: '成品完整源码' });
+    await source.evaluate(element => {
+      element.focus();
+      const start = element.value.indexOf('PRIVATE-CANVAS-SELECTION');
+      element.setSelectionRange(start, start + 'PRIVATE-CANVAS-SELECTION'.length);
+      element.dispatchEvent(new Event('select', { bubbles: true }));
+    });
+    const clearSelection = page.getByRole('button', { name: '取消源码选区' });
+    await clearSelection.waitFor();
+    const instruction = '请调整第2页的版式：把标题移到右上方';
+    const editor = page.getByRole('textbox', { name: '成品局部修改要求' });
+    const submit = page.getByRole('button', { name: '提交局部修改' });
+    await editor.fill('请修改这段文字：调整标点');
+    assert.equal(await submit.isEnabled(), true);
+    await editor.fill(instruction);
+    await page.getByText('请先取消源码选区，再提交按页修改。').waitFor();
+    assert.equal(await submit.isDisabled(), true);
+    assert.equal(fixture.writes.length, 5);
+    await clearSelection.click();
+    const posted = page.waitForResponse(response => response.url().endsWith('/' + deck.id + '/revise'));
+    await submit.click();
+    await posted;
+    assert.deepEqual(fixture.writes.at(-1).body, { instruction, expectedRevision: 2 });
     assert.deepEqual(errors, []);
-    console.log('Teacher workbench prepared classroom browser regression passed', assetPath[2]);
+    console.log('Teacher workbench classroom preparation and slide revision checks passed', assetPath[2]);
   } finally {
     if (browser) await browser.close();
     server.closeAllConnections();

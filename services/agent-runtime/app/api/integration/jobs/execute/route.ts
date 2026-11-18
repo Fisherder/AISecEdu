@@ -5,6 +5,8 @@ import { hasMeasuredLessonUsage, InvalidLessonPlanResponse, materializeOrdinaryL
   ORDINARY_LESSON_REQUEST_LIMIT, ordinaryLessonCandidateBlueprint, ordinaryLessonCandidateDraft,
   ordinaryLessonCandidateInput, ordinaryLessonPlanInput,
 } from '@/lib/server/agent-harness/ordinary-lesson-plan';
+import { OrdinaryLayoutError, ordinarySlideLayoutTarget, reviseOrdinarySlideLayout,
+} from '@/lib/server/agent-harness/ordinary-slide-layout';
 import { createHarnessTurn, recordHarnessUsage } from '@/lib/server/agent-harness/classroom-turn';
 import { persistDurableModelEvent } from '@/lib/server/durable-model-events';
 import { openDebateCheckpoint } from '@/lib/debate/checkpoint';
@@ -30,6 +32,7 @@ import {
 } from '@/lib/generation/candidate-pipeline';
 import { generateSingleArtifact, type SingleArtifactInput } from '@/lib/server/lesson-generation';
 import { generateModernCourseware } from '@/lib/courseware/generation';
+import { coursewareDisplayPositions } from '@/lib/courseware-studio/document';
 import { reconcileOrdinarySlideCanvas } from '@/lib/courseware/saved-canvas';
 import { inspectRenderedCourseware } from '@/lib/courseware/render-client';
 import { COURSEWARE_MAX_PAGES, coursewareSlideDataSchema } from '@/lib/courseware/schema';
@@ -122,7 +125,7 @@ type CinematicModelCall = (
 type JobRequest = {
   jobId?: string;
   kind?: string;
-  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean; ordinaryTeaching?: 'material-summary' | 'candidate-plan' | 'slide-wording' | 'lesson-plan-materialize' };
+  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean; ordinaryTeaching?: 'material-summary' | 'candidate-plan' | 'slide-wording' | 'lesson-plan-materialize' | 'slide-layout' };
   payload?: Record<string, unknown>;
   modelRoute?: {
     route?: string;
@@ -3182,9 +3185,10 @@ function ordinarySlideTarget(payload: Record<string, unknown>) {
     return {error: '课件页标识缺失或重复，无法安全修订。'};
   }
   const pageIds: string[] = [];
-  const reconciledArtifacts = [...artifacts] as LessonArtifact[];
+  const displayPositions = coursewareDisplayPositions(artifacts.map(item => recordValue(item) || {}));
+  const reconciledArtifacts = displayPositions.map(index => artifacts[index]) as LessonArtifact[];
   for (const number of pageNumbers.sort((a, b) => a - b)) {
-    const native = recordValue(recordValue(artifacts[number - 1])?.content);
+    const native = recordValue(recordValue(reconciledArtifacts[number - 1])?.content);
     const target = coursewareSlideDataSchema.safeParse(native?.studio);
     if (!target.success || !['image', 'chart', 'comparison'].includes(target.data.page.visual.kind) ||
         target.data.page.beats.length || target.data.page.check) {
@@ -3209,7 +3213,7 @@ function ordinarySlideTarget(payload: Record<string, unknown>) {
     }
     pageIds.push(studio.page.id);
   }
-  return {content, lesson, artifacts: reconciledArtifacts, pageIds, instruction: match[2].trim()};
+  return {content, lesson, artifacts: reconciledArtifacts, storedArtifacts: artifacts, displayPositions, pageIds, instruction: match[2].trim()};
 }
 
 class OrdinarySlideModelUnavailable extends Error {}
@@ -3243,9 +3247,13 @@ async function reviseOrdinarySlide(
       return typeof id === 'string' && target.pageIds.includes(id) ? [[id, item.title] as const] : [];
     }),
   );
+  const storedArtifacts = [...target.storedArtifacts];
+  target.displayPositions.forEach((index, displayIndex) => {
+    storedArtifacts[index] = revised.artifacts[displayIndex];
+  });
   const next = {
     ...target.content,
-    lesson: { ...target.lesson, artifacts: revised.artifacts, updatedAt: Date.now() },
+    lesson: { ...target.lesson, artifacts: storedArtifacts, updatedAt: Date.now() },
     ...(Array.isArray(design?.pages) ? {coursewareDesign: {
       ...design, pages: design.pages.map(page => {
         const item = recordValue(page);
@@ -3267,8 +3275,11 @@ export async function POST(req: NextRequest) {
   const pathname = req.nextUrl.pathname.replace(/\/$/, '');
   const ordinaryLessonPath = '/api/integration/jobs/ordinary-lesson-plan';
   const basePath = req.nextUrl.basePath || process.env.NEXT_PUBLIC_BASE_PATH?.trim().replace(/\/$/, '') || '/agent-runtime';
+  const ordinaryLayoutPath = '/api/integration/jobs/ordinary-slide-layout';
   const ordinaryLessonEndpoint = pathname === ordinaryLessonPath || pathname === basePath + ordinaryLessonPath;
-  if (!ordinaryLessonEndpoint && req.headers.get('accept')?.includes('application/x-ndjson')) {
+  const ordinaryLayoutEndpoint = pathname === ordinaryLayoutPath || pathname === basePath + ordinaryLayoutPath;
+  const jsonOnly = ordinaryLessonEndpoint || ordinaryLayoutEndpoint;
+  if (!jsonOnly && req.headers.get('accept')?.includes('application/x-ndjson')) {
     const bodyText = await req.text();
     let submitted: JobRequest = {};
     try {
@@ -3349,7 +3360,7 @@ export async function POST(req: NextRequest) {
       return reply({ success: false, error: 'Invalid 玄甲 service credential' }, 401);
     }
     const body = (await req.json().catch(error => {
-      if (ordinaryLessonEndpoint) return null;
+      if (jsonOnly) return null;
       throw error;
     })) as JobRequest | null;
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -3376,6 +3387,19 @@ export async function POST(req: NextRequest) {
         }, 422);
       }
     }
+    const ordinaryLayoutJob = ordinaryScope === 'slide-layout' || payload.revisionBackend === 'ordinary-slide-layout';
+    if ((ordinaryLayoutEndpoint || ordinaryLayoutJob) && (
+      !ordinaryLayoutEndpoint || kind !== 'artifact.revise' || ordinaryScope !== 'slide-layout' ||
+      payload.revisionBackend !== 'ordinary-slide-layout' || payload.artifactType !== 'slide-deck' ||
+      payload.workspaceId != null || typeof body.scope?.ownerId !== 'number' ||
+      !Number.isSafeInteger(body.scope.ownerId) || body.scope.ownerId <= 0 ||
+      !Number.isSafeInteger(body.scope.dojoId)
+    )) {
+      return reply({
+        success: false, error: '此内部地址仅接收锁定的普通静态课件版式修订。',
+        errorCode: 'INVALID_ORDINARY_SLIDE_LAYOUT_JOB', failureCategory: 'permanent',
+      }, 422);
+    }
     const candidateGeneration = kind === 'candidate.generate' || kind === 'self.candidate.generate';
     const requestedCandidateCount = Number(payload.candidateCount);
     const expectedCandidateCount = candidateGeneration
@@ -3401,6 +3425,41 @@ export async function POST(req: NextRequest) {
 
     const executeJob = async () => {
 
+    if (ordinaryLayoutEndpoint) {
+      const unavailable = () => reply({
+        success: false, error: '普通课件版式服务暂不可用。当前版本已保留。',
+        errorCode: 'ORDINARY_SLIDE_LAYOUT_UNAVAILABLE', failureCategory: 'service',
+      }, 503);
+      let target: ReturnType<typeof ordinarySlideLayoutTarget>;
+      try {
+        target = ordinarySlideLayoutTarget(payload);
+      } catch (error) {
+        if (!(error instanceof OrdinaryLayoutError)) throw error;
+        return reply({success: false, error: error.message, errorCode: error.code, failureCategory: 'permanent'}, error.status);
+      }
+      const modelId = process.env.HARNESS_DEEPSEEK_MODEL?.trim();
+      if (!modelId || body.modelRoute?.provider !== 'deepseek' ||
+          requestedModel !== modelId || body.modelRoute.required_model !== modelId) return unavailable();
+      try {
+        const turn = createHarnessTurn();
+        if (!turn) return unavailable();
+        const {result, usage} = await reviseOrdinarySlideLayout(target, {turn, modelId, signal: req.signal}, {
+          jobId, ownerId: body.scope!.ownerId!, dojoId: body.scope!.dojoId!, moduleIndex: body.scope!.moduleIndex,
+        });
+        return reply({
+          success: true, result,
+          model: {
+            provider: 'deepseek', actualModel: modelId, modelVersion: 'deepseek:' + modelId, usage,
+            latencyMs: Date.now() - started, responseHash: createHash('sha256').update(JSON.stringify(result)).digest('hex'),
+            degraded: false, executionMode: 'ordinary-slide-layout',
+          },
+        });
+      } catch (error) {
+        if (!(error instanceof OrdinaryLayoutError)) return unavailable();
+        return reply({success: false, error: error.message, errorCode: error.code,
+          failureCategory: error.status === 503 ? 'service' : error.status === 409 ? 'permanent' : 'quality'}, error.status);
+      }
+    }
     if (ordinaryScope === 'lesson-plan-materialize') {
       const invalid = () => reply({
         success: false, error: '教案任务缺少已选方案、版本或完整资料摘要。',
