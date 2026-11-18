@@ -764,6 +764,8 @@
         "pdfNoText": "No extractable text found in this PDF.",
         "imageUploadFailed": "Failed to upload image: {{error}}",
         "imageTooLargeNoStorage": "Image too large to attach without storage configured (max 2 MB locally).",
+        "imageCaptionForEvaluation": "평가용 설명을 입력하세요. 과정에서 허용하는 경우 이번에 새로 선택한 학습 이미지를 보낼 수도 있습니다.",
+        "sendNewTeachingImage": "이번에 새로 선택한 학습 이미지를 평가를 위해 외부 모델로 보냅니다. 저장된 첨부 파일은 제출 기록에 남습니다.",
         "imageNeedsCaptionNoVision": "The current model can't read images. Add a text description of the image before submitting, or switch to a vision-capable model in Settings.",
         "unsupportedFileType": "Unsupported file type. Only text files (.txt, .md, .csv, .json, .py, …) and PDF are accepted.",
         "pasteTab": "Paste text / image",
