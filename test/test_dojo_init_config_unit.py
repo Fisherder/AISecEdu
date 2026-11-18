@@ -292,6 +292,97 @@ def test_ci_test_arguments_reach_pytest_without_becoming_deployment_options():
         ], result.stdout
 
 
+def test_deploy_rejects_missing_restore_source_before_starting_containers():
+    parser = (ROOT / "deploy.sh").read_text().split("ENV_ARGS=( )\n", 1)[1]
+    parser = parser.split('\nif [ "$START"', 1)[0]
+    with tempfile.TemporaryDirectory() as directory:
+        missing = Path(directory) / "missing backup.dump"
+        result = subprocess.run(
+            ["/bin/bash", "-eu", "-c", "DEFAULT_CONTAINER_NAME=synthetic\nENV_ARGS=()\n" + parser,
+             "deploy-parser", "-r", str(missing)],
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 1 and "backup file does not exist" in result.stderr, result
+
+
+def run_database_action(folder, action, commands, *arguments):
+    script = (ROOT / "dojo/dojo").read_text().replace("/opt/pwn.college", ".").replace("/data/", "./").replace("/tmp/", "./")
+    return subprocess.run(
+        ["/bin/bash", "-e", "-c", commands + "\n" + script, "dojo", action, *arguments],
+        cwd=folder, capture_output=True, text=True, timeout=10,
+        env={"PATH": os.environ["PATH"], "DB_NAME": "test_database"},
+    )
+
+
+def test_database_backup_publishes_only_complete_private_dumps():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        backup_folder = folder / "backups"
+        commands = r"""
+date() { echo fixed-time; }
+docker() {
+    [ "$*" = "exec db pg_dump -Fc --dbname=test_database" ] || return 91
+    printf 'archive'
+}
+"""
+        first = run_database_action(folder, "backup", commands)
+        second = run_database_action(folder, "backup", commands)
+        assert first.returncode == second.returncode == 0, (first.stderr, second.stderr)
+        dumps = sorted(backup_folder.iterdir())
+        assert len(dumps) == 2, dumps
+        for dump in dumps:
+            assert dump.name.startswith("db-fixed-time.")
+            assert dump.suffix == ".dump"
+            assert dump.read_text() == "archive"
+            assert dump.stat().st_mode & 0o777 == 0o600
+
+        failed = run_database_action(folder, "backup", "docker() { printf 'partial'; return 7; }")
+        assert failed.returncode == 7 and not failed.stdout, failed
+        empty = run_database_action(folder, "backup", "docker() { return 0; }")
+        assert empty.returncode != 0 and "backup is empty" in empty.stderr, empty
+        assert sorted(backup_folder.iterdir()) == dumps
+
+
+def test_cloud_backup_skips_unpublished_dumps():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        (folder / "backups").mkdir()
+        (folder / "backups/.db-fixed-time.partial").write_text("partial")
+        (folder / "backups/complete backup.dump").write_text("complete")
+        (folder / "key file").touch()
+        commands = r"""
+BACKUP_AES_KEY_FILE="key file"
+S3_BACKUP_BUCKET=synthetic
+openssl() {
+    [ "$3" = "./backups/complete backup.dump" ] || return 91
+    printf 'encrypted' > "$5"
+}
+aws() { printf '%s\n' "$4"; }
+"""
+        result = run_database_action(folder, "cloud-backup", commands)
+        assert result.returncode == 0, result.stderr
+        assert "s3://synthetic/complete backup.dump.enc" in result.stdout
+        assert ".db-fixed-time.partial" not in result.stdout
+
+
+def test_database_restore_surfaces_missing_and_failed_transactional_restores():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        (folder / "backups").mkdir()
+        (folder / "backups/previous.dump").write_text("archive")
+        commands = r"""
+docker() {
+    [ "$*" = "exec -i db pg_restore --single-transaction --clean --if-exists --dbname=test_database" ] || return 91
+    [ "$(cat)" = "archive" ] || return 92
+    return 7
+}
+"""
+        failed = run_database_action(folder, "restore", commands, "previous.dump")
+        assert failed.returncode == 7, failed
+        missing = run_database_action(folder, "restore", commands, "missing.dump")
+        assert missing.returncode == 1 and "missing file" in missing.stderr, missing
+
+
 if __name__ == "__main__":
     suite = unittest.TestSuite(unittest.FunctionTestCase(value) for name, value in list(globals().items())
                                if name.startswith("test_") and callable(value))
