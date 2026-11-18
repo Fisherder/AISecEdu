@@ -306,3 +306,94 @@ describe('Evaluator API through Harness', () => {
     }
   });
 });
+
+describe('Evaluator API teaching image boundary', () => {
+  it('passes only an explicitly selected inline image from the current ordinary task', async () => {
+    vi.stubEnv('DOJO_AI_ENABLED', 'true');
+    vi.stubEnv('HARNESS_INTERNAL_URL', 'http://harness.invalid:3081');
+    vi.stubEnv('HARNESS_SERVICE_SECRET', 'fixture-auth');
+    const fetchTurn = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        model: 'fixture-model',
+        text: JSON.stringify({ feedback: '图片中的标注清楚。', score: 88 }),
+      }),
+    );
+    vi.stubGlobal('fetch', fetchTurn);
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8R8AAAAASUVORK5CYII=';
+    const dataUrl = 'data:image/png;base64,' + png;
+    const project = mkProject();
+    const submission = addSubmission(project, {
+      microtaskId: 't1',
+      kind: 'file',
+      filename: '盆栽观察.png',
+      mimeType: 'image/png',
+      fileUrl: 'https://browser-storage.invalid/private-delivery',
+      content: '',
+    });
+    const request = (changes: Record<string, unknown>) =>
+      new NextRequest('http://localhost/api/pbl/v2/evaluate', {
+        method: 'POST',
+        body: JSON.stringify({
+          project,
+          kind: 'task',
+          milestoneId: 'ms1',
+          microtaskId: 't1',
+          ...changes,
+        }),
+      });
+    try {
+      expect((await postEvaluation(request({}))).status).toBe(415);
+      expect(
+        (
+          await postEvaluation(
+            request({
+              selectedSubmissionImage: {
+                submissionId: submission.id,
+                dataUrl: 'https://browser.invalid',
+              },
+            }),
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await postEvaluation(
+            request({
+              selectedSubmissionImage: { submissionId: 'another-student', dataUrl },
+            }),
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await postEvaluation(
+            request({
+              project: { ...project, scenario: { internalExperiment: true } },
+              selectedSubmissionImage: { submissionId: submission.id, dataUrl },
+            }),
+          )
+        ).status,
+      ).toBe(400);
+      expect(fetchTurn).not.toHaveBeenCalled();
+
+      const response = await postEvaluation(
+        request({
+          selectedSubmissionImage: { submissionId: submission.id, dataUrl },
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('图片中的标注清楚。');
+      expect(fetchTurn).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchTurn.mock.calls[0];
+      const input = JSON.parse(String(init?.body));
+      expect(String(url)).toBe('http://harness.invalid:3081/v1/teaching-image-turn');
+      expect(input.images).toEqual([{ mediaType: 'image/png', data: png }]);
+      expect(input.messages.at(-1)?.content).toContain('盆栽观察.png');
+      expect(init?.body).not.toContain('browser-storage.invalid');
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+});

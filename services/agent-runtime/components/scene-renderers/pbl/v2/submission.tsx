@@ -42,7 +42,6 @@ import {
 } from 'lucide-react';
 
 import { addSubmission, listSubmissionsForMicrotask } from '@/lib/pbl/v2/operations/submission';
-import { findModelById } from '@/lib/ai/model-aliases';
 import {
   TEXT_PDF_IMAGE_ACCEPT,
   isImageFile,
@@ -59,7 +58,6 @@ import type {
 import type { PBLSSEEvent } from '@/lib/pbl/v2/api/sse';
 import { applyInstructorEvent } from './apply-instructor-event';
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
-import { useSettingsStore } from '@/lib/store/settings';
 import { normalizeProjectRuntime } from '@/lib/pbl/v2/operations/progress';
 import {
   appendRuntimeEvent,
@@ -406,6 +404,7 @@ export function PBLV2SubmissionPanel({
     milestoneId: string,
     microtaskId: string,
     microtaskTitle: string,
+    selectedSubmissionImage?: { submissionId: string; dataUrl: string },
   ) => {
     setEvaluating(true);
     onInstructorStreamingChange?.(true);
@@ -446,13 +445,13 @@ export function PBLV2SubmissionPanel({
           streamStatus,
           draft,
         });
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'x-model': modelConfig.modelString || '',
-          'x-api-key': modelConfig.apiKey || '',
-        };
-        if (modelConfig.baseUrl) headers['x-base-url'] = modelConfig.baseUrl;
-        if (modelConfig.providerType) headers['x-provider-type'] = modelConfig.providerType;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (streamStatus === 'instructor') {
+          headers['x-model'] = modelConfig.modelString || '';
+          headers['x-api-key'] = modelConfig.apiKey || '';
+          if (modelConfig.baseUrl) headers['x-base-url'] = modelConfig.baseUrl;
+          if (modelConfig.providerType) headers['x-provider-type'] = modelConfig.providerType;
+        }
         try {
           const stored = localStorage.getItem('locale');
           if (stored) headers['x-user-locale'] = stored;
@@ -509,6 +508,7 @@ export function PBLV2SubmissionPanel({
           kind: 'task',
           milestoneId,
           microtaskId,
+          selectedSubmissionImage,
         },
         'eval-task',
       );
@@ -712,7 +712,7 @@ export function PBLV2SubmissionPanel({
           existing={existing}
           submitLocked={submitLocked}
           onClose={() => setModalOpen(false)}
-          onSubmit={(args) => {
+          onSubmit={({ selectedImage, ...args }) => {
             // Apply the submission to a clone so React picks up the
             // change; addSubmission mutates the project, so we clone
             // first to keep render semantics clean.
@@ -722,7 +722,13 @@ export function PBLV2SubmissionPanel({
             onProjectChange(next);
             onSubmissionAdded?.(sub, args.microtaskId);
             setModalOpen(false);
-            void runImmediateTaskEval(next, args.milestoneId, args.microtaskId, current.task.title);
+            void runImmediateTaskEval(
+              next,
+              args.milestoneId,
+              args.microtaskId,
+              current.task.title,
+              selectedImage ? { submissionId: sub.id, dataUrl: selectedImage } : undefined,
+            );
           }}
         />
       )}
@@ -904,11 +910,12 @@ interface SubmissionModalProps {
     filename?: string;
     mimeType?: string;
     fileUrl?: string;
+    selectedImage?: string;
   }) => void;
 }
 
 function SubmissionModal({
-  project: _project,
+  project,
   microtaskId,
   milestoneId,
   microtaskTitle,
@@ -918,17 +925,12 @@ function SubmissionModal({
   onSubmit,
 }: SubmissionModalProps) {
   const { t } = useI18n();
-  // Whether the currently-selected model can read images. Reactive so that
-  // switching models (in Settings) updates the image-caption gating live.
-  const hasVision = useSettingsStore((s) => {
-    const model = findModelById(s.providerId, s.providersConfig[s.providerId]?.models, s.modelId);
-    return !!model?.capabilities?.vision;
-  });
   const [mode, setMode] = useState<'paste' | 'file'>('paste');
   const [text, setText] = useState('');
   const [filename, setFilename] = useState('');
   const [mimeType, setMimeType] = useState('');
   const [fileUrl, setFileUrl] = useState<string | undefined>(undefined);
+  const [selectedImage, setSelectedImage] = useState<string>();
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -982,6 +984,7 @@ function SubmissionModal({
   // typed by hand is kept; only file-derived text is cleared.
   const resetAttachment = () => {
     setFileUrl(undefined);
+    setSelectedImage(undefined);
     setFilename('');
     setMimeType('');
     if (textFromFileRef.current) {
@@ -1009,6 +1012,11 @@ function SubmissionModal({
     if (isImageFile(file)) {
       setUploading(true);
       try {
+        const shareSelectedImage =
+          !project.scenario &&
+          file.size <= IMAGE_BASE64_CAP &&
+          ['image/png', 'image/jpeg', 'image/webp'].includes(file.type);
+        const inline = shareSelectedImage ? await blobToDataUrl(file) : undefined;
         let src = await uploadBlobToStorage(file, 'media', ac.signal);
         if (ac.signal.aborted) return;
         if (!src) {
@@ -1016,10 +1024,11 @@ function SubmissionModal({
             setError(t('pbl.v2.submission.imageTooLargeNoStorage'));
             return;
           }
-          src = await blobToDataUrl(file);
+          src = inline ?? (await blobToDataUrl(file));
           if (ac.signal.aborted) return;
         }
         setFileUrl(src);
+        setSelectedImage(inline);
         setFilename(file.name);
         setMimeType(file.type || 'image/png');
         // Keep any caption the learner already typed (don't clobber it).
@@ -1119,12 +1128,13 @@ function SubmissionModal({
   // submission needs a text caption to grade against.
   const captionRequired = imageRequiresCaption({
     hasImage,
-    hasVision,
+    hasVision: Boolean(selectedImage),
     hasCaption: !!text.trim(),
   });
 
   const clearImage = () => {
     setFileUrl(undefined);
+    setSelectedImage(undefined);
     setFilename('');
     setMimeType('');
     setError(null);
@@ -1155,6 +1165,7 @@ function SubmissionModal({
           filename: filename || undefined,
           mimeType: mimeType || undefined,
           fileUrl: fileUrl || undefined,
+          selectedImage,
         });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));

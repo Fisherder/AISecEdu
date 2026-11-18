@@ -30,7 +30,23 @@ export type HarnessTurn = (
   signal?: AbortSignal,
 ) => Promise<HarnessTurnResult>;
 
+export interface TeachingTurnImage {
+  mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+  data: string;
+}
+
 export function createHarnessTurn(): HarnessTurn | undefined {
+  return createHarnessTransport('/v1/turn');
+}
+
+export function createTeachingImageTurn(image: TeachingTurnImage): HarnessTurn | undefined {
+  return createHarnessTransport('/v1/teaching-image-turn', image);
+}
+
+function createHarnessTransport(
+  path: '/v1/turn' | '/v1/teaching-image-turn',
+  image?: TeachingTurnImage,
+): HarnessTurn | undefined {
   const mode = (process.env.DOJO_AI_ENABLED || 'auto').trim().toLowerCase();
   const enabled = mode === 'auto' ? process.env.HARNESS_CONFIGURED?.trim().toLowerCase() : mode;
   if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') return undefined;
@@ -39,7 +55,7 @@ export function createHarnessTurn(): HarnessTurn | undefined {
   const secret = process.env.HARNESS_SERVICE_SECRET;
   if (!root || !secret?.trim()) return undefined;
 
-  const endpoint = new URL(root + '/v1/turn');
+  const endpoint = new URL(root + path);
   return async (messages, signal) => {
     const body = JSON.stringify({ messages });
     if (Buffer.byteLength(body, 'utf8') > 1024 * 1024 || messages.length > 128) {
@@ -50,7 +66,7 @@ export function createHarnessTurn(): HarnessTurn | undefined {
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + secret, 'Content-Type': 'application/json' },
-      body,
+      body: image ? JSON.stringify({ messages, images: [image] }) : body,
       cache: 'no-store',
       redirect: 'error',
       signal: signal ? AbortSignal.any([signal, duration]) : duration,

@@ -9,12 +9,10 @@ import type { NextRequest } from 'next/server';
  */
 const mocks = vi.hoisted(() => ({
   resolveModelFromRequest: vi.fn(),
-  resolveModel: vi.fn(),
 }));
 
 vi.mock('@/lib/server/resolve-model', () => ({
   resolveModelFromRequest: mocks.resolveModelFromRequest,
-  resolveModel: mocks.resolveModel,
 }));
 vi.mock('@/lib/pbl/v2/api/sse', () => ({
   createSSEResponse: vi.fn(() => new Response('ok')),
@@ -70,19 +68,23 @@ describe('PBL v2 runtime routes forward MODEL_ROUTES stages', () => {
 
   afterEach(() => vi.unstubAllEnvs());
 
-  it('image evaluation keeps the server-side runtime stage without caller credentials', async () => {
+  it('image evaluation does not inherit a browser model or fetch a stored URL', async () => {
     vi.stubEnv('DOJO_AI_ENABLED', 'true');
     vi.stubEnv('HARNESS_INTERNAL_URL', 'http://harness.invalid:3081');
     vi.stubEnv('HARNESS_SERVICE_SECRET', 'fixture');
-    mocks.resolveModel.mockResolvedValue({
-      model: {},
-      modelInfo: { capabilities: { vision: true } },
-    });
     const { POST } = await import('@/app/api/pbl/v2/evaluate/route');
-    await POST(
+    const response = await POST(
       makeRequest({
         project: {
-          submissions: [{ microtaskId: 't1', fileUrl: '/image.png', mimeType: 'image/png' }],
+          submissions: [
+            {
+              id: 's1',
+              kind: 'file',
+              microtaskId: 't1',
+              fileUrl: '/image.png',
+              mimeType: 'image/png',
+            },
+          ],
         },
         kind: 'task',
         milestoneId: 'm1',
@@ -91,7 +93,7 @@ describe('PBL v2 runtime routes forward MODEL_ROUTES stages', () => {
         baseUrl: 'https://browser.invalid',
       }),
     );
-    expect(mocks.resolveModel).toHaveBeenCalledWith({ stage: 'pbl-v2-runtime:evaluate' });
+    expect(response.status).toBe(415);
     expect(mocks.resolveModelFromRequest).not.toHaveBeenCalled();
   });
 

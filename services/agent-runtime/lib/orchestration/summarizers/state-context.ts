@@ -133,7 +133,10 @@ export function summarizeElements(
 /**
  * Build context string from store state
  */
-export function buildStateContext(storeState: StatelessChatRequest['storeState']): string {
+export function buildStateContext(
+  storeState: StatelessChatRequest['storeState'],
+  { includeAnswerKeys = true }: { includeAnswerKeys?: boolean } = {},
+): string {
   const { stage, scenes, currentSceneId, mode, whiteboardOpen, quizResults } = storeState;
 
   const lines: string[] = [];
@@ -189,19 +192,25 @@ export function buildStateContext(storeState: StatelessChatRequest['storeState']
             const r = resultsById.get(q.id);
             const ans = answersById?.[q.id];
             const studentAnswer = Array.isArray(ans) ? ans.join(', ') : (ans ?? '');
-            const correctAnswer =
-              Array.isArray(q.answer) && q.answer.length > 0 ? q.answer.join(', ') : '(open-ended)';
             const verdict = r ? r.status.toUpperCase() : 'UNGRADED';
             const points = q.points ?? 1;
             const earned = r?.earned ?? 0;
             const entry: string[] = [
               `  ${i + 1}. [${q.type}] ${q.question}`,
               `     Student answer: ${studentAnswer || '(empty)'}`,
-              `     Correct answer: ${correctAnswer}`,
-              `     Verdict: ${verdict} (${earned}/${points} pts)`,
             ];
-            if (q.analysis) entry.push(`     Reference analysis: ${q.analysis}`);
-            if (r?.aiComment) entry.push(`     AI grader comment: ${r.aiComment}`);
+            if (includeAnswerKeys) {
+              const correctAnswer =
+                Array.isArray(q.answer) && q.answer.length > 0
+                  ? q.answer.join(', ')
+                  : '(open-ended)';
+              entry.push(`     Correct answer: ${correctAnswer}`);
+            }
+            entry.push(`     Verdict: ${verdict} (${earned}/${points} pts)`);
+            if (includeAnswerKeys && q.analysis)
+              entry.push(`     Reference analysis: ${q.analysis}`);
+            if (includeAnswerKeys && r?.aiComment)
+              entry.push(`     AI grader comment: ${r.aiComment}`);
             return entry.join('\n');
           });
           const score = quizResults.results.reduce((acc, r) => acc + (r.earned ?? 0), 0);

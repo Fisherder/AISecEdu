@@ -116,3 +116,45 @@ describe('buildStateContext whiteboard code summary', () => {
     expect(context.indexOf('[id:old]')).toBeLessThan(context.indexOf('[id:new]'));
   });
 });
+
+it('can retain learner quiz feedback without forwarding the answer key or grader notes', () => {
+  const state = makeStoreState([]);
+  state.currentSceneId = 'q';
+  state.scenes = [
+    {
+      id: 'q',
+      title: '盆栽练习',
+      type: 'quiz',
+      content: {
+        type: 'quiz',
+        questions: [
+          {
+            id: 'first',
+            type: 'single',
+            question: '哪一项适合盆栽？',
+            answer: ['private answer'],
+            analysis: 'private analysis',
+            points: 1,
+          },
+        ],
+      },
+    },
+  ] as unknown as typeof state.scenes;
+  state.quizResults = {
+    sceneId: 'q',
+    answers: { first: 'learner choice' },
+    results: [
+      {
+        questionId: 'first',
+        status: 'incorrect',
+        correct: false,
+        earned: 0,
+        aiComment: 'private grader note',
+      },
+    ],
+  };
+  const text = buildStateContext(state, { includeAnswerKeys: false });
+  expect(text).toContain('learner choice');
+  expect(text).toContain('INCORRECT (0/1 pts)');
+  expect(text).not.toMatch(/private answer|private analysis|private grader note/);
+});

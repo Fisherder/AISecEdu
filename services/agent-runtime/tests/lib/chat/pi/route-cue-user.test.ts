@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
+import type { StatelessChatRequest } from '@/lib/types/chat';
 import { convertToLlm } from '@earendil-works/pi-agent-core';
-
-const PI_CHAT_FLAG = 'NEXT_PUBLIC_PI_CHAT_ENABLED';
-let originalPiChatFlag: string | undefined;
 
 type MockTool = {
   name: string;
@@ -72,6 +70,42 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }) as unknown as NextRequest;
+}
+
+async function runLegacyDirector(request: NextRequest): Promise<Response> {
+  const { runPiDirectorLoop } = await import('@/lib/chat/pi/director-loop');
+  const { isPiWebSearchEnabled } = await import('@/lib/config/feature-flags');
+  const { resolveAgentConfigs, getPiMaxActionsPerAgent, getPiMaxAgentTurns } =
+    await import('@/lib/chat/pi/config');
+  const body = (await request.json()) as StatelessChatRequest;
+  const model = await mocks.resolveModel();
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        await runPiDirectorLoop({
+          body,
+          agentConfigs: resolveAgentConfigs(body),
+          send: async (event) =>
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)),
+          languageModel: model.model,
+          thinkingConfig: model.thinkingConfig,
+          maxOutputTokens: model.modelInfo?.outputWindow,
+          contextWindow: model.modelInfo?.contextWindow,
+          signal: request.signal,
+          abortSignal: request.signal,
+          maxAgentTurns: getPiMaxAgentTurns(body),
+          maxActionsPerAgent: getPiMaxActionsPerAgent(body),
+          enableWhiteboardTools: body.config.piEnableWhiteboardTools === true,
+          enableWebSearch: isPiWebSearchEnabled(),
+        });
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+  });
+  return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
 }
 
 function makeBody() {
@@ -561,10 +595,8 @@ function mockDirectorWithFailedSceneRead() {
   });
 }
 
-describe('POST /api/chat/pi cue_user', () => {
+describe('legacy Pi director behavior', () => {
   beforeEach(() => {
-    originalPiChatFlag = process.env[PI_CHAT_FLAG];
-    process.env[PI_CHAT_FLAG] = 'true';
     vi.resetModules();
     mocks.resolveModel.mockReset();
     mocks.buildAgent.mockReset();
@@ -582,18 +614,12 @@ describe('POST /api/chat/pi cue_user', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    if (originalPiChatFlag === undefined) {
-      delete process.env[PI_CHAT_FLAG];
-    } else {
-      process.env[PI_CHAT_FLAG] = originalPiChatFlag;
-    }
   });
 
   it('wires Pi standard message conversion only into the Director agent', async () => {
     mockDirectorWithAgentTurn({ explicitlyCueUser: false });
 
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(makeRequest(makeBody()));
+    const response = await runLegacyDirector(makeRequest(makeBody()));
     await readSseEvents(response);
 
     const agentOptions = mocks.buildAgent.mock.calls.map(
@@ -614,8 +640,7 @@ describe('POST /api/chat/pi cue_user', () => {
     delete process.env.OPENMAIC_ENABLE_PI_WEB_SEARCH;
     try {
       mockDirectorWithAgentTurn({ explicitlyCueUser: false });
-      const { POST } = await import('@/app/api/chat/pi/route');
-      const response = await POST(makeRequest(makeBody()));
+      const response = await runLegacyDirector(makeRequest(makeBody()));
       await readSseEvents(response);
 
       const directorOptions = mocks.buildAgent.mock.calls
@@ -689,8 +714,7 @@ describe('POST /api/chat/pi cue_user', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     try {
-      const { POST } = await import('@/app/api/chat/pi/route');
-      const response = await POST(makeRequest(makeBody()));
+      const response = await runLegacyDirector(makeRequest(makeBody()));
       const events = await readSseEvents(response);
       const doneEvent = events.find((event) => event.type === 'done');
 
@@ -762,8 +786,7 @@ describe('POST /api/chat/pi cue_user', () => {
     );
 
     try {
-      const { POST } = await import('@/app/api/chat/pi/route');
-      const response = await POST(makeRequest(makeBody()));
+      const response = await runLegacyDirector(makeRequest(makeBody()));
       const events = await readSseEvents(response);
       const doneEvent = events.find((event) => event.type === 'done');
 
@@ -793,8 +816,7 @@ describe('POST /api/chat/pi cue_user', () => {
     };
     mockDirectorReadSceneDelegation(captured);
 
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(makeRequest(makeBody()));
+    const response = await runLegacyDirector(makeRequest(makeBody()));
     const events = await readSseEvents(response);
     const doneEvent = events.find((event) => event.type === 'done');
 
@@ -823,8 +845,7 @@ describe('POST /api/chat/pi cue_user', () => {
   it('does not duplicate cue_user when coordinator explicitly cues before fallback', async () => {
     mockDirectorWithAgentTurn({ explicitlyCueUser: true });
 
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(makeRequest(makeBody()));
+    const response = await runLegacyDirector(makeRequest(makeBody()));
     const events = await readSseEvents(response);
 
     const cueUserEvents = events.filter((event) => event.type === 'cue_user');
@@ -847,8 +868,7 @@ describe('POST /api/chat/pi cue_user', () => {
   it('keeps the session open when close_session follows cue_user in the same director turn', async () => {
     mockDirectorWithAgentTurn({ explicitlyCueUser: true, closeAfterCue: true });
 
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(makeRequest(makeBody()));
+    const response = await runLegacyDirector(makeRequest(makeBody()));
     const events = await readSseEvents(response);
     const doneEvent = events.find((event) => event.type === 'done');
 
@@ -862,8 +882,7 @@ describe('POST /api/chat/pi cue_user', () => {
   it('falls back to cue_user before done when coordinator forgets to cue', async () => {
     mockDirectorWithAgentTurn({ explicitlyCueUser: false });
 
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(makeRequest(makeBody()));
+    const response = await runLegacyDirector(makeRequest(makeBody()));
     const events = await readSseEvents(response);
 
     const cueUserEvents = events.filter((event) => event.type === 'cue_user');
@@ -891,8 +910,7 @@ describe('POST /api/chat/pi cue_user', () => {
     });
 
     const body = makeBody();
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(
+    const response = await runLegacyDirector(
       makeRequest({
         ...body,
         config: {
@@ -931,8 +949,7 @@ describe('POST /api/chat/pi cue_user', () => {
       cuePrompt: 'Any follow-up?',
     });
 
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(makeRequest(makeBody()));
+    const response = await runLegacyDirector(makeRequest(makeBody()));
     const events = await readSseEvents(response);
 
     const cueUserEvents = events.filter((event) => event.type === 'cue_user');
@@ -957,8 +974,7 @@ describe('POST /api/chat/pi cue_user', () => {
     });
 
     const body = makeBody();
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(
+    const response = await runLegacyDirector(
       makeRequest({
         ...body,
         config: {
@@ -996,8 +1012,7 @@ describe('POST /api/chat/pi cue_user', () => {
   it('rejects close_session when the current turn has no visible agent response', async () => {
     mockDirectorCloseSessionWithoutTeacherTurn();
 
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(makeRequest(makeBody()));
+    const response = await runLegacyDirector(makeRequest(makeBody()));
     const events = await readSseEvents(response);
 
     const cueUserEvents = events.filter((event) => event.type === 'cue_user');
@@ -1015,8 +1030,7 @@ describe('POST /api/chat/pi cue_user', () => {
     mockDirectorWithRejectedCalls(counter);
 
     const body = makeBody();
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(
+    const response = await runLegacyDirector(
       makeRequest({
         ...body,
         config: { ...body.config, piMaxAgentTurns: 1 },
@@ -1034,8 +1048,7 @@ describe('POST /api/chat/pi cue_user', () => {
   it('marks failed evidence tools as native tool errors and exposes an audit trace', async () => {
     mockDirectorWithFailedSceneRead();
 
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(makeRequest(makeBody()));
+    const response = await runLegacyDirector(makeRequest(makeBody()));
     const events = await readSseEvents(response);
     const doneEvent = events.find((event) => event.type === 'done');
 
@@ -1057,8 +1070,7 @@ describe('POST /api/chat/pi cue_user', () => {
   it('uses only this loop turn count for the classroom agent turn cap', async () => {
     mockDirectorWithTwoTeacherTurns();
 
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(
+    const response = await runLegacyDirector(
       makeRequest({
         ...makeBody(),
         config: {
@@ -1123,8 +1135,7 @@ describe('POST /api/chat/pi cue_user', () => {
     );
 
     const body = makeBody();
-    const { POST } = await import('@/app/api/chat/pi/route');
-    const response = await POST(
+    const response = await runLegacyDirector(
       makeRequest({
         ...body,
         config: {
