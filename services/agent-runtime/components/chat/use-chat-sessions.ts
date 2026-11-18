@@ -1182,11 +1182,6 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         {
           config: requestTemplate.config,
           userProfile: requestTemplate.userProfile,
-          apiKey: requestTemplate.apiKey,
-          baseUrl: requestTemplate.baseUrl,
-          model: requestTemplate.model,
-          providerType: requestTemplate.providerType,
-          thinkingConfig: requestTemplate.thinkingConfig,
         },
         {
           getStoreState: buildFreshAgentLoopStoreState,
@@ -1661,17 +1656,18 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       // Capture the next request only after that mutation has settled.
       await pendingRetirementRef.current;
 
-      // Validate model configuration before sending
-      const modelConfig = getCurrentModelConfig();
-      if (!modelConfig.modelId) {
-        toast.error(t('settings.modelNotConfigured'));
-        return;
-      }
-      if (modelConfig.requiresApiKey && !modelConfig.apiKey && !modelConfig.isServerConfigured) {
-        toast.error(t('settings.setupNeeded'), {
-          description: t('settings.apiKeyDesc'),
-        });
-        return;
+      if (isPiChatEnabled()) {
+        const modelConfig = getCurrentModelConfig();
+        if (!modelConfig.modelId) {
+          toast.error(t('settings.modelNotConfigured'));
+          return;
+        }
+        if (modelConfig.requiresApiKey && !modelConfig.apiKey && !modelConfig.isServerConfigured) {
+          toast.error(t('settings.setupNeeded'), {
+            description: t('settings.apiKeyDesc'),
+          });
+          return;
+        }
       }
 
       // Create a new session when there's no active QA session to append to.
@@ -1833,17 +1829,18 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       // but being explicit guards against future refactors)
       livePausedRef.current = false;
 
-      // Validate model configuration before starting discussion
-      const modelConfig = getCurrentModelConfig();
-      if (!modelConfig.modelId) {
-        toast.error(t('settings.modelNotConfigured'));
-        return;
-      }
-      if (modelConfig.requiresApiKey && !modelConfig.apiKey && !modelConfig.isServerConfigured) {
-        toast.error(t('settings.setupNeeded'), {
-          description: t('settings.apiKeyDesc'),
-        });
-        return;
+      if (isPiChatEnabled()) {
+        const modelConfig = getCurrentModelConfig();
+        if (!modelConfig.modelId) {
+          toast.error(t('settings.modelNotConfigured'));
+          return;
+        }
+        if (modelConfig.requiresApiKey && !modelConfig.apiKey && !modelConfig.isServerConfigured) {
+          toast.error(t('settings.setupNeeded'), {
+            description: t('settings.apiKeyDesc'),
+          });
+          return;
+        }
       }
 
       // Auto-end previous active QA/Discussion sessions to ensure only one is active

@@ -54,7 +54,7 @@ export interface AgentLoopRequest {
     [key: string]: unknown;
   };
   userProfile?: { nickname?: string; bio?: string };
-  apiKey: string;
+  apiKey?: string;
   baseUrl?: string;
   model?: string;
   providerType?: string;

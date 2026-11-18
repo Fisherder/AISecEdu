@@ -30,7 +30,9 @@ import type { NextRequest } from 'next/server';
 
 import { createLogger } from '@/lib/logger';
 import { apiError } from '@/lib/server/api-response';
-import { resolveModelFromRequest } from '@/lib/server/resolve-model';
+import { resolveModel } from '@/lib/server/resolve-model';
+import { createHarnessTurn } from '@/lib/server/agent-harness/classroom-turn';
+import { latestSubmissionForMicrotask } from '@/lib/pbl/v2/operations/submission';
 
 import { createSSEResponse } from '@/lib/pbl/v2/api/sse';
 import {
@@ -79,15 +81,28 @@ export async function POST(req: NextRequest) {
     return apiError('MISSING_REQUIRED_FIELD', 400, "kind='milestone' requires milestoneId.");
   }
 
-  let resolved;
-  try {
-    resolved = await resolveModelFromRequest(req, body, 'pbl-v2-runtime:evaluate');
-  } catch (err) {
-    log.error('Model resolution failed:', err);
-    return apiError('INVALID_REQUEST', 400, err instanceof Error ? err.message : String(err));
+  const harnessTurn = createHarnessTurn();
+  if (!harnessTurn) return apiError('UPSTREAM_ERROR', 503, '项目评价服务尚未配置。');
+  const submission =
+    body.kind === 'task' && body.microtaskId && Array.isArray(body.project.submissions)
+      ? latestSubmissionForMicrotask(body.project, body.microtaskId)
+      : undefined;
+  let visionModel: Awaited<ReturnType<typeof resolveModel>> | undefined;
+  if (submission?.fileUrl && submission.mimeType?.startsWith('image/')) {
+    try {
+      visionModel = await resolveModel({ stage: 'pbl-v2-runtime:evaluate' });
+    } catch (err) {
+      log.error('Vision model resolution failed:', err);
+      return apiError('INVALID_REQUEST', 400, '图片评价模型不可用。');
+    }
   }
-  const { model, thinkingConfig, modelInfo } = resolved;
-  const hasVision = !!modelInfo?.capabilities?.vision;
+  const runtime = visionModel?.modelInfo?.capabilities?.vision
+    ? {
+        languageModel: visionModel.model,
+        thinkingConfig: visionModel.thinkingConfig,
+        hasVision: true,
+      }
+    : { harnessTurn };
 
   if (body.kind === 'task') {
     return createSSEResponse(
@@ -95,10 +110,8 @@ export async function POST(req: NextRequest) {
         project: body.project,
         milestoneId: body.milestoneId!,
         microtaskId: body.microtaskId!,
-        languageModel: model,
-        thinkingConfig,
+        ...runtime,
         recentChatSummary: body.recentChatSummary,
-        hasVision,
         signal: req.signal,
       }),
       { signal: req.signal },
@@ -109,8 +122,7 @@ export async function POST(req: NextRequest) {
       runMilestoneEvaluation({
         project: body.project,
         milestoneId: body.milestoneId!,
-        languageModel: model,
-        thinkingConfig,
+        harnessTurn,
         recentChatSummary: body.recentChatSummary,
         signal: req.signal,
       }),
@@ -121,8 +133,7 @@ export async function POST(req: NextRequest) {
   return createSSEResponse(
     runFinalEvaluation({
       project: body.project,
-      languageModel: model,
-      thinkingConfig,
+      harnessTurn,
       recentChatSummary: body.recentChatSummary,
       signal: req.signal,
     }),

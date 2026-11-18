@@ -108,7 +108,7 @@ test('HTTP requests drive the official restricted agent loop and Messages adapte
   assert.deepEqual(await a.json(), {
     text: '答复 甲',
     model,
-    usage: { prompt_tokens: 6, completion_tokens: 3, total_tokens: 9 },
+    usage: { prompt_tokens: 6, completion_tokens: 3, total_tokens: 9, cache_read_input_tokens: 2 },
   });
   assert.equal((await b.json()).text, '答复 乙');
   assert.equal(received.length, 2);

@@ -45,7 +45,14 @@ function formatUsage(usage) {
   if (usage === undefined || usage.totalTokens === 0) return undefined;
   const prompt = usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
   const completion = usage.outputTokens;
-  return { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion };
+  return {
+    prompt_tokens: prompt,
+    completion_tokens: completion,
+    total_tokens: prompt + completion,
+    cache_read_input_tokens: usage.cacheReadTokens,
+    cache_creation_input_tokens: usage.cacheWriteTokens,
+    reasoning_tokens: usage.reasoningTokens,
+  };
 }
 
 export async function createEngine({ model, baseURL }) {

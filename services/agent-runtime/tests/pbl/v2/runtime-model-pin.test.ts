@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
 /**
@@ -9,10 +9,12 @@ import type { NextRequest } from 'next/server';
  */
 const mocks = vi.hoisted(() => ({
   resolveModelFromRequest: vi.fn(),
+  resolveModel: vi.fn(),
 }));
 
 vi.mock('@/lib/server/resolve-model', () => ({
   resolveModelFromRequest: mocks.resolveModelFromRequest,
+  resolveModel: mocks.resolveModel,
 }));
 vi.mock('@/lib/pbl/v2/api/sse', () => ({
   createSSEResponse: vi.fn(() => new Response('ok')),
@@ -66,14 +68,31 @@ describe('PBL v2 runtime routes forward MODEL_ROUTES stages', () => {
     );
   });
 
-  it('evaluate route forwards its runtime stage', async () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('image evaluation keeps the server-side runtime stage without caller credentials', async () => {
+    vi.stubEnv('DOJO_AI_ENABLED', 'true');
+    vi.stubEnv('HARNESS_INTERNAL_URL', 'http://harness.invalid:3081');
+    vi.stubEnv('HARNESS_SERVICE_SECRET', 'fixture');
+    mocks.resolveModel.mockResolvedValue({
+      model: {},
+      modelInfo: { capabilities: { vision: true } },
+    });
     const { POST } = await import('@/app/api/pbl/v2/evaluate/route');
-    await POST(makeRequest({ project: { id: 'p' }, kind: 'final' }));
-    expect(mocks.resolveModelFromRequest).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      'pbl-v2-runtime:evaluate',
+    await POST(
+      makeRequest({
+        project: {
+          submissions: [{ microtaskId: 't1', fileUrl: '/image.png', mimeType: 'image/png' }],
+        },
+        kind: 'task',
+        milestoneId: 'm1',
+        microtaskId: 't1',
+        apiKey: 'browser-key',
+        baseUrl: 'https://browser.invalid',
+      }),
     );
+    expect(mocks.resolveModel).toHaveBeenCalledWith({ stage: 'pbl-v2-runtime:evaluate' });
+    expect(mocks.resolveModelFromRequest).not.toHaveBeenCalled();
   });
 
   it('open-task route forwards its runtime stage', async () => {

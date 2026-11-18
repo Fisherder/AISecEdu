@@ -16,7 +16,9 @@
  * write a small MockLanguageModelV3 helper for both Instructor and
  * Evaluator together.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { POST as postEvaluation } from '@/app/api/pbl/v2/evaluate/route';
 import { MockLanguageModelV3, convertArrayToReadableStream } from 'ai/test';
 import {
   runFinalEvaluation,
@@ -248,5 +250,59 @@ describe('Evaluator agent — milestone/final JSON-only output', () => {
     expect(patch.evaluation.whatYouLearned).toEqual(['用 key 找到对应值']);
     expect(patch.evaluation.whatsNext).toBe('下一步可以加入新增和删除键值对的功能。');
     expect(patch.evaluation.stars).toBe(4.5);
+  });
+});
+
+describe('Evaluator API through Harness', () => {
+  it('uses only learner evidence and emits evaluation patch before done', async () => {
+    vi.stubEnv('DOJO_AI_ENABLED', 'true');
+    vi.stubEnv('HARNESS_INTERNAL_URL', 'http://harness.invalid:3081');
+    vi.stubEnv('HARNESS_SERVICE_SECRET', 'fixture-auth');
+    const fetchTurn = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        model: 'fixture-model',
+        text: JSON.stringify({ feedback: '说明了植物浇水安排。', score: 91 }),
+      }),
+    );
+    vi.stubGlobal('fetch', fetchTurn);
+    try {
+      const project = mkProject();
+      addSubmission(project, {
+        microtaskId: 't1',
+        kind: 'text',
+        content: '每周二给盆栽浇水。',
+      });
+      const response = await postEvaluation(
+        new NextRequest('http://localhost/api/pbl/v2/evaluate', {
+          method: 'POST',
+          body: JSON.stringify({
+            project: { ...project, hiddenAnswer: 'never forward' },
+            kind: 'task',
+            milestoneId: 'ms1',
+            microtaskId: 't1',
+            apiKey: 'browser-key',
+          }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      const frames = (await response.text()).trim().split('\n\n');
+      expect(frames.map((frame) => frame.split('\n')[0])).toEqual([
+        'event: project_patch',
+        'event: done',
+      ]);
+      const payload = JSON.parse(frames[0].split('\n')[1].slice(6));
+      expect(payload).toMatchObject({
+        patch: { evaluation: { score: 91, feedback: '说明了植物浇水安排。' } },
+      });
+      expect(fetchTurn).toHaveBeenCalledTimes(1);
+      const [url, request] = fetchTurn.mock.calls[0];
+      expect(String(url)).toBe('http://harness.invalid:3081/v1/turn');
+      expect(request?.headers).toMatchObject({ Authorization: 'Bearer fixture-auth' });
+      expect(request?.body).toContain('每周二给盆栽浇水');
+      expect(request?.body).not.toMatch(/browser-key|never forward/);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
 });
