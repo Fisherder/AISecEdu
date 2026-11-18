@@ -5,7 +5,12 @@ import { once } from 'node:events';
 import { setTimeout as pause } from 'node:timers/promises';
 
 const address = 'http://127.0.0.1:3080';
-const app = spawn('dsh', ['web', '--no-open', '--host', '127.0.0.1', '--port', '3080'], { stdio: 'ignore' });
+const app = spawn('dsh', ['web', '--no-open', '--host', '127.0.0.1', '--port', '3080'], {
+  stdio: ['ignore', 'ignore', 'pipe'],
+});
+let bootError = '';
+app.stderr.setEncoding('utf8');
+app.stderr.on('data', chunk => { bootError = (bootError + chunk).slice(-2500); });
 const exited = once(app, 'exit');
 try {
   const deadline = Date.now() + 45_000;
@@ -22,7 +27,7 @@ try {
     }
     await pause(250);
   }
-  assert.ok(html, `The official Web UI did not serve its entry page (exit ${app.exitCode}, signal ${app.signalCode})`);
+  assert.ok(html, `Official Web UI startup (exit ${app.exitCode}, signal ${app.signalCode}): ${bootError}`);
   const script = html.match(/<script[^>]*\bsrc=["']([^"']+)["']/i)?.[1];
   assert.ok(script, 'The official Web UI did not reference its application bundle');
   const asset = new URL(script, address);

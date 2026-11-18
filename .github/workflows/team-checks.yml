@@ -36,6 +36,7 @@ jobs:
       - name: Verify the unmodified official Web UI in an offline container
         run: >
           docker run --rm -i --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=256m
+          --tmpfs /home/node:rw,nosuid,nodev,uid=1000,gid=1000,mode=0700,size=64m
           --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges -w /tmp -e DSH_HOME=/tmp/dsh
           aisecedu-harness-test node --input-type=module < test/harness_release_ui.mjs
       - uses: actions/setup-node@v4
