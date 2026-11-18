@@ -974,7 +974,7 @@ def learning_profile_context(user):
     }
 
 
-def guide_reference_catalog(profile):
+def guide_reference_catalog(profile, *, include_historical=True):
     recent_attempts = {}
     for attempt in profile.get("recentAttempts") or []:
         reference_id = str(attempt.get("referenceId") or "")
@@ -1018,6 +1018,8 @@ def guide_reference_catalog(profile):
                         "url": exercise.get("url"),
                     }
                 )
+    if not include_historical:
+        return result
     known = {item["id"] for item in result}
     for reference_id, recent in recent_attempts.items():
         if reference_id in known:
@@ -1044,6 +1046,32 @@ def guide_reference_catalog(profile):
                 "url": attempt.get("url"),
             }
         )
+    return result
+
+
+def guide_reference_summaries(user, profile, references):
+    visible = {
+        item["id"]: item for item in guide_reference_catalog(profile, include_historical=False)
+    }
+    result = []
+    for reference_id in references:
+        item = visible.get(reference_id)
+        if item is None:
+            continue
+        challenge = DojoChallenges.from_id(item["courseId"], item["moduleId"], item["challengeId"]).first()
+        if challenge is None:
+            continue
+        count = LearningAttempts.query.filter_by(
+            user_id=user.id, dojo_id=challenge.dojo_id, module_index=challenge.module_index,
+            challenge_index=challenge.challenge_index,
+        ).count()
+        challenge_profile = LearningChallengeProfiles.query.get(challenge.challenge_id)
+        objectives = challenge_profile.objectives if challenge_profile else []
+        result.append({
+            **item,
+            "attemptCount": count,
+            "objectives": objectives if isinstance(objectives, list) else [],
+        })
     return result
 
 

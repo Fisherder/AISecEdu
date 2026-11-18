@@ -33,12 +33,13 @@ from .context import (
     attempt_agent_context,
     context_digest,
     guide_reference_catalog,
-    guide_reference_context,
+    guide_reference_summaries,
     learning_profile_context,
     tutor_local_references,
 )
 from .evidence import active_attempt, append_evidence, redact_text, verify_evidence_chain
 from .guide_prompts import build_guide_prompt
+from .guide_model_context import CONTEXT_VERSION, guide_model_context, guide_teaching_text
 from .tutor_context import RESTRICTED_TUTOR_REQUEST, tutor_model_input, tutor_observations
 from .student_agent import sanitize_tool_calls, student_resource_reference_for_url
 from .standards import DEFAULT_HINT_POLICY
@@ -924,6 +925,8 @@ def _guide_scoped_history(thread, reference_ids):
             if isinstance(getattr(message, "metadata_json", None), dict)
             else {}
         )
+        if metadata.get("modelContextVersion") != CONTEXT_VERSION or message.role not in {"user", "assistant"}:
+            continue
         message_references = set(_guide_message_reference_ids(message))
         if target:
             if message_references != target:
@@ -938,79 +941,15 @@ def _guide_scoped_history(thread, reference_ids):
                     continue
         elif message_references:
             continue
+        if message.role == "assistant" and metadata.get("provider") != "MODEL":
+            continue
         result.append(
             {
                 "role": message.role,
                 "content": str(message.content or "")[:3500],
             }
         )
-    return result[-14:]
-
-
-def _guide_scoped_profile(profile, reference_ids):
-    """Remove unrelated exercises from model context when references are pinned."""
-
-    compact = _compact_learning_profile(
-        profile,
-        limit=max(32000, DOJO_AI_MAX_CONTEXT_CHARS - 90000),
-    )
-    if not reference_ids:
-        compact["scope"] = {"mode": "PROFILE", "referenceIds": []}
-        return compact
-
-    parsed = {}
-    for reference_id in reference_ids:
-        parts = str(reference_id).split("/", 2)
-        if len(parts) == 3:
-            parsed[reference_id] = tuple(parts)
-    selected_courses = {parts[0] for parts in parsed.values()}
-    scoped_courses = []
-    for course in compact.get("courses") or []:
-        if str(course.get("id")) not in selected_courses:
-            continue
-        modules = []
-        for module in course.get("modules") or []:
-            exercises = []
-            for exercise in module.get("exercises") or []:
-                reference_id = "/".join(
-                    (
-                        str(course.get("id") or ""),
-                        str(module.get("id") or ""),
-                        str(exercise.get("id") or ""),
-                    )
-                )
-                if reference_id in parsed:
-                    exercises.append(exercise)
-            if exercises:
-                modules.append({**module, "exercises": exercises})
-        if modules:
-            scoped_courses.append({**course, "modules": modules})
-
-    compact["courses"] = scoped_courses
-    compact["recentAttempts"] = [
-        attempt
-        for attempt in compact.get("recentAttempts") or []
-        if str(attempt.get("referenceId") or "") in parsed
-    ]
-    compact["skills"] = [
-        skill
-        for skill in compact.get("skills") or []
-        if str(skill.get("courseId") or "") in selected_courses
-    ]
-    compact["recommendations"] = []
-    compact["activeAttemptId"] = next(
-        (
-            attempt.get("id")
-            for attempt in compact["recentAttempts"]
-            if attempt.get("status") == "ACTIVE"
-        ),
-        None,
-    )
-    compact["scope"] = {
-        "mode": "REFERENCED",
-        "referenceIds": list(reference_ids),
-    }
-    return compact
+    return result[-4:]
 
 
 def _guide_scope_conflicts(answer, profile, reference_ids):
@@ -1048,19 +987,13 @@ def _guide_fallback(question, profile, referenced_contexts=None):
     if referenced_contexts:
         anchors = []
         for item in referenced_contexts[:4]:
-            latest = (item.get("attempts") or [None])[0]
-            if latest:
-                score = (latest.get("scores") or {}).get("total")
-                detail = latest.get("status") or "已有尝试"
-                if score is not None:
-                    detail += f"，综合得分 {score:g}"
-            else:
-                detail = "尚无练习记录"
+            count = item.get("attemptCount") or 0
+            detail = f"已记录 {count} 次尝试" if count else "尚无练习记录"
             anchors.append(f"{item.get('exercise')}（{detail}）")
         return (
-            f"我已把你引用的{'、'.join(anchors)}作为本次建议的主要依据。"
-            "可以先对照这些题目的学习目标，找出反复出现的过程证据、评分反馈和未验证假设，"
-            "把共同缺口整理成一个知识点，再选择其中一题做一次最小验证。"
+            f"本轮引用了{'、'.join(anchors)}。"
+            "复习时先对照公开学习目标，写下一项已理解的概念和一个仍需核对的问题。"
+            "涉及实际实验过程、命令或具体解法时，请向任课教师咨询。"
         )
     active = next(
         (
@@ -1077,14 +1010,14 @@ def _guide_fallback(question, profile, referenced_contexts=None):
     if active and active_label and active_label in question:
         return (
             f"你明确提到了“{active_label}”。建议先把本轮目标写成一个可以被验证的"
-            "小问题，再回到 Workspace 的 Tutor，让它结合实时运行环境状态检查你的具体思路。"
+            "小问题，再请任课教师检查实验中的具体思路。"
             "完成后记录一次简短反思，我再帮你安排下一步学习节奏。"
         )
     if _guide_needs_reference(question):
         return (
             "我还不能确定你指的是哪一道题，因此不会从最近记录中自行选择。"
-            "请在输入框使用 @ 引用目标题目；引用后我会只读取那道题的目标、尝试、"
-            "评分和学习证据来回答。"
+            "请在输入框使用 @ 引用目标题目；引用后我会只使用那道题的公开目标和练习统计，"
+            "并给出复习建议。"
         )
     if weakest:
         labels = "、".join(item.get("label") or item.get("dimension") for item in weakest)
@@ -1107,307 +1040,18 @@ def _safe_guide_text(value, fallback):
     return value, False
 
 
-def _compact_learning_profile(profile, *, limit=DOJO_AI_MAX_CONTEXT_CHARS):
-    """Bound a learner profile while keeping enrolled and recent evidence first."""
-
-    def text(value, limit):
-        return str(value or "")[:limit]
-
-    result = {
-        "learner": dict(profile.get("learner") or {}),
-        "summary": dict(profile.get("summary") or {}),
-        "skills": [
-            {
-                **item,
-                "course": text(item.get("course"), 160),
-                "label": text(item.get("label"), 120),
-            }
-            for item in (profile.get("skills") or [])[:36]
-            if isinstance(item, dict)
-        ],
-        "recentAttempts": [
-            {
-                **item,
-                "course": text(item.get("course"), 160),
-                "unit": text(item.get("unit"), 160),
-                "exercise": text(item.get("exercise"), 200),
-                "reflection": text(item.get("reflection"), 1600),
-                "assessment": (
-                    {
-                        **(item.get("assessment") or {}),
-                        "feedback": text(
-                            (item.get("assessment") or {}).get("feedback"),
-                            1800,
-                        ),
-                    }
-                    if isinstance(item.get("assessment"), dict)
-                    else None
-                ),
-            }
-            for item in (profile.get("recentAttempts") or [])[:24]
-            if isinstance(item, dict)
-        ],
-        "recommendations": [
-            {
-                **item,
-                "course": text(item.get("course"), 160),
-                "exercise": text(item.get("exercise"), 200),
-                "reason": text(item.get("reason"), 1000),
-            }
-            for item in (profile.get("recommendations") or [])[:24]
-            if isinstance(item, dict)
-        ],
-        "activeAttemptId": profile.get("activeAttemptId"),
-        "generatedAt": profile.get("generatedAt"),
-        "courses": [],
-    }
-    courses = sorted(
-        [item for item in (profile.get("courses") or []) if isinstance(item, dict)],
-        key=lambda item: (not bool(item.get("enrolled")), str(item.get("name") or "")),
+def _guide_navigation_options(profile, references):
+    resources = (
+        [{"title": row["exercise"], "url": row.get("url")} for row in references]
+        if references else
+        [{"title": row["name"], "url": row.get("url")} for row in (profile.get("courses") or [])[:20]]
     )
-    remaining_exercises = 480
-    for course in courses[:30]:
-        if not course.get("enrolled") and sum(
-            not item.get("enrolled") for item in result["courses"]
-        ) >= 6:
-            continue
-        bounded_course = {
-            key: course.get(key)
-            for key in (
-                "id",
-                "enrolled",
-                "role",
-                "submissions",
-                "completed",
-                "total",
-                "url",
-            )
-        }
-        bounded_course.update(
-            {
-                "name": text(course.get("name"), 200),
-                "description": text(course.get("description"), 1400),
-                "modules": [],
-            }
-        )
-        for module in (course.get("modules") or [])[:20]:
-            if not isinstance(module, dict) or remaining_exercises <= 0:
-                continue
-            exercises = [
-                {
-                    key: exercise.get(key)
-                    for key in (
-                        "id",
-                        "exerciseMode",
-                        "required",
-                        "completed",
-                        "url",
-                    )
-                }
-                | {"name": text(exercise.get("name"), 200)}
-                for exercise in (module.get("exercises") or [])[
-                    : min(40, remaining_exercises)
-                ]
-                if isinstance(exercise, dict)
-            ]
-            remaining_exercises -= len(exercises)
-            bounded_course["modules"].append(
-                {
-                    "id": module.get("id"),
-                    "name": text(module.get("name"), 200),
-                    "description": text(module.get("description"), 900),
-                    "completed": module.get("completed"),
-                    "total": module.get("total"),
-                    "exercises": exercises,
-                }
-            )
-        result["courses"].append(bounded_course)
-        if len(json.dumps(result, ensure_ascii=False, sort_keys=True)) > limit:
-            result["courses"].pop()
-            break
-    for collection in (
-        "recommendations",
-        "skills",
-        "recentAttempts",
-        "courses",
-    ):
-        minimum = 1 if collection == "recentAttempts" else 0
-        while (
-            len(result[collection]) > minimum
-            and len(json.dumps(result, ensure_ascii=False, sort_keys=True))
-            > limit
-        ):
-            result[collection].pop()
-    result["catalogTruncated"] = len(result["courses"]) < len(courses)
-    return result
-
-
-def _compact_guide_active_context(context):
-    if not isinstance(context, dict) or context.get("error"):
-        return {}
-    challenge = context.get("challenge") or {}
-    exercise = challenge.get("exercise") or {}
-    live = context.get("liveContainer") or {}
-    container = live.get("container") or {}
-    trajectory = context.get("studentTrajectory") or {}
-
-    def output(section, limit):
-        return str((section or {}).get("output") or "")[:limit]
-
     return {
-        "attempt": {
-            key: (context.get("attempt") or {}).get(key)
-            for key in ("id", "status", "mode", "started", "scores")
-        },
-        "course": {
-            key: (challenge.get("course") or {}).get(key)
-            for key in ("id", "name")
-        },
-        "unit": {
-            key: (challenge.get("unit") or {}).get(key)
-            for key in ("id", "name")
-        },
-        "exercise": {
-            key: exercise.get(key)
-            for key in (
-                "id",
-                "name",
-                "description",
-                "category",
-                "difficulty",
-                "objectives",
-                "interfaces",
-                "exerciseMode",
-            )
-        },
-        "environment": {
-            "available": bool(live.get("available")),
-            "type": "CONTAINER" if live.get("available") else "NONE",
-            "matchesAttempt": live.get("matchesAttempt"),
-            "status": container.get("status"),
-            "workingDirectory": container.get("workingDirectory"),
-            "identity": output(live.get("identity"), 1200),
-            "runningProcesses": output(live.get("processes"), 5000),
-            "listeningPorts": output(live.get("ports"), 2500),
-            "workspaceChanges": output(live.get("workspaceChanges"), 1800),
-            "files": [
-                {
-                    "path": item.get("path"),
-                    "size": item.get("size"),
-                    "kind": item.get("kind"),
-                }
-                for item in ((live.get("files") or {}).get("files") or [])[:80]
-                if isinstance(item, dict)
-            ],
-        },
-        "recentActivity": [
-            {
-                "sequence": event.get("sequence"),
-                "type": event.get("type"),
-                "source": event.get("source"),
-                "payload": event.get("payload"),
-                "occurred": event.get("occurred"),
-            }
-            for event in (trajectory.get("events") or [])[-24:]
-            if isinstance(event, dict)
-        ],
-        "referenceFilePaths": [
-            item.get("path")
-            for item in (
-                (context.get("referenceFiles") or {}).get("files") or []
-            )[:80]
-            if isinstance(item, dict)
-        ],
+        f"course-option-{index}": resource
+        for index, resource in enumerate(resources, 1)
+        if isinstance(resource["url"], str) and resource["url"].startswith("/")
+        and not resource["url"].startswith("//") and "\\" not in resource["url"]
     }
-
-
-def _compact_guide_reference_contexts(contexts, *, limit=45000):
-    result = json.loads(json.dumps(contexts, ensure_ascii=False, default=str))
-    for item in result:
-        item["attempts"] = (item.get("attempts") or [])[:3]
-        for attempt in item["attempts"]:
-            assessment = attempt.get("assessment")
-            if isinstance(assessment, dict):
-                assessment["feedback"] = str(assessment.get("feedback") or "")[:1200]
-            attempt["tutorHistory"] = [
-                {
-                    **message,
-                    "content": str(message.get("content") or "")[:700],
-                }
-                for message in (attempt.get("tutorHistory") or [])[-3:]
-            ]
-            events = []
-            for event in (attempt.get("recentEvents") or [])[-6:]:
-                payload = event.get("payload") or {}
-                encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-                events.append(
-                    {
-                        **event,
-                        "payload": (
-                            payload
-                            if len(encoded) <= 900
-                            else {"summary": encoded[:900], "truncated": True}
-                        ),
-                    }
-                )
-            attempt["recentEvents"] = events
-
-    def size():
-        return len(json.dumps(result, ensure_ascii=False, sort_keys=True))
-
-    while size() > limit:
-        candidate = next(
-            (
-                item
-                for item in reversed(result)
-                if len(item.get("attempts") or []) > 1
-            ),
-            None,
-        )
-        if candidate is None:
-            break
-        candidate["attempts"].pop()
-    if size() > limit:
-        for item in result:
-            for attempt in item.get("attempts") or []:
-                attempt["tutorHistory"] = []
-    while size() > limit:
-        changed = False
-        for item in result:
-            for attempt in item.get("attempts") or []:
-                events = attempt.get("recentEvents") or []
-                if events:
-                    events.pop(0)
-                    changed = True
-                    if size() <= limit:
-                        return result
-        if not changed:
-            break
-    return result
-
-
-def _guide_profile_urls(profile):
-    urls = set()
-
-    def add(value):
-        value = str(value or "")
-        if value.startswith("/") and not value.startswith("//") and "\\" not in value:
-            urls.add(value)
-
-    for course in profile.get("courses") or []:
-        if not isinstance(course, dict):
-            continue
-        add(course.get("url"))
-        for module in course.get("modules") or []:
-            if not isinstance(module, dict):
-                continue
-            for exercise in module.get("exercises") or []:
-                if isinstance(exercise, dict):
-                    add(exercise.get("url"))
-    for recommendation in profile.get("recommendations") or []:
-        if isinstance(recommendation, dict):
-            add(recommendation.get("url"))
-    return urls
 
 
 def guide_reply(user, question, thread=None, references=None, agent_context=None):
@@ -1423,9 +1067,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
     else:
         reference_ids = supplied_reference_ids
     profile = learning_profile_context(user)
-    referenced_contexts = _compact_guide_reference_contexts(
-        guide_reference_context(user, profile, reference_ids)
-    )
+    referenced_contexts = guide_reference_summaries(user, profile, reference_ids)
     resolved_reference_ids = [str(item.get("id") or "") for item in referenced_contexts]
     if reference_ids and resolved_reference_ids != reference_ids:
         raise GuideReferenceSelectionError(
@@ -1448,7 +1090,6 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
         for item in referenced_contexts
     ]
     history = _guide_scoped_history(thread, reference_ids)
-    model_profile = _guide_scoped_profile(profile, reference_ids)
     current_attempt = active_attempt(user.id)
     current_reference_id = str(
         getattr(
@@ -1458,34 +1099,16 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
         )
         or ""
     )
-    active_context = (
-        _compact_guide_active_context(
-            attempt_agent_context(
-                current_attempt,
-                include_private=False,
-                include_container=True,
-            )
-        )
-        if current_attempt
-        and current_reference_id
-        and current_reference_id in reference_ids
-        else {}
-    )
+    active_reference_matched = bool(current_reference_id and current_reference_id in reference_ids)
     scope = {
         "mode": "REFERENCED" if reference_ids else "PROFILE",
         "referenceIds": list(reference_ids),
-        "activeReferenceMatched": bool(active_context),
+        "activeReferenceMatched": active_reference_matched,
     }
     agent_context = agent_context if isinstance(agent_context, dict) else {}
-    digest = context_digest(
-        {
-            "scope": scope,
-            "learningProfile": model_profile,
-            "activeStudyContext": active_context,
-            "referencedStudyContexts": referenced_contexts,
-            "studentWorkspace": agent_context,
-        }
-    )
+    navigation = _guide_navigation_options(profile, referenced_contexts)
+    model_context = guide_model_context(question, history, scope, profile, referenced_contexts, navigation)
+    digest = context_digest(model_context)
     fallback = _guide_fallback(question, profile, referenced_contexts)
     answer = fallback
     provider = "DETERMINISTIC"
@@ -1496,6 +1119,9 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
     tool_calls = []
     guide_prompt, guide_prompt_manifest = build_guide_prompt(scope["mode"])
     needs_reference = not reference_ids and _guide_needs_reference(question)
+    safe_question = bool(model_context["question"])
+    if not safe_question:
+        answer = "我可以帮你理解公开的学习目标或制定复习计划。实验现场、命令输出和具体解法请交由任课教师指导。"
     scope_validation = {
         "status": "DETERMINISTIC" if reference_ids else "NOT_APPLICABLE",
         "expectedReferenceIds": list(reference_ids),
@@ -1504,19 +1130,11 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
     }
     try:
         with usage_scope(current_attempt.id if current_attempt and reference_ids == [current_reference_id] else None, '当前实验学习指导'):
-            if not needs_reference and upstream_enabled():
+            if not needs_reference and safe_question and upstream_enabled():
                 dispatch_id = record_model_dispatch(DOJO_AI_GUIDE_MODEL)
                 response = None
                 try:
-                    response = invoke_turn(request_body(guide_prompt, {
-                        "question": question,
-                        "conversation": history,
-                        "scope": scope,
-                        "learningProfile": model_profile,
-                        "activeStudyContext": active_context,
-                        "referencedStudyContexts": referenced_contexts,
-                        "studentWorkspace": agent_context,
-                    }))
+                    response = invoke_turn(request_body(guide_prompt, model_context))
                 finally:
                     settle_model_dispatch(dispatch_id, response)
                 model_used = response["model"]
@@ -1533,40 +1151,23 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
         if generated:
             tool_calls = [
                 call for call in sanitize_tool_calls(generated.get("toolCalls"))
-                if call["tool"] in {"open", "remember", "forget"}
+                if call["tool"] in {"remember", "forget"}
             ]
-            actions = [
-                item
-                for item in (generated.get("actions") or [])[:4]
-                if isinstance(item, dict)
-            ]
-            profile_urls = _guide_profile_urls(model_profile)
-            for collection in (
-                "courses",
-                "assignments",
-                "publishedArtifacts",
-                "personalArtifacts",
-                "workspaces",
-            ):
-                for item in agent_context.get(collection) or []:
-                    if isinstance(item, dict) and item.get("url"):
-                        profile_urls.add(str(item["url"]))
-            safe_actions = []
-            for item in actions:
-                action_url = str(item.get("url") or "")
-                if action_url not in profile_urls:
+            actions = generated.get("actions")
+            for item in actions[:4] if isinstance(actions, list) else []:
+                if not isinstance(item, dict):
                     continue
-                resource_ref = student_resource_reference_for_url(
-                    action_url,
-                    agent_context,
-                    model_profile,
-                )
+                selection = navigation.get(str(item.get("resourceId") or ""))
+                if selection is None:
+                    continue
+                action_url = selection["url"]
+                resource_ref = student_resource_reference_for_url(action_url, agent_context, profile)
                 if resource_ref is None:
                     continue
-                description = str(item.get("why") or "")[:500]
+                description = guide_teaching_text(item.get("why"), 500)
                 safe_actions.append(
                     {
-                        "label": str(item.get("label") or "继续学习")[:160],
+                        "label": guide_teaching_text(item.get("label"), 160) or "继续学习",
                         "why": description,
                         "description": description,
                         "url": action_url,
@@ -1577,9 +1178,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
             follow_up = str(generated.get("followUp") or "").strip()
             if follow_up:
                 answer_text = f"{answer_text}\n\n{follow_up}".strip()
-            answer, blocked = _safe_guide_text(
-                answer_text, fallback
-            )
+            answer, blocked = _safe_guide_text(guide_teaching_text(answer_text, 8000), fallback)
             provider = "MODEL_BLOCKED" if blocked else "MODEL"
             if blocked:
                 safe_actions = []
@@ -1636,8 +1235,8 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
         tool_calls = []
 
     if not thread.messages:
-        proposed = str((generated or {}).get("title") or "").strip()
-        proposed = proposed or question.replace("\n", " ")[:48] or "New conversation"
+        proposed = guide_teaching_text((generated or {}).get("title"), 160)
+        proposed = proposed or model_context["question"].replace("\n", " ")[:48] or "新学习对话"
         thread.title = proposed[:160]
     db.session.add(
         LearningGuideMessages(
@@ -1647,6 +1246,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
             content=question,
             metadata_json={
                 "contextDigest": digest,
+                "modelContextVersion": CONTEXT_VERSION if safe_question else None,
                 "scope": scope,
                 "references": reference_views,
             },
@@ -1661,8 +1261,9 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
             "provider": provider,
             "model": model_used,
             "contextDigest": digest,
-            "activeContextIncluded": bool(active_context),
-            "promptManifest": [] if needs_reference else [guide_prompt_manifest],
+            "modelContextVersion": CONTEXT_VERSION,
+            "activeContextIncluded": False,
+            "promptManifest": [guide_prompt_manifest] if model_used else [],
             "scope": scope,
             "scopeValidation": scope_validation,
             "references": reference_views,
@@ -1681,7 +1282,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
         "digest": digest,
         "summary": profile.get("summary") or {},
         "activeAttemptId": profile.get("activeAttemptId"),
-        "activeContextIncluded": bool(active_context),
+        "activeContextIncluded": False,
         "scopeMode": scope["mode"],
         "referencedExerciseIds": list(reference_ids),
         "generatedAt": profile.get("generatedAt"),
@@ -1703,22 +1304,12 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
         "profileSummary": profile.get("summary") or {},
         "contextCoverage": {
             "scopeMode": scope["mode"],
-            "activeAttempt": bool(active_context),
-            "environmentAvailable": bool(
-                (active_context.get("environment") or {}).get("available")
-            ),
-            "recentActivity": len(
-                active_context.get("recentActivity") or []
-            ),
+            "activeAttempt": active_reference_matched,
+            "environmentAvailable": False,
+            "recentActivity": 0,
             "referencedExercises": len(referenced_contexts),
-            "referencedAttempts": sum(
-                len(item.get("attempts") or []) for item in referenced_contexts
-            ),
-            "referencedEvidenceEvents": sum(
-                len(attempt.get("recentEvents") or [])
-                for item in referenced_contexts
-                for attempt in item.get("attempts") or []
-            ),
+            "referencedAttempts": sum(item["attemptCount"] for item in referenced_contexts),
+            "referencedEvidenceEvents": 0,
             "scopeValidated": scope_validation.get("status"),
         },
     }
