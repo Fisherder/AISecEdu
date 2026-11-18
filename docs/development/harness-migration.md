@@ -136,7 +136,27 @@ CHROME_BIN=/path/to/chrome node test/browser/teacher-course-navigation.mjs
 
 ### 在共享宿主上发布 DSH 服务
 
-迁移合入 `develop` 后，维护者可将 [DSH 的宿主 Compose 配置](../../ops/staging/harness.compose.yml) 叠加到上述四服务配置。先记录现有的 DSH 镜像 ID 和配置文件版本，在宿主装载通过 CI 的目标镜像，用 `docker image inspect` 核对镜像 ID、平台与 `org.opencontainers.image.revision`。CI 的 `tested-commit` 记录实际构建的 Git 提交，PR 构建可使用合并测试提交。
+迁移合入 `develop` 后，维护者可将 [DSH 的宿主 Compose 配置](../../ops/staging/harness.compose.yml) 叠加到上述四服务配置。`Team quick checks` 在最终提交上重新构建并测试镜像。下载窗口为两天。先在已登录 GitHub CLI 的维护机上取回该提交的产物，目的目录须为新目录。
+
+```bash
+commit=$(git ls-remote origin refs/heads/develop | cut -f1)
+python3 ops/staging/fetch-harness-image.py "$commit" "./teaching-image-$commit"
+```
+
+下载命令核对 GitHub 仓库、分支、工作流、事件、完整提交和运行结果，再校验归档里的 `tested-commit` 与两个文件的 SHA-256。只有整套检查通过后才出现目的目录。`team/teaching-harness-*` 验收分支可加 `--branch 分支名` 下载演练产物。PR 产物继续按 PR 源提交命名，里面的 `tested-commit` 可能是 GitHub 生成的合并测试提交。共享站发布使用对应的 `develop` 推送产物。
+
+把校验通过的目录传到维护宿主，记录现有 DSH 镜像 ID 和与之配套的配置版本。先在宿主复核传输完整性，再载入镜像。以下命令在目标目录中执行，`commit` 设为准备发布的完整提交。
+
+```bash
+set -euo pipefail
+sha256sum -c SHA256SUMS
+test "$(cat tested-commit)" = "$commit"
+docker load -i harness.tar.gz
+image="aisecedu/harness-acceptance:$commit"
+test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")" = "$commit"
+test "$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "$image")" = linux/amd64
+export AISECEDU_HARNESS_IMAGE="$(docker image inspect -f '{{.Id}}' "$image")"
+```
 
 将 `AISECEDU_HARNESS_IMAGE` 设为已核对的本地镜像 ID，将 `AISECEDU_HARNESS_ENV_FILE` 设为宿主上只有维护者可读的绝对文件路径。文件使用原始的 `名称=值` 格式，填写 `HARNESS_SERVICE_SECRET`、`DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL` 和 `DEEPSEEK_BASE_URL`。模型端点须支持 Messages 流式协议。下面的命令在经审核的项目根目录使用 Bash 执行，只操作 DSH 服务。
 
@@ -154,6 +174,16 @@ compose=(docker compose -p aisecedu-develop
 DSH 的 `teaching` 网络用于后续接入已审核的教学客户端，`model-egress` 网络用于外发请求。这个配置没有发布宿主端口，数据库、Redis 和现有四个服务均不接入这两个网络。适配器只允许向配置的 Messages 地址发送 POST；需要从网络层限制出口的宿主应在网关或防火墙设置相应规则。业务端接入时，应用和 Worker 使用相同的模型名和内部服务凭据；模型 API Key 只交给 DSH。上面的命令单独执行不会打开共享站的课堂入口或启动后台任务。
 
 升级前先停止向该实例分配新教学回合。两分钟的停止宽限期可让已接收的九十秒回合结束。若探针失败，恢复上一版镜像 ID 和与之配对的环境文件，重新运行 `up` 和探针，再恢复教学流量。首次安装尚无上一版时，可用 `"${compose[@]}" stop deepseek-harness` 停止本次增加的组件。此操作仅涉及 DSH。
+
+### 在开发数据副本上启用教学 Worker 前核对积压
+
+工作进程启动时会从 PostgreSQL 找回过期任务，并重新投递待处理记录。索引、摘要等专用 Worker 也执行这一步。复制库和 Redis 应分别检查。用开发库的现有连接运行以下只读查询，输出只有分类和数量。
+
+```bash
+psql -X -v ON_ERROR_STOP=1 -f ops/staging/teaching-worker-preflight.sql
+```
+
+核对排队、运行、申请取消、未发布记录和可重新投递的数量。部分计数有重叠。再在开发站所用的 Redis 逻辑库中检查 `teaching:jobs`、`teaching:coding-review`、`teaching:authoring`、`teaching:material-index` 和 `teaching:materials` 的 `XLEN`。已有流还需用 `XINFO GROUPS` 核对 `teaching-workers` 的待确认数和积压数。发现历史任务时，先明确哪些任务由开发环境承接，再启动消费者。点查结果只代表检查当时的状态，切换前须复核。正式合并尚需依照维护者手册完成匹配版本的 Web、Worker、课堂、检查器和代理的联调。
 
 
 ## TypeScript 历史测试诊断

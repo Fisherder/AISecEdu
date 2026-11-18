@@ -50,21 +50,39 @@ jobs:
           npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev --no-audit --no-fund
           python -m pip install -r ops/team/requirements.txt
           python test/harness_client_contract.py
-      - name: Package the verified teaching image for isolated acceptance
-        if: github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(fromJSON('["opened", "reopened", "synchronize", "ready_for_review"]'), github.event.action)
+      - name: Package the verified teaching image
+        id: teaching-image
+        if: >-
+          (github.event_name == 'pull_request' && !github.event.pull_request.draft &&
+          contains(fromJSON('["opened", "reopened", "synchronize", "ready_for_review"]'), github.event.action)) ||
+          (github.event_name == 'push' && !github.event.deleted &&
+          (github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/team/teaching-harness-')))
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
         run: |
+          tested_commit=$(git rev-parse HEAD)
+          test "$tested_commit" = "$GITHUB_SHA"
+          test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' aisecedu-harness-test)" = "$tested_commit"
+          case "$GITHUB_EVENT_NAME:$GITHUB_REF" in
+            pull_request:*) artifact="teaching-image-$PR_HEAD_SHA" ;;
+            push:refs/heads/develop) artifact="teaching-image-develop-$tested_commit" ;;
+            push:refs/heads/team/teaching-harness-*) artifact="teaching-image-candidate-$tested_commit" ;;
+            *) exit 1 ;;
+          esac
           mkdir -p "$RUNNER_TEMP/teaching-image"
-          image="aisecedu/harness-acceptance:$GITHUB_SHA"
+          image="aisecedu/harness-acceptance:$tested_commit"
           docker tag aisecedu-harness-test "$image"
           docker save "$image" | gzip -1 > "$RUNNER_TEMP/teaching-image/harness.tar.gz"
-          git rev-parse HEAD > "$RUNNER_TEMP/teaching-image/tested-commit"
+          printf '%s\n' "$tested_commit" > "$RUNNER_TEMP/teaching-image/tested-commit"
           cd "$RUNNER_TEMP/teaching-image"
           sha256sum harness.tar.gz tested-commit > SHA256SUMS
+          printf 'artifact=%s\n' "$artifact" >> "$GITHUB_OUTPUT"
       - name: Keep the image for the development acceptance window
-        if: github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(fromJSON('["opened", "reopened", "synchronize", "ready_for_review"]'), github.event.action)
+        if: steps.teaching-image.outputs.artifact != ''
         uses: actions/upload-artifact@v4
         with:
-          name: teaching-image-${{ github.event.pull_request.head.sha }}
+          name: ${{ steps.teaching-image.outputs.artifact }}
           path: ${{ runner.temp }}/teaching-image
           compression-level: 0
           retention-days: 2
