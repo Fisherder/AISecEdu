@@ -175,6 +175,44 @@ DSH 的 `teaching` 网络用于后续接入已审核的教学客户端，`model-
 
 升级前先停止向该实例分配新教学回合。两分钟的停止宽限期可让已接收的九十秒回合结束。若探针失败，恢复上一版镜像 ID 和与之配对的环境文件，重新运行 `up` 和探针，再恢复教学流量。首次安装尚无上一版时，可用 `"${compose[@]}" stop deepseek-harness` 停止本次增加的组件。此操作仅涉及 DSH。
 
+### 发布配套的课堂和浏览器检查器
+
+课堂使用 Next 的生产包和固定版本的 Chromium 检查器。在 `develop` 或教学验收分支推送课堂、检查器或其发布配置变更时，`Teaching runtime images` 工作流从同一提交构建两份 Linux amd64 镜像。维护者也可在相应分支手动运行。镜像在独立项目中按[共享宿主课堂配置](../../ops/staging/classroom.compose.yml) 启动，用合成数学图表检验访问控制、真实浏览器渲染和全新持久卷。通过的镜像对以 `teaching-runtime-images-完整提交号` 归档两天。
+
+在已登录 GitHub CLI 的维护机上选定对应分支、提交和成功的运行，下载该运行的同名产物。将归档送到宿主后，进入下载目录，设置 `commit` 为目标完整提交、`repo` 为已审阅源码的绝对路径。
+
+```bash
+set -euo pipefail
+sha256sum -c SHA256SUMS
+test "$(jq -er .commit release.json)" = "$commit"
+python3 "$repo/ops/generation-release.py" deploy .
+docker load -i images.tar.gz
+export AISECEDU_CLASSROOM_IMAGE="$(jq -er '.images["agent-runtime"]' release.json)"
+export AISECEDU_INSPECTOR_IMAGE="$(jq -er '.images["courseware-inspector"]' release.json)"
+for id in "$AISECEDU_CLASSROOM_IMAGE" "$AISECEDU_INSPECTOR_IMAGE"; do
+  test "$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$id")" = "$commit"
+  test "$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "$id")" = linux/amd64
+done
+```
+
+`deploy .` 在此用于本地校验和预览；共享宿主的服务启动由 Compose 管理。它可以直接核验压缩包里的原始 Docker 归档摘要。把 `AISECEDU_CLASSROOM_PUBLIC_ORIGIN` 设为浏览器打开开发站时使用的来源（协议、主机及实际端口）。`AISECEDU_CLASSROOM_AUTH_FILE` 指向权限为 0600 的原始环境文件，只填写配套 Web 和课堂使用的内部 `AISECEDU_SERVICE_SECRET`。`AISECEDU_CLASSROOM_ENV_FILE` 是 Next 专用文件，离线验收时为空。接入 DSH 时在其中填写内部 `HARNESS_SERVICE_SECRET` 和 `HARNESS_DEEPSEEK_MODEL`。模型供应商 Key 只进入 DSH 的环境文件。
+
+在已审阅源码目录，沿用上节包含基线和 DSH 的 Bash `compose` 数组，加载课堂 overlay。既有课堂版本需先记下两份镜像 ID 和环境文件版本。
+
+```bash
+compose+=(-f "$repo/ops/staging/classroom.compose.yml")
+"${compose[@]}" config --quiet
+"${compose[@]}" up -d --no-deps --wait agent-runtime courseware-inspector
+"${compose[@]}" exec -T \
+  -e NEXT_RUNTIME_ORIGIN=http://127.0.0.1:3000/agent-runtime \
+  -e COURSEWARE_INSPECTOR_ORIGIN=http://courseware-inspector:3015 \
+  agent-runtime node --input-type=module < "$repo/test/teaching_runtime_release_smoke.mjs"
+```
+
+这一阶段默认关闭模型，不发布端口，且保留现有 Web、数据库、Redis 和代理的网络。课堂数据在本 Compose 项目的 `classroom-data` 卷中。检查器只连渲染私网。回退时恢复前一对镜像 ID 和配套环境文件，重复上述 `up` 和探针。首次装配如需撤回，可停止这两个服务并保留数据卷。
+
+切到真实教学流量前，维护者还须按同一提交部署 Web 与 Worker，核对内部鉴权并审阅代理开放的课堂路径。当前宿主的应用 launcher 使用受保护的 `/etc/aisecedu/app-env.json` 作为子进程的完整环境。Web 或 Worker 的内部地址和服务鉴权须通过其实际启动配置生效。仅在这组配置验收后开启 `AISECEDU_CLASSROOM_AI_ENABLED`。
+
 ### 在开发数据副本上启用教学 Worker 前核对积压
 
 工作进程启动时会从 PostgreSQL 找回过期任务，并重新投递待处理记录。索引、摘要等专用 Worker 也执行这一步。复制库和 Redis 应分别检查。用开发库的现有连接运行以下只读查询，输出只有分类和数量。

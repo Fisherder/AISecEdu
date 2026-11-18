@@ -1,0 +1,72 @@
+services:
+  agent-runtime:
+    image: ${AISECEDU_CLASSROOM_IMAGE:?Set the verified classroom image ID}
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    env_file:
+      - path: ${AISECEDU_CLASSROOM_AUTH_FILE:?Set the absolute path of the protected service token file}
+        format: raw
+      - path: ${AISECEDU_CLASSROOM_ENV_FILE:?Set the absolute path of the classroom-only environment file}
+        format: raw
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      NODE_ENV: production
+      AISECEDU_INTEGRATED: "true"
+      NEXT_PUBLIC_AISECEDU_INTEGRATED: "true"
+      NEXT_PUBLIC_BASE_PATH: /agent-runtime
+      AISECEDU_INTERNAL_URL: http://app:8000
+      AISECEDU_PUBLIC_ORIGIN: ${AISECEDU_CLASSROOM_PUBLIC_ORIGIN:?Set the user-facing origin of the development site}
+      COURSEWARE_INSPECTOR_URL: http://courseware-inspector:3015
+      HARNESS_INTERNAL_URL: http://deepseek-harness:3081
+      DOJO_AI_ENABLED: ${AISECEDU_CLASSROOM_AI_ENABLED:-false}
+    volumes:
+      - classroom-data:/app/data
+    networks: [teaching, classroom-render]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/agent-runtime/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  courseware-inspector:
+    image: ${AISECEDU_INSPECTOR_IMAGE:?Set the verified inspector image ID}
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m
+    shm_size: 512m
+    env_file:
+      - path: ${AISECEDU_CLASSROOM_AUTH_FILE:?Set the absolute path of the protected service token file}
+        format: raw
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: "3015"
+      COURSEWARE_RENDER_ORIGIN: http://agent-runtime:3000/agent-runtime
+    networks: [classroom-render]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3015/health', {headers:{'X-AISecEdu-Service-Token':process.env.AISECEDU_SERVICE_SECRET}}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+networks:
+  teaching:
+    internal: true
+  classroom-render:
+    internal: true
+
+volumes:
+  classroom-data: {}

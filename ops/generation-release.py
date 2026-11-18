@@ -3,6 +3,7 @@ import argparse
 import copy
 import datetime
 import fcntl
+import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -10,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 SERVICES = ('agent-runtime', 'courseware-inspector')
@@ -24,12 +26,24 @@ def output(args):
     return subprocess.check_output(args, text=True).strip()
 
 
-def sha256(path):
+def sha256(path, opener=open):
     digest = hashlib.sha256()
-    with open(path, 'rb') as source:
+    with opener(path, 'rb') as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b''):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def image_archive(bundle):
+    archive = bundle / 'images.tar'
+    return archive if archive.is_file() else bundle / 'images.tar.gz'
+
+
+def write_manifest(bundle, revision, platform, images, digest, **source):
+    manifest = {'schema': 'aisecedu-generation-release-v1', 'commit': revision,
+                'platform': platform, 'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                'images': images, 'archiveSha256': digest, **source}
+    (bundle / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
 
 def overlay(images, enabled='html-v1'):
@@ -48,7 +62,8 @@ def validate_manifest(bundle):
         raise ValueError('Invalid generation release manifest')
     if set(manifest.get('images', {})) != set(SERVICES) or any(not re.fullmatch(r'sha256:[a-f0-9]{64}', image) for image in manifest['images'].values()):
         raise ValueError('Release must pin both image IDs')
-    if sha256(bundle / 'images.tar') != manifest.get('archiveSha256'):
+    archive = image_archive(bundle)
+    if sha256(archive, gzip.open if archive.suffix == '.gz' else open) != manifest.get('archiveSha256'):
         raise ValueError('Release image archive checksum mismatch')
     return manifest
 
@@ -71,10 +86,7 @@ def build(args):
             images[service] = output(['docker', 'image', 'inspect', '--format', '{{.Id}}', tag])
             tags.append(tag)
         command(['docker', 'save', '-o', str(bundle / 'images.tar'), *tags])
-        manifest = {'schema': 'aisecedu-generation-release-v1', 'commit': revision, 'platform': args.platform,
-                    'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'images': images,
-                    'archiveSha256': sha256(bundle / 'images.tar')}
-        (bundle / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
+        write_manifest(bundle, revision, args.platform, images, sha256(bundle / 'images.tar'))
         (bundle / OVERLAY).write_text(json.dumps(overlay(images), indent=2) + '\n')
         print(f'Built immutable image pair: {bundle}')
     except BaseException:
@@ -97,6 +109,40 @@ def installed_ids(container):
     return result
 
 
+def package_tested(args):
+    if not re.fullmatch(r'[a-f0-9]{40}', args.commit):
+        raise ValueError('Supply the full tested commit')
+    bundle = args.bundle.absolute()
+    if bundle.exists() or bundle.is_symlink():
+        raise ValueError('Choose a new release directory')
+    images = {}
+    for service, reference in zip(SERVICES, (args.runtime_image, args.inspector_image)):
+        info, = json.loads(output(['docker', 'image', 'inspect', '--', reference]))
+        revision = (info['Config'].get('Labels') or {}).get('org.opencontainers.image.revision')
+        if revision != args.commit or (info['Os'], info['Architecture']) != ('linux', 'amd64'):
+            raise ValueError(f'{service} is not a linux/amd64 image for {args.commit}')
+        images[service] = info['Id']
+    if len(set(images.values())) != len(SERVICES):
+        raise ValueError('The classroom and inspector must use distinct images')
+    bundle.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.generation-release-', dir=bundle.parent) as temp:
+        stage = Path(temp) / 'bundle'
+        stage.mkdir()
+        digest = hashlib.sha256()
+        with subprocess.Popen(['docker', 'image', 'save', *images.values()], stdout=subprocess.PIPE) as docker:
+            with docker.stdout, gzip.open(stage / 'images.tar.gz', 'wb', compresslevel=1) as archive:
+                for chunk in iter(lambda: docker.stdout.read(1024 * 1024), b''):
+                    digest.update(chunk)
+                    archive.write(chunk)
+            if docker.wait():
+                raise ValueError('Docker could not export the tested image pair')
+        write_manifest(stage, args.commit, 'linux/amd64', images, digest.hexdigest())
+        sums = [f'{sha256(stage / name)}  {name}\n' for name in ('images.tar.gz', 'release.json')]
+        (stage / 'SHA256SUMS').write_text(''.join(sums))
+        stage.rename(bundle)
+    print(f'Packaged tested images for {args.commit}: {bundle}')
+
+
 def export_running(args):
     revision = output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'])
     if output(['git', '-C', str(ROOT), 'status', '--porcelain']):
@@ -107,11 +153,8 @@ def export_running(args):
     try:
         with open(bundle / 'images.tar', 'wb') as archive:
             command(engine(args.container, 'save', *images.values()), stdout=archive)
-        manifest = {'schema': 'aisecedu-generation-release-v1', 'commit': revision,
-                    'platform': 'linux/amd64', 'sourceContainer': args.container,
-                    'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    'images': images, 'archiveSha256': sha256(bundle / 'images.tar')}
-        (bundle / 'release.json').write_text(json.dumps(manifest, indent=2) + '\n')
+        write_manifest(bundle, revision, 'linux/amd64', images, sha256(bundle / 'images.tar'),
+                       sourceContainer=args.container)
         print(f'Exported the exact running image pair without rebuilding: {bundle}')
     except BaseException:
         shutil.rmtree(bundle)
@@ -175,7 +218,7 @@ def deploy(args):
         previous_file.write_text(json.dumps(previous_override, indent=2))
         previous_file.chmod(0o600)
         (state / 'previous-target.json').write_text(json.dumps({'target': target}))
-        with open(bundle / 'images.tar', 'rb') as archive:
+        with open(image_archive(bundle), 'rb') as archive:
             command(['docker', 'exec', '-i', args.container, 'docker', 'load'], stdin=archive)
         pending = copy.deepcopy(original)
         for service, settings in overlay(manifest['images'])['services'].items():
@@ -218,6 +261,11 @@ def main():
     builder = sub.add_parser('build')
     builder.add_argument('bundle', type=Path)
     builder.add_argument('--platform', default='linux/amd64')
+    packager = sub.add_parser('package-tested', help='Archive the verified classroom and inspector images')
+    packager.add_argument('bundle', type=Path)
+    packager.add_argument('--runtime-image', required=True)
+    packager.add_argument('--inspector-image', required=True)
+    packager.add_argument('--commit', required=True)
     exporter = sub.add_parser('export')
     exporter.add_argument('bundle', type=Path)
     exporter.add_argument('--container', default='aisecedu-development')
@@ -233,6 +281,8 @@ def main():
         parser.error('Invalid container name')
     if args.action == 'build':
         build(args)
+    elif args.action == 'package-tested':
+        package_tested(args)
     elif args.action == 'export':
         export_running(args)
     elif args.action == 'deploy':

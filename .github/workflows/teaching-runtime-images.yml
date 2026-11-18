@@ -1,0 +1,158 @@
+name: Teaching runtime images
+
+on:
+  push:
+    branches:
+      - develop
+      - 'team/teaching-harness-*'
+    paths:
+      - '.github/workflows/teaching-runtime-images.yml'
+      - 'services/agent-runtime/**'
+      - 'services/courseware-inspector/**'
+      - 'test/teaching_runtime_release_smoke.mjs'
+      - 'ops/generation-release.py'
+      - 'ops/staging/classroom.compose.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: teaching-runtime-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verified-image-pair:
+    if: >-
+      github.ref_type == 'branch' && !github.event.deleted &&
+      (github.ref_name == 'develop' || startsWith(github.ref_name, 'team/teaching-harness-'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      NEXT_IMAGE: aisecedu/agent-runtime:generation-${{ github.sha }}
+      INSPECTOR_IMAGE: aisecedu/courseware-inspector:generation-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build the exact Linux amd64 production image pair
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          df -h "$RUNNER_TEMP"
+          docker buildx build --platform linux/amd64 --load \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$NEXT_IMAGE" \
+            --build-arg AISECEDU_INTEGRATED=true \
+            --build-arg NEXT_PUBLIC_AISECEDU_INTEGRATED=true \
+            --build-arg NEXT_PUBLIC_BASE_PATH=/agent-runtime \
+            services/agent-runtime
+          docker buildx build --platform linux/amd64 --load \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$INSPECTOR_IMAGE" \
+            services/courseware-inspector
+          for image in "$NEXT_IMAGE" "$INSPECTOR_IMAGE"; do
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = 'linux/amd64'
+            test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")" = "$GITHUB_SHA"
+          done
+          df -h "$RUNNER_TEMP"
+          docker system df
+
+      - name: Verify the production pair on an internal network
+        id: pair
+        shell: bash
+        run: |
+          project="teaching-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          sandbox=$(mktemp -d)
+          umask 077
+          export AISECEDU_CLASSROOM_IMAGE=$(docker image inspect --format '{{.Id}}' "$NEXT_IMAGE")
+          export AISECEDU_INSPECTOR_IMAGE=$(docker image inspect --format '{{.Id}}' "$INSPECTOR_IMAGE")
+          export AISECEDU_CLASSROOM_AUTH_FILE="$sandbox/classroom-auth.env"
+          export AISECEDU_CLASSROOM_ENV_FILE="$sandbox/classroom-runtime.env"
+          export AISECEDU_CLASSROOM_PUBLIC_ORIGIN=http://classroom.invalid
+          export AISECEDU_CLASSROOM_AI_ENABLED=false
+          # A disposable test token, with no model key or data in either service.
+          printf 'AISECEDU_SERVICE_SECRET=synthetic-teaching-runtime-%s-%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$AISECEDU_CLASSROOM_AUTH_FILE"
+          : > "$AISECEDU_CLASSROOM_ENV_FILE"
+
+          compose() { docker compose --project-name "$project" -f ops/staging/classroom.compose.yml "$@"; }
+          cleanup() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              compose logs --tail 100 agent-runtime courseware-inspector 2>&1 || true
+            fi
+            compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+            rm -f "$AISECEDU_CLASSROOM_AUTH_FILE" "$AISECEDU_CLASSROOM_ENV_FILE"
+            rmdir "$sandbox"
+          }
+          trap cleanup EXIT
+          compose up -d --no-build --wait --wait-timeout 180
+          for service in agent-runtime courseware-inspector; do
+            container=$(compose ps -q "$service")
+            if [ "$service" = agent-runtime ]; then
+              image="$AISECEDU_CLASSROOM_IMAGE"
+              networks=2
+            else
+              image="$AISECEDU_INSPECTOR_IMAGE"
+              networks=1
+            fi
+            test "$(docker inspect -f '{{.Image}}' "$container")" = "$image"
+            test "$(docker inspect -f '{{len .HostConfig.PortBindings}}' "$container")" = 0
+            test "$(docker inspect -f '{{len .NetworkSettings.Networks}}' "$container")" = "$networks"
+            for network in $(docker inspect -f '{{range $name, $config := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$container"); do
+              test "$(docker network inspect -f '{{.Internal}}' "$network")" = true
+            done
+          done
+
+          compose exec -T agent-runtime node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { mkdir, mkdtemp, readFile, rmdir, unlink, writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          assert.equal(process.getuid(), 1001);
+          const checkpoints = '/app/data/courseware-checkpoints';
+          await mkdir(checkpoints, { recursive: true, mode: 0o700 });
+          const directory = await mkdtemp(join(checkpoints, 'synthetic-release-'));
+          const file = join(directory, 'write-read-delete.json');
+          const contents = '{"fixture":"ordinary teaching runtime"}';
+          await writeFile(file, contents, { mode: 0o600, flag: 'wx' });
+          try {
+            assert.equal(await readFile(file, 'utf8'), contents);
+          } finally {
+            await unlink(file);
+            await rmdir(directory);
+          }
+          JS
+
+          compose exec -T \
+            -e NEXT_RUNTIME_ORIGIN=http://127.0.0.1:3000/agent-runtime \
+            -e COURSEWARE_INSPECTOR_ORIGIN=http://courseware-inspector:3015 \
+            agent-runtime node --input-type=module < test/teaching_runtime_release_smoke.mjs
+          printf 'runtime=%s\ninspector=%s\n' "$AISECEDU_CLASSROOM_IMAGE" "$AISECEDU_INSPECTOR_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Package the two verified images in generation-release format
+        shell: bash
+        env:
+          TESTED_RUNTIME: ${{ steps.pair.outputs.runtime }}
+          TESTED_INSPECTOR: ${{ steps.pair.outputs.inspector }}
+        run: |
+          BUNDLE_DIR="$RUNNER_TEMP/teaching-runtime-images"
+          python3 ops/generation-release.py package-tested "$BUNDLE_DIR" \
+            --runtime-image "$TESTED_RUNTIME" --inspector-image "$TESTED_INSPECTOR" --commit "$GITHUB_SHA"
+          {
+            printf '### Teaching runtime release `%s`\n\n' "$GITHUB_SHA"
+            printf 'Download `teaching-runtime-images-%s`, then run:\n\n' "$GITHUB_SHA"
+            printf '```bash\n'
+            printf 'cd <downloaded-release-directory>\n'
+            printf 'sha256sum -c SHA256SUMS\n'
+            printf 'python3 /path/to/repository/ops/generation-release.py deploy .\n'
+            printf '```\n\n'
+            printf 'The final command only previews the validated release.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the tested image pair
+        uses: actions/upload-artifact@v4
+        with:
+          name: teaching-runtime-images-${{ github.sha }}
+          path: ${{ runner.temp }}/teaching-runtime-images
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2

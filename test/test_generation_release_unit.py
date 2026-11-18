@@ -1,9 +1,11 @@
 import hashlib
+import gzip
 import importlib.util
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from argparse import Namespace
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('generation_release', Path(__file__).parents[1] / 'ops/generation-release.py')
@@ -12,6 +14,49 @@ spec.loader.exec_module(release)
 
 
 class GenerationReleaseTests(unittest.TestCase):
+    def test_package_tested_pins_source_platform_and_exact_exported_ids(self):
+        import subprocess
+        import sys
+        from contextlib import ExitStack
+
+        commit = 'a' * 40
+        ids = ['sha256:' + code * 64 for code in '12']
+        popen = subprocess.Popen
+        for case in ('valid', 'wrong-revision', 'wrong-platform', 'interrupted-export'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as folder, ExitStack() as mocks:
+                bundle = Path(folder) / 'release'
+                args = Namespace(commit=commit, bundle=bundle, runtime_image='runtime', inspector_image='inspector')
+                inspection = [
+                    json.dumps([{'Id': image_id, 'Os': 'linux',
+                                 'Architecture': 'arm64' if index == 1 and case == 'wrong-platform' else 'amd64',
+                                 'Config': {'Labels': {'org.opencontainers.image.revision':
+                                                        'b' * 40 if index == 1 and case == 'wrong-revision' else commit}}}])
+                    for index, image_id in enumerate(ids)
+                ]
+                mocks.enter_context(patch.object(release, 'output', side_effect=inspection))
+
+                def save(command, **kwargs):
+                    self.assertEqual(command, ['docker', 'image', 'save', *ids])
+                    result = 1 if case == 'interrupted-export' else 0
+                    return popen([sys.executable, '-c', f"print('synthetic tar');raise SystemExit({result})"], **kwargs)
+
+                exporter = mocks.enter_context(patch.object(release.subprocess, 'Popen', side_effect=save))
+                if case != 'valid':
+                    with self.assertRaises(ValueError):
+                        release.package_tested(args)
+                    self.assertFalse(bundle.exists())
+                    self.assertEqual(exporter.called, case == 'interrupted-export')
+                    continue
+                release.package_tested(args)
+                manifest = release.validate_manifest(bundle)
+                self.assertEqual(list(manifest['images'].values()), ids)
+                self.assertEqual(manifest['archiveSha256'], hashlib.sha256(b'synthetic tar\n').hexdigest())
+                self.assertFalse((bundle / 'images.tar').exists())
+                self.assertEqual(len((bundle / 'SHA256SUMS').read_text().splitlines()), 2)
+                (bundle / 'images.tar.gz').write_bytes(gzip.compress(b'changed archive'))
+                with self.assertRaisesRegex(ValueError, 'checksum'):
+                    release.validate_manifest(bundle)
+
     def test_rejects_tampered_archive_and_unpinned_images(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
