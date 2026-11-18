@@ -58,7 +58,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: services/agent-runtime/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec tsc --noEmit
+      - name: Type-check the entire runtime and show all historical diagnostics
+        run: python3 ../../ops/team/check_agent_runtime_types.py
       - run: pnpm exec vitest run tests/lib/chat tests/chat tests/pbl/question-turn.test.ts tests/pbl/v2/evaluator.test.ts tests/pbl/v2/runtime-model-pin.test.ts tests/pbl/v2/runtime-llm-entry.test.ts tests/lib/server/debate-harness-route.test.ts tests/security/integrated-middleware-policy.test.ts
   contributor-checks:
     runs-on: ubuntu-latest

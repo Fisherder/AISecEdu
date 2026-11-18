@@ -15,7 +15,7 @@ describe('semantic teaching intent and requirement clarification', () => {
     const decision = normalizeTeacherIntent(task(kind), authority());
     expect(decision.clarification.questions).toHaveLength(1);
     const result = applyTeacherIntent({ answer: '已生成', plan: ['最终方案'], deliverables: [{}], generationOptions: {} }, decision);
-    expect(result.interaction.state).toBe('awaiting-input');
+    expect(result.interaction?.state).toBe('awaiting-input');
     expect(result.plan).toEqual([]);
     expect(result.deliverables).toEqual([]);
     expect(result.generationOptions).toBeNull();

@@ -1,3 +1,4 @@
+import { createOpenAI } from '@ai-sdk/openai';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const aiMock = vi.hoisted(() => ({
@@ -262,6 +263,7 @@ describe('LLM thinking provider options', () => {
   });
 
   it('falls back to raw JSON text when structured output parsing fails', async () => {
+    const { Output } = await vi.importActual<typeof import('ai')>('ai');
     const parseError = Object.assign(
       new Error('No object generated: could not parse the response.'),
       { name: 'AI_NoObjectGeneratedError' },
@@ -275,13 +277,10 @@ describe('LLM thinking provider options', () => {
 
     const result = await callLLM(
       {
-        model: {
-          provider: 'deepseek.chat',
-          modelId: 'deepseek-v4-flash',
-        },
+        model: createOpenAI({ name: 'deepseek', apiKey: 'synthetic-test-key' }).chat('deepseek-v4-flash'),
         prompt: 'return JSON',
-        output: { type: 'json' },
-      } as Parameters<typeof callLLM>[0],
+        output: Output.json(),
+      },
       'test',
       { retries: 1 },
       { mode: 'enabled', effort: 'high' },
