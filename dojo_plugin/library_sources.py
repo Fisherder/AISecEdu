@@ -130,10 +130,20 @@ def _course_href(dojo, tab, **values):
     return "/teacher/courses?" + urlencode({"dojo": dojo.reference_id, "tab": tab, **values})
 
 
-def source_preview_href(user, item):
+def source_preview_href(user, item, *, share_snapshot=False):
     from urllib.parse import quote, urlencode
     from .agent_runtime.artifacts import artifact_for_viewer
     from .coursework import assignment_for_teacher
+    from .readonly_courses import readonly_course
+
+    if share_snapshot and item.visibility == "teachers":
+        model = {"artifact": TeachingArtifacts, "assignment": TeachingAssignments, "practice": LearningDrafts}.get(item.source_kind)
+        source = model.query.filter_by(id=item.source_id).first() if model else None
+        if source is not None and readonly_course(source.dojo_id):
+            membership = DojoAdmins.query.filter_by(dojo_id=source.dojo_id, user_id=user.id).first()
+            if membership is None:
+                db.session.add(DojoAdmins(dojo_id=source.dojo_id, user_id=user.id))
+                db.session.flush()
 
     try:
         if item.source_kind == "artifact":
@@ -245,18 +255,17 @@ def instantiate_snapshot(user, dojo, module_index, payload, provenance):
     raise ValueError("素材内容类型无效。")
 
 
-def frozen_course_ids():
-    from .models.construction import ConstructionSpaces
-    return db.session.query(ConstructionSpaces.course_id)
+def readonly_course_ids():
+    return db.session.query(Dojos.dojo_id).filter(Dojos.data["readOnly"].as_boolean().is_(True))
 
 
-def exclude_frozen(column):
-    return or_(column.is_(None), column.notin_(frozen_course_ids()))
+def exclude_readonly(column):
+    return or_(column.is_(None), column.notin_(readonly_course_ids()))
 
 
 def library_courses(user):
     require_library_teacher(user)
-    query = Dojos.query.filter(exclude_frozen(Dojos.dojo_id))
+    query = Dojos.query.filter(exclude_readonly(Dojos.dojo_id))
     if getattr(user, "type", None) != "admin":
         query = query.filter(Dojos.dojo_id.in_(db.session.query(DojoAdmins.dojo_id).filter_by(user_id=user.id)))
     rows = query.order_by(Dojos.name, Dojos.dojo_id).all()
@@ -265,7 +274,7 @@ def library_courses(user):
             for row in rows if not (row.data or {}).get("archived")]
 
 
-def list_sources(user, *, kind="artifact", course_id=None, search="", content_type="", source_id=None, offset=0, limit=24, for_submission=False):
+def list_sources(user, *, kind="artifact", course_id=None, search="", content_type="", source_id=None, offset=0, limit=24):
     require_library_teacher(user)
     if kind not in {"artifact", "assignment", "practice", "challenge"}:
         raise ValueError("来源类型无效。")
@@ -279,13 +288,7 @@ def list_sources(user, *, kind="artifact", course_id=None, search="", content_ty
         "practice": (LearningDrafts, LearningDrafts.spec["name"].as_string()),
         "challenge": (DojoChallenges, DojoChallenges.name),
     }[kind]
-    query = model.query.filter(exclude_frozen(model.dojo_id))
-    if for_submission:
-        from .models.construction import ConstructionSpaces
-        unavailable = db.session.query(ConstructionSpaces.course_id)
-        archived = db.session.query(Dojos.dojo_id).filter(Dojos.data['archived'].as_boolean().is_(True))
-        query = query.filter(or_(model.dojo_id.is_(None),
-                                 ~model.dojo_id.in_(unavailable.union(archived))))
+    query = model.query.filter(exclude_readonly(model.dojo_id))
     if kind == "artifact":
         allowed = or_(TeachingArtifacts.owner_id == user.id, TeachingArtifacts.dojo_id.in_(courses))
         if getattr(user, "type", None) != "admin":

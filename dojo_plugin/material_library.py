@@ -8,7 +8,6 @@ from sqlalchemy import func, or_
 from CTFd.models import Users, db
 
 from .agent_runtime.scope import ScopeError, dojo_for_user, validate_module
-from .construction_library import library_status, guard_library_write, guard_import
 from .models import (
     DojoAdmins, LearningAuditEvents, MaterialCollections, MaterialCollectionItems,
     MaterialLibraryImports, MaterialLibraryItems, MaterialLibraryVersions,
@@ -153,7 +152,6 @@ def _item_views(rows, user):
         "visibility": row.visibility, "archived": row.archived,
         "version": row.version, "metadataVersion": row.metadata_version,
         "canManage": row.owner_id == user.id,
-        "construction": library_status(row),
         "collections": groups.get(row.id, []),
         "created": row.created.isoformat() + "Z", "updated": row.updated.isoformat() + "Z",
     } for row in rows]
@@ -228,7 +226,6 @@ def save_source(user, source, *, snapshotter, collection_ids=None, title=None, d
     source_id = _text(source.get("id"), 128, "来源标识")
     if visibility not in {"private", "teachers"}:
         raise ValueError("素材仅支持自己可见或教师共享。")
-    guard_library_write(user, visibility)
     ids = _collection_ids(user, [] if collection_ids is None else collection_ids)
     if expected_metadata_version is not None:
         _integer(expected_metadata_version, "素材信息版本")
@@ -286,7 +283,6 @@ def update_item(user, item_id, body):
     if "visibility" in body:
         if body["visibility"] not in {"private", "teachers"}:
             raise ValueError("素材共享范围无效。")
-        guard_library_write(user, body["visibility"])
         item.visibility = body["visibility"]
     if "archived" in body:
         if not isinstance(body["archived"], bool):
@@ -338,8 +334,9 @@ def import_items(user, body, *, instantiator):
         item = item_for_user(user, selection["id"], lock=True)
         if item.archived:
             raise LibraryConflict("所选素材已归档，请重新选择。")
-        guard_import(item.id, selection["version"])
         revision = _version_row(item, selection["version"])
+        if (revision.provenance or {}).get("revoked"):
+            raise LibraryConflict("该素材版本已撤销，不能导入。")
         if _hash(revision.payload) != revision.content_hash:
             raise LibraryConflict("素材快照校验未通过，暂不能选用。")
         snapshots.append((item, revision))
