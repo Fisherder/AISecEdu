@@ -43,6 +43,21 @@ jobs:
           npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev --no-audit --no-fund
           python -m pip install -r ops/team/requirements.txt
           python test/harness_client_contract.py
+      - name: Package the verified teaching image for isolated acceptance
+        if: github.event.action == 'ready_for_review'
+        run: |
+          mkdir -p "$RUNNER_TEMP/teaching-image"
+          docker save aisecedu-harness-test | gzip -1 > "$RUNNER_TEMP/teaching-image/harness.tar.gz"
+          cd "$RUNNER_TEMP/teaching-image"
+          sha256sum harness.tar.gz > SHA256SUMS
+      - name: Keep the image for the development acceptance window
+        if: github.event.action == 'ready_for_review'
+        uses: actions/upload-artifact@v4
+        with:
+          name: teaching-image-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/teaching-image
+          compression-level: 0
+          retention-days: 2
   classroom-contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
