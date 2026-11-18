@@ -18,6 +18,15 @@
     "package.json", "*lock*", "requirements*", "pyproject.toml",
     "**/package.json", "**/*lock*", "**/requirements*", "**/pyproject.toml"
   ],
+  "verified_vendor_trees": [
+    {
+      "path": "vendor/deepseek-harness",
+      "source": "https://github.com/deepseek-ai/deepseek-harness",
+      "release": "dsh-v0.2.2-rc.4",
+      "commit": "3f321d32bfe382212a8ed8785c1d47a5a300aa23",
+      "tree": "6778b1f1e75fde6d62f69d345792bf08e32178d4"
+    }
+  ],
   "repair_paths": ["dojo_plugin/**", "dojo_theme/**", "test/**", "docs/**"],
   "required_checks": ["contributor-checks", "audit", "singlenode DOJO Test", "multinode DOJO Test"]
 }

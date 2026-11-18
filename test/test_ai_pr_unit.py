@@ -59,14 +59,14 @@ def test_irreversible_model_execution_uses_one_action_per_fresh_job_and_no_publi
     jobs = {match.group(1): source[match.end():starts[index + 1].start() if index + 1 < len(starts) else len(source)]
             for index, match in enumerate(starts)}
     model_jobs = {name: body for name, body in jobs.items() if 'uses: openai/codex-action@' in body}
-    assert set(model_jobs) == {'analyze', 'repair', 'final_review'}
+    assert set(model_jobs) == {'analyze', 'repair', 'final_review', 'large_review'}
     for name, body in model_jobs.items():
         assert body.count('uses: openai/codex-action@') == 1, name
         assert 'safety-strategy: drop-sudo' in body and 'runs-on: ubuntu-24.04' in body
         assert 'name: aisecedu-ai-model' in body and 'AI_AUTOPILOT_SSH_KEY' not in body
         assert 'contents: write' not in body and 'pull-requests: write' not in body
     assert 'uses: openai/codex-action@' not in jobs['publish']
-    assert 'needs: [analyze, repair, final_review]' in jobs['publish']
+    assert 'needs: [analyze, repair, final_review, large_review]' in jobs['publish']
 
 
 def test_only_latest_required_check_results_affect_failure_context():
@@ -929,6 +929,111 @@ def test_base_sync_publishes_the_live_develop_commit_when_the_pr_snapshot_is_old
         retry.assert_not_called()
         assert ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip() == current_base
         assert ai.git(remote, 'show', current_base + ':dojo_plugin/example.py').stdout == 'value = 3\n'
+
+def test_large_git_inventory_matches_exact_vendor_tree_and_preserves_all_application_bytes():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        ai.git(repo, 'init', '-q')
+        ai.git(repo, 'config', 'user.name', 'Synthetic')
+        ai.git(repo, 'config', 'user.email', 'synthetic@example.com')
+        (repo / 'app.txt').write_text('before\n')
+        ai.git(repo, 'add', '.')
+        ai.git(repo, 'commit', '-qm', 'base')
+        base = ai.git(repo, 'rev-parse', 'HEAD').stdout.strip()
+        vendor = repo / 'vendor' / 'example'
+        vendor.mkdir(parents=True)
+        for index in range(1050):
+            (vendor / f'{index}.txt').write_text('upstream\n')
+        (repo / 'vendor' / 'example-local.lock').write_text('锁' * 80_000)
+        (repo / 'app.txt').rename(repo / 'renamed.txt')
+        ai.git(repo, 'add', '-A')
+        ai.git(repo, 'commit', '-qm', 'head')
+        head = ai.git(repo, 'rev-parse', 'HEAD').stdout.strip()
+        tree = ai.git(repo, 'rev-parse', 'HEAD:vendor/example').stdout.strip()
+        pins = [{'path': 'vendor/example', 'tree': tree, 'commit': head,
+                 'release': 'synthetic-v1', 'source': 'https://example.com/release'}]
+        with patch.dict(ai.POLICY, verified_vendor_trees=pins):
+            evidence, paths, chunks, blocked = ai.exact_large_diff(repo, base, head)
+            assert not blocked
+            assert evidence['total_paths'] == len(paths) == 1053
+            assert evidence['application_paths'] == 3
+            assert evidence['vendor'][0]['after']['tree'] == tree
+            assert len(chunks) > 2
+            actual = b''.join(part.encode() for _, part in chunks)
+            expected = ai.git(repo, 'diff', '--full-index', '--no-ext-diff', '--no-renames', base, head, '--',
+                              ':(exclude,literal)vendor/example').stdout.encode()
+            assert actual == expected
+            assert evidence['patch_sha256'] == ai.hashlib.sha256(actual).hexdigest()
+            for item, part in chunks:
+                assert actual[item['start']:item['end']] == part.encode()
+                assert item['sha256'] == ai.hashlib.sha256(part.encode()).hexdigest()
+            with patch.object(ai, 'LARGE_DIFF_CHUNK_LIMIT', 1):
+                assert ai.exact_large_diff(repo, base, head)[3]
+            (vendor / '1.txt').write_text('local modification\n')
+            ai.git(repo, 'commit', '-qam', 'untrusted vendor')
+            unverified, _, _, _ = ai.exact_large_diff(repo, base, 'HEAD')
+            assert not unverified['vendor']
+            assert unverified['application_paths'] == 1053
+
+
+def test_large_publication_binds_every_report_and_cannot_repair_or_auto_approve():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        head, base = '1' * 40, '2' * 40
+        pr = {'number': 1, 'node_id': 'node', 'state': 'open', 'draft': False, 'changed_files': 1000,
+              'base': {'ref': 'develop', 'sha': base}, 'user': {'login': 'hunry-1-code'},
+              'head': {'sha': head, 'ref': 'feat/member/task', 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
+        with patch.object(ai, 'LARGE_DIFF_CHUNK_BYTES', 5):
+            chunks = [row for row, _ in ai.large_diff_chunks(b'abcdefghij')]
+        evidence = {'chunks': chunks, 'application_paths': 1, 'vendor': []}
+        context = {'mode': 'large_review', 'number': 1, 'head': head, 'base': base, 'branch': 'feat/member/task',
+                   'large_review': evidence, 'blocked_reason': '', 'failures': [],
+                   'signature': ai.state_signature(pr, [], [])}
+        (folder / 'context.json').write_text(json.dumps(context))
+        reports = folder / 'segment-reports'
+
+        class Client:
+            repo = 'Fisherder/AISecEdu'
+
+            def repo_api(self, path, data=None, method=None):
+                assert data is None
+                if path == '/pulls/1':
+                    return pr
+                if path == '/git/ref/heads/develop':
+                    return {'object': {'sha': base}}
+                assert '/check-runs' in path
+                return {'check_runs': []}
+
+            def pages(self, path):
+                assert not path.endswith('/files')
+                return []
+
+        def add(index, value=None):
+            target = reports / f'deepseek-segment-{index}' / 'segment-report.json'
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps({'head': head, 'base': base, 'signature': context['signature'],
+                                          'chunk': chunks[index] if value is None else value, 'report': report()}))
+            return target
+
+        with (patch.object(ai, 'GitHub', Client),
+              patch.object(ai, 'load_large_diff', return_value=(evidence, [('A', 'example.py')], [], '')),
+              patch.object(ai, 'post_comment') as comment,
+              patch.object(ai, 'record_check') as record,
+              patch.object(ai, 'suspend_approval'),
+              patch.object(ai, 'git') as git):
+            publish = lambda: ai.publish(folder, folder / 'never-check-out', expected=context)
+            add(0)
+            rejects(publish)
+            add(1, {**chunks[1], 'sha256': 'wrong'})
+            rejects(publish)
+            add(1)
+            publish()
+            assert record.call_args.args[-1] == 'success'
+            assert '等待人工审批' in record.call_args.args[3]
+            comment.assert_called_once()
+            (folder / 'repair.patch').write_text('malicious artifact')
+            rejects(publish)
+            git.assert_not_called()
 
 
 if __name__ == '__main__':

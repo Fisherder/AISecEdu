@@ -104,6 +104,7 @@ jobs:
       base: ${{ steps.prepare.outputs.base }}
       branch: ${{ steps.prepare.outputs.branch }}
       should_repair: ${{ steps.plan.outputs.should_repair }}
+      chunks: ${{ steps.prepare.outputs.chunks }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -136,6 +137,9 @@ jobs:
         run: |
           sudo mkdir -p /opt/aisecedu-toolchains/node22/bin
           sudo ln -s "$(command -v node)" /opt/aisecedu-toolchains/node22/bin/node
+      - name: Prepare read-only review inputs
+        if: steps.prepare.outputs.mode == 'analyze'
+        run: |
           mkdir -p "$RUNNER_TEMP/ai-codex-review"
           printf '[features]\nmulti_agent = false\n' > "$RUNNER_TEMP/ai-codex-review/config.toml"
           python3 policy/ops/team/ai_pr.py prompts --folder "$RUNNER_TEMP/ai-result"
@@ -173,6 +177,67 @@ jobs:
         with:
           name: deepseek-initial-pr-${{ steps.prepare.outputs.number }}-${{ github.run_id }}
           path: ${{ runner.temp }}/ai-result/
+          retention-days: 7
+          if-no-files-found: error
+  large_review:
+    needs: analyze
+    if: needs.analyze.outputs.mode == 'large_review'
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        chunk: ${{ fromJSON(needs.analyze.outputs.chunks || '[]') }}
+    runs-on: ubuntu-24.04
+    environment:
+      name: aisecedu-ai-model
+      deployment: false
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          path: policy
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: deepseek-initial-pr-${{ needs.analyze.outputs.number }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/ai-result
+      - name: Verify the assigned Git patch SHA-256
+        env:
+          AI_CHUNK: ${{ matrix.chunk }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ai-codex-review" "$GITHUB_WORKSPACE/large-review"
+          printf '[features]\nmulti_agent = false\n' > "$RUNNER_TEMP/ai-codex-review/config.toml"
+          python3 policy/ops/team/ai_pr.py large-prompt --folder "$RUNNER_TEMP/ai-result" --chunk "$AI_CHUNK"
+      - name: Review the complete assigned segment
+        timeout-minutes: ${{ github.event_name == 'pull_request' && 24 || 12 }}
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
+        with:
+          openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          responses-api-endpoint: ${{ vars.DEEPSEEK_BASE_URL }}/responses
+          codex-version: '0.144.1'
+          model: ${{ vars.DEEPSEEK_MODEL }}
+          effort: low
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          codex-home: ${{ runner.temp }}/ai-codex-review
+          working-directory: ${{ github.workspace }}/large-review
+          prompt-file: ${{ runner.temp }}/ai-result/review.txt
+          output-file: ${{ runner.temp }}/ai-result/initial-review.json
+          output-schema-file: ${{ github.workspace }}/policy/ops/team/ai_review.schema.json
+          codex-args: '["--ephemeral", "-c", "web_search=\"disabled\"", "-c", "model_catalog_json=\"${{ github.workspace }}/policy/ops/team/deepseek-models.json\""]'
+          allow-bot-users: github-actions[bot]
+      - name: Bind valid model output to the exact Git patch SHA-256
+        env:
+          AI_CHUNK: ${{ matrix.chunk }}
+        run: python3 policy/ops/team/ai_pr.py large-report --folder "$RUNNER_TEMP/ai-result" --chunk "$AI_CHUNK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deepseek-segment-${{ matrix.chunk }}
+          path: ${{ runner.temp }}/ai-result/segment-report.json
           retention-days: 7
           if-no-files-found: error
   repair:
@@ -317,11 +382,12 @@ jobs:
           retention-days: 7
           if-no-files-found: error
   publish:
-    needs: [analyze, repair, final_review]
+    needs: [analyze, repair, final_review, large_review]
     if: >-
       !cancelled() && needs.analyze.result == 'success' &&
       contains(fromJSON('["success", "skipped"]'), needs.repair.result) &&
       contains(fromJSON('["success", "skipped"]'), needs.final_review.result) &&
+      (needs.analyze.outputs.mode != 'large_review' || needs.large_review.result == 'success') &&
       needs.analyze.outputs.mode != 'skip' && needs.analyze.outputs.mode != ''
     runs-on: ubuntu-latest
     environment:
@@ -344,7 +410,13 @@ jobs:
         with:
           name: deepseek-${{ needs.final_review.result == 'success' && 'final' || needs.repair.result == 'success' && 'repair' || 'initial' }}-pr-${{ needs.analyze.outputs.number }}-${{ github.run_id }}
           path: ${{ runner.temp }}/ai-result
+      - uses: actions/download-artifact@v4
+        if: needs.analyze.outputs.mode == 'large_review'
+        with:
+          pattern: deepseek-segment-*
+          path: ${{ runner.temp }}/ai-result/segment-reports
       - uses: actions/checkout@v4
+        if: needs.analyze.outputs.mode != 'large_review' && needs.analyze.outputs.mode != 'large_blocked'
         with:
           ref: ${{ needs.analyze.outputs.head }}
           path: candidate
@@ -359,15 +431,17 @@ jobs:
           AI_EXPECTED_BASE: ${{ needs.analyze.outputs.base }}
           AI_EXPECTED_BRANCH: ${{ needs.analyze.outputs.branch }}
         run: |
-          git -C candidate config user.name 'github-actions[bot]'
-          git -C candidate config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if [ -d candidate/.git ]; then
+            git -C candidate config user.name 'github-actions[bot]'
+            git -C candidate config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          fi
           python3 policy/ops/team/ai_pr.py publish --folder "$RUNNER_TEMP/ai-result" --candidate "$GITHUB_WORKSPACE/candidate"
   report-failure:
-    needs: [gate, analyze, repair, final_review, publish]
+    needs: [gate, analyze, repair, final_review, large_review, publish]
     if: >-
       always() &&
-      (needs.gate.result == 'failure' || needs.analyze.result == 'failure' || needs.repair.result == 'failure' || needs.final_review.result == 'failure' || needs.publish.result == 'failure' ||
-       needs.gate.result == 'cancelled' || needs.analyze.result == 'cancelled' || needs.repair.result == 'cancelled' || needs.final_review.result == 'cancelled' || needs.publish.result == 'cancelled')
+      (needs.gate.result == 'failure' || needs.analyze.result == 'failure' || needs.repair.result == 'failure' || needs.final_review.result == 'failure' || needs.large_review.result == 'failure' || needs.publish.result == 'failure' ||
+       needs.gate.result == 'cancelled' || needs.analyze.result == 'cancelled' || needs.repair.result == 'cancelled' || needs.final_review.result == 'cancelled' || needs.large_review.result == 'cancelled' || needs.publish.result == 'cancelled')
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
