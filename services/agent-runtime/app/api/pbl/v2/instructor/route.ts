@@ -17,7 +17,7 @@ import type { NextRequest } from 'next/server';
 
 import { createLogger } from '@/lib/logger';
 import { apiError } from '@/lib/server/api-response';
-import { resolveModelFromRequest } from '@/lib/server/resolve-model';
+import { resolveInstructorRuntime } from '@/lib/pbl/v2/api/instructor-runtime';
 
 import { createSSEResponse } from '@/lib/pbl/v2/api/sse';
 import { applyRequestLocaleToProject } from '@/lib/pbl/v2/api/locale';
@@ -50,15 +50,19 @@ export async function POST(req: NextRequest) {
     return apiError('MISSING_REQUIRED_FIELD', 400, '`userMessage` is required.');
   }
 
-  let resolved;
+  if (body.phase !== undefined && !['greeting', 'setup', 'instructing'].includes(body.phase)) {
+    return apiError('INVALID_REQUEST', 400, 'Invalid instructor phase.');
+  }
+
+  let runtime;
   try {
-    resolved = await resolveModelFromRequest(req, body, 'pbl-v2-runtime:instructor');
+    runtime = await resolveInstructorRuntime(req, body, 'pbl-v2-runtime:instructor');
   } catch (err) {
     log.error('Model resolution failed:', err);
     return apiError('INVALID_REQUEST', 400, err instanceof Error ? err.message : String(err));
   }
 
-  const { model, thinkingConfig } = resolved;
+  if (!runtime) return apiError('UPSTREAM_ERROR', 503, '项目导师暂时不可用。');
   const phase = body.phase ?? 'instructing';
   applyRequestLocaleToProject(req, body.project);
 
@@ -67,8 +71,7 @@ export async function POST(req: NextRequest) {
       project: body.project,
       userMessage: body.userMessage,
       phase,
-      languageModel: model,
-      thinkingConfig,
+      ...runtime,
       signal: req.signal,
     }),
     { signal: req.signal },

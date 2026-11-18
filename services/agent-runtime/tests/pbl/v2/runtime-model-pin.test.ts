@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
 
 /**
- * Wiring guard: every PBL v2 *runtime* route must forward its MODEL_ROUTES
+ * Wiring guard: specialized PBL v2 runtime routes must forward its MODEL_ROUTES
  * stage into model resolution, so operators can pin the shared runtime model
  * through `pbl-v2-runtime` or override a specific endpoint via
  * `pbl-v2-runtime:<endpoint>`.
@@ -56,9 +56,9 @@ describe('PBL v2 runtime routes forward MODEL_ROUTES stages', () => {
     });
   });
 
-  it('instructor route forwards its runtime stage', async () => {
+  it('scenario instructor keeps its separate runtime stage', async () => {
     const { POST } = await import('@/app/api/pbl/v2/instructor/route');
-    await POST(makeRequest({ project: { id: 'p' }, userMessage: 'hi' }));
+    await POST(makeRequest({ project: { id: 'p', scenario: {} }, userMessage: 'hi' }));
     expect(mocks.resolveModelFromRequest).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
@@ -97,9 +97,9 @@ describe('PBL v2 runtime routes forward MODEL_ROUTES stages', () => {
     expect(mocks.resolveModelFromRequest).not.toHaveBeenCalled();
   });
 
-  it('open-task route forwards its runtime stage', async () => {
+  it('scenario open-task keeps its separate runtime stage', async () => {
     const { POST } = await import('@/app/api/pbl/v2/open-task/route');
-    await POST(makeRequest({ project: { id: 'p' }, phase: 'greeting' }));
+    await POST(makeRequest({ project: { id: 'p', scenario: {} }, phase: 'greeting' }));
     expect(mocks.resolveModelFromRequest).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
