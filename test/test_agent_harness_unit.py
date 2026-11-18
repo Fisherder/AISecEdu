@@ -619,3 +619,35 @@ def test_driver_durable_replay_tool_completion_and_continuation(setup, monkeypat
 def test_multi_job_result_ids_are_deduplicated():
     h = load("dojo_plugin/agent_runtime/harness.py", {"__name__": "harness_test"})
     assert h.tool_job_ids({"result": {"job": {"id": "a"}, "jobs": [{"id": "a"}, {"id": "b"}]}}) == ["a", "b"]
+
+
+def test_upstream_teacher_turn_only_enqueues_approved_teaching_operations():
+    tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
+    functions = {"_upstream_teacher_result", "_validated_tool_proposals"}
+    constants = {"AGENT_TOOL_SCHEMAS", "UPSTREAM_APPROVED_TEACHING_TOOLS"}
+    tree.body = [
+        node for node in tree.body
+        if (isinstance(node, ast.FunctionDef) and node.name in functions)
+        or (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in constants)
+    ]
+    namespace = {
+        "result_object": json.loads,
+        "redact_text": lambda value, limit: value[:limit],
+        "scrub_payload": lambda value, key: value,
+    }
+    exec(compile(tree, "jobs.py", "exec"), namespace)
+    project = namespace["_upstream_teacher_result"]
+    validate = namespace["_validated_tool_proposals"]
+    job = SimpleNamespace(payload={"chatBackend": "upstream"}, dojo_id=None, module_index=None)
+    proposal = {"tool": "course.create", "arguments": {"name": "课程示例", "unexpected": True}}
+    text = json.dumps({"answer": "课程创建草案", "proposal": proposal})
+    result = project({}, text)
+    assert result["executionMode"] == "execute"
+    assert result["intentDecision"]["intent"] == "operate"
+    validated, = validate(job, result)
+    assert validated["requiresConfirmation"] is True
+    assert validated["arguments"] == {"name": "课程示例"}
+    assert validate(job, {"toolProposals": [{"tool": "challenge.generate", "arguments": {}}]}) == []
+    assert "toolProposals" not in project({"executionMode": "ask"}, text)
+    assert "toolProposals" not in project({"context": {"agentLoop": {"trace": [{"status": "verified"}]}}}, text)

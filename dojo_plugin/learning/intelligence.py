@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 from CTFd.models import db
 
-from ..agent_runtime.upstream_turn import UpstreamTurnError, invoke_turn, request_body
+from ..agent_runtime.upstream_turn import UpstreamTurnError, invoke_turn, request_body, result_object, upstream_enabled
 from ..config import (
     DOJO_AI_API_KEY,
     DOJO_AI_BASE_URL,
@@ -2061,7 +2061,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
     }
     try:
         with usage_scope(current_attempt.id if current_attempt and reference_ids == [current_reference_id] else None, '当前实验学习指导'):
-            if not needs_reference and DOJO_AI_ENABLED:
+            if not needs_reference and upstream_enabled():
                 dispatch_id = record_model_dispatch(DOJO_AI_GUIDE_MODEL)
                 response = None
                 try:
@@ -2076,13 +2076,8 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
                     }))
                 finally:
                     settle_model_dispatch(dispatch_id, response)
-                content = re.sub(
-                    r"^```(?:json)?\s*|\s*```$", "", response["text"], flags=re.IGNORECASE,
-                )
                 model_used = response["model"]
-                candidate = json.loads(content)
-                if not isinstance(candidate, dict):
-                    raise UpstreamTurnError("学习助手返回格式无效")
+                candidate = result_object(response["text"])
                 answer_text = candidate.get("answer")
                 if not isinstance(answer_text, str) or not answer_text.strip():
                     raise UpstreamTurnError("学习助手返回空白答复")

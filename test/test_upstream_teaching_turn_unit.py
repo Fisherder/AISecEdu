@@ -61,3 +61,85 @@ def test_turn_rejects_success_without_actual_model(service):
     body = turn.request_body("教学顾问", {"request": "解释学习目标"})
     with pytest.raises(turn.UpstreamTurnError, match="未返回完整答复"):
         turn.invoke_turn(body)
+
+
+@pytest.mark.parametrize(("setting", "configured", "expected"), [
+    ("auto", "true", True),
+    ("auto", "false", False),
+    ("false", "true", False),
+    ("true", "false", True),
+])
+def test_dedicated_configuration_controls_auto_mode(monkeypatch, setting, configured, expected):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("DOJO_AI_API_KEY", raising=False)
+    monkeypatch.setenv("DOJO_AI_ENABLED", setting)
+    monkeypatch.setenv("HARNESS_CONFIGURED", configured)
+    assert turn.upstream_enabled() is expected
+
+
+@pytest.mark.parametrize("backend", ["legacy", "upstream"])
+@pytest.mark.parametrize("mode", ["ask", "plan", "execute"])
+def test_teacher_request_omits_person_rows_from_both_model_backends(backend, mode):
+    import ast
+    from types import SimpleNamespace
+
+    model_context_path = MODULE.with_name("teacher_model_context.py")
+    model_context_spec = importlib.util.spec_from_file_location("teacher_model_context_fixture", model_context_path)
+    model_context = importlib.util.module_from_spec(model_context_spec)
+    model_context_spec.loader.exec_module(model_context)
+    tree = ast.parse(MODULE.with_name("jobs.py").read_text())
+    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_runtime_request_body"]
+    namespace = {
+        "request_body": turn.request_body,
+        "scrub_payload": lambda value, **kwargs: value,
+        "teacher_model_payload": model_context.teacher_model_payload,
+        "teacher_platform_facts": model_context.teacher_platform_facts,
+    }
+    exec(compile(tree, "jobs.py", "exec"), namespace)
+    opaque = "NEVER_SEND_PERSON_SENTINEL"
+    person = {"name": opaque, "studentNumber": opaque, "userId": opaque, "averageAssessment": 88.6789}
+    aggregate = {"studentCount": 34, "verifiedCompleteCount": 23}
+    payload = {
+        "chatBackend": backend,
+        "executionMode": mode,
+        "prompt": "继续准备关于科学读写的课程",
+        "credentials": opaque,
+        "scope": {"student": person},
+        "context": {
+            "thread": {"internalAudit": opaque},
+            "platformFacts": {
+                "scope": {"teacherId": opaque, "threadId": opaque, "moduleIndex": 0},
+                "course": {"id": opaque, "referenceId": "course-ref", "name": "科学读写", "members": [person]},
+                "availableCourses": [{"referenceId": "course-ref", "name": "科学读写", "modules": [{"index": 0, "name": "开篇"}]}],
+                "verifiedProgress": {**aggregate, "students": [person]},
+                "assignments": {"recent": [{"title": "小练习", "submissions": [person]}]},
+                "pendingAttachments": [{"id": "material-ref", "filename": "讲义.txt", "uploadedBy": opaque}],
+                "jobs": {"recent": [{"status": "READY", "error": opaque}]},
+                "unknown": {"participants": [person]},
+            },
+            "agentLoop": {"trace": [{
+                "tool": "course.update", "status": "verified",
+                "observation": {"course": {"referenceId": "course-ref", "name": "科学读写", "members": [person]}},
+            }]},
+            "conversation": [{"role": "user", "content": "使用上节课的教学目标", "userId": opaque}],
+        },
+        "sourceMaterials": [{"id": "material-ref", "excerpts": [{"content": "选用讲义摘录", "authorId": opaque}]}],
+    }
+    job = SimpleNamespace(kind="agent.chat", id="job", owner_id=123, dojo_id=456, module_index=0)
+    body = namespace["_runtime_request_body"](job, {"actual_model": "synthetic"}, payload)
+    assert opaque not in json.dumps(body)
+    assert "88.6789" not in json.dumps(body)
+    if backend == "upstream":
+        context = json.loads(body["messages"][-1]["content"])
+        materials = context["sourceMaterials"]
+    else:
+        context = body["payload"]["context"]
+        materials = body["payload"]["sourceMaterials"]
+    facts = context["platformFacts"]
+    assert facts["verifiedProgress"] == aggregate
+    assert facts["scope"] == {"moduleIndex": 0}
+    assert facts["availableCourses"][0]["referenceId"] == "course-ref"
+    assert facts["pendingAttachments"][0]["id"] == "material-ref"
+    assert facts["assignments"]["recent"] == [{"title": "小练习"}]
+    assert context["conversation"] == [{"role": "user", "content": "使用上节课的教学目标"}]
+    assert materials[0]["excerpts"][0]["content"] == "选用讲义摘录"

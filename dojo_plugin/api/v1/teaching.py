@@ -64,7 +64,6 @@ from ...coursework import (
     generate_assignment_payload,
     override_submission_grade,
     publish_assignment,
-    roster_submissions,
     update_assignment,
 )
 from ...models import (
@@ -2680,135 +2679,27 @@ def _attempt_is_completed(attempt):
 
 def _agent_progress_snapshot(dojo):
     challenges = DojoChallenges.query.filter_by(dojo_id=dojo.dojo_id).all()
-    challenge_ids = [row.challenge_id for row in challenges if row.challenge_id]
-    required_ids = {
-        row.challenge_id for row in challenges if row.challenge_id and row.required
-    }
-    students = {
-        row.user_id: {
-            "userId": row.user_id,
-            "name": row.user.name if row.user else str(row.user_id),
-            "solved": set(),
-            "attempts": [],
-            "scores": [],
-            "evidence": {},
-            "lastSolve": None,
-        }
-        for row in DojoUsers.query.filter(
-            DojoUsers.dojo_id == dojo.dojo_id,
-            DojoUsers.type != "admin",
-        ).all()
-    }
-
-    def student_row(user_id):
-        return students.setdefault(
-            user_id,
-            {
-                "userId": user_id,
-                "name": str(user_id),
-                "solved": set(),
-                "attempts": [],
-                "scores": [],
-                "evidence": {},
-                "lastSolve": None,
-            },
-        )
-
-    solve_rows = (
-        db.session.query(Solves.user_id, Solves.challenge_id, func.max(Solves.date))
-        .filter(Solves.challenge_id.in_(challenge_ids or [-1]))
-        .group_by(Solves.user_id, Solves.challenge_id)
-        .all()
+    challenge_ids = {row.challenge_id for row in challenges if row.challenge_id}
+    required_ids = {row.challenge_id for row in challenges if row.challenge_id and row.required}
+    enrolled = DojoUsers.query.filter(
+        DojoUsers.dojo_id == dojo.dojo_id, DojoUsers.type != "admin",
     )
-    for user_id, challenge_id, solved_at in solve_rows:
-        row = student_row(user_id)
-        row["solved"].add(challenge_id)
-        if solved_at and (row["lastSolve"] is None or solved_at > row["lastSolve"]):
-            row["lastSolve"] = solved_at
-
-    attempts = LearningAttempts.query.filter_by(dojo_id=dojo.dojo_id).all()
-    attempts_by_id = {}
-    for attempt in attempts:
-        attempts_by_id[attempt.id] = attempt
-        student_row(attempt.user_id)["attempts"].append(attempt)
-    if attempts_by_id:
-        for assessment in LearningAssessments.query.filter(
-            LearningAssessments.attempt_id.in_(list(attempts_by_id))
-        ).all():
-            attempt = attempts_by_id.get(assessment.attempt_id)
-            if attempt:
-                student_row(attempt.user_id)["scores"].append(
-                    float(assessment.total_score)
-                )
-    evidence_rows = (
-        db.session.query(
-            LearningAttempts.user_id,
-            LearningEvidenceEvents.event_type,
-            func.count(LearningEvidenceEvents.id),
+    verified_complete = 0
+    if required_ids:
+        completed = (
+            db.session.query(Solves.user_id)
+            .join(DojoUsers, DojoUsers.user_id == Solves.user_id)
+            .filter(DojoUsers.dojo_id == dojo.dojo_id, DojoUsers.type != "admin",
+                    Solves.challenge_id.in_(required_ids))
+            .group_by(Solves.user_id)
+            .having(func.count(func.distinct(Solves.challenge_id)) == len(required_ids))
         )
-        .join(
-            LearningEvidenceEvents,
-            LearningEvidenceEvents.attempt_id == LearningAttempts.id,
-        )
-        .filter(LearningAttempts.dojo_id == dojo.dojo_id)
-        .group_by(LearningAttempts.user_id, LearningEvidenceEvents.event_type)
-        .all()
-    )
-    for user_id, event_type, count in evidence_rows:
-        student_row(user_id)["evidence"][event_type] = int(count)
-
-    rows = []
-    for row in students.values():
-        solved = row.pop("solved")
-        user_attempts = row.pop("attempts")
-        scores = row.pop("scores")
-        required_solved = len(solved & required_ids)
-        rows.append(
-            {
-                **row,
-                "solvedChallengeIds": sorted(solved),
-                "requiredSolved": required_solved,
-                "requiredTotal": len(required_ids),
-                "verifiedCompletion": (
-                    required_solved / len(required_ids) if required_ids else 0.0
-                ),
-                "attemptCount": len(user_attempts),
-                "activeAttempts": sum(
-                    1 for attempt in user_attempts if attempt.status == "ACTIVE"
-                ),
-                "completedAttempts": sum(
-                    1 for attempt in user_attempts if _attempt_is_completed(attempt)
-                ),
-                "averageAssessment": sum(scores) / len(scores) if scores else None,
-                "averageTrust": (
-                    sum(float(attempt.trust_score) for attempt in user_attempts)
-                    / len(user_attempts)
-                    if user_attempts
-                    else None
-                ),
-                "lastSolve": _timestamp(row["lastSolve"]),
-            }
-        )
-    rows.sort(key=lambda item: (item["name"], item["userId"]))
+        verified_complete = completed.count()
     return {
         "challengeCount": len(challenge_ids),
         "requiredChallengeCount": len(required_ids),
-        "studentCount": len(rows),
-        "verifiedCompleteCount": sum(
-            1 for row in rows if row["verifiedCompletion"] >= 1
-        ),
-        "students": rows[:500],
-        "truncated": len(rows) > 500,
-        "sourceOfTruth": [
-            "Solves",
-            "LearningAttempts",
-            "LearningEvidenceEvents",
-            "LearningAssessments",
-        ],
-        "completionPolicy": (
-            "Only verified challenge solves satisfy required completion; "
-            "content views and preview browsing are engagement signals only."
-        ),
+        "studentCount": enrolled.count(),
+        "verifiedCompleteCount": verified_complete,
     }
 
 
@@ -2979,17 +2870,6 @@ def _teacher_agent_context(user, thread):
             }
             for item in dojo.modules[:100]
         ],
-        "members": [
-            {
-                "username": membership.user.name,
-                "role": "teacher" if membership.type == "admin" else "student",
-            }
-            for membership in DojoUsers.query.filter_by(dojo_id=dojo.dojo_id)
-            .order_by(DojoUsers.type, DojoUsers.user_id)
-            .limit(500)
-            .all()
-            if membership.user is not None
-        ],
         "selectedModule": (
             {
                 "index": module.module_index,
@@ -3159,17 +3039,6 @@ def _teacher_agent_context(user, thread):
                 "status": assignment.status,
                 "moduleIndex": assignment.module_index,
                 "itemCount": len(assignment.items),
-                "submissions": [
-                    {
-                        "id": row["submission"]["id"],
-                        "studentName": row["studentName"],
-                        "status": row["submission"]["status"],
-                        "score": row["submission"]["score"],
-                        "maxScore": row["submission"]["maxScore"],
-                    }
-                    for row in roster_submissions(assignment)[:100]
-                    if row.get("submission")
-                ],
             }
             for assignment in recent_assignments
         ],
@@ -3236,7 +3105,6 @@ def _teacher_agent_context(user, thread):
                 "status": row.status,
                 "stage": row.stage,
                 "progress": row.progress,
-                "error": row.error[:1000] if row.error else None,
             }
             for row in job_query.order_by(TeachingJobs.updated.desc()).limit(10).all()
         ],
@@ -6534,6 +6402,7 @@ def _agent_continuation_context(user, thread, body):
         raise ValueError("Original teacher request is no longer available")
     return {
         "prompt": prompt,
+        "chatBackend": root_payload.get("chatBackend"),
         "requestProvenance": (root_payload.get("context") or {}).get("requestProvenance"),
         "questionReply": (root_payload.get("context") or {}).get("questionReply"),
         "intentDecision": (source_job.result or {}).get("intentDecision"),
@@ -6919,7 +6788,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 # Persist the complete teacher brief too, so later selection,
                 # refinement and materialization keep the same original intent.
                 payload["prompt"] = question_reply_prompt(question_context)
-            if not continuation:
+            if not continuation or (continuation_context or {}).get("chatBackend") == "upstream":
                 payload["chatBackend"] = "upstream"
             assistant_text = "正在准备教学对话回复…"
 

@@ -1,11 +1,19 @@
 import json
 import os
+import re
 
 import requests
 
 
 class UpstreamTurnError(ValueError):
     pass
+
+
+def upstream_enabled():
+    setting = (os.environ.get("DOJO_AI_ENABLED") or "auto").strip().lower()
+    if setting == "auto":
+        setting = os.environ.get("HARNESS_CONFIGURED", "").strip().lower()
+    return setting in {"1", "true", "yes"}
 
 
 def request_body(system_prompt, context):
@@ -56,3 +64,11 @@ def invoke_turn(body, *, encoded=None):
             if isinstance(usage, dict) and type(usage.get(key)) is int and usage[key] >= 0
         },
     }
+
+
+def result_object(text):
+    content = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+    result = json.loads(content)
+    if not isinstance(result, dict):
+        raise UpstreamTurnError("教学对话服务返回格式无效")
+    return result
