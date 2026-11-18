@@ -8,9 +8,13 @@ const address = 'http://127.0.0.1:3080';
 const app = spawn('dsh', ['web', '--no-open', '--host', '127.0.0.1', '--port', '3080'], {
   stdio: ['ignore', 'ignore', 'pipe'],
 });
+let bootStart = '';
 let bootError = '';
 app.stderr.setEncoding('utf8');
-app.stderr.on('data', chunk => { bootError = (bootError + chunk).slice(-2500); });
+app.stderr.on('data', chunk => {
+  if (bootStart.length < 3500) bootStart += chunk.slice(0, 3500 - bootStart.length);
+  bootError = (bootError + chunk).slice(-800);
+});
 const exited = once(app, 'exit');
 try {
   const deadline = Date.now() + 45_000;
@@ -27,7 +31,7 @@ try {
     }
     await pause(250);
   }
-  assert.ok(html, `Official Web UI startup (exit ${app.exitCode}, signal ${app.signalCode}): ${bootError}`);
+  assert.ok(html, `Official Web UI startup (exit ${app.exitCode}, signal ${app.signalCode}): ${bootStart}\n${bootError}`);
   const script = html.match(/<script[^>]*\bsrc=["']([^"']+)["']/i)?.[1];
   assert.ok(script, 'The official Web UI did not reference its application bundle');
   const asset = new URL(script, address);

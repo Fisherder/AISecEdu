@@ -92,9 +92,10 @@ jobs:
       - name: Exercise teaching contracts with synthetic data
         run: >
           pnpm exec vitest run tests/lib/chat tests/chat tests/pbl/question-turn.test.ts
-          tests/pbl/v2/evaluator.test.ts tests/pbl/v2/runtime-model-pin.test.ts tests/pbl/v2/runtime-llm-entry.test.ts
+          tests/pbl/v2/instructor-harness-route.test.ts tests/pbl/v2/evaluator.test.ts tests/pbl/v2/runtime-model-pin.test.ts tests/pbl/v2/runtime-llm-entry.test.ts
           tests/lib/server/debate-harness-route.test.ts tests/lib/server/student-teaching-routes.test.ts
           tests/lib/orchestration/state-context.test.ts tests/integration/harness-courseware-job.test.ts
+          tests/integration/ordinary-teaching-jobs.test.ts tests/quiz
           tests/ai/provider-transport-journal.test.ts tests/security/integrated-middleware-policy.test.ts
   contributor-checks:
     runs-on: ubuntu-latest
