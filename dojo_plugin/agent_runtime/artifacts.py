@@ -440,8 +440,8 @@ def artifact_capabilities(artifact, user):
     is_course_teacher = artifact_course_teacher(artifact, user)
     is_owner = artifact.owner_id == user.id
     is_personal = artifact.self_workspace_id is not None
-    from ..construction_guards import frozen_course
-    is_archived = artifact.status in {"ARCHIVED", "DELETED"} or frozen_course(artifact.dojo_id)
+    from ..readonly_courses import readonly_course
+    is_archived = artifact.status in {"ARCHIVED", "DELETED"} or readonly_course(artifact.dojo_id)
     can_edit = bool(is_owner and not is_archived)
     can_publish = bool(
         is_owner

@@ -2,7 +2,8 @@
   "schema": 1,
   "whole_files": [
     "test_model_router.py",
-    "test_runtime_profiles.py"
+    "test_runtime_profiles.py",
+    "test_construction_retirement.py"
   ],
   "test_nodes": {
     "test_challenge_corpus.py": [

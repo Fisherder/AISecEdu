@@ -7,7 +7,7 @@ from CTFd.utils.decorators import authed_only
 from CTFd.utils.user import get_current_user
 
 from ...agent_runtime.scope import ScopeError, build_scope, dojo_for_user
-from ...construction_guards import frozen_course
+from ...readonly_courses import readonly_course
 from ...learning.inquiry import catalog, make_spec
 from ...learning.inquiry_service import (
     InquiryConflict, apply_action, attempt_view, create_project, edit_project,
@@ -49,7 +49,7 @@ class InquiryContext(Resource):
         from .teaching import _teacher_dojos
         return {"pattern": catalog(), "example": make_spec({}), "courses": [{"id": course.dojo_id, "referenceId": course.reference_id,
                 "name": course.name, "modules": [{"index": module.module_index, "name": module.name} for module in course.modules]}
-                for course in _teacher_dojos(user) if not frozen_course(course.dojo_id)]}
+                for course in _teacher_dojos(user) if not readonly_course(course.dojo_id)]}
 
 
 @inquiry_namespace.route("/projects")

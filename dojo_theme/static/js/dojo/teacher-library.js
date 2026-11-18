@@ -88,7 +88,7 @@
   }
 
   function card(item) {
-    return `<article class="library-card" data-library-id="${escape(item.id)}"><div class="library-card-top"><span class="library-type-chip">${escape(item.typeLabel)}</span>${item.archived ? '<span>已归档</span>' : `<label class="library-pick"><input type="checkbox" data-library-select="${escape(item.id)}" aria-label="选择 ${escape(item.title)}">选择</label>`}</div><h2>${escape(item.title)}</h2><p>${escape(item.description || "暂无补充说明，可打开预览查看具体内容。")}</p><div class="library-card-meta">${escape(item.collections.map(group => group.name).join(" · ") || "未分类")}<br>${item.construction ? "已验收入库 · " : "自主素材 · "}版本 ${item.version} · ${item.visibility === "teachers" ? "教师共享" : "仅自己"}${item.canManage ? " · 我的素材" : ""}</div><footer><button type="button" data-library-preview="${escape(item.id)}">预览</button>${!item.archived ? `<button type="button" class="library-primary" data-library-use="${escape(item.id)}">加入课程</button>` : ""}${item.canManage ? `<button type="button" data-library-edit="${escape(item.id)}">管理</button><button type="button" data-library-archive="${escape(item.id)}">${item.archived ? "恢复" : "归档"}</button>` : ""}</footer></article>`;
+    return `<article class="library-card" data-library-id="${escape(item.id)}"><div class="library-card-top"><span class="library-type-chip">${escape(item.typeLabel)}</span>${item.archived ? '<span>已归档</span>' : `<label class="library-pick"><input type="checkbox" data-library-select="${escape(item.id)}" aria-label="选择 ${escape(item.title)}">选择</label>`}</div><h2>${escape(item.title)}</h2><p>${escape(item.description || "暂无补充说明，可打开预览查看具体内容。")}</p><div class="library-card-meta">${escape(item.collections.map(group => group.name).join(" · ") || "未分类")}<br>版本 ${item.version} · ${item.visibility === "teachers" ? "教师共享" : "仅自己"}${item.canManage ? " · 我的素材" : ""}</div><footer><button type="button" data-library-preview="${escape(item.id)}">预览</button>${!item.archived ? `<button type="button" class="library-primary" data-library-use="${escape(item.id)}">加入课程</button>` : ""}${item.canManage ? `<button type="button" data-library-edit="${escape(item.id)}">管理</button><button type="button" data-library-archive="${escape(item.id)}">${item.archived ? "恢复" : "归档"}</button>` : ""}</footer></article>`;
   }
 
   async function load() {
@@ -312,7 +312,7 @@
   });
 
   async function preview(item) {
-    const target = item.construction ? unwrap(await api.json("POST", `/construction/materials/${item.id}/preview`, {})) : await request(`/items/${item.id}/preview`);
+    const target = await write("POST", `/items/${item.id}/source-preview`, {});
     const url = new URL(target.href, window.location.origin);
     if (url.origin !== window.location.origin) throw new Error("项目预览地址无效。");
     window.location.assign(url.href);

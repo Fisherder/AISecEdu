@@ -1,7 +1,9 @@
 # ---- Stage 1: Base ----
 FROM node:22-alpine AS base
 
-RUN sed -i "s|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g" /etc/apk/repositories && apk add --no-cache libc6-compat
+ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
+
+RUN sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && apk add --no-cache libc6-compat
 RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
 
 WORKDIR /app
@@ -10,7 +12,7 @@ WORKDIR /app
 FROM base AS deps
 
 # Native build tools for sharp, @napi-rs/canvas
-RUN sed -i "s|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g" /etc/apk/repositories && apk add --no-cache python3 build-base g++ cairo-dev pango-dev jpeg-dev giflib-dev librsvg-dev
+RUN sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && apk add --no-cache python3 build-base g++ cairo-dev pango-dev jpeg-dev giflib-dev librsvg-dev
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/ ./packages/
@@ -52,13 +54,15 @@ RUN pnpm build
 # ---- Stage 4: Runner ----
 FROM node:22-alpine AS runner
 
+ARG ALPINE_MIRROR=dl-cdn.alpinelinux.org
+
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
-RUN sed -i "s|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g" /etc/apk/repositories && apk add --no-cache libc6-compat cairo pango jpeg giflib librsvg \
+RUN sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && apk add --no-cache libc6-compat cairo pango jpeg giflib librsvg \
     poppler-utils tesseract-ocr tesseract-ocr-data-eng tesseract-ocr-data-chi_sim
 
 RUN addgroup --system --gid 1001 nodejs && \
