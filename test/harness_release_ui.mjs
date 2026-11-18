@@ -41,13 +41,19 @@ try {
   const html = await page.text();
   assert.match(html, /<title>DeepSeek Harness<\/title>/i);
   assert.ok(html.includes('__DSH_BOOT__'), 'The official server did not inject the Web bootstrap');
-  const script = html.match(/<script[^>]*\bsrc=["']([^"']+)["']/i)?.[1];
-  assert.ok(script, 'The official Web UI did not reference its application bundle');
-  const asset = new URL(script, address);
-  assert.equal(asset.origin, address);
-  const response = await fetch(asset, { signal: AbortSignal.timeout(5000) });
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-type') ?? '', /javascript/);
+  // Match tags outside inline bootstrap scripts. The manifest contains HTML as data.
+  const assets = Array.from(html.matchAll(/<script\b([^>]*)>[\s\S]*?<\/script>/gi))
+    .map(match => match[1].match(/(?:^|\s)src=["']([^"']+)["']/i)?.[1])
+    .filter(Boolean);
+  assert.ok(assets.some(src => /(?:^|\/)assets\/index-[^/]+\.js$/.test(src)),
+    'The official Web UI did not reference its bundled application entry');
+  for (const src of assets) {
+    const asset = new URL(src, address);
+    assert.ok(asset.origin === address, 'The published scripts must be local in the offline build');
+    const response = await fetch(asset, { headers: { cookie }, signal: AbortSignal.timeout(5000) });
+    assert.equal(response.status, 200, `Unexpected status for ${asset.pathname}`);
+    assert.match(response.headers.get('content-type') ?? '', /javascript/);
+  }
   console.log('Official Web UI served its HTML and JavaScript in the offline container.');
 } finally {
   app.kill();
