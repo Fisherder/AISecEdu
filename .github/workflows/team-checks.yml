@@ -13,7 +13,7 @@ permissions:
 jobs:
   harness-integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,8 +30,14 @@ jobs:
           trap 'docker rm "$container" >/dev/null' EXIT
           docker cp "$container:/opt/deepseek-harness" "$RUNNER_TEMP/image-dsh"
           diff --no-dereference --brief --recursive vendor/deepseek-harness "$RUNNER_TEMP/image-dsh"
+          test "$(docker run --rm --network none --read-only --tmpfs /tmp -e DSH_HOME=/tmp/dsh aisecedu-harness-test dsh --version)" = "0.2.2-rc.4"
       - name: Exercise the official agent loop with the local model fixture
         run: docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges aisecedu-harness-test node --test
+      - name: Verify the unmodified official Web UI in an offline container
+        run: >
+          docker run --rm -i --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=256m
+          --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges -w /tmp -e DSH_HOME=/tmp/dsh
+          aisecedu-harness-test node --input-type=module < test/harness_release_ui.mjs
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -106,7 +112,7 @@ jobs:
       - name: Test the teaching client, durable jobs and course catalogue
         run: |
           python -m pip install -r ops/team/requirements.txt
-          python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_guide_teaching_turn_unit.py test/test_course_catalog_unit.py
+          python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py test/test_course_catalog_unit.py
       - name: Verify cross-course navigation in desktop and mobile viewports
         run: CHROME_BIN="$(command -v google-chrome)" node test/browser/teacher-course-navigation.mjs
       - name: Courseware editor browser component checks
