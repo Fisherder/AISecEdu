@@ -551,6 +551,9 @@
     "submitAnswers": "Submit Answers",
     "aiGrading": "AI is grading...",
     "aiGradingWait": "Please wait, analyzing your answers",
+    "gradingPending": "Grading pending",
+    "gradingPendingDetail": "Your answers are saved. Try again to complete grading.",
+    "retryGrading": "Retry grading",
     "quizReport": "Quiz Report",
     "retry": "Retry"
   },

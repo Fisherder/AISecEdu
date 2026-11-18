@@ -69,11 +69,11 @@ export async function persistQuizReview(
   input: QuizDraftInput & { results: QuestionResult[] },
   writer: Pick<QuizAttemptWriter, 'recordPhase'>,
 ): Promise<void> {
-  await writer.recordPhase({ ...input, phase: 'reviewed' });
+  await writer.recordPhase({ ...input, phase: 'reviewed', requireCurrentSubmission: true });
 }
 
 export interface QuizViewHydratedState {
-  phase: 'not_started' | 'answering' | 'reviewing';
+  phase: 'not_started' | 'answering' | 'grading_pending' | 'reviewing';
   answers: QuizAnswers;
   results: QuestionResult[];
 }
@@ -88,6 +88,9 @@ export function quizViewStateFromAttempt(
       answers: state.answers,
       results: state.results ?? [],
     };
+  }
+  if (state.phase === 'submitted') {
+    return { phase: 'grading_pending', answers: state.answers, results: [] };
   }
   if (state.phase === 'draft' && Object.keys(state.answers).length === 0) {
     return { phase: 'not_started', answers: {}, results: [] };

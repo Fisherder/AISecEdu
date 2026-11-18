@@ -551,6 +551,9 @@
     "submitAnswers": "Enviar Respostas",
     "aiGrading": "A IA está corrigindo...",
     "aiGradingWait": "Aguarde, analisando suas respostas",
+    "gradingPending": "Correção pendente",
+    "gradingPendingDetail": "Suas respostas foram salvas. Tente novamente para concluir a correção.",
+    "retryGrading": "Tentar corrigir novamente",
     "quizReport": "Relatório do Questionário",
     "retry": "Tentar novamente"
   },

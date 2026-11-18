@@ -536,6 +536,9 @@
     "submitAnswers": "提交答案",
     "aiGrading": "AI 正在批改中...",
     "aiGradingWait": "請稍候，正在分析你的答案",
+    "gradingPending": "答卷待評",
+    "gradingPendingDetail": "答案已儲存，可重試完成評分。",
+    "retryGrading": "重試評分",
     "quizReport": "答題報告",
     "retry": "重新答題"
   },

@@ -81,6 +81,8 @@ python test/harness_client_contract.py
 
 发布前记录现有 Web、Worker 和课堂镜像，并确认上次数据库备份可读。部署时保持 Web 和 Worker 使用相同版本，以合成教师验证只读咨询与一次审批操作，以合成学生验证导学、课堂问答、跨班访问和关闭 AI 时的提示。需紧急停止外送时，关闭开发实例的 AI 开关并重新加载受影响服务。需要恢复上一版行为时，恢复这一组镜像及其配置；先处理升级后尚未完成的作业，避免由旧 worker 重复领取。恢复服务版本无需还原业务数据库。数据库灾备演练应在独立库进行。
 
+课堂普通短答 `/api/quiz-grade` 使用 Harness 回合和实际计费用量，判评未完成时保留原答卷并允许重试，成绩仅在全部题目评分有效后写入。
+
 ## TypeScript 历史测试诊断
 
 PR #7 的 `classroom-contracts` 首次完整运行 TypeScript 时，应用代码通过，11 个旧测试报告 40 条诊断。本次修复了模型结构化输出夹具和教师意图断言的两条诊断。余下 38 条记录在[精确诊断基线](../../ops/team/agent-runtime-typescript-baseline.json)，涉及旧场景与流程测试、辩论代理测试及生成修复路由测试。其中三条来自 `generated-valve-review-case.json`、`generated-stux-review-case.json` 和 `generated-stux-pointer-review-case.json` 缺失。没有将本地不可复现的生成内容替代为历史夹具。既有的辩论请求体限制断言及生成路由遗漏选项断言也仍有独立的运行时失败。

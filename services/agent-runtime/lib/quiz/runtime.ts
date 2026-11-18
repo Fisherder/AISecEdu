@@ -31,6 +31,7 @@ export interface QuizAttemptRecordInput {
   results?: QuestionResult[];
   /** Begin a distinct retry even when the prior attempt has the same payload. */
   startNewAttempt?: boolean;
+  requireCurrentSubmission?: boolean;
 }
 
 export interface LegacyQuizAttemptInput {
@@ -542,6 +543,11 @@ export async function recordQuizAttempt(
 
         const lastRecord = records.at(-1);
         const last = asQuizPayload(lastRecord);
+        if (input.requireCurrentSubmission
+            && (session.status !== 'active' || last?.phase !== 'submitted'
+              || !sameAnswers(last.answers, input.answers))) {
+          throw new QuizRetryProgressedError(sessionId);
+        }
 
         if (input.startNewAttempt && !created) {
           // A concurrent retry may already have created the first active child.
