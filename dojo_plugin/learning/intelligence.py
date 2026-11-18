@@ -78,6 +78,75 @@ class _StageTimings:
         return stages
 
 
+@contextmanager
+def _model_request_deadline(seconds):
+    """Bound model I/O in both gevent Web requests and standalone job workers.
+
+    ``requests`` read timeouts reset whenever an upstream proxy emits bytes,
+    so a nominal 120-second timeout could still occupy the only authoring
+    worker for more than ten minutes. Gunicorn's gevent workers need a timer
+    owned by the current greenlet, never a process-wide alarm. The standalone
+    worker can use SIGALRM on its main thread. Other native threads retain
+    the bounded idle timeout and incremental response checks.
+    """
+
+    try:
+        from gevent import Timeout as GreenletTimeout
+        from gevent.monkey import is_module_patched
+    except ImportError:
+        pass
+    else:
+        if is_module_patched("socket"):
+            timer = GreenletTimeout(max(0.001, float(seconds)))
+            try:
+                with timer:
+                    yield
+            except GreenletTimeout as exception:
+                if exception is not timer:
+                    raise
+                raise requests.Timeout(
+                    f"model request exceeded {float(seconds):.0f}s total wall-clock deadline"
+                ) from exception
+            return
+
+    supported = (
+        threading.current_thread() is threading.main_thread()
+        and hasattr(signal, "SIGALRM")
+        and hasattr(signal, "setitimer")
+    )
+    if not supported:
+        yield
+        return
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    if previous_timer[0] > 0 and previous_timer[0] <= float(seconds):
+        # A host process deadline already provides the stricter bound.
+        yield
+        return
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    started = time.monotonic()
+
+    def timed_out(_signum, _frame):
+        raise requests.Timeout(
+            f"model request exceeded {float(seconds):.0f}s total wall-clock deadline"
+        )
+
+    signal.signal(signal.SIGALRM, timed_out)
+    signal.setitimer(signal.ITIMER_REAL, max(0.001, float(seconds)))
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0] > 0:
+            elapsed = time.monotonic() - started
+            remaining = max(0.001, previous_timer[0] - elapsed)
+            signal.setitimer(
+                signal.ITIMER_REAL,
+                remaining,
+                previous_timer[1],
+            )
+
+
 def _read_model_response_json(response, deadline):
     """Observe keep-alive bytes instead of letting buffered JSON reads wait forever.
 
