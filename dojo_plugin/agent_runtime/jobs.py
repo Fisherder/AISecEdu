@@ -68,6 +68,7 @@ from .conversation import turn_wait_state, execution_chain
 from .session_events import record_step_lifecycle, record_turn_lifecycle
 from .harness import TurnDeferred, advance_turn
 from .teacher_model_context import teacher_model_payload, teacher_platform_facts
+from .teacher_documents import DOCUMENT_INSTRUCTION, document_deliverables, requested_document_formats
 from .upstream_turn import UpstreamTurnError, invoke_turn, request_body, result_object, upstream_enabled
 from .commands import COMMAND_JOB_KINDS, execute_command, finish_command_job, reopen_command_job, recover_command_job
 from .local_extract import index_verified_local_source, locally_extractable
@@ -75,6 +76,7 @@ from .reliability import RuntimeJobError, recovery_decision, recovery_due, publi
 from .materials import (
     MATERIAL_ANALYSIS_VERSION,
     MATERIAL_INDEX_VERSION,
+    MaterialContextError,
     build_course_material_context,
     compact_material_grounding,
     course_material_grounding_requested,
@@ -2784,6 +2786,7 @@ def _harness_courseware_authorized(job, payload):
 
 def _runtime_request_body(job, route, payload):
     upstream_chat = job.kind == "agent.chat" and payload.get("chatBackend") == "upstream"
+    formats = requested_document_formats(payload) if upstream_chat else ()
     if job.kind == "agent.chat":
         payload = teacher_model_payload(payload)
     elif isinstance(payload.get("courseContext"), dict) and "availableCourses" in payload["courseContext"]:
@@ -2802,7 +2805,8 @@ def _runtime_request_body(job, route, payload):
             "material.add_to_module（materialId、referenceId、moduleIndex、可选 name）。"
             "课程和章节标识必须来自平台事实，文件标识必须来自附件，不得猜测。"
             "待审批操作还没有执行。只有 operationObservations 和平台可核验的既有历史可以表述为已完成。"
-            "若操作不在支持范围内，提供可用的草稿或建议，并指向对应的课程中心入口。",
+            "若操作不在支持范围内，提供可用的草稿或建议，并指向对应的课程中心入口。"
+            + ("\n" + DOCUMENT_INSTRUCTION if formats else ""),
             scrub_payload({
                 "request": payload.get("prompt"),
                 "executionMode": payload.get("executionMode"),
@@ -2812,6 +2816,7 @@ def _runtime_request_body(job, route, payload):
                 "questionReply": context.get("questionReply"),
                 "approvedPlan": context.get("approvedPlan"),
                 "operationObservations": (context.get("agentLoop") or {}).get("trace"),
+                **({"requestedDocumentFormats": list(formats)} if formats else {}),
                 "sourceRefs": payload.get("sourceRefs"),
                 "sourceMaterials": payload.get("sourceMaterials"),
                 "materialDossier": payload.get("materialDossier"),
@@ -3102,19 +3107,39 @@ def _upstream_teacher_result(payload, text):
     if not isinstance(answer, str) or not answer.strip():
         raise RuntimeJobError("教学对话服务返回空白答复", category="service")
     result = {"answer": redact_text(answer, limit=48000)}
+    formats = requested_document_formats(payload)
+    if formats:
+        document = response.get("document")
+        if document is not None:
+            try:
+                deliverables = document_deliverables(document, formats)
+            except ValueError as error:
+                raise RuntimeJobError(str(error), category="quality") from None
+            return {
+                "answer": "教学文档草稿",
+                "deliverables": deliverables,
+                "executionMode": "execute",
+                "intentDecision": {
+                    "version": "teacher-intent-v1", "intent": "create", "executionMode": "execute",
+                    "clarification": {"state": "confirmed"},
+                },
+            }
+        if "document" not in response:
+            raise RuntimeJobError("教学文档回合未返回文档结构，请重试。", category="quality")
     mode = payload.get("executionMode") or "auto"
     observations = ((payload.get("context") or {}).get("agentLoop") or {}).get("trace")
     proposal = response.get("proposal")
     if (
         mode in {"auto", "execute"}
         and not observations
+        and not formats
         and isinstance(proposal, dict)
         and isinstance(proposal.get("tool"), str)
         and proposal["tool"] in UPSTREAM_APPROVED_TEACHING_TOOLS
         and isinstance(proposal.get("arguments"), dict)
     ):
         result["toolProposals"] = [proposal]
-    elif mode == "execute" and not observations:
+    elif mode == "execute" and not observations and not formats:
         result["answer"] = "本轮返回文字建议。课程、章节和教学内容的变更也可通过课程中心提交。\n\n" + result["answer"]
     if mode == "auto":
         intent, mode = ("operate", "execute") if result.get("toolProposals") else ("answer", "ask")
@@ -3127,31 +3152,57 @@ def _upstream_teacher_result(payload, text):
     return result
 
 
+def _require_upstream_teacher_scope(job, payload):
+    from ..api.v1.teaching import _require_teacher, _teacher_dojos
+    from .scope import build_scope
+
+    owner = Users.query.filter_by(id=job.owner_id).first()
+    thread = TeachingAgentThreads.query.filter_by(id=job.thread_id, user_id=job.owner_id).first()
+    if owner is None or thread is None or thread.status != "ACTIVE":
+        raise PermanentJobError("教学对话已归档或不可用")
+    _require_teacher(owner)
+    if thread.dojo_id is not None:
+        build_scope(owner, role="teacher", dojo_id=thread.dojo_id, module_index=thread.module_index)
+    if job.dojo_id is not None:
+        build_scope(owner, role="teacher", dojo_id=job.dojo_id, module_index=job.module_index)
+    facts = (payload.get("context") or {}).get("platformFacts") or {}
+    scope = facts.get("scope") or {}
+    if (scope.get("dojoId"), scope.get("moduleIndex")) != (job.dojo_id, job.module_index):
+        raise PermanentJobError("课程或章节范围已变化，请重新发送这条教学要求。")
+    available_courses = {dojo.reference_id for dojo in _teacher_dojos(owner)}
+    if any(course.get("referenceId") not in available_courses for course in (facts.get("availableCourses") or [])):
+        raise PermanentJobError("可管理课程范围已变化，请重新发送教学要求。")
+
+
+def _require_teacher_document_sources(job, payload):
+    coverage = payload.get("materialContext") or {}
+    refs = [ref for ref in payload.get("sourceRefs") or []
+            if isinstance(ref, dict) and ref.get("type") == "material"]
+    if not refs and not coverage.get("expectedMaterialCount"):
+        return
+    if not refs or coverage.get("complete") is not True:
+        raise PermanentJobError("教学文档的引用资料尚未完成校验。")
+    try:
+        current = build_course_material_context(
+            owner_id=job.owner_id, dojo_id=job.dojo_id, source_refs=refs, require_complete=True,
+        )
+    except MaterialContextError:
+        raise PermanentJobError("教学文档的引用资料权限或版本已变化，请重新选择。") from None
+    pinned = {(row.get("id"), row.get("revisionId"), row.get("sha256")) for row in refs}
+    authorized = {(row["id"], row["revisionId"], row["sha256"]) for row in current["sourceRefs"]}
+    if pinned != authorized:
+        raise PermanentJobError("教学文档的引用资料权限或版本已变化，请重新选择。")
+
+
 def _invoke_agent_runtime(job, route, payload=None):
     payload = dict(payload or job.payload or {})
     body = _runtime_request_body(job, route, payload)
     if job.kind == "agent.chat" and payload.get("chatBackend") == "upstream":
-        from ..api.v1.teaching import _require_teacher, _teacher_dojos
-        from .scope import build_scope
-
         if not upstream_enabled():
             raise PermanentJobError("教学对话服务尚未启用")
-        owner = Users.query.filter_by(id=job.owner_id).first()
-        thread = TeachingAgentThreads.query.filter_by(id=job.thread_id, user_id=job.owner_id).first()
-        if owner is None or thread is None or thread.status != "ACTIVE":
-            raise PermanentJobError("教学对话已归档或不可用")
-        _require_teacher(owner)
-        if thread.dojo_id is not None:
-            build_scope(owner, role="teacher", dojo_id=thread.dojo_id, module_index=thread.module_index)
-        if job.dojo_id is not None:
-            build_scope(owner, role="teacher", dojo_id=job.dojo_id, module_index=job.module_index)
-        facts = (payload.get("context") or {}).get("platformFacts") or {}
-        scope = facts.get("scope") or {}
-        if (scope.get("dojoId"), scope.get("moduleIndex")) != (job.dojo_id, job.module_index):
-            raise PermanentJobError("课程或章节范围已变化，请重新发送这条教学要求。")
-        available_courses = {dojo.reference_id for dojo in _teacher_dojos(owner)}
-        if any(course.get("referenceId") not in available_courses for course in (facts.get("availableCourses") or [])):
-            raise PermanentJobError("可管理课程范围已变化，请重新发送教学要求。")
+        _require_upstream_teacher_scope(job, payload)
+        if requested_document_formats(payload):
+            _require_teacher_document_sources(job, payload)
         encoded = _runtime_json_bytes(body)
         _record_runtime_dispatch(job, body, encoded)
         try:
@@ -3384,6 +3435,14 @@ def _persist_result(job, result):
                 for proposal in tool_proposals
                 if proposal.get("tool") not in GENERATION_OPTION_TOOLS
             ]
+        is_upstream_document = (job.payload or {}).get("chatBackend") == "upstream" and bool(result.get("deliverables"))
+        if is_upstream_document:
+            accepted = prepared_input(job)
+            document_payload = accepted["payload"] if accepted else job.payload
+            if not requested_document_formats(document_payload):
+                raise PermanentJobError("本轮教学文档没有可核验的教师交付要求。")
+            _require_upstream_teacher_scope(job, document_payload)
+            _require_teacher_document_sources(job, document_payload)
         stored_files = persist_agent_deliverables(job, [] if refinement else result.get("deliverables"))
         public_files = [
             public
@@ -3391,6 +3450,8 @@ def _persist_result(job, result):
             if (public := public_agent_file(item)) is not None
         ]
         answer = _agent_answer(result)
+        if is_upstream_document and public_files:
+            answer = "教学文档草稿已生成，可通过下方链接下载。"
         if (job.payload or {}).get("chatBackend") == "upstream" and result.get("toolProposals"):
             if tool_proposals:
                 answer = "请核对下方操作和参数，审批通过后才会提交。\n\n" + answer

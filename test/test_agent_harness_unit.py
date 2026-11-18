@@ -635,6 +635,7 @@ def test_upstream_teacher_turn_only_enqueues_approved_teaching_operations():
         "result_object": json.loads,
         "redact_text": lambda value, limit: value[:limit],
         "scrub_payload": lambda value, key: value,
+        "requested_document_formats": load("dojo_plugin/agent_runtime/teacher_documents.py", {}).requested_document_formats,
     }
     exec(compile(tree, "jobs.py", "exec"), namespace)
     project = namespace["_upstream_teacher_result"]
@@ -783,3 +784,185 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     assert not eligible(SimpleNamespace(**job), {**payload, "artifactType": "simulation"})
     namespace["DojoAdmins"] = table(dojo_id=2, user_id=9)
     assert not eligible(SimpleNamespace(**job), payload)
+
+
+@pytest.mark.parametrize("prompt, mode, expected", [
+    ("请帮我写一份关于蒸发的Word教案", "auto", ("docx",)),
+    ("制作蒸发教案，给我DOCX和Markdown文件", "execute", ("docx", "md")),
+    ("帮我写一份古诗教学教案", "auto", ("docx",)),
+    ("请制作教案，不要 DOCX，只要 Markdown", "auto", ("md",)),
+    ("如何制作一份 Word 教案？", "auto", ()),
+    ("请制作 Markdown 教案", "ask", ()),
+    ("请制作 Markdown 教案", "plan", ()),
+    ("不要制作教案，请解释评估方法", "auto", ()),
+    ("请把教学文档输出为 HTML", "auto", ()),
+])
+def test_teacher_document_requires_an_explicit_supported_request(prompt, mode, expected):
+    documents = load("dojo_plugin/agent_runtime/teacher_documents.py", {})
+    assert documents.requested_document_formats({"prompt": prompt, "executionMode": mode}) == expected
+
+
+def test_upstream_teacher_documents_reach_the_real_private_download_handler(setup, monkeypatch, tmp_path):
+    import io
+    import zipfile
+
+    from flask import Flask, request, send_file
+
+    session, thread, _ = setup
+    thread.dojo_id, thread.module_index = 2, 0
+    package = "harness_fixture"
+    docs = importlib.import_module(package + ".agent_runtime.teacher_documents")
+    files = importlib.import_module(package + ".agent_runtime.files")
+    upstream = importlib.import_module(package + ".agent_runtime.upstream_turn")
+    monkeypatch.setattr(files, "_storage_root", lambda: tmp_path)
+
+    class ScopeError(ValueError):
+        pass
+
+    class PermanentJobError(RuntimeError):
+        pass
+
+    def require_teacher(owner):
+        if owner.id != 7:
+            raise ScopeError("Teacher permission required")
+
+    permitted_courses = {2}
+
+    def build_scope(owner, *, role, dojo_id, module_index):
+        assert role == "teacher"
+        if owner.id != 7 or dojo_id not in permitted_courses:
+            raise ScopeError("Course not found")
+
+    monkeypatch.setitem(sys.modules, package + ".api.v1.teaching", SimpleNamespace(
+        _require_teacher=require_teacher, _teacher_dojos=lambda _owner: [SimpleNamespace(reference_id="science")],
+    ))
+    monkeypatch.setitem(sys.modules, package + ".agent_runtime.scope", SimpleNamespace(build_scope=build_scope))
+
+    approved_source = {"id": "handout", "type": "material", "revisionId": "r1", "sha256": "1" * 64}
+    payload = {
+        "chatBackend": "upstream", "executionMode": "auto",
+        "prompt": "基于已授权讲义制作蒸发教案，交付DOCX和Markdown文件",
+        "context": {"platformFacts": {"scope": {"dojoId": 2, "moduleIndex": 0}, "availableCourses": [{"referenceId": "science"}]}},
+        "sourceRefs": [approved_source],
+        "sourceMaterials": [dict(approved_source, title="蒸发讲义", excerpts=["记录水量与实际观察"])],
+        "materialContext": {"complete": True, "expectedMaterialCount": 1},
+    }
+    job = add_job(session, "document-job", kind="agent.chat", dojo_id=2, module_index=0, payload=payload)
+    existing_message = Message(id=8, thread_id=thread.id, user_id=7, role="assistant", metadata_json={})
+    session.add(existing_message)
+    session.commit()
+    allowed_ids = {"handout"}
+
+    class MaterialContextError(ValueError):
+        pass
+
+    def material_context(*, owner_id, dojo_id, source_refs, require_complete):
+        assert (owner_id, dojo_id, require_complete) == (7, 2, True)
+        if any(ref["id"] not in allowed_ids for ref in source_refs):
+            raise MaterialContextError("unavailable synthetic material")
+        return {"sourceRefs": [approved_source]}
+
+    wire_requests = []
+
+    def invoke_turn(body, *, encoded):
+        assert json.loads(encoded) == body
+        wire_requests.append(body)
+        context = json.loads(body["messages"][1]["content"])
+        assert context["requestedDocumentFormats"] == ["docx", "md"]
+        assert context["sourceRefs"] == [approved_source]
+        assert "普通教学文档" in body["messages"][0]["content"]
+        return {
+            "model": "synthetic-harness",
+            "usage": {"prompt_tokens": 7, "completion_tokens": 11},
+            "text": json.dumps({
+                "answer": "模型声称的链接不作为交付地址 https://example.invalid/file",
+                "document": {"title": "蒸发教学教案", "sections": [{
+                    "heading": "观察目标",
+                    "paragraphs": ["记录同样大小的碟子中温水与冷水的变化。", "HTML 字符示例 <b>是文本</b>。"],
+                }]},
+                "proposal": {"tool": "course.create", "arguments": {"name": "不会自动执行"}},
+            }, ensure_ascii=False),
+        }
+
+    wanted = {"_runtime_request_body", "_runtime_json_bytes", "_upstream_teacher_result", "_invoke_agent_runtime",
+              "_require_upstream_teacher_scope", "_require_teacher_document_sources", "_persist_result", "_agent_answer"}
+    tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
+    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in wanted]
+    facts = importlib.import_module(package + ".agent_runtime.teacher_model_context")
+    job_namespace = {
+        "__name__": package + ".agent_runtime.test_document_job",
+        "__package__": package + ".agent_runtime",
+        "json": json, "request_body": upstream.request_body, "result_object": upstream.result_object,
+        "teacher_model_payload": facts.teacher_model_payload, "scrub_payload": lambda value, **_: value,
+        "redact_text": lambda value, limit: value[:limit], "requested_document_formats": docs.requested_document_formats,
+        "document_deliverables": docs.document_deliverables, "DOCUMENT_INSTRUCTION": docs.DOCUMENT_INSTRUCTION,
+        "upstream_enabled": lambda: True, "invoke_turn": invoke_turn, "UpstreamTurnError": upstream.UpstreamTurnError,
+        "RuntimeJobError": reliability.RuntimeJobError, "PermanentJobError": PermanentJobError,
+        "MaterialContextError": MaterialContextError, "Users": User, "TeachingAgentThreads": Thread,
+        "build_course_material_context": material_context, "_record_runtime_dispatch": lambda *args: None,
+        "restore_input_cache": lambda *args, **kwargs: None, "prepared_input": lambda _job: {"payload": payload},
+        "validated_generation_options": lambda *args: None, "_validated_tool_proposals": lambda *args: [],
+        "persist_agent_deliverables": files.persist_agent_deliverables, "public_agent_file": files.public_agent_file,
+        "_agent_message_for_job": lambda _job: existing_message,
+        "ConversationCards": SimpleNamespace(query=SimpleNamespace(filter_by=lambda **_: SimpleNamespace(all=lambda: []))),
+    }
+    exec(compile(tree, "jobs.py", "exec"), job_namespace)
+
+    result = job_namespace["_invoke_agent_runtime"](job, {}, payload)
+    assert result["model"]["usage"]["completion_tokens"] == 11
+    assert "toolProposals" not in result["result"]
+    stored = job_namespace["_persist_result"](job, result["result"])
+    assert stored["requiresAction"] is False
+    assert [file["format"] for file in stored["files"]] == ["docx", "md"]
+    assert stored["answer"] == "教学文档草稿已生成，可通过下方链接下载。"
+    assert job_namespace["_persist_result"](job, result["result"])["files"] == stored["files"]
+    job.result = stored
+    session.commit()
+    public_files = existing_message.metadata_json["files"]
+    assert all("storageKey" not in file for file in public_files)
+
+    tree = ast.parse((ROOT / "dojo_plugin/api/v1/teaching.py").read_text())
+    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_job_for_user"
+                 or isinstance(node, ast.ClassDef) and node.name == "TeachingJobFile"]
+    endpoint = tree.body[-1]
+    endpoint.decorator_list = []
+    endpoint.body[0].decorator_list = []
+    route_namespace = {
+        "Resource": object, "TeachingJobs": Job, "ScopeError": ScopeError,
+        "_current_user": lambda: SimpleNamespace(id=int(request.headers["Fixture-User"])),
+        "public_agent_file": files.public_agent_file, "agent_file_path": files.agent_file_path,
+        "send_file": send_file, "_error": lambda _message, status, **_: ("missing", status),
+    }
+    exec(compile(tree, "teaching.py", "exec"), route_namespace)
+    app = Flask(__name__)
+    app.add_url_rule("/pwncollege_api/v1/teaching/jobs/<job_id>/files/<file_id>",
+                     view_func=route_namespace["TeachingJobFile"]().get)
+    browser = app.test_client()
+    for public in public_files:
+        owner_download = browser.get(public["downloadUrl"], headers={"Fixture-User": "7"})
+        assert owner_download.status_code == 200
+        assert owner_download.headers["Cache-Control"] == "private, no-store"
+        assert owner_download.headers["Content-Disposition"].startswith("attachment")
+        assert browser.get(public["downloadUrl"], headers={"Fixture-User": "8"}).status_code == 404
+        if public["format"] == "docx":
+            with zipfile.ZipFile(io.BytesIO(owner_download.data)) as archive:
+                assert "观察目标" in archive.read("word/document.xml").decode()
+                assert not any("vba" in name.lower() for name in archive.namelist())
+        else:
+            assert "## 观察目标" in owner_download.text
+            assert "&lt;b&gt;是文本&lt;/b&gt;" in owner_download.text
+
+    allowed_ids.clear()
+    with pytest.raises(PermanentJobError, match="引用资料权限或版本"):
+        job_namespace["_invoke_agent_runtime"](job, {}, payload)
+    with pytest.raises(PermanentJobError, match="引用资料权限或版本"):
+        job_namespace["_persist_result"](job, result["result"])
+    permitted_courses.clear()
+    with pytest.raises(ScopeError, match="Course not found"):
+        job_namespace["_invoke_agent_runtime"](job, {}, payload)
+    assert len(wire_requests) == 1
+    with pytest.raises(ValueError, match="普通教学文本"):
+        docs.document_deliverables(
+            {"title": "文档", "sections": [{"heading": "示例", "paragraphs": ["<script>placeholder</script>"]}]},
+            ("md",),
+        )
