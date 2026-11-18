@@ -58,7 +58,7 @@ from ...learning.exercise_modes import (
     is_retired_exercise,
     is_supported_exercise,
 )
-from ...learning.context import guide_reference_catalog, learning_profile_context
+from ...learning.context import guide_reference_options, learning_profile_context
 from ...learning.standards import ABILITY_LABELS
 from ...learning.student_experience import (
     activity_state,
@@ -3302,6 +3302,16 @@ class LearningGuide(Resource):
         if selected is None and threads:
             selected = threads[0]
         profile = learning_profile_context(user)
+        selected_view = guide_thread_view(selected, include_messages=True) if selected else None
+        reference_options = guide_reference_options(
+            user, profile, selected_view["referenceIds"] if selected_view else (),
+        )
+        visible_reference_ids = {item["id"] for item in reference_options}
+        if selected_view:
+            selected_view["referenceIds"] = [
+                reference_id for reference_id in selected_view["referenceIds"]
+                if reference_id in visible_reference_ids
+            ]
         guide_skills = [
             {
                 **item,
@@ -3316,7 +3326,7 @@ class LearningGuide(Resource):
             (
                 attempt
                 for attempt in profile.get("recentAttempts") or []
-                if attempt.get("status") == "ACTIVE"
+                if attempt.get("status") == "ACTIVE" and attempt.get("referenceId") in visible_reference_ids
             ),
             None,
         )
@@ -3334,11 +3344,7 @@ class LearningGuide(Resource):
         return {
             "success": True,
             "threads": [guide_thread_view(thread) for thread in threads],
-            "thread": (
-                guide_thread_view(selected, include_messages=True)
-                if selected
-                else None
-            ),
+            "thread": selected_view,
             "profile": {
                 "summary": profile.get("summary") or {},
                 "activeAttempt": active,
@@ -3351,7 +3357,7 @@ class LearningGuide(Resource):
                 )[:3],
                 "recommendations": (profile.get("recommendations") or [])[:4],
             },
-            "referenceOptions": guide_reference_catalog(profile, include_historical=False),
+            "referenceOptions": reference_options,
             "quickPrompts": quick_prompts,
             "workspace": student_agent_snapshot(user),
         }

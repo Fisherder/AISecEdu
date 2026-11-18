@@ -57,6 +57,7 @@ def guide():
         "completed": True,
         "objectives": ["区分观察和推测"],
         "attemptCount": 3,
+        "verifiedEvidenceCount": 2,
         "attempts": [evidence],
         "interfaces": [evidence],
         "privateAnswer": PRIVATE,
@@ -89,7 +90,7 @@ def guide():
         "LearningGuideMessages": lambda **fields: SimpleNamespace(
             id=1, created=datetime.datetime.now(datetime.timezone.utc), **fields,
         ),
-        "guide_thread_view": lambda thread: {"id": thread.id},
+        "guide_thread_view": lambda thread: {"id": thread.id, "referenceIds": thread.context.get("referencedExerciseIds", [])},
         "context_digest": lambda _: "synthetic-digest",
         "learning_profile_context": Mock(return_value=profile),
         "guide_reference_summaries": Mock(side_effect=lambda _, __, refs: [exercise] if refs == [REFERENCE] else []),
@@ -128,10 +129,13 @@ def test_actual_guide_turn_only_sends_selected_public_fields_and_safe_history(gu
     assert result["contextCoverage"]["activeAttempt"] is True
     assert result["contextCoverage"]["environmentAvailable"] is False
     assert result["contextCoverage"]["referencedAttempts"] == 3
+    assert result["contextCoverage"]["referencedEvidenceEvents"] == 2
+    assert result["message"]["metadata"]["scopeValidation"]["status"] == "VALIDATED"
     body = guide.invoke_turn.call_args.args[0]
     serialized = json.dumps(body)
     assert PRIVATE not in serialized
     assert "99.321" not in serialized
+    assert "verifiedEvidenceCount" not in serialized
     assert "studentWorkspace" not in serialized
     assert "activeStudyContext" not in serialized
     data = json.loads(body["messages"][-1]["content"])
@@ -177,3 +181,94 @@ def test_disabled_guide_keeps_offline_feedback_without_provider_call(guide):
     assert "已记录 3 次尝试" in result["message"]["content"]
     guide.invoke_turn.assert_not_called()
     guide.record_model_dispatch.assert_not_called()
+
+
+def test_guide_inherits_saved_selection_and_explicit_empty_selection_clears_scope(guide):
+    guide.upstream_enabled.return_value = False
+    selected = guide.call("怎样复习？", [REFERENCE])
+    assert selected["thread"]["referenceIds"] == [REFERENCE]
+    inherited = guide.call("下一步？")
+    assert inherited["message"]["metadata"]["scopeValidation"]["status"] == "DETERMINISTIC"
+    assert inherited["contextCoverage"]["referencedAttempts"] == 3
+    assert inherited["contextCoverage"]["referencedEvidenceEvents"] == 2
+    cleared = guide.call("改成一般复习建议", [])
+    assert cleared["thread"]["referenceIds"] == []
+    assert cleared["contextCoverage"]["scopeMode"] == "PROFILE"
+    assert cleared["contextCoverage"]["referencedAttempts"] == 0
+    assert cleared["contextCoverage"]["referencedEvidenceEvents"] == 0
+    assert cleared["message"]["metadata"]["scopeValidation"]["status"] == "NOT_APPLICABLE"
+    guide.invoke_turn.assert_not_called()
+
+
+def test_unbounded_reference_lookup_requires_current_visibility_and_counts_own_verified_receipts():
+    user = SimpleNamespace(id=123, type="user")
+    course_id = "science~00000001"
+    reference = f"{course_id}/intro/observation"
+    saved_reference = f"{course_id}/intro/review"
+    module = SimpleNamespace(id="intro", name="入门", visible=Mock(return_value=True))
+    course = SimpleNamespace(reference_id=course_id, name="科学", modules=[module])
+    challenge = SimpleNamespace(id="observation", name="观察", reference_id=reference, dojo=course,
+                                module=module, exercise_mode="CONTAINER", visible=Mock(return_value=True),
+                                dojo_id=1, module_index=2, challenge_index=3, challenge_id=4)
+    saved = SimpleNamespace(id="review", name="复习", reference_id=saved_reference, dojo=course,
+                            module=module, exercise_mode="CONTAINER", visible=Mock(return_value=True))
+    module.challenges = [challenge, saved]
+    access_query = Mock()
+    access_query.first.return_value = course
+    own_attempts = Mock()
+    own_attempts.count.return_value = 7
+    own_attempts.order_by.return_value.limit.return_value.all.return_value = [
+        SimpleNamespace(id="verified"), SimpleNamespace(id="broken"),
+    ]
+    evidence_query = Mock()
+    evidence_query.filter_by.return_value.order_by.return_value.all.return_value = [
+        SimpleNamespace(source="PLATFORM", trust_level=3, payload={"private": PRIVATE}),
+        SimpleNamespace(source="CLIENT", trust_level=3, payload={"private": PRIVATE}),
+    ]
+    namespace = {
+        "Dojos": SimpleNamespace(viewable=Mock(return_value=access_query)),
+        "LearningAttempts": SimpleNamespace(query=SimpleNamespace(filter_by=Mock(return_value=own_attempts)),
+                                            started=SimpleNamespace(desc=Mock())),
+        "LearningEvidenceEvents": SimpleNamespace(query=evidence_query, sequence="sequence"),
+        "LearningChallengeProfiles": SimpleNamespace(query=SimpleNamespace(get=Mock(return_value=None))),
+        "verify_evidence_chain": Mock(side_effect=lambda attempt_id, **_: {"valid": attempt_id == "verified"}),
+    }
+    load_definitions("dojo_plugin/learning/context.py", namespace, {
+        "guide_reference_catalog", "guide_reference_options", "_visible_guide_challenge",
+        "_guide_reference_option", "_guide_evidence_count", "guide_reference_summaries",
+    })
+    profile = {"courses": [], "recentAttempts": [{
+        "referenceId": reference, "courseId": course_id, "moduleId": "intro", "challengeId": "observation",
+        "status": "ACTIVE", "reflection": PRIVATE,
+    }]}
+    options = namespace["guide_reference_options"]
+    summaries = namespace["guide_reference_summaries"]
+    items = options(user, profile, [saved_reference])
+    assert [item["id"] for item in items] == [reference, saved_reference]
+    assert items[0]["recentAttempts"] == 1
+    summary = summaries(user, profile, [reference])[0]
+    assert summary["attemptCount"] == 7
+    assert summary["verifiedEvidenceCount"] == 1
+    assert PRIVATE not in json.dumps([items, summary])
+    namespace["LearningAttempts"].query.filter_by.assert_called_once_with(
+        user_id=user.id, dojo_id=1, module_index=2, challenge_index=3,
+    )
+    namespace["Dojos"].viewable.assert_called_with(id=course_id, user=user)
+    challenge.visible.return_value = False
+    assert [item["id"] for item in options(user, profile, [saved_reference])] == [saved_reference]
+    assert summaries(user, profile, [reference]) == []
+    access_query.first.return_value = None
+    assert options(user, profile, [saved_reference]) == []
+    assert summaries(user, profile, [reference]) == []
+    assert namespace["LearningAttempts"].query.filter_by.call_count == 1
+
+
+def test_guide_blocks_model_answers_outside_the_selected_course_scope(guide):
+    guide.invoke_turn.return_value["text"] = json.dumps({
+        "answer": "这是另一个课程的结论。", "usedReferenceIds": ["other/course/exercise"],
+    })
+    result = guide.call("怎么区分观察和推测？", [REFERENCE])
+    assert result["provider"] == "MODEL_SCOPE_BLOCKED"
+    assert result["message"]["metadata"]["scopeValidation"]["status"] == "BLOCKED"
+    assert result["contextCoverage"]["referencedEvidenceEvents"] == 2
+    assert "另一个课程的结论" not in result["message"]["content"]

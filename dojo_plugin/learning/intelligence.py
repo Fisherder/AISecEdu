@@ -1377,7 +1377,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
             "recentActivity": 0,
             "referencedExercises": len(referenced_contexts),
             "referencedAttempts": sum(item["attemptCount"] for item in referenced_contexts),
-            "referencedEvidenceEvents": 0,
+            "referencedEvidenceEvents": sum(item["verifiedEvidenceCount"] for item in referenced_contexts),
             "scopeValidated": scope_validation.get("status"),
         },
     }
