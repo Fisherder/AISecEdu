@@ -12580,6 +12580,29 @@ class AgentRuntimeLessons(Resource):
             )
 
 
+def _studio_agent_policy(user, scope, artifact, revision):
+    """Project current service policy only for the existing Studio owner."""
+    if (artifact.self_workspace_id is not None
+            or (scope.module_index is not None and artifact.module_index != scope.module_index)
+            or revision is None or type(revision.revision) is not int or revision.revision < 1
+            or revision.revision != artifact.current_revision):
+        raise ScopeError("Courseware studio not found")
+    ordinary = ordinary_teaching_course(artifact.dojo_id)
+    model = config.HARNESS_DEEPSEEK_MODEL if ordinary else None
+    enabled = not ordinary or bool(
+        model and upstream_enabled() and os.getenv("HARNESS_INTERNAL_URL", "").strip()
+        and os.getenv("HARNESS_SERVICE_SECRET", "").strip()
+    )
+    return {
+        "mode": "ordinary-harness" if ordinary else "legacy",
+        "ownerId": user.id,
+        "artifactId": artifact.id,
+        "revision": revision.revision,
+        "model": model if enabled else None,
+        "enabled": enabled,
+    }
+
+
 @teaching_namespace.route("/runtime/lessons/<string:artifact_id>/studio")
 class AgentRuntimeCoursewareStudio(Resource):
     @bypass_csrf_protection
@@ -12591,10 +12614,21 @@ class AgentRuntimeCoursewareStudio(Resource):
             artifact = _lesson_artifact(artifact_id, user, scope)
             if artifact.owner_id != user.id or artifact.status == "ARCHIVED":
                 raise ScopeError("Courseware studio not found")
+            read_scope = {"ownerId": user.id, "status": artifact.status}
+            policy_requested = request.args.get("agentPolicy") == "1"
+            current = current_artifact_revision(artifact) if policy_requested else None
+            if policy_requested:
+                policy = _studio_agent_policy(user, scope, artifact, current)
+                wanted = request.args.getlist("revision")
+                if wanted and (len(wanted) != 1 or wanted[0] != str(policy["revision"])):
+                    return _error(
+                        "课件版本已变化，请重新打开当前版后继续。", 409, code="REVISION_CONFLICT",
+                    )
+                read_scope["agentPolicy"] = policy
             if request.args.get("authorize") == "1":
-                return _ok({"ownerId": user.id, "status": artifact.status})
+                return _ok(read_scope)
             lesson = _lesson_payload(artifact)
-            requested = request.args.get("revision", type=int)
+            requested = request.args.get("revision", type=int) if not policy_requested else None
             if requested is not None:
                 revision = TeachingArtifactRevisions.query.filter_by(
                     artifact_id=artifact.id, revision=requested,
@@ -12607,11 +12641,11 @@ class AgentRuntimeCoursewareStudio(Resource):
             rows = TeachingArtifactRevisions.query.filter_by(
                 artifact_id=artifact.id,
             ).order_by(TeachingArtifactRevisions.revision.desc()).limit(100).all()
-            current = current_artifact_revision(artifact)
+            if not policy_requested:
+                current = current_artifact_revision(artifact)
             return _ok({
+                **read_scope,
                 "lesson": lesson,
-                "ownerId": user.id,
-                "status": artifact.status,
                 "canPublish": artifact.dojo_id is not None and artifact.self_workspace_id is None,
                 "sourceRefs": current.source_refs if current else [],
                 "revisions": [{"revision": row.revision, "instruction": row.instruction,

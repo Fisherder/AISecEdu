@@ -1,3 +1,5 @@
+import type { AISecEduRequestSession } from '../aisecedu-integration';
+
 export interface ClassroomTurnMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -105,13 +107,17 @@ function createHarnessTransport(
   };
 }
 
-export async function recordHarnessUsage(result: HarnessTurnResult, source: string) {
+export async function recordHarnessUsage(
+  result: HarnessTurnResult,
+  source: string,
+  capturedSession?: AISecEduRequestSession,
+) {
   if (!result.usage) return;
 
   const { recordUsage } = await import('@/lib/server/usage-storage');
   const cacheReadTokens = result.usage.cache_read_input_tokens ?? 0;
   const cacheCreationTokens = result.usage.cache_creation_input_tokens ?? 0;
-  await recordUsage({
+  const input = {
     source,
     providerId: 'deepseek',
     modelId: result.model,
@@ -126,7 +132,9 @@ export async function recordHarnessUsage(result: HarnessTurnResult, source: stri
       cacheCreationTokens,
       reasoningTokens: result.usage.reasoning_tokens ?? 0,
     },
-  });
+  };
+  if (capturedSession) await recordUsage(input, { capturedSession });
+  else await recordUsage(input);
 }
 
 export function createClassroomTurn(): ClassroomTurn | undefined {

@@ -30,19 +30,27 @@ export async function getAISecEduSessionToken(): Promise<string> {
   return token;
 }
 
+export type AISecEduRequestSession = { token: string; traceId?: string };
+
 export async function aiseceduRequest<T>(
   path: string,
   init: RequestInit = {},
-  options: { session?: boolean } = { session: true },
+  options: { session?: boolean; capturedSession?: AISecEduRequestSession } = { session: true },
 ): Promise<T> {
   const outboundHeaders = new Headers(init.headers);
   outboundHeaders.set(AISECEDU_SERVICE_HEADER, serviceSecret());
   outboundHeaders.set('Accept', 'application/json');
-  const requestHeaders = await incomingHeaders();
-  const traceId = requestHeaders.get('pwn-trace-id') || requestHeaders.get('x-trace-id');
+  const requestHeaders = options.capturedSession ? undefined : await incomingHeaders();
+  const traceId =
+    options.capturedSession?.traceId ||
+    requestHeaders?.get('pwn-trace-id') ||
+    requestHeaders?.get('x-trace-id');
   if (traceId) outboundHeaders.set('X-Trace-ID', traceId.slice(0, 128));
   if (options.session !== false) {
-    outboundHeaders.set('Authorization', `Bearer ${await getAISecEduSessionToken()}`);
+    outboundHeaders.set(
+      'Authorization',
+      `Bearer ${options.capturedSession?.token ?? (await getAISecEduSessionToken())}`,
+    );
   }
   if (init.body && !(init.body instanceof FormData) && !outboundHeaders.has('Content-Type')) {
     outboundHeaders.set('Content-Type', 'application/json');
@@ -51,6 +59,7 @@ export async function aiseceduRequest<T>(
     ...init,
     headers: outboundHeaders,
     cache: 'no-store',
+    ...(options.capturedSession ? { redirect: 'error' } : {}),
   });
   const body = (await response.json().catch(() => ({}))) as ApiEnvelope<T>;
   if (!response.ok || !body.success || body.data === undefined) {

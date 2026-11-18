@@ -233,6 +233,18 @@ export function CoursewareStudio({ lesson: original }: { lesson: Lesson }) {
   const dirty = documentKey(draft) !== documentKey(saved);
   const editable = Boolean(info) && !audience.current;
   const busy = starting || currentRun?.status === 'running';
+  const agentPolicy = info?.agentPolicy;
+  const agentUnavailable = !agentPolicy
+    ? '暂时无法确认此课件的 AI 调整权限。你仍可手动编辑并保存。'
+    : !agentPolicy.enabled
+      ? '此课程的 AI 调整暂不可用。你仍可手动编辑并保存。'
+      : '';
+  const ordinaryAgent = agentPolicy?.mode === 'ordinary-harness';
+  const canSend =
+    !busy &&
+    !agentUnavailable &&
+    Boolean(instruction.trim()) &&
+    (scope !== 'element' || Boolean(selected));
   const baseUrl = `/api/lessons/${original.id}/studio`;
   const cacheKey = `xuanjia-courseware:${original.id}:${info?.ownerId || 'viewer'}`;
   const change = useCallback((next: StudioLesson) => {
@@ -513,7 +525,7 @@ export function CoursewareStudio({ lesson: original }: { lesson: Lesson }) {
     }
   }
   async function startAgent() {
-    if (!instruction.trim() || starting) return;
+    if (!canSend) return;
     setStarting(true);
     setError('');
     setAccepted([]);
@@ -1644,13 +1656,14 @@ export function CoursewareStudio({ lesson: original }: { lesson: Lesson }) {
                       </option>
                     </select>
                   </label>
+                  {agentUnavailable && <p role="status">{agentUnavailable}</p>}
                   <textarea
                     aria-label="课件调整要求"
                     value={instruction}
                     onChange={(e) => setInstruction(e.target.value)}
                     placeholder="例如：保留文字，将图示对齐并放大…"
                     rows={4}
-                    maxLength={6000}
+                    maxLength={ordinaryAgent ? 500 : 6000}
                     onKeyDown={(e) => {
                       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                         e.preventDefault();
@@ -1659,7 +1672,7 @@ export function CoursewareStudio({ lesson: original }: { lesson: Lesson }) {
                     }}
                   />
                   <div>
-                    <span>⌘ / Ctrl Enter 发送</span>
+                    <span>{ordinaryAgent ? '单行，最多 500 字 · ' : ''}⌘ / Ctrl Enter 发送</span>
                     {busy ? (
                       <button
                         onClick={async () => {
@@ -1682,7 +1695,7 @@ export function CoursewareStudio({ lesson: original }: { lesson: Lesson }) {
                       <button
                         className={styles.primary}
                         aria-label="发送调整要求"
-                        disabled={!instruction.trim() || (scope === 'element' && !selected)}
+                        disabled={!canSend}
                         onClick={() => void startAgent()}
                       >
                         <Send size={16} />

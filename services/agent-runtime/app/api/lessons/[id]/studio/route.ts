@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readStudio, saveStudio, listRuns } from '@/lib/server/courseware-studio';
+import { AISECEDU_SESSION_COOKIE } from '@/lib/server/aisecedu-integration';
+import {
+  readStudio,
+  readStudioUiAgentPolicy,
+  saveStudio,
+  listRuns,
+} from '@/lib/server/courseware-studio';
 import { capBodyStream } from '@/lib/server/capped-stream';
 export const runtime = 'nodejs';
 type Context = { params: Promise<{ id: string }> };
@@ -17,8 +23,19 @@ export async function GET(req: NextRequest, ctx: Context) {
     const { id } = await ctx.params;
     const revision = Number(req.nextUrl.searchParams.get('revision')) || undefined;
     const info = await readStudio(id, revision);
+    const agentPolicy = revision
+      ? undefined
+      : await readStudioUiAgentPolicy(
+          id,
+          info.lesson.__aiseceduRevision,
+          {
+            token: req.cookies.get(AISECEDU_SESSION_COOKIE)?.value || '',
+            traceId: req.headers.get('pwn-trace-id') || req.headers.get('x-trace-id') || undefined,
+          },
+          req.signal,
+        );
     return NextResponse.json(
-      { ...info, runs: revision ? [] : await listRuns(id, info.ownerId) },
+      { ...info, agentPolicy, runs: revision ? [] : await listRuns(id, info.ownerId) },
       { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (error) {

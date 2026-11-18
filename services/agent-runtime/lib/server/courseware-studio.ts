@@ -1,7 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { aiseceduRequest, isAISecEduIntegrated } from './aisecedu-integration';
+import { z } from 'zod';
+import {
+  aiseceduRequest,
+  isAISecEduIntegrated,
+  type AISecEduRequestSession,
+} from './aisecedu-integration';
+import { createHarnessTurn, recordHarnessUsage } from './agent-harness/classroom-turn';
+import { hasMeasuredLessonUsage } from './agent-harness/ordinary-lesson-plan';
+import {
+  ordinaryStudioFields,
+  ordinaryStudioInstruction,
+  ordinaryStudioProposal,
+  ordinaryStudioSystem,
+} from './agent-harness/ordinary-studio';
 import { resolveAgentRuntimeDataDir } from './data-root';
 import { resolveModel } from './resolve-model';
 import { streamLLM } from '@/lib/ai/llm';
@@ -42,6 +55,97 @@ export async function readStudio(id: string, revision?: number): Promise<StudioI
     `/pwncollege_api/v1/teaching/runtime/lessons/${id}/studio${revision ? '?revision=' + revision : ''}`,
   );
 }
+const studioAgentPolicySchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('ordinary-harness'),
+    ownerId: z.number().int().positive(),
+    artifactId: z.string(),
+    revision: z.number().int().positive(),
+    enabled: z.boolean(),
+    model: z.string().min(1).nullable(),
+  }),
+  z.object({
+    mode: z.literal('legacy'),
+    ownerId: z.number().int().positive(),
+    artifactId: z.string(),
+    revision: z.number().int().positive(),
+    enabled: z.literal(true),
+    model: z.null(),
+  }),
+]);
+export type StudioAgentPolicy = z.infer<typeof studioAgentPolicySchema>;
+
+export async function authorizeStudioAgent(
+  id: string,
+  revision: number,
+  session: AISecEduRequestSession,
+  signal?: AbortSignal,
+): Promise<StudioAgentPolicy> {
+  if (
+    !isAISecEduIntegrated() ||
+    !idPattern.test(id) ||
+    !session.token ||
+    !Number.isSafeInteger(revision) ||
+    revision <= 0
+  ) {
+    throw Object.assign(new Error('无法核验课件调整权限。'), { status: 403 });
+  }
+  const deadline = AbortSignal.timeout(10_000);
+  const response = await aiseceduRequest<{ ownerId: number; agentPolicy?: unknown }>(
+    `/pwncollege_api/v1/teaching/runtime/lessons/${id}/studio?agentPolicy=1&authorize=1&revision=${revision}`,
+    { signal: signal ? AbortSignal.any([deadline, signal]) : deadline },
+    { capturedSession: session },
+  );
+  const policy = studioAgentPolicySchema.safeParse(response.agentPolicy);
+  if (
+    !policy.success ||
+    policy.data.artifactId !== id ||
+    policy.data.ownerId !== response.ownerId ||
+    policy.data.revision !== revision
+  ) {
+    throw Object.assign(new Error('课件服务无法核验当前版本的调整策略，请稍后重试。'), {
+      status: 503,
+    });
+  }
+  return policy.data;
+}
+
+function ordinaryStudioTurn(policy: Extract<StudioAgentPolicy, { mode: 'ordinary-harness' }>) {
+  const configured = process.env.HARNESS_DEEPSEEK_MODEL?.trim();
+  if (!policy.enabled || !policy.model || configured !== policy.model) {
+    throw Object.assign(new Error('普通课件调整服务暂不可用。'), { status: 503 });
+  }
+  try {
+    const turn = createHarnessTurn();
+    if (turn) return turn;
+  } catch {
+    // A missing or invalid internal endpoint is a service failure.
+  }
+  throw Object.assign(new Error('普通课件调整服务暂不可用。'), { status: 503 });
+}
+
+export async function readStudioUiAgentPolicy(
+  id: string,
+  revision: number,
+  session: AISecEduRequestSession,
+  signal?: AbortSignal,
+): Promise<StudioInfo['agentPolicy']> {
+  try {
+    const policy = await authorizeStudioAgent(id, revision, session, signal);
+    if (policy.mode === 'legacy') return { mode: 'legacy', enabled: true, model: null };
+    let enabled = false;
+    try {
+      ordinaryStudioTurn(policy);
+      enabled = true;
+    } catch {
+      // The document remains available for manual work while the model is offline.
+    }
+    return { mode: policy.mode, enabled, model: policy.model };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function authorizeStudio(id: string): Promise<{ ownerId: number }> {
   if (!isAISecEduIntegrated() || !idPattern.test(id))
     throw Object.assign(new Error('课件不存在'), { status: 404 });
@@ -160,6 +264,7 @@ export async function createRun(
   instruction: string,
   scope: EditScope,
   requestId: string,
+  policy: StudioAgentPolicy,
 ) {
   if (!instruction.trim() || instruction.length > 6000)
     throw new Error('请输入 1–6000 字的调整要求');
@@ -173,6 +278,13 @@ export async function createRun(
   )
     throw new Error('请选择有效的修改范围');
   validateDocument(lesson, info.lesson);
+  if (
+    policy.ownerId !== info.ownerId ||
+    policy.artifactId !== lesson.id ||
+    policy.revision !== lesson.__aiseceduRevision
+  ) {
+    throw Object.assign(new Error('课件调整范围或版本已改变。'), { status: 409 });
+  }
   if (
     scope.elementId &&
     !nativeOf(lesson.artifacts.find((p) => p.id === scope.pageIds[0])!).elements.some(
@@ -192,6 +304,15 @@ export async function createRun(
         throw Object.assign(new Error('请求标识已用于其他调整'), { status: 409 });
       return { run: same, created: false };
     }
+    if (policy.mode === 'ordinary-harness') {
+      if (!ordinaryStudioInstruction.safeParse(instruction).success) {
+        throw new Error('请输入不超过500字的单行课件调整要求，避免附加源码或其他私有内容。');
+      }
+      lesson.artifacts
+        .filter((page) => scope.pageIds.includes(page.id))
+        .forEach((page) => ordinaryStudioFields(page, scope));
+      ordinaryStudioTurn(policy);
+    }
     if (existing.some((r) => r.status === 'running'))
       throw Object.assign(new Error('这份课件已有调整正在进行，可以查看或停止后再发起。'), {
         status: 409,
@@ -207,6 +328,7 @@ export async function createRun(
       baseRevision: lesson.__aiseceduRevision,
       baseDigest: digest(lesson),
       status: 'running',
+      executionMode: policy.mode,
       createdAt: now,
       updatedAt: now,
       messages: ['已读取修改范围，正在准备课件上下文。'],
@@ -231,7 +353,72 @@ path 相对于页面 content，只允许：/studio/page/...、/studio/theme/...�
 V2页面 title 2–40字，takeaway <=100字，supporting最多3项各55字，speakerNotes80–1800字。改变supporting数量须同步layout.supporting。保持visual种类的数据结构、beats目标存在、教学问题正确选项存在。颜色为6位HEX。不要把动画对象改成静态截图。保持图片资产和来源。
 只输出实际必要的最小修改，不重写整套课件。整个任务为建议预览，尚未保存或发布。`;
 
-export async function executeRun(run: AgentRun, lesson: StudioLesson) {
+async function executeOrdinaryStudioRun(
+  run: AgentRun,
+  lesson: StudioLesson,
+  policy: Extract<StudioAgentPolicy, { mode: 'ordinary-harness' }>,
+  recheck: (signal: AbortSignal) => Promise<StudioAgentPolicy>,
+  signal: AbortSignal,
+  session: AISecEduRequestSession,
+) {
+  const pages = ordered(lesson);
+  let preview = lesson;
+  for (const [index, page] of pages.entries()) {
+    if (!run.scope.pageIds.includes(page.id)) continue;
+    signal.throwIfAborted();
+    const live = await recheck(signal);
+    if (live.mode !== 'ordinary-harness' || live.model !== policy.model || !live.enabled)
+      throw new Error('普通课件调整权限、版本或指定模型已改变。');
+    const turn = ordinaryStudioTurn(live);
+    const fields = ordinaryStudioFields(page, run.scope);
+    const response = await turn(
+      [
+        { role: 'system', content: ordinaryStudioSystem },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            instruction: run.instruction,
+            pageNumber: index + 1,
+            pageCount: pages.length,
+            scope: run.scope.elementId ? 'object' : 'page',
+            fields: fields.map(({ key, value }) => ({ key, value })),
+          }),
+        },
+      ],
+      signal,
+    );
+    await recordHarnessUsage(response, 'courseware-studio', session);
+    if (response.model !== policy.model || !hasMeasuredLessonUsage(response)) {
+      throw new Error('普通课件调整未取得指定模型的用量回执。');
+    }
+    const { prompt_tokens, completion_tokens, total_tokens } = response.usage;
+    await updateRun(run, (current) => {
+      const usage = current.usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+      usage.inputTokens += prompt_tokens;
+      usage.outputTokens += completion_tokens;
+      usage.totalTokens += total_tokens ?? prompt_tokens + completion_tokens;
+      current.model = response.model;
+      current.usage = usage;
+    });
+    signal.throwIfAborted();
+    const final = await recheck(signal);
+    if (final.mode !== 'ordinary-harness' || final.model !== policy.model || !final.enabled)
+      throw new Error('普通课件调整权限、版本或指定模型已改变。');
+    const proposal = ordinaryStudioProposal(response.text, fields, page, preview, run.scope);
+    if (proposal) preview = proposal.preview;
+    await updateRun(run, (current) => {
+      if (proposal) current.proposals.push(proposal.proposal);
+      current.processed += 1;
+    });
+  }
+}
+
+export async function executeRun(
+  run: AgentRun,
+  lesson: StudioLesson,
+  policy: StudioAgentPolicy,
+  session: AISecEduRequestSession,
+) {
   const control = running.get(run.id);
   if (!control) return;
   const timer = setTimeout(
@@ -242,6 +429,27 @@ export async function executeRun(run: AgentRun, lesson: StudioLesson) {
     void updateRun(run, () => {}).catch(() => {});
   }, 10000);
   try {
+    const recheck = async (signal: AbortSignal) => {
+      const current = await authorizeStudioAgent(run.lessonId, run.baseRevision, session, signal);
+      if (current.ownerId !== run.ownerId || current.mode !== policy.mode)
+        throw new Error('课件调整权限已改变。');
+      return current;
+    };
+    const finish = () =>
+      updateRun(run, (r) => {
+        r.status = 'ready';
+        r.messages.push(
+          r.proposals.length
+            ? `已完成 ${r.proposals.length} 页修改建议，请对照后采用。`
+            : '没有需要修改的内容。可以补充更具体的要求。',
+        );
+      });
+    if (policy.mode === 'ordinary-harness') {
+      await executeOrdinaryStudioRun(run, lesson, policy, recheck, control.signal, session);
+      await finish();
+      return;
+    }
+    await recheck(control.signal);
     const { model, modelInfo } = await resolveModel(
       process.env.PREP_RICH_MODEL
         ? { modelString: process.env.PREP_RICH_MODEL }
@@ -319,6 +527,8 @@ export async function executeRun(run: AgentRun, lesson: StudioLesson) {
           });
         } else throw new Error('Agent 返回了无法识别的调整结果');
       };
+      await recheck(control.signal);
+      control.signal.throwIfAborted();
       const result = streamLLM(
         {
           model,
@@ -348,14 +558,7 @@ export async function executeRun(run: AgentRun, lesson: StudioLesson) {
         r.processed = Math.min(offset + batch.length, selected.length);
       });
     }
-    await updateRun(run, (r) => {
-      r.status = 'ready';
-      r.messages.push(
-        r.proposals.length
-          ? `已完成 ${r.proposals.length} 页修改建议，请对照后采用。`
-          : '没有需要修改的内容。可以补充更具体的要求。',
-      );
-    });
+    await finish();
   } catch (error) {
     await updateRun(run, (r) => {
       r.status = control.signal.aborted ? 'cancelled' : 'failed';

@@ -41,6 +41,7 @@ flowchart LR
 | 普通 PBL v2 任务开场与导师 | `/open-task` 和 `/instructor` 走官方引擎，保留 SSE、持久化、观察记录和难度调整。普通短答评分采用官方引擎的实际回执 | 调整难度须引用本轮学生原话。短答无法取得有效评分时保持待评，可用原答卷重试 |
 | 课堂辩论 `/api/integration/debate/respond` | 回合与反思使用实际模型，保留论据校验和检查点 | 重试核验请求身份与模型，凭实际模型回执登记用量 |
 | 正式原生课件 | 当前授课教师的 `native-v2` 课件制作通过 Harness，保留原有的产物、渲染和逐页恢复检查点 | 验收覆盖重复请求恢复已完成页面；机器执行类作业和其他产物有独立执行契约 |
+| 交互预览中的课件编辑器 | 普通教学课程的教师可在「Agent」面板按当前页、整套课件或选中对象请求调整。DSH 逐页返回可采用的改动 | 只提交本轮要求和所选范围内可编辑的文字及排版字段。课程材料、图片、讲者备注、历史指令和其他页面的内容留在平台 |
 
 对普通教学课程，管理员可在开发实例的受保护配置中填写 `HARNESS_ORDINARY_TEACHING_COURSE_IDS`，值为逗号分隔的课程数字 ID，初始为空。授权教师的已索引教材摘要、教案和课件候选，以及原生静态课件的文字润色和版式修订由官方引擎处理。队列在生成前核实课程和材料归属，保留产物格式和原有保存检查。专用生成器和其他类型的修订仍有独立路径。
 
@@ -51,6 +52,14 @@ flowchart LR
 在工作台打开原生静态课件，在「局部修改」输入「请调整第1、2页的版式：将比较区居中，左右各留 84 像素」。要统一整份课件，可以输入「请调整整份课件的版式：将标题右对齐」。页码以课件编辑器当前显示的顺序为准。已经选中源码时，先点击「取消源码选区」再提交按页修改。
 
 DSH 每页接收本轮版式要求、页序、区域类型和坐标。正文、图片、讲者备注及其他页面的内容留在平台。生成后，平台重新编译选中的页面，用浏览器检查排版，再保存一个可比较和恢复的新版本。如果某一页超出画布、排版发生冲突或无法保留已有的手工移动，工作台会显示失败原因，教师可调整要求后重试。这个入口使用独立的内部服务路径 `/api/integration/jobs/ordinary-slide-layout`，部署时先升级课堂服务和检查器，再启用新版 Worker。
+
+### 在交互预览中调整并保存
+
+教师从工作台打开课件的「交互预览」，点击编辑器顶部的「Agent」。当前支持无动画步骤、无随堂题的原生静态图表、对照表和内嵌图片页。想改整页，选择「当前页」。想改一个标题或图形，先在「编辑」里点选画布对象，再到「Agent」里选择「选中对象」。若每页都支持调整，也可选择「整套课件」。输入具体要求，例如「将选中的标题向右移动 20 像素」，点击「发送调整要求」。
+
+收到建议后可逐页对比，选择「采用本页」或「采用全部建议」。采用会改变当前草稿，点击「保存」才会产生课件新版本。若模型停用，仍可手工编辑、查看历史版本并保存。若其他窗口已经保存了新版，先核对新版再重新提交调整。
+
+开发站启用该入口前，应将平台 Web 和课堂服务更新到同一审核提交。在课件打开时，新课堂服务从平台查询当前教师、课件及版本对应的模型策略。策略缺失或模型配置与策略不一致时，编辑器会显示 AI 调整暂不可用。手工编辑和查看旧建议仍可使用。
 
 ### 从普通教案候选打开成品
 
@@ -112,7 +121,8 @@ python -m pytest -q \
   test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_tutor_illustrations_unit.py \
   test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py \
   test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py \
-  test/test_ordinary_lesson_plan_unit.py test/test_ordinary_slide_layout_unit.py
+  test/test_ordinary_lesson_plan_unit.py test/test_ordinary_slide_layout_unit.py \
+  test/test_studio_agent_policy_unit.py
 npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev
 npm test --prefix services/deepseek-harness
 python test/harness_client_contract.py

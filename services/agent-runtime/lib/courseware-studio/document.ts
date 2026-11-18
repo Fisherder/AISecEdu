@@ -7,7 +7,7 @@ import { applyCoursewareCanvasEdits } from '@/lib/courseware/edits';
 export type StudioLesson = Lesson & { __aiseceduRevision: number };
 export type EditScope = { pageIds: string[]; elementId?: string };
 export type Patch = { path: string; value: unknown };
-export type PageProposal = { pageId: string; summary: string; changes: Patch[] };
+export type PageProposal = { pageId: string; summary: string; changes: Patch[]; ordinary?: true };
 export type NativeContent = {
   elements: PPTElement[];
   background?: SlideBackground;
@@ -24,6 +24,7 @@ export type StudioInfo = {
   sourceRefs: unknown[];
   ownerId: number;
   canPublish: boolean;
+  agentPolicy?: {mode: 'ordinary-harness' | 'legacy'; enabled: boolean; model: string | null};
 };
 export type AgentRun = {
   id: string;
@@ -41,6 +42,8 @@ export type AgentRun = {
   proposals: PageProposal[];
   error?: string;
   model?: string;
+  executionMode?: 'ordinary-harness' | 'legacy';
+  usage?: {inputTokens: number; outputTokens: number; totalTokens: number};
   processed: number;
   total: number;
 };
@@ -269,7 +272,8 @@ export function applyProposal(
     assign(contentOf(page), parts, change.value);
   }
   if (semantic && studioOf(page)) {
-    const studio = coursewareSlideDataSchema.parse(studioOf(page));
+    const rawStudio = studioOf(page)!;
+    const validatedStudio = coursewareSlideDataSchema.parse(rawStudio);
     page = updateStudio(
       {
         ...page,
@@ -278,8 +282,15 @@ export function applyProposal(
           studio: studioOf(source),
         } as unknown as LessonArtifact['content'],
       },
-      studio,
+      proposal.ordinary ? rawStudio : validatedStudio,
     );
+    if (proposal.ordinary) {
+      const content = contentOf(page);
+      const original = contentOf(source);
+      if (Object.hasOwn(original, 'speakerNotes')) content.speakerNotes = original.speakerNotes;
+      else delete content.speakerNotes;
+      if (!proposal.changes.some(change => change.path === '/studio/page/title')) page.title = source.title;
+    }
   }
   validatePage(page);
   return updatePage(lesson, page.id, () => page);

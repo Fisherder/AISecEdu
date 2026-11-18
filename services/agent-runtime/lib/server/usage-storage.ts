@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { createLogger } from '@/lib/logger';
 import { hasBillableTokens, type NormalizedUsage } from '@/lib/usage/normalize';
-import { aiseceduRequest, isAISecEduIntegrated } from '@/lib/server/aisecedu-integration';
+import { aiseceduRequest, isAISecEduIntegrated, type AISecEduRequestSession } from '@/lib/server/aisecedu-integration';
 
 const log = createLogger('UsageStorage');
 
@@ -63,6 +63,7 @@ interface RecordOptions {
   baseDir?: string;
   /** Injected clock for deterministic tests. */
   now?: Date;
+  capturedSession?: AISecEduRequestSession;
 }
 
 let counter = 0;
@@ -154,7 +155,8 @@ export async function recordUsage(
         await aiseceduRequest('/pwncollege_api/v1/teaching/runtime/usage', {
           method: 'POST',
           body: JSON.stringify(record),
-        });
+          ...(opts.capturedSession ? { signal: AbortSignal.timeout(10_000) } : {}),
+        }, opts.capturedSession ? {capturedSession: opts.capturedSession} : undefined);
       } catch (error) {
         // Classroom media may be rendered as part of a service-authenticated
         // durable job. Those calls have no browser session to which a

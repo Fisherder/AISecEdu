@@ -114,6 +114,7 @@ jobs:
           tests/lib/server/debate-harness-route.test.ts tests/lib/server/student-teaching-routes.test.ts
           tests/lib/orchestration/state-context.test.ts tests/integration/harness-courseware-job.test.ts
           tests/integration/ordinary-teaching-jobs.test.ts tests/integration/ordinary-static-classroom.test.ts tests/quiz
+          tests/integration/ordinary-courseware-studio.test.ts
           tests/ai/provider-transport-journal.test.ts tests/security/integrated-middleware-policy.test.ts
       - name: Cache the pinned Playwright Chromium binary
         id: tutor-chromium-cache
@@ -161,7 +162,8 @@ jobs:
             test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_tutor_illustrations_unit.py \
             test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py \
             test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py \
-            test/test_ordinary_lesson_plan_unit.py test/test_ordinary_slide_layout_unit.py
+            test/test_ordinary_lesson_plan_unit.py test/test_ordinary_slide_layout_unit.py \
+            test/test_studio_agent_policy_unit.py
       - name: Verify cross-course navigation in desktop and mobile viewports
         run: CHROME_BIN="$(command -v google-chrome)" node test/browser/teacher-course-navigation.mjs
       - name: Courseware editor browser component checks
