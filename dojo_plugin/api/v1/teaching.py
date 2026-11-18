@@ -175,6 +175,7 @@ from ...agent_runtime.materials import (
 from ...agent_runtime.model_journal import ModelJournalError, record_model_event
 from ...agent_runtime.project_collection import project_collection_view
 from ...agent_runtime.reliability import public_recovery
+from ...agent_runtime.upstream_turn import ordinary_teaching_image_allowed
 from ...agent_runtime.scope import (
     ScopeError,
     assert_capability,
@@ -11881,6 +11882,7 @@ class AgentRuntimeIntrospect(Resource):
                     "sessionId": session_id,
                     "user": {"id": user.id, "name": user.name},
                     "scope": scope.as_dict(),
+                    "ordinaryTeachingImageAllowed": ordinary_teaching_image_allowed(user, scope, model_quota),
                     "modelQuota": model_quota,
                 }
             )

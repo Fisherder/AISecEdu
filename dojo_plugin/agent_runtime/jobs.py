@@ -69,7 +69,7 @@ from .session_events import record_step_lifecycle, record_turn_lifecycle
 from .harness import TurnDeferred, advance_turn
 from .teacher_model_context import teacher_model_payload, teacher_platform_facts
 from .teacher_documents import DOCUMENT_INSTRUCTION, document_deliverables, requested_document_formats
-from .upstream_turn import UpstreamTurnError, invoke_turn, request_body, result_object, upstream_enabled
+from .upstream_turn import UpstreamTurnError, invoke_turn, ordinary_teaching_course, request_body, result_object, upstream_enabled
 from .commands import COMMAND_JOB_KINDS, execute_command, finish_command_job, reopen_command_job, recover_command_job
 from .local_extract import index_verified_local_source, locally_extractable
 from .reliability import RuntimeJobError, recovery_decision, recovery_due, public_recovery
@@ -2790,10 +2790,7 @@ def _ordinary_teaching_job_scope(job, payload):
         or job.dojo_id is None or payload.get("workspaceId") or not upstream_enabled()
     ):
         return None
-    course_ids = os.environ.get("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "").split(",")
-    if not all(re.fullmatch(r"-?[0-9]{1,10}", item.strip()) for item in course_ids):
-        return None
-    if job.dojo_id not in {int(item) for item in course_ids}:
+    if not ordinary_teaching_course(job.dojo_id):
         return None
     owner = Users.query.filter_by(id=job.owner_id).first()
     if not owner or (owner.type != "admin" and not DojoAdmins.query.filter_by(

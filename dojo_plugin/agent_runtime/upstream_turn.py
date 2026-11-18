@@ -16,6 +16,23 @@ def upstream_enabled():
     return setting in {"1", "true", "yes"}
 
 
+def ordinary_teaching_course(dojo_id):
+    if type(dojo_id) is not int:
+        return False
+    configured = os.environ.get("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "").split(",")
+    ids = [item.strip() for item in configured]
+    return all(re.fullmatch(r"-?[0-9]{1,10}", item) for item in ids) and dojo_id in {int(item) for item in ids}
+
+
+def ordinary_teaching_image_allowed(user, scope, model_quota):
+    capability = {"teacher": "agent:chat", "student": "self-learning:chat"}.get(scope.role)
+    return bool(
+        user.id == scope.user_id and capability and capability in scope.capabilities
+        and model_quota.get("available") is True and upstream_enabled()
+        and ordinary_teaching_course(scope.dojo_id)
+    )
+
+
 def request_body(system_prompt, context):
     return {"messages": [
         {"role": "system", "content": system_prompt},

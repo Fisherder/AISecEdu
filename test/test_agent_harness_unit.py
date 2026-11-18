@@ -975,7 +975,7 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
 
 
 def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_targets(monkeypatch):
-    import os
+    turn = load("dojo_plugin/agent_runtime/upstream_turn.py", {})
 
     tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
     tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)
@@ -989,7 +989,7 @@ def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_target
         return SimpleNamespace(query=SimpleNamespace(filter_by=filter_by))
 
     namespace = {
-        "os": os, "re": re, "upstream_enabled": lambda: True,
+        "ordinary_teaching_course": turn.ordinary_teaching_course, "re": re, "upstream_enabled": lambda: True,
         "Users": table(id=7, type="user"), "DojoAdmins": table(dojo_id=2, user_id=7),
         "TeachingCandidateSets": table(id="candidate", owner_id=7, dojo_id=2, kind="lesson-plan",
                                        self_workspace_id=None),

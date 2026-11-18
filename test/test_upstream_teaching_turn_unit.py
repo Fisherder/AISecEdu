@@ -205,3 +205,49 @@ def test_teacher_material_coverage_describes_the_scrubbed_model_input(expected, 
     assert [row["id"] for row in context["sourceMaterials"]] == material_ids
     assert [row["id"] for row in context["sourceRefs"]] == material_ids
     assert coverage["includedMaterialCount"] == expected and coverage["complete"] is True
+
+
+def test_only_current_ordinary_course_session_can_send_a_new_teaching_image(monkeypatch):
+    import ast
+    from types import SimpleNamespace
+
+    tree = ast.parse((RUNTIME.parent / "api/v1/teaching.py").read_text())
+    resource = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "AgentRuntimeIntrospect")
+    method = next(item for item in resource.body if isinstance(item, ast.FunctionDef) and item.name == "post")
+    method.decorator_list = []
+    tree.body = [method]
+    user = SimpleNamespace(id=11, name="Synthetic")
+    scope = SimpleNamespace(user_id=11, role="student", dojo_id=3, workspace_id=None,
+                            capabilities=("self-learning:chat",), as_dict=lambda: {})
+    namespace = dict(
+        require_service_auth=lambda: None, bearer_session_token=lambda: "synthetic scoped ticket",
+        verify_session_token=lambda _: (user, scope, "session"), _ok=lambda body: body,
+        _service_scoped_workspace=lambda *args: SimpleNamespace(quota={"modelTokens": 10}),
+        _workspace_usage=lambda _: {"modelTokens": 10}, ordinary_teaching_image_allowed=turn.ordinary_teaching_image_allowed,
+    )
+    exec(compile(tree, "introspect.py", "exec"), namespace)
+    def allowed():
+        return namespace["post"](None)["ordinaryTeachingImageAllowed"]
+
+    monkeypatch.setenv("DOJO_AI_ENABLED", "true")
+    monkeypatch.setenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "3,-9")
+    assert allowed()
+    for course in (4, None, "3"):
+        scope.dojo_id = course
+        assert not allowed()
+    scope.dojo_id = -9
+    scope.user_id = 12
+    assert not allowed()
+    scope.user_id = 11
+    scope.workspace_id = "limited"
+    assert not allowed()
+    scope.workspace_id = None
+    scope.capabilities = ()
+    assert not allowed()
+    scope.role, scope.capabilities = "teacher", ("agent:chat",)
+    assert allowed()
+    monkeypatch.setenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "4,broken,-9")
+    assert not allowed()
+    monkeypatch.setenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "-9")
+    monkeypatch.setenv("DOJO_AI_ENABLED", "false")
+    assert not allowed()
