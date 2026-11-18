@@ -2,7 +2,6 @@ from urllib.parse import quote, unquote
 
 from .contracts import success_envelope
 from ..models import DojoAdmins, DojoUsers, UserAccountPreferences
-from ..models.construction import ConstructionMembers, ConstructionSpaces
 from ..models.global_agent import TeachingAgentActions, TeachingJobs
 
 
@@ -52,7 +51,6 @@ MODE_DEFINITIONS = {
         "navigation": (
             ("课程中心", "/teacher/courses", "layer-group"),
             ("素材库", "/teacher/library", "book"),
-            ("建设任务", "/teacher/construction", "clipboard-check"),
             ("AI 共创", "/teacher?view=conversation", "magic"),
         ),
     },
@@ -86,16 +84,10 @@ def teacher_mode_available(user):
         return False
     if getattr(user, "type", None) == "admin":
         return True
-    if ConstructionMembers.query.filter_by(user_id=user.id, active=True).filter(ConstructionMembers.role.in_(("author", "reviewer", "coordinator"))).first():
-        return True
     for membership in DojoAdmins.query.filter_by(user_id=user.id).all():
-        if membership.dojo and membership.dojo.type != "construction" and ConstructionSpaces.query.filter_by(course_id=membership.dojo_id).first() is None:
+        if membership.dojo and not (membership.dojo.data or {}).get("readOnly") and not (membership.dojo.data or {}).get("archived"):
             return True
     return False
-
-
-def construction_author(user):
-    return bool(user and ConstructionMembers.query.filter_by(user_id=user.id, active=True, role="author").first())
 
 
 def preferred_product_mode(user, cookie):
@@ -179,8 +171,6 @@ def mode_navigation(user, mode, mode_ids=None, path="/"):
         return len(target_path) * 10 + 1 if target_query in full_path else 0
 
     navigation = MODE_DEFINITIONS[mode]["navigation"]
-    if mode == "learning" and construction_author(user):
-        navigation += (("建设任务", "/teacher/construction", "clipboard-check"), ("AI 共创", "/teacher?view=conversation", "magic"))
     scores = [match_score(href) for _, href, _ in navigation]
     best_score = max(scores, default=0)
     return [

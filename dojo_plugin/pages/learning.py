@@ -598,8 +598,8 @@ def teaching_artifact(artifact_id):
     except ScopeError:
         abort(404)
     is_course_teacher = artifact_course_teacher(artifact, user)
-    from ..construction_guards import frozen_course
-    frozen_review = is_course_teacher and frozen_course(artifact.dojo_id)
+    from ..readonly_courses import readonly_course
+    readonly_preview = is_course_teacher and readonly_course(artifact.dojo_id)
     is_personal = bool(
         artifact.owner_id == user.id and artifact.self_workspace_id is not None
     )
@@ -645,19 +645,19 @@ def teaching_artifact(artifact_id):
             fallback="/learning/extend" if is_personal else "/student",
         )
     from ..agent_runtime.artifacts import current_artifact_revision
-    from ..construction_files import artifact_files
+    from ..artifact_files import artifact_files
     try:
         submitted_files = artifact_files(artifact, current_artifact_revision(artifact), user)
     except (ScopeError, ValueError):
         abort(404)
-    template = 'construction_files.html' if submitted_files is not None else 'construction_artifact.html' if frozen_review else 'teaching_artifact.html'
+    template = 'artifact_files.html' if submitted_files is not None else 'readonly_artifact.html' if readonly_preview else 'teaching_artifact.html'
     return render_template(
         template,
         artifact=artifact,
         artifact_embedded=teacher_context and request.args.get("embedded") == "co-creation",
         submitted_files=submitted_files,
-        frozen_review=frozen_review,
-        artifact_viewer_role="teacher" if can_manage or frozen_review else "student",
+        readonly_preview=readonly_preview,
+        artifact_viewer_role="teacher" if can_manage or readonly_preview else "student",
         artifact_is_personal=is_personal,
         artifact_return_to=artifact_return_to,
         artifact_return_role=(
@@ -926,12 +926,6 @@ def _legal_document(document, title):
             "如需了解账号、课程数据或使用边界，请联系课程教师或平台管理员。"
         )
     return render_template("legal.html", title=title, content=content)
-
-
-@learning.route("/teacher/construction")
-@authed_only
-def teacher_construction():
-    return render_template("teacher_construction.html")
 
 
 @learning.route("/activate-account")

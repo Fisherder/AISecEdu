@@ -1,4 +1,4 @@
-from flask import has_request_context, request, jsonify
+from flask import request, jsonify
 from sqlalchemy import text
 from CTFd.models import db
 
@@ -6,7 +6,7 @@ from CTFd.models import db
 def install_guards():
     if db.engine.dialect.name != 'postgresql':
         return
-    db.session.execute(text('''CREATE OR REPLACE FUNCTION construction_frozen_guard() RETURNS trigger AS $$
+    db.session.execute(text('''CREATE OR REPLACE FUNCTION readonly_course_guard() RETURNS trigger AS $$
     DECLARE before_row jsonb; after_row jsonb; candidate jsonb; course integer;
     BEGIN
       before_row := CASE WHEN TG_OP <> 'INSERT' THEN to_jsonb(OLD) ELSE '{}'::jsonb END;
@@ -20,8 +20,8 @@ def install_guards():
         ELSE
           course := COALESCE(candidate->>'dojo_id', candidate->>'course_id')::integer;
         END IF;
-        IF EXISTS (SELECT 1 FROM construction_spaces WHERE course_id = course) THEN
-          RAISE EXCEPTION '固定审核副本不可修改，请返回原稿创作。' USING ERRCODE = '23514';
+        IF EXISTS (SELECT 1 FROM dojos WHERE dojo_id = course AND data->>'readOnly' = 'true') THEN
+          RAISE EXCEPTION '历史只读副本不可修改，请在自己的课程中创建副本。' USING ERRCODE = '23514';
         END IF;
       END LOOP;
       IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
@@ -30,20 +30,22 @@ def install_guards():
                   'teaching_assignments', 'teaching_assignment_items', 'learning_drafts', 'material_asset_copies'):
         if table not in db.metadata.tables:
             continue
-        exists = db.session.execute(text("SELECT 1 FROM pg_trigger WHERE tgname = 'construction_frozen' AND tgrelid = to_regclass(:table)"), {'table': table}).scalar()
+        exists = db.session.execute(text("SELECT 1 FROM pg_trigger WHERE tgname = 'readonly_course' AND tgrelid = to_regclass(:table)"), {'table': table}).scalar()
         if exists:
             continue
         db.session.execute(text("SET LOCAL lock_timeout = '2s'"))
-        db.session.execute(text(f'CREATE TRIGGER construction_frozen BEFORE INSERT OR UPDATE OR DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION construction_frozen_guard()'))
+        db.session.execute(text(f'CREATE TRIGGER readonly_course BEFORE INSERT OR UPDATE OR DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION readonly_course_guard()'))
 
 
-def frozen_course(course_id):
-    from .models.construction import ConstructionSpaces
-    return course_id is not None and ConstructionSpaces.query.filter_by(course_id=course_id).first() is not None
+def readonly_course(course_id):
+    from .models import Dojos
+    return course_id is not None and Dojos.query.filter(
+        Dojos.dojo_id == course_id, Dojos.data['readOnly'].as_boolean().is_(True),
+    ).first() is not None
 
 
 def protect_request():
-    if request.method in ('GET', 'HEAD', 'OPTIONS') or '/construction/' in request.path:
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
         return None
     if request.path.endswith(('/preview', '/launch', '/student-preview')):
         return None
@@ -70,6 +72,6 @@ def protect_request():
                 row = model.query.filter_by(id=args[key]).first()
                 if row:
                     course_ids.append(row.dojo_id)
-    if any(frozen_course(cid) for cid in course_ids):
-        return jsonify(success=False, error={'code': 'FROZEN_REVIEW', 'message': '这是固定版本审核副本，只能预览。请在建设任务中返回原稿修改并重新提交。'}), 409
+    if any(readonly_course(cid) for cid in course_ids):
+        return jsonify(success=False, error={'code': 'READ_ONLY_COURSE', 'message': '这是历史只读副本，只能预览。请在自己的课程中创建可编辑副本。'}), 409
     return None
