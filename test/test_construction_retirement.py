@@ -106,3 +106,46 @@ def test_shared_snapshot_preview_preserves_readonly_boundaries_and_library_acces
                 raise AssertionError('Private material or non-teacher access was granted')
     finally:
         db.session.rollback()
+
+
+def test_readonly_snapshots_remain_protected_at_database_level():
+    from sqlalchemy.exc import IntegrityError
+    owner = identity()
+    try:
+        snapshot = course(owner)
+        artifact = TeachingArtifacts(owner_id=owner.id, dojo_id=snapshot.dojo_id,
+                                     artifact_type='slide-deck', title='Original')
+        db.session.add(artifact)
+        db.session.flush()
+        snapshot.data = {**snapshot.data, 'readOnly': True, 'archived': True}
+        db.session.flush()
+        try:
+            with db.session.begin_nested():
+                artifact.title = 'Unexpected edit'
+                db.session.flush()
+        except IntegrityError:
+            pass
+        else:
+            raise AssertionError('Readonly snapshot accepted a direct write')
+        assert artifact.title == 'Original'
+    finally:
+        db.session.rollback()
+
+
+def test_historical_file_previews_keep_instructor_files_private():
+    from types import SimpleNamespace
+    from dojo_plugin.artifact_files import artifact_files
+    owner, student = identity(), identity()
+    try:
+        artifact = SimpleNamespace(id='old-file', owner_id=owner.id, dojo_id=None)
+        revision = SimpleNamespace(content={'schema': 'construction-files/1',
+            'instructorNotes': {'files': [{'filename': 'teacher-only.pdf', 'href': '/invalid'}]}})
+        assert artifact_files(artifact, revision, student) == []
+        try:
+            artifact_files(artifact, revision, owner)
+        except ScopeError:
+            pass
+        else:
+            raise AssertionError('Unvalidated historical attachment was exposed')
+    finally:
+        db.session.rollback()
