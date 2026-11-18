@@ -2,6 +2,7 @@ import collections
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlencode
 import logging
 import traceback
 import datetime
@@ -9,6 +10,9 @@ import sys
 import re
 
 from ..learning.inquiry_service import published_projects as inquiry_published_projects
+from ..agent_runtime.auth import AgentRuntimeAuthError, mint_launch_ticket
+from ..agent_runtime.classroom_preparation import student_module_classrooms
+from ..agent_runtime.scope import build_scope, ScopeError
 
 from flask import Blueprint, render_template, abort, send_file, redirect, url_for, Response, stream_with_context, request, g
 from sqlalchemy.exc import IntegrityError
@@ -19,9 +23,9 @@ from CTFd.utils.decorators import authed_only
 from CTFd.utils.user import get_current_user, is_admin
 from CTFd.utils.helpers import get_infos
 
-from ..utils import get_current_container, get_all_containers, render_markdown
+from ..utils import get_all_containers, render_markdown
 from ..utils.stats import get_container_stats, get_dojo_stats, get_challenge_solves
-from ..utils.dojo import dojo_route, get_current_dojo_challenge, dojo_update, dojo_admins_only
+from ..utils.dojo import current_container_for_display, dojo_route, get_current_dojo_challenge, dojo_update, dojo_admins_only
 from ..utils.image_pulls import enqueue_dojo_image_pulls
 from ..utils.query_timer import query_timeout
 from ..models import (
@@ -33,7 +37,7 @@ from ..models import (
     DojoUsers,
     TeachingArtifacts,
 )
-from ..config import DOJOS_DIR
+from ..config import AGENT_RUNTIME_PUBLIC_ORIGIN, DOJOS_DIR
 
 dojo = Blueprint("pwncollege_dojo", __name__)
 #pylint:disable=redefined-outer-name
@@ -465,6 +469,24 @@ def dojo_solves(dojo, solves_code=None, format="csv"):
         return {"success": False, "error": "导出格式无效。"}, 400
 
 
+@dojo.route("/dojo/<dojo>/<module>/classrooms/<classroom_id>/join", methods=["POST"])
+@authed_only
+@dojo_route
+def join_module_classroom(dojo, module, classroom_id):
+    user = get_current_user()
+    if not student_module_classrooms(user, module, classroom_id=classroom_id):
+        abort(404)
+    try:
+        scope = build_scope(user, role="student", dojo_id=dojo.dojo_id, module_index=module.module_index)
+        token, _ = mint_launch_ticket(user, scope, target=f"/classroom/{classroom_id}")
+    except ScopeError:
+        abort(404)
+    except AgentRuntimeAuthError:
+        db.session.rollback()
+        abort(503, description="课堂服务暂不可用，请稍后重试。")
+    return _no_store_redirect(f"{AGENT_RUNTIME_PUBLIC_ORIGIN}/api/integration/exchange?{urlencode({'ticket': token})}")
+
+
 def view_module(dojo, module, scroll_to_challenge=None):
     user = get_current_user()
     user_solves = set(solve.challenge_id for solve in (
@@ -477,9 +499,9 @@ def view_module(dojo, module, scroll_to_challenge=None):
             5000,
             []
         ))
-    container = get_current_container()
+    container = current_container_for_display(user)
     practice = container.labels.get("dojo.mode") == "privileged" if container else False
-    current_challenge = get_current_dojo_challenge(user)
+    current_challenge = get_current_dojo_challenge(user, container=container)
 
     student = DojoStudents.query.filter_by(dojo=dojo, user=user).first()
     assessments = []
@@ -565,6 +587,7 @@ def view_module(dojo, module, scroll_to_challenge=None):
 
     return render_template(
         "module.html",
+        ordinary_classrooms=student_module_classrooms(user, module),
         inquiry_activities=inquiry_published_projects(user, dojo, module.module_index),
         debate_activities=(TeachingArtifacts.query.filter_by(
             dojo_id=dojo.dojo_id, module_index=module.module_index,

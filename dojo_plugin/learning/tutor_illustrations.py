@@ -4,22 +4,15 @@ import base64
 import binascii
 import re
 
-from sqlalchemy import String, and_, cast, exists, or_
-from sqlalchemy.orm import aliased
-
-from CTFd.models import Users
-
 from ..agent_runtime.artifacts import content_hash
-from ..agent_runtime.classroom_preparation import ordinary_static_lesson, published_classroom_deck
+from ..agent_runtime.classroom_preparation import ordinary_static_lesson, published_classroom_deck, published_ordinary_sessions
 from ..agent_runtime.upstream_turn import ordinary_teaching_course, teaching_image_enabled
 from .guide_model_context import guide_teaching_text
 from ..models import (
-    DojoAdmins,
     DojoChallenges,
     DojoUsers,
     LearningAttempts,
     TeachingAgentActions,
-    TeachingArtifacts,
     TeachingArtifactRevisions,
     TeachingSessions,
 )
@@ -54,55 +47,11 @@ def _eligible_scope(user, attempt):
     return current.dojo_id, current.module_index
 
 
-def _json_matches_integer(value, expected):
-    # JSON receipt fields are stored text via ->> in PostgreSQL. Comparing as
-    # text avoids casting malformed historical receipt values to integers.
-    return cast(value.as_string(), String) == cast(expected, String)
-
-
-def _classrooms(dojo_id, module_index):
-    session, action = TeachingSessions, TeachingAgentActions
-    artifact, revision = TeachingArtifacts, TeachingArtifactRevisions
-    request = action.request_json
-    teacher_membership = DojoAdmins.query.filter(
-        DojoAdmins.user_id == session.owner_id, DojoAdmins.dojo_id == dojo_id,
-    ).exists()
-    other = aliased(action)
-    ambiguous_receipt = exists().where(and_(
-        other.id != action.id, other.target_id == session.id,
-        other.action_type == "prepare-ordinary-classroom",
-        other.target_type == "teaching_session", other.status == "COMPLETED",
-    ))
-    return (
-        session.query
-        .join(action, and_(action.target_id == session.id, action.actor_id == session.owner_id,
-                           action.thread_id == session.thread_id))
-        .join(artifact, artifact.id == request["artifactId"].as_string())
-        .join(revision, and_(revision.artifact_id == artifact.id, revision.revision == artifact.current_revision))
-        .join(Users, Users.id == session.owner_id)
-        .filter(
-            session.dojo_id == dojo_id, session.module_index == module_index,
-            session.started.isnot(None),
-            or_(session.status == "LIVE", and_(session.status == "ENDED", session.ended.isnot(None))),
-            action.action_type == "prepare-ordinary-classroom", action.status == "COMPLETED",
-            action.target_type == "teaching_session", action.result["sessionId"].as_string() == session.id,
-            action.result["artifactId"].as_string() == artifact.id,
-            _json_matches_integer(action.result["artifactRevision"], revision.revision), ~ambiguous_receipt,
-            or_(Users.type == "admin", teacher_membership),
-            artifact.owner_id == session.owner_id, artifact.dojo_id == dojo_id,
-            artifact.module_index == module_index, artifact.artifact_type == "slide-deck",
-            artifact.status == "PUBLISHED", artifact.self_workspace_id.is_(None),
-            _json_matches_integer(request["dojoId"], dojo_id), _json_matches_integer(request["moduleIndex"], module_index),
-            _json_matches_integer(request["expectedRevision"], revision.revision),
-            request["contentHash"].as_string() == revision.content_hash,
-            request["ordinaryScenesHash"].as_string().isnot(None),
-            request["ordinaryImagePages"][0]["pageId"].as_string().isnot(None),
-            # Classroom runtime edits replace state and clear these pins. Do
-            # not offer these sessions in the catalogue after such an edit.
-            session.state["artifactId"].as_string() == artifact.id,
-            _json_matches_integer(session.state["artifactRevision"], revision.revision),
-            session.state["artifactContentHash"].as_string() == revision.content_hash,
-        )
+def _illustrated_sessions(dojo_id, module_index):
+    request = TeachingAgentActions.request_json
+    return published_ordinary_sessions(dojo_id, module_index).filter(
+        request["ordinaryScenesHash"].as_string().isnot(None),
+        request["ordinaryImagePages"][0]["pageId"].as_string().isnot(None),
     )
 
 
@@ -134,7 +83,7 @@ def available_tutor_illustrations(user, attempt):
     if scope is None:
         return []
     rows = (
-        _classrooms(*scope)
+        _illustrated_sessions(*scope)
         .with_entities(
             TeachingSessions.id, TeachingArtifactRevisions.revision,
             TeachingAgentActions.request_json["ordinaryImagePages"],
@@ -246,7 +195,7 @@ def resolve_tutor_illustration(user, attempt, selection):
     if scope is None:
         raise PermissionError(_DENIED)
     row = (
-        _classrooms(*scope)
+        _illustrated_sessions(*scope)
         .with_entities(TeachingSessions, TeachingAgentActions.request_json)
         .filter(TeachingSessions.id == classroom_id, TeachingArtifactRevisions.revision == revision_number)
         .populate_existing().first()

@@ -182,6 +182,7 @@ from ...agent_runtime.scope import (
     ScopeError,
     assert_capability,
     build_scope,
+    can_view_student_classroom,
     dojo_for_user,
     owner_or_teacher,
 )
@@ -1987,11 +1988,7 @@ def _session_for_user(session_id, user, *, teacher=False, lock=False):
     if teacher:
         dojo_for_user(user, session.dojo_id, teacher=True)
     elif not owner_or_teacher(user, session.owner_id, session.dojo_id):
-        membership = DojoUsers.query.filter_by(
-            dojo_id=session.dojo_id,
-            user_id=user.id,
-        ).first()
-        if membership is None or session.status not in {"LIVE", "ENDED"}:
+        if not can_view_student_classroom(user, session):
             raise ScopeError("Teaching session not found")
     return session
 
@@ -11998,6 +11995,7 @@ class AgentRuntimeLaunch(Resource):
         dojo_id = body.get("dojoId")
         module_index = body.get("moduleIndex")
         workspace_id = body.get("workspaceId")
+        classroom = None
         try:
             if role not in AGENT_RUNTIME_TARGETS or not AGENT_RUNTIME_TARGETS[
                 role
@@ -12028,6 +12026,16 @@ class AgentRuntimeLaunch(Resource):
                 dojo_id = artifact.dojo_id
                 module_index = artifact.module_index
                 workspace_id = artifact.self_workspace_id
+            elif role == "student" and target.startswith("/classroom/") and not target.startswith("/classroom/study_"):
+                classroom = TeachingSessions.query.options(load_only(
+                    TeachingSessions.id, TeachingSessions.status, TeachingSessions.dojo_id, TeachingSessions.module_index,
+                )).filter_by(id=target.rstrip("/").rsplit("/", 1)[-1]).first()
+                if workspace_id is not None or not can_view_student_classroom(user, classroom):
+                    raise ScopeError("Classroom not found")
+                if dojo_id is None:
+                    dojo_id = classroom.dojo_id
+                if module_index is None:
+                    module_index = classroom.module_index
             scope = build_scope(
                 user,
                 role=role,
@@ -12035,6 +12043,8 @@ class AgentRuntimeLaunch(Resource):
                 module_index=module_index,
                 workspace_id=workspace_id,
             )
+            if classroom is not None and (scope.dojo_id, scope.module_index) != (classroom.dojo_id, classroom.module_index):
+                raise ScopeError("Classroom not found")
             token, expires = mint_launch_ticket(user, scope, target=target)
             query = urlencode({"ticket": token})
             return _ok(
@@ -12776,13 +12786,8 @@ class AgentRuntimeClassroom(Resource):
             if scope.role == "teacher":
                 if not owner_or_teacher(user, session.owner_id, session.dojo_id):
                     raise ScopeError("Classroom not found")
-            else:
-                enrolled = DojoUsers.query.filter_by(
-                    dojo_id=session.dojo_id,
-                    user_id=user.id,
-                ).first()
-                if enrolled is None or session.status not in {"LIVE", "ENDED"}:
-                    raise ScopeError("Classroom not found")
+            elif not can_view_student_classroom(user, session):
+                raise ScopeError("Classroom not found")
             if scope.dojo_id is not None and session.dojo_id != scope.dojo_id:
                 raise ScopeError("Classroom not found")
             if (

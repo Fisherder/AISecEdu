@@ -802,7 +802,18 @@ def dojo_route(func):
     return wrapper
 
 
-def get_current_dojo_challenge(user=None):
+def current_container_for_display(user):
+    try:
+        return get_current_container(user)
+    except (docker.errors.DockerException, requests.RequestException):
+        logging.getLogger(__name__).warning("Workspace status is unavailable while rendering the course")
+        return None
+
+
+_CONTAINER_NOT_LOOKED_UP = object()
+
+
+def get_current_dojo_challenge(user=None, *, container=_CONTAINER_NOT_LOOKED_UP):
     resolved_user = user or get_current_user()
     cache_key = getattr(resolved_user, "id", None)
     if has_request_context():
@@ -812,13 +823,8 @@ def get_current_dojo_challenge(user=None):
             g._dojo_current_challenges = cache
         if cache_key in cache:
             return cache[cache_key]
-    try:
-        container = get_current_container(resolved_user)
-    except docker.errors.DockerException:
-        logging.getLogger(__name__).warning(
-            "Docker is unavailable while resolving the current challenge"
-        )
-        container = None
+    if container is _CONTAINER_NOT_LOOKED_UP:
+        container = current_container_for_display(resolved_user)
     challenge = None
     if container:
         challenge = (

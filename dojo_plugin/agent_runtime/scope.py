@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from CTFd.models import Users
 
-from ..models import DojoAdmins, Dojos, DojoUsers, SelfLearningWorkspaces
+from ..models import DojoAdmins, DojoModules, Dojos, DojoUsers, SelfLearningWorkspaces
 
 
 class ScopeError(ValueError):
@@ -86,6 +86,17 @@ def dojo_for_user(user, dojo_id, *, teacher=False):
         # Do not reveal whether a private course exists.
         raise ScopeError("Dojo not found")
     return dojo
+
+
+def can_view_student_classroom(user, session):
+    if session is None or session.status not in {"LIVE", "ENDED"}:
+        return False
+    if DojoUsers.query.filter_by(dojo_id=session.dojo_id, user_id=user.id).first() is None:
+        return False
+    if session.module_index is None:
+        return True
+    module = DojoModules.query.filter_by(dojo_id=session.dojo_id, module_index=session.module_index).first()
+    return module is not None and module.visible()
 
 
 def validate_module(dojo, module_index):

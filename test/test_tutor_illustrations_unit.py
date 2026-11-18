@@ -9,6 +9,7 @@ import json
 import re
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import JSON, Column, Integer, String, and_, cast, create_engine, event, exists, or_
@@ -53,7 +54,7 @@ class Challenge(Base):
         return SimpleNamespace(visible=lambda: self.module_visibility == 1)
 
 
-Classroom = _model("classroom", ints="dojo_id module_index owner_id", strings="thread_id status updated started ended", documents="state")
+Classroom = _model("classroom", ints="dojo_id module_index owner_id", strings="title thread_id status updated started ended", documents="state")
 Action = _model("action", ints="actor_id", strings="target_id thread_id action_type status target_type", documents="request_json result")
 Artifact = _model(
     "artifact", ints="owner_id dojo_id module_index current_revision", strings="status artifact_type self_workspace_id",
@@ -138,7 +139,8 @@ def illustrations(monkeypatch):
     yield SimpleNamespace(
         catalog=namespace["available_tutor_illustrations"], resolve=namespace["resolve_tutor_illustration"],
         user=SimpleNamespace(id=1), attempt=attempt, db=db, flags=flags, statements=statements,
-        classroom=classroom, action=action, digest=digest, classrooms=namespace["_classrooms"],
+        classroom=classroom, action=action, digest=digest, classrooms=namespace["_illustrated_sessions"],
+        module_classes=namespace["student_module_classrooms"],
         pick={"classroomId": CLASSROOM_ID, "revision": 3, "pageId": PAGE_ID, "consent": True},
     )
     db.remove()
@@ -265,6 +267,42 @@ def test_postgresql_receipt_query_uses_correlated_duplicate_check_and_safe_json_
     assert "action_1.target_id = classroom.id" in compiled
     assert "CAST(CAST(" in compiled and "AS INTEGER" not in compiled
     assert "SELECT classroom.id" in compiled
+
+
+def test_enrolled_student_can_open_approved_class_without_an_image_or_active_exercise(illustrations):
+    f = illustrations
+    module = SimpleNamespace(dojo_id=-9, module_index=0, visible=lambda: True)
+    f.action.request_json = {key: value for key, value in f.action.request_json.items()
+                             if key not in ("ordinaryScenesHash", "ordinaryImagePages")}
+    f.attempt.status = "INTERRUPTED"
+    f.flags.image_enabled = False
+    f.db.commit()
+    rows = f.module_classes(f.user, module)
+    assert [row.id for row in rows] == [CLASSROOM_ID]
+    assert set(rows[0]._mapping.keys()) == {"id", "title", "status"}
+    assert f.module_classes(f.user, module, classroom_id="different-session") == []
+    assert f.module_classes(SimpleNamespace(id=987), module) == []
+    module.visible = lambda: False
+    assert f.module_classes(f.user, module) == []
+    module.visible = lambda: True
+    f.classroom.status = "READY"
+    f.db.commit()
+    assert f.module_classes(f.user, module) == []
+
+
+def test_authorized_classroom_read_rechecks_current_module_visibility(illustrations):
+    f = illustrations
+    module_query = Mock()
+    module = module_query.filter_by.return_value.first.return_value
+    namespace = {"DojoUsers": Enrollment, "DojoModules": SimpleNamespace(query=module_query)}
+    _functions(ROOT / "dojo_plugin/agent_runtime/scope.py", namespace, {"can_view_student_classroom"})
+    check = namespace["can_view_student_classroom"]
+    module.visible.return_value = True
+    assert check(f.user, f.classroom)
+    module_query.filter_by.assert_called_once_with(dojo_id=-9, module_index=0)
+    module.visible.return_value = False
+    assert not check(f.user, f.classroom)
+    assert not check(SimpleNamespace(id=987), f.classroom)
 
 
 def test_unwrapped_mixed_class_accepts_the_rendered_png_not_the_source_jpeg(illustrations):

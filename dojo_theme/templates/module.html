@@ -105,6 +105,20 @@
   </section>
   {% endif %}
 
+  {% if ordinary_classrooms %}
+  <section class="product-surface unit-content-intro" aria-labelledby="module-classrooms-heading">
+    <h2 id="module-classrooms-heading">本章课堂</h2>
+    {% for classroom in ordinary_classrooms %}
+    <form method="post" action="{{ url_for('pwncollege_dojo.join_module_classroom', dojo=dojo.reference_id, module=module.id, classroom_id=classroom.id) }}">
+      <input type="hidden" name="nonce" value="{{ Session.nonce }}">
+      <p>{{ classroom.title }} · {{ '上课中' if classroom.status == 'LIVE' else '已结束' }}
+        <button class="product-button" type="submit" aria-label="{{ '进入课堂' if classroom.status == 'LIVE' else '回看课件' }}：{{ classroom.title }}">{{ '进入课堂' if classroom.status == 'LIVE' else '回看课件' }}</button>
+      </p>
+    </form>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   {% if debate_activities %}
   <section class="product-surface unit-content-intro" aria-label="AI 辩论学习活动">
     <div class="product-section-heading"><div><span class="product-kicker">AI 辩论</span><h2>在交锋中深化理解</h2><p>选择立场，与 AI 分轮论证，最后完成反思并查看学习反馈。</p></div></div>
@@ -360,7 +374,7 @@
     <span><strong>添加题目</strong><small>直接在此单元中创建并发布新题目。</small></span>
   </a>
   <br>
-  {% elif not module.resources and not module.challenges and not inquiry_activities %}
+  {% elif not module.resources and not module.challenges and not inquiry_activities and not ordinary_classrooms %}
   <p class="text-muted">此单元尚未发布题目。</p>
   {% endif %}
 
