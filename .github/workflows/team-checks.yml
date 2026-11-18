@@ -25,7 +25,7 @@ jobs:
           upstream_tree=$(gh api repos/deepseek-ai/deepseek-harness/git/commits/3f321d32bfe382212a8ed8785c1d47a5a300aa23 --jq .tree.sha)
           test "$(git cat-file -t HEAD:vendor/deepseek-harness)" = tree
           test "$(git rev-parse HEAD:vendor/deepseek-harness)" = "$upstream_tree"
-          docker build -f services/deepseek-harness/Dockerfile -t aisecedu-harness-test .
+          docker build -f services/deepseek-harness/Dockerfile --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" -t aisecedu-harness-test .
           container=$(docker create aisecedu-harness-test)
           trap 'docker rm "$container" >/dev/null' EXIT
           docker cp "$container:/opt/deepseek-harness" "$RUNNER_TEMP/image-dsh"
@@ -47,9 +47,12 @@ jobs:
         if: github.event.action == 'ready_for_review'
         run: |
           mkdir -p "$RUNNER_TEMP/teaching-image"
-          docker save aisecedu-harness-test | gzip -1 > "$RUNNER_TEMP/teaching-image/harness.tar.gz"
+          image="aisecedu/harness-acceptance:$GITHUB_SHA"
+          docker tag aisecedu-harness-test "$image"
+          docker save "$image" | gzip -1 > "$RUNNER_TEMP/teaching-image/harness.tar.gz"
+          git rev-parse HEAD > "$RUNNER_TEMP/teaching-image/tested-commit"
           cd "$RUNNER_TEMP/teaching-image"
-          sha256sum harness.tar.gz > SHA256SUMS
+          sha256sum harness.tar.gz tested-commit > SHA256SUMS
       - name: Keep the image for the development acceptance window
         if: github.event.action == 'ready_for_review'
         uses: actions/upload-artifact@v4
@@ -103,7 +106,7 @@ jobs:
       - name: Test the teaching client, durable jobs and course catalogue
         run: |
           python -m pip install -r ops/team/requirements.txt
-          python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_course_catalog_unit.py
+          python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_guide_teaching_turn_unit.py test/test_course_catalog_unit.py
       - name: Verify cross-course navigation in desktop and mobile viewports
         run: CHROME_BIN="$(command -v google-chrome)" node test/browser/teacher-course-navigation.mjs
       - name: Courseware editor browser component checks
