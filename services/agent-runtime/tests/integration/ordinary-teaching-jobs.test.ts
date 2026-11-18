@@ -1,12 +1,14 @@
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyCoursewarePagePatch } from '@/lib/courseware/patches';
 import { coursewareSlideDataSchema } from '@/lib/courseware/schema';
 import { ordinaryCandidate, ordinaryMaterialAnalysis, ordinarySlidePatch } from '@/lib/server/agent-harness/ordinary-teaching';
 
-const mocks = vi.hoisted(() => ({ resolveModel: vi.fn(), revise: vi.fn(), usage: vi.fn() }));
+const mocks = vi.hoisted(() => ({ resolveModel: vi.fn(), inspectRendered: vi.fn(), usage: vi.fn() }));
 vi.mock('@/lib/server/resolve-model', () => ({resolveModel: mocks.resolveModel}));
-vi.mock('@/lib/courseware/revision', () => ({reviseModernCourseware: mocks.revise}));
+vi.mock('@/lib/courseware/render-client', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/courseware/render-client')>(),
+  inspectRenderedCourseware: mocks.inspectRendered,
+}));
 vi.mock('@/lib/server/usage-storage', () => ({recordUsage: mocks.usage}));
 vi.mock('@/lib/server/aisecedu-integration', () => ({
   AISECEDU_SERVICE_HEADER: 'X-AISecEdu-Service-Token',
@@ -49,6 +51,61 @@ const modelResponse = (value: unknown) => Response.json({
   text: JSON.stringify(value), model: 'official-model', usage: {prompt_tokens: 10, completion_tokens: 5},
 });
 
+const plantTitles = ['种子与幼苗', '根吸收水分', '叶片的作用', '茎运输水分'];
+const revisedTitles = {2: '根如何吸收水分', 4: '茎如何运输水分'} as const;
+
+function plantDeck() {
+  return plantTitles.map((title, index) => {
+    const number = index + 1;
+    const studio = coursewareSlideDataSchema.parse({
+      page: {
+        schema: 'courseware-page-v2', id: `plant-${number}`, role: 'opening', title,
+        composition: 'wide', durationSeconds: 60, takeaway: '依据观察描述植物的结构',
+        objective: '比较植物结构在两个观察条件下的表现',
+        visual: {kind: 'comparison', columns: ['条件甲', '条件乙'], rows: [
+          {label: '供水', values: ['较少', '充足']},
+          {label: '观察', values: ['待记录', '待比较']},
+        ]},
+        layout: {
+          title: {box: {left: 30, top: 28, width: 940, height: 60}, fontSize: 32},
+          takeaway: {box: {left: 30, top: 98, width: 940, height: 45}, fontSize: 22},
+          supporting: [],
+          visual: {left: 40, top: 155, width: 920, height: 360},
+        },
+        speakerNotes: `PRIVATE-SPEAKER-${number} ${'请让小组先记录看到的变化，课堂讨论时再区分事实和推测。'.repeat(4)}`,
+      },
+      theme: {name: `PRIVATE-THEME-${number}`, background: '#ffffff', foreground: '#000000', muted: '#555555',
+        accent: '#2222ee', secondary: '#005544', surface: '#cccccc'},
+      assets: [{id: `asset-${number}`, src: 'data:image/png;base64,AA==',
+        source: `PRIVATE-ASSET-SOURCE-${number}`, alt: `PRIVATE-ASSET-ALT-${number}`, width: 1, height: 1}],
+    });
+    return {id: `artifact-${number}`, title, type: 'slide',
+      outline: {title, description: studio.page.objective},
+      content: {studio, remark: `PRIVATE-REMARK-${number}`}};
+  });
+}
+
+function assertScopedSlidePrompt(url: unknown, init: {headers: Record<string, string>; body: string}, selected: number[]) {
+  expect(String(url)).toBe(harness);
+  expect(init.headers.Authorization).toBe('Bearer fixture-secret');
+  const {messages, ...otherFields} = JSON.parse(init.body);
+  expect(otherFields).toEqual({});
+  expect(messages).toHaveLength(2);
+  expect(messages[0].role).toBe('system');
+  expect(messages[1].role).toBe('user');
+  const packet = JSON.parse(messages[1].content);
+  expect(Object.keys(packet).sort()).toEqual(['editableTextFields', 'instruction']);
+  const title = packet.editableTextFields.find((field: {path: string}) => field.path === 'title')?.text;
+  const number = plantTitles.indexOf(title) + 1;
+  expect(selected).toContain(number);
+  for (const otherTitle of plantTitles.filter(item => item !== title)) {
+    expect(init.body).not.toContain(otherTitle);
+  }
+  expect(init.body).not.toMatch(/PRIVATE-(SPEAKER|THEME|ASSET-SOURCE|ASSET-ALT|REMARK)-|data:image/);
+  expect(packet.editableTextFields.map((field: {path: string}) => field.path)).not.toContain('speakerNotes');
+  return number as 2 | 4;
+}
+
 describe('ordinary teaching worker service routes', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -57,6 +114,9 @@ describe('ordinary teaching worker service routes', () => {
     vi.stubEnv('HARNESS_SERVICE_SECRET', 'fixture-secret');
     vi.stubEnv('HARNESS_DEEPSEEK_MODEL', 'official-model');
     mocks.resolveModel.mockRejectedValue(new Error('legacy route fixture'));
+    mocks.inspectRendered.mockImplementation(async studio => ({
+      issues: [], evidence: {status: 'PASS', pageId: studio.page.id},
+    }));
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -170,27 +230,12 @@ describe('ordinary teaching worker service routes', () => {
   });
 
   it('requires a scoped static native page and applies only the selected text correction', async () => {
-    const studio = coursewareSlideDataSchema.parse({
-      page: {schema: 'courseware-page-v2', id: 'page-1', role: 'opening', title: '蒸发课',
-        composition: 'split', durationSeconds: 60, takeaway: '温度会影响蒸发', objective: '比较水量变化',
-        visual: {kind: 'comparison', columns: ['冷水', '温水'], rows: [
-          {label: '水温', values: ['低', '高']}, {label: '蒸发', values: ['慢', '快']},
-        ]}, speakerNotes: '控制容器大小和气流，再预测两组水量变化并记录实际结果。'.repeat(4)},
-      theme: {name: '课堂', background: '#ffffff', foreground: '#000000', muted: '#555555',
-        accent: '#2222ee', secondary: '#005544', surface: '#cccccc'}, assets: [],
+    const artifacts = plantDeck();
+    const fetch = vi.fn(async (url, init) => {
+      assertScopedSlidePrompt(url, init, [1]);
+      return modelResponse({changes: [{op: 'set', path: ['takeaway'], value: '比较种子和幼苗的结构'}]});
     });
-    const artifacts = [{id: 'artifact-1', title: studio.page.title, type: 'slide', content: {studio}}];
-    const patch = {changes: [{op: 'set', path: ['takeaway'], value: '水温影响蒸发速度'}]};
-    const fetch = vi.fn(async () => modelResponse(patch));
     vi.stubGlobal('fetch', fetch);
-    mocks.revise.mockImplementation(async options => {
-      expect(options.onlyPageIds).toEqual(['page-1']);
-      expect(options.textOnlyPageIds).toEqual(['page-1']);
-      const typedPatch = JSON.parse(await options.aiCall('当前页文字修订', '普通课件资料'));
-      const page = applyCoursewarePagePatch(studio.page, typedPatch, true);
-      return {artifacts: [{...artifacts[0], content: {studio: {...studio, page}}}],
-        revision: {renderEvidence: [{status: 'PASS'}]}};
-    });
     const {POST} = await import('@/app/api/integration/jobs/execute/route');
     const response = await POST(request('artifact.revise', 'slide-wording', {
       artifactType: 'slide-deck', instruction: '只润色第1页措辞：把结论写清楚',
@@ -200,16 +245,112 @@ describe('ordinary teaching worker service routes', () => {
     expect(response.status, JSON.stringify(output)).toBe(200);
     expect(output.model.executionMode).toBe('ordinary-slide-wording');
     expect(output.result.content.lesson.artifacts[0].content.studio.page).toMatchObject({
-      id: 'page-1', takeaway: '水温影响蒸发速度', visual: studio.page.visual,
+      id: 'plant-1', takeaway: '比较种子和幼苗的结构', visual: artifacts[0].content.studio.page.visual,
     });
-    expect(output.result.content.revisionMetadata.renderEvidence).toEqual([{status: 'PASS'}]);
+    expect(output.result.content.revisionMetadata).toMatchObject({
+      pageId: 'plant-1', pageIds: ['plant-1'],
+      renderEvidence: [{status: 'PASS', pageId: 'plant-1'}],
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
     expect(() => ordinarySlidePatch({changes: [{op: 'add', path: ['takeaway'], value: '不允许的操作'}]})).toThrow();
+  });
+
+  it.each([
+    '只润色第2、4页的文字：把标题写成清晰的问题',
+    '仅调整第2页和第4页措辞：把标题写成清晰的问题',
+  ])('routes explicitly selected pages through independent text-only turns (%s)', async instruction => {
+    const artifacts = plantDeck();
+    const unchanged = artifacts.map(item => JSON.stringify(item));
+    const fetch = vi.fn(async (url, init) => {
+      const page = assertScopedSlidePrompt(url, init, [2, 4]);
+      const usage = page === 2
+        ? {prompt_tokens: 13, completion_tokens: 4, total_tokens: 17}
+        : {prompt_tokens: 29, completion_tokens: 8, total_tokens: 37};
+      return Response.json({
+        text: JSON.stringify({changes: [{op: 'set', path: ['title'], value: revisedTitles[page]}]}),
+        model: 'official-model', usage,
+      });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request('artifact.revise', 'slide-wording', {
+      artifactType: 'slide-deck', instruction, currentContent: {lesson: {artifacts}},
+    }));
+    const output = await response.json();
+    expect(response.status, JSON.stringify(output)).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(output.model).toMatchObject({
+      actualModel: 'official-model', executionMode: 'ordinary-slide-wording',
+      usage: {inputTokens: 42, outputTokens: 12, totalTokens: 54},
+    });
+    expect(mocks.usage.mock.calls.map(([call]) => [call.modelId, call.usage.inputTokens, call.usage.outputTokens]))
+      .toEqual([['official-model', 13, 4], ['official-model', 29, 8]]);
+    const next = output.result.content.lesson.artifacts;
+    expect(next.map((item: {title: string}) => item.title)).toEqual([
+      plantTitles[0], revisedTitles[2], plantTitles[2], revisedTitles[4],
+    ]);
+    expect(JSON.stringify(next[0])).toBe(unchanged[0]);
+    expect(JSON.stringify(next[2])).toBe(unchanged[2]);
+    expect(next[1].content.studio).toEqual({...artifacts[1].content.studio,
+      page: {...artifacts[1].content.studio.page, title: revisedTitles[2]}});
+    expect(next[3].content.studio).toEqual({...artifacts[3].content.studio,
+      page: {...artifacts[3].content.studio.page, title: revisedTitles[4]}});
+    expect(output.result.content.revisionMetadata).toMatchObject({
+      mode: 'ordinary-slide-wording', pageIds: ['plant-2', 'plant-4'],
+      renderEvidence: [{status: 'PASS', pageId: 'plant-2'}, {status: 'PASS', pageId: 'plant-4'}],
+    });
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it.each(['unavailable', 'out-of-scope-patch'])(
+    'returns no partial result or legacy turn when a later selected page fails (%s)', async failure => {
+      const artifacts = plantDeck();
+      const pagesSeen: number[] = [];
+      const fetch = vi.fn(async (url, init) => {
+        const page = assertScopedSlidePrompt(url, init, [2, 4]);
+        pagesSeen.push(page);
+        if (page === 4 && failure === 'unavailable') return new Response(null, {status: 503});
+        return modelResponse({changes: [{
+          op: 'set', path: [page === 4 ? 'speakerNotes' : 'title'], value: revisedTitles[page],
+        }]});
+      });
+      vi.stubGlobal('fetch', fetch);
+      const {POST} = await import('@/app/api/integration/jobs/execute/route');
+      const response = await POST(request('artifact.revise', 'slide-wording', {
+        artifactType: 'slide-deck', instruction: '只润色第2、4页的文字：让标题更明确',
+        currentContent: {lesson: {artifacts}},
+      }));
+      const output = await response.json();
+      expect(response.status, JSON.stringify(output)).toBe(failure === 'unavailable' ? 503 : 422);
+      expect(pagesSeen[0]).toBe(2);
+      expect(pagesSeen).toContain(4);
+      expect(output.success).toBe(false);
+      expect(output).not.toHaveProperty('result');
+      expect(JSON.stringify(output)).not.toContain(revisedTitles[2]);
+      expect(mocks.resolveModel).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    '调整所有页面布局',
+    '只润色第2、2页的文字：使标题更清楚',
+    '只润色第2、5页的文字：使标题更清楚',
+  ])('rejects an invalid wording selection without calling a provider (%s)', async instruction => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request('artifact.revise', 'slide-wording', {
+      artifactType: 'slide-deck', instruction, currentContent: {lesson: {artifacts: plantDeck()}},
+    }));
+    expect(response.status).toBe(422);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
   });
 
   it.each([
     ['candidate.generate', 'candidate-plan', {artifactType: 'simulation'}],
     ['self.candidate.generate', 'candidate-plan', {artifactType: 'lesson-plan'}],
-    ['artifact.revise', 'slide-wording', {artifactType: 'slide-deck', instruction: '调整所有页面布局'}],
     ['material.enrich', '', {materialId: 'm1', revisionId: 'r1'}],
   ])('keeps unsupported %s outside the ordinary service', async (kind, scope, payload) => {
     const fetch = vi.fn();

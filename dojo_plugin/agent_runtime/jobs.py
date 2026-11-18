@@ -69,7 +69,10 @@ from .session_events import record_step_lifecycle, record_turn_lifecycle
 from .harness import TurnDeferred, advance_turn
 from .teacher_model_context import teacher_model_payload, teacher_platform_facts
 from .teacher_documents import DOCUMENT_INSTRUCTION, document_deliverables, requested_document_formats
-from .upstream_turn import UpstreamTurnError, invoke_turn, ordinary_teaching_course, request_body, result_object, upstream_enabled
+from .upstream_turn import (
+    UpstreamTurnError, invoke_turn, ordinary_slide_wording_request,
+    ordinary_teaching_course, request_body, result_object, upstream_enabled,
+)
 from .commands import COMMAND_JOB_KINDS, execute_command, finish_command_job, reopen_command_job, recover_command_job
 from .local_extract import index_verified_local_source, locally_extractable
 from .reliability import RuntimeJobError, recovery_decision, recovery_due, public_recovery
@@ -1572,6 +1575,13 @@ def enqueue_job(
             raise PermissionError("Idempotency key belongs to another user")
         return existing, False
 
+    if (kind == "artifact.revise" and payload.get("artifactType") == "slide-deck"
+            and not payload.get("workspaceId") and ordinary_slide_wording_request(payload.get("instruction"))
+            and ordinary_teaching_course(dojo_id) and upstream_enabled()):
+        # Pin the new request so a later access or configuration change cannot
+        # silently reroute the teacher's slides to a different model backend.
+        payload = {**payload, "revisionBackend": "ordinary-slide-wording"}
+
     inherited_trace_id = get_trace_id()
     if inherited_trace_id in {None, "", "NONE", "LOCAL"}:
         inherited_trace_id = None
@@ -2813,8 +2823,16 @@ def _ordinary_teaching_job_scope(job, payload):
     if job.kind == "artifact.revise":
         if payload.get("artifactType") != "slide-deck" or not payload.get("artifactId"):
             return None
-        if not re.fullmatch(r"(?:请)?(?:只|仅)(?:修改|调整|润色)第([1-9][0-9]{0,2})页(?:的)?(?:文字|文案|措辞)[：:][\s\S]+",
-                            str(payload.get("instruction") or "").strip()):
+        instruction = str(payload.get("instruction") or "").strip()
+        if payload.get("revisionBackend") == "ordinary-slide-wording":
+            if not ordinary_slide_wording_request(instruction):
+                return None
+        elif not re.fullmatch(
+            r"(?:请)?(?:只|仅)(?:修改|调整|润色)第([1-9][0-9]{0,2})页(?:的)?(?:文字|文案|措辞)[：:][\s\S]+",
+            instruction,
+        ):
+            # Unpinned jobs were admitted by an earlier worker and use its
+            # original single-page routing contract when retried.
             return None
         artifact = TeachingArtifacts.query.filter_by(
             id=payload["artifactId"], owner_id=job.owner_id, dojo_id=job.dojo_id,
@@ -2890,6 +2908,9 @@ def _runtime_request_body(job, route, payload):
             model_context,
         )
     ordinary_teaching = _ordinary_teaching_job_scope(job, payload)
+    if (job.kind == "artifact.revise" and payload.get("revisionBackend") == "ordinary-slide-wording"
+            and ordinary_teaching != "slide-wording"):
+        raise PermanentJobError("课件文字修订的课程权限或服务配置已变化，请重新发起。")
     return {
         "jobId": job.id,
         "kind": job.kind,
@@ -4647,6 +4668,9 @@ def process_job(job_id, *, worker_id=None):
                 db.session.commit()
 
             model_mode = str((response.get("model") or {}).get("executionMode") or "")
+            if (job.kind == "artifact.revise" and runtime_payload.get("revisionBackend") == "ordinary-slide-wording"
+                    and model_mode != "ordinary-slide-wording"):
+                raise PermanentJobError("课件文字修订未取得指定教学服务的回执。")
             if model_mode.startswith("ordinary-"):
                 authorized_scope = _ordinary_teaching_job_scope(job, runtime_payload)
                 if not authorized_scope or model_mode != f"ordinary-{authorized_scope}":

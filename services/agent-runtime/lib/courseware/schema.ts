@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { LEARNER_LANGUAGE_BRIEF } from '@/lib/teaching/learner-language';
 
+export const COURSEWARE_MAX_PAGES = 120;
 const label = z.string().trim().min(1).max(48);
 const shortText = z.string().trim().min(1).max(100);
 const id = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]{0,47}$/);
@@ -435,7 +436,7 @@ export const coursewareDesignSchema = z
         }),
       )
       .min(1)
-      .max(120),
+      .max(COURSEWARE_MAX_PAGES),
   })
   .superRefine((design, ctx) => {
     const ids = design.pages.map((page) => page.id);

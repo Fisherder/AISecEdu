@@ -979,7 +979,7 @@ def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_target
 
     tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
     tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)
-                 and node.name == "_ordinary_teaching_job_scope"]
+                 and node.name in {"_ordinary_teaching_job_scope", "_runtime_request_body", "enqueue_job"}]
 
     def table(**row):
         def filter_by(**criteria):
@@ -990,6 +990,8 @@ def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_target
 
     namespace = {
         "ordinary_teaching_course": turn.ordinary_teaching_course, "re": re, "upstream_enabled": lambda: True,
+        "ordinary_slide_wording_request": turn.ordinary_slide_wording_request,
+        "_harness_courseware_authorized": lambda job, payload: False, "PermanentJobError": RuntimeError,
         "Users": table(id=7, type="user"), "DojoAdmins": table(dojo_id=2, user_id=7),
         "TeachingCandidateSets": table(id="candidate", owner_id=7, dojo_id=2, kind="lesson-plan",
                                        self_workspace_id=None),
@@ -1013,9 +1015,36 @@ def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_target
     assert scope(create, candidate) == "candidate-plan"
     assert scope(enrich, material) == "material-summary"
     assert scope(revise, slide) == "slide-wording"
+    old_multi = {**slide, "instruction": "请仅润色第2、4页的文字：让植物观察结论更容易理解"}
+    assert scope(revise, old_multi) is None
+
+    class QueuedJob(SimpleNamespace):
+        id = "queued"
+        query = table().query
+
+    namespace.update(
+        TeachingJobs=QueuedJob, TeachingJobOutbox=SimpleNamespace,
+        db=SimpleNamespace(session=SimpleNamespace(add=lambda obj: None, flush=lambda: None)),
+        get_trace_id=lambda: "test-trace", append_job_event=lambda *args: None,
+    )
+    job, created = namespace["enqueue_job"](
+        kind="artifact.revise", dojo_id=2, owner_id=7, idempotency_key="multi",
+        payload=old_multi, commit=False,
+    )
+    assert created and "revisionBackend" not in old_multi
+    assert job.payload["revisionBackend"] == "ordinary-slide-wording"
+    body = namespace["_runtime_request_body"]
+    assert body(job, {}, job.payload)["scope"]["ordinaryTeaching"] == "slide-wording"
+    with pytest.raises(RuntimeError, match="课程权限"):
+        body(job, {}, {**job.payload, "artifactId": "not-owned"})
+    # An invalid page still goes to the strict validator, never to the legacy model.
+    assert scope(job, {**job.payload, "instruction": "只改动布局"}) is None
+    assert scope(job, {**job.payload, "instruction": "仅润色第0页和第1000页文字：简明"}) == "slide-wording"
     assert scope(create, {**candidate, "workspaceId": "personal"}) is None
     assert scope(create, {**candidate, "artifactType": "simulation"}) is None
     assert scope(enrich, {**material, "storageKey": "other-version"}) is None
     assert scope(revise, {**slide, "instruction": "修改所有页面布局"}) is None
     namespace["DojoAdmins"] = table(dojo_id=3, user_id=7)
     assert scope(create, candidate) is None
+    with pytest.raises(RuntimeError, match="课程权限"):
+        body(job, {}, job.payload)

@@ -27,7 +27,7 @@ import {
 import { generateSingleArtifact, type SingleArtifactInput } from '@/lib/server/lesson-generation';
 import { generateModernCourseware } from '@/lib/courseware/generation';
 import { inspectRenderedCourseware } from '@/lib/courseware/render-client';
-import { coursewareSlideDataSchema } from '@/lib/courseware/schema';
+import { COURSEWARE_MAX_PAGES, coursewareSlideDataSchema } from '@/lib/courseware/schema';
 import { openCoursewareCheckpoint } from '@/lib/courseware/checkpoints';
 import { reviseModernCourseware } from '@/lib/courseware/revision';
 import { searchCoursewareImage } from '@/lib/courseware/assets';
@@ -3138,48 +3138,96 @@ async function analyzeMaterialComprehensively(
 }
 
 function ordinarySlideTarget(payload: Record<string, unknown>) {
-  const instruction = String(payload.instruction || '').trim();
-  const match = /^(?:请)?(?:只|仅)(?:修改|调整|润色)第([1-9][0-9]{0,2})页(?:的)?(?:文字|文案|措辞)[：:]([\s\S]+)$/u.exec(instruction);
+  const specification = typeof payload.instruction === 'string' ? payload.instruction.trim() : '';
+  if (specification.length > 4096) return {error: '本次文字修订要求过长。'};
+  const match = /^(?:请\s*)?(?:只|仅)\s*(?:修改|调整|润色)\s*(.*?)\s*(?:的\s*)?(?:文字|文案|措辞)\s*[：:]\s*([\s\S]+)$/u.exec(specification);
+  if (!match || !match[1].includes('页') || !match[2].trim() || match[2].trim().length > 2000) {
+    return {error: '请指定要润色的页码和文字要求，例如“仅润色第2、4页的文字：改用初学者能理解的措辞”。'};
+  }
+  const pageNumbers = match[1].trim().split(/\s*[、,，和及]\s*/u).map(raw => {
+    const page = /^(?:第\s*)?([1-9][0-9]{0,2})(?:\s*页)?$/u.exec(raw);
+    return page ? Number(page[1]) : 0;
+  });
+  if (pageNumbers.includes(0) || new Set(pageNumbers).size !== pageNumbers.length ||
+      pageNumbers.length > COURSEWARE_MAX_PAGES) {
+    return {error: `请逐一列出不同的页码，每次最多 ${COURSEWARE_MAX_PAGES} 页。`};
+  }
+
   const content = recordValue(payload.currentContent);
   const lesson = recordValue(content?.lesson);
   const artifacts = Array.isArray(lesson?.artifacts) ? lesson.artifacts : [];
-  if (!match || !content || !lesson || !artifacts.length || artifacts.some(item =>
+  if (!content || !lesson || !artifacts.length || artifacts.some(item =>
     recordValue(item)?.type !== 'slide' ||
     recordValue(recordValue(recordValue(recordValue(item)?.content)?.studio)?.page)?.schema !== 'courseware-page-v2'
-  )) return null;
-  const target = coursewareSlideDataSchema.safeParse(recordValue(recordValue(artifacts[Number(match[1]) - 1])?.content)?.studio);
-  if (!target.success || !['image', 'chart', 'comparison'].includes(target.data.page.visual.kind) ||
-      target.data.page.beats.length || target.data.page.check) return null;
-  return {content, lesson, artifacts: artifacts as LessonArtifact[], pageId: target.data.page.id, instruction: match[2]};
+  )) return {error: '课件原稿尚未准备好进行文字修订。'};
+  if (pageNumbers.some(page => page > artifacts.length)) return {error: '选中的页码超出了当前课件。'};
+
+  const allPageIds = artifacts.map(item => {
+    const studio = recordValue(recordValue(recordValue(item)?.content)?.studio);
+    return recordValue(studio?.page)?.id;
+  });
+  if (allPageIds.some(id => typeof id !== 'string' || !id) || new Set(allPageIds).size !== artifacts.length) {
+    return {error: '课件页标识缺失或重复，无法安全修订。'};
+  }
+  const pageIds: string[] = [];
+  for (const number of pageNumbers.sort((a, b) => a - b)) {
+    const target = coursewareSlideDataSchema.safeParse(recordValue(recordValue(artifacts[number - 1])?.content)?.studio);
+    if (!target.success || !['image', 'chart', 'comparison'].includes(target.data.page.visual.kind) ||
+        target.data.page.beats.length || target.data.page.check) {
+      return {error: `第${number}页不符合静态课件文字修订条件。`};
+    }
+    pageIds.push(target.data.page.id);
+  }
+  return {content, lesson, artifacts: artifacts as LessonArtifact[], pageIds, instruction: match[2].trim()};
 }
 
+class OrdinarySlideModelUnavailable extends Error {}
+
+const ordinarySlideSystem = ordinaryTeachingRules + '\n' +
+  '只润色当前页中列出的现有教学文字。逐字保留每个字段的 protectedLiterals；只修改需要调整的字段。' +
+  '使用较简洁的措辞以适应原版面。返回 JSON {"changes":[{"op":"set","path":["title"],"value":"新文字"}]}。' +
+  'path 由字段名和数字数组下标组成，只能使用 editableTextFields 列出的路径。';
+
 async function reviseOrdinarySlide(
-  target: NonNullable<ReturnType<typeof ordinarySlideTarget>>,
+  target: Exclude<ReturnType<typeof ordinarySlideTarget>, {error: string}>,
   model: OrdinaryTeachingModel,
 ) {
   let usage: Record<string, number> = {};
   const revised = await reviseModernCourseware({
     artifacts: target.artifacts, instruction: target.instruction,
-    onlyPageIds: [target.pageId], textOnlyPageIds: [target.pageId],
+    onlyPageIds: target.pageIds, textOnlyPageIds: target.pageIds,
     inspectRendered: inspectRenderedCourseware,
-    aiCall: async (system, prompt, images) => {
-      if (images?.length) throw new Error('An ordinary slide wording edit accepts text only');
-      const result = await ordinaryTeachingText(model, ordinaryTeachingRules + '\n' + system, prompt, 'generate-classroom');
-      ordinarySlidePatch(parseJson(result.text));
+    projectedTextPatch: async (instruction, editableTextFields) => {
+      const prompt = JSON.stringify({instruction, editableTextFields});
+      const result = await ordinaryTeachingText(model, ordinarySlideSystem, prompt, 'generate-classroom')
+        .catch(() => { throw new OrdinarySlideModelUnavailable(); });
       usage = mergeUsage(usage, result.usage);
-      return result.text;
+      return ordinarySlidePatch(parseJson(result.text));
     },
   });
   const design = recordValue(target.content.coursewareDesign);
-  const editedPage = revised.artifacts.find(item => recordValue(recordValue(recordValue(item.content)?.studio)?.page)?.id === target.pageId);
+  const editedTitles = new Map(
+    revised.artifacts.flatMap(item => {
+      const id = recordValue(recordValue(recordValue(item.content)?.studio)?.page)?.id;
+      return typeof id === 'string' && target.pageIds.includes(id) ? [[id, item.title] as const] : [];
+    }),
+  );
   const next = {
     ...target.content,
     lesson: { ...target.lesson, artifacts: revised.artifacts, updatedAt: Date.now() },
-    ...(Array.isArray(design?.pages) && editedPage ? {coursewareDesign: {
-      ...design, pages: design.pages.map(page => recordValue(page)?.id === target.pageId
-        ? {...recordValue(page), title: editedPage.title} : page),
+    ...(Array.isArray(design?.pages) ? {coursewareDesign: {
+      ...design, pages: design.pages.map(page => {
+        const item = recordValue(page);
+        const title = typeof item?.id === 'string' ? editedTitles.get(item.id) : undefined;
+        return title === undefined ? page : {...item, title};
+      }),
     }} : {}),
-    revisionMetadata: {mode: 'ordinary-slide-wording', pageId: target.pageId, renderEvidence: revised.revision.renderEvidence},
+    revisionMetadata: {
+      mode: 'ordinary-slide-wording',
+      ...(target.pageIds.length === 1 ? {pageId: target.pageIds[0]} : {}),
+      pageIds: target.pageIds,
+      renderEvidence: revised.revision.renderEvidence,
+    },
   };
   return {result: {content: next}, usage};
 }
@@ -3296,6 +3344,22 @@ export async function POST(req: NextRequest) {
 
     const executeJob = async () => {
 
+    const ordinaryScope = body.scope?.ordinaryTeaching;
+    const ordinaryWording = ordinaryScope === 'slide-wording';
+    const ordinaryWordingInvalid = (error: string) => reply({
+      success: false, error, errorCode: 'INVALID_SLIDE_WORDING_TARGET', failureCategory: 'permanent',
+    }, 422);
+    const ordinaryWordingUnavailable = () => reply({
+      success: false, error: '课件文字修订服务暂不可用，请稍后重试。',
+      errorCode: 'SLIDE_WORDING_UNAVAILABLE', failureCategory: 'service',
+    }, 503);
+    if (ordinaryWording && (kind !== 'artifact.revise' || payload.artifactType !== 'slide-deck' ||
+        body.scope?.dojoId == null || payload.workspaceId)) {
+      return ordinaryWordingInvalid('当前任务不符合普通课程课件文字修订条件。');
+    }
+    const ordinaryRevision = ordinaryWording ? ordinarySlideTarget(payload) : null;
+    if (ordinaryRevision?.error) return ordinaryWordingInvalid(ordinaryRevision.error);
+
     if (kind === 'material.analyze') {
       const extracted = await extractMaterial(jobId, payload, traceId);
       const parsed = {
@@ -3370,17 +3434,22 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const ordinaryScope = body.scope?.ordinaryTeaching;
     const ordinaryCandidateJob = ordinaryScope === 'candidate-plan' && kind === 'candidate.generate' &&
       (artifactType === 'slide-deck' || artifactType === 'lesson-plan');
     const ordinaryMaterialJob = ordinaryScope === 'material-summary' && kind === 'material.enrich' &&
       typeof payload.materialId === 'string' && typeof payload.revisionId === 'string';
-    const ordinaryRevision = ordinaryScope === 'slide-wording' && kind === 'artifact.revise' &&
-      payload.artifactType === 'slide-deck' ? ordinarySlideTarget(payload) : null;
-    const ordinaryTurn = body.scope?.dojoId != null && !payload.workspaceId && body.modelRoute?.provider === 'deepseek' &&
-      (ordinaryCandidateJob || ordinaryMaterialJob || ordinaryRevision) && harnessModel &&
-      (!requiredModel || harnessModel === requiredModel || body.modelRoute?.allow_degraded)
-      ? createHarnessTurn() : undefined;
+    const ordinaryModelMatches = body.scope?.dojoId != null && !payload.workspaceId &&
+      body.modelRoute?.provider === 'deepseek' && harnessModel &&
+      (!requiredModel || harnessModel === requiredModel || body.modelRoute?.allow_degraded);
+    let ordinaryTurn;
+    try {
+      ordinaryTurn = ordinaryModelMatches && (ordinaryCandidateJob || ordinaryMaterialJob || ordinaryWording)
+        ? createHarnessTurn() : undefined;
+    } catch (error) {
+      if (ordinaryWording) return ordinaryWordingUnavailable();
+      throw error;
+    }
+    if (ordinaryWording && !ordinaryTurn) return ordinaryWordingUnavailable();
     if (ordinaryTurn && harnessModel) {
       const model: OrdinaryTeachingModel = {turn: ordinaryTurn, modelId: harnessModel, signal: req.signal};
       let result: Record<string, unknown>;
@@ -3393,8 +3462,19 @@ export async function POST(req: NextRequest) {
         const output = await generateCandidatesWithPipeline(payload, model, artifactType, expectedCandidateCount, slidePageRequirement);
         result = {candidates: output.candidates, generationReport: output.report};
         usage = output.usage;
-      } else if (ordinaryRevision) {
-        ({result, usage} = await reviseOrdinarySlide(ordinaryRevision, model));
+      } else if (ordinaryRevision?.pageIds) {
+        try {
+          ({result, usage} = await reviseOrdinarySlide(ordinaryRevision, model));
+        } catch (error) {
+          if (error instanceof OrdinarySlideModelUnavailable ||
+              (error instanceof Error && error.name === 'CoursewareInspectorUnavailableError')) {
+            return ordinaryWordingUnavailable();
+          }
+          return reply({
+            success: false, error: '修订结果未通过文字或版式校验，当前版本已保留。',
+            errorCode: 'SLIDE_WORDING_REJECTED', failureCategory: 'quality',
+          }, 422);
+        }
       } else {
         const output = await analyzeMaterialComprehensively(jobId, payload, traceId, model);
         result = {analysis: output.analysis, chunks: output.chunks};

@@ -24,6 +24,19 @@ def ordinary_teaching_course(dojo_id):
     return all(re.fullmatch(r"-?[0-9]{1,10}", item) for item in ids) and dojo_id in {int(item) for item in ids}
 
 
+def ordinary_slide_wording_request(instruction):
+    # The renderer validates the actual page list against the saved deck.
+    # Recognize the intent here even when a teacher mistypes a page number.
+    if not isinstance(instruction, str):
+        return False
+    match = re.fullmatch(
+        r"(?:请\s*)?(?:只|仅)\s*(?:修改|调整|润色)\s*([^：:\n]+?)\s*"
+        r"(?:的\s*)?(?:文字|文案|措辞)\s*[：:]\s*(\S[\s\S]*)",
+        instruction.strip(),
+    )
+    return bool(match and "页" in match[1])
+
+
 def ordinary_teaching_image_allowed(user, scope, model_quota):
     capability = {"teacher": "agent:chat", "student": "self-learning:chat"}.get(scope.role)
     return bool(

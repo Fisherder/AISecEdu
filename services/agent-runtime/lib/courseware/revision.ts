@@ -4,9 +4,11 @@ import type { LessonArtifact } from '@/lib/types/lesson';
 import { coursewareModelStage } from './generation';
 import { compileCoursewareSlide, coursewareThemeIssues, inspectCoursewareSlide } from './compiler';
 import {
+  COURSEWARE_MAX_PAGES,
   COURSEWARE_PLANNING_BRIEF,
   coursewarePageSchema,
   coursewareThemeSchema,
+  type CoursewarePage,
   type CoursewareSlideData,
 } from './schema';
 import { applyCoursewarePagePatch, coursewarePatchSchema } from './patches';
@@ -16,8 +18,14 @@ import { protectedTeachingLiterals } from '@/lib/teaching/learner-language';
 const revisionPlanSchema = z.object({
   explanation: z.string().min(8).max(500),
   theme: coursewareThemeSchema.optional(),
-  pages: z.array(z.object({ id: z.string(), instruction: z.string().min(8).max(2000) })).max(120),
+  pages: z.array(z.object({ id: z.string(), instruction: z.string().min(8).max(2000) })).max(COURSEWARE_MAX_PAGES),
 });
+
+type EditableTextField = { path: string; text: string; protectedLiterals: string[] };
+type TextPatchModel = (
+  instruction: string,
+  editableTextFields: EditableTextField[],
+) => Promise<z.infer<typeof coursewarePatchSchema>>;
 
 export async function reviseModernCourseware(input: {
   artifacts: LessonArtifact[];
@@ -25,13 +33,24 @@ export async function reviseModernCourseware(input: {
   onlyPageIds?: string[];
   pageInstructions?: Record<string, string>;
   textOnlyPageIds?: string[];
-  aiCall: AICallFn;
   inspectRendered: (
     data: CoursewareSlideData,
   ) => Promise<{ issues: string[]; evidence: Record<string, unknown> }>;
   onPageRevised?: (data: CoursewareSlideData, evidence: Record<string, unknown>) => Promise<void>;
   onRejected?: (id: string, attempt: number, draft: unknown, issues: string[]) => Promise<void>;
-}) {
+} & ({ aiCall: AICallFn; projectedTextPatch?: never } | {
+  projectedTextPatch: TextPatchModel;
+  aiCall?: never;
+  onlyPageIds: string[];
+  textOnlyPageIds: string[];
+})) {
+  const callModel: AICallFn = input.aiCall ?? (() => {
+    throw new Error('A general revision model is unavailable for projected text edits');
+  });
+  if (input.projectedTextPatch && (!input.onlyPageIds?.length ||
+      input.onlyPageIds.some(id => !input.textOnlyPageIds?.includes(id)))) {
+    throw new Error('Projected text edits require explicit text-only page targets');
+  }
   const originals = input.artifacts.map((artifact) =>
     'studio' in artifact.content ? artifact.content.studio : undefined,
   );
@@ -51,7 +70,7 @@ export async function reviseModernCourseware(input: {
     theme: undefined,
   } } : await coursewareModelStage({
     name: 'revision scope',
-    aiCall: input.aiCall,
+    aiCall: callModel,
     schema: revisionPlanSchema,
     system:
       '你负责把教师本轮修改精确映射到既有课件页。只规划需要修改的页，保持未要求修改的页面和事实不变。全套配色只用theme，不为换配色重写正文。页id必须使用已有id，不能虚构。pages为空且没有theme不算完成。只返回JSON。',
@@ -120,29 +139,47 @@ export async function reviseModernCourseware(input: {
       }
       return issues;
     };
-    const patch = edit && input.onlyPageIds ? (await coursewareModelStage({
-      name: `correct ${source.page.id}`,
-      aiCall: input.aiCall,
-      schema: coursewarePatchSchema,
-      onRejected: (attempt, draft, issues) => input.onRejected?.(source.page.id, attempt, draft, issues) || Promise.resolve(),
-      system: COURSEWARE_PLANNING_BRIEF + '\n你是定向审校修复器。仅为当前页返回最小JSON补丁changes，不重新生成已经通过画面检查的整页。path为字段/数组下标路径。每次补丁始终应用于original原稿，不是在上次补丁之上累加。禁止改id/schema/role或虚构来源。\n' +
-        (textOnly ? '本次是纯文字修订：只能set editableTextFields列出的现有字段，不得改变layout/几何/时序/数据/代码/公式/答案键，不得add或remove。逐字保留每个字段的protectedLiterals，换用清楚表达；literalEvidence是只读参考，不是可修改目标。若数字或事实本身有错，应留给内容审校处理，不能以润色名义修改。文字必须适配现有区域，不允许扩大区域或缩小字体；所有修改仍须通过逐帧布局检查。' :
-          'set设置值，add在数组下标插入或添加字段，remove移除。同步修正所有相关正文、视觉数值/明暗路径、动画状态、讲稿和答案反馈；只用文字掩饰错误视觉不算修复。保持正确对象的ID、位置、尺寸和顺序，不做无关美化。若内容变长，应简洁表达或调整相关文本区域，仍必须通过逐帧布局检查。'),
-      context: { original: source.page, instruction: edit.instruction, theme,
-        ...(textOnly ? {
-          editableTextFields: coursewareLanguageUnit(source.page).fields.filter(field => !field.literal)
-            .map(field => ({ path: field.path, text: field.text, protectedLiterals: protectedTeachingLiterals(field.text) })),
-          literalEvidence: coursewareLanguageUnit(source.page).fields.filter(field => field.literal),
-        } : {}),
-        pageContract: z.toJSONSchema(coursewarePageSchema, { io: 'input', unrepresentable: 'any' }),
-        availableAssets: source.assets.map(({ src: _, ...asset }) => asset) },
-      inspect: (patch) => inspectPage(applyCoursewarePagePatch(source.page, patch, textOnly)),
-    })).value : undefined;
-    const page = patch ? applyCoursewarePagePatch(source.page, patch, textOnly) : edit
+    let patchedPage: CoursewarePage | undefined;
+    if (edit && input.projectedTextPatch) {
+      const editableTextFields = coursewareLanguageUnit(source.page).fields
+        .filter(field => !field.literal && field.path !== 'speakerNotes')
+        .map(field => ({ path: field.path, text: field.text, protectedLiterals: protectedTeachingLiterals(field.text) }));
+      const allowedPaths = new Set(editableTextFields.map(field => field.path));
+      const result = await input.projectedTextPatch(edit.instruction, editableTextFields);
+      const changedPaths = result.changes.map(change => change.path.join('.'));
+      if (new Set(changedPaths).size !== changedPaths.length || changedPaths.some(path => !allowedPaths.has(path))) {
+        throw new Error('A projected edit must target distinct visible teaching text fields');
+      }
+      const revised = applyCoursewarePagePatch(source.page, result, true);
+      if ((await inspectPage(revised)).length) {
+        throw new Error('The revised teaching text did not pass local layout checks');
+      }
+      patchedPage = revised;
+    } else if (edit && input.onlyPageIds) {
+      patchedPage = applyCoursewarePagePatch(source.page, (await coursewareModelStage({
+          name: `correct ${source.page.id}`,
+          aiCall: callModel,
+          schema: coursewarePatchSchema,
+          onRejected: (attempt, draft, issues) => input.onRejected?.(source.page.id, attempt, draft, issues) || Promise.resolve(),
+          system: COURSEWARE_PLANNING_BRIEF + '\n你是定向审校修复器。仅为当前页返回最小JSON补丁changes，不重新生成已经通过画面检查的整页。path为字段/数组下标路径。每次补丁始终应用于original原稿，不是在上次补丁之上累加。禁止改id/schema/role或虚构来源。\n' +
+            (textOnly ? '本次是纯文字修订：只能set editableTextFields列出的现有字段，不得改变layout/几何/时序/数据/代码/公式/答案键，不得add或remove。逐字保留每个字段的protectedLiterals，换用清楚表达；literalEvidence是只读参考，不是可修改目标。若数字或事实本身有错，应留给内容审校处理，不能以润色名义修改。文字必须适配现有区域，不允许扩大区域或缩小字体；所有修改仍须通过逐帧布局检查。' :
+              'set设置值，add在数组下标插入或添加字段，remove移除。同步修正所有相关正文、视觉数值/明暗路径、动画状态、讲稿和答案反馈；只用文字掩饰错误视觉不算修复。保持正确对象的ID、位置、尺寸和顺序，不做无关美化。若内容变长，应简洁表达或调整相关文本区域，仍必须通过逐帧布局检查。'),
+          context: { original: source.page, instruction: edit.instruction, theme,
+            ...(textOnly ? {
+              editableTextFields: coursewareLanguageUnit(source.page).fields.filter(field => !field.literal)
+                .map(field => ({ path: field.path, text: field.text, protectedLiterals: protectedTeachingLiterals(field.text) })),
+              literalEvidence: coursewareLanguageUnit(source.page).fields.filter(field => field.literal),
+            } : {}),
+            pageContract: z.toJSONSchema(coursewarePageSchema, { io: 'input', unrepresentable: 'any' }),
+            availableAssets: source.assets.map(({ src: _, ...asset }) => asset) },
+          inspect: (patch) => inspectPage(applyCoursewarePagePatch(source.page, patch, textOnly)),
+      })).value, textOnly);
+    }
+    const page = patchedPage ?? (edit
       ? (
           await coursewareModelStage({
             name: `revise ${source.page.id}`,
-            aiCall: input.aiCall,
+            aiCall: callModel,
             schema: coursewarePageSchema,
             system:
               COURSEWARE_PLANNING_BRIEF +
@@ -168,8 +205,10 @@ export async function reviseModernCourseware(input: {
             inspect: inspectPage,
           })
         ).value
-      : source.page;
-    const studio = { page, theme, assets: source.assets };
+      : source.page);
+    const studio = input.projectedTextPatch
+      ? { ...source, page }
+      : { page, theme, assets: source.assets };
     if (!edit) {
       const issues = inspectCoursewareSlide(studio);
       if (issues.length) throw new Error(issues.join('; '));
@@ -179,6 +218,14 @@ export async function reviseModernCourseware(input: {
     }
     const compiled = compileCoursewareSlide(studio, page.beats.length - 1);
     await input.onPageRevised?.(studio, evidence[index]);
+    const compiledContent = {
+      elements: compiled.elements,
+      background: compiled.background,
+      speakerNotes: page.speakerNotes,
+      remark: page.speakerNotes,
+      layout: page.role,
+      studio,
+    };
     artifacts.push({
       ...structuredClone(input.artifacts[index]),
       title: page.title,
@@ -188,14 +235,9 @@ export async function reviseModernCourseware(input: {
         description: page.objective,
         keyPoints: [page.takeaway, ...page.supporting],
       },
-      content: {
-        elements: compiled.elements,
-        background: compiled.background,
-        speakerNotes: page.speakerNotes,
-        remark: page.speakerNotes,
-        layout: page.role,
-        studio,
-      },
+      content: input.projectedTextPatch
+        ? { ...compiledContent, ...native, elements: compiled.elements, studio }
+        : compiledContent,
     });
   }
   return {

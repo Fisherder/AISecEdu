@@ -44,8 +44,10 @@ def unrecorded_diagnostics(blocks, baseline):
 def main():
     baseline_path = Path(__file__).with_name("agent-runtime-typescript-baseline.json")
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))["diagnostics"]
+    # Incremental builds can reorder TypeScript's union descriptions. Generate
+    # diagnostics from the current tree so their fingerprints match a clean CI run.
     process = subprocess.run(
-        ["pnpm", "exec", "tsc", "--noEmit", "--pretty", "false"],
+        ["pnpm", "exec", "tsc", "--incremental", "false", "--noEmit", "--pretty", "false"],
         cwd=ROOT / "services/agent-runtime",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
