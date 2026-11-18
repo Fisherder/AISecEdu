@@ -320,7 +320,7 @@ describe('Evaluator API teaching image boundary', () => {
       active: true,
       ordinaryTeachingImageAllowed: true,
       user: { id: 21 },
-      scope: { role: 'student', user_id: 21, dojo_id: 17, capabilities: ['self-learning:chat'] },
+      scope: { role: 'student', user_id: 21, dojo_id: -9, capabilities: ['self-learning:chat'] },
       modelQuota: { available: true },
     };
     let enabled = true;
@@ -376,7 +376,7 @@ describe('Evaluator API teaching image boundary', () => {
       expect((await middleware(request())).status).toBe(200);
       expect(await (await getEvaluationCapability(request())).json()).toEqual({ allowed: true });
       expect(await (await getEvaluationCapability(request(undefined, 'student-two'))).json()).toEqual({ allowed: false });
-      expect((await postEvaluation(request({ ...image, dojoId: 17, userId: 21 }, 'student-two'))).status).toBe(403);
+      expect((await postEvaluation(request({ ...image, dojoId: -9, userId: 21 }, 'student-two'))).status).toBe(403);
       expect((await postEvaluation(request({}))).status).toBe(415);
       expect((await postEvaluation(request({
         selectedSubmissionImage: { submissionId: submission.id, dataUrl },

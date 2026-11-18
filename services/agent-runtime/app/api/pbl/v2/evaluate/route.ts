@@ -86,7 +86,7 @@ async function canSendNewTeachingImage(req: NextRequest): Promise<boolean> {
     return data?.active === true && data.ordinaryTeachingImageAllowed === true &&
       Number.isSafeInteger(data.user?.id) && data.user.id > 0 &&
       data.scope?.user_id === data.user.id &&
-      Number.isSafeInteger(data.scope.dojo_id) && data.scope.dojo_id > 0;
+      Number.isSafeInteger(data.scope.dojo_id);
   } catch {
     return false;
   }
