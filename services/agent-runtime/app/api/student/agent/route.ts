@@ -5,6 +5,10 @@ import { resolvePrincipal, type Principal } from '@/lib/server/auth/session';
 import { getDb } from '@/lib/server/db';
 import { ensureAppSchema } from '@/lib/server/schema';
 import {
+  createStudentSelfStudyPackage,
+  SelfStudyGenerationError,
+} from '@/lib/server/self-study-generation';
+import {
   decideStudentAgentMessage,
   type StudentAgentHistoryMessage,
 } from '@/lib/server/student-agent';
@@ -106,7 +110,9 @@ function linksForState(state: StudentAgentLearningState) {
   return links.slice(0, 4);
 }
 
-async function requireStudent(req: NextRequest): Promise<{ response: NextResponse } | { principal: Principal }> {
+async function requireStudent(
+  req: NextRequest,
+): Promise<{ response: NextResponse } | { principal: Principal }> {
   const principal = await resolvePrincipal(req);
   if (!principal) {
     return { response: apiError(API_ERROR_CODES.INVALID_CREDENTIALS, 401, 'Not authenticated') };
@@ -221,12 +227,15 @@ export async function POST(req: NextRequest) {
     ],
   );
 
-  const decision = await decideStudentAgentMessage({
-    message,
-    history,
-    state,
-    context: state.activeContext,
-  }, { signal: req.signal });
+  const decision = await decideStudentAgentMessage(
+    {
+      message,
+      history,
+      state,
+      context: state.activeContext,
+    },
+    { signal: req.signal },
+  );
   if (Object.keys(decision.profileUpdates).length > 0 || decision.memoryFacts.length > 0) {
     await saveStudentLearningProfile(learnerKey, decision.profileUpdates, decision.memoryFacts, db);
   }
@@ -238,15 +247,53 @@ export async function POST(req: NextRequest) {
         db,
       )
     : undefined;
+  let generatedPackage:
+    | { id: string; title: string; classroomId: string; classroomUrl: string }
+    | undefined;
+  let reply = decision.reply;
+  const trace = [...decision.trace];
+  if (decision.action === 'generate_package' && decision.packageRequest) {
+    try {
+      const { id, title, classroomId, classroomUrl } = await createStudentSelfStudyPackage(
+        req,
+        access.principal,
+        decision.packageRequest,
+        message,
+      );
+      generatedPackage = { id, title, classroomId, classroomUrl };
+      trace.push({
+        label: '创建个人学习包',
+        detail: `《${title}》已生成，可以打开学习。`,
+        status: 'completed',
+      });
+      reply = `个人学习包《${title}》已生成。请从下方打开课堂。`;
+    } catch (error) {
+      const reason =
+        error instanceof SelfStudyGenerationError
+          ? error.publicMessage
+          : '内容生成暂时失败，请稍后重试';
+      reply = `本次个人学习包没有生成。学习目标已保留。${reason}。`;
+    }
+  }
   const refreshedState = await loadStudentAgentLearningState(learnerKey, state.activeContext, db);
   const metadata = {
     action: decision.action,
     title: decision.title,
     source: decision.source,
-    trace: decision.trace,
+    trace,
     plan,
+    generatedPackage,
     modelUsage: decision.modelUsage,
-    links: linksForState(refreshedState),
+    links: generatedPackage
+      ? [
+          {
+            label: `进入《${generatedPackage.title}》`,
+            href: `/classroom/${generatedPackage.classroomId}`,
+            kind: 'classroom',
+          },
+          ...linksForState(refreshedState),
+        ].slice(0, 4)
+      : linksForState(refreshedState),
     remembered: decision.memoryFacts,
   };
   const assistantMessageId = `student_message_${nanoid(12)}`;
@@ -255,7 +302,7 @@ export async function POST(req: NextRequest) {
     `INSERT INTO student_agent_messages
        (id, thread_id, learner_key, role, kind, content, metadata, created_at)
      VALUES ($1,$2,$3,'assistant','result',$4,$5,$6)`,
-    [assistantMessageId, threadId, learnerKey, decision.reply, JSON.stringify(metadata), completedAt],
+    [assistantMessageId, threadId, learnerKey, reply, JSON.stringify(metadata), completedAt],
   );
   const firstTurn = String(threadRow.title) === '新学习对话';
   await db.query(
@@ -289,7 +336,7 @@ export async function POST(req: NextRequest) {
         id: assistantMessageId,
         role: 'assistant',
         kind: 'result',
-        content: decision.reply,
+        content: reply,
         metadata,
         createdAt: completedAt,
       },

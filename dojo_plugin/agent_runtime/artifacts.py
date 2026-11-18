@@ -292,7 +292,7 @@ def select_candidate(candidate_id, user):
     return candidate, candidate_set
 
 
-def materialize_candidate(candidate_id, user, *, title=None):
+def materialize_candidate(candidate_id, user, *, title=None, commit=True):
     candidate, candidate_set = _candidate_for_user(candidate_id, user, lock=True)
     if candidate.materialized_artifact_id:
         artifact = TeachingArtifacts.query.filter_by(
@@ -330,7 +330,10 @@ def materialize_candidate(candidate_id, user, *, title=None):
     candidate.status = "MATERIALIZED"
     candidate_set.selected_candidate_id = candidate.id
     candidate_set.status = "MATERIALIZED"
-    db.session.commit()
+    if commit:
+        db.session.commit()
+    else:
+        db.session.flush()
     return artifact, revision
 
 

@@ -64,7 +64,9 @@ export function lessonToScenes(
 ): { stageId: string; stage: Stage; scenes: Scene[] } {
   const stageId = requestedStageId || nanoid(10);
   const now = Date.now();
-  const debateAgents = lesson.artifacts.some((artifact) => artifact.type === 'debate' && !('debate' in artifact.content))
+  const debateAgents = lesson.artifacts.some(
+    (artifact) => artifact.type === 'debate' && !('debate' in artifact.content),
+  )
     ? buildDebateAgentConfigs(stageId)
     : [];
   const stage: Stage = {
@@ -114,8 +116,11 @@ export async function publishLesson(
   lesson: Lesson,
   baseUrl: string,
   ownerKey?: string,
+  options: { personalStudy?: boolean } = {},
 ): Promise<{ classroomId: string; url: string }> {
-  const id = nanoid(10);
+  if (options.personalStudy && !ownerKey) throw new Error('Personal classroom owner is required');
+  const suffix = nanoid(10);
+  const id = options.personalStudy ? `personal_study_${suffix}` : suffix;
   const { stage, scenes } = lessonToScenes(lesson, id);
   const persisted = await persistClassroom({ id, stage, scenes }, baseUrl);
   // The classroom player still consumes the portable JSON artifact. The PG

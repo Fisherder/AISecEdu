@@ -1054,7 +1054,7 @@ def _guide_navigation_options(profile, references):
     }
 
 
-def guide_reply(user, question, thread=None, references=None, agent_context=None):
+def guide_reply(user, question, thread=None, references=None, agent_context=None, *, skip_model=False):
     question = redact_text(question).strip()[:6000]
     thread = thread or new_guide_thread(user)
     supplied_reference_ids = _guide_reference_ids(references)
@@ -1130,7 +1130,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
     }
     try:
         with usage_scope(current_attempt.id if current_attempt and reference_ids == [current_reference_id] else None, '当前实验学习指导'):
-            if not needs_reference and safe_question and upstream_enabled():
+            if not skip_model and not needs_reference and safe_question and upstream_enabled():
                 dispatch_id = record_model_dispatch(DOJO_AI_GUIDE_MODEL)
                 response = None
                 try:
