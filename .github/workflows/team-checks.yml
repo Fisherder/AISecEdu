@@ -110,6 +110,14 @@ jobs:
         run: pnpm exec playwright install chromium
       - name: Verify Tutor illustration selection, consent and fallback in Chromium
         run: node ../../test/browser/tutor-teaching-image.cjs
+      - name: Verify the immutable teacher workbench and classroom preparation in Chromium
+        run: |
+          python3 ../../ops/publish_workbench_assets.py --check
+          npm --prefix ../cocreation-workbench ci --no-audit --no-fund
+          npm --prefix ../cocreation-workbench run typecheck
+          npm --prefix ../cocreation-workbench test
+          npm --prefix ../cocreation-workbench run build
+          node ../cocreation-workbench/tests/classroom-preparation-browser.cjs --match-rebuild
   contributor-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10

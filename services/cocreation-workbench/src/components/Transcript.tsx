@@ -19,6 +19,7 @@ import {
 import { useWorkbench } from '../core/context';
 import { api, id, key, safeLink } from '../core/api';
 import { projectActivity, streamedAnswer } from '../core/events';
+import { classroomDashboardLink, classroomPreparation } from '../core/classroom-preparation';
 import { dateLabel, terminal, type Message, type Data } from '../core/types';
 import { Button, IconButton, Status, Code, Dialog } from './ui';
 import { Composer } from './Composer';
@@ -225,6 +226,50 @@ function Approvals({ message }: { message: Message }) {
   return (
     <>
       {proposals.map((proposal, index) => {
+        if (proposal.tool === 'classroom.prepare') {
+          const thread = state.thread;
+          if (!thread) return null;
+          const preparation = classroomPreparation(thread, message, index);
+          const disabled = state.busy || state.loadingThread;
+          return (
+            <section className="approval-block" key={index}>
+              <h3><ShieldCheck size={17} />准备课堂</h3>
+              <p>{proposal.reason || '使用已发布的静态课件准备课堂。'}</p>
+              {!preparation ? (
+                <p>请返回原课程和章节并核对提案及批准记录。</p>
+              ) : preparation.sessionId ? (
+                <>
+                  <p role="status">课堂已准备。开始上课需要教师确认。</p>
+                  <a href={classroomDashboardLink(thread.id, preparation.sessionId)}>查看已准备的课堂</a>
+                </>
+              ) : preparation.decision === 'REJECTED' ? (
+                <p role="status">已拒绝课堂准备。</p>
+              ) : preparation.decision === 'APPROVED' ? (
+                <Button className="primary" disabled={disabled}
+                  onClick={() => void c.run(() => c.prepareClassroom(thread.id, message.id, index))}>
+                  继续准备课堂
+                </Button>
+              ) : (
+                <>
+                  <details>
+                    <summary>查看操作详情</summary>
+                    <Code value={{ tool: proposal.tool, arguments: proposal.arguments }} />
+                  </details>
+                  <div className="button-row">
+                    <Button disabled={disabled}
+                      onClick={() => void c.run(() => c.prepareClassroom(thread.id, message.id, index, 'REJECTED'))}>
+                      拒绝
+                    </Button>
+                    <Button className="primary" disabled={disabled}
+                      onClick={() => void c.run(() => c.prepareClassroom(thread.id, message.id, index, 'APPROVED'))}>
+                      批准并准备课堂
+                    </Button>
+                  </div>
+                </>
+              )}
+            </section>
+          );
+        }
         const decision = message.metadata.toolProposalDecisions?.[String(index)];
         const result = message.metadata.toolExecutionResults?.[String(index)];
         if (!proposal.requiresConfirmation || decision || result?.status === 'SUCCEEDED')

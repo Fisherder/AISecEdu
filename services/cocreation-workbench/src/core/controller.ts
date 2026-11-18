@@ -1,6 +1,7 @@
 import { api, request, id, key, ApiError } from './api';
 import { blankDraft, WorkspaceStorage } from './storage';
 import { mergeEvents } from './events';
+import { classroomPreparation, classroomSessionId, matchingClassroomDecision } from './classroom-preparation';
 import {
   terminal,
   type Artifact,
@@ -25,6 +26,7 @@ export class WorkbenchController {
   private creating?: Promise<Thread>;
   private mutationKeys = new Map<string, string>();
   private catalogLoaded = new Set<string>();
+  private classroomActions = new Set<string>();
 
   constructor(owner: string) {
     this.storage = new WorkspaceStorage(owner);
@@ -584,6 +586,77 @@ export class WorkbenchController {
     this.patch({ previews: { ...this.state.previews, [artifact.id]: '' } });
     await this.loadArtifact(artifact.id);
     this.notify('已从所选版本创建新草稿。');
+  }
+  async prepareClassroom(threadId: string, messageId: number, index: number, decision?: 'APPROVED' | 'REJECTED') {
+    const origin = this.state.thread;
+    if (!origin || origin.id !== threadId || this.state.loadingThread) return;
+    const originEpoch = this.epoch;
+    const current = () => {
+      const thread = this.state.thread;
+      return !this.stop && !this.state.loadingThread && this.epoch === originEpoch &&
+        thread?.id === threadId && thread.status === 'ACTIVE' &&
+        thread.dojoId === origin.dojoId && thread.moduleIndex === origin.moduleIndex ? thread : null;
+    };
+    const getPreparation = () => {
+      const thread = current();
+      const message = thread?.messages?.find(item => item.id === messageId);
+      return thread && message ? classroomPreparation(thread, message, index) : null;
+    };
+    const initial = getPreparation();
+    if (!initial) throw new Error('课堂准备的课件、课程范围或审批已变更，请重新检查提案。');
+    if (initial.sessionId || initial.decision === 'REJECTED') return;
+    const actionKey = JSON.stringify([threadId, messageId, index]);
+    if (this.classroomActions.has(actionKey)) return;
+    const base = `/threads/${id(threadId)}/messages/${messageId}/tool-proposals/${index}`;
+    const updateProposal = (map: string, value: Data) => {
+      const thread = current();
+      const live = getPreparation();
+      if (!thread || !live || live.approval.id !== initial.approval.id ||
+          live.approval.sha256 !== initial.approval.sha256) return false;
+      const messages = thread.messages?.map(message => message.id !== messageId ? message : {
+        ...message,
+        metadata: { ...message.metadata, [map]: {
+          ...message.metadata[map], [String(index)]: value,
+        } },
+      });
+      this.patch({ thread: { ...thread, messages } });
+      return true;
+    };
+    this.classroomActions.add(actionKey);
+    try {
+      if (!initial.decision) {
+        if (!decision) throw new Error('请先批准这项课堂准备。');
+        const data = await this.mutate(base + '/decision', {
+          decision, confirmed: true, approvalRequest: initial.approval,
+        });
+        if (!current()) return;
+        if (!matchingClassroomDecision(initial.approval, data.decision) || data.decision.decision !== decision)
+          throw new Error('课堂准备未返回可验证的审批记录，请刷新后查看。');
+        if (!updateProposal('toolProposalDecisions', data.decision) || decision === 'REJECTED') return;
+      } else if (decision) {
+        // A recorded approval is resumed through the separate preparation action.
+        return;
+      }
+      const approved = getPreparation();
+      if (!approved || approved.decision !== 'APPROVED' || approved.sessionId ||
+          approved.approval.id !== initial.approval.id || approved.approval.sha256 !== initial.approval.sha256) return;
+      const data = await this.mutate(base + '/prepare-classroom', { approvalRequest: approved.approval });
+      if (!current()) return;
+      if (!classroomSessionId(data.sessionId) || data.artifactId !== approved.artifactId ||
+          data.artifactRevision !== approved.revision)
+        throw new Error('课堂准备未返回可验证的会话，可重试原请求。');
+      updateProposal('toolExecutionResults', {
+        tool: 'classroom.prepare', status: 'SUCCEEDED', sessionId: data.sessionId,
+        artifactId: data.artifactId, artifactRevision: data.artifactRevision,
+      });
+    } catch (error) {
+      // The server may have committed an approval or receipt before the connection failed.
+      if (!current()) return;
+      await this.refreshThread(threadId, originEpoch).catch(() => {});
+      if (current()) throw error;
+    } finally {
+      this.classroomActions.delete(actionKey);
+    }
   }
   async approve(messageId: number, proposalIndex: number, decision: string) {
     const threadId = this.state.thread?.id;
