@@ -2784,6 +2784,60 @@ def _harness_courseware_authorized(job, payload):
     ))
 
 
+def _ordinary_teaching_job_scope(job, payload):
+    if (
+        job.kind not in {"candidate.generate", "material.enrich", "artifact.revise"}
+        or job.dojo_id is None or payload.get("workspaceId") or not upstream_enabled()
+    ):
+        return None
+    course_ids = os.environ.get("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "").split(",")
+    if not all(re.fullmatch(r"-?[0-9]{1,10}", item.strip()) for item in course_ids):
+        return None
+    if job.dojo_id not in {int(item) for item in course_ids}:
+        return None
+    owner = Users.query.filter_by(id=job.owner_id).first()
+    if not owner or (owner.type != "admin" and not DojoAdmins.query.filter_by(
+        dojo_id=job.dojo_id, user_id=job.owner_id,
+    ).first()):
+        return None
+    if job.kind == "candidate.generate":
+        artifact_type = payload.get("artifactType")
+        prompt = str(payload.get("prompt") or "")
+        if (
+            artifact_type not in {"lesson-plan", "slide-deck"} or not payload.get("candidateSetId")
+            or re.search(r"靶场|攻防演练|漏洞复现|漏洞利用|攻击步骤|可执行载荷|\b(?:ctf|exploit)\b", prompt, re.I)
+        ):
+            return None
+        candidate = TeachingCandidateSets.query.filter_by(
+            id=payload["candidateSetId"], owner_id=job.owner_id, dojo_id=job.dojo_id,
+            self_workspace_id=None, kind=artifact_type,
+        ).first()
+        return "candidate-plan" if candidate is not None else None
+    if job.kind == "artifact.revise":
+        if payload.get("artifactType") != "slide-deck" or not payload.get("artifactId"):
+            return None
+        if not re.fullmatch(r"(?:请)?(?:只|仅)(?:修改|调整|润色)第([1-9][0-9]{0,2})页(?:的)?(?:文字|文案|措辞)[：:][\s\S]+",
+                            str(payload.get("instruction") or "").strip()):
+            return None
+        artifact = TeachingArtifacts.query.filter_by(
+            id=payload["artifactId"], owner_id=job.owner_id, dojo_id=job.dojo_id,
+            self_workspace_id=None, artifact_type="slide-deck",
+        ).first()
+        return "slide-wording" if artifact is not None else None
+    material = TeachingMaterials.query.filter_by(
+        id=payload.get("materialId"), owner_id=job.owner_id, dojo_id=job.dojo_id, status="READY",
+    ).first()
+    if material is None or not re.search(r"\.(?:txt|md|markdown|pdf|docx|pptx)$", material.filename, re.I):
+        return None
+    revision = TeachingMaterialRevisions.query.filter_by(
+        id=payload.get("revisionId"), material_id=material.id,
+        storage_key=payload.get("storageKey"), status="READY",
+    ).first()
+    if revision is None or not revision.sha256:
+        return None
+    return "material-summary"
+
+
 def _runtime_request_body(job, route, payload):
     upstream_chat = job.kind == "agent.chat" and payload.get("chatBackend") == "upstream"
     formats = requested_document_formats(payload) if upstream_chat else ()
@@ -2822,6 +2876,7 @@ def _runtime_request_body(job, route, payload):
                 "materialDossier": payload.get("materialDossier"),
             }, text_limit=120000),
         )
+    ordinary_teaching = _ordinary_teaching_job_scope(job, payload)
     return {
         "jobId": job.id,
         "kind": job.kind,
@@ -2830,6 +2885,7 @@ def _runtime_request_body(job, route, payload):
             "dojoId": job.dojo_id,
             "moduleIndex": job.module_index,
             **({"teacherCourseware": True} if _harness_courseware_authorized(job, payload) else {}),
+            **({"ordinaryTeaching": ordinary_teaching} if ordinary_teaching else {}),
         },
         "payload": payload,
         "modelRoute": route,
@@ -4565,6 +4621,11 @@ def process_job(job_id, *, worker_id=None):
                 }
                 db.session.commit()
 
+            model_mode = str((response.get("model") or {}).get("executionMode") or "")
+            if model_mode.startswith("ordinary-"):
+                authorized_scope = _ordinary_teaching_job_scope(job, runtime_payload)
+                if not authorized_scope or model_mode != f"ordinary-{authorized_scope}":
+                    raise PermanentJobError("普通教学作业的课程或资料授权已变化，请重新发起。")
             job = heartbeat(
                 job,
                 stage="delivering" if job.kind == "agent.chat" else "persisting",

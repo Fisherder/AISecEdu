@@ -966,3 +966,50 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
             {"title": "文档", "sections": [{"heading": "示例", "paragraphs": ["<script>placeholder</script>"]}]},
             ("md",),
         )
+
+
+def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_targets(monkeypatch):
+    import os
+
+    tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
+    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                 and node.name == "_ordinary_teaching_job_scope"]
+
+    def table(**row):
+        def filter_by(**criteria):
+            return SimpleNamespace(first=lambda: SimpleNamespace(**row) if all(
+                row.get(key) == value for key, value in criteria.items()
+            ) else None)
+        return SimpleNamespace(query=SimpleNamespace(filter_by=filter_by))
+
+    namespace = {
+        "os": os, "re": re, "upstream_enabled": lambda: True,
+        "Users": table(id=7, type="user"), "DojoAdmins": table(dojo_id=2, user_id=7),
+        "TeachingCandidateSets": table(id="candidate", owner_id=7, dojo_id=2, kind="lesson-plan",
+                                       self_workspace_id=None),
+        "TeachingArtifacts": table(id="slide", owner_id=7, dojo_id=2, artifact_type="slide-deck",
+                                    self_workspace_id=None),
+        "TeachingMaterials": table(id="material", owner_id=7, dojo_id=2, filename="handout.txt", status="READY"),
+        "TeachingMaterialRevisions": table(id="revision", material_id="material", storage_key="stored",
+                                            status="READY", sha256="a" * 64),
+    }
+    exec(compile(tree, "jobs.py", "exec"), namespace)
+    scope = namespace["_ordinary_teaching_job_scope"]
+    candidate = {"artifactType": "lesson-plan", "candidateSetId": "candidate"}
+    material = {"materialId": "material", "revisionId": "revision", "storageKey": "stored"}
+    slide = {"artifactType": "slide-deck", "artifactId": "slide", "instruction": "只润色第1页措辞：表述更清楚"}
+    create = SimpleNamespace(kind="candidate.generate", owner_id=7, dojo_id=2)
+    enrich = SimpleNamespace(kind="material.enrich", owner_id=7, dojo_id=2)
+    revise = SimpleNamespace(kind="artifact.revise", owner_id=7, dojo_id=2)
+    monkeypatch.delenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", raising=False)
+    assert scope(create, candidate) is None
+    monkeypatch.setenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "2, -5")
+    assert scope(create, candidate) == "candidate-plan"
+    assert scope(enrich, material) == "material-summary"
+    assert scope(revise, slide) == "slide-wording"
+    assert scope(create, {**candidate, "workspaceId": "personal"}) is None
+    assert scope(create, {**candidate, "artifactType": "simulation"}) is None
+    assert scope(enrich, {**material, "storageKey": "other-version"}) is None
+    assert scope(revise, {**slide, "instruction": "修改所有页面布局"}) is None
+    namespace["DojoAdmins"] = table(dojo_id=3, user_id=7)
+    assert scope(create, candidate) is None
