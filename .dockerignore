@@ -52,6 +52,3 @@ windows2000-*-20*/
 **/*.bak*
 **/*.orig
 **/*.before-*
-
-# Runtime builds install the pinned, published upstream packages.
-vendor/deepseek-harness/

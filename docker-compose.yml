@@ -293,7 +293,9 @@ services:
       - /data/redis:/data
 
   deepseek-harness:
-    build: ./services/deepseek-harness
+    build:
+      context: .
+      dockerfile: services/deepseek-harness/Dockerfile
     profiles: [harness]
     init: true
     restart: unless-stopped

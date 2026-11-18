@@ -25,7 +25,11 @@ jobs:
           upstream_tree=$(gh api repos/deepseek-ai/deepseek-harness/git/commits/3f321d32bfe382212a8ed8785c1d47a5a300aa23 --jq .tree.sha)
           test "$(git cat-file -t HEAD:vendor/deepseek-harness)" = tree
           test "$(git rev-parse HEAD:vendor/deepseek-harness)" = "$upstream_tree"
-          docker build -t aisecedu-harness-test services/deepseek-harness
+          docker build -f services/deepseek-harness/Dockerfile -t aisecedu-harness-test .
+          container=$(docker create aisecedu-harness-test)
+          trap 'docker rm "$container" >/dev/null' EXIT
+          docker cp "$container:/opt/deepseek-harness" "$RUNNER_TEMP/image-dsh"
+          diff --no-dereference --brief --recursive vendor/deepseek-harness "$RUNNER_TEMP/image-dsh"
       - name: Exercise the official agent loop with the local model fixture
         run: docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges aisecedu-harness-test node --test
       - uses: actions/setup-node@v4
@@ -60,7 +64,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Type-check the entire runtime and show all historical diagnostics
         run: python3 ../../ops/team/check_agent_runtime_types.py
-      - run: pnpm exec vitest run tests/lib/chat tests/chat tests/pbl/question-turn.test.ts tests/pbl/v2/evaluator.test.ts tests/pbl/v2/runtime-model-pin.test.ts tests/pbl/v2/runtime-llm-entry.test.ts tests/lib/server/debate-harness-route.test.ts tests/security/integrated-middleware-policy.test.ts
+      - name: Exercise teaching contracts with synthetic data
+        run: >
+          pnpm exec vitest run tests/lib/chat tests/chat tests/pbl/question-turn.test.ts
+          tests/pbl/v2/evaluator.test.ts tests/pbl/v2/runtime-model-pin.test.ts tests/pbl/v2/runtime-llm-entry.test.ts
+          tests/lib/server/debate-harness-route.test.ts tests/lib/server/student-teaching-routes.test.ts
+          tests/lib/orchestration/state-context.test.ts tests/integration/harness-courseware-job.test.ts
+          tests/ai/provider-transport-journal.test.ts tests/security/integrated-middleware-policy.test.ts
   contributor-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -78,7 +88,7 @@ jobs:
       - name: Test the teaching client, durable jobs and course catalogue
         run: |
           python -m pip install -r ops/team/requirements.txt
-          python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_course_catalog_unit.py
+          python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_course_catalog_unit.py
       - name: Verify cross-course navigation in desktop and mobile viewports
         run: CHROME_BIN="$(command -v google-chrome)" node test/browser/teacher-course-navigation.mjs
       - name: Courseware editor browser component checks
