@@ -59,6 +59,7 @@ from ...learning.exercise_modes import (
     is_supported_exercise,
 )
 from ...learning.context import guide_reference_options, learning_profile_context
+from ...learning.tutor_illustrations import available_tutor_illustrations, resolve_tutor_illustration
 from ...learning.standards import ABILITY_LABELS
 from ...learning.student_experience import (
     activity_state,
@@ -3214,6 +3215,44 @@ class LearningAttemptAssessment(Resource):
         return {"success": True, "assessment": assessment_view(assessment)}
 
 
+def _current_tutor_attempt(user):
+    attempt = active_attempt(user.id)
+    challenge = attempt.dojo_challenge if attempt is not None else None
+    if challenge is None or challenge.challenge_id != attempt.challenge_id or not is_supported_exercise(challenge):
+        return None
+    if challenge.dojo.is_admin(user):
+        return attempt
+    if not challenge.module.visible() or not challenge.visible():
+        return None
+    course = Dojos.viewable(user=user).filter(Dojos.dojo_id == attempt.dojo_id).first()
+    return attempt if course is not None else None
+
+
+@learning_namespace.route("/tutor/context")
+class LearningTutorContext(Resource):
+    @authed_only
+    def get(self):
+        user = get_current_user()
+        attempt = _current_tutor_attempt(user)
+        if attempt is None:
+            return {"success": True, "attempt": None, "illustrations": []}
+        challenge = attempt.dojo_challenge
+        history = (
+            LearningTutorMessages.query.filter_by(attempt_id=attempt.id, user_id=user.id)
+            .with_entities(LearningTutorMessages.role, LearningTutorMessages.content)
+            .order_by(LearningTutorMessages.id.desc()).limit(100).all()
+        )
+        return {
+            "success": True,
+            "attempt": {
+                "id": attempt.id, "epoch": attempt.epoch, "dojoId": challenge.dojo.reference_id,
+                "moduleId": challenge.module.id, "challengeId": challenge.id,
+                "tutorMessages": [{"role": role, "content": content} for role, content in reversed(history)],
+            },
+            "illustrations": available_tutor_illustrations(user, attempt),
+        }
+
+
 @learning_namespace.route("/tutor")
 class LearningTutor(Resource):
     @authed_only
@@ -3229,17 +3268,32 @@ class LearningTutor(Resource):
             stage_started = now
 
         user = get_current_user()
-        data = request.get_json(silent=True) or {}
-        question = str(data.get("question") or "").strip()
-        challenge = get_current_dojo_challenge(user)
-        attempt = active_attempt(user.id, challenge) if challenge else None
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or not isinstance(data.get("question"), str):
+            return {"success": False, "error": "请输入本轮的教学问题"}, 400
+        if set(data) - {"question", "attemptId", "teachingImage"}:
+            return {"success": False, "error": "本轮仅支持文字问题和所选课程插图"}, 400
+        question = data["question"].strip()
+        if re.search(r"data\s*:\s*image/|[A-Za-z0-9+/]{256,}", question, re.IGNORECASE):
+            return {"success": False, "error": "请从当前课堂的插图列表选择图片"}, 400
+        attempt = _current_tutor_attempt(user)
         mark("attemptLookup")
-        if not attempt:
-            return {"success": False, "error": "当前没有活动题目会话"}, 409
+        if attempt is None or ("attemptId" in data and data["attemptId"] != attempt.id):
+            return {"success": False, "error": "当前题目会话已变化，请重新打开学习助手"}, 409
         if not question:
             return {"success": False, "error": "问题不能为空"}, 400
+        image = None
+        if "teachingImage" in data:
+            if "attemptId" not in data:
+                return {"success": False, "error": "请选择当前练习的教学插图"}, 400
+            try:
+                image = resolve_tutor_illustration(user, attempt, data["teachingImage"])
+            except PermissionError as error:
+                return {"success": False, "error": str(error)}, 403
+            except ValueError as error:
+                return {"success": False, "error": str(error)}, 400
         profile = LearningChallengeProfiles.query.get(attempt.challenge_id)
-        reply = tutor_reply(attempt, user, question, profile)
+        reply = tutor_reply(attempt, user, question, profile, teaching_image=image)
         mark("tutor")
         db.session.commit()
         mark("commit")

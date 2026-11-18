@@ -267,6 +267,9 @@ def test_approved_snapshot_creates_one_ready_teaching_session(prepared):
     action = prepared.db.query(Action).one()
     assert action.result["sessionId"] == row.id
     assert action.request_json["approvalRequest"] == prepared.approval
+    scene_bytes = json.dumps(row.state["scenes"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    assert action.request_json["ordinaryScenesHash"] == hashlib.sha256(scene_bytes).hexdigest()
+    assert action.request_json["ordinaryImagePages"] == []
     prepared.execution_receipt.assert_called_once_with(action, "committed", prepared.approval)
     response = prepared.client.post(PATH, json=request_body)
     assert response.status_code == 200 and response.json["data"]["deduplicated"]

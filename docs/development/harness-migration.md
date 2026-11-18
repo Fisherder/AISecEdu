@@ -36,7 +36,7 @@ flowchart LR
 | Pi 课堂 `/api/chat/pi` | 发言人选择、阅读当前公开课件、白板动作、邀请学生发言和结束课堂由 Harness 回合及课堂服务协作完成 | 保留设置开关与 SSE。模型收到公开课件和本人已提交的作答状态，标准答案和批改备注留在平台 |
 | 独立课堂服务的 `/api/student/agent` 和 `/api/student/review` | 两个处理器已接入 Harness，保留学习者身份、计划存储和用量 | 集成部署的浏览器中间件没有开放这两个端点。平台学生的日常导学从 `/guide` 进入 |
 | 个人学习包 | 学生在已登录的 `/guide` 明确请求后，可打开自己的概念讲义与自检反馈。普通 PBL 的文字评语沿用原有回复格式 | 创建时验证请求所属会话和学习者范围；学习包是私人草稿。教师查看已提交成果要走原有审阅权限 |
-| 题内辅导 `/learning/tutor` | 本人问题、公开目标与提示、经平台核验的学习观察进入上游 | 保留尝试记录与本地防泄题处理。模型无法访问学生桌面、终端或私有解法。实验中的操作指导仍需要教师参与 |
+| 题内辅导 `/learning/tutor` | 本人问题、公开目标与提示、经平台核验的学习观察进入上游。符合条件的课堂插图可以在同一问答侧栏按轮选择 | 保留尝试记录与本地防泄题处理。插图由服务端从已核验版本中读取，学习者逐次确认后才发送给模型。实验中的操作指导仍需要教师参与 |
 | PBL 答疑与 v2 判评 | 普通文字提问及阶段、任务和最终判评走上游。普通教学课程内，用户可以为本轮判评重新选择教学图片并明确同意发送 | 提交前按当前会话复核身份、课程权限、额度及普通教学开关。本地保存的旧附件可继续查看；需要图片判评时重新选择上传，也可以只提交文字 |
 | 普通 PBL v2 任务开场与导师 | `/open-task` 和 `/instructor` 走官方引擎，保留 SSE、持久化、观察记录和难度调整。普通短答评分采用官方引擎的实际回执 | 调整难度须引用本轮学生原话。短答无法取得有效评分时保持待评，可用原答卷重试 |
 | 课堂辩论 `/api/integration/debate/respond` | 回合与反思使用实际模型，保留论据校验和检查点 | 重试核验请求身份与模型，凭实际模型回执登记用量 |
@@ -49,6 +49,10 @@ flowchart LR
 手工移动或调整大小的标题、结论和要点文本框会按已保存的位置验收。若某页含有检查器无法重现的手工编辑，例如另加的画布元素，系统会指出冲突页并保留原稿，教师可在画布编辑器中修改该页。
 
 准备课堂时，教师先在工作台选定课程和章节，再发送「请用《植物观察》准备课堂」。若同一章节有重名课件，可把书名号中的标题换为课件 ID。收到提案后核对课件与版号，点击批准。成功后可在课堂列表查看“待上课”会话，开始上课仍由教师决定。此流程适用于已发布的原生静态图表、对照表和内嵌图片课件。权限被收回、课件另行发布或转换失败时，平台保留原课件，教师可在修正问题后重试。
+
+题内 AI 学习助手通过 `GET /learning/tutor/context` 获取当前学习者的尝试与可选插图清单。清单只包含普通教学课程允许范围内、与当前尝试同课程和章节、由教师批准准备且处于上课中或已结束状态的课堂。课件必须仍为已发布的同一版本，准备回执须登记对应的静态内嵌插图。课堂的状态只说明它可以纳入筛选，不能证明学习者逐页看过。没有符合条件的图片时继续使用文字问答，旧课堂缺少准备回执时也适用。
+
+选择插图后，学习者须为该次提交勾选同意将所选插图发送给外部模型。切换选择或练习、再次提交时需要重新确认。浏览器提交课堂、版本和页面标识，服务器在发送前复核当前归属、发布状态和回执，只传所选的已核验栅格图。Tutor 不截取桌面、实时工作区或实验现场，也不上传旧附件。没有选择插图时仍按原有规则处理文字和学习记录。回执表明本轮未发送插图时，界面显示原因；请求失败后如需重试图片，须重新选择并确认。
 
 具体应用端点以代码和本 PR 的集成测试为准。原版 CLI 的本地开发者工具没有直接挂到共享教学平台的 HTTP 接口。[官方安全模型](https://github.com/deepseek-ai/deepseek-harness/blob/3f321d32bfe382212a8ed8785c1d47a5a300aa23/SAFETY.zh.md)
 
@@ -81,17 +85,32 @@ git rev-parse HEAD:vendor/deepseek-harness
 # 官方目录树应为 6778b1f1e75fde6d62f69d345792bf08e32178d4
 git ls-tree -r HEAD:vendor/deepseek-harness | wc -l
 make dev-check
-python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py test/test_course_catalog_unit.py
+python -m pip install -r ops/team/requirements.txt
+python -m pytest -q \
+  test/test_upstream_teaching_turn_unit.py test/test_teacher_harness_model_pin_unit.py \
+  test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_tutor_illustrations_unit.py \
+  test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py \
+  test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py
 npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev
 npm test --prefix services/deepseek-harness
 python test/harness_client_contract.py
 ```
 
-跨进程测试从真实的 Python 教学客户端发请求，经过 Node HTTP 服务、官方循环与官方模型适配器，到本机的 Messages 夹具，再验证原路返回的模型及用量。不会使用外部模型余额。课堂回归在 `services/agent-runtime` 中安装锁定依赖后执行 `python3 ../../ops/team/check_agent_runtime_types.py` 和父仓库工作流列出的 Vitest 套件。浏览器回归是 `CHROME_BIN=/path/to/chrome node test/browser/teacher-course-navigation.mjs`。正式构建和共享联调见[维护者手册](operations.md)。
+跨进程测试从真实的 Python 教学客户端发请求，经过 Node HTTP 服务、官方循环与官方模型适配器，到本机的 Messages 夹具，再验证原路返回的模型及用量。使用合成响应中的 token 数，不调用外部模型或消耗余额。解析器和课堂准备测试使用 SQLAlchemy 及临时 SQLite。课堂回归在 `services/agent-runtime` 中安装锁定依赖后执行 `python3 ../../ops/team/check_agent_runtime_types.py` 和父仓库工作流列出的 Vitest 套件。
+
+Tutor 浏览器回归使用课堂服务依赖中固定的 Playwright 版本，在仓库根目录执行以下命令。CI 缓存对应锁文件的 Chromium 二进制，并单独安装 Linux 系统依赖。测试使用合成课堂和模拟 HTTP 响应，浏览器不会发出外部请求。
+
+```sh
+(cd services/agent-runtime && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium)
+node test/browser/tutor-teaching-image.cjs
+CHROME_BIN=/path/to/chrome node test/browser/teacher-course-navigation.mjs
+```
+
+正式构建和共享联调见[维护者手册](operations.md)。
 
 发布前记录现有 Web、Worker 和课堂镜像，并确认上次数据库备份可读。部署时保持 Web 和 Worker 使用相同版本，以合成教师验证只读咨询与一次审批操作，以合成学生验证导学、课堂问答、跨班访问和关闭 AI 时的提示。需紧急停止外送时，关闭开发实例的 AI 开关并重新加载受影响服务。需要恢复上一版行为时，恢复这一组镜像及其配置；先处理升级后尚未完成的作业，避免由旧 worker 重复领取。恢复服务版本无需还原业务数据库。数据库灾备演练应在独立库进行。
 
-共享开发站使用宿主 Compose 项目 `aisecedu-develop`，配置位于 `/srv/aisecedu-develop-instance/compose.json`。2026-11-19 核实该配置启动了 app、db、cache 和 edge。app、db 和 cache 只接内部网络，edge 对课堂入口返回 HTTP 503。仓库中的常规部署示例与此实例不同。为这个实例发布时，需要在同一份经审核的宿主配置中加入配套的教学 Worker、课堂、DSH 和所需的课件检查服务，单独配置 DSH 到指定模型端点的出口，并连同原有代理规则验证切换与回退。当前运行提交可查看[开发站版本页](http://10.92.35.7:28081/_aisecedu/version.json)。
+共享开发站使用宿主 Compose 项目 `aisecedu-develop`，配置位于 `/srv/aisecedu-develop-instance/compose.json`。2026-11-19 核实该配置启动了 app、db、cache 和 edge。app、db 和 cache 只接内部网络，edge 对课堂入口返回 HTTP 503。Tutor 插图仍由本分支的合成验收覆盖，尚未部署到共享开发站。仓库中的常规部署示例与此实例不同。为这个实例发布时，需要在同一份经审核的宿主配置中加入配套的教学 Worker、课堂、DSH 和所需的课件检查服务，单独配置 DSH 到指定模型端点的出口，并连同原有代理规则验证切换与回退。当前运行提交可查看[开发站版本页](http://10.92.35.7:28081/_aisecedu/version.json)。
 
 ### 在共享宿主上发布 DSH 服务
 

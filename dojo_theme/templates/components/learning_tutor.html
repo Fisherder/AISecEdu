@@ -17,12 +17,25 @@
     <div class="learning-tutor-messages" data-tutor-messages></div>
     <div class="learning-tutor-thinking" data-tutor-thinking hidden>
       <span></span><span></span><span></span>
-      <small>正在结合你的实时进度分析，通常需要 30-60 秒…</small>
+      <small>正在结合本题的教学资料和已有学习记录分析…</small>
     </div>
     <label class="learning-tutor-field learning-tutor-question">
       <span>问题</span>
       <textarea class="form-control" rows="4" data-tutor-question placeholder="你下一步想理解或验证什么？"></textarea>
     </label>
+    <div data-tutor-image-options hidden>
+      <label class="learning-tutor-field">
+        <span>附加已发布的课堂插图（可选）</span>
+        <select class="form-control" data-tutor-illustration disabled>
+          <option value="">仅发送文字</option>
+        </select>
+      </label>
+      <label data-tutor-image-confirmation hidden>
+        <input type="checkbox" data-tutor-image-consent disabled>
+        同意将本轮选中的课堂插图发送给外部模型。
+      </label>
+    </div>
+    <p data-tutor-image-notice role="status" hidden></p>
     <button type="button" class="btn btn-primary btn-block" data-tutor-send><span>询问 AI 学习助手</span></button>
     <a class="learning-tutor-analysis-link" href="/guide" data-tutor-full-link>
       <i class="fas fa-expand-alt"></i>

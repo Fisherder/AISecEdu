@@ -97,6 +97,19 @@ jobs:
           tests/lib/orchestration/state-context.test.ts tests/integration/harness-courseware-job.test.ts
           tests/integration/ordinary-teaching-jobs.test.ts tests/integration/ordinary-static-classroom.test.ts tests/quiz
           tests/ai/provider-transport-journal.test.ts tests/security/integrated-middleware-policy.test.ts
+      - name: Cache the pinned Playwright Chromium binary
+        id: tutor-chromium-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: tutor-chromium-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('services/agent-runtime/pnpm-lock.yaml') }}
+      - name: Install Linux dependencies for Tutor Chromium
+        run: pnpm exec playwright install-deps chromium
+      - name: Install the pinned Tutor Chromium binary
+        if: steps.tutor-chromium-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install chromium
+      - name: Verify Tutor illustration selection, consent and fallback in Chromium
+        run: node ../../test/browser/tutor-teaching-image.cjs
   contributor-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -114,7 +127,12 @@ jobs:
       - name: Test the teaching client, durable jobs and course catalogue
         run: |
           python -m pip install -r ops/team/requirements.txt
-          python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_teacher_harness_model_pin_unit.py test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py
+          # requirements.txt pins SQLAlchemy for the SQLite resolver and preparation suites.
+          python -m pytest -q \
+            test/test_upstream_teaching_turn_unit.py test/test_teacher_harness_model_pin_unit.py \
+            test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_tutor_illustrations_unit.py \
+            test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py \
+            test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py
       - name: Verify cross-course navigation in desktop and mobile viewports
         run: CHROME_BIN="$(command -v google-chrome)" node test/browser/teacher-course-navigation.mjs
       - name: Verify the approved classroom preparation and retry flow

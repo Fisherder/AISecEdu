@@ -49,6 +49,13 @@ def ordinary_teaching_image_allowed(user, scope, model_quota):
     )
 
 
+def teaching_image_enabled():
+    setting = (os.getenv("HARNESS_DEEPSEEK_IMAGE_INPUT") or "auto").lower()
+    model = (os.getenv("HARNESS_DEEPSEEK_MODEL") or "deepseek-flash").strip()
+    supported = model in {"deepseek-flash", "deepseek-v4.1-flash"} if setting == "auto" else setting == "true"
+    return bool(supported and upstream_enabled() and os.getenv("HARNESS_INTERNAL_URL") and os.getenv("HARNESS_SERVICE_SECRET"))
+
+
 def request_body(system_prompt, context):
     return {"messages": [
         {"role": "system", "content": system_prompt},
@@ -57,17 +64,33 @@ def request_body(system_prompt, context):
 
 
 def invoke_turn(body, *, encoded=None):
+    return _send_turn(body, "/v1/turn", 1024 * 1024, encoded)
+
+
+def invoke_teaching_image_turn(body, image):
+    # The caller resolves a single authorized, displayed illustration immediately before this call.
+    if not teaching_image_enabled():
+        raise UpstreamTurnError("当前教学模型未启用读图。", category="permanent")
+    if not isinstance(image, dict) or set(image) != {"mediaType", "data"} or (
+        image["mediaType"] not in ("image/png", "image/jpeg", "image/webp")
+        or not isinstance(image["data"], str) or not 0 < len(image["data"]) <= 2796204
+    ):
+        raise UpstreamTurnError("教学插图格式或大小不符合要求。", category="permanent")
+    return _send_turn({**body, "images": [image]}, "/v1/teaching-image-turn", 4 * 1024 * 1024)
+
+
+def _send_turn(body, path, limit, encoded=None):
     base_url = os.environ.get("HARNESS_INTERNAL_URL", "").strip().rstrip("/")
     secret = os.environ.get("HARNESS_SERVICE_SECRET", "")
     if not base_url or not secret:
         raise UpstreamTurnError("教学对话服务尚未配置", category="permanent")
     if encoded is None:
         encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    if len(encoded) > 1024 * 1024:
+    if len(encoded) > limit:
         raise UpstreamTurnError("教学对话资料超出服务容量，请减少本轮引用的资料", category="permanent")
     try:
         with requests.post(
-            f"{base_url}/v1/turn",
+            f"{base_url}{path}",
             headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/json"},
             data=encoded,
             timeout=(8, 95),

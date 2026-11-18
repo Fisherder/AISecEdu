@@ -107,9 +107,10 @@ class HarnessClientContract(unittest.TestCase):
                         "images": [{"mediaType": "image/png", "data": synthetic_png()}]}
                 self.assertEqual(requests.post(url + "/v1/turn", json=body, headers=headers, timeout=4).status_code, 400)
                 image_url = url + "/v1/teaching-image-turn"
-                response = requests.post(image_url, json=body, headers=headers, timeout=20)
-                self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(response.json()["text"], "教学回执")
+                with patch.dict(os.environ, HARNESS_INTERNAL_URL=url, HARNESS_SERVICE_SECRET="fixture-service",
+                                DOJO_AI_ENABLED="true", HARNESS_DEEPSEEK_IMAGE_INPUT="true"):
+                    response = client.invoke_teaching_image_turn({"messages": body["messages"]}, body["images"][0])
+                self.assertEqual(response["text"], "教学回执")
                 self.assertEqual([r[0] for r in model.requests], ["/v1/messages", "/v1/messages"])
                 blocks = model.requests[-1][2]["messages"][0]["content"]
                 pictures = [b["source"] for b in blocks if b["type"] == "image"]

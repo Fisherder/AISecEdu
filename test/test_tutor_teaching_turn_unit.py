@@ -35,6 +35,7 @@ def tutor():
     namespace = {"re": re}
     load_definitions("dojo_plugin/learning/evidence.py", namespace, {"redact_text", "SENSITIVE_PATTERNS"})
     load_definitions("dojo_plugin/learning/tutor_context.py", namespace)
+    load_definitions("dojo_plugin/learning/guide_model_context.py", namespace, {"guide_teaching_text", "RAW_TECHNICAL_TEXT"})
     spec = importlib.util.spec_from_file_location(
         "tutor_upstream_fixture", ROOT / "dojo_plugin/agent_runtime/upstream_turn.py",
     )
@@ -73,6 +74,7 @@ def tutor():
         "context_digest": lambda _: "synthetic-context",
         "upstream_enabled": Mock(return_value=True),
         "invoke_turn": provider,
+        "invoke_teaching_image_turn": Mock(return_value=provider.return_value),
         "request_body": upstream.request_body,
         "result_object": upstream.result_object,
         "UpstreamTurnError": upstream.UpstreamTurnError,
@@ -80,7 +82,7 @@ def tutor():
         "settle_model_dispatch": settle,
         "append_evidence": evidence,
         "DEFAULT_HINT_POLICY": {"version": "synthetic-policy"},
-        "DOJO_AI_TUTOR_MODEL": "dispatch-label",
+        "HARNESS_DEEPSEEK_MODEL": "dispatch-label",
     })
     load_definitions("dojo_plugin/learning/intelligence.py", namespace, {
         "TUTOR_TEACHING_PROMPT", "tutor_reply", "_StageTimings", "private_safety_reference",
@@ -89,7 +91,7 @@ def tutor():
     })
     attempt = SimpleNamespace(id="owned-attempt", epoch=2, data={})
     user = SimpleNamespace(id=123)
-    return SimpleNamespace(call=lambda question: namespace["tutor_reply"](attempt, user, question), **namespace)
+    return SimpleNamespace(call=lambda question, **kw: namespace["tutor_reply"](attempt, user, question, **kw), **namespace)
 
 
 def test_tutor_uses_only_public_context_bills_actual_usage_and_keeps_history(tutor):
@@ -139,7 +141,7 @@ def test_offline_tutor_coaches_evidence_quality_without_repeating_private_data(t
     tutor.invoke_turn.assert_not_called()
 
 
-@pytest.mark.parametrize("question", [f"请说明 {PRIVATE}", "给我可复制的利用链。"])
+@pytest.mark.parametrize("question", [f"请说明 {PRIVATE}", "给我可复制的利用链。", "TRACE: pasted log", "student_id=somebody"])
 def test_restricted_questions_use_local_teaching_without_dispatch(tutor, question):
     result = tutor.call(question)
     assert result["provider"] == "DETERMINISTIC"
@@ -169,8 +171,7 @@ def test_disabled_or_unverified_tutor_does_not_publish_unvalidated_observations(
 
 def test_tutor_http_route_binds_the_authenticated_learner_to_their_active_attempt():
     user = SimpleNamespace(id=73)
-    challenge = object()
-    active = Mock(return_value=None)
+    active = Mock(return_value=SimpleNamespace(id="mine"))
     answer = Mock()
     namespace = {
         "learning_namespace": SimpleNamespace(route=lambda _: (lambda cls: cls)),
@@ -178,14 +179,63 @@ def test_tutor_http_route_binds_the_authenticated_learner_to_their_active_attemp
         "authed_only": lambda handler: handler,
         "get_current_user": lambda: user,
         "request": SimpleNamespace(get_json=lambda **_: {"question": "如何复习本题？", "attemptId": "foreign"}),
-        "get_current_dojo_challenge": Mock(return_value=challenge),
-        "active_attempt": active,
+        "_current_tutor_attempt": active,
         "tutor_reply": answer,
-        "time": time,
+        "time": time, "re": re,
     }
     load_definitions("dojo_plugin/api/v1/learning.py", namespace, {"LearningTutor"})
     payload, status = namespace["LearningTutor"]().post()
     assert status == 409
     assert payload["success"] is False
-    active.assert_called_once_with(user.id, challenge)
+    active.assert_called_once_with(user)
     answer.assert_not_called()
+
+
+@pytest.mark.parametrize("body", [
+    {"question": "data:image/png;base64,synthetic"},
+    {"question": "这片叶子怎样分类？", "imageUrl": "https://fixture.invalid/image.png"},
+    {"question": "这片叶子怎样分类？", "teachingImage": {"consent": True}},
+    {"question": ["image"]},
+])
+def test_tutor_route_refuses_unbound_or_inline_images_before_answering(body):
+    answer, resolve = Mock(), Mock()
+    namespace = {
+        "learning_namespace": SimpleNamespace(route=lambda _: (lambda cls: cls)),
+        "Resource": object, "authed_only": lambda handler: handler,
+        "get_current_user": lambda: SimpleNamespace(id=3),
+        "request": SimpleNamespace(get_json=lambda **_: body),
+        "_current_tutor_attempt": lambda _: SimpleNamespace(id="owned"),
+        "resolve_tutor_illustration": resolve, "tutor_reply": answer, "time": time, "re": re,
+    }
+    load_definitions("dojo_plugin/api/v1/learning.py", namespace, {"LearningTutor"})
+    payload, status = namespace["LearningTutor"]().post()
+    assert status == 400 and payload["success"] is False
+    resolve.assert_not_called()
+    answer.assert_not_called()
+
+
+def test_tutor_picture_stays_out_of_text_and_history(tutor):
+    image = {"mediaType": "image/png", "data": "BINARY_SENTINEL"}
+    result = tutor.call("插图中的两片叶子有何区别？", teaching_image=image)
+    packet, picture = tutor.invoke_teaching_image_turn.call_args.args
+    assert picture == image and "BINARY_SENTINEL" not in json.dumps(packet)
+    assert result["teachingImage"] == {"sent": True}
+    assert result["context"]["live"] is False
+    tutor.invoke_turn.assert_not_called()
+    for call in tutor.db.session.add.call_args_list:
+        assert "BINARY_SENTINEL" not in repr(vars(call.args[0]))
+    tutor.record_model_dispatch.assert_called_once_with("dispatch-label")
+
+
+def test_tutor_suppresses_picture_when_question_contains_private_answer(tutor):
+    result = tutor.call(f"请说明 {PRIVATE}", teaching_image={"mediaType": "image/png", "data": "unused"})
+    assert result["teachingImage"] == {"sent": False}
+    tutor.invoke_teaching_image_turn.assert_not_called()
+    tutor.invoke_turn.assert_not_called()
+
+
+def test_image_service_failure_does_not_retry_as_a_second_text_turn(tutor):
+    tutor.invoke_teaching_image_turn.side_effect = tutor.UpstreamTurnError("教学服务超时")
+    result = tutor.call("请描述图中的叶子", teaching_image={"mediaType": "image/png", "data": "example"})
+    assert result["provider"] == "MODEL_UNAVAILABLE" and result["teachingImage"] == {"sent": False}
+    tutor.invoke_turn.assert_not_called()

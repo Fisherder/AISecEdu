@@ -79,6 +79,21 @@ def _static_element(element):
     return True
 
 
+def displayed_image_pages(classroom_id, scenes):
+    """Small catalogue saved with the renderer receipt, excluding image data."""
+    result = []
+    prefix = classroom_id + "-"
+    for scene in scenes:
+        scene_id, title = scene.get("id"), scene.get("title")
+        if not isinstance(scene_id, str) or not scene_id.startswith(prefix) or not isinstance(title, str):
+            continue
+        images = [element for element in scene["content"]["canvas"]["elements"]
+                  if isinstance(element, dict) and element.get("type") == "image"]
+        if len(images) == 1 and images[0].get("id") == "verified-image":
+            result.append({"pageId": scene_id[len(prefix):], "label": title[:160]})
+    return result
+
+
 def published_classroom_deck(owner_id, dojo_id, module_index, artifact_id, *, lock=False):
     """Return the current stored revision for an ordinary classroom, or None."""
     if not ordinary_teaching_course(dojo_id) or not isinstance(artifact_id, str) or not artifact_id:

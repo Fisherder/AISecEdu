@@ -108,7 +108,7 @@ def guide():
         "settle_model_dispatch": Mock(),
         "sanitize_tool_calls": lambda value: value or [],
         "student_resource_reference_for_url": Mock(return_value={"objectType": "exercise", "objectId": REFERENCE}),
-        "DOJO_AI_GUIDE_MODEL": "dispatch-label",
+        "HARNESS_DEEPSEEK_MODEL": "dispatch-label",
     })
     load_definitions("dojo_plugin/learning/intelligence.py", namespace, {
         "GuideReferenceSelectionError", "guide_reply", "_guide_reference_ids", "_guide_message_reference_ids",
@@ -269,6 +269,16 @@ def test_guide_blocks_model_answers_outside_the_selected_course_scope(guide):
     })
     result = guide.call("怎么区分观察和推测？", [REFERENCE])
     assert result["provider"] == "MODEL_SCOPE_BLOCKED"
+    assert result["message"]["metadata"]["agentMeta"]["usage"] == {"prompt_tokens": 8}
     assert result["message"]["metadata"]["scopeValidation"]["status"] == "BLOCKED"
     assert result["contextCoverage"]["referencedEvidenceEvents"] == 2
     assert "另一个课程的结论" not in result["message"]["content"]
+
+
+def test_unparseable_guide_answer_keeps_the_measured_provider_usage(guide):
+    guide.invoke_turn.return_value["text"] = "not JSON"
+    result = guide.call("怎么区分观察和推测？", [REFERENCE])
+    assert result["provider"] == "MODEL_UNAVAILABLE"
+    assert result["message"]["metadata"]["agentMeta"] == {
+        "provider": "DEEPSEEK", "model": "mock", "usage": {"prompt_tokens": 8},
+    }

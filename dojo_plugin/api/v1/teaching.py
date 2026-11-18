@@ -48,7 +48,7 @@ from ...agent_runtime.approval_journal import (
     message_approval_metadata, proposal_operation, proposal_request,
     record_execution, recorded_decision, request_reference, require_approved,
 )
-from ...agent_runtime.classroom_preparation import ordinary_static_lesson, published_classroom_deck
+from ...agent_runtime.classroom_preparation import displayed_image_pages, ordinary_static_lesson, published_classroom_deck
 from ...models.global_agent import teaching_id
 from ...agent_runtime.commands import action_execution, admit_action, admit_teacher_tool
 from ...agent_runtime.approved_actions import ApprovedActionError, apply_action, prepare_action
@@ -5916,7 +5916,8 @@ class TeachingToolPrepareClassroom(Resource):
                 risk_level="R1", target_type="teaching_session", target_id=session.id, status="COMPLETED",
                 idempotency_key=key, request_json={"approvalRequest": approval, "dojoId": scope.dojo_id,
                     "moduleIndex": scope.module_index, "artifactId": artifact.id, "expectedRevision": revision.revision,
-                    "contentHash": revision.content_hash},
+                    "contentHash": revision.content_hash, "ordinaryScenesHash": content_hash(rendered["scenes"]),
+                    "ordinaryImagePages": displayed_image_pages(classroom_id, rendered["scenes"])},
                 result=result, completed=now,
             )
             db.session.add(session)

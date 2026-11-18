@@ -61,6 +61,7 @@ x-ctfd-env: &ctfd-env
   DOJO_CTF_CORPUS_DIR: /var/ctf-corpus
   HARNESS_INTERNAL_URL: http://deepseek-harness:3081
   HARNESS_DEEPSEEK_MODEL: &harness-model ${HARNESS_DEEPSEEK_MODEL:-deepseek-flash}
+  HARNESS_DEEPSEEK_IMAGE_INPUT: &harness-image-input ${HARNESS_DEEPSEEK_IMAGE_INPUT:-auto}
   HARNESS_CONFIGURED: "${HARNESS_DEEPSEEK_API_KEY:+true}"
   HARNESS_ORDINARY_TEACHING_COURSE_IDS: ${HARNESS_ORDINARY_TEACHING_COURSE_IDS:-}
   HARNESS_SERVICE_SECRET: ${HARNESS_SERVICE_SECRET:-}
@@ -316,7 +317,7 @@ services:
       DEEPSEEK_API_KEY: ${HARNESS_DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${HARNESS_DEEPSEEK_BASE_URL:-https://api.deepseek.com/anthropic}
       DEEPSEEK_MODEL: *harness-model
-      DEEPSEEK_IMAGE_INPUT: ${HARNESS_DEEPSEEK_IMAGE_INPUT:-auto}
+      DEEPSEEK_IMAGE_INPUT: *harness-image-input
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3081/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 15s
