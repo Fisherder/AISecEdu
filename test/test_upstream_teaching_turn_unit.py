@@ -93,7 +93,7 @@ def test_teacher_request_omits_person_rows_from_both_model_backends(backend, mod
     from types import SimpleNamespace
 
     tree = ast.parse((RUNTIME / "jobs.py").read_text())
-    functions = {"_runtime_request_body", "_harness_courseware_authorized"}
+    functions = {"_runtime_request_body", "_harness_courseware_authorized", "_ordinary_teaching_job_scope"}
     tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in functions]
     namespace = {
         "request_body": turn.request_body,
