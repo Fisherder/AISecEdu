@@ -88,7 +88,8 @@ def test_teacher_request_omits_person_rows_from_both_model_backends(backend, mod
     model_context = importlib.util.module_from_spec(model_context_spec)
     model_context_spec.loader.exec_module(model_context)
     tree = ast.parse(MODULE.with_name("jobs.py").read_text())
-    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_runtime_request_body"]
+    functions = {"_runtime_request_body", "_harness_courseware_authorized"}
+    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in functions]
     namespace = {
         "request_body": turn.request_body,
         "scrub_payload": lambda value, **kwargs: value,
