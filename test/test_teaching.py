@@ -3313,7 +3313,7 @@ def test_global_agent_executes_native_course_operations(
     assert inferred_pending["metadata"]["presentation"] == "activity"
     assert inferred_pending["metadata"]["jobKind"] == "agent.chat"
     assert inferred_pending["metadata"]["jobStatus"] in {"QUEUED", "RUNNING"}
-    assert "理解完整要求" in inferred_pending["content"]
+    assert inferred_pending["content"] == "正在准备教学对话回复…"
     inferred_cancel = admin_session.delete(
         f"{API}/jobs/{inferred_data['job']['id']}", json={}
     )
@@ -3374,7 +3374,7 @@ def test_global_agent_executes_native_course_operations(
     assert "intent" not in analysis_pending_reply["metadata"]
     assert analysis_pending_reply["metadata"]["presentation"] == "activity"
     assert analysis_pending_reply["metadata"]["jobKind"] == "agent.chat"
-    assert "理解完整要求" in analysis_pending_reply["content"]
+    assert analysis_pending_reply["content"] == "正在准备教学对话回复…"
     assert "已开始生成" not in analysis_pending_reply["content"]
     canceled_analysis = admin_session.delete(
         f"{API}/jobs/{material_analysis_data['job']['id']}", json={}
