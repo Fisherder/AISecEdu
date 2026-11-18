@@ -1,6 +1,10 @@
 import { ordinaryBlueprint, ordinaryCandidate, ordinaryMaterialAnalysis, ordinarySlidePatch,
   ordinaryTeachingJson, ordinaryTeachingRules, ordinaryTeachingText, type OrdinaryTeachingModel,
 } from '@/lib/server/agent-harness/ordinary-teaching';
+import { hasMeasuredLessonUsage, InvalidLessonPlanResponse, materializeOrdinaryLessonPlan,
+  ORDINARY_LESSON_REQUEST_LIMIT, ordinaryLessonCandidateBlueprint, ordinaryLessonCandidateDraft,
+  ordinaryLessonCandidateInput, ordinaryLessonPlanInput,
+} from '@/lib/server/agent-harness/ordinary-lesson-plan';
 import { createHarnessTurn, recordHarnessUsage } from '@/lib/server/agent-harness/classroom-turn';
 import { persistDurableModelEvent } from '@/lib/server/durable-model-events';
 import { openDebateCheckpoint } from '@/lib/debate/checkpoint';
@@ -118,7 +122,7 @@ type CinematicModelCall = (
 type JobRequest = {
   jobId?: string;
   kind?: string;
-  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean; ordinaryTeaching?: 'material-summary' | 'candidate-plan' | 'slide-wording' };
+  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean; ordinaryTeaching?: 'material-summary' | 'candidate-plan' | 'slide-wording' | 'lesson-plan-materialize' };
   payload?: Record<string, unknown>;
   modelRoute?: {
     route?: string;
@@ -1070,6 +1074,7 @@ async function generateCandidatesWithPipeline(
   artifactType: string,
   expectedCount: number,
   pageRequirement: SlideDeckPageRequirement,
+  ordinaryLesson?: ReturnType<typeof ordinaryLessonCandidateInput>,
 ) {
   const ordinary = 'turn' in resolved;
   const trace = getServerAgentRunTrace();
@@ -1093,18 +1098,18 @@ async function generateCandidatesWithPipeline(
       throw error;
     }
   };
-  const prompt = String(payload.prompt || '').trim();
-  const materialPrompt = candidateMaterialPrompt(payload);
-  const materialIds = Array.isArray(recordValue(payload.materialContext)?.materialIds)
+  const prompt = ordinaryLesson?.request ?? String(payload.prompt || '').trim();
+  const materialIds = ordinaryLesson ? ordinaryLesson.sources.map(source => source.materialId)
+    : Array.isArray(recordValue(payload.materialContext)?.materialIds)
     ? (recordValue(payload.materialContext)?.materialIds as unknown[]).map(String).filter(Boolean)
     : [];
-  const context = (ordinary ? completeJsonForPrompt : jsonForPrompt)(
+  const context = ordinaryLesson ? JSON.stringify(ordinaryLesson) : (ordinary ? completeJsonForPrompt : jsonForPrompt)(
     {
       prompt,
       artifactType,
       constraints: payload.constraints,
       sourceCandidates: payload.sourceCandidates,
-      materialContext: materialPrompt,
+      materialContext: candidateMaterialPrompt(payload),
       courseContext: payload.courseContext,
       personal: payload.personal,
     },
@@ -1124,7 +1129,8 @@ async function generateCandidatesWithPipeline(
     if (artifactType === 'slide-deck' && slideDeckPageCountIssue(plan.outline.length, pageRequirement)) {
       throw new Error('Ordinary slide candidate did not match the required page count');
     }
-    const locators = new Map(candidateSourceGrounding(payload).map(row => [row.materialId, row.sourceLocators]));
+    const locators = ordinaryLesson ? new Map()
+      : new Map(candidateSourceGrounding(payload).map(row => [row.materialId, row.sourceLocators]));
     return {candidate: {...validated.candidate, content: {...plan,
       sourceGrounding: plan.sourceGrounding.map(row => ({...row, sourceLocators: locators.get(row.materialId) || []})),
     }}};
@@ -1145,7 +1151,8 @@ async function generateCandidatesWithPipeline(
       },
       artifactType === 'slide-deck' ? pageRequirement : undefined,
     );
-    return (normalized.candidates as unknown[])[0] as Record<string, unknown>;
+    const first = (normalized.candidates as unknown[])[0] as Record<string, unknown>;
+    return ordinaryLesson ? ordinaryLessonCandidateDraft(first, ordinaryLesson) : first;
   };
   const validate = (candidate: Record<string, unknown>): CandidatePipelineIssue[] => {
     const issue = candidateGenerationIssue(
@@ -1169,7 +1176,7 @@ async function generateCandidatesWithPipeline(
           pageRequirement,
           materialIds,
         ),
-        prompt: `教学需求：${prompt}\n上下文：${context}`,
+        prompt: ordinaryLesson ? context : `教学需求：${prompt}\n上下文：${context}`,
         output: resilientJsonOutput(),
         maxOutputTokens: Math.min(resolved.modelInfo?.outputWindow || 3_000, 3_000),
       },
@@ -1183,7 +1190,8 @@ async function generateCandidatesWithPipeline(
           try {
             const parsed = parseJson(text);
             if (ordinary) ordinaryBlueprint.parse(parsed);
-            normalizeCandidateBlueprint(parsed, ordinal, artifactType, prompt);
+            const normalized = normalizeCandidateBlueprint(parsed, ordinal, artifactType, prompt);
+            if (ordinaryLesson) ordinaryLessonCandidateBlueprint.parse(normalized);
             return true;
           } catch {
             if (ordinary) return false;
@@ -1234,14 +1242,16 @@ async function generateCandidatesWithPipeline(
     safety: ['仅限授权隔离环境', '不生成真实凭据或公网攻击步骤'],
   });
   const expansionSystem = ordinary ? `${ordinaryTeachingRules} 生成 ${artifactType} 候选，仅返回 {"candidate":{"title":"...","summary":"...","strategy":"...","differences":["..."],"recommendation":"...","content":{"type":"${artifactType}","objectives":["..."],"outline":[{"title":"...","description":"...","keyPoints":["..."],"layout":"concept","visualBrief":"...","speakerNotes":"..."}],"activities":[{"title":"...","instruction":"..."}],"assessment":{"criteria":["..."]},"sourceGrounding":[{"materialId":"...","uses":["..."]}]}}}。
-sourceGrounding 必须准确覆盖授权资料 ${JSON.stringify(materialIds)}。${artifactType === 'slide-deck' ? slideDeckPageInstruction(pageRequirement) : ''}`
+sourceGrounding 必须准确覆盖授权资料 ${JSON.stringify(materialIds)}。${artifactType === 'slide-deck' ? slideDeckPageInstruction(pageRequirement) : ''}
+${ordinaryLesson ? '教案标题最多160字，大纲最多30节，每节题目最多80字、说明最多800字、要点各最多200字。目标和评价准则各最多300字；活动题目最多100字、活动说明最多800字。' : ''}`
     : candidateExpansionSystem(artifactType, pageRequirement, materialIds);
   const makeCandidate = async (blueprint: CandidateBlueprint, ordinal: number) => {
     return observed('workflow', `扩展第 ${ordinal}/${expectedCount} 个候选方案`, async () => {
     const response = await callTeachingJobJson(resolved,
       {
         system: expansionSystem,
-        prompt: `教学需求：${prompt}\n候选序号：${ordinal}/${expectedCount}\n蓝图：${jsonForPrompt(blueprint, 18_000)}\n课程上下文：${context}`,
+        prompt: ordinaryLesson ? JSON.stringify({...ordinaryLesson, ordinal, blueprint: ordinaryLessonCandidateBlueprint.parse(blueprint)})
+          : `教学需求：${prompt}\n候选序号：${ordinal}/${expectedCount}\n蓝图：${jsonForPrompt(blueprint, 18_000)}\n课程上下文：${context}`,
         output: resilientJsonOutput(),
         maxOutputTokens: Math.min(resolved.modelInfo?.outputWindow || 16_000, 20_000),
       },
@@ -1273,8 +1283,9 @@ sourceGrounding 必须准确覆盖授权资料 ${JSON.stringify(materialIds)}。
     return observed('tool', `定向修复第 ${ordinal} 个候选 · 第 ${repairAttempt} 轮`, async () => {
     const response = await callTeachingJobJson(resolved,
       {
-        system: `${expansionSystem}\n这是第 ${repairAttempt} 次定向修复。只修复列出的缺陷，保留蓝图目标和已有有效内容。`,
-        prompt: `缺陷：${jsonForPrompt(issues, 8_000)}\n蓝图：${jsonForPrompt(blueprint, 18_000)}\n当前候选：${jsonForPrompt(candidate, 70_000)}\n上下文：${context}`,
+        system: ordinaryLesson ? `${expansionSystem}\n请依据本轮要求和已确认的教学蓝图重新生成。`
+          : `${expansionSystem}\n这是第 ${repairAttempt} 次定向修复。只修复列出的缺陷，保留蓝图目标和已有有效内容。`,
+        prompt: ordinaryLesson ? JSON.stringify({...ordinaryLesson, ordinal, blueprint: ordinaryLessonCandidateBlueprint.parse(blueprint)}) : `缺陷：${jsonForPrompt(issues, 8_000)}\n蓝图：${jsonForPrompt(blueprint, 18_000)}\n当前候选：${jsonForPrompt(candidate, 70_000)}\n上下文：${context}`,
         output: resilientJsonOutput(),
         maxOutputTokens: Math.min(resolved.modelInfo?.outputWindow || 20_000, 24_000),
       },
@@ -3253,7 +3264,11 @@ async function reviseOrdinarySlide(
 }
 
 export async function POST(req: NextRequest) {
-  if (req.headers.get('accept')?.includes('application/x-ndjson')) {
+  const pathname = req.nextUrl.pathname.replace(/\/$/, '');
+  const ordinaryLessonPath = '/api/integration/jobs/ordinary-lesson-plan';
+  const basePath = req.nextUrl.basePath || process.env.NEXT_PUBLIC_BASE_PATH?.trim().replace(/\/$/, '') || '/agent-runtime';
+  const ordinaryLessonEndpoint = pathname === ordinaryLessonPath || pathname === basePath + ordinaryLessonPath;
+  if (!ordinaryLessonEndpoint && req.headers.get('accept')?.includes('application/x-ndjson')) {
     const bodyText = await req.text();
     let submitted: JobRequest = {};
     try {
@@ -3333,12 +3348,34 @@ export async function POST(req: NextRequest) {
     if (!authorized(req)) {
       return reply({ success: false, error: 'Invalid 玄甲 service credential' }, 401);
     }
-    const body = (await req.json()) as JobRequest;
+    const body = (await req.json().catch(error => {
+      if (ordinaryLessonEndpoint) return null;
+      throw error;
+    })) as JobRequest | null;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return reply({ success: false, error: 'Invalid job request' }, 400);
+    }
     const jobId = String(body.jobId || '');
     const kind = String(body.kind || '');
     auditJobId = jobId || 'unknown';
     auditKind = kind || 'unknown';
     const payload = body.payload && typeof body.payload === 'object' ? body.payload : {};
+    const ordinaryScope = body.scope?.ordinaryTeaching;
+    const pinnedLessonCandidate = payload.generationReason === 'teacher_requested_ordinary_lesson_plan' ||
+      Object.hasOwn(payload, 'ordinaryCandidateModel');
+    if (ordinaryLessonEndpoint) {
+      const materialize = kind === 'artifact.materialize' && ordinaryScope === 'lesson-plan-materialize' &&
+        !pinnedLessonCandidate;
+      const candidate = kind === 'candidate.generate' && ordinaryScope === 'candidate-plan' &&
+        payload.generationReason === 'teacher_requested_ordinary_lesson_plan' &&
+        typeof payload.ordinaryCandidateModel === 'string' && Boolean(payload.ordinaryCandidateModel.trim());
+      if (payload.artifactType !== 'lesson-plan' || !(materialize || candidate)) {
+        return reply({
+          success: false, error: '此内部地址仅接收已锁定的普通教案任务。',
+          errorCode: 'INVALID_ORDINARY_LESSON_PLAN_JOB', failureCategory: 'permanent',
+        }, 422);
+      }
+    }
     const candidateGeneration = kind === 'candidate.generate' || kind === 'self.candidate.generate';
     const requestedCandidateCount = Number(payload.candidateCount);
     const expectedCandidateCount = candidateGeneration
@@ -3364,7 +3401,75 @@ export async function POST(req: NextRequest) {
 
     const executeJob = async () => {
 
-    const ordinaryScope = body.scope?.ordinaryTeaching;
+    if (ordinaryScope === 'lesson-plan-materialize') {
+      const invalid = () => reply({
+        success: false, error: '教案任务缺少已选方案、版本或完整资料摘要。',
+        errorCode: 'INVALID_ORDINARY_LESSON_PLAN', failureCategory: 'permanent',
+      }, 422);
+      const unavailable = () => reply({
+        success: false, error: '普通教案生成服务暂不可用，请稍后重试。',
+        errorCode: 'ORDINARY_LESSON_PLAN_UNAVAILABLE', failureCategory: 'service',
+      }, 503);
+      if (kind !== 'artifact.materialize' || payload.workspaceId != null ||
+          typeof body.scope?.ownerId !== 'number' || !Number.isSafeInteger(body.scope.ownerId) ||
+          body.scope.ownerId <= 0 || !Number.isSafeInteger(body.scope.dojoId)) return invalid();
+      let input;
+      try {
+        input = ordinaryLessonPlanInput(payload);
+      } catch {
+        return invalid();
+      }
+      const harnessModel = process.env.HARNESS_DEEPSEEK_MODEL?.trim();
+      if (!harnessModel || body.modelRoute?.provider !== 'deepseek' || requestedModel !== harnessModel ||
+          body.modelRoute.required_model !== harnessModel) return unavailable();
+      try {
+        const turn = createHarnessTurn();
+        if (!turn) return unavailable();
+        const {result, usage, actualModel} = await materializeOrdinaryLessonPlan(
+          input, {turn, modelId: harnessModel, signal: req.signal},
+        );
+        return reply({
+          success: true, result,
+          model: {
+            provider: 'deepseek', actualModel, modelVersion: 'deepseek:' + actualModel, usage,
+            latencyMs: Date.now() - started,
+            responseHash: createHash('sha256').update(JSON.stringify(result)).digest('hex'),
+            degraded: false, executionMode: 'lesson-plan-harness',
+          },
+        });
+      } catch (error) {
+        if (error instanceof InvalidLessonPlanResponse) {
+          return reply({
+            success: false, error: '模型返回的教案与已选大纲不符，或有无效内容，请重试。',
+            errorCode: 'INVALID_ORDINARY_LESSON_PLAN_RESPONSE', failureCategory: 'quality',
+          }, 422);
+        }
+        return unavailable();
+      }
+    }
+    const ordinaryCandidateUnavailable = () => reply({
+      success: false, error: '普通教案方案服务暂不可用，请重新发起生成。',
+      errorCode: 'ORDINARY_LESSON_PLAN_CANDIDATE_UNAVAILABLE', failureCategory: 'service',
+    }, 503);
+    if (pinnedLessonCandidate && (
+      kind !== 'candidate.generate' || ordinaryScope !== 'candidate-plan' || artifactType !== 'lesson-plan' ||
+      payload.workspaceId != null || typeof body.scope?.ownerId !== 'number' ||
+      !Number.isSafeInteger(body.scope.ownerId) || body.scope.ownerId <= 0 ||
+      !Number.isSafeInteger(body.scope?.dojoId) || typeof payload.candidateSetId !== 'string' ||
+      !payload.candidateSetId.trim() || payload.generationReason !== 'teacher_requested_ordinary_lesson_plan'
+    )) {
+      return reply({
+        success: false, error: '普通教案方案需要教师课程和已固定的生成任务。',
+        errorCode: 'INVALID_ORDINARY_LESSON_PLAN_CANDIDATE', failureCategory: 'permanent',
+      }, 422);
+    }
+    if (pinnedLessonCandidate && typeof payload.prompt === 'string' &&
+        payload.prompt.trim().length > ORDINARY_LESSON_REQUEST_LIMIT) {
+      return reply({
+        success: false, error: `请把本轮教案要求缩短到 ${ORDINARY_LESSON_REQUEST_LIMIT} 字以内后重试。`,
+        errorCode: 'ORDINARY_LESSON_PLAN_REQUEST_TOO_LONG', failureCategory: 'permanent',
+      }, 422);
+    }
     const ordinaryWording = ordinaryScope === 'slide-wording';
     const ordinaryWordingInvalid = (error: string) => reply({
       success: false, error, errorCode: 'INVALID_SLIDE_WORDING_TARGET', failureCategory: 'permanent',
@@ -3422,6 +3527,9 @@ export async function POST(req: NextRequest) {
 
     const requiredModel = body.modelRoute?.required_model;
     const harnessModel = process.env.HARNESS_DEEPSEEK_MODEL?.trim();
+    if (pinnedLessonCandidate && (!harnessModel || payload.ordinaryCandidateModel !== harnessModel ||
+        body.modelRoute?.provider !== 'deepseek' || requestedModel !== harnessModel ||
+        requiredModel !== harnessModel)) return ordinaryCandidateUnavailable();
     const coursewareTurn = kind === 'artifact.materialize' && body.modelRoute?.provider === 'deepseek' &&
       body.scope?.teacherCourseware === true && body.scope.dojoId != null && !payload.workspaceId &&
       payload.artifactType === 'slide-deck' && typeof payload.artifactId === 'string' && payload.artifactId &&
@@ -3475,14 +3583,52 @@ export async function POST(req: NextRequest) {
         ? createHarnessTurn() : undefined;
     } catch (error) {
       if (ordinaryWording) return ordinaryWordingUnavailable();
+      if (pinnedLessonCandidate) return ordinaryCandidateUnavailable();
       throw error;
     }
+    if (pinnedLessonCandidate && !ordinaryTurn) return ordinaryCandidateUnavailable();
     if (ordinaryWording && !ordinaryTurn) return ordinaryWordingUnavailable();
     if (ordinaryTurn && harnessModel) {
       const model: OrdinaryTeachingModel = {turn: ordinaryTurn, modelId: harnessModel, signal: req.signal};
       let result: Record<string, unknown>;
       let usage: Record<string, number>;
-      if (ordinaryCandidateJob) {
+      if (pinnedLessonCandidate) {
+        let selected;
+        try {
+          selected = ordinaryLessonCandidateInput(payload);
+        } catch {
+          return reply({
+            success: false, error: '普通教案方案需要本轮教学要求及对应的完整教材摘要。',
+            errorCode: 'INVALID_ORDINARY_LESSON_PLAN_CANDIDATE', failureCategory: 'permanent',
+          }, 422);
+        }
+        let invalidReceipt = false;
+        const turn = ordinaryTurn;
+        const pinnedModel: OrdinaryTeachingModel = {...model, turn: async (messages, signal) => {
+          if (invalidReceipt) throw new Error('A pinned candidate call has already returned an invalid receipt');
+          const response = await turn(messages, signal).catch(error => {
+            invalidReceipt = true;
+            throw error;
+          });
+          if (response.model !== harnessModel || !hasMeasuredLessonUsage(response)) {
+            invalidReceipt = true;
+            await recordHarnessUsage(response, 'aisecedu-integration-job');
+            throw new Error('The pinned candidate turn did not return a model and measured usage');
+          }
+          return response;
+        }};
+        try {
+          const output = await generateCandidatesWithPipeline(
+            payload, pinnedModel, artifactType, expectedCandidateCount, slidePageRequirement, selected,
+          );
+          if (invalidReceipt) return ordinaryCandidateUnavailable();
+          result = {candidates: output.candidates, generationReport: output.report};
+          usage = output.usage;
+        } catch (error) {
+          if (invalidReceipt) return ordinaryCandidateUnavailable();
+          throw error;
+        }
+      } else if (ordinaryCandidateJob) {
         const groundingIssue = materialGroundingIssue(payload);
         if (groundingIssue) {
           return reply({success: false, error: `Generation requires a complete teacher-material snapshot: ${groundingIssue}`}, 422);

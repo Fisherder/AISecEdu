@@ -43,10 +43,10 @@ const lessonCandidate = {candidate: {
     activities: [{title: '小组讨论', instruction: '交流预测依据'}],
     assessment: {criteria: ['根据记录说明差异']}, sourceGrounding: []},
 }};
-const request = (kind: string, ordinaryTeaching: string, payload: Record<string, unknown>, token = 'integration-secret') =>
-  new NextRequest('http://localhost/api/integration/jobs/execute', {
+const request = (kind: string, ordinaryTeaching: string, payload: Record<string, unknown>, token = 'integration-secret', model = job.modelRoute.actual_model, requiredModel?: string, endpoint = 'execute') =>
+  new NextRequest(`http://localhost/api/integration/jobs/${endpoint}`, {
     method: 'POST', headers: {'Content-Type': 'application/json', 'X-AISecEdu-Service-Token': token},
-    body: JSON.stringify({...job, kind, scope: {...job.scope, ordinaryTeaching}, payload}),
+    body: JSON.stringify({...job, kind, modelRoute: {...job.modelRoute, actual_model: model, required_model: requiredModel}, scope: {...job.scope, ordinaryTeaching}, payload}),
   });
 const modelResponse = (value: unknown) => Response.json({
   text: JSON.stringify(value), model: 'official-model', usage: {prompt_tokens: 10, completion_tokens: 5},
@@ -134,6 +134,282 @@ describe('ordinary teaching worker service routes', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  const planOutput = {sections: [{title: '水的状态变化', explanation: '根据观察记录比较两组水量的变化。',
+    takeaways: ['比较条件与证据', '保持其他条件一致']}]};
+  const materializeRequest = (overrides: Record<string, unknown> = {}, model = 'official-model', token = 'integration-secret', requiredModel: string | null = model) => {
+    const coverage = {complete: true, expectedMaterialCount: 1, materialIds: ['material-one']};
+    return request('artifact.materialize', 'lesson-plan-materialize', {
+      artifactType: 'lesson-plan', artifactId: 'lesson-one', candidateSetId: 'candidate-set-one', expectedRevision: 2,
+      title: '温度与蒸发', requestPrompt: '复用所选大纲的对照观察',
+      plan: {
+        ...lessonCandidate.candidate.content, experience: {mode: 'ordinary-teaching-plan'},
+        outline: [{...lessonCandidate.candidate.content.outline[0], speakerNotes: 'PRIVATE speaker notes'}],
+        sourceGrounding: [{materialId: 'material-one', uses: ['观察水量变化']}],
+        privateSolution: 'PRIVATE answer',
+      },
+      materialContext: coverage,
+      materialDossier: {coverage, materials: [{id: 'material-one', title: '课堂观察记录',
+        analysis: {summary: '两组水量的变化可用于课堂比较。', private: 'PRIVATE analysis'},
+        coverage: {complete: true}, excerpts: ['PRIVATE excerpt'], filename: 'PRIVATE filename'}]},
+      ...overrides,
+    }, token, model, requiredModel ?? undefined, 'ordinary-lesson-plan');
+  };
+
+  it('materializes the approved lesson plan as native slides with actual usage and safe source summaries', async () => {
+    const fetch = vi.fn(async (url, init) => {
+      expect(String(url)).toBe(harness);
+      const {messages, ...rest} = JSON.parse(init.body);
+      expect(rest).toEqual({});
+      expect(messages.map((message: {role: string}) => message.role)).toEqual(['system', 'user']);
+      expect(init.body).not.toContain('PRIVATE');
+      expect(JSON.parse(messages[1].content)).toMatchObject({
+        title: '温度与蒸发',
+        requestPrompt: '复用所选大纲的对照观察',
+        sources: [{materialId: 'material-one', title: '课堂观察记录', summary: '两组水量的变化可用于课堂比较。'}],
+      });
+      return modelResponse(planOutput);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
+    const response = await POST(materializeRequest());
+    expect(response.status).toBe(200);
+    const completed = await response.json();
+    expect(completed).toMatchObject({
+      success: true,
+      result: {
+        content: {
+          schema: 'aisecedu.global-agent.artifact.v1', artifactType: 'lesson-plan', renderer: 'agent-runtime-stage',
+          lesson: {id: 'lesson-one', title: '温度与蒸发', artifacts: [{type: 'slide', title: '水的状态变化',
+            content: {elements: [{type: 'text'}]}}]},
+        },
+        validation: {status: 'GENERATED', artifactCount: 1, fallbackCount: 0,
+          materialGrounding: {complete: true, materialIds: ['material-one']}},
+      },
+      model: {provider: 'deepseek', actualModel: 'official-model', executionMode: 'lesson-plan-harness',
+        usage: {inputTokens: 10, outputTokens: 5, totalTokens: 15}},
+    });
+    expect(JSON.stringify(completed)).not.toContain('PRIVATE');
+    expect(completed.result.content.lesson).not.toHaveProperty('subjectProfile');
+    expect(completed.model.responseHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(mocks.usage).toHaveBeenCalledOnce();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('rejects unauthorized, cross-scope, and unpinned lesson plans without reaching a model', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
+    expect((await POST(materializeRequest({}, 'official-model', 'wrong-secret'))).status).toBe(401);
+    for (const payload of [{expectedRevision: 0}, {workspaceId: 'lab'}, {artifactType: 'slide-deck'}, {plan: {}},
+      {materialContext: {complete: true, expectedMaterialCount: 1, materialIds: ['other-course']}}, {requestPrompt: '请复现漏洞利用'}]) {
+      expect((await POST(materializeRequest(payload))).status).toBe(422);
+    }
+    expect((await POST(materializeRequest({}, 'old-model'))).status).toBe(503);
+    expect((await POST(materializeRequest({}, 'official-model', 'integration-secret', null))).status).toBe(503);
+    expect((await POST(materializeRequest({}, 'official-model', 'integration-secret', 'old-model'))).status).toBe(503);
+    vi.stubEnv('DOJO_AI_ENABLED', 'false');
+    expect((await POST(materializeRequest())).status).toBe(503);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('withholds invalid content and rejects model responses with no measured usage', async () => {
+    const fetch = vi.fn()
+      .mockImplementationOnce(async () => modelResponse({sections: [{...planOutput.sections[0], title: '更换大纲'}]}))
+      .mockImplementationOnce(async () => modelResponse({sections: [{...planOutput.sections[0], explanation: '<script>'}]}))
+      .mockImplementationOnce(async () => Response.json({model: 'official-model', text: JSON.stringify(planOutput)}));
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
+    for (const status of [422, 422, 503]) {
+      const response = await POST(materializeRequest());
+      expect(response.status).toBe(status);
+      expect(await response.json()).not.toHaveProperty('result');
+    }
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  const candidateRequest = (payload: Record<string, unknown> = {}) =>
+    request('candidate.generate', 'candidate-plan', {
+      artifactType: 'lesson-plan', candidateSetId: 'candidate-one', generationReason: 'teacher_requested_ordinary_lesson_plan',
+      ordinaryCandidateModel: 'official-model', prompt: '设计一节蒸发教案', candidateCount: 1,
+      materialContext: {complete: true, expectedMaterialCount: 0},
+      ...payload,
+    }, 'integration-secret', 'official-model', 'official-model', 'ordinary-lesson-plan');
+
+  it('sends only the teacher request, validated blueprint, and selected summaries on every pinned candidate turn', async () => {
+    const coverage = {complete: true, expectedMaterialCount: 1, materialIds: ['material-one'], notes: 'PRIVATE COVERAGE'};
+    const material = {id: 'material-one', revisionId: 'revision-one', sha256: 'a'.repeat(64),
+      title: '课堂观察记录', coverage: {complete: true}, filename: 'PRIVATE FILENAME',
+      analysis: {summary: '两组水量的变化可用于课堂比较。', functionalPoints: ['PRIVATE POINT']},
+      excerpts: [{content: 'PRIVATE RAW EXCERPT', locator: {text: 'PRIVATE LOCATOR'}}]};
+    const sourceRef = {type: 'material', id: material.id, revisionId: material.revisionId, sha256: material.sha256,
+      ownerName: 'PRIVATE OWNER', uri: 'PRIVATE URI'};
+    const sourcedCandidate = {candidate: {...lessonCandidate.candidate,
+      content: {...lessonCandidate.candidate.content, sourceGrounding: [{materialId: material.id, uses: ['比较水量变化']}]}}};
+    const injectedBlueprint = {blueprint: {...blueprint.blueprint, history: 'PRIVATE BLUEPRINT HISTORY'}};
+    const injectedCandidate = {candidate: {...sourcedCandidate.candidate, tool: 'PRIVATE MODEL TOOL'}};
+    const fetch = vi.fn(async (_url: unknown, _init: {body: string}): Promise<Response> => new Response(null, {status: 500}))
+      .mockResolvedValueOnce(modelResponse(injectedBlueprint))
+      .mockResolvedValueOnce(modelResponse(blueprint))
+      .mockResolvedValueOnce(modelResponse(injectedCandidate))
+      .mockResolvedValueOnce(modelResponse(sourcedCandidate));
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
+    const payload = {
+      materialContext: coverage, materialDossier: {coverage, materials: [material], private: 'PRIVATE DOSSIER'},
+      sourceRefs: [sourceRef, {type: 'other', value: 'PRIVATE OTHER REF'}],
+      sourceMaterials: [{id: 'unapproved-material', summary: 'PRIVATE UNSCOPED SOURCE'}],
+      courseContext: {value: 'PRIVATE COURSE'}, constraints: ['PRIVATE CONSTRAINTS'], personal: {name: 'PRIVATE USER'},
+      sourceCandidates: ['PRIVATE PREVIOUS CANDIDATE'], context: {history: ['PRIVATE HISTORY']},
+      tools: ['PRIVATE TOOL'],
+    };
+    const response = await POST(candidateRequest(payload));
+    const result = await response.json();
+    expect(response.status, JSON.stringify(result)).toBe(200);
+    expect(result.model).toMatchObject({actualModel: 'official-model', usage: {inputTokens: 40, outputTokens: 20, totalTokens: 60}});
+    expect(JSON.stringify(result)).not.toContain('PRIVATE');
+    expect(fetch).toHaveBeenCalledTimes(4);
+    for (const [index, [url, init]] of fetch.mock.calls.entries()) {
+      expect(String(url)).toBe(harness);
+      expect(init.body).not.toMatch(/PRIVATE|unapproved-material|revision-one|aaaaaaaaaaaaaaaa/);
+      const packet = JSON.parse(init.body);
+      expect(Object.keys(packet)).toEqual(['messages']);
+      expect(packet.messages.map((message: {role: string}) => message.role)).toEqual(['system', 'user']);
+      const user = JSON.parse(packet.messages[1].content);
+      expect(user).toEqual({
+        request: '设计一节蒸发教案',
+        sources: [{materialId: material.id, title: material.title, summary: material.analysis.summary}],
+        ...(index >= 2 ? {ordinal: 1, blueprint: {
+          title: blueprint.blueprint.title, summary: blueprint.blueprint.summary,
+          strategy: blueprint.blueprint.strategy, variant: blueprint.blueprint.variant,
+          objectives: blueprint.blueprint.objectives, outline: blueprint.blueprint.outline, assessment: blueprint.blueprint.assessment,
+        }} : {}),
+      });
+    }
+    expect((await POST(candidateRequest({...payload, sourceRefs: []}))).status).toBe(422);
+    expect((await POST(candidateRequest({...payload, sourceRefs: [{...sourceRef, revisionId: 'other-revision'}]}))).status).toBe(422);
+    expect((await POST(candidateRequest({...payload, materialDossier: {coverage, materials: [
+      material, {...material, id: 'unapproved-material'},
+    ]}}))).status).toBe(422);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('supports a pinned candidate without materials and rejects missing, zero or mismatched model receipts', async () => {
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(modelResponse(blueprint))
+      .mockResolvedValueOnce(modelResponse(lessonCandidate))
+      .mockResolvedValueOnce(Response.json({text: JSON.stringify(blueprint), model: 'official-model'}))
+      .mockResolvedValueOnce(Response.json({text: JSON.stringify(blueprint), model: 'official-model',
+        usage: {prompt_tokens: 0, completion_tokens: 0}}))
+      .mockResolvedValueOnce(modelResponse(blueprint))
+      .mockResolvedValueOnce(Response.json({text: JSON.stringify(lessonCandidate), model: 'wrong-model',
+        usage: {prompt_tokens: 10, completion_tokens: 5}}))
+      .mockResolvedValueOnce(Response.json({text: JSON.stringify(blueprint),
+        usage: {prompt_tokens: 10, completion_tokens: 5}}));
+    vi.stubGlobal('fetch', fetch);
+    expect((await POST(candidateRequest())).status).toBe(200);
+    for (let index = 0; index < 4; index++) {
+      const response = await POST(candidateRequest());
+      expect(response.status).toBe(503);
+      expect(await response.json()).not.toHaveProperty('result');
+    }
+    expect(fetch).toHaveBeenCalledTimes(7);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('rejects an overlong teacher request before calling the pinned model', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
+    const response = await POST(candidateRequest({prompt: '教'.repeat(4001)}));
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({errorCode: 'ORDINARY_LESSON_PLAN_REQUEST_TOO_LONG', error: expect.stringContaining('4000')});
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('withholds candidates whose outline and text exceed the materialization schema', async () => {
+    const tooManySections = {candidate: {...lessonCandidate.candidate, content: {...lessonCandidate.candidate.content,
+      outline: Array.from({length: 31}, (_, index) => ({...lessonCandidate.candidate.content.outline[0], title: `小节 ${index + 1}`}))}}};
+    const oversizedObjective = {candidate: {...lessonCandidate.candidate, content: {...lessonCandidate.candidate.content,
+      objectives: ['水'.repeat(301)]}}};
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(modelResponse(blueprint))
+      .mockResolvedValueOnce(modelResponse(tooManySections))
+      .mockResolvedValueOnce(modelResponse(oversizedObjective));
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
+    const response = await POST(candidateRequest());
+    expect(response.ok).toBe(false);
+    expect(await response.json()).not.toHaveProperty('result');
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('keeps the dedicated worker URL private and rejects every unpinned or mismatched job before dispatch', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
+    const {integratedSessionApiAllowed} = await import('@/middleware');
+    const base = await candidateRequest().json();
+    const url = 'http://localhost/api/integration/jobs/ordinary-lesson-plan';
+    const candidatePin = {generationReason: base.payload.generationReason, ordinaryCandidateModel: 'official-model'};
+    const internal = (body: unknown, authenticated = true, endpoint = url) => new NextRequest(endpoint, {
+      method: 'POST',
+      headers: {'content-type': 'application/json', accept: 'application/x-ndjson',
+        ...(authenticated ? {'X-AISecEdu-Service-Token': 'integration-secret'} : {})},
+      body: JSON.stringify(body),
+    });
+    expect(integratedSessionApiAllowed(new URL(url).pathname, 'POST')).toBe(false);
+    expect((await POST(internal(base, false))).status).toBe(401);
+    expect((await POST(internal(null))).status).toBe(400);
+    const mismatches = [
+      {...base, kind: 'material.analyze'},
+      {...base, kind: 'artifact.materialize'},
+      {...base, scope: {...base.scope, ordinaryTeaching: 'lesson-plan-materialize'}},
+      {...base, scope: {...base.scope, ordinaryTeaching: undefined}},
+      {...base, scope: undefined, payload: {artifactType: 'lesson-plan'}},
+      {...base, payload: {artifactType: 'lesson-plan'}},
+      {...base, payload: {artifactType: 'lesson-plan', generationReason: candidatePin.generationReason}},
+      {...base, payload: {artifactType: 'lesson-plan', ordinaryCandidateModel: 'official-model'}},
+      {...base, payload: {...base.payload, artifactType: 'slide-deck'}},
+      {...base, kind: 'artifact.materialize', scope: {...base.scope, ordinaryTeaching: 'lesson-plan-materialize'},
+        payload: {...base.payload, ...candidatePin}},
+    ];
+    for (const malformed of mismatches) {
+      const response = await POST(internal(malformed));
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({errorCode: 'INVALID_ORDINARY_LESSON_PLAN_JOB'});
+    }
+    const prefixed = await POST(internal(mismatches[0], true, 'http://localhost/agent-runtime' + new URL(url).pathname));
+    expect(prefixed.status).toBe(422);
+    expect(await prefixed.json()).toMatchObject({errorCode: 'INVALID_ORDINARY_LESSON_PLAN_JOB'});
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back from an explicitly pinned ordinary lesson candidate', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/execute/route');
+    const payload = {artifactType: 'lesson-plan', candidateSetId: 'candidate-one',
+      generationReason: 'teacher_requested_ordinary_lesson_plan', ordinaryCandidateModel: 'official-model'};
+    expect((await POST(request('candidate.generate', '', payload))).status).toBe(422);
+    expect((await POST(request('candidate.generate', 'candidate-plan', payload))).status).toBe(503);
+    vi.stubEnv('DOJO_AI_ENABLED', 'false');
+    const original = request('candidate.generate', 'candidate-plan', payload, 'integration-secret', 'official-model');
+    const pinned = await original.json();
+    pinned.modelRoute.required_model = 'official-model';
+    const disabled = new NextRequest(original.url, {
+      method: 'POST', headers: original.headers, body: JSON.stringify(pinned),
+    });
+    expect((await POST(disabled)).status).toBe(503);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
   });
 
   it('summarizes the authorized extracted text without executing it and retains grounded chunk coverage', async () => {

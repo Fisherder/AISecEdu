@@ -326,6 +326,17 @@ def test_candidate_lineage_is_preserved_without_implicit_course_files():
     tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
     functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)
                  and node.name in {"_job_material_grounding_required", "_runtime_payload"}]
+    policy_path = ROOT / "dojo_plugin/agent_runtime/ordinary_lesson_plan.py"
+    policy_nodes = [
+        node for node in ast.parse(policy_path.read_text()).body
+        if isinstance(node, ast.FunctionDef) and node.name == "explicit_generation"
+        or isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id in {"GENERATION_REASON", "GENERATION_MODEL"}
+            for target in node.targets
+        )
+    ]
+    policy = {}
+    exec(compile(ast.Module(body=policy_nodes, type_ignores=[]), str(policy_path), "exec"), policy)
     candidate_set = SimpleNamespace(source_refs=[])
     calls = []
 
@@ -335,6 +346,7 @@ def test_candidate_lineage_is_preserved_without_implicit_course_files():
                 "coverage": {"complete": True, "expectedMaterialCount": len(kwargs["source_refs"])}}
 
     namespace = {
+        "ordinary_lesson_plan": SimpleNamespace(explicit_generation=policy["explicit_generation"]),
         "course_material_grounding_requested": lambda prompt: "根据课程资料" in str(prompt),
         "singular_material_reference_requested": lambda prompt: "这份课件" in str(prompt),
         "PermanentJobError": ValueError,

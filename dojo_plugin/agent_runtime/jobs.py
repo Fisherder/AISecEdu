@@ -61,7 +61,11 @@ from .artifacts import (
     replace_generated_candidates,
 )
 from .files import persist_agent_deliverables, public_agent_file
-from .model_router import UPSTREAM_TEACHER_ROUTE, route_model, validate_actual_model
+from .model_router import (
+    UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_TEACHER_ROUTE,
+    route_model, validate_actual_model,
+)
+from . import ordinary_lesson_plan
 from .model_journal import close_canceled_model_calls
 from .model_inputs import ModelInputError, accepted_input, freeze_input, freeze_prepared, prepared_input, request_payload, restore_input_cache
 from .conversation import turn_wait_state, execution_chain
@@ -1590,6 +1594,11 @@ def enqueue_job(
     if kind == "agent.chat" and payload.get("chatBackend") == "upstream":
         payload = pin_classroom_request(payload, owner_id, dojo_id, module_index)
 
+    if kind == "candidate.generate":
+        payload = ordinary_lesson_plan.admit_generation(payload, owner_id, dojo_id, module_index, thread_id)
+    if kind == "artifact.materialize":
+        payload = ordinary_lesson_plan.admit(payload, owner_id, dojo_id, module_index, thread_id)
+
     if (kind == "artifact.revise" and payload.get("artifactType") == "slide-deck"
             and not payload.get("workspaceId") and ordinary_slide_wording_request(payload.get("instruction"))
             and ordinary_teaching_course(dojo_id) and upstream_enabled()):
@@ -2616,6 +2625,8 @@ def _prepare_model_request(job):
         restore_input_cache(job)
         return saved["payload"], saved["modelRoute"]
     payload = _runtime_payload(job)
+    if job.kind == "candidate.generate":
+        ordinary_lesson_plan.generation_model(job, payload, _ordinary_teaching_job_scope(job, payload))
     route = route_model(job.kind, prompt=str(payload.get("prompt") or payload.get("instruction") or ""),
                         payload=payload, allow_degraded=bool(payload.get("allowDegraded")))
     if job.kind == "agent.chat" and job.thread_id:
@@ -2629,6 +2640,8 @@ def _prepare_model_request(job):
 def _runtime_payload(job):
     admitted = accepted_input(job) if job.kind == "agent.chat" and job.thread_id else None
     payload = dict(admitted["payload"] if admitted else (job.payload or {}))
+    if job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload):
+        return ordinary_lesson_plan.prepare(job, payload)
     if job.kind == "agent.chat" and payload.get("waitForJobIds"):
         from ..api.v1.teaching import _teacher_agent_context, _teacher_agent_history_context
         from .session_events import (
@@ -2700,6 +2713,9 @@ def _runtime_payload(job):
         and singular_material_reference_requested(prompt)
     ):
         raise PermanentJobError("这条要求没有指定所说的那份文件。请先选择引用资料或重新上传。")
+    pinned_candidate = job.kind == "candidate.generate" and ordinary_lesson_plan.explicit_generation(payload)
+    if pinned_candidate and (len(material_refs) != len(source_refs) or (not material_refs and required)):
+        raise PermanentJobError("请先选择本次普通教案所需的教材，再重新生成候选。")
     include_course_materials = bool(material_refs) or course_material_grounding_requested(prompt)
     material_context = student_snapshot or build_course_material_context(
         owner_id=job.owner_id,
@@ -2721,11 +2737,20 @@ def _runtime_payload(job):
     )
     payload["sourceRefs"] = resolved_source_refs
     payload["sourceMaterials"] = material_context["sourceMaterials"]
-    payload["materialContext"] = material_context["coverage"]
+    coverage = material_context["coverage"]
+    empty_candidate_sources = (
+        pinned_candidate and not resolved_source_refs and not material_context["sourceMaterials"]
+        and coverage.get("expectedMaterialCount") == 0 and coverage.get("complete") is True
+    )
+    if empty_candidate_sources:
+        coverage = {**coverage, "materialIds": []}
+    payload["materialContext"] = coverage
     if student_snapshot is not None:
         payload["materialDossier"] = student_snapshot["dossier"]
     elif material_context["sourceMaterials"]:
         payload["materialDossier"] = compact_material_grounding(material_context)
+    elif empty_candidate_sources:
+        payload["materialDossier"] = {"coverage": coverage, "materials": []}
     else:
         payload.pop("materialDossier", None)
     persisted_payload = (
@@ -2735,7 +2760,7 @@ def _runtime_payload(job):
             **(job.payload or {}),
             "context": payload.get("context") or {},
             "sourceRefs": resolved_source_refs,
-            "materialContext": material_context["coverage"],
+            "materialContext": coverage,
         }
     )
     if persisted_payload != (job.payload or {}):
@@ -2873,6 +2898,17 @@ def _ordinary_teaching_job_scope(job, payload):
 
 
 def _runtime_request_body(job, route, payload):
+    if job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload):
+        return {
+            "jobId": job.id,
+            "kind": job.kind,
+            "scope": {
+                "ownerId": job.owner_id, "dojoId": job.dojo_id, "moduleIndex": job.module_index,
+                "ordinaryTeaching": ordinary_lesson_plan.BACKEND,
+            },
+            "payload": ordinary_lesson_plan.wire_payload(payload),
+            "modelRoute": route,
+        }
     upstream_chat = job.kind == "agent.chat" and payload.get("chatBackend") == "upstream"
     if upstream_chat and "classroomPreparation" in payload:
         return classroom_request_body(payload["classroomPreparation"], request_body)
@@ -2930,6 +2966,8 @@ def _runtime_request_body(job, route, payload):
             model_context,
         )
     ordinary_teaching = _ordinary_teaching_job_scope(job, payload)
+    if job.kind == "candidate.generate":
+        ordinary_lesson_plan.generation_model(job, payload, ordinary_teaching)
     if (job.kind == "artifact.revise" and payload.get("revisionBackend") == "ordinary-slide-wording"
             and ordinary_teaching != "slide-wording"):
         raise PermanentJobError("课件文字修订的课程权限或服务配置已变化，请重新发起。")
@@ -3336,7 +3374,11 @@ def _invoke_agent_runtime(job, route, payload=None):
             "actualModel": response["model"],
             "usage": response["usage"],
         }}
-    url = f"{config.AGENT_RUNTIME_INTERNAL_URL}/api/integration/jobs/execute"
+    endpoint = "execute"
+    if ((job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload))
+            or (job.kind == "candidate.generate" and ordinary_lesson_plan.explicit_generation(payload))):
+        endpoint = "ordinary-lesson-plan"
+    url = f"{config.AGENT_RUNTIME_INTERNAL_URL}/api/integration/jobs/{endpoint}"
     request_kwargs = {
         "headers": {
             "X-AISecEdu-Service-Token": config.AGENT_RUNTIME_SERVICE_SECRET,
@@ -3381,6 +3423,9 @@ def _invoke_agent_runtime(job, route, payload=None):
         # to the durable scheduler, never another untracked immediate POST.
         break
     try:
+        if endpoint == "ordinary-lesson-plan" and response.status_code == 404:
+            raise RuntimeJobError("课堂服务尚未提供普通教案接口，请核对部署版本。",
+                                  category="service", code="ORDINARY_LESSON_PLAN_ROUTE_UNAVAILABLE", retry_after=30)
         if response.status_code >= 400:
             try:
                 failure = response.json()
@@ -3739,7 +3784,7 @@ def _persist_result(job, result):
             user = Users.query.filter_by(id=job.owner_id).first()
             if user is None:
                 raise PermanentJobError("Artifact owner no longer exists")
-            artifact, revision = materialize_candidate(rows[0].id, user)
+            artifact, revision = materialize_candidate(rows[0].id, user, commit=False)
             materialization_job, _ = enqueue_job(
                 owner_id=job.owner_id,
                 kind="artifact.materialize",
@@ -3869,12 +3914,16 @@ def _persist_result(job, result):
                 "revisionId": existing.id,
                 "revision": existing.revision,
             }
+        scoped = ordinary_lesson_plan.pinned(job.payload or {})
+        if scoped:
+            ordinary_lesson_plan.prepare(job, job.payload)
         revision = create_revision(
             artifact,
             user,
             expected_revision=int(job.payload.get("expectedRevision")),
             instruction=instruction,
             content=result.get("content"),
+            commit=not scoped,
         )
         artifact = TeachingArtifacts.query.filter_by(id=artifact.id).first()
         artifact.status = "READY"
@@ -4685,9 +4734,13 @@ def process_job(job_id, *, worker_id=None):
                     model_meta.setdefault(
                         "latencyMs", int((time.monotonic() - started) * 1000)
                     )
-                if route.get("route") == UPSTREAM_TEACHER_ROUTE:
+                if route.get("route") in {UPSTREAM_TEACHER_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE}:
                     # A mismatched receipt still represents a measured model invocation.
                     failed_model_meta = model_meta
+                if route.get("route") == UPSTREAM_LESSON_PLAN_ROUTE:
+                    ordinary_lesson_plan.validate_receipt(route, response)
+                elif route.get("route") == UPSTREAM_LESSON_CANDIDATE_ROUTE:
+                    ordinary_lesson_plan.validate_generation_receipt(route, response)
                 _record_invocation(job, route, model_meta, status="SUCCEEDED")
                 failed_model_meta = {}
                 checkpoint_job = _owned_job_attempt(job_id, identity)
@@ -4701,6 +4754,15 @@ def process_job(job_id, *, worker_id=None):
                 }
                 db.session.commit()
 
+            if route.get("route") == UPSTREAM_LESSON_PLAN_ROUTE:
+                # Renewed jobs and recovered checkpoints must pass the live source and model checks too.
+                ordinary_lesson_plan.validate_receipt(route, response)
+                ordinary_lesson_plan.prepare(job, runtime_payload)
+            elif route.get("route") == UPSTREAM_LESSON_CANDIDATE_ROUTE:
+                ordinary_lesson_plan.validate_generation_receipt(route, response)
+                ordinary_lesson_plan.generation_model(
+                    job, job.payload or {}, _ordinary_teaching_job_scope(job, job.payload or {}),
+                )
             model_mode = str((response.get("model") or {}).get("executionMode") or "")
             if (job.kind == "artifact.revise" and runtime_payload.get("revisionBackend") == "ordinary-slide-wording"
                     and model_mode != "ordinary-slide-wording"):

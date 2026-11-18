@@ -22,6 +22,19 @@ documents = load_file("teacher_documents")
 classroom = load_file("classroom_requests")
 
 
+@pytest.mark.parametrize(("prompt", "expected"), [
+    ("请生成普通教案候选：比较两片树叶的形状。", True),
+    ("制作普通教案候选: 分组观察。\n请留出讨论时间。", True),
+    ("请生成普通教案：比较两片树叶的形状。", False),
+    ("请生成普通教案候选：", False),
+    ("请生成普通教案候选：请交付 Word 文档。", False),
+    ("如何生成普通教案候选：观察树叶？", False),
+    ("不要生成普通教案候选：观察树叶。", False),
+])
+def test_teacher_explicitly_requests_comparable_lesson_plans(prompt, expected):
+    assert documents.requests_lesson_plan_candidates(prompt) is expected
+
+
 @pytest.mark.parametrize(("prompt", "name"), [
     ("请用已发布的课件《植物观察》准备课堂", "植物观察"),
     ("请准备一节课堂，使用《artifact_23》", "artifact_23"),

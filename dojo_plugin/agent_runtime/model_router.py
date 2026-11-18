@@ -6,6 +6,8 @@ from .. import config
 
 
 UPSTREAM_TEACHER_ROUTE = "upstream-teacher-turn"
+UPSTREAM_LESSON_PLAN_ROUTE = "upstream-lesson-plan-materialize"
+UPSTREAM_LESSON_CANDIDATE_ROUTE = "upstream-lesson-plan-candidate"
 
 
 COMPLEX_KINDS = {
@@ -137,6 +139,14 @@ def route_model(kind, *, prompt="", payload=None, allow_degraded=False):
         route_name = UPSTREAM_TEACHER_ROUTE
         actual_model = required_model = config.HARNESS_DEEPSEEK_MODEL
         allow_degraded = False
+    elif kind == "candidate.generate" and isinstance(payload, dict) and "ordinaryCandidateModel" in payload:
+        route_name = UPSTREAM_LESSON_CANDIDATE_ROUTE
+        actual_model = required_model = payload["ordinaryCandidateModel"]
+        allow_degraded = False
+    elif kind == "artifact.materialize" and isinstance(payload, dict) and "ordinaryLessonPlan" in payload:
+        route_name = UPSTREAM_LESSON_PLAN_ROUTE
+        actual_model = required_model = (payload.get("ordinaryLessonPlan") or {}).get("model")
+        allow_degraded = False
     else:
         complex_scene = is_complex_scene(kind, prompt=prompt, payload=payload)
         route_name = "deepseek-v4-flash" if complex_scene else "teaching-default"
@@ -164,9 +174,9 @@ def route_model(kind, *, prompt="", payload=None, allow_degraded=False):
 
 def validate_actual_model(route, actual_model):
     required = route.get("required_model")
-    if route.get("route") == UPSTREAM_TEACHER_ROUTE:
+    if route.get("route") in {UPSTREAM_TEACHER_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE}:
         if not required or actual_model != required:
-            raise ValueError("The teacher turn did not use the configured Harness model")
+            raise ValueError("The teaching job did not use the configured Harness model")
         return route
     if required and actual_model != required:
         if not route.get("allow_degraded"):

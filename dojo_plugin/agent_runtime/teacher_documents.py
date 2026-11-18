@@ -33,6 +33,13 @@ DOCUMENT_INSTRUCTION = (
 )
 
 
+def requests_lesson_plan_candidates(prompt):
+    return bool(
+        re.fullmatch(r"(?:请\s*)?(?:生成|制作)\s*普通教案候选\s*[:：]\s*\S[\s\S]*", prompt.strip())
+        and not any(pattern.search(prompt) for _, pattern in FORMATS)
+    )
+
+
 def requested_document_formats(payload):
     mode = payload.get("executionMode") or "auto"
     context = payload.get("context") or {}

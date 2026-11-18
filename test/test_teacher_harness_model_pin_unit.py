@@ -39,7 +39,10 @@ def router():
     return load_parts(
         RUNTIME / "model_router.py",
         {"config": config, "hashlib": hashlib, "json": json, "re": re},
-        assignment_names={"UPSTREAM_TEACHER_ROUTE", "COMPLEX_KINDS", "COMPLEX_HINTS"},
+        assignment_names={
+            "UPSTREAM_TEACHER_ROUTE", "UPSTREAM_LESSON_PLAN_ROUTE", "UPSTREAM_LESSON_CANDIDATE_ROUTE",
+            "COMPLEX_KINDS", "COMPLEX_HINTS",
+        },
     )
 
 

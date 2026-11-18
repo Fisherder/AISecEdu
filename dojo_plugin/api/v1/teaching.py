@@ -111,6 +111,7 @@ from ...models import (
     TeachingSessionEvents,
     TeachingSessions,
 )
+from ...agent_runtime.ordinary_lesson_plan import GENERATION_REASON as ORDINARY_PLAN_REASON, OrdinaryLessonPlanError
 from ...agent_runtime.artifacts import (
     PERSONAL_REVIEWABLE_ARTIFACT_STATUSES,
     RevisionConflict,
@@ -179,7 +180,8 @@ from ...agent_runtime.materials import (
 from ...agent_runtime.model_journal import ModelJournalError, record_model_event
 from ...agent_runtime.project_collection import project_collection_view
 from ...agent_runtime.reliability import public_recovery
-from ...agent_runtime.upstream_turn import ordinary_teaching_course, ordinary_teaching_image_allowed
+from ...agent_runtime.teacher_documents import requests_lesson_plan_candidates
+from ...agent_runtime.upstream_turn import ordinary_teaching_course, ordinary_teaching_image_allowed, upstream_enabled
 from ...agent_runtime.scope import (
     ScopeError,
     assert_capability,
@@ -843,7 +845,7 @@ def _message_attachment_views(user, source_refs):
     ]
 
 
-def _agent_request_context(body, user, thread):
+def _agent_request_context(body, user, thread, *, include_thread_attachments=True):
     raw_constraints = body.get("constraints") or {}
     if not isinstance(raw_constraints, dict):
         raise ValueError("Constraints must be an object")
@@ -853,7 +855,8 @@ def _agent_request_context(body, user, thread):
     if not isinstance(raw_refs_value, list):
         raise ValueError("Source references must be an array")
     raw_refs = list(raw_refs_value)
-    raw_refs.extend(unreferenced_attachment_refs(_thread_attachment_entries(thread)))
+    if include_thread_attachments:
+        raw_refs.extend(unreferenced_attachment_refs(_thread_attachment_entries(thread)))
     if len(raw_refs) > 100:
         raise ValueError("At most 100 source references are allowed")
     refs = []
@@ -6663,7 +6666,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             existing, wait_for_job_ids = prepare_turn_submission(db.session, thread, body, submission_key)
             if existing is not None:
                 response = _ok({"thread": _thread_view(thread, include_messages=True),
-                                "job": job_view(existing), "candidateSetId": None,
+                                "job": job_view(existing), "candidateSetId": (existing.payload or {}).get("candidateSetId"),
                                 "deduplicated": True}, 202)
                 db.session.commit()
                 return response
@@ -6794,6 +6797,20 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 module_index=thread.module_index,
             )
 
+        ordinary_plan = (
+            not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
+            and requests_lesson_plan_candidates(content)
+        )
+        if ordinary_plan:
+            if len(content) > 4000:
+                raise ValueError("请将本轮普通教案要求缩减到 4000 字符以内。")
+            if not ordinary_teaching_course(thread.dojo_id):
+                raise ValueError("请先选择已开通普通教案生成的课程。")
+            if not upstream_enabled() or not config.HARNESS_DEEPSEEK_MODEL:
+                raise ValueError("本课程的教学模型暂未启用。")
+            if body.get("delivery") == "next-step" and wait_for_job_ids:
+                raise ConversationConflict("制作教案候选需要独立任务，请选择“排队”发送。")
+
         user_message = None
         if not continuation:
             user_message = TeachingAgentMessages(
@@ -6808,32 +6825,32 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if thread.title in DEFAULT_THREAD_TITLES:
                 thread.title = _thread_title_from_message(content)
 
-        if session_history_replayable(thread.id):
-            # New conversations derive the model-visible history from the
-            # same durable message events used to reconstruct the page.
-            recent_messages = replay_session_messages(thread.id)[-30:]
-        else:
-            recent_messages = (
-                TeachingAgentMessages.query.filter_by(thread_id=thread.id)
-                .order_by(TeachingAgentMessages.id.desc())
-                .limit(30)
-                .all()
+        if not ordinary_plan:
+            if session_history_replayable(thread.id):
+                # New conversations derive the model-visible history from the
+                # same durable message events used to reconstruct the page.
+                recent_messages = replay_session_messages(thread.id)[-30:]
+            else:
+                recent_messages = (
+                    TeachingAgentMessages.query.filter_by(thread_id=thread.id)
+                    .order_by(TeachingAgentMessages.id.desc())
+                    .limit(30)
+                    .all()
+                )
+            history_context = _teacher_agent_history_context(
+                user, thread, recent_messages,
+                user_message.id if user_message is not None else None,
             )
-        history_context = _teacher_agent_history_context(
-            user, thread, recent_messages,
-            user_message.id if user_message is not None else None,
-        )
-        conversation = history_context["conversation"]
-        if continuation_context and isinstance(continuation_context.get("requestProvenance"), dict):
-            history_context["requestProvenance"] = continuation_context["requestProvenance"]
+            if continuation_context and isinstance(continuation_context.get("requestProvenance"), dict):
+                history_context["requestProvenance"] = continuation_context["requestProvenance"]
         if "learningPattern" in body:
             pattern_id = body["learningPattern"]
             if pattern_id not in ("", "process-inquiry"):
                 raise ValueError("请选择有效的学习模式。")
             thread.context = {**(thread.context or {}), "learningPattern": inquiry_pattern_catalog() if pattern_id else None}
-        platform_context = _teacher_agent_context(user, thread)
+        platform_context = None if ordinary_plan else _teacher_agent_context(user, thread)
 
-        generate = continuation and requested_action == "generate"
+        generate = ordinary_plan or (continuation and requested_action == "generate")
         if continuation_context is not None:
             constraints = continuation_context["constraints"]
             source_refs = continuation_context["sourceRefs"]
@@ -6850,7 +6867,9 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 "trace": [],
             }
         else:
-            constraints, source_refs = _agent_request_context(body, user, thread)
+            constraints, source_refs = _agent_request_context(
+                body, user, thread, include_thread_attachments=not ordinary_plan,
+            )
             allow_degraded = bool(body.get("allowDegraded"))
             agent_loop = {
                 "depth": 0,
@@ -6891,7 +6910,11 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
         candidate_set = None
         if generate:
             artifact_type = str(body.get("artifactType") or "").strip().lower()
-            if selected_generation is not None:
+            if ordinary_plan:
+                if not source_refs and course_material_grounding_requested(content):
+                    raise ValueError("请先在“引用资料”中选定本次教案使用的教材。")
+                artifact_type = "lesson-plan"
+            elif selected_generation is not None:
                 artifact_type = selected_generation["bundle"]["artifactType"]
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", artifact_type):
                 raise ValueError(
@@ -6904,22 +6927,19 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 raise ValueError(
                     "请先在智能体给出的三套候选方案中选择一套，再开始正式生成。"
                 )
-            try:
-                count = (
-                    1
-                    if selected_generation is not None
-                    else int(body.get("candidateCount") or 1)
-                )
-            except (TypeError, ValueError) as exc:
-                raise ValueError("Candidate count must be an integer") from exc
+            if ordinary_plan:
+                count, generation_reason = 2, ORDINARY_PLAN_REASON
+            elif selected_generation is not None:
+                count, generation_reason = 1, "teacher_selected_prompt_option"
+            else:
+                try:
+                    count = int(body.get("candidateCount") or 1)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Candidate count must be an integer") from exc
+                generation_reason = "model_planned"
             if count not in {1, 2, 3, 4}:
                 raise ValueError("Candidate count must be between 1 and 4")
             generation_mode = "multiple" if count > 1 else "single"
-            generation_reason = (
-                "teacher_selected_prompt_option"
-                if selected_generation is not None
-                else "model_planned"
-            )
             selection_provenance = (
                 {
                     "sourceMessageId": selected_generation["sourceMessage"].id,
@@ -6957,13 +6977,20 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 "phase": thread.phase,
                 "constraints": constraints,
                 "sourceRefs": source_refs,
-                "conversation": conversation,
-                "courseContext": platform_context,
                 "allowDegraded": allow_degraded,
                 "generationSelection": selection_provenance,
             }
             if dependency_ids:
                 payload["dependsOnJobIds"] = dependency_ids
+            if ordinary_plan:
+                payload.update(
+                    ordinaryCandidateModel=config.HARNESS_DEEPSEEK_MODEL, constraints={}, allowDegraded=False,
+                    submissionFingerprint=submission_fingerprint(body), userMessageId=user_message.id,
+                )
+                if wait_for_job_ids:
+                    payload["waitForJobIds"] = wait_for_job_ids
+            else:
+                payload.update(conversation=history_context["conversation"], courseContext=platform_context)
             job_kind = "candidate.generate"
             assistant_text = (
                 f"正在按你的要求准备 {count} 种实质不同的方案，完成后会在当前对话中给出可比较的结果。"
@@ -6985,7 +7012,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 "context": {
                     "thread": scrub_payload(thread.context or {}),
                     "platformFacts": platform_context,
-                    "conversation": conversation,
+                    "conversation": history_context["conversation"],
                     "requestProvenance": history_context["requestProvenance"],
                     "agentLoop": agent_loop,
                     "questionReply": question_context,
@@ -8086,6 +8113,7 @@ class CandidateMaterialize(Resource):
                 candidate_id,
                 user,
                 title=body.get("title"),
+                commit=False,
             )
             parent_generation_job = _candidate_generation_job(candidate_set, user)
             job, created = enqueue_job(
@@ -8140,6 +8168,9 @@ class CandidateMaterialize(Resource):
                 },
                 202,
             )
+        except OrdinaryLessonPlanError as exc:
+            db.session.rollback()
+            return _error(exc, 409, code="ORDINARY_LESSON_PLAN_CANDIDATE_REQUIRED")
         except (ScopeError, OverflowError) as exc:
             return _error(
                 exc,

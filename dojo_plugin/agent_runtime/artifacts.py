@@ -527,7 +527,7 @@ def revision_view(revision, *, include_content=True, student_safe=False):
     return result
 
 
-def create_revision(artifact, user, *, expected_revision, instruction, content):
+def create_revision(artifact, user, *, expected_revision, instruction, content, commit=True):
     artifact = TeachingArtifacts.query.filter_by(id=artifact.id).with_for_update().first()
     if artifact is None or artifact.owner_id != user.id:
         raise ScopeError("Artifact not found")
@@ -554,7 +554,10 @@ def create_revision(artifact, user, *, expected_revision, instruction, content):
     artifact.current_revision = new_number
     artifact.status = "DRAFT"
     artifact.updated = datetime.datetime.utcnow()
-    db.session.commit()
+    if commit:
+        db.session.commit()
+    else:
+        db.session.flush()
     return revision
 
 

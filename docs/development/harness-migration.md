@@ -46,6 +46,14 @@ flowchart LR
 
 教师在课件产物页可以输入「请仅润色第2、4页的文字：让植物观察结论更适合初学者」。也可以写「第2页和第4页」。每张选中页分别提交可编辑的文字和需保留的字面量，平台在本地验证改动、检查渲染并保存一个新版本。页码重复、越界或选中不支持的页面时，任务返回错误。任何一张未通过验收，原版本继续生效。已入队的新任务会保留指定引擎，重试时复核课程与课件权限。
 
+### 从普通教案候选打开成品
+
+教师在工作台选择已开通普通教学的课程，需要使用教材时先选择「引用资料」。发送「请生成普通教案候选：比较两种植物叶片的形状和叶脉，留出五分钟分组讨论」。工作台返回两份可以比较的方案。在「审阅生成成品」中找到要采用的方案，点击「打开成品工作区」。生成结束后，点击「打开交互预览」即可按所选大纲查看各节讲解和要点。需要可下载的文件时，仍可以直接要求制作 Word 或 Markdown 教案。
+
+候选生成和成品生成分别登记 DSH 调用及模型用量。后者根据已选择的候选、初始版本和教材摘要生成课堂展示稿。同一候选的重复请求复用已有任务。若课程权限、已引用资料或模型配置发生变化，界面会显示任务失败原因，教师可在核对后重新提交。
+
+发布时先部署兼容的课堂服务，再启用新 Worker。Worker 将这些任务发送到独立的内部路径 `/api/integration/jobs/ordinary-lesson-plan`。旧课堂服务缺少该路由，遇到版本错配时会拒绝请求。
+
 手工移动或调整大小的标题、结论和要点文本框会按已保存的位置验收。若某页含有检查器无法重现的手工编辑，例如另加的画布元素，系统会指出冲突页并保留原稿，教师可在画布编辑器中修改该页。
 
 准备课堂时，教师先在工作台选定课程和章节，再发送「请用《植物观察》准备课堂」。若同一章节有重名课件，可把书名号中的标题换为课件 ID。收到提案后核对课件与版号，点击批准。成功后可在课堂列表查看“待上课”会话，开始上课仍由教师决定。此流程适用于已发布的原生静态图表、对照表和内嵌图片课件。权限被收回、课件另行发布或转换失败时，平台保留原课件，教师可在修正问题后重试。
@@ -97,7 +105,8 @@ python -m pytest -q \
   test/test_upstream_teaching_turn_unit.py test/test_teacher_harness_model_pin_unit.py \
   test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_tutor_illustrations_unit.py \
   test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py \
-  test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py
+  test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py \
+  test/test_ordinary_lesson_plan_unit.py
 npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev
 npm test --prefix services/deepseek-harness
 python test/harness_client_contract.py
