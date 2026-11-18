@@ -19,8 +19,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Verify pinned source and build the teaching runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(git rev-parse HEAD:vendor/deepseek-harness)" = 3f321d32bfe382212a8ed8785c1d47a5a300aa23
+          upstream_tree=$(gh api repos/deepseek-ai/deepseek-harness/git/commits/3f321d32bfe382212a8ed8785c1d47a5a300aa23 --jq .tree.sha)
+          test "$(git cat-file -t HEAD:vendor/deepseek-harness)" = tree
+          test "$(git rev-parse HEAD:vendor/deepseek-harness)" = "$upstream_tree"
           docker build -t aisecedu-harness-test services/deepseek-harness
       - name: Exercise the official agent loop with the local model fixture
         run: docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges aisecedu-harness-test node --test

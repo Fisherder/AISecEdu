@@ -4,7 +4,7 @@
 
 ## 源码与运行边界
 
-官方 `dsh-v0.2.2-rc.4` 固定在 `vendor/deepseek-harness`，Git 提交为 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`。子模块可以检出这一提交的完整原始文件；平台的 HTTP 接口、课堂显示和权限适配都放在子模块外。运行镜像通过锁文件安装同版本的官方 npm 包。上游将此版本列为开发者预览。[固定版本与许可证](https://github.com/deepseek-ai/deepseek-harness/tree/3f321d32bfe382212a8ed8785c1d47a5a300aa23)
+官方 `dsh-v0.2.2-rc.4` 固定在 `vendor/deepseek-harness`，Git 提交为 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`。父仓库直接跟踪全部 21,071 个文件，普通克隆即包含 CLI、网页、插件、Python、原生代码、文档、测试、许可证和第三方声明。平台的 HTTP 接口、课堂显示和权限适配放在该目录之外。运行镜像通过锁文件安装同版本的官方 npm 包。上游将此版本列为开发者预览。[固定版本与许可证](https://github.com/deepseek-ai/deepseek-harness/tree/3f321d32bfe382212a8ed8785c1d47a5a300aa23)
 
 ```mermaid
 flowchart LR
@@ -44,7 +44,7 @@ flowchart LR
 | 教学接口与目录 | 基线中教学 API 文件达 13,381 行，作业调度文件 4,834 行，学习智能模块 2,266 行。目录曾只在前 320 个字符的介绍中检索 | 将可独立验证的课程筛选、排序和分页抽到 `dojo_plugin/learning/course_catalog.py`。对完整描述匹配，列表保留 320 字预览。权限仍在 API 层，统计基于允许查看的课程 |
 | 持久任务 | 重试时重新生成模型输入会破坏与已审批内容的对应，同一任务重复写入可能造成二次操作 | 复用冻结请求、范围检查和审批记录。普通模型回合不能直接写库。已有任务必须按原契约读取；升级验收应覆盖升级前创建、升级后重试及切换课程三种状态 |
 | 备份与还原 | 转储或下载中途失败可能留下看似完成的备份，恢复失败也可能表现为成功 | 完成的转储通过同目录暂存文件发布。恢复使用配置数据库和单一事务，并把数据库错误传回调用者。使用故障注入覆盖本地及云备份命令，不改现有备份文件 |
-| 发布与依赖 | 上游开发预览变化快，单靠包名或镜像标签无法重现功能。仓库内嵌的 Node 工作流不会自动在父仓库执行 | 在父仓库检查固定上游提交，构建无特权容器，用本地模型夹具运行官方适配器，单独运行 Python 和课堂测试。新版本同时更新子模块、npm 锁、集成测试及发布记录 |
+| 发布与依赖 | 上游开发预览变化快，单靠包名或镜像标签无法重现功能。仓库内嵌的 Node 工作流不会自动在父仓库执行 | 在父仓库检查固定上游提交，构建无特权容器，用本地模型夹具运行官方适配器，单独运行 Python 和课堂测试。新版本同时更新完整源码目录、上游提交、npm 锁、集成测试及发布记录 |
 | 容量和运行环境 | 共享开发实例使用业务数据副本，重型构建还受容量预约限制。代码通过或容器可启动不足以验证真实部署 | 构建使用隔离执行器。开发部署应记录源码和镜像标识，先以合成账号和课程验收，再检查版本端点及健康状态 |
 
 仍需单独量测课程目录在大课程数下的数据库查询数和耗时。抽出筛选模块修正了检索行为，未把分页下推至 SQL。题内多模态、评分和历史任务若需更换运行引擎，应在同一份合成输入上对照两版业务结果，并验证旧作业可以恢复。课堂首段文字显示时间应以同一模型、同一教材实际测量。
@@ -58,8 +58,9 @@ flowchart LR
 在个人开发副本运行以下验证。平台快速检查和课堂服务使用 Node 22，独立 Harness 服务使用 Node 24.9 或更新的 24.x。Python 测试依赖见 `ops/team/requirements.txt`，课堂依赖使用项目固定的 pnpm 10.28.0。
 
 ```sh
-git submodule update --init --depth 1 vendor/deepseek-harness
-git -C vendor/deepseek-harness rev-parse HEAD
+git rev-parse HEAD:vendor/deepseek-harness
+# 官方目录树应为 6778b1f1e75fde6d62f69d345792bf08e32178d4
+git ls-tree -r HEAD:vendor/deepseek-harness | wc -l
 make dev-check
 python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_course_catalog_unit.py
 npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev
