@@ -3262,16 +3262,21 @@
       : [];
     const visibleProposals = proposals
       .map((proposal, index) => ({ proposal, index }))
-      .filter(
-        ({ proposal, index }) =>
-          proposal.tool !== "dojo.select" &&
-          proposal.requiresConfirmation !== true &&
-          !proposalDecision(message, index) &&
-          !proposalWasApplied(message, index, proposal) &&
-          !state.executingProposalKeys.has(
-            `${message.id}:${index}:${proposal.tool}`,
-          ),
-      );
+      .filter(({ proposal, index }) => {
+        if (
+          !proposal || proposal.tool === "dojo.select" ||
+          proposalWasApplied(message, index, proposal) ||
+          state.executingProposalKeys.has(proposalKey(message, index, proposal))
+        ) return false;
+        if (isPinnedClassroomProposal(proposal)) {
+          const key = classroomPreparationKey(state.thread?.id, message.id, index);
+          return Boolean(
+            savedClassroomApproval(message, index, proposal) &&
+            !classroomPreparationsInFlight.has(key)
+          );
+        }
+        return proposal.requiresConfirmation !== true && !proposalDecision(message, index);
+      });
     const suggestions = (
       Array.isArray(metadata.suggestions) ? metadata.suggestions : []
     )
@@ -3333,9 +3338,103 @@
     "classroom.prepare",
   ]);
 
+  const classroomPreparationsInFlight = new Set();
+  const preparedClassroomProposals = new Set();
+
+  function classroomPreparationKey(threadId, messageId, index) {
+    return JSON.stringify([threadId, String(messageId), index]);
+  }
+
+  function isPinnedClassroomProposal(proposal) {
+    return proposal?.tool === "classroom.prepare" && (
+      proposal.requiresConfirmation === true ||
+      proposal.arguments?.expectedRevision !== undefined ||
+      proposal.arguments?.contentHash !== undefined
+    );
+  }
+
+  function savedClassroomApproval(message, index, proposal) {
+    if (
+      !isPinnedClassroomProposal(proposal) ||
+      proposal.requiresConfirmation !== true ||
+      typeof proposal.arguments?.artifactId !== "string" || !proposal.arguments.artifactId ||
+      !Number.isSafeInteger(proposal.arguments.expectedRevision) || proposal.arguments.expectedRevision < 1 ||
+      !/^[a-f0-9]{64}$/.test(proposal.arguments.contentHash) ||
+      message.role !== "assistant" ||
+      message.metadata?.pending !== false
+    ) return null;
+    const decision = proposalDecision(message, index);
+    const reference = message.metadata?.toolProposalApprovalRequests?.[String(index)];
+    if (
+      decision?.decision !== "APPROVED" || decision.version !== 1 ||
+      typeof reference?.id !== "string" || !reference.id ||
+      !/^[a-f0-9]{64}$/.test(reference.sha256) ||
+      decision.requestId !== reference.id || decision.requestSha256 !== reference.sha256
+    ) return null;
+    return { id: decision.requestId, sha256: decision.requestSha256 };
+  }
+
+  async function executePinnedClassroomPreparation(action, messageId, index) {
+    if (!threadActionCurrent(action) || state.thread.status !== "ACTIVE") return false;
+    const message = (state.thread.messages || []).find(item => String(item.id) === String(messageId));
+    const proposal = message?.metadata?.toolProposals?.[index];
+    const approvalRequest = message && savedClassroomApproval(message, index, proposal);
+    if (!approvalRequest) throw new Error("课堂准备需要本对话中已保存的批准决定。");
+    const selectedDojo = Number(elements.dojo.value || 0) || null;
+    const selectedModule = elements.module.value === "" ? null : Number(elements.module.value);
+    const scopeCurrent = () => threadActionCurrent(action) &&
+      (Number(elements.dojo.value || 0) || null) === selectedDojo &&
+      (elements.module.value === "" ? null : Number(elements.module.value)) === selectedModule;
+    if (
+      proposal.boundScope?.dojoId !== state.thread.dojoId ||
+      proposal.boundScope?.moduleIndex !== state.thread.moduleIndex ||
+      selectedDojo !== state.thread.dojoId || selectedModule !== state.thread.moduleIndex
+    ) throw new Error("课堂准备的课程或章节已变化。请切回原范围并重新检查提案。");
+    if (proposalWasApplied(message, index, proposal)) return true;
+    const key = classroomPreparationKey(action.threadId, messageId, index);
+    if (classroomPreparationsInFlight.has(key)) return false;
+    const actionKey = proposalKey(message, index, proposal);
+    classroomPreparationsInFlight.add(key);
+    state.proposalFailures.delete(actionKey);
+    renderMessages();
+    try {
+      const data = unwrap(await api.json(
+        "POST",
+        `/teaching/threads/${encodeURIComponent(action.threadId)}/messages/${encodeURIComponent(messageId)}/tool-proposals/${encodeURIComponent(index)}/prepare-classroom`,
+        { approvalRequest },
+      ));
+      if (typeof data?.sessionId !== "string" || !data.sessionId) {
+        throw new Error("课堂准备未返回有效的会话。请重试同一项准备请求。");
+      }
+      preparedClassroomProposals.add(key);
+      if (scopeCurrent()) {
+        try {
+          const session = await loadSessions(action, data.sessionId);
+          if (scopeCurrent()) {
+            const notice = !session || session.status === "READY"
+              ? "课堂已准备 · 待开始（READY）"
+              : `课堂已准备 · ${statusLabel(session.status)}`;
+            api.showNotice(elements.notice, notice, "success");
+          }
+        } catch {
+          if (scopeCurrent())
+            api.showNotice(elements.notice, "课堂已准备，会话列表暂未刷新。", "warning");
+        }
+      }
+      return true;
+    } catch (error) {
+      if (!scopeCurrent()) return false;
+      state.proposalFailures.set(actionKey, error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally {
+      classroomPreparationsInFlight.delete(key);
+      if (threadActionCurrent(action)) renderMessages();
+    }
+  }
+
   function canExecuteAutomatically(proposal) {
     return (
-      !proposal.requiresConfirmation && automaticActionTools.has(proposal.tool)
+      !isPinnedClassroomProposal(proposal) && !proposal.requiresConfirmation && automaticActionTools.has(proposal.tool)
     );
   }
 
@@ -3504,7 +3603,10 @@
 
   function proposalWasApplied(message, index, proposal) {
     const key = proposalKey(message, index, proposal);
-    return message.metadata?.toolExecutionResults?.[String(index)]?.status === "SUCCEEDED" || state.appliedActionProposals.has(key);
+    return message.metadata?.toolExecutionResults?.[String(index)]?.status === "SUCCEEDED" ||
+      state.appliedActionProposals.has(key) ||
+      (isPinnedClassroomProposal(proposal) &&
+        preparedClassroomProposals.has(classroomPreparationKey(state.thread?.id, message.id, index)));
   }
 
   async function preflightDestructiveProposal(proposal) {
@@ -3522,11 +3624,11 @@
     return entered === expected;
   }
 
-  async function persistProposalDecision(item, decision) {
+  async function persistProposalDecision(item, decision, action) {
     const data = unwrap(
       await api.json(
         "POST",
-        `/teaching/threads/${encodeURIComponent(state.thread.id)}/messages/${encodeURIComponent(item.message.id)}/tool-proposals/${encodeURIComponent(item.index)}/decision`,
+        `/teaching/threads/${encodeURIComponent(action.threadId)}/messages/${encodeURIComponent(item.message.id)}/tool-proposals/${encodeURIComponent(item.index)}/decision`,
         {
           decision,
           confirmed: true,
@@ -3534,6 +3636,7 @@
         },
       ),
     );
+    if (!threadActionCurrent(action)) return data;
     const metadata = item.message.metadata || {};
     item.message.metadata = {
       ...metadata,
@@ -3542,7 +3645,7 @@
         [String(item.index)]: data.decision,
       },
     };
-    state.thread = data.thread || state.thread;
+    if (data.thread?.id === action.threadId) state.thread = data.thread;
     return data;
   }
 
@@ -3558,16 +3661,28 @@
 
   async function handleProposalApproval(item, decision) {
     if (!state.thread || state.resolvingApprovalKeys.has(item.key)) return;
-    if (
-      decision === "APPROVED" &&
-      !(await preflightDestructiveProposal(item.proposal))
-    )
-      return;
+    const action = { threadId: state.thread.id, epoch: state.threadLoadEpoch || 0 };
+    const pinnedClassroom = isPinnedClassroomProposal(item.proposal);
+    if (pinnedClassroom && (
+      !state.thread.messages?.some(
+        message => message === item.message && message.metadata?.toolProposals?.[item.index] === item.proposal,
+      ) || proposalWasApplied(item.message, item.index, item.proposal)
+    )) return;
     state.resolvingApprovalKeys.add(item.key);
     updateAgentChrome();
     try {
-      await persistProposalDecision(item, decision);
+      if (
+        decision === "APPROVED" &&
+        !(await preflightDestructiveProposal(item.proposal))
+      ) return;
+      if (!threadActionCurrent(action)) return;
+      await persistProposalDecision(item, decision, action);
+      if (!threadActionCurrent(action)) return;
       renderMessages();
+      if (pinnedClassroom && decision === "APPROVED") {
+        await executePinnedClassroomPreparation(action, item.message.id, item.index);
+        return;
+      }
       if (item.message.metadata?.harnessManaged && ['queued', 'executing', 'waiting-tool', 'awaiting-approval'].includes(item.message.metadata?.harnessExecution?.state)) {
         await loadThread(state.thread.id);
         api.showNotice(elements.notice, decision === 'REJECTED' ? '已拒绝这项操作，智能体将继续处理。' : '已批准，智能体正在后台继续执行。', 'progress');
@@ -3586,10 +3701,14 @@
         "已批准，智能体正在继续执行。",
         "success",
       );
+    } catch (error) {
+      if (threadActionCurrent(action)) throw error;
     } finally {
       state.resolvingApprovalKeys.delete(item.key);
-      updateAgentChrome();
-      focusComposerAfterApproval();
+      if (threadActionCurrent(action)) {
+        updateAgentChrome();
+        focusComposerAfterApproval();
+      }
     }
   }
 
@@ -3692,6 +3811,12 @@
       Array.isArray(message.metadata.toolProposals)
         ? message.metadata.toolProposals
         : [];
+    if (isPinnedClassroomProposal(proposals[startIndex])) {
+      if (automatic || !state.thread) return [];
+      const action = { threadId: state.thread.id, epoch: state.threadLoadEpoch || 0 };
+      if (!state.thread.messages?.includes(message)) return [];
+      return await executePinnedClassroomPreparation(action, message.id, startIndex) ? [startIndex] : [];
+    }
     const executedIndexes = [];
     for (let index = startIndex; index < proposals.length; index += 1) {
       const proposal = proposals[index];
@@ -4177,6 +4302,8 @@
       return retryTrackedJob(args.jobId);
     }
     if (proposal.tool === "classroom.prepare") {
+      if (isPinnedClassroomProposal(proposal))
+        throw new Error("已固定版本的课堂准备只能从原提案的批准决定执行。");
       const dojo = currentDojo();
       if (!dojo || !state.thread) return;
       await api
@@ -4701,6 +4828,16 @@
     ].join(":");
   }
 
+  function classroomProposalTranscriptSignature(message) {
+    const proposals = message.metadata?.toolProposals;
+    if (!Array.isArray(proposals)) return "";
+    return proposals.map((proposal, index) => {
+      if (!isPinnedClassroomProposal(proposal)) return "";
+      const key = classroomPreparationKey(state.thread?.id, message.id, index);
+      return `${Number(classroomPreparationsInFlight.has(key))}${Number(preparedClassroomProposals.has(key))}`;
+    }).join("");
+  }
+
   function transcriptSignature(messages) {
     const transcript = messages
       .map((message) => {
@@ -4729,7 +4866,7 @@
               .join(",")
           : "";
         const selection = metadata.generationSelection || {};
-        return `${message.id}:${content.length}:${content.slice(-72)}:${metadata.pending}:${metadata.failed}:${metadata.presentation || ""}:${cards}:${optionSignature}:${selection.optionId || ""}:${selection.status || ""}:${metadata.generationRound || 1}:${metadata.generationRefinement?.jobId || ""}:${metadata.questionReplyJobId || ""}:${JSON.stringify(metadata.questions || [])}:${JSON.stringify(metadata.selectedSkills || [])}:${JSON.stringify(metadata.plan || [])}:${JSON.stringify(metadata.toolExecutionResults || {})}:${metadata.harnessExecution?.state || ""}`;
+        return `${message.id}:${content.length}:${content.slice(-72)}:${metadata.pending}:${metadata.failed}:${metadata.presentation || ""}:${cards}:${optionSignature}:${selection.optionId || ""}:${selection.status || ""}:${metadata.generationRound || 1}:${metadata.generationRefinement?.jobId || ""}:${metadata.questionReplyJobId || ""}:${JSON.stringify(metadata.questions || [])}:${JSON.stringify(metadata.selectedSkills || [])}:${JSON.stringify(metadata.plan || [])}:${JSON.stringify(metadata.toolExecutionResults || {})}:${JSON.stringify(metadata.toolProposalDecisions || {})}:${classroomProposalTranscriptSignature(message)}:${metadata.harnessExecution?.state || ""}`;
       })
       .join("|");
     const jobs = Array.from(state.trackedJobs.values())
@@ -6245,8 +6382,14 @@
       <details><summary>查看学生细粒度事实</summary><ul class="progress-student-list">${students.map((item) => `<li><span>${api.escapeHtml(item.name)}</span><strong>${item.requiredSolved}/${item.requiredTotal}</strong><small>${item.attemptCount} 次尝试 · ${Math.round((item.verifiedCompletion || 0) * 100)}%</small></li>`).join("") || "<li>暂无学生记录</li>"}</ul></details>`;
   }
 
-  async function loadSessions() {
+  async function loadSessions(action, preferredSessionId) {
+    const selectedDojo = elements.dojo.value;
+    const selectedModule = elements.module.value;
     const data = unwrap(await api.request("/teaching/sessions"));
+    if (action && (
+      !threadActionCurrent(action) ||
+      elements.dojo.value !== selectedDojo || elements.module.value !== selectedModule
+    )) return;
     const dojoId = Number(elements.dojo.value || 0);
     const moduleIndex =
       elements.module.value === "" ? null : Number(elements.module.value);
@@ -6255,6 +6398,7 @@
     );
     state.activeSession =
       matching.find((item) => item.status === "LIVE") ||
+      matching.find((item) => item.id === preferredSessionId && item.status === "READY") ||
       matching.find((item) => ["READY", "PAUSED"].includes(item.status)) ||
       null;
     const labels = {
@@ -6278,6 +6422,7 @@
     elements.sessionOpen.hidden =
       !state.activeSession ||
       !["LIVE", "ENDED"].includes(state.activeSession.status);
+    return matching.find((item) => item.id === preferredSessionId);
   }
 
   async function openSession() {

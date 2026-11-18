@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { lessonToScenes } from '@/lib/server/lesson-publish';
+import { ordinaryStaticClassroom } from '@/lib/server/ordinary-static-classroom';
 import type { Lesson } from '@/lib/types/lesson';
 import { recordIntegrationRequest } from '@/lib/server/integration-metrics';
 import {
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
     return reply({ success: false, error: 'Invalid 玄甲 service credential' }, 401);
   }
   try {
-    const body = (await request.json()) as { classroomId?: string; lesson?: Lesson };
+    const body = (await request.json()) as { classroomId?: string; lesson?: Lesson; mode?: unknown };
     const classroomId = String(body.classroomId || '');
     const lesson = body.lesson;
     if (
@@ -38,7 +39,12 @@ export async function POST(request: NextRequest) {
         400,
       );
     }
-    const { stage, scenes } = lessonToScenes(lesson, classroomId);
+    if (body.mode !== undefined && body.mode !== 'ordinary-static') {
+      return reply({ success: false, error: 'Unsupported classroom render mode' }, 400);
+    }
+    const { stage, scenes } = body.mode === 'ordinary-static'
+      ? await ordinaryStaticClassroom(lesson, classroomId)
+      : lessonToScenes(lesson, classroomId);
     return reply({ success: true, result: { stage, scenes } });
   } catch {
     return reply({ success: false, error: 'Unable to render classroom' }, 422);

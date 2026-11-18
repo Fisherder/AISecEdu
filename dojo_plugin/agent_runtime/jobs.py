@@ -69,6 +69,9 @@ from .session_events import record_step_lifecycle, record_turn_lifecycle
 from .harness import TurnDeferred, advance_turn
 from .teacher_model_context import teacher_model_payload, teacher_platform_facts
 from .teacher_documents import DOCUMENT_INSTRUCTION, document_deliverables, requested_document_formats
+from .classroom_requests import (
+    classroom_proposal_result, classroom_request_body, current_classroom_pin, pin_classroom_request,
+)
 from .upstream_turn import (
     UpstreamTurnError, invoke_turn, ordinary_slide_wording_request,
     ordinary_teaching_course, request_body, result_object, upstream_enabled,
@@ -390,7 +393,10 @@ def _job_failure_message(job):
     return f"这项任务未完成：{reason}可以重新运行；若仍失败，请联系管理员。"
 
 
-UPSTREAM_APPROVED_TEACHING_TOOLS = {"course.create", "course.update", "module.create", "module.update", "material.add_to_module"}
+UPSTREAM_APPROVED_TEACHING_TOOLS = {
+    "course.create", "course.update", "module.create", "module.update", "material.add_to_module",
+    "classroom.prepare",
+}
 
 
 def _validated_tool_proposals(job, result):
@@ -416,7 +422,12 @@ def _validated_tool_proposals(job, result):
             if key in raw_arguments
         }
         target_dojo = None
-        if tool == "generation.start":
+        if upstream and tool == "classroom.prepare":
+            pin = current_classroom_pin(job, request_payload(job))
+            if pin is None or arguments.get("artifactId") != pin["artifactId"]:
+                continue
+            arguments = dict(pin)
+        elif tool == "generation.start":
             from .workbench import generation_selection_authorized
             reference = f"option:{arguments.get('sourceMessageId')}:{arguments.get('optionId')}"
             sources = ((job.payload or {}).get("context") or {}).get("requestProvenance", {}).get("sources") or []
@@ -496,6 +507,7 @@ def _validated_tool_proposals(job, result):
         artifact_id = arguments.get("artifactId")
         if (
             artifact_id
+            and not (upstream and tool == "classroom.prepare")
             and not TeachingArtifacts.query.filter_by(
                 id=str(artifact_id),
                 owner_id=job.owner_id,
@@ -1575,6 +1587,9 @@ def enqueue_job(
             raise PermissionError("Idempotency key belongs to another user")
         return existing, False
 
+    if kind == "agent.chat" and payload.get("chatBackend") == "upstream":
+        payload = pin_classroom_request(payload, owner_id, dojo_id, module_index)
+
     if (kind == "artifact.revise" and payload.get("artifactType") == "slide-deck"
             and not payload.get("workspaceId") and ordinary_slide_wording_request(payload.get("instruction"))
             and ordinary_teaching_course(dojo_id) and upstream_enabled()):
@@ -2651,6 +2666,10 @@ def _runtime_payload(job):
             payload["context"]["steering"] = {"originalRequest": request_payload(original).get("prompt"),
                 "instruction": payload.get("prompt"), "boundaryJobId": (job.payload or {}).get("steeringBoundaryJobId"),
                 "mode": "next-step" if (job.payload or {}).get("steeringBoundaryJobId") else "after-completion"}
+    if job.kind == "agent.chat" and payload.get("chatBackend") == "upstream" and "classroomPreparation" in payload:
+        # This operation uses the admitted deck, including for queued turns. Other conversation
+        # attachments and material dossiers are unrelated to selecting a published revision.
+        return payload
     # Derive authorship from the owned selection record, never from the expanded prompt or a client field.
     payload.pop("teacherLearningRequest", None)
     teacher_request = _teacher_learning_request(job, payload)
@@ -2855,6 +2874,8 @@ def _ordinary_teaching_job_scope(job, payload):
 
 def _runtime_request_body(job, route, payload):
     upstream_chat = job.kind == "agent.chat" and payload.get("chatBackend") == "upstream"
+    if upstream_chat and "classroomPreparation" in payload:
+        return classroom_request_body(payload["classroomPreparation"], request_body)
     formats = requested_document_formats(payload) if upstream_chat else ()
     if job.kind == "agent.chat":
         payload = teacher_model_payload(payload)
@@ -2902,6 +2923,7 @@ def _runtime_request_body(job, route, payload):
             "material.add_to_module（materialId、referenceId、moduleIndex、可选 name）。"
             "课程和章节标识必须来自平台事实，文件标识必须来自附件，不得猜测。"
             "待审批操作还没有执行。只有 operationObservations 和平台可核验的既有历史可以表述为已完成。"
+            "若教师想用课件准备课堂，请提示其发送「请用《课件的准确标题》准备课堂」。"
             "若操作不在支持范围内，提供可用的草稿或建议，并指向对应的课程中心入口。"
             "如果资料覆盖不完整，须标为部分资料并说明仅依据已列出的资料。"
             + ("\n" + DOCUMENT_INSTRUCTION if formats else ""),
@@ -3193,6 +3215,8 @@ def _upstream_teacher_result(payload, text):
         response = result_object(text)
     except ValueError:
         response = {"answer": text}
+    if "classroomPreparation" in payload:
+        return classroom_proposal_result(payload["classroomPreparation"], response.get("proposal"))
     answer = response.get("answer")
     if not isinstance(answer, str) or not answer.strip():
         raise RuntimeJobError("教学对话服务返回空白答复", category="service")
@@ -3226,6 +3250,7 @@ def _upstream_teacher_result(payload, text):
         and isinstance(proposal, dict)
         and isinstance(proposal.get("tool"), str)
         and proposal["tool"] in UPSTREAM_APPROVED_TEACHING_TOOLS
+        and proposal["tool"] != "classroom.prepare"
         and isinstance(proposal.get("arguments"), dict)
     ):
         result["toolProposals"] = [proposal]
@@ -3250,6 +3275,8 @@ def _require_upstream_teacher_scope(job, payload):
     thread = TeachingAgentThreads.query.filter_by(id=job.thread_id, user_id=job.owner_id).first()
     if owner is None or thread is None or thread.status != "ACTIVE":
         raise PermanentJobError("教学对话已归档或不可用")
+    if "classroomPreparation" in payload and (thread.dojo_id, thread.module_index) != (job.dojo_id, job.module_index):
+        raise PermanentJobError("准备课堂的课程或章节已变化，请重新选择课件。")
     _require_teacher(owner)
     if thread.dojo_id is not None:
         build_scope(owner, role="teacher", dojo_id=thread.dojo_id, module_index=thread.module_index)
@@ -3291,7 +3318,9 @@ def _invoke_agent_runtime(job, route, payload=None):
         if not upstream_enabled():
             raise PermanentJobError("教学对话服务尚未启用")
         _require_upstream_teacher_scope(job, payload)
-        if requested_document_formats(payload):
+        if payload.get("classroomPreparation") and not current_classroom_pin(job, payload):
+            raise PermanentJobError("所选课件的版本、发布状态或课程范围已变化，请重新发起。")
+        if "classroomPreparation" not in payload and requested_document_formats(payload):
             _require_teacher_document_sources(job, payload)
         encoded = _runtime_json_bytes(body)
         _record_runtime_dispatch(job, body, encoded)

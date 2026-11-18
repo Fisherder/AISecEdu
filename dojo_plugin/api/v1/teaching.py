@@ -48,6 +48,8 @@ from ...agent_runtime.approval_journal import (
     message_approval_metadata, proposal_operation, proposal_request,
     record_execution, recorded_decision, request_reference, require_approved,
 )
+from ...agent_runtime.classroom_preparation import ordinary_static_lesson, published_classroom_deck
+from ...models.global_agent import teaching_id
 from ...agent_runtime.commands import action_execution, admit_action, admit_teacher_tool
 from ...agent_runtime.approved_actions import ApprovedActionError, apply_action, prepare_action
 from ...coursework_observation import assignment_agent_observation
@@ -175,7 +177,7 @@ from ...agent_runtime.materials import (
 from ...agent_runtime.model_journal import ModelJournalError, record_model_event
 from ...agent_runtime.project_collection import project_collection_view
 from ...agent_runtime.reliability import public_recovery
-from ...agent_runtime.upstream_turn import ordinary_teaching_image_allowed
+from ...agent_runtime.upstream_turn import ordinary_teaching_course, ordinary_teaching_image_allowed
 from ...agent_runtime.scope import (
     ScopeError,
     assert_capability,
@@ -1763,6 +1765,47 @@ def _thread_card_views(cards):
     return views
 
 
+def _classroom_preparation_key(owner_id, approval_id):
+    digest = hashlib.sha256(approval_id.encode()).hexdigest()
+    return _supplied_idempotency(owner_id, "prepare-classroom", digest)
+
+
+def _project_classroom_preparation_receipts(thread, approval_metadata):
+    pending_receipts = {}
+    for metadata in approval_metadata.values():
+        proposals = metadata.get("toolProposals")
+        references = metadata.get("toolProposalApprovalRequests")
+        if not isinstance(proposals, list) or not isinstance(references, dict):
+            continue
+        for index, proposal in enumerate(proposals):
+            if not isinstance(proposal, dict) or proposal.get("tool") != "classroom.prepare":
+                continue
+            reference = references.get(str(index))
+            if not isinstance(reference, dict) or not isinstance(reference.get("id"), str):
+                continue
+            key = _classroom_preparation_key(thread.user_id, reference["id"])
+            pending_receipts[key] = (metadata, str(index), reference)
+    if not pending_receipts:
+        return
+    actions = TeachingAgentActions.query.filter_by(
+        thread_id=thread.id, actor_id=thread.user_id, action_type="prepare-ordinary-classroom",
+        status="COMPLETED",
+    ).filter(TeachingAgentActions.idempotency_key.in_(pending_receipts)).all()
+    for action in actions:
+        metadata, index, reference = pending_receipts[action.idempotency_key]
+        result = action.result or {}
+        if (action.request_json or {}).get("approvalRequest") != reference or result.get("sessionId") != action.target_id:
+            continue
+        old = metadata.get("toolExecutionResults")
+        receipts = dict(old) if isinstance(old, dict) else {}
+        receipts[index] = {
+            "tool": "classroom.prepare", "status": "SUCCEEDED",
+            "sessionId": result["sessionId"], "artifactId": result["artifactId"],
+            "artifactRevision": result["artifactRevision"],
+        }
+        metadata["toolExecutionResults"] = receipts
+
+
 def _thread_view(
     thread,
     *,
@@ -1821,6 +1864,7 @@ def _thread_view(
         for card, card_view in zip(cards, _thread_card_views(cards)):
             by_message.setdefault(card.message_id, []).append(card_view)
         approval_metadata = message_approval_metadata(thread.id, messages)
+        _project_classroom_preparation_receipts(thread, approval_metadata)
         result["messages"] = [
             {
                 "id": message.id,
@@ -2660,6 +2704,53 @@ def _render_classroom(artifact, classroom_id):
     if not isinstance(result.get("scenes"), list) or not result["scenes"]:
         raise ValueError("The preview service returned an empty scene")
     return result
+
+
+def _render_ordinary_classroom(lesson, classroom_id):
+    response = requests.post(
+        f"{config.AGENT_RUNTIME_INTERNAL_URL.rstrip('/')}/api/integration/classrooms/render",
+        headers={
+            "X-AISecEdu-Service-Token": config.AGENT_RUNTIME_SERVICE_SECRET,
+            "X-Trace-ID": get_trace_id(),
+            "Content-Type": "application/json",
+        },
+        json={"classroomId": classroom_id, "lesson": lesson, "mode": "ordinary-static"},
+        timeout=(5, 30),
+        allow_redirects=False,
+    )
+    response.raise_for_status()
+    if response.status_code != 200:
+        raise ValueError("课堂转换返回了意外状态。")
+    body = response.json()
+    result = body.get("result") if isinstance(body, dict) and body.get("success") is True else None
+    stage = result.get("stage") if isinstance(result, dict) else None
+    scenes = result.get("scenes") if isinstance(result, dict) else None
+    if (
+        not isinstance(stage, dict) or stage.get("id") != classroom_id
+        or not isinstance(stage.get("name"), str) or not stage["name"].strip()
+        or set(stage) - {"id", "name", "createdAt", "updatedAt"}
+        or not isinstance(scenes, list) or len(scenes) != len(lesson["artifacts"])
+    ):
+        raise ValueError("课堂转换未返回完整的静态课件。")
+    scene_ids = set()
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            raise ValueError("课堂转换未返回完整的静态课件。")
+        content = scene.get("content")
+        scene_id = scene.get("id")
+        if (
+            not isinstance(scene_id, str) or not scene_id or scene_id in scene_ids
+            or scene.get("stageId") != classroom_id or scene.get("type") != "slide"
+            or scene.get("actions") or scene.get("multiAgent")
+            or not isinstance(content, dict) or content.get("type") != "slide"
+            or set(content) != {"type", "canvas"}
+            or not isinstance(content.get("canvas"), dict)
+            or not isinstance(content["canvas"].get("elements"), list)
+            or not content["canvas"]["elements"]
+        ):
+            raise ValueError("课堂转换未返回完整的静态课件。")
+        scene_ids.add(scene_id)
+    return {"stage": stage, "scenes": scenes}
 
 
 def _status_counts(query, status_column, id_column):
@@ -5718,6 +5809,128 @@ class TeachingToolProposalDecision(Resource):
             return _error(exc, 404, code="NOT_FOUND")
         except ApprovalJournalError as exc:
             return _error(exc, exc.status, code=exc.code)
+        finally:
+            db.session.rollback()
+
+
+def _ordinary_classroom_scope(user, thread):
+    _require_teacher(user)
+    scope = build_scope(user, role="teacher", dojo_id=thread.dojo_id, module_index=thread.module_index)
+    if not ordinary_teaching_course(scope.dojo_id):
+        raise ScopeError("当前课程未启用普通课堂准备。")
+    return scope
+
+
+@teaching_namespace.route(
+    "/threads/<string:thread_id>/messages/<int:message_id>/tool-proposals/"
+    "<int:proposal_index>/prepare-classroom"
+)
+class TeachingToolPrepareClassroom(Resource):
+    @authed_only
+    def post(self, thread_id, message_id, proposal_index):
+        user = _current_user()
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or set(body) != {"approvalRequest"}:
+            return _error("仅接受已持久化的批准请求引用。", 400, code="INVALID_REQUEST")
+        try:
+            thread = TeachingAgentThreads.query.filter_by(
+                id=thread_id, user_id=user.id,
+            ).with_for_update().populate_existing().first()
+            if thread is None:
+                raise ScopeError("教学对话不存在。")
+            if thread.status != "ACTIVE":
+                return _error("请先恢复这个对话。", 409, code="THREAD_ARCHIVED")
+            scope = _ordinary_classroom_scope(user, thread)
+            source = TeachingAgentMessages.query.filter_by(
+                id=message_id, thread_id=thread.id, user_id=user.id, role="assistant",
+            ).with_for_update().populate_existing().first()
+            if source is None:
+                raise ScopeError("课堂准备提案不存在。")
+            from ...agent_runtime.tool_plan import message_metadata
+            metadata = message_metadata(source)
+            if metadata.get("pending") is not False:
+                return _error("课堂准备提案尚未完成。", 409, code="PROPOSAL_NOT_READY")
+            proposals = metadata.get("toolProposals")
+            proposal = proposals[proposal_index] if isinstance(proposals, list) and 0 <= proposal_index < len(proposals) else None
+            if not isinstance(proposal, dict) or proposal.get("tool") != "classroom.prepare" or proposal.get("requiresConfirmation") is not True:
+                raise ScopeError("课堂准备提案不存在。")
+            source_job = TeachingJobs.query.filter_by(
+                id=metadata.get("jobId"), owner_id=user.id, thread_id=thread.id, kind="agent.chat", status="SUCCEEDED",
+            ).first()
+            if source_job is None or (source_job.payload or {}).get("chatBackend") != "upstream":
+                raise ScopeError("课堂准备提案不存在。")
+            bound_scope = proposal.get("boundScope")
+            if (
+                not isinstance(bound_scope, dict) or
+                (bound_scope.get("dojoId"), bound_scope.get("moduleIndex")) != (scope.dojo_id, scope.module_index)
+                or (source_job.dojo_id, source_job.module_index) != (scope.dojo_id, scope.module_index)
+            ):
+                return _error("课堂准备提案的课程或章节已变化。", 409, code="CLASSROOM_SCOPE_CONFLICT")
+            envelope = proposal_request(thread.id, source.id, proposal_index, proposal)
+            approval = require_approved(envelope, body.get("approvalRequest"))
+            key = _classroom_preparation_key(user.id, approval["id"])
+            previous = TeachingAgentActions.query.filter_by(
+                actor_id=user.id, thread_id=thread.id, action_type="prepare-ordinary-classroom", idempotency_key=key,
+            ).first()
+            if previous is not None:
+                if previous.status != "COMPLETED" or (previous.request_json or {}).get("approvalRequest") != approval:
+                    raise ApprovalJournalError("批准后操作内容发生变化，请重新提出请求。", "APPROVAL_REQUEST_CHANGED")
+                return _ok({**previous.result, "deduplicated": True})
+            arguments = proposal.get("arguments")
+            if not isinstance(arguments, dict):
+                return _error("课件版本未固定，请重新提出准备请求。", 409, code="CLASSROOM_VERSION_REQUIRED")
+            artifact_id = arguments.get("artifactId")
+            expected = arguments.get("expectedRevision")
+            expected_hash = arguments.get("contentHash")
+            if type(expected) is not int or expected < 1 or not isinstance(expected_hash, str) or not re.fullmatch(r"[a-f0-9]{64}", expected_hash):
+                return _error("课件版本未固定，请重新提出准备请求。", 409, code="CLASSROOM_VERSION_REQUIRED")
+            deck = published_classroom_deck(user.id, scope.dojo_id, scope.module_index, artifact_id, lock=True)
+            if (
+                deck is None or (deck[1].revision, deck[1].content_hash) != (expected, expected_hash)
+                or content_hash(deck[1].content) != expected_hash
+            ):
+                return _error("课件或已发布版本已变化，请重新选择。", 409, code="CLASSROOM_REVISION_CONFLICT")
+            artifact, revision = deck
+            classroom_id = teaching_id("session")
+            rendered = _render_ordinary_classroom(ordinary_static_lesson(revision.content), classroom_id)
+            # Membership may have changed while the conversion request was running.
+            current_user = Users.query.filter_by(id=user.id).populate_existing().first()
+            if current_user is None:
+                raise ScopeError("教师账号已不可用。")
+            _ordinary_classroom_scope(current_user, thread)
+            title = arguments.get("title")
+            title = title.strip() if isinstance(title, str) else ""
+            now = datetime.datetime.utcnow()
+            session = TeachingSessions(
+                id=classroom_id, owner_id=user.id, dojo_id=scope.dojo_id, module_index=scope.module_index,
+                thread_id=thread.id, title=(title or artifact.title)[:240], status="READY",
+                state={
+                    **rendered, "artifactId": artifact.id, "artifactRevision": revision.revision,
+                    "artifactContentHash": revision.content_hash, "renderer": "agent-runtime-stage",
+                    "createdAt": _timestamp(now),
+                },
+            )
+            result = {"sessionId": session.id, "artifactId": artifact.id, "artifactRevision": revision.revision}
+            action = TeachingAgentActions(
+                thread_id=thread.id, actor_id=user.id, action_type="prepare-ordinary-classroom",
+                risk_level="R1", target_type="teaching_session", target_id=session.id, status="COMPLETED",
+                idempotency_key=key, request_json={"approvalRequest": approval, "dojoId": scope.dojo_id,
+                    "moduleIndex": scope.module_index, "artifactId": artifact.id, "expectedRevision": revision.revision,
+                    "contentHash": revision.content_hash},
+                result=result, completed=now,
+            )
+            db.session.add(session)
+            db.session.add(action)
+            db.session.flush()
+            record_execution(action, "committed", approval)
+            db.session.commit()
+            return _ok({**result, "deduplicated": False}, 201)
+        except ScopeError as exc:
+            return _error(exc, 404, code="NOT_FOUND")
+        except ApprovalJournalError as exc:
+            return _error(exc, exc.status, code=exc.code)
+        except (requests.RequestException, ValueError):
+            return _error("静态课件转换未完成，请稍后重试。", 502, code="CLASSROOM_RENDER_FAILED")
         finally:
             db.session.rollback()
 

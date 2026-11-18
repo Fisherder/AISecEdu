@@ -19,6 +19,50 @@ def load_file(name):
 turn = load_file("upstream_turn")
 model_context = load_file("teacher_model_context")
 documents = load_file("teacher_documents")
+classroom = load_file("classroom_requests")
+
+
+@pytest.mark.parametrize(("prompt", "name"), [
+    ("请用已发布的课件《植物观察》准备课堂", "植物观察"),
+    ("请准备一节课堂，使用《artifact_23》", "artifact_23"),
+    ("准备课堂", ""),
+    ("怎样用《植物观察》准备课堂？", None),
+    ("不要用《植物观察》准备课堂", None),
+    ("用《植物观察》准备课堂并开始上课", None),
+    ("请总结植物观察", None),
+])
+def test_classroom_preparation_requires_the_teachers_own_request(monkeypatch, prompt, name):
+    lookup = MagicMock(return_value={"artifactId": "local-id"})
+    monkeypatch.setattr(classroom, "find_published_deck", lookup)
+    payload = {"prompt": prompt, "chatBackend": "upstream", "classroomPreparation": {"artifactId": "stale"}}
+    admitted = classroom.pin_classroom_request(payload, 8, -7, 0)
+    if name:
+        lookup.assert_called_once_with(name, 8, -7, 0)
+        assert admitted["classroomPreparation"] == {"artifactId": "local-id"}
+    else:
+        lookup.assert_not_called()
+        assert admitted.get("classroomPreparation") == ({} if name == "" else None)
+    for extra in ({"executionMode": "ask"}, {"context": {"agentLoop": {"trace": [{"tool": "course.read"}]}}}):
+        assert "classroomPreparation" not in classroom.pin_classroom_request({**payload, **extra}, 8, -7, 0)
+
+
+def test_only_the_selected_public_metadata_reaches_the_model_and_the_proposal_is_canonical():
+    pin = {"artifactId": "published-deck", "title": "植物观察", "expectedRevision": 3,
+           "contentHash": "f" * 64, "teacherNotes": "PRIVATE-FIXTURE"}
+    body = classroom.classroom_request_body(pin, turn.request_body)
+    assert json.loads(body["messages"][1]["content"]) == {
+        "publishedClassroomDeck": {"artifactId": "selected-deck"},
+    }
+    reply = {"tool": "classroom.prepare", "arguments": {
+        "artifactId": "selected-deck", "title": "invented", "expectedRevision": 999, "contentHash": "wrong",
+    }}
+    result = classroom.classroom_proposal_result(pin, reply)
+    assert result["toolProposals"][0]["arguments"] == {"artifactId": "published-deck"}
+    assert "第 3 版" in result["answer"]
+    for bad in (None, {"tool": "course.create", "arguments": {}},
+                {"tool": "classroom.prepare", "arguments": {"artifactId": "other"}}):
+        assert "toolProposals" not in classroom.classroom_proposal_result(pin, bad)
+    assert "toolProposals" not in classroom.classroom_proposal_result({}, reply)
 
 
 @pytest.fixture

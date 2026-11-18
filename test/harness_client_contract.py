@@ -20,6 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("harness_client", ROOT / "dojo_plugin/agent_runtime/upstream_turn.py")
 client = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(client)
+CLASSROOM_SPEC = importlib.util.spec_from_file_location(
+    "classroom_client", ROOT / "dojo_plugin/agent_runtime/classroom_requests.py",
+)
+classroom_client = importlib.util.module_from_spec(CLASSROOM_SPEC)
+CLASSROOM_SPEC.loader.exec_module(classroom_client)
 
 
 def synthetic_png():
@@ -39,10 +44,16 @@ class ModelFixture(BaseHTTPRequestHandler):
     def do_POST(self):
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.server.requests.append((self.path, self.headers.get("x-api-key"), payload))
+        reply = "教学回执"
+        if "publishedClassroomDeck" in payload["messages"][0]["content"][0].get("text", ""):
+            deck = json.loads(payload["messages"][0]["content"][0]["text"])["publishedClassroomDeck"]
+            reply = json.dumps({"answer": "请确认", "proposal": {
+                "tool": "classroom.prepare", "arguments": {"artifactId": deck["artifactId"]},
+            }}, ensure_ascii=False)
         events = [
             ("message_start", {"message": {"id": "fixture", "model": "fixture", "usage": {"input_tokens": 5}}}),
             ("content_block_start", {"index": 0, "content_block": {"type": "text", "text": ""}}),
-            ("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": "教学回执"}}),
+            ("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": reply}}),
             ("content_block_stop", {"index": 0}),
             ("message_delta", {"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 3}}),
             ("message_stop", {}),
@@ -107,6 +118,15 @@ class HarnessClientContract(unittest.TestCase):
                 invalid = requests.post(image_url, json=body, headers=headers, timeout=5)
                 self.assertEqual(invalid.status_code, 400, invalid.text)
                 self.assertEqual(len(model.requests), 2)
+                pin = {"artifactId": "fixture-deck", "title": "叶片观察", "expectedRevision": 2, "contentHash": "f" * 64}
+                with patch.dict(os.environ, HARNESS_INTERNAL_URL=url, HARNESS_SERVICE_SECRET="fixture-service"):
+                    turn = client.invoke_turn(classroom_client.classroom_request_body(pin, client.request_body))
+                proposed = classroom_client.classroom_proposal_result(pin, client.result_object(turn["text"])["proposal"])
+                self.assertEqual(proposed["toolProposals"][0]["arguments"], {"artifactId": "fixture-deck"})
+                self.assertEqual(turn["usage"]["total_tokens"], 8)
+                self.assertEqual(json.loads(model.requests[-1][2]["messages"][0]["content"][0]["text"]), {
+                    "publishedClassroomDeck": {"artifactId": "selected-deck"},
+                })
             finally:
                 service.terminate()
                 try:
