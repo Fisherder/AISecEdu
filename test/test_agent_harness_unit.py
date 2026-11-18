@@ -847,6 +847,10 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
         "sourceMaterials": [dict(approved_source, title="蒸发讲义", excerpts=["记录水量与实际观察"])],
         "materialContext": {"complete": True, "expectedMaterialCount": 1},
     }
+    payload["materialDossier"] = {
+        "coverage": payload["materialContext"],
+        "materials": payload["sourceMaterials"],
+    }
     job = add_job(session, "document-job", kind="agent.chat", dojo_id=2, module_index=0, payload=payload)
     existing_message = Message(id=8, thread_id=thread.id, user_id=7, role="assistant", metadata_json={})
     session.add(existing_message)
@@ -915,6 +919,8 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
     assert stored["requiresAction"] is False
     assert [file["format"] for file in stored["files"]] == ["docx", "md"]
     assert stored["answer"] == "教学文档草稿已生成，可通过下方链接下载。"
+    assert stored["materialModelCoverage"] == json.loads(wire_requests[0]["messages"][-1]["content"])["materialModelCoverage"]
+    assert existing_message.metadata_json["materialModelCoverage"] == stored["materialModelCoverage"]
     assert job_namespace["_persist_result"](job, result["result"])["files"] == stored["files"]
     job.result = stored
     session.commit()

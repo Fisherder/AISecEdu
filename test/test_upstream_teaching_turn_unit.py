@@ -151,3 +151,57 @@ def test_teacher_request_omits_person_rows_from_both_model_backends(backend, mod
     assert facts["assignments"]["recent"] == [{"title": "小练习"}]
     assert context["conversation"] == [{"role": "user", "content": "使用上节课的教学目标"}]
     assert materials[0]["excerpts"][0]["content"] == "选用讲义摘录"
+
+
+@pytest.mark.parametrize(("expected", "included"), [(100, 100), (101, 100)])
+def test_teacher_material_coverage_describes_the_scrubbed_model_input(expected, included):
+    import ast
+    import re
+    from types import SimpleNamespace
+
+    evidence = ast.parse((RUNTIME.parent / "learning" / "evidence.py").read_text())
+    evidence_names = {"SENSITIVE_KEYS", "SENSITIVE_PATTERNS", "redact_text", "scrub_payload"}
+    evidence.body = [
+        node for node in evidence.body
+        if getattr(node, "name", None) in evidence_names
+        or (isinstance(node, ast.Assign) and node.targets[0].id in evidence_names)
+    ]
+    namespace = {
+        "re": re,
+        "request_body": turn.request_body,
+        "teacher_model_payload": model_context.teacher_model_payload,
+        "requested_document_formats": documents.requested_document_formats,
+    }
+    exec(compile(evidence, "evidence.py", "exec"), namespace)
+    jobs = ast.parse((RUNTIME / "jobs.py").read_text())
+    jobs.body = [node for node in jobs.body if getattr(node, "name", None) == "_runtime_request_body"]
+    exec(compile(jobs, "jobs.py", "exec"), namespace)
+
+    materials = [
+        {"id": f"material-{i}", "title": f"普通课程资料 {i}", "analysis": {"summary": "观察植物生长。"}}
+        for i in range(expected)
+    ]
+    source_refs = [{"type": "material", "id": material["id"]} for material in materials]
+    coverage = {"expectedMaterialCount": expected, "includedMaterialCount": expected, "complete": True}
+    payload = {
+        "chatBackend": "upstream",
+        "prompt": "概括课程资料",
+        "sourceRefs": source_refs,
+        "sourceMaterials": materials,
+        "materialDossier": {"coverage": coverage, "materials": materials},
+    }
+    request = namespace["_runtime_request_body"](SimpleNamespace(kind="agent.chat"), {}, payload)
+    context = json.loads(request["messages"][-1]["content"])
+    expected_coverage = {
+        "expectedMaterialCount": expected,
+        "includedMaterialCount": included,
+        "missingMaterialCount": expected - included,
+        "complete": expected == included,
+    }
+    assert context["materialModelCoverage"] == expected_coverage
+    assert context["materialDossier"]["coverage"].items() >= expected_coverage.items()
+    material_ids = [material["id"] for material in materials[:included]]
+    assert [row["id"] for row in context["materialDossier"]["materials"]] == material_ids
+    assert [row["id"] for row in context["sourceMaterials"]] == material_ids
+    assert [row["id"] for row in context["sourceRefs"]] == material_ids
+    assert coverage["includedMaterialCount"] == expected and coverage["complete"] is True
