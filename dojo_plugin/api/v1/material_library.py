@@ -127,6 +127,13 @@ class LibraryImports(Resource):
         return import_items(user, _body(), instantiator=instantiate_snapshot)
 
 
+@material_library_namespace.route("/items/<string:item_id>/source-preview")
+class LibrarySourcePreview(Resource):
+    @library_endpoint
+    def post(self, item_id, *, user):
+        return {"href": source_preview_href(user, item_for_user(user, item_id), share_snapshot=True)}
+
+
 @material_library_namespace.route("/items/<string:item_id>/preview")
 class LibraryPreview(Resource):
     @library_endpoint
