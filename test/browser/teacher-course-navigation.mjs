@@ -6,11 +6,13 @@ import {join} from 'node:path';
 import {Browser} from './cdp.mjs';
 
 const read = path => readFile(new URL('../../' + path, import.meta.url), 'utf8');
-const [template, courses, selection, styles] = await Promise.all([
+const [template, courses, selection, styles, atlas, insights] = await Promise.all([
   read('dojo_theme/templates/teacher_courses.html'),
   read('dojo_theme/static/js/dojo/teacher-courses.js'),
   read('dojo_theme/static/js/dojo/core/bulk-selection.js'),
   read('dojo_theme/static/css/course-hub.css'),
+  read('dojo_theme/static/js/dojo/learning-atlas.js'),
+  read('dojo_theme/static/js/dojo/learning-insights.js'),
 ]);
 const markup = template.split('{% block content %}')[1].split('{% endblock %}')[0];
 const html = `<!doctype html><meta charset="utf-8"><style>${styles}</style>
@@ -20,8 +22,12 @@ const courseRows = [{id: 1, referenceId: 'alpha', name: 'Course Alpha'}, {id: 2,
 const pending = new Map();
 const mutations = [];
 let confirmRotation;
+let delayBetaWorkspace = false;
 const success = data => ({success: true, data});
 const hold = key => new Promise(resolve => pending.set(key, resolve));
+const report = (course, students) => ({course, summary: {students, tasks: 0}, scope: {label: 'Fixture'},
+  trend: [], tasks: [], students: [], followups: [], statuses: [], source: {label: 'Fixture'},
+  filterOptions: {modules: [], students: []}});
 const finish = (key, data) => { pending.get(key)(success(data)); pending.delete(key); };
 const go = url => { history.pushState(null, '', url); dispatchEvent(new PopStateEvent('popstate')); };
 window.AISecEduUI = {confirm: () => new Promise(resolve => { confirmRotation = resolve; }), notify() {}};
@@ -34,8 +40,10 @@ window.DojoLearning = {
     if (pathname === '/teaching/courses') return success({items: courseRows});
     const course = courseRows.find(row => pathname.split('/').includes(row.referenceId));
     if (pathname.endsWith('/workspace')) {
+      if (course === courseRows[1] && delayBetaWorkspace) return hold('beta:workspace');
       return success({course, materials: [{id: course.id, title: course.name + ' material'}]});
     }
+    if (pathname.startsWith('/teaching/insights/')) return hold(course.referenceId + ':insights');
     if (pathname.endsWith('/assignments')) return success({assignments: []});
     if (pathname.endsWith('/content')) return hold(course.referenceId + ':' + searchParams.get('kind'));
     throw new Error('Unexpected fixture request ' + path);
@@ -46,8 +54,9 @@ window.DojoLearning = {
     return hold(course + ':code');
   },
 };
-</script><script src="/selection.js"></script><script src="/courses.js"></script>`;
-const assets = {'/selection.js': selection, '/courses.js': courses};
+</script><script src="/selection.js"></script><script src="/atlas.js"></script>
+<script src="/insights.js"></script><script src="/courses.js"></script>`;
+const assets = {'/selection.js': selection, '/courses.js': courses, '/atlas.js': atlas, '/insights.js': insights};
 const server = createServer((request, response) => {
   const url = new URL(request.url, 'http://localhost');
   if (url.pathname === '/teacher/courses') {
@@ -103,10 +112,32 @@ try {
       await new Promise(resolve => setTimeout(resolve, 0));
     });
     assert.equal(await page.evaluate(() => mutations.some(item => item.regenerate)), false);
+
+    await page.evaluate(() => document.querySelector('[data-cs-tab=students]').click());
+    await page.waitFor('pending.has("alpha:insights")', {timeout: 5000});
+    await page.evaluate(() => finish('alpha:insights', report(courseRows[0], 12)));
+    await page.waitFor('document.querySelector("#cs-stat-students").textContent === "12"', {timeout: 5000});
+    await page.evaluate(() => {
+      document.querySelector('[data-ix=refresh]').click();
+      delayBetaWorkspace = true;
+      go('/teacher/courses?dojo=beta&tab=students');
+    });
+    await page.waitFor('pending.has("alpha:insights") && pending.has("beta:workspace")', {timeout: 5000});
+    await page.evaluate(async () => {
+      finish('alpha:insights', report(courseRows[0], 99));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    assert.equal(await page.evaluate(() => document.querySelector('#cs-stat-students').textContent === '99'), false);
+    assert.equal(await page.evaluate(() => document.querySelector('#ix-title').textContent.includes('Course Alpha')), false);
+    await page.evaluate(() => finish('beta:workspace', {course: courseRows[1]}));
+    await page.waitFor('pending.has("beta:insights")', {timeout: 5000});
+    await page.evaluate(() => finish('beta:insights', report(courseRows[1], 8)));
+    await page.waitFor('document.querySelector("#cs-stat-students").textContent === "8"', {timeout: 5000});
+    assert.match(await page.text('#ix-title'), /Course Beta/);
     assert.deepEqual(page.pageErrors, []);
     await browser.closePage(page);
   }
-  console.log('Teacher course navigation keeps delayed content, course codes and confirmations in their originating workspace.');
+  console.log('Teacher course navigation keeps delayed content, course codes, confirmations and learning insights in their originating workspace.');
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));

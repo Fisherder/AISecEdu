@@ -219,6 +219,7 @@
     if (view !== "detail") {
       closeCourseCodeDialog({restoreFocus: false});
       closeMaterialPreview({restoreFocus: false});
+      analyticsWorkspace?.setCourse(null);
     }
     state.view = view === "detail" ? "detail" : "list";
     elements.courseListView.hidden = state.view !== "list";
@@ -2098,6 +2099,7 @@
       if (name === "students" && !state.learningScopeInitialized) {
         loaders.push(
           reloadLearningProgress({syncUrl: false}).then(result => {
+            if (!isCurrentWorkspace(workspace)) return false;
             if (result) state.learningScopeInitialized = true;
             return result;
           })
@@ -2948,7 +2950,8 @@
     closeCourseCodeDialog({restoreFocus: false});
     closeMaterialPreview({restoreFocus: false});
     closeQuestionDrawer({restoreFocus: false});
-    closeStudentDrawer({restoreFocus: false});
+    analyticsWorkspace?.setCourse(null);
+    state.learningScopeInitialized = false;
     state.course = (state.context.teacherDojos || []).find(item =>
       item.id === Number(courseId) || item.referenceId === String(courseId || "")
     );
