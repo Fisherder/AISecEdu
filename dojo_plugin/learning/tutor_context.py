@@ -18,6 +18,31 @@ SAFE_OBSERVATIONS = {
 }
 
 
+def tutor_progress_count(events, verified):
+    """Count authenticated progress receipts for the HTTP status only."""
+    if not verified:
+        return 0
+    sources = {kind: source for kind, (source, _) in SAFE_OBSERVATIONS.items()}
+    sources["simulation.action.completed"] = "SIMULATION"
+    return sum(
+        event.trust_level >= 2 and sources.get(event.event_type) == event.source
+        for event in events if event.event_type in sources
+    )
+
+
+def tutor_offline_hint(question, observations):
+    if re.search(r"\b(?:trustworth(?:y|iness)|reliab(?:le|ility)|credib(?:le|ility))\b", question, re.I):
+        return (
+            "What makes a record trustworthy? Check who created it and when, then look for a second "
+            "independent source that confirms the same fact. Which check can you do first?"
+        )
+    observed = f"当前记录显示：{observations[0]}。 " if observations else ""
+    return (
+        f"{observed}先用一句话写出本题要验证的学习目标，再区分你已观察到的事实和自己的推测。"
+        "试着指出还缺哪一条证据，并对照题目中的公开提示。需要确认具体解法时，可以向任课教师提问。"
+    )
+
+
 def tutor_observations(events, verified):
     if not verified:
         return []

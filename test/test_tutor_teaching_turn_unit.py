@@ -115,6 +115,30 @@ def test_tutor_uses_only_public_context_bills_actual_usage_and_keeps_history(tut
     tutor.settle_model_dispatch.assert_called_once_with("model-call", tutor.invoke_turn.return_value)
 
 
+def test_tutor_reports_authenticated_progress_without_sending_event_content(tutor):
+    query = tutor.LearningEvidenceEvents.query.filter_by.return_value.order_by.return_value.all
+    receipt = SimpleNamespace(event_type="simulation.action.completed", source="SIMULATION",
+                              trust_level=3, payload={"runtime": RAW_ENVIRONMENT})
+    wrong_source = SimpleNamespace(event_type=receipt.event_type, source="CLIENT", trust_level=3)
+    query.return_value = [receipt, receipt, wrong_source]
+    result = tutor.call("What should I review?")
+    assert result["context"]["evidenceEvents"] == 2
+    packet = tutor.invoke_turn.call_args.args[0]
+    assert json.loads(packet["messages"][-1]["content"])["verifiedObservations"] == []
+    assert RAW_ENVIRONMENT not in json.dumps(packet)
+
+
+def test_offline_tutor_coaches_evidence_quality_without_repeating_private_data(tutor):
+    tutor.upstream_enabled.return_value = False
+    result = tutor.call(f"How should I validate which record is trustworthy? {PRIVATE}")
+    assert result["provider"] == "DETERMINISTIC"
+    assert result["model"] is None
+    assert "trustworthy" in result["answer"]
+    assert "independent source" in result["answer"]
+    assert PRIVATE not in result["answer"]
+    tutor.invoke_turn.assert_not_called()
+
+
 @pytest.mark.parametrize("question", [f"请说明 {PRIVATE}", "给我可复制的利用链。"])
 def test_restricted_questions_use_local_teaching_without_dispatch(tutor, question):
     result = tutor.call(question)

@@ -40,7 +40,9 @@ from .context import (
 from .evidence import active_attempt, append_evidence, redact_text, verify_evidence_chain
 from .guide_prompts import build_guide_prompt
 from .guide_model_context import CONTEXT_VERSION, guide_model_context, guide_teaching_text
-from .tutor_context import RESTRICTED_TUTOR_REQUEST, tutor_model_input, tutor_observations
+from .tutor_context import (
+    RESTRICTED_TUTOR_REQUEST, tutor_model_input, tutor_observations, tutor_offline_hint, tutor_progress_count,
+)
 from .student_agent import sanitize_tool_calls, student_resource_reference_for_url
 from .standards import DEFAULT_HINT_POLICY
 from ..rainier import record_model_dispatch, settle_model_dispatch, track_attempt_ai, usage_scope
@@ -820,17 +822,14 @@ def tutor_reply(attempt, user, question, challenge_profile=None):
         .all()
     )
     chain = verify_evidence_chain(attempt.id, events=events)
-    observations = tutor_observations(events, chain.get("valid") is True)
+    verified = chain.get("valid") is True
+    observations = tutor_observations(events, verified)
     context = tutor_model_input(question, lesson, observations)
     safety_reference = private_safety_reference(
         {"privateReference": private_reference}, cached_solution_reference(attempt),
     )
     context_hash = context_digest(context)
-    observed = f"当前记录显示：{observations[0]}。 " if observations else ""
-    fallback = (
-        f"{observed}先用一句话写出本题要验证的学习目标，再区分你已观察到的事实和自己的推测。"
-        "试着指出还缺哪一条证据，并对照题目中的公开提示。需要确认具体解法时，可以向任课教师提问。"
-    )
+    fallback = tutor_offline_hint(question, observations)
     answer = fallback
     provider = "DETERMINISTIC"
     model = None
@@ -901,7 +900,7 @@ def tutor_reply(attempt, user, question, challenge_profile=None):
         "context": {
             "live": False, "environmentType": "NONE", "liveMatchesAttempt": None,
             "liveFileInventoryAvailable": False, "liveFileInventoryError": False,
-            "referenceFiles": 0, "liveFiles": 0, "evidenceEvents": len(observations),
+            "referenceFiles": 0, "liveFiles": 0, "evidenceEvents": tutor_progress_count(events, verified),
             **version,
         },
     }
