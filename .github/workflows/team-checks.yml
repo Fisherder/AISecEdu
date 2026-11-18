@@ -24,6 +24,38 @@ jobs:
           docker build -t aisecedu-harness-test services/deepseek-harness
       - name: Exercise the official agent loop with the local model fixture
         run: docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges aisecedu-harness-test node --test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Send a teaching request across the real Python and Node clients
+        run: |
+          npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev --no-audit --no-fund
+          python -m pip install -r ops/team/requirements.txt
+          python test/harness_client_contract.py
+  classroom-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: services/agent-runtime
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: services/agent-runtime/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: services/agent-runtime/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm exec vitest run tests/lib/chat tests/chat tests/pbl/question-turn.test.ts tests/pbl/v2/evaluator.test.ts tests/pbl/v2/runtime-model-pin.test.ts tests/pbl/v2/runtime-llm-entry.test.ts tests/lib/server/debate-harness-route.test.ts tests/security/integrated-middleware-policy.test.ts
   contributor-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -38,6 +70,12 @@ jobs:
         with:
           node-version: '22'
       - run: make dev-check
+      - name: Test the teaching client, durable jobs and course catalogue
+        run: |
+          python -m pip install -r ops/team/requirements.txt
+          python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_course_catalog_unit.py
+      - name: Verify cross-course navigation in desktop and mobile viewports
+        run: CHROME_BIN="$(command -v google-chrome)" node test/browser/teacher-course-navigation.mjs
       - name: Courseware editor browser component checks
         if: hashFiles('test/browser/courseware-quiz-editor.cjs') != ''
         env:
