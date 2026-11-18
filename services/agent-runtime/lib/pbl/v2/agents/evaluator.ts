@@ -89,6 +89,7 @@ export interface RunTaskEvaluationArgs {
    *  submission is sent multimodally (else it degrades to text-only eval). */
   hasVision?: boolean;
   signal?: AbortSignal;
+  newTeachingImageCaption?: string;
 }
 
 export interface RunMilestoneEvaluationArgs {
@@ -364,6 +365,7 @@ export async function* runTaskEvaluation(
   const { milestone, microtask } = lookup;
   const { system, user } = buildTaskEvalPrompt(project, milestone, microtask, {
     recentChatSummary,
+    newTeachingImageCaption: args.newTeachingImageCaption,
   });
   // Image submission + vision-capable model → grade the picture itself.
   // Otherwise (text/PDF, or a non-vision model) keep the text-only path.

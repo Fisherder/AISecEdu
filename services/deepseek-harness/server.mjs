@@ -139,6 +139,20 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
   });
 }
 
+export function validateProviderURL(value) {
+  const baseURL = value?.trim() || 'https://api.deepseek.com/anthropic';
+  const parsed = new URL(baseURL);
+  const authority = /^https?:\/\/([^/?#]+)/i.exec(baseURL)?.[1];
+  const exactLoopback = /^(127\.0\.0\.1|\[::1\]|localhost)(?::[0-9]+)?$/i.test(authority ?? '');
+  if (
+    parsed.username || parsed.password || parsed.search || parsed.hash ||
+    (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && exactLoopback))
+  ) {
+    throw new Error('Provider URL must use HTTPS or an explicit loopback HTTP fixture');
+  }
+  return parsed.href.replace(/\/+$/, '');
+}
+
 async function main() {
   const {
     HARNESS_SERVICE_SECRET: secret,
@@ -152,7 +166,7 @@ async function main() {
   }
   const port = Number(rawPort);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT');
-  const providerURL = baseURL?.trim() || 'https://api.deepseek.com/anthropic';
+  const providerURL = validateProviderURL(baseURL);
   const endpoint = new URL(providerURL.replace(/\/+$/, '') + '/v1/messages');
   const transport = globalThis.fetch;
   // The provider supports uploading persistent Files before a Messages call. This service

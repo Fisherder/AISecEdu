@@ -54,7 +54,8 @@ interface EvaluateRequest {
   milestoneId?: string;
   microtaskId?: string;
   recentChatSummary?: string;
-  selectedSubmissionImage?: { submissionId: string; dataUrl: string };
+  selectedSubmissionImage?: unknown;
+  newTeachingImage?: { dataUrl: string; consent: true; caption?: string };
 }
 
 function parseSelectedImage(value: unknown): TeachingTurnImage | undefined {
@@ -64,6 +65,38 @@ function parseSelectedImage(value: unknown): TeachingTurnImage | undefined {
   const image = { mediaType: match[1] as TeachingTurnImage['mediaType'], data: match[2] };
   if (Buffer.byteLength(image.data, 'base64') > 2 * 1024 * 1024) return;
   return image;
+}
+
+async function canSendNewTeachingImage(req: NextRequest): Promise<boolean> {
+  if (!/^(1|true|yes)$/i.test(process.env.AISECEDU_INTEGRATED?.trim() || '')) return false;
+  const sessionToken = req.cookies.get('aisecedu_agent_runtime')?.value;
+  const secret = process.env.AISECEDU_SERVICE_SECRET;
+  const origin = process.env.AISECEDU_INTERNAL_URL?.replace(/\/$/, '');
+  if (!sessionToken || !secret || !origin) return false;
+  try {
+    const res = await fetch(`${origin}/pwncollege_api/v1/teaching/runtime/introspect`, {
+      method: 'POST',
+      headers: { 'X-AISecEdu-Service-Token': secret, Authorization: `Bearer ${sessionToken}` },
+      cache: 'no-store',
+      redirect: 'error',
+      signal: AbortSignal.any([req.signal, AbortSignal.timeout(5000)]),
+    });
+    if (!res.ok) return false;
+    const { data } = await res.json();
+    return data?.active === true && data.ordinaryTeachingImageAllowed === true &&
+      Number.isSafeInteger(data.user?.id) && data.user.id > 0 &&
+      data.scope?.user_id === data.user.id &&
+      Number.isSafeInteger(data.scope.dojo_id) && data.scope.dojo_id > 0;
+  } catch {
+    return false;
+  }
+}
+
+export async function GET(req: NextRequest) {
+  return Response.json(
+    { allowed: Boolean(createHarnessTurn()) && await canSendNewTeachingImage(req) },
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -98,25 +131,28 @@ export async function POST(req: NextRequest) {
     body.kind === 'task' && body.microtaskId && Array.isArray(body.project.submissions)
       ? latestSubmissionForMicrotask(body.project, body.microtaskId)
       : undefined;
-  const selection = body.selectedSubmissionImage;
   const imageSubmission = submission?.kind === 'file' && submission.mimeType?.startsWith('image/');
   let taskTurn = harnessTurn;
-  if (selection !== undefined) {
-    const image = parseSelectedImage(selection?.dataUrl);
-    if (
-      body.project.scenario ||
-      !imageSubmission ||
-      submission.id !== selection?.submissionId ||
-      !image ||
-      submission.mimeType !== image.mediaType
-    ) {
-      return apiError('INVALID_REQUEST', 400, '只能评价当前普通项目中明确选择的学习提交图片。');
+  let newTeachingImageCaption: string | undefined;
+  if (body.selectedSubmissionImage !== undefined) {
+    return apiError('INVALID_REQUEST', 400, '历史附件仅供查看。若课程允许发送教学图片，请在本轮重新选择图片并确认发送。');
+  }
+  if (body.newTeachingImage !== undefined) {
+    if (!await canSendNewTeachingImage(req)) {
+      return apiError('FORBIDDEN', 403, '当前会话没有发送教学图片的课程权限。请提交文字说明。');
+    }
+    const image = parseSelectedImage(body.newTeachingImage?.dataUrl);
+    if (body.kind !== 'task' || body.project.scenario || body.newTeachingImage?.consent !== true || !image) {
+      return apiError('INVALID_REQUEST', 400, '请确认发送本轮新选的普通教学图片。');
     }
     const imageTurn = createTeachingImageTurn(image);
     if (!imageTurn) return apiError('UPSTREAM_ERROR', 503, '项目评价服务尚未配置。');
     taskTurn = imageTurn;
+    newTeachingImageCaption = typeof body.newTeachingImage.caption === 'string'
+      ? body.newTeachingImage.caption.trim().slice(0, 2000)
+      : '';
   } else if (imageSubmission && !submission.content?.trim()) {
-    return apiError('INVALID_REQUEST', 415, '请重新选择提交图片，或先提供可供评价的文字说明。');
+    return apiError('INVALID_REQUEST', 415, '请提供可供评价的文字说明，或在有权限的课程中明确选择发送本轮新图。');
   }
 
   if (body.kind === 'task') {
@@ -126,6 +162,7 @@ export async function POST(req: NextRequest) {
         milestoneId: body.milestoneId!,
         microtaskId: body.microtaskId!,
         harnessTurn: taskTurn,
+        newTeachingImageCaption,
         recentChatSummary: body.recentChatSummary,
         signal: req.signal,
       }),

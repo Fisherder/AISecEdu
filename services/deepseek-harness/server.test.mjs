@@ -3,7 +3,22 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { createEngine } from './engine.mjs';
-import { createService } from './server.mjs';
+import { createService, validateProviderURL } from './server.mjs';
+
+test('requires HTTPS for providers outside explicit loopback fixtures', () => {
+  assert.equal(validateProviderURL(), 'https://api.deepseek.com/anthropic');
+  assert.equal(validateProviderURL('https://provider.invalid/anthropic/'), 'https://provider.invalid/anthropic');
+  for (const host of ['127.0.0.1', '[::1]', 'localhost']) {
+    assert.equal(validateProviderURL(`http://${host}:3082/anthropic`), `http://${host}:3082/anthropic`);
+  }
+  for (const url of [
+    'http://provider.invalid', 'http://127.0.0.2', 'http://127.1', 'http://127.0.0.1.provider.invalid',
+    'http://localhost@provider.invalid', 'ftp://localhost', 'https://user:secret@provider.invalid',
+    'https://provider.invalid/?target=messages', 'https://provider.invalid/path#fragment',
+  ]) {
+    assert.throws(() => validateProviderURL(url), /Provider URL must use HTTPS/);
+  }
+});
 
 const secret = 'local-fixture-secret';
 const model = 'local-messages-fixture';

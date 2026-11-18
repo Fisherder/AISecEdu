@@ -35,6 +35,7 @@ const INTEGRATED_SESSION_API = [
   { pattern: /^\/api\/classroom$/, methods: new Set(['GET']) },
   { pattern: /^\/api\/classroom-media\/[A-Za-z0-9_-]+\//, methods: new Set(['GET']) },
   { pattern: /^\/api\/chat(?:\/pi)?$/, methods: new Set(['POST']) },
+  { pattern: /^\/api\/pbl\/v2\/evaluate$/, methods: new Set(['GET']) },
   { pattern: /^\/api\/pbl\//, methods: new Set(['POST']) },
   { pattern: /^\/api\/quiz-grade$/, methods: new Set(['POST']) },
   { pattern: /^\/api\/generate\/tts$/, methods: new Set(['POST']) },
