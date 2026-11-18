@@ -42,9 +42,11 @@ try {
   assert.match(html, /<title>DeepSeek Harness<\/title>/i);
   assert.ok(html.includes('__DSH_BOOT__'), 'The official server did not inject the Web bootstrap');
   // Match tags outside inline bootstrap scripts. The manifest contains HTML as data.
+  const namedEntities = { amp: '&', quot: '"', lt: '<', gt: '>' };
   const assets = Array.from(html.matchAll(/<script\b([^>]*)>[\s\S]*?<\/script>/gi))
-    .map(match => match[1].match(/(?:^|\s)src=["']([^"']+)["']/i)?.[1])
-    .filter(Boolean);
+    .map(match => match[1].match(/(?:^|\s)src=(["'])(.*?)\1/i)?.[2])
+    .filter(Boolean)
+    .map(src => src.replace(/&(amp|quot|lt|gt);/g, (_, key) => namedEntities[key]));
   assert.ok(assets.some(src => /(?:^|\/)assets\/index-[^/]+\.js$/.test(src)),
     'The official Web UI did not reference its bundled application entry');
   for (const src of assets) {
