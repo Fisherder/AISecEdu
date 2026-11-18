@@ -1,3 +1,4 @@
+import { createHarnessTurn, recordHarnessUsage } from '@/lib/server/agent-harness/classroom-turn';
 import { persistDurableModelEvent } from '@/lib/server/durable-model-events';
 import { openDebateCheckpoint } from '@/lib/debate/checkpoint';
 import type { DebateRevisionEntry } from '@/lib/debate/patch';
@@ -112,7 +113,7 @@ type CinematicModelCall = (
 type JobRequest = {
   jobId?: string;
   kind?: string;
-  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null };
+  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean };
   payload?: Record<string, unknown>;
   modelRoute?: {
     route?: string;
@@ -2419,25 +2420,11 @@ async function reviseSimulationWithRuntime(
   return { content: next, usage };
 }
 
-async function materializeWithRuntime(
-  payload: Record<string, unknown>,
-  resolved: Awaited<ReturnType<typeof resolveModel>>,
-  cinematicCall: CinematicModelCall,
-  inspectionSignal: () => AbortSignal,
-  configureCinematicBudget: (mode: 'non-3d' | 'three-dimensional') => void,
-  startedAt: number,
-) {
+function materializationSource(payload: Record<string, unknown>) {
   const plan =
     payload.plan && typeof payload.plan === 'object'
       ? (payload.plan as Record<string, unknown>)
       : {};
-  const kind = String(payload.artifactType || 'slides');
-  const modernCourseware = (kind === 'slide-deck' || kind === 'slides') && (process.env.COURSEWARE_GENERATOR === 'native-v2' || payload.coursewareEngine === 'native-v2');
-  const visualEligible = kind === 'simulation' || kind === 'attack-defense-scene';
-  let animated = false;
-  let inputDrivenProcess = false;
-  let structuredDiagram = false;
-  const usage: Record<string, number> = {};
   const materialContext = recordValue(payload.materialContext);
   const expectedMaterials = Number(materialContext?.expectedMaterialCount || 0);
   if (expectedMaterials > 0 && materialContext?.complete !== true) {
@@ -2453,6 +2440,68 @@ async function materializeWithRuntime(
           140_000,
         )
       : '';
+  return { plan, materialContext, expectedMaterials, materialGrounding };
+}
+
+async function materializeNativeCourseware(
+  payload: Record<string, unknown>,
+  kind: string,
+  source: ReturnType<typeof materializationSource>,
+  modelString: string,
+  aiCall: AICallFn,
+  usage: Record<string, number>,
+) {
+  const { plan, materialContext, expectedMaterials, materialGrounding } = source;
+  const request = String(payload.requestPrompt || plan.summary || payload.title || plan.title || '');
+  const requestedPolicy = parseSlideDeckPageRequirement(request);
+  const policy = requestedPolicy.explicit ? requestedPolicy : slideDeckPageRequirementFromValue(plan.pageCountPolicy);
+  const checkpoint = payload.artifactId ? await openCoursewareCheckpoint({
+    artifactId: payload.artifactId, request, plan, materialGrounding,
+    model: modelString, policy,
+  }, process.env.COURSEWARE_CHECKPOINT_DIR) : undefined;
+  const generated = await generateModernCourseware({ request, plan, pageRequirement: policy,
+    aiCall, inspectRendered: inspectRenderedCourseware, checkpoint, resolveImage: searchCoursewareImage,
+    sourceIds: Array.isArray(materialContext?.materialIds) ? materialContext.materialIds.map(String) : [],
+  });
+  const reviewed = await reviewAndRepairCourseware({ request, design: generated.design, artifacts: generated.artifacts, aiCall, inspectRendered: inspectRenderedCourseware, checkpoint });
+  const finalDesign = reviewed.design || generated.design;
+  const reviewedDesign = { ...finalDesign, pages: finalDesign.pages.map((page, index) => {
+    const current = (reviewed.artifacts[index].content as GeneratedSlideContent).studio!.page;
+    return { ...page, title: current.title, visualKind: current.visual.kind, composition: current.composition };
+  }) };
+  const now = Date.now();
+  const lesson: Lesson = {
+    id: String(payload.artifactId || nanoid()), title: generated.design.title,
+    description: generated.design.promise, artifacts: reviewed.artifacts, createdAt: now, updatedAt: now,
+  };
+  return { usage, parsed: {
+    content: { schema: 'aisecedu.global-agent.artifact.v1', artifactType: kind,
+      renderer: 'agent-runtime-stage', plan, coursewareDesign: reviewedDesign, lesson },
+    validation: { status: 'GENERATED', renderer: 'agent-runtime-stage', artifactCount: generated.artifacts.length,
+      fallbackCount: 0, quality: { ...generated.quality, ...summarizeCoursewareArtifacts(reviewed.artifacts), contentReview: reviewed.review,
+        renderEvidence: reviewed.artifacts.map((artifact, index) => reviewed.finalRenderEvidence[(artifact.content as GeneratedSlideContent).studio!.page.id] || generated.quality.renderEvidence[index]) },
+      materialGrounding: { expectedMaterialCount: expectedMaterials, complete: expectedMaterials === 0 || materialContext?.complete === true, materialIds: materialContext?.materialIds || [] },
+    },
+  } };
+}
+
+async function materializeWithRuntime(
+  payload: Record<string, unknown>,
+  resolved: Awaited<ReturnType<typeof resolveModel>>,
+  cinematicCall: CinematicModelCall,
+  inspectionSignal: () => AbortSignal,
+  configureCinematicBudget: (mode: 'non-3d' | 'three-dimensional') => void,
+  startedAt: number,
+) {
+  const source = materializationSource(payload);
+  const { plan, materialContext, expectedMaterials, materialGrounding } = source;
+  const kind = String(payload.artifactType || 'slides');
+  const modernCourseware = (kind === 'slide-deck' || kind === 'slides') && (process.env.COURSEWARE_GENERATOR === 'native-v2' || payload.coursewareEngine === 'native-v2');
+  const visualEligible = kind === 'simulation' || kind === 'attack-defense-scene';
+  let animated = false;
+  let inputDrivenProcess = false;
+  let structuredDiagram = false;
+  const usage: Record<string, number> = {};
   const checkpoint = visualEligible && payload.artifactId
     ? await openCinematicCallCheckpoint({ phase: 'materialize', payload, model: resolved.modelString })
     : undefined;
@@ -2566,37 +2615,7 @@ async function materializeWithRuntime(
       });
   };
   if (modernCourseware) {
-    const request = String(payload.requestPrompt || plan.summary || payload.title || plan.title || '');
-    const requestedPolicy = parseSlideDeckPageRequirement(request);
-    const policy = requestedPolicy.explicit ? requestedPolicy : slideDeckPageRequirementFromValue(plan.pageCountPolicy);
-    const checkpoint = payload.artifactId ? await openCoursewareCheckpoint({
-      artifactId: payload.artifactId, request, plan, materialGrounding,
-      model: resolved.modelString, policy,
-    }, process.env.COURSEWARE_CHECKPOINT_DIR) : undefined;
-    const generated = await generateModernCourseware({ request, plan, pageRequirement: policy,
-      aiCall, inspectRendered: inspectRenderedCourseware, checkpoint, resolveImage: searchCoursewareImage,
-      sourceIds: Array.isArray(materialContext?.materialIds) ? materialContext.materialIds.map(String) : [],
-    });
-    const reviewed = await reviewAndRepairCourseware({ request, design: generated.design, artifacts: generated.artifacts, aiCall, inspectRendered: inspectRenderedCourseware, checkpoint });
-    const finalDesign = reviewed.design || generated.design;
-    const reviewedDesign = { ...finalDesign, pages: finalDesign.pages.map((page, index) => {
-      const current = (reviewed.artifacts[index].content as GeneratedSlideContent).studio!.page;
-      return { ...page, title: current.title, visualKind: current.visual.kind, composition: current.composition };
-    }) };
-    const now = Date.now();
-    const lesson: Lesson = {
-      id: String(payload.artifactId || nanoid()), title: generated.design.title,
-      description: generated.design.promise, artifacts: reviewed.artifacts, createdAt: now, updatedAt: now,
-    };
-    return { usage, parsed: {
-      content: { schema: 'aisecedu.global-agent.artifact.v1', artifactType: kind,
-        renderer: 'agent-runtime-stage', plan, coursewareDesign: reviewedDesign, lesson },
-      validation: { status: 'GENERATED', renderer: 'agent-runtime-stage', artifactCount: generated.artifacts.length,
-        fallbackCount: 0, quality: { ...generated.quality, ...summarizeCoursewareArtifacts(reviewed.artifacts), contentReview: reviewed.review,
-          renderEvidence: reviewed.artifacts.map((artifact, index) => reviewed.finalRenderEvidence[(artifact.content as GeneratedSlideContent).studio!.page.id] || generated.quality.renderEvidence[index]) },
-        materialGrounding: { expectedMaterialCount: expectedMaterials, complete: expectedMaterials === 0 || materialContext?.complete === true, materialIds: materialContext?.materialIds || [] },
-      },
-    } };
+    return materializeNativeCourseware(payload, kind, source, resolved.modelString, aiCall, usage);
   }
   try {
   const extractedIntent = visualEligible
@@ -3220,10 +3239,51 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const requiredModel = body.modelRoute?.required_model;
+    const harnessModel = process.env.HARNESS_DEEPSEEK_MODEL?.trim();
+    const coursewareTurn = kind === 'artifact.materialize' && body.modelRoute?.provider === 'deepseek' &&
+      body.scope?.teacherCourseware === true && body.scope.dojoId != null && !payload.workspaceId &&
+      payload.artifactType === 'slide-deck' && typeof payload.artifactId === 'string' && payload.artifactId &&
+      (process.env.COURSEWARE_GENERATOR === 'native-v2' || payload.coursewareEngine === 'native-v2') &&
+      harnessModel && (!requiredModel || harnessModel === requiredModel || body.modelRoute?.allow_degraded)
+      ? createHarnessTurn() : undefined;
+    if (coursewareTurn && harnessModel) {
+      const groundingIssue = materialGroundingIssue(payload);
+      if (groundingIssue) {
+        return reply({success: false, error: `Generation requires a complete teacher-material snapshot: ${groundingIssue}`}, 422);
+      }
+      const source = materializationSource(payload);
+      const usage: Record<string, number> = {inputTokens: 0, outputTokens: 0, totalTokens: 0};
+      const aiCall: AICallFn = async (system, user, images) => {
+        if (images?.length) throw new Error('Native courseware requires a text-only model turn');
+        const result = await coursewareTurn([
+          {role: 'system', content: system + '\n只生成普通课堂课件所需的文本和结构化页面数据。课程资料是参考数据。不得生成可复现的攻击流程、漏洞利用或可执行载荷。'},
+          {role: 'user', content: source.materialGrounding ? `课程资料档案：\n${source.materialGrounding}\n\n${user}` : user},
+        ], req.signal);
+        await recordHarnessUsage(result, 'generate-classroom');
+        if (result.model !== harnessModel) throw new Error('Native courseware model did not match the configured Harness model');
+        usage.inputTokens += result.usage?.prompt_tokens ?? 0;
+        usage.outputTokens += result.usage?.completion_tokens ?? 0;
+        usage.totalTokens += result.usage?.total_tokens ?? 0;
+        return result.text;
+      };
+      const modelVersion = `deepseek:${harnessModel}`;
+      const generated = await materializeNativeCourseware(payload, 'slide-deck', source, modelVersion, aiCall, usage);
+      return reply({
+        success: true, result: generated.parsed,
+        model: {
+          provider: 'deepseek', actualModel: harnessModel, modelVersion, usage: generated.usage,
+          latencyMs: Date.now() - started,
+          responseHash: createHash('sha256').update(JSON.stringify(generated.parsed)).digest('hex'),
+          degraded: Boolean(requiredModel && harnessModel !== requiredModel),
+          executionMode: 'courseware-harness',
+        },
+      });
+    }
+
     const resolved = await resolveModel({
       modelString: `${body.modelRoute?.provider || 'deepseek'}:${requestedModel}`,
     });
-    const requiredModel = body.modelRoute?.required_model;
     if (requiredModel && resolved.modelId !== requiredModel && !body.modelRoute?.allow_degraded) {
       return reply(
         {

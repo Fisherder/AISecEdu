@@ -751,3 +751,35 @@ def test_canceling_provider_audit_uses_the_last_committed_response_fingerprint(s
         **common, "status": "cancelled", "terminationSource": "job-cancellation", "providerOutcomeKnown": False,
         "chunksCount": 1, "byteLength": len(body), "bodySha256": fingerprint,
     }
+
+
+def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifact():
+    tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
+    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                 and node.name == "_harness_courseware_authorized"]
+
+    def table(**row):
+        def filter_by(**criteria):
+            return SimpleNamespace(first=lambda: SimpleNamespace(**row) if all(
+                row.get(key) == value for key, value in criteria.items()
+            ) else None)
+        return SimpleNamespace(query=SimpleNamespace(filter_by=filter_by))
+
+    namespace = {
+        "TeachingArtifacts": table(id="artifact", owner_id=7, dojo_id=2, artifact_type="slide-deck",
+                                   self_workspace_id=None),
+        "Users": table(id=7, type="user"),
+        "DojoAdmins": table(dojo_id=2, user_id=7),
+        "upstream_enabled": lambda: True,
+    }
+    exec(compile(tree, "jobs.py", "exec"), namespace)
+    eligible = namespace["_harness_courseware_authorized"]
+    job = {"kind": "artifact.materialize", "dojo_id": 2, "owner_id": 7}
+    payload = {"artifactId": "artifact", "artifactType": "slide-deck"}
+    assert eligible(SimpleNamespace(**job), payload)
+    for changes in ({"owner_id": 9}, {"dojo_id": 4}, {"dojo_id": None}, {"kind": "self.candidate.generate"}):
+        assert not eligible(SimpleNamespace(**{**job, **changes}), payload)
+    assert not eligible(SimpleNamespace(**job), {**payload, "workspaceId": "student-workspace"})
+    assert not eligible(SimpleNamespace(**job), {**payload, "artifactType": "simulation"})
+    namespace["DojoAdmins"] = table(dojo_id=2, user_id=9)
+    assert not eligible(SimpleNamespace(**job), payload)

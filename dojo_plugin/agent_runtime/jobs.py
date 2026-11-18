@@ -2761,6 +2761,27 @@ def _index_material_on_worker(job, payload):
     )
 
 
+def _harness_courseware_authorized(job, payload):
+    if (
+        job.kind != "artifact.materialize" or job.dojo_id is None
+        or payload.get("artifactType") != "slide-deck" or payload.get("workspaceId")
+        or not payload.get("artifactId") or not upstream_enabled()
+    ):
+        return False
+    artifact = TeachingArtifacts.query.filter_by(
+        id=payload["artifactId"], owner_id=job.owner_id, dojo_id=job.dojo_id,
+        self_workspace_id=None, artifact_type="slide-deck",
+    ).first()
+    if artifact is None:
+        return False
+    owner = Users.query.filter_by(id=job.owner_id).first()
+    return bool(owner and (
+        owner.type == "admin" or DojoAdmins.query.filter_by(
+            dojo_id=job.dojo_id, user_id=job.owner_id,
+        ).first() is not None
+    ))
+
+
 def _runtime_request_body(job, route, payload):
     upstream_chat = job.kind == "agent.chat" and payload.get("chatBackend") == "upstream"
     if job.kind == "agent.chat":
@@ -2803,6 +2824,7 @@ def _runtime_request_body(job, route, payload):
             "ownerId": job.owner_id,
             "dojoId": job.dojo_id,
             "moduleIndex": job.module_index,
+            **({"teacherCourseware": True} if _harness_courseware_authorized(job, payload) else {}),
         },
         "payload": payload,
         "modelRoute": route,
