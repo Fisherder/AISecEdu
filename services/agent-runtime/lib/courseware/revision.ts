@@ -207,7 +207,7 @@ export async function reviseModernCourseware(input: {
         ).value
       : source.page);
     const studio = input.projectedTextPatch
-      ? { ...source, page }
+      ? { ...source, page: { ...source.page, ...page } }
       : { page, theme, assets: source.assets };
     if (!edit) {
       const issues = inspectCoursewareSlide(studio);

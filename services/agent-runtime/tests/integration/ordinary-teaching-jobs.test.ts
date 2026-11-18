@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { coursewareSlideDataSchema } from '@/lib/courseware/schema';
+import { compileCoursewareSlide } from '@/lib/courseware/compiler';
 import { ordinaryCandidate, ordinaryMaterialAnalysis, ordinarySlidePatch } from '@/lib/server/agent-harness/ordinary-teaching';
 
 const mocks = vi.hoisted(() => ({ resolveModel: vi.fn(), inspectRendered: vi.fn(), usage: vi.fn() }));
@@ -105,6 +106,18 @@ function assertScopedSlidePrompt(url: unknown, init: {headers: Record<string, st
   expect(packet.editableTextFields.map((field: {path: string}) => field.path)).not.toContain('speakerNotes');
   return number as 2 | 4;
 }
+
+it('centers static slide headers vertically without shifting the comparison body', () => {
+  const [{content: {studio}}] = plantDeck();
+  const {elements} = compileCoursewareSlide(studio);
+  const find = (id: string) => elements.find(element => element.id === id);
+  expect(find('page-title')).toMatchObject({...studio.page.layout!.title.box, vAlign: 'middle'});
+  expect(find('column-0')).toMatchObject({type: 'text', vAlign: 'middle'});
+  expect(find('column-1')).toMatchObject({type: 'text', vAlign: 'middle'});
+  expect(find('page-promise')).not.toHaveProperty('vAlign');
+  expect(find('criterion-0')).not.toHaveProperty('vAlign');
+  expect(find('comparison-0-0')).not.toHaveProperty('vAlign');
+});
 
 describe('ordinary teaching worker service routes', () => {
   beforeEach(() => {
@@ -346,6 +359,73 @@ describe('ordinary teaching worker service routes', () => {
     expect(response.status).toBe(422);
     expect(fetch).not.toHaveBeenCalled();
     expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('inspects and preserves identifiable manual positions on a historical compiled canvas', async () => {
+    const artifacts = plantDeck();
+    const selected = artifacts[1];
+    const baseline = compileCoursewareSlide(selected.content.studio);
+    Object.assign(selected.content.studio, {authorNotes: 'STUDIO-PRIVATE-EXTENSION'});
+    Object.assign(selected.content.studio.page, {authorNotes: 'PAGE-PRIVATE-EXTENSION'});
+    Object.assign(selected.content.studio.assets[0], {attributionNotes: 'ASSET-PRIVATE-EXTENSION'});
+    Object.assign(selected.content, {
+      background: baseline.background,
+      elements: baseline.elements.map(element => {
+        if (element.type !== 'text') return element;
+        const legacy = {...element};
+        delete legacy.vAlign;
+        if (legacy.id === 'page-title') legacy.left -= 4;
+        return legacy;
+      }),
+    });
+    const fetch = vi.fn(async () =>
+      modelResponse({changes: [{op: 'set', path: ['title'], value: revisedTitles[2]}]}));
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request('artifact.revise', 'slide-wording', {
+      artifactType: 'slide-deck', instruction: '仅润色第2页措辞：把标题写成清晰的问题',
+      currentContent: {lesson: {artifacts}},
+    }));
+    const output = await response.json();
+    expect(response.status, JSON.stringify(output)).toBe(200);
+    const revised = output.result.content.lesson.artifacts[1];
+    expect(revised.content.studio.page.layout.title.box.left).toBe(26);
+    expect(revised.content.elements.find((element: {id: string}) => element.id === 'page-title'))
+      .toMatchObject({left: 26, vAlign: 'middle'});
+    expect(mocks.inspectRendered).toHaveBeenCalledWith(expect.objectContaining({page: expect.objectContaining({
+      layout: revised.content.studio.page.layout,
+      title: revisedTitles[2],
+    })}));
+    expect(revised.content.studio.authorNotes).toBe('STUDIO-PRIVATE-EXTENSION');
+    expect(revised.content.studio.page.authorNotes).toBe('PAGE-PRIVATE-EXTENSION');
+    expect(revised.content.studio.assets[0].attributionNotes).toBe('ASSET-PRIVATE-EXTENSION');
+    expect(JSON.stringify(fetch.mock.calls)).not.toContain('PRIVATE-EXTENSION');
+    expect(revised.content.remark).toBe(selected.content.remark);
+  });
+
+  it.each(['manual text', 'custom element'])('retains the original revision when the canvas has %s', async edit => {
+    const artifacts = plantDeck();
+    const selected = artifacts[3];
+    const baseline = compileCoursewareSlide(selected.content.studio);
+    const elements = edit === 'manual text'
+      ? baseline.elements.map(element => element.type === 'text' && element.id === 'page-title'
+        ? {...element, content: '<p>教师原生画布文字</p>'} : element)
+      : [...baseline.elements, {...baseline.elements[0], id: 'teacher-extra'}];
+    Object.assign(selected.content, {elements, background: baseline.background});
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(request('artifact.revise', 'slide-wording', {
+      artifactType: 'slide-deck', instruction: '仅润色第2、4页措辞：把标题写得更明确',
+      currentContent: {lesson: {artifacts}},
+    }));
+    const output = await response.json();
+    expect(response.status).toBe(409);
+    expect(output).toMatchObject({success: false, errorCode: 'SLIDE_WORDING_CANVAS_CONFLICT', failureCategory: 'permanent'});
+    expect(output).not.toHaveProperty('result');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+    expect(mocks.inspectRendered).not.toHaveBeenCalled();
   });
 
   it.each([

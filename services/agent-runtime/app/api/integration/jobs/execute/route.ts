@@ -26,6 +26,8 @@ import {
 } from '@/lib/generation/candidate-pipeline';
 import { generateSingleArtifact, type SingleArtifactInput } from '@/lib/server/lesson-generation';
 import { generateModernCourseware } from '@/lib/courseware/generation';
+import { compileCoursewareSlide } from '@/lib/courseware/compiler';
+import { isEqual } from 'lodash';
 import { inspectRenderedCourseware } from '@/lib/courseware/render-client';
 import { COURSEWARE_MAX_PAGES, coursewareSlideDataSchema } from '@/lib/courseware/schema';
 import { openCoursewareCheckpoint } from '@/lib/courseware/checkpoints';
@@ -3137,6 +3139,48 @@ async function analyzeMaterialComprehensively(
   return { analysis, chunks: extracted.chunks, usage };
 }
 
+function reconcileOrdinarySlideCanvas(
+  content: Record<string, unknown> | null,
+  studio: Parameters<typeof compileCoursewareSlide>[0],
+) {
+  if (!content || (content.elements === undefined && content.background === undefined)) return studio;
+  const baseline = compileCoursewareSlide(studio);
+  if (content.background !== undefined && !isEqual(content.background, baseline.background)) return null;
+  if (content.elements === undefined) return studio;
+  // Slides saved before header centering legitimately have no vAlign on these elements.
+  const matches = (elements: typeof baseline.elements) => isEqual(content.elements, elements) ||
+    isEqual(content.elements, elements.map(element => {
+      if (element.type !== 'text' || element.vAlign !== 'middle') return element;
+      const legacy = { ...element };
+      delete legacy.vAlign;
+      return legacy;
+    }));
+  if (matches(baseline.elements)) return studio;
+
+  const {layout} = studio.page;
+  if (!layout || !Array.isArray(content.elements)) return null;
+  const saved = new Map(content.elements.map(raw => {
+    const element = recordValue(raw);
+    return [element?.id, element];
+  }));
+  const copyRegion = (id: string, region: typeof layout.title) => {
+    const element = saved.get(id);
+    return {...region, box: {
+      left: element?.left, top: element?.top, width: element?.width, height: element?.height,
+    }};
+  };
+  const candidate = coursewareSlideDataSchema.safeParse({
+    ...studio,
+    page: {...studio.page, layout: {
+      ...layout,
+      title: copyRegion('page-title', layout.title),
+      takeaway: copyRegion('page-promise', layout.takeaway),
+      supporting: layout.supporting.map((region, index) => copyRegion(`support-${index}`, region)),
+    }},
+  });
+  return candidate.success && matches(compileCoursewareSlide(candidate.data).elements) ? candidate.data : null;
+}
+
 function ordinarySlideTarget(payload: Record<string, unknown>) {
   const specification = typeof payload.instruction === 'string' ? payload.instruction.trim() : '';
   if (specification.length > 4096) return {error: '本次文字修订要求过长。'};
@@ -3170,15 +3214,34 @@ function ordinarySlideTarget(payload: Record<string, unknown>) {
     return {error: '课件页标识缺失或重复，无法安全修订。'};
   }
   const pageIds: string[] = [];
+  const reconciledArtifacts = [...artifacts] as LessonArtifact[];
   for (const number of pageNumbers.sort((a, b) => a - b)) {
-    const target = coursewareSlideDataSchema.safeParse(recordValue(recordValue(artifacts[number - 1])?.content)?.studio);
+    const native = recordValue(recordValue(artifacts[number - 1])?.content);
+    const target = coursewareSlideDataSchema.safeParse(native?.studio);
     if (!target.success || !['image', 'chart', 'comparison'].includes(target.data.page.visual.kind) ||
         target.data.page.beats.length || target.data.page.check) {
       return {error: `第${number}页不符合静态课件文字修订条件。`};
     }
-    pageIds.push(target.data.page.id);
+    const studio = reconcileOrdinarySlideCanvas(native, target.data);
+    if (!studio) {
+      return {
+        error: `第${number}页有手工画布修改。当前版本已保留，请在课件画布编辑器中调整该页文字。`,
+        canvasConflict: true,
+      };
+    }
+    if (studio !== target.data) {
+      const original = reconciledArtifacts[number - 1];
+      const savedStudio = recordValue(native?.studio);
+      const savedPage = recordValue(savedStudio?.page);
+      const updatedStudio = {
+        ...studio, ...savedStudio,
+        page: {...studio.page, ...savedPage, layout: studio.page.layout},
+      };
+      reconciledArtifacts[number - 1] = {...original, content: {...original.content, studio: updatedStudio}};
+    }
+    pageIds.push(studio.page.id);
   }
-  return {content, lesson, artifacts: artifacts as LessonArtifact[], pageIds, instruction: match[2].trim()};
+  return {content, lesson, artifacts: reconciledArtifacts, pageIds, instruction: match[2].trim()};
 }
 
 class OrdinarySlideModelUnavailable extends Error {}
@@ -3358,7 +3421,15 @@ export async function POST(req: NextRequest) {
       return ordinaryWordingInvalid('当前任务不符合普通课程课件文字修订条件。');
     }
     const ordinaryRevision = ordinaryWording ? ordinarySlideTarget(payload) : null;
-    if (ordinaryRevision?.error) return ordinaryWordingInvalid(ordinaryRevision.error);
+    if (ordinaryRevision?.error) {
+      if (ordinaryRevision.canvasConflict) {
+        return reply({
+          success: false, error: ordinaryRevision.error, errorCode: 'SLIDE_WORDING_CANVAS_CONFLICT',
+          failureCategory: 'permanent',
+        }, 409);
+      }
+      return ordinaryWordingInvalid(ordinaryRevision.error);
+    }
 
     if (kind === 'material.analyze') {
       const extracted = await extractMaterial(jobId, payload, traceId);

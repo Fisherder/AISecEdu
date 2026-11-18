@@ -153,6 +153,8 @@ export function compileCoursewareSlide(
   const hotspots: CoursewareHotspot[] = [];
   const bounds = visualBounds(page);
   const beat = page.beats[Math.min(beatIndex, page.beats.length - 1)];
+  const headerVAlign = !page.beats.length && !page.check &&
+    ['image', 'chart', 'comparison'].includes(page.visual.kind) ? 'middle' : undefined;
   const add = (value: Record<string, unknown>) =>
     elements.push(normalizeElement({ rotate: 0, ...value }));
   const text = (
@@ -164,6 +166,7 @@ export function compileCoursewareSlide(
     weight = 400,
     align = 'left',
     font = 'Noto Sans SC',
+    vAlign?: 'middle',
   ) => {
     textBoxes.push({ id, text: value, ...box, fontSize: size });
     add({
@@ -173,6 +176,7 @@ export function compileCoursewareSlide(
       defaultFontName: font,
       defaultColor: color,
       lineHeight: 1.2,
+      ...(vAlign ? { vAlign } : {}),
       content: `<p style="font-family:${font === 'JetBrains Mono' ? "'JetBrains Mono',Consolas,Menlo,monospace" : "'Noto Sans SC','Microsoft YaHei',sans-serif"};font-size:${size}px;font-weight:${weight};color:${color};line-height:1.2;text-align:${align};white-space:pre-wrap;overflow-wrap:anywhere">${coursewareText(value)}</p>`,
     });
   };
@@ -210,7 +214,10 @@ export function compileCoursewareSlide(
 
   if (page.layout) {
     const { title, takeaway, supporting } = page.layout;
-    text('page-title', page.title, title.box, title.fontSize, theme.foreground, 750, title.align);
+    text(
+      'page-title', page.title, title.box, title.fontSize, theme.foreground, 750, title.align,
+      undefined, headerVAlign,
+    );
     text(
       'page-promise',
       page.takeaway,
@@ -239,6 +246,9 @@ export function compileCoursewareSlide(
       38,
       theme.foreground,
       750,
+      undefined,
+      undefined,
+      headerVAlign,
     );
     if (page.composition === 'split') {
       text(
@@ -497,6 +507,9 @@ export function compileCoursewareSlide(
         23,
         theme.foreground,
         700,
+        undefined,
+        undefined,
+        headerVAlign,
       ),
     );
     line(
