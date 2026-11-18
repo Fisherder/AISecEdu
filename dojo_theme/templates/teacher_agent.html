@@ -212,6 +212,15 @@
       </div>
     </header>
     <div id="teaching-notice" class="teaching-notice" role="alert" hidden></div>
+    {% if not is_student_agent %}
+    <section id="teaching-ordinary-classrooms" class="px-3 py-2" aria-label="普通教学课堂" hidden>
+      <label for="teaching-ordinary-classroom-select">普通教学课堂</label>
+      <select id="teaching-ordinary-classroom-select"></select>
+      <button id="teaching-ordinary-classroom-start" type="button" class="btn btn-primary" disabled>开始课堂</button>
+      <button id="teaching-ordinary-classroom-end" type="button" class="btn btn-outline-secondary" disabled>结束课堂</button>
+      <button id="teaching-ordinary-classroom-open" type="button" class="btn btn-outline-primary" disabled>打开课堂</button>
+    </section>
+    {% endif %}
     <div
       id="teaching-messages"
       class="teaching-messages"
@@ -819,6 +828,6 @@
 {% endif %}
 <script
   defer
-  src="{{ url_for('views.themes', path=('js/dojo/learning-guide.js' if is_student_agent else 'js/dojo/teaching-agent.js'), v=('aisecedu-student-agent-unified-v6-deadline' if is_student_agent else 'inquiry-cocreation-20261019-4')) }}"
+  src="{{ url_for('views.themes', path=('js/dojo/learning-guide.js' if is_student_agent else 'js/dojo/teaching-agent.js'), v=('aisecedu-student-agent-unified-v6-deadline' if is_student_agent else 'ordinary-classroom-20261119-1')) }}"
 ></script>
 {% endblock %}

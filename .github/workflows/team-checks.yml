@@ -108,6 +108,8 @@ jobs:
       - name: Install the pinned Tutor Chromium binary
         if: steps.tutor-chromium-cache.outputs.cache-hit != 'true'
         run: pnpm exec playwright install chromium
+      - name: Verify the teacher classroom selector and approval flow in Chromium
+        run: node ../../test/browser/teacher-classroom-preparation.cjs --chromium
       - name: Verify Tutor illustration selection, consent and fallback in Chromium
         run: node ../../test/browser/tutor-teaching-image.cjs
       - name: Verify the immutable teacher workbench and classroom preparation in Chromium
@@ -143,8 +145,6 @@ jobs:
             test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py
       - name: Verify cross-course navigation in desktop and mobile viewports
         run: CHROME_BIN="$(command -v google-chrome)" node test/browser/teacher-course-navigation.mjs
-      - name: Verify the approved classroom preparation and retry flow
-        run: node test/browser/teacher-classroom-preparation.cjs
       - name: Courseware editor browser component checks
         if: hashFiles('test/browser/courseware-quiz-editor.cjs') != ''
         env:

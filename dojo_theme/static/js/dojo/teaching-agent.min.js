@@ -84,6 +84,11 @@
     sessionStart: document.getElementById("teaching-session-start"),
     sessionEnd: document.getElementById("teaching-session-end"),
     sessionOpen: document.getElementById("teaching-session-open"),
+    ordinaryClassroom: document.getElementById("teaching-ordinary-classrooms"),
+    ordinaryClassroomSelect: document.getElementById("teaching-ordinary-classroom-select"),
+    ordinaryClassroomStart: document.getElementById("teaching-ordinary-classroom-start"),
+    ordinaryClassroomEnd: document.getElementById("teaching-ordinary-classroom-end"),
+    ordinaryClassroomOpen: document.getElementById("teaching-ordinary-classroom-open"),
     artifacts: document.getElementById("teaching-artifact-list"),
     drawer: document.getElementById("teaching-drawer"),
     drawerOpen: document.getElementById("teaching-drawer-open"),
@@ -229,6 +234,12 @@
     openAgentTraceItemIds: new Set(),
     candidateSet: null,
     activeSession: null,
+    ordinaryClassrooms: [],
+    ordinaryClassroomId: null,
+    ordinaryClassroomScope: null,
+    sessionListRequest: null,
+    classroomSelectionRequest: null,
+    classroomCommand: null,
     sourceMaterialIds: new Set(),
     pendingMaterialIds: new Set(),
     sourceSelectionThreadId: null,
@@ -1070,6 +1081,7 @@
 
   function syncThreadLocation({ keepLaunchIntent = false } = {}) {
     const url = new URL(window.location.href);
+    if (url.searchParams.get("thread") !== state.thread?.id) url.searchParams.delete("classroom");
     if (state.thread?.id) {
       url.searchParams.set("thread", state.thread.id);
       url.searchParams.delete("newProject");
@@ -1077,7 +1089,7 @@
       url.searchParams.delete("thread");
       url.searchParams.set("newProject", "1");
     }
-    url.searchParams.set("view", "conversation");
+    if (url.searchParams.get("view") !== "dashboard") url.searchParams.set("view", "conversation");
     if (!keepLaunchIntent) {
       for (const key of ["prompt", "dojo", "dojoId", "module", "moduleIndex", "artifactType", "candidateMode", "tasks", "job"]) {
         url.searchParams.delete(key);
@@ -6382,23 +6394,150 @@
       <details><summary>查看学生细粒度事实</summary><ul class="progress-student-list">${students.map((item) => `<li><span>${api.escapeHtml(item.name)}</span><strong>${item.requiredSolved}/${item.requiredTotal}</strong><small>${item.attemptCount} 次尝试 · ${Math.round((item.verifiedCompletion || 0) * 100)}%</small></li>`).join("") || "<li>暂无学生记录</li>"}</ul></details>`;
   }
 
+  function classroomScopeSnapshot() {
+    return {
+      threadId: state.thread?.id,
+      epoch: state.threadLoadEpoch || 0,
+      dojo: elements.dojo.value,
+      module: elements.module.value,
+    };
+  }
+
+  function classroomScopeCurrent(scope) {
+    return Boolean(scope && state.thread?.status === "ACTIVE" &&
+      threadActionCurrent(scope) && elements.dojo.value === scope.dojo &&
+      elements.module.value === scope.module && state.thread.dojoId === Number(scope.dojo) &&
+      state.thread.moduleIndex === (scope.module === "" ? null : Number(scope.module)));
+  }
+
+  function renderOrdinaryClassrooms() {
+    if (!elements.ordinaryClassroom) return;
+    const scoped = classroomScopeCurrent(state.ordinaryClassroomScope);
+    const {ordinaryClassrooms} = state;
+    const selected = scoped ? ordinaryClassrooms.find(item => item.id === state.ordinaryClassroomId) : null;
+    const labels = { READY: "待开始", PAUSED: "已暂停", LIVE: "进行中", ENDED: "已结束" };
+    const visible = scoped && ordinaryClassrooms.length > 0;
+    elements.ordinaryClassroom.hidden = !visible;
+    const busy = Boolean(state.classroomCommand);
+    elements.ordinaryClassroomSelect.disabled = !visible || busy;
+    elements.ordinaryClassroomStart.disabled = busy || !["READY", "PAUSED"].includes(selected?.status);
+    elements.ordinaryClassroomEnd.disabled = busy || selected?.status !== "LIVE";
+    elements.ordinaryClassroomOpen.disabled = busy || !["LIVE", "ENDED"].includes(selected?.status);
+    if (!visible) return;
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.disabled = true;
+    placeholder.textContent = "选择课堂";
+    elements.ordinaryClassroomSelect.replaceChildren(placeholder, ...ordinaryClassrooms.map(item => {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = `${item.title}（${labels[item.status]}）`;
+      return option;
+    }));
+    elements.ordinaryClassroomSelect.value = selected?.id || "";
+  }
+
+  function rememberClassroomSelection(id) {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("thread") !== state.thread?.id) return;
+    url.searchParams.set("classroom", id);
+    window.history.replaceState(window.history.state, "", url);
+  }
+
+  function selectOrdinaryClassroom(id) {
+    if (!classroomScopeCurrent(state.ordinaryClassroomScope) || state.classroomCommand ||
+        !state.ordinaryClassrooms.some(item => item.id === id)) return;
+    state.classroomSelectionRequest = null;
+    state.ordinaryClassroomId = id;
+    rememberClassroomSelection(id);
+    renderOrdinaryClassrooms();
+  }
+
+  async function actOnOrdinaryClassroom(command) {
+    const scope = classroomScopeSnapshot();
+    if (!classroomScopeCurrent(scope) || !classroomScopeCurrent(state.ordinaryClassroomScope) ||
+        state.classroomCommand) return;
+    const selected = state.ordinaryClassrooms.find(item => item.id === state.ordinaryClassroomId);
+    const allowed = {start: ["READY", "PAUSED"], end: ["LIVE"], open: ["LIVE", "ENDED"]};
+    if (!selected || !allowed[command]?.includes(selected.status)) return;
+    const action = {};
+    const stillSelected = () => classroomScopeCurrent(scope) && state.ordinaryClassroomId === selected.id;
+    state.classroomCommand = action;
+    renderOrdinaryClassrooms();
+    try {
+      if (command === "open") {
+        const launch = unwrap(await api.json("POST", "/teaching/runtime/launch", {
+          role: "teacher", dojoId: selected.dojoId, moduleIndex: selected.moduleIndex,
+          target: `/classroom/${selected.id}`,
+        }));
+        if (stillSelected()) window.location.href = launch.launchUrl;
+        return;
+      }
+      const {action: control} = unwrap(await api.json(
+        "POST", `/teaching/sessions/${encodeURIComponent(selected.id)}/control`, { command },
+      ));
+      if (!stillSelected()) return;
+      if (control?.targetId !== selected.id || control.request?.command !== command || !control.approvalRequest) {
+        throw new Error("课堂操作没有返回与所选课堂一致的审批请求。");
+      }
+      const verb = command === "start" ? "开始课堂" : "结束课堂";
+      const confirmed = await window.AISecEduUI.confirm(
+        `确认${verb}「${selected.title}」？`, {title: verb, confirmLabel: verb, confirmStyle: "primary"},
+      );
+      if (!confirmed || !stillSelected()) return;
+      const result = unwrap(await api.json("POST", `/teaching/actions/${encodeURIComponent(control.id)}/decision`, {
+        decision: "APPROVED", confirmed: true, approvalRequest: control.approvalRequest,
+      }));
+      const completed = await window.AISecEduCommands.waitForAction(result.action, {
+        read: async id => unwrap(await api.request(`/teaching/actions/${encodeURIComponent(id)}/decision`)).action,
+      });
+      if (!stillSelected()) return;
+      if (completed?.status !== "APPROVED") throw new Error(completed?.error || "课堂操作未完成。");
+      await loadSessions(scope, selected.id);
+    } catch (error) {
+      if (stillSelected()) throw error;
+    } finally {
+      if (state.classroomCommand === action) state.classroomCommand = null;
+      renderOrdinaryClassrooms();
+    }
+  }
+
   async function loadSessions(action, preferredSessionId) {
-    const selectedDojo = elements.dojo.value;
-    const selectedModule = elements.module.value;
-    const data = unwrap(await api.request("/teaching/sessions"));
-    if (action && (
-      !threadActionCurrent(action) ||
-      elements.dojo.value !== selectedDojo || elements.module.value !== selectedModule
-    )) return;
+    const scope = classroomScopeSnapshot();
+    if (!classroomScopeCurrent(scope) || (action && !threadActionCurrent(action))) return;
+    if (preferredSessionId) state.classroomSelectionRequest = {scope, id: preferredSessionId};
+    const request = {};
+    state.sessionListRequest = request;
+    const params = new URLSearchParams({view: "summary", dojoId: scope.dojo, moduleIndex: scope.module});
+    const preference = state.classroomSelectionRequest;
+    const selectedId = classroomScopeCurrent(preference?.scope)
+      ? preference.id
+      : classroomScopeCurrent(state.ordinaryClassroomScope) ? state.ordinaryClassroomId : null;
+    if (selectedId) params.set("sessionId", selectedId);
+    const data = unwrap(await api.request(`/teaching/sessions?${params.toString()}`));
+    if (state.sessionListRequest !== request || !classroomScopeCurrent(scope)) return;
     const dojoId = Number(elements.dojo.value || 0);
     const moduleIndex =
       elements.module.value === "" ? null : Number(elements.module.value);
     const matching = (data.sessions || []).filter(
       (item) => item.dojoId === dojoId && item.moduleIndex === moduleIndex,
     );
+    const priorOrdinaryId = classroomScopeCurrent(state.ordinaryClassroomScope) ? state.ordinaryClassroomId : null;
+    state.ordinaryClassrooms = matching.filter(item => item.ordinaryPrepared === true &&
+      ["READY", "PAUSED", "LIVE", "ENDED"].includes(item.status));
+    state.ordinaryClassroomScope = scope;
+    const currentPreference = state.classroomSelectionRequest;
+    const preferredId = classroomScopeCurrent(currentPreference?.scope) ? currentPreference.id : null;
+    const requested = preferredId || priorOrdinaryId;
+    state.ordinaryClassroomId = requested
+      ? state.ordinaryClassrooms.find(item => item.id === requested)?.id || null
+      : state.ordinaryClassrooms[0]?.id || null;
+    if (preferredId && state.ordinaryClassroomId) rememberClassroomSelection(state.ordinaryClassroomId);
+    state.classroomSelectionRequest = null;
+    renderOrdinaryClassrooms();
     state.activeSession =
+      matching.find((item) => item.id === preferredId && item.status === "READY") ||
       matching.find((item) => item.status === "LIVE") ||
-      matching.find((item) => item.id === preferredSessionId && item.status === "READY") ||
       matching.find((item) => ["READY", "PAUSED"].includes(item.status)) ||
       null;
     const labels = {
@@ -6789,6 +6928,7 @@
     if (state.threadEventWatch && state.threadEventWatch.threadId !== id)
       stopThreadEventWatch();
     const epoch = state.threadLoadEpoch = (state.threadLoadEpoch || 0) + 1;
+    renderOrdinaryClassrooms();
     const changingThread = !state.thread || state.thread.id !== id;
     if (changingThread) closeArtifactReview();
     if (changingThread) saveComposerDraft();
@@ -6851,7 +6991,18 @@
         .slice(-3);
       await Promise.all(visibleActiveJobs.map((job) => refreshJobDetails(job.id).catch(() => {})));
     }
-    if (epoch === state.threadLoadEpoch) startThreadEventWatch();
+    if (epoch === state.threadLoadEpoch) {
+      startThreadEventWatch();
+      const location = new URLSearchParams(window.location.search);
+      const requestedClassroom = location.get("thread") === id ? location.get("classroom") : null;
+      if (state.thread.messages?.some(message => Object.values(message.metadata?.toolExecutionResults || {}).some(
+        result => result?.tool === "classroom.prepare" && result.status === "SUCCEEDED"
+      ))) {
+        loadSessions(classroomScopeSnapshot(), requestedClassroom).catch(error => {
+          if (epoch === state.threadLoadEpoch) showError(error);
+        });
+      }
+    }
   }
 
   function collectJobs() {
@@ -8454,11 +8605,13 @@
   );
   elements.dojo.addEventListener("change", () => {
     populateModules();
+    renderOrdinaryClassrooms();
     saveContext().catch(showError);
   });
-  elements.module.addEventListener("change", () =>
-    saveContext().catch(showError),
-  );
+  elements.module.addEventListener("change", () => {
+    renderOrdinaryClassrooms();
+    saveContext().catch(showError);
+  });
   elements.candidateMode.addEventListener("change", () => {
     elements.countRow.hidden = elements.candidateMode.value !== "multiple";
   });
@@ -8584,6 +8737,12 @@
         loadSessions(),
       ]).catch(showError),
     );
+  elements.ordinaryClassroomSelect?.addEventListener("change", event =>
+    selectOrdinaryClassroom(event.target.value),
+  );
+  elements.ordinaryClassroomStart?.addEventListener("click", () => actOnOrdinaryClassroom("start").catch(showError));
+  elements.ordinaryClassroomEnd?.addEventListener("click", () => actOnOrdinaryClassroom("end").catch(showError));
+  elements.ordinaryClassroomOpen?.addEventListener("click", () => actOnOrdinaryClassroom("open").catch(showError));
   elements.sessionStart.addEventListener("click", () =>
     startSession().catch(showError),
   );

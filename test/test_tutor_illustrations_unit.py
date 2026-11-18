@@ -12,7 +12,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from sqlalchemy import JSON, Column, Integer, String, and_, cast, create_engine, event, exists, or_
+from flask import Flask, request
+from sqlalchemy import JSON, Column, Integer, String, and_, case, cast, create_engine, event, exists, or_
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import aliased, declarative_base, scoped_session, sessionmaker
 
@@ -54,7 +55,7 @@ class Challenge(Base):
         return SimpleNamespace(visible=lambda: self.module_visibility == 1)
 
 
-Classroom = _model("classroom", ints="dojo_id module_index owner_id", strings="title thread_id status updated started ended", documents="state")
+Classroom = _model("classroom", ints="dojo_id module_index owner_id", strings="title thread_id status created updated started ended", documents="state")
 Action = _model("action", ints="actor_id", strings="target_id thread_id action_type status target_type", documents="request_json result")
 Artifact = _model(
     "artifact", ints="owner_id dojo_id module_index current_revision", strings="status artifact_type self_workspace_id",
@@ -78,7 +79,7 @@ def illustrations(monkeypatch):
     flags = SimpleNamespace(image_enabled=True, ordinary=True)
     namespace = dict(
         base64=base64, binascii=binascii, re=re, json=json, hashlib=hashlib, and_=and_, or_=or_,
-        cast=cast, exists=exists, aliased=aliased, String=String,
+        case=case, cast=cast, exists=exists, aliased=aliased, String=String,
         guide_teaching_text=lambda label, limit: label[:limit],
         Users=User, DojoAdmins=Membership, DojoChallenges=Challenge, DojoUsers=Enrollment,
         LearningAttempts=Attempt, TeachingSessions=Classroom, TeachingAgentActions=Action,
@@ -141,6 +142,7 @@ def illustrations(monkeypatch):
         user=SimpleNamespace(id=1), attempt=attempt, db=db, flags=flags, statements=statements,
         classroom=classroom, action=action, digest=digest, classrooms=namespace["_illustrated_sessions"],
         module_classes=namespace["student_module_classrooms"],
+        summary=namespace["teacher_classroom_summaries"],
         pick={"classroomId": CLASSROOM_ID, "revision": 3, "pageId": PAGE_ID, "consent": True},
     )
     db.remove()
@@ -329,3 +331,99 @@ def test_unwrapped_mixed_class_accepts_the_rendered_png_not_the_source_jpeg(illu
     f.db.commit()
     assert f.catalog(f.user, f.attempt)[0]["pageId"] == PAGE_ID
     assert f.resolve(f.user, f.attempt, f.pick) == {"mediaType": "image/png", "data": PNG}
+
+
+def test_teacher_summary_pins_exact_ready_class_outside_cap_without_loading_state(illustrations):
+    f = illustrations
+    f.classroom.status = "READY"
+    f.classroom.started = None
+    f.classroom.updated = "2020"
+    f.db.add_all([
+        Classroom(id=f"more-{index}", owner_id=2, dojo_id=-9, module_index=0,
+                  title="较新的课堂", status="READY", updated="2026", state={"scenes": ["private-payload"]})
+        for index in range(105)
+    ])
+    f.db.add_all([
+        Classroom(id="other-owner", owner_id=3, dojo_id=-9, module_index=0, updated="2030"),
+        Classroom(id="other-module", owner_id=2, dojo_id=-9, module_index=1, updated="2030"),
+        Classroom(id="other-course", owner_id=2, dojo_id=-21, module_index=0, updated="2030"),
+        Classroom(id="whole-course", owner_id=2, dojo_id=-9, module_index=None, updated="2030"),
+    ])
+    f.db.commit()
+    rows, ordinary = f.summary(2, -9, 0)
+    assert len(rows) == 100 and CLASSROOM_ID not in {row.id for row in rows}
+    assert not ordinary
+    f.statements.clear()
+    rows, ordinary = f.summary(2, -9, 0, preferred_id=CLASSROOM_ID)
+    assert len(rows) == 100 and rows[0].id == CLASSROOM_ID
+    assert ordinary == {CLASSROOM_ID}
+    assert all("classroom.state" not in sql.split("FROM", 1)[0] for sql in f.statements)
+    assert all("revision.content " not in sql.split("FROM", 1)[0] for sql in f.statements)
+    assert not f.catalog(f.user, f.attempt)  # A teacher can prepare a class before students can access it.
+    for forbidden in ("other-owner", "other-module", "other-course", "whole-course"):
+        rows, ordinary = f.summary(2, -9, 0, preferred_id=forbidden)
+        assert forbidden not in {row.id for row in rows}
+        assert not ordinary
+    rows, _ordinary = f.summary(2, -9, None, preferred_id="other-module")
+    assert [row.id for row in rows] == ["whole-course"]
+
+
+def test_teacher_summary_marks_verified_whole_course_preparation(illustrations):
+    f = illustrations
+    f.classroom.module_index = None
+    f.classroom.status = "READY"
+    f.classroom.started = None
+    f.action.request_json = {**f.action.request_json, "moduleIndex": None}
+    f.db.query(Artifact).one().module_index = None
+    f.db.commit()
+    rows, ordinary = f.summary(2, -9, None, preferred_id=CLASSROOM_ID)
+    assert [row.id for row in rows] == [CLASSROOM_ID]
+    assert ordinary == {CLASSROOM_ID}
+
+
+def test_classroom_summary_http_scope_and_legacy_response(illustrations):
+    f = illustrations
+
+    class ScopeError(ValueError):
+        pass
+
+    def scope(actor, *, role, dojo_id, module_index):
+        assert actor.id == 2 and role == "teacher"
+        if dojo_id != "-9" or module_index not in (None, "0"):
+            raise ScopeError("Course or chapter not found")
+        return SimpleNamespace(dojo_id=-9, module_index=None if module_index is None else int(module_index))
+
+    api_source = ROOT / "dojo_plugin/api/v1/teaching.py"
+    collection = next(node for node in ast.parse(api_source.read_text()).body
+                      if isinstance(node, ast.ClassDef) and node.name == "TeachingSessionCollection")
+    get_route = next(method for method in collection.body if isinstance(method, ast.FunctionDef) and method.name == "get")
+    get_route.decorator_list = []
+    namespace = {
+        "re": re, "request": request, "ScopeError": ScopeError, "build_scope": scope,
+        "TeachingSessions": Classroom, "teacher_classroom_summaries": f.summary,
+        "_current_user": lambda: SimpleNamespace(id=2), "_require_teacher": lambda actor: None,
+        "_timestamp": lambda timestamp: timestamp,
+    }
+    _functions(api_source, namespace, {"_ok", "_error"})
+    exec(compile(ast.Module(body=[get_route], type_ignores=[]), str(api_source), "exec"), namespace)
+    app = Flask(__name__)
+    app.add_url_rule("/sessions", view_func=lambda: namespace["get"](None))
+    browser = app.test_client()
+
+    scoped = browser.get("/sessions", query_string={
+        "view": "summary", "dojoId": "-9", "moduleIndex": "0", "sessionId": CLASSROOM_ID,
+    })
+    assert scoped.status_code == 200
+    assert scoped.json["data"]["sessions"] == [{
+        "id": CLASSROOM_ID, "title": None, "dojoId": -9, "moduleIndex": 0, "status": "LIVE",
+        "started": "2026-01-01", "ended": "2026-01-02", "created": None, "updated": "2026-01-01",
+        "ordinaryPrepared": True,
+    }]
+    assert browser.get("/sessions?view=summary&dojoId=-9").json["data"]["sessions"] == []
+    assert browser.get("/sessions?view=summary&dojoId=-21").status_code == 403
+    assert browser.get("/sessions?view=summary&dojoId=-9&sessionId=../private").status_code == 400
+    assert browser.get("/sessions?view=summary").status_code == 400
+    legacy = browser.get("/sessions")
+    assert legacy.status_code == 200
+    assert legacy.json["data"]["sessions"][0]["state"] == f.classroom.state
+    assert "ordinaryPrepared" not in legacy.json["data"]["sessions"][0]

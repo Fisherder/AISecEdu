@@ -2,7 +2,7 @@
 
 import re
 
-from sqlalchemy import String, and_, cast, exists, or_
+from sqlalchemy import String, and_, case, cast, exists, or_
 from sqlalchemy.orm import aliased
 
 from CTFd.models import Users
@@ -129,7 +129,7 @@ def _json_matches_integer(value, expected):
     return cast(value.as_string(), String) == cast(expected, String)
 
 
-def published_ordinary_sessions(dojo_id, module_index):
+def published_ordinary_sessions(dojo_id, module_index, *, include_ready=False):
     """Prepared classes still tied to their published deck and saved rendering."""
     session, action = TeachingSessions, TeachingAgentActions
     artifact, revision = TeachingArtifacts, TeachingArtifactRevisions
@@ -143,6 +143,16 @@ def published_ordinary_sessions(dojo_id, module_index):
         other.action_type == "prepare-ordinary-classroom",
         other.target_type == "teaching_session", other.status == "COMPLETED",
     ))
+    learner_visible = and_(
+        session.started.isnot(None),
+        or_(session.status == "LIVE", and_(session.status == "ENDED", session.ended.isnot(None))),
+    )
+    available = or_(session.status.in_(("READY", "PAUSED")), learner_visible) if include_ready else learner_visible
+    module_pin = (
+        request["moduleIndex"].as_string().is_(None)
+        if module_index is None
+        else _json_matches_integer(request["moduleIndex"], module_index)
+    )
     return (
         session.query
         .join(action, and_(action.target_id == session.id, action.actor_id == session.owner_id,
@@ -152,8 +162,7 @@ def published_ordinary_sessions(dojo_id, module_index):
         .join(Users, Users.id == session.owner_id)
         .filter(
             session.dojo_id == dojo_id, session.module_index == module_index,
-            session.started.isnot(None),
-            or_(session.status == "LIVE", and_(session.status == "ENDED", session.ended.isnot(None))),
+            available,
             action.action_type == "prepare-ordinary-classroom", action.status == "COMPLETED",
             action.target_type == "teaching_session", action.result["sessionId"].as_string() == session.id,
             action.result["artifactId"].as_string() == artifact.id,
@@ -162,7 +171,7 @@ def published_ordinary_sessions(dojo_id, module_index):
             artifact.owner_id == session.owner_id, artifact.dojo_id == dojo_id,
             artifact.module_index == module_index, artifact.artifact_type == "slide-deck",
             artifact.status == "PUBLISHED", artifact.self_workspace_id.is_(None),
-            _json_matches_integer(request["dojoId"], dojo_id), _json_matches_integer(request["moduleIndex"], module_index),
+            _json_matches_integer(request["dojoId"], dojo_id), module_pin,
             _json_matches_integer(request["expectedRevision"], revision.revision),
             request["contentHash"].as_string() == revision.content_hash,
             # Classroom runtime edits replace state and clear these pins. Do
@@ -186,3 +195,23 @@ def student_module_classrooms(user, module, *, classroom_id=None):
     if classroom_id is not None:
         query = query.filter(TeachingSessions.id == classroom_id)
     return query.order_by((TeachingSessions.status == "LIVE").desc(), TeachingSessions.started.desc(), TeachingSessions.id).all()
+
+
+def teacher_classroom_summaries(owner_id, dojo_id, module_index, *, preferred_id=None):
+    """Read a bounded course/module selector without loading stored stage or scenes."""
+    session = TeachingSessions
+    query = session.query.filter_by(owner_id=owner_id, dojo_id=dojo_id, module_index=module_index)
+    if preferred_id:
+        query = query.order_by(case((session.id == preferred_id, 0), else_=1))
+    rows = query.with_entities(
+        session.id, session.title, session.status, session.dojo_id, session.module_index,
+        session.started, session.ended, session.created, session.updated,
+    ).order_by(session.updated.desc(), session.id).limit(100).all()
+    ordinary_ids = set()
+    if rows and ordinary_teaching_course(dojo_id):
+        ordinary_ids = {
+            item.id for item in published_ordinary_sessions(dojo_id, module_index, include_ready=True)
+            .with_entities(session.id).filter(session.owner_id == owner_id, session.id.in_([row.id for row in rows]))
+            .all()
+        }
+    return rows, ordinary_ids

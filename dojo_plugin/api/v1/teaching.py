@@ -48,7 +48,9 @@ from ...agent_runtime.approval_journal import (
     message_approval_metadata, proposal_operation, proposal_request,
     record_execution, recorded_decision, request_reference, require_approved,
 )
-from ...agent_runtime.classroom_preparation import displayed_image_pages, ordinary_static_lesson, published_classroom_deck
+from ...agent_runtime.classroom_preparation import (
+    displayed_image_pages, ordinary_static_lesson, published_classroom_deck, teacher_classroom_summaries,
+)
 from ...models.global_agent import teaching_id
 from ...agent_runtime.commands import action_execution, admit_action, admit_teacher_tool
 from ...agent_runtime.approved_actions import ApprovedActionError, apply_action, prepare_action
@@ -10981,6 +10983,28 @@ class TeachingSessionCollection(Resource):
         user = _current_user()
         try:
             _require_teacher(user)
+            if request.args.get("view") == "summary":
+                dojo_id = request.args.get("dojoId")
+                module_index = request.args.get("moduleIndex") or None
+                preferred_id = request.args.get("sessionId") or None
+                if not dojo_id:
+                    return _error("课程范围不能为空。", 400)
+                if preferred_id and not re.fullmatch(r"[A-Za-z0-9_-]{1,48}", preferred_id):
+                    return _error("课堂编号无效。", 400)
+                scope = build_scope(user, role="teacher", dojo_id=dojo_id, module_index=module_index)
+                rows, ordinary_ids = teacher_classroom_summaries(
+                    user.id, scope.dojo_id, scope.module_index, preferred_id=preferred_id,
+                )
+                return _ok({"sessions": [
+                    {
+                        "id": row.id, "title": row.title, "status": row.status,
+                        "dojoId": row.dojo_id, "moduleIndex": row.module_index,
+                        "ordinaryPrepared": row.id in ordinary_ids,
+                        "started": _timestamp(row.started), "ended": _timestamp(row.ended),
+                        "created": _timestamp(row.created), "updated": _timestamp(row.updated),
+                    }
+                    for row in rows
+                ]})
             rows = (
                 TeachingSessions.query.filter_by(owner_id=user.id)
                 .order_by(TeachingSessions.updated.desc())
