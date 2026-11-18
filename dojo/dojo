@@ -96,6 +96,11 @@ case "$ACTION" in
             profiles+=("main" "workspace")
         fi
 
+        if [[ "$WORKSPACE_NODE" -eq 0 && -n "${HARNESS_DEEPSEEK_API_KEY:-}" ]]; then
+            case "$(printf %s "${DOJO_AI_ENABLED:-auto}" | tr A-Z a-z)" in
+                1|true|yes|auto) profiles+=(harness) ;;
+            esac
+        fi
         [ "${ENABLE_SPLUNK}" = "true" ] && profiles+=("splunk")
 
         args=(--env-file=/data/config.env)

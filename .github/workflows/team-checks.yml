@@ -11,6 +11,19 @@ on:
 permissions:
   contents: read
 jobs:
+  harness-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify pinned source and build the teaching runtime
+        run: |
+          test "$(git rev-parse HEAD:vendor/deepseek-harness)" = 3f321d32bfe382212a8ed8785c1d47a5a300aa23
+          docker build -t aisecedu-harness-test services/deepseek-harness
+      - name: Exercise the official agent loop with the local model fixture
+        run: docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges aisecedu-harness-test node --test
   contributor-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10

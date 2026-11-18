@@ -8,7 +8,7 @@
   "manual_paths": [
     ".github/**", ".codex/**", ".agents/**", "AGENTS.md", "**/AGENTS.md",
     "Makefile", ".git*", ".lfsconfig", ".npmrc", ".dockerignore", "conftest.py", "pytest.ini", "**/conftest.py", "**/pytest.ini",
-    "ops/**", "dojo/**", "etc/**", "Dockerfile*", "**/Dockerfile*", "docker-compose*", "deploy.sh",
+    "vendor/deepseek-harness", "ops/**", "dojo/**", "etc/**", "Dockerfile*", "**/Dockerfile*", "docker-compose*", "deploy.sh",
     "nginx/**", "nginx-workspace/**", "dojofs/**", "db/**", "watchdog/**", "user_firewall*",
     "sshd/**", "homefs/**", "workspace/**", "workspacefs/**",
     "dojo_plugin/api/**", "dojo_plugin/models/**", "dojo_plugin/agent_runtime/**",

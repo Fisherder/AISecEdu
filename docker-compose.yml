@@ -59,6 +59,9 @@ x-ctfd-env: &ctfd-env
   DOJO_SERVICE_START_WAIT_SECONDS: ${DOJO_SERVICE_START_WAIT_SECONDS:-600}
   DOJO_SERVICE_START_LEASE_SECONDS: ${DOJO_SERVICE_START_LEASE_SECONDS:-300}
   DOJO_CTF_CORPUS_DIR: /var/ctf-corpus
+  HARNESS_INTERNAL_URL: http://deepseek-harness:3081
+  HARNESS_CONFIGURED: "${HARNESS_DEEPSEEK_API_KEY:+true}"
+  HARNESS_SERVICE_SECRET: ${HARNESS_SERVICE_SECRET:-}
   GLOBAL_AGENT_RUNTIME_INTERNAL_URL: http://agent-runtime:3000/agent-runtime
   GLOBAL_AGENT_RUNTIME_PUBLIC_ORIGIN: ${GLOBAL_AGENT_RUNTIME_PUBLIC_ORIGIN:-https://${DOJO_HOST}/agent-runtime}
   GLOBAL_AGENT_RUNTIME_TICKET_SECRET: ${GLOBAL_AGENT_RUNTIME_TICKET_SECRET:?GLOBAL_AGENT_RUNTIME_TICKET_SECRET must be set by dojo init}
@@ -289,6 +292,31 @@ services:
     volumes:
       - /data/redis:/data
 
+  deepseek-harness:
+    build: ./services/deepseek-harness
+    profiles: [harness]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m
+    mem_limit: 768m
+    pids_limit: 96
+    environment:
+      PORT: "3081"
+      HARNESS_SERVICE_SECRET: ${HARNESS_SERVICE_SECRET:-}
+      DEEPSEEK_API_KEY: ${HARNESS_DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${HARNESS_DEEPSEEK_BASE_URL:-https://api.deepseek.com/anthropic}
+      DEEPSEEK_MODEL: ${DOJO_AI_COMPLEX_SCENE_MODEL:-deepseek-v4.1-flash}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3081/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
   agent-runtime:
     container_name: agent-runtime
     hostname: agent-runtime
@@ -311,6 +339,10 @@ services:
       AISECEDU_INTERNAL_URL: http://ctfd:8000
       AISECEDU_PUBLIC_ORIGIN: ${AISECEDU_PUBLIC_ORIGIN:-https://${DOJO_HOST}}
       AISECEDU_SERVICE_SECRET: ${GLOBAL_AGENT_RUNTIME_SERVICE_SECRET:?GLOBAL_AGENT_RUNTIME_SERVICE_SECRET must be set by dojo init}
+      HARNESS_INTERNAL_URL: http://deepseek-harness:3081
+      DOJO_AI_ENABLED: ${DOJO_AI_ENABLED:-auto}
+      HARNESS_CONFIGURED: "${HARNESS_DEEPSEEK_API_KEY:+true}"
+      HARNESS_SERVICE_SECRET: ${HARNESS_SERVICE_SECRET:-}
       AISECEDU_AGENT_SKILLS_DIR: /app/agent-skills
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-${DOJO_AI_API_KEY:-}}
       DEEPSEEK_BASE_URL: ${DOJO_AI_BASE_URL:-https://api.deepseek.com}
