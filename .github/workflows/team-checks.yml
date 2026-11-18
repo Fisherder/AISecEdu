@@ -51,7 +51,7 @@ jobs:
           python -m pip install -r ops/team/requirements.txt
           python test/harness_client_contract.py
       - name: Package the verified teaching image for isolated acceptance
-        if: github.event.action == 'ready_for_review' || (github.event.action == 'synchronize' && github.event.pull_request.draft == false)
+        if: github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(fromJSON('["opened", "reopened", "synchronize", "ready_for_review"]'), github.event.action)
         run: |
           mkdir -p "$RUNNER_TEMP/teaching-image"
           image="aisecedu/harness-acceptance:$GITHUB_SHA"
@@ -61,7 +61,7 @@ jobs:
           cd "$RUNNER_TEMP/teaching-image"
           sha256sum harness.tar.gz tested-commit > SHA256SUMS
       - name: Keep the image for the development acceptance window
-        if: github.event.action == 'ready_for_review' || (github.event.action == 'synchronize' && github.event.pull_request.draft == false)
+        if: github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(fromJSON('["opened", "reopened", "synchronize", "ready_for_review"]'), github.event.action)
         uses: actions/upload-artifact@v4
         with:
           name: teaching-image-${{ github.event.pull_request.head.sha }}
