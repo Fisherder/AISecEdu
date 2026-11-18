@@ -34,7 +34,7 @@ flowchart LR
 | 学生 `/guide` | 将本人的学习问题、限定引用和相应的对话历史交给上游 | 入口仍由平台验证用户与引用范围，保留原有的离线状态和答复校验 |
 | 普通课堂 `/api/chat` | 主持判断与角色发言由官方引擎产生。客户端沿用原有的发言、提示和白板事件 | 保留流式 HTTP 事件顺序；模型交付完整文本后开始下发对应文字，首段显示时延和以前逐 token 转发的模式有差异 |
 | Pi 课堂 `/api/chat/pi` | 发言人选择、阅读当前公开课件、白板动作、邀请学生发言和结束课堂由 Harness 回合及课堂服务协作完成 | 保留设置开关与 SSE。模型收到公开课件和本人已提交的作答状态，标准答案和批改备注留在平台 |
-| 学生咨询 `/api/student/agent`、复习 `/api/student/review` | 个人计划、普通咨询和形成性反馈使用官方模型 | 保留学习者身份、计划存储和真实用量。离线时明确返回相应状态 |
+| 独立课堂服务的 `/api/student/agent` 和 `/api/student/review` | 两个处理器已接入 Harness，保留学习者身份、计划存储和用量 | 集成部署的浏览器中间件没有开放这两个端点。平台学生的日常导学从 `/guide` 进入 |
 | 个人学习包 | 学生在已登录的 `/guide` 明确请求后，可打开自己的概念讲义与自检反馈。普通 PBL 的文字评语沿用原有回复格式 | 创建时验证请求所属会话和学习者范围；学习包是私人草稿。教师查看已提交成果要走原有审阅权限 |
 | 题内辅导 `/learning/tutor` | 本人问题、公开目标与提示、经平台核验的学习观察进入上游 | 保留尝试记录与本地防泄题处理。模型无法访问学生桌面、终端或私有解法。实验中的操作指导仍需要教师参与 |
 | PBL 答疑与 v2 判评 | 普通文字提问及阶段、任务和最终判评走上游。普通教学课程内，用户可以为本轮判评重新选择教学图片并明确同意发送 | 提交前按当前会话复核身份、课程权限、额度及普通教学开关。本地保存的旧附件可继续查看；需要图片判评时重新选择上传，也可以只提交文字 |
@@ -92,6 +92,27 @@ python test/harness_client_contract.py
 发布前记录现有 Web、Worker 和课堂镜像，并确认上次数据库备份可读。部署时保持 Web 和 Worker 使用相同版本，以合成教师验证只读咨询与一次审批操作，以合成学生验证导学、课堂问答、跨班访问和关闭 AI 时的提示。需紧急停止外送时，关闭开发实例的 AI 开关并重新加载受影响服务。需要恢复上一版行为时，恢复这一组镜像及其配置；先处理升级后尚未完成的作业，避免由旧 worker 重复领取。恢复服务版本无需还原业务数据库。数据库灾备演练应在独立库进行。
 
 共享开发站使用宿主 Compose 项目 `aisecedu-develop`，配置位于 `/srv/aisecedu-develop-instance/compose.json`。2026-11-19 核实该配置启动了 app、db、cache 和 edge。app、db 和 cache 只接内部网络，edge 对课堂入口返回 HTTP 503。仓库中的常规部署示例与此实例不同。为这个实例发布时，需要在同一份经审核的宿主配置中加入配套的教学 Worker、课堂、DSH 和所需的课件检查服务，单独配置 DSH 到指定模型端点的出口，并连同原有代理规则验证切换与回退。当前运行提交可查看[开发站版本页](http://10.92.35.7:28081/_aisecedu/version.json)。
+
+### 在共享宿主上发布 DSH 服务
+
+迁移合入 `develop` 后，维护者可将 [DSH 的宿主 Compose 配置](../../ops/staging/harness.compose.yml) 叠加到上述四服务配置。先记录现有的 DSH 镜像 ID 和配置文件版本，在宿主装载通过 CI 的目标镜像，用 `docker image inspect` 核对镜像 ID、平台与 `org.opencontainers.image.revision`。CI 的 `tested-commit` 记录实际构建的 Git 提交，PR 构建可使用合并测试提交。
+
+将 `AISECEDU_HARNESS_IMAGE` 设为已核对的本地镜像 ID，将 `AISECEDU_HARNESS_ENV_FILE` 设为宿主上只有维护者可读的绝对文件路径。文件使用原始的 `名称=值` 格式，填写 `HARNESS_SERVICE_SECRET`、`DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL` 和 `DEEPSEEK_BASE_URL`。模型端点须支持 Messages 流式协议。下面的命令在经审核的项目根目录使用 Bash 执行，只操作 DSH 服务。
+
+```bash
+compose=(docker compose -p aisecedu-develop
+  -f /srv/aisecedu-develop-instance/compose.json
+  -f "$PWD/ops/staging/harness.compose.yml")
+"${compose[@]}" config --quiet
+"${compose[@]}" up -d --no-deps --wait deepseek-harness
+"${compose[@]}" exec -T deepseek-harness node --input-type=module < ops/staging/check-harness.mjs
+```
+
+探针先检查进程和匿名请求的响应，再用内部服务凭据发出一句合成教学请求。成功输出包括 `ready`、DSH 会话模型名和 token 总数。原版 DSH 将本轮请求使用的模型 ID 记入会话，网关别名背后的物理模型版本需查供应方记录。新教师任务固定 `HARNESS_DEEPSEEK_MODEL`，工作进程核对它与会话回执中的模型名。配置和鉴权错误可据任务终态直接修正，限流和临时服务故障沿用队列的延迟重试。
+
+DSH 的 `teaching` 网络用于后续接入已审核的教学客户端，`model-egress` 网络用于外发请求。这个配置没有发布宿主端口，数据库、Redis 和现有四个服务均不接入这两个网络。适配器只允许向配置的 Messages 地址发送 POST；需要从网络层限制出口的宿主应在网关或防火墙设置相应规则。业务端接入时，应用和 Worker 使用相同的模型名和内部服务凭据；模型 API Key 只交给 DSH。上面的命令单独执行不会打开共享站的课堂入口或启动后台任务。
+
+升级前先停止向该实例分配新教学回合。两分钟的停止宽限期可让已接收的九十秒回合结束。若探针失败，恢复上一版镜像 ID 和与之配对的环境文件，重新运行 `up` 和探针，再恢复教学流量。首次安装尚无上一版时，可用 `"${compose[@]}" stop deepseek-harness` 停止本次增加的组件。此操作仅涉及 DSH。
 
 
 ## TypeScript 历史测试诊断

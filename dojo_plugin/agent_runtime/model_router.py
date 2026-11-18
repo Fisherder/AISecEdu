@@ -5,6 +5,9 @@ import re
 from .. import config
 
 
+UPSTREAM_TEACHER_ROUTE = "upstream-teacher-turn"
+
+
 COMPLEX_KINDS = {
     "attack-defense-scene",
     "classroom-scenario",
@@ -130,19 +133,22 @@ def is_complex_scene(kind, prompt="", payload=None):
 
 
 def route_model(kind, *, prompt="", payload=None, allow_degraded=False):
-    complex_scene = is_complex_scene(kind, prompt=prompt, payload=payload)
-    actual_model = (
-        config.DOJO_AI_COMPLEX_SCENE_MODEL
-        if complex_scene
-        else config.DOJO_AI_AUTHORING_PLAN_MODEL
-    )
+    if kind == "agent.chat" and isinstance(payload, dict) and payload.get("chatBackend") == "upstream":
+        route_name = UPSTREAM_TEACHER_ROUTE
+        actual_model = required_model = config.HARNESS_DEEPSEEK_MODEL
+        allow_degraded = False
+    else:
+        complex_scene = is_complex_scene(kind, prompt=prompt, payload=payload)
+        route_name = "deepseek-v4-flash" if complex_scene else "teaching-default"
+        actual_model = (
+            config.DOJO_AI_COMPLEX_SCENE_MODEL if complex_scene else config.DOJO_AI_AUTHORING_PLAN_MODEL
+        )
+        required_model = config.DOJO_AI_COMPLEX_SCENE_MODEL if complex_scene else None
     return {
-        "route": "deepseek-v4-flash" if complex_scene else "teaching-default",
+        "route": route_name,
         "provider": "deepseek",
         "actual_model": actual_model,
-        "required_model": (
-            config.DOJO_AI_COMPLEX_SCENE_MODEL if complex_scene else None
-        ),
+        "required_model": required_model,
         "allow_degraded": bool(allow_degraded),
         "degraded": False,
         "request_hash": hashlib.sha256(
@@ -158,6 +164,10 @@ def route_model(kind, *, prompt="", payload=None, allow_degraded=False):
 
 def validate_actual_model(route, actual_model):
     required = route.get("required_model")
+    if route.get("route") == UPSTREAM_TEACHER_ROUTE:
+        if not required or actual_model != required:
+            raise ValueError("The teacher turn did not use the configured Harness model")
+        return route
     if required and actual_model != required:
         if not route.get("allow_degraded"):
             raise ValueError(

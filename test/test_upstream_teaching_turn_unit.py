@@ -97,15 +97,31 @@ def test_turn_sends_only_messages_and_returns_measured_usage(service):
     assert post.call_args.kwargs["headers"]["Authorization"] == "Bearer synthetic-test-token"
 
 
-@pytest.mark.parametrize("status", [307, 401, 503])
-def test_turn_rejects_http_failure_without_exposing_the_error_body(service, status):
+@pytest.mark.parametrize(("status", "category"), [
+    (307, "permanent"), (400, "permanent"), (401, "permanent"), (403, "permanent"),
+    (413, "permanent"), (422, "permanent"), (408, "service"), (429, "service"), (503, "service"),
+])
+def test_turn_rejects_http_failure_without_exposing_the_error_body(service, status, category):
     post, response = service
     response.status_code = status
+    response.headers = {"Retry-After": "150"}
     body = turn.request_body("教学顾问", {"request": "解释学习目标"})
-    with pytest.raises(turn.UpstreamTurnError, match=f"HTTP {status}"):
+    with pytest.raises(turn.UpstreamTurnError, match=f"HTTP {status}") as caught:
         turn.invoke_turn(body)
+    assert caught.value.category == category
+    assert caught.value.retry_after == ("150" if category == "service" else 0)
     response.json.assert_not_called()
     post.assert_called_once()
+
+
+def test_worker_can_stop_unchanged_input_and_config_errors_without_a_model_call(service, monkeypatch):
+    post, _ = service
+    for credential, encoded in (("", b"{}"), ("synthetic-service", b"x" * (1024 * 1024 + 1))):
+        monkeypatch.setenv("HARNESS_SERVICE_SECRET", credential)
+        with pytest.raises(turn.UpstreamTurnError) as caught:
+            turn.invoke_turn({}, encoded=encoded)
+        assert caught.value.category == "permanent"
+    post.assert_not_called()
 
 
 def test_turn_rejects_success_without_actual_model(service):

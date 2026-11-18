@@ -127,6 +127,16 @@ class HarnessClientContract(unittest.TestCase):
                 self.assertEqual(json.loads(model.requests[-1][2]["messages"][0]["content"][0]["text"]), {
                     "publishedClassroomDeck": {"artifactId": "selected-deck"},
                 })
+                probe = [os.getenv("HARNESS_NODE", "node"), str(ROOT / "ops/staging/check-harness.mjs")]
+                denied = subprocess.run(probe, env={**config, "HARNESS_SERVICE_SECRET": "wrong"},
+                                        capture_output=True, text=True, timeout=15)
+                self.assertNotEqual(denied.returncode, 0)
+                self.assertEqual(len(model.requests), 3)
+                ready = subprocess.run(probe, env=config, check=True, capture_output=True, text=True, timeout=15)
+                self.assertEqual(json.loads(ready.stdout), {
+                    "ready": True, "model": "fixture", "totalTokens": 8, "unauthenticatedStatus": 401,
+                })
+                self.assertEqual(len(model.requests), 4)
             finally:
                 service.terminate()
                 try:

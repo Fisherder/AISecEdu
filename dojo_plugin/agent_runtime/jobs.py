@@ -61,7 +61,7 @@ from .artifacts import (
     replace_generated_candidates,
 )
 from .files import persist_agent_deliverables, public_agent_file
-from .model_router import route_model, validate_actual_model
+from .model_router import UPSTREAM_TEACHER_ROUTE, route_model, validate_actual_model
 from .model_journal import close_canceled_model_calls
 from .model_inputs import ModelInputError, accepted_input, freeze_input, freeze_prepared, prepared_input, request_payload, restore_input_cache
 from .conversation import turn_wait_state, execution_chain
@@ -3327,7 +3327,7 @@ def _invoke_agent_runtime(job, route, payload=None):
         try:
             response = invoke_turn(body, encoded=encoded)
         except UpstreamTurnError as error:
-            raise RuntimeJobError(str(error), category="service") from None
+            raise RuntimeJobError(str(error), category=error.category, retry_after=error.retry_after) from None
         result = _upstream_teacher_result(payload, response["text"])
         coverage = json.loads(body["messages"][-1]["content"]).get("materialModelCoverage")
         if coverage is not None:
@@ -4602,6 +4602,7 @@ def process_job(job_id, *, worker_id=None):
     identity = (worker_id, job.trace_id, job.attempt_count)
     job._execution_identity = identity
     route = None
+    failed_model_meta = {}
     try:
         if job.kind == 'rainier.submit':
             from ..rainier import send_submission
@@ -4684,7 +4685,11 @@ def process_job(job_id, *, worker_id=None):
                     model_meta.setdefault(
                         "latencyMs", int((time.monotonic() - started) * 1000)
                     )
+                if route.get("route") == UPSTREAM_TEACHER_ROUTE:
+                    # A mismatched receipt still represents a measured model invocation.
+                    failed_model_meta = model_meta
                 _record_invocation(job, route, model_meta, status="SUCCEEDED")
+                failed_model_meta = {}
                 checkpoint_job = _owned_job_attempt(job_id, identity)
                 checkpoint_job.result = {
                     **(checkpoint_job.result or {}),
@@ -4885,7 +4890,7 @@ def process_job(job_id, *, worker_id=None):
         _sync_native_authoring_batch_action(job)
         if route is not None:
             try:
-                _record_invocation(job, route, {}, status="FAILED", error=exc)
+                _record_invocation(job, route, failed_model_meta, status="FAILED", error=exc)
             except Exception:
                 logger.debug("Could not record failed model invocation", exc_info=True)
         db.session.commit()

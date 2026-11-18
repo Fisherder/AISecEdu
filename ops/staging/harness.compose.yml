@@ -1,0 +1,33 @@
+# Host Compose overlay for /srv/aisecedu-develop-instance/compose.json.
+# The shared app, workers and edge are released separately from this service.
+services:
+  deepseek-harness:
+    image: ${AISECEDU_HARNESS_IMAGE:?Set the verified local image ID or immutable digest}
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 96
+    mem_limit: 768m
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
+    stop_grace_period: 2m
+    env_file:
+      - path: ${AISECEDU_HARNESS_ENV_FILE:?Set the absolute path of the protected DSH environment file}
+        format: raw
+    environment:
+      PORT: "3081"
+    networks: [teaching, model-egress]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3081/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+networks:
+  teaching:
+    internal: true
+  model-egress: {}

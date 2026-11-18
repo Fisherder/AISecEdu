@@ -60,6 +60,7 @@ x-ctfd-env: &ctfd-env
   DOJO_SERVICE_START_LEASE_SECONDS: ${DOJO_SERVICE_START_LEASE_SECONDS:-300}
   DOJO_CTF_CORPUS_DIR: /var/ctf-corpus
   HARNESS_INTERNAL_URL: http://deepseek-harness:3081
+  HARNESS_DEEPSEEK_MODEL: &harness-model ${HARNESS_DEEPSEEK_MODEL:-deepseek-flash}
   HARNESS_CONFIGURED: "${HARNESS_DEEPSEEK_API_KEY:+true}"
   HARNESS_ORDINARY_TEACHING_COURSE_IDS: ${HARNESS_ORDINARY_TEACHING_COURSE_IDS:-}
   HARNESS_SERVICE_SECRET: ${HARNESS_SERVICE_SECRET:-}
@@ -299,6 +300,8 @@ services:
       dockerfile: services/deepseek-harness/Dockerfile
     profiles: [harness]
     init: true
+    # The service drains active model turns, which may take up to 90 seconds.
+    stop_grace_period: 2m
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -312,7 +315,7 @@ services:
       HARNESS_SERVICE_SECRET: ${HARNESS_SERVICE_SECRET:-}
       DEEPSEEK_API_KEY: ${HARNESS_DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${HARNESS_DEEPSEEK_BASE_URL:-https://api.deepseek.com/anthropic}
-      DEEPSEEK_MODEL: &harness-model ${HARNESS_DEEPSEEK_MODEL:-deepseek-flash}
+      DEEPSEEK_MODEL: *harness-model
       DEEPSEEK_IMAGE_INPUT: ${HARNESS_DEEPSEEK_IMAGE_INPUT:-auto}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3081/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]

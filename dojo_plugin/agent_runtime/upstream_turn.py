@@ -6,7 +6,10 @@ import requests
 
 
 class UpstreamTurnError(ValueError):
-    pass
+    def __init__(self, message, *, category="service", retry_after=0):
+        super().__init__(message)
+        self.category = category
+        self.retry_after = retry_after
 
 
 def upstream_enabled():
@@ -57,11 +60,11 @@ def invoke_turn(body, *, encoded=None):
     base_url = os.environ.get("HARNESS_INTERNAL_URL", "").strip().rstrip("/")
     secret = os.environ.get("HARNESS_SERVICE_SECRET", "")
     if not base_url or not secret:
-        raise UpstreamTurnError("教学对话服务尚未配置")
+        raise UpstreamTurnError("教学对话服务尚未配置", category="permanent")
     if encoded is None:
         encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     if len(encoded) > 1024 * 1024:
-        raise UpstreamTurnError("教学对话资料超出服务容量，请减少本轮引用的资料")
+        raise UpstreamTurnError("教学对话资料超出服务容量，请减少本轮引用的资料", category="permanent")
     try:
         with requests.post(
             f"{base_url}/v1/turn",
@@ -70,8 +73,14 @@ def invoke_turn(body, *, encoded=None):
             timeout=(8, 95),
             allow_redirects=False,
         ) as response:
-            if not 200 <= response.status_code < 300:
-                raise UpstreamTurnError(f"教学对话服务返回 HTTP {response.status_code}")
+            status = response.status_code
+            if not 200 <= status < 300:
+                transient = status in {408, 425, 429} or 500 <= status < 600
+                raise UpstreamTurnError(
+                    f"教学对话服务返回 HTTP {status}",
+                    category="service" if transient else "permanent",
+                    retry_after=response.headers.get("Retry-After", 0) if transient else 0,
+                )
             result = response.json()
     except requests.Timeout:
         raise UpstreamTurnError("教学对话服务请求超时") from None

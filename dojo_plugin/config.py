@@ -126,6 +126,7 @@ DOJO_WINDOWS2000_RUNTIME_IMAGE = os.getenv("DOJO_WINDOWS2000_RUNTIME_IMAGE") or 
 
 DOJO_AI_TUTOR_MODEL = os.getenv("DOJO_AI_TUTOR_MODEL") or "deepseek-v4-flash"
 DOJO_AI_SIMULATION_MODEL = os.getenv("DOJO_AI_SIMULATION_MODEL") or "deepseek-v4.1-flash"
+HARNESS_DEEPSEEK_MODEL = (os.getenv("HARNESS_DEEPSEEK_MODEL") or "deepseek-flash").strip()
 DOJO_AI_GUIDE_MODEL = os.getenv("DOJO_AI_GUIDE_MODEL") or "deepseek-v4.1-flash"
 DOJO_AI_GRADER_MODEL = os.getenv("DOJO_AI_GRADER_MODEL") or "deepseek-v4.1-flash"
 DOJO_AI_SOLUTION_MODEL = os.getenv("DOJO_AI_SOLUTION_MODEL") or "deepseek-v4.1-flash"
