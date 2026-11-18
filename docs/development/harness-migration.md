@@ -1,6 +1,6 @@
 # 开发版智能体迁移与平台审查
 
-审查基线为 `develop` 的 `e32fa59a`。本文记录平台代码的实际调用关系、这一版修复的缺陷，以及验收时需要分别验证的入口。运行实例的 commit、镜像和开关以部署记录为准。[变更与检查结果](https://github.com/Fisherder/AISecEdu/pull/7)
+审查起点为 `develop` 的 `e32fa59a`，本分支已合入开发分支后来发布的 `2f4f5de0`（PR #6）。本文记录平台代码的实际调用关系、这一版修复的缺陷，以及验收时需要分别验证的入口。运行实例的 commit、镜像和开关以部署记录为准。[变更与检查结果](https://github.com/Fisherder/AISecEdu/pull/7)
 
 ## 源码与运行边界
 
@@ -22,7 +22,7 @@ flowchart LR
 
 一次内部 `POST /v1/turn` 对应一个独立的内存会话。上游负责 Agent、会话事件、模型调用和终态判定。平台负责账号、课程成员、作业审批和持久业务记录。模型只能返回文字或教学草案；课程变更要经过平台的权限与审批接口。容器没有宿主目录、Docker socket、数据库口令或宿主监听端口。运行组合没有注册命令执行、文件、网页搜索、远程插件或实验环境操作工具。开发分支可以检出上游完整源码，服务启动时仅加载本文列出的能力。
 
-2026-11-18 的验收分别检查了三处。GitHub PR 普通检出与服务器个人验收副本 `/home/ubuntu/aisecedu-review/pr7/vendor/deepseek-harness` 均有完整的 21,071 个文件和相同的 Git 树。CI 完成教学容器内逐文件比对。官方 npm 发行版的原生 CLI 在独立目录启动，`dsh --version` 返回 `0.2.2-rc.4`。`28081/_aisecedu/version.json` 在本次核对时仍为 `e32fa59a`，其运行配置关闭了课堂服务、模型和后台任务；部署进度应查版本端点。
+2026-11-18 的验收分别检查了三处。GitHub PR 普通检出与服务器个人验收副本 `/home/ubuntu/aisecedu-review/pr7/vendor/deepseek-harness` 均有完整的 21,071 个文件和相同的 Git 树。CI 完成教学容器内逐文件比对。官方 npm 发行版的原生 CLI 在独立目录启动，`dsh --version` 返回 `0.2.2-rc.4`。`28081/_aisecedu/version.json` 在 2026-11-18 21:46（北京时间）返回 `2f4f5de0`，其运行配置关闭了课堂服务、模型和后台任务；部署进度应查版本端点。
 
 ## 入口与实际行为
 
@@ -37,8 +37,11 @@ flowchart LR
 | 个人学习包 | 学生在已登录的 `/guide` 明确请求后，可打开自己的概念讲义与自检反馈。普通 PBL 的文字评语沿用原有回复格式 | 创建时验证请求所属会话和学习者范围；学习包是私人草稿。教师查看已提交成果要走原有审阅权限 |
 | 题内辅导 `/learning/tutor` | 本人问题、公开目标与提示、经平台核验的学习观察进入上游 | 保留尝试记录与本地防泄题处理。模型无法访问学生桌面、终端或私有解法。实验中的操作指导仍需要教师参与 |
 | PBL 答疑与 v2 判评 | 普通文字提问及阶段、任务和最终判评走上游。图片判评使用本次选中、绑定最新提交的教学图片 | 来历不明的远程 URL 不进入取图流程。只有旧 URL 且没有文字说明的记录需要重新选择附件 |
+| 普通 PBL v2 任务开场与导师 | `/open-task` 和 `/instructor` 走官方引擎，保留 SSE、持久化、观察记录和难度调整。普通短答评分采用官方引擎的实际回执 | 调整难度须引用本轮学生原话。短答无法取得有效评分时保持待评，可用原答卷重试 |
 | 课堂辩论 `/api/integration/debate/respond` | 回合与反思使用实际模型，保留论据校验和检查点 | 重试核验请求身份与模型，凭实际模型回执登记用量 |
 | 正式原生课件 | 当前授课教师的 `native-v2` 课件制作通过 Harness，保留原有的产物、渲染和逐页恢复检查点 | 验收覆盖重复请求恢复已完成页面；机器执行类作业和其他产物有独立执行契约 |
+
+对普通教学课程，管理员可在开发实例的受保护配置中填写 `HARNESS_ORDINARY_TEACHING_COURSE_IDS`，值为逗号分隔的课程数字 ID，初始为空。授权教师的已索引教材摘要、教案和课件候选、指定静态单页的文字润色由官方引擎处理。队列在生成前核实课程和材料归属，保留产物格式和原有保存检查。旧的专用生成和其他修订仍有独立路径。
 
 具体应用端点以代码和本 PR 的集成测试为准。原版 CLI 的本地开发者工具没有直接挂到共享教学平台的 HTTP 接口。[官方安全模型](https://github.com/deepseek-ai/deepseek-harness/blob/3f321d32bfe382212a8ed8785c1d47a5a300aa23/SAFETY.zh.md)
 
@@ -71,7 +74,7 @@ git rev-parse HEAD:vendor/deepseek-harness
 # 官方目录树应为 6778b1f1e75fde6d62f69d345792bf08e32178d4
 git ls-tree -r HEAD:vendor/deepseek-harness | wc -l
 make dev-check
-python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_course_catalog_unit.py
+python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py test/test_course_catalog_unit.py
 npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev
 npm test --prefix services/deepseek-harness
 python test/harness_client_contract.py
@@ -81,7 +84,6 @@ python test/harness_client_contract.py
 
 发布前记录现有 Web、Worker 和课堂镜像，并确认上次数据库备份可读。部署时保持 Web 和 Worker 使用相同版本，以合成教师验证只读咨询与一次审批操作，以合成学生验证导学、课堂问答、跨班访问和关闭 AI 时的提示。需紧急停止外送时，关闭开发实例的 AI 开关并重新加载受影响服务。需要恢复上一版行为时，恢复这一组镜像及其配置；先处理升级后尚未完成的作业，避免由旧 worker 重复领取。恢复服务版本无需还原业务数据库。数据库灾备演练应在独立库进行。
 
-课堂普通短答 `/api/quiz-grade` 使用 Harness 回合和实际计费用量，判评未完成时保留原答卷并允许重试，成绩仅在全部题目评分有效后写入。
 
 ## TypeScript 历史测试诊断
 
