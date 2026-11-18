@@ -309,7 +309,8 @@ services:
       HARNESS_SERVICE_SECRET: ${HARNESS_SERVICE_SECRET:-}
       DEEPSEEK_API_KEY: ${HARNESS_DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${HARNESS_DEEPSEEK_BASE_URL:-https://api.deepseek.com/anthropic}
-      DEEPSEEK_MODEL: &harness-model ${HARNESS_DEEPSEEK_MODEL:-${DOJO_AI_COMPLEX_SCENE_MODEL:-deepseek-v4.1-flash}}
+      DEEPSEEK_MODEL: &harness-model ${HARNESS_DEEPSEEK_MODEL:-deepseek-flash}
+      DEEPSEEK_IMAGE_INPUT: ${HARNESS_DEEPSEEK_IMAGE_INPUT:-auto}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3081/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 15s

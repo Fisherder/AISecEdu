@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import AgentRegistry from '@deepseek-ai/dsh-agent';
 import AgentLoop from '@deepseek-ai/dsh-agent-loop';
@@ -17,8 +20,11 @@ function textBlock(text) {
   return [{ type: 'text', text }];
 }
 
-function userMessage(content) {
-  return createUserMessage({ content: textBlock(content), source: { kind: 'user' } });
+function userMessage(content, images = []) {
+  return createUserMessage({
+    content: [...textBlock(content), ...images.map(attachment => ({ type: 'image', attachment }))],
+    source: { kind: 'user' },
+  });
 }
 
 function installHistory(session, { system, history, model }) {
@@ -55,10 +61,19 @@ function formatUsage(usage) {
   };
 }
 
-export async function createEngine({ model, baseURL }) {
+export async function createEngine({ model, baseURL, attachmentDir }) {
   const ctx = new Context();
   try {
     await ctx.plugin(LlmRuntime);
+    if (attachmentDir) {
+      const { default: LocalAttachments } = await import('@deepseek-ai/dsh-attachment-local');
+      await ctx.plugin(LocalAttachments, {
+        dshHome: attachmentDir, maxImageBytes: 2 * 1024 * 1024, maxImagesPerMessage: 2,
+        maxMessageImageBytes: 4 * 1024 * 1024, maxImagePixels: 8_000_000, maxImageDimension: 4096,
+        normalizedImageMaxPixels: 2_000_000, normalizedImageMaxDimension: 2048,
+        normalizedImageMaxBytes: 1024 * 1024, imageCompressionConcurrency: 1,
+      });
+    }
     await ctx.plugin(SessionStore);
     await ctx.plugin(SessionProjectionRegistry);
     await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false });
@@ -81,7 +96,7 @@ export async function createEngine({ model, baseURL }) {
     await ctx.plugin(AgentLoop, { agents: [] });
     await ctx.plugin(DeepSeekProvider, {
       baseURL,
-      models: [{ id: model, inputModalities: ['text'] }],
+      models: [{ id: model, inputModalities: attachmentDir ? ['text', 'image'] : ['text'] }],
     });
     if (ctx.agents === undefined || ctx.agentLoop === undefined || ctx.llm === undefined) {
       throw new Error('Harness composition did not start');
@@ -93,7 +108,23 @@ export async function createEngine({ model, baseURL }) {
 
   return {
     close: () => ctx.fiber.dispose(),
-    async turn(messages, signal) {
+    async imageTurn(messages, signal, images) {
+      const directory = await mkdtemp(join(tmpdir(), 'teaching-images-'));
+      let isolated;
+      try {
+        isolated = await createEngine({ model, baseURL, attachmentDir: directory });
+        return await isolated.turn(messages, signal, images);
+      } finally {
+        try {
+          await isolated?.close();
+        } finally {
+          await rm(directory, { recursive: true, force: true });
+        }
+      }
+    },
+    async turn(messages, signal, images = []) {
+      signal.throwIfAborted();
+      const attachments = images.length ? await ctx.attachments.saveImages(images) : [];
       const system = messages[0].role === 'system' ? messages[0].content : '';
       const history = messages.slice(messages[0].role === 'system' ? 1 : 0, -1);
       let assistant;
@@ -124,7 +155,7 @@ export async function createEngine({ model, baseURL }) {
       try {
         signal.addEventListener('abort', cancel, { once: true });
         signal.throwIfAborted();
-        handle.agent.followup(userMessage(messages.at(-1).content));
+        handle.agent.followup(userMessage(messages.at(-1).content, attachments));
         await handle.agent.whenIdle();
         signal.throwIfAborted();
         if (finish !== 'completed' || assistant === undefined) throw new Error('Model turn failed');

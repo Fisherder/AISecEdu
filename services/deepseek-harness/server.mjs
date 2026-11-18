@@ -21,10 +21,10 @@ function json(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
-function validate(value) {
+function validate(value, withImages) {
   const messages = value?.messages;
   if (
-    typeof value !== 'object' || value === null || Object.keys(value).length !== 1
+    typeof value !== 'object' || value === null || Object.keys(value).length !== (withImages ? 2 : 1)
     || !Array.isArray(messages) || messages.length === 0 || messages.length > maxMessages
     || messages.at(-1)?.role !== 'user'
     || messages.some((item, index) => (
@@ -35,10 +35,28 @@ function validate(value) {
   ) {
     throw new RequestError(400, 'Expected text messages ending in a user message');
   }
-  return messages;
+  if (!withImages) return { messages };
+  if (Buffer.byteLength(JSON.stringify(messages)) > maxBodyBytes) {
+    throw new RequestError(413, 'Teaching text is too large');
+  }
+  if (!Array.isArray(value.images) || !value.images.length || value.images.length > 2) {
+    throw new RequestError(400, 'Expected one or two teaching images');
+  }
+  const images = value.images.map(image => {
+    if (!image || Object.keys(image).length !== 2 || !['image/png', 'image/jpeg', 'image/webp'].includes(image.mediaType)
+        || typeof image.data !== 'string' || !image.data.length || image.data.length > 2796204) {
+      throw new RequestError(400, 'Invalid teaching image');
+    }
+    const data = Buffer.from(image.data, 'base64');
+    if (data.length > 2 * 1024 * 1024 || data.toString('base64') !== image.data) {
+      throw new RequestError(400, 'Invalid teaching image encoding');
+    }
+    return { data, mediaType: image.mediaType };
+  });
+  return { messages, images };
 }
 
-async function readMessages(request) {
+async function readMessages(request, withImages) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers['content-type'] ?? '')) {
     throw new RequestError(415, 'Expected application/json');
   }
@@ -47,7 +65,7 @@ async function readMessages(request) {
   let size = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
-    if (size > maxBodyBytes) throw new RequestError(413, 'Request body is too large');
+    if (size > (withImages ? 7 * maxBodyBytes : maxBodyBytes)) throw new RequestError(413, 'Request body is too large');
     chunks.push(chunk);
   }
 
@@ -57,19 +75,21 @@ async function readMessages(request) {
   } catch {
     throw new RequestError(400, 'Invalid JSON');
   }
-  return validate(payload);
+  return validate(payload, withImages);
 }
 
-export function createService({ secret, engine, timeoutMs = turnTimeout }) {
+export function createService({ secret, engine, allowImages = true, timeoutMs = turnTimeout }) {
   if (typeof secret !== 'string' || !secret.trim()) throw new Error('HARNESS_SERVICE_SECRET is required');
   const token = Buffer.from('Bearer ' + secret);
   let active = 0;
+  let activeImages = 0;
   return createServer({ requestTimeout: 30_000, headersTimeout: 10_000 }, async (request, response) => {
     if (request.method === 'GET' && request.url === '/health') {
       json(response, 200, { status: 'ok' });
       return;
     }
-    if (request.method !== 'POST' || request.url !== '/v1/turn') {
+    const withImages = request.url === '/v1/teaching-image-turn';
+    if (request.method !== 'POST' || (!withImages && request.url !== '/v1/turn')) {
       json(response, 404, { error: 'Not found' });
       return;
     }
@@ -79,25 +99,33 @@ export function createService({ secret, engine, timeoutMs = turnTimeout }) {
       json(response, 401, { error: 'Unauthorized' });
       return;
     }
-    if (active >= maxTurns) {
+    if (withImages && !allowImages) {
+      json(response, 503, { error: 'The configured teaching model has no image input' });
+      return;
+    }
+    if (active >= maxTurns || (withImages && activeImages >= 2)) {
       json(response, 503, { error: 'Service is busy' });
       return;
     }
 
     active += 1;
+    if (withImages) activeImages += 1;
     const disconnect = new AbortController();
     const abort = () => disconnect.abort();
     response.once('close', abort);
     const deadline = AbortSignal.timeout(timeoutMs);
     try {
-      const messages = await readMessages(request);
-      const result = await engine.turn(messages, AbortSignal.any([disconnect.signal, deadline]));
+      const { messages, images } = await readMessages(request, withImages);
+      const signal = AbortSignal.any([disconnect.signal, deadline]);
+      const result = withImages ? await engine.imageTurn(messages, signal, images) : await engine.turn(messages, signal);
       if (!response.destroyed) json(response, 200, result);
     } catch (error) {
       if (response.destroyed) return;
       if (error instanceof RequestError) {
         if (error.status === 413) response.setHeader('connection', 'close');
         json(response, error.status, { error: error.message });
+      } else if (error?.name === 'AttachmentError') {
+        json(response, 400, { error: 'Teaching image could not be read within the configured limits' });
       } else if (deadline.aborted) {
         json(response, 504, { error: 'Model turn timed out' });
       } else {
@@ -105,6 +133,7 @@ export function createService({ secret, engine, timeoutMs = turnTimeout }) {
       }
     } finally {
       active -= 1;
+      if (withImages) activeImages -= 1;
       response.off('close', abort);
     }
   });
@@ -123,8 +152,23 @@ async function main() {
   }
   const port = Number(rawPort);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT');
-  const engine = await createEngine({ model: model.trim(), baseURL: baseURL?.trim() || undefined });
-  const server = createService({ secret, engine });
+  const providerURL = baseURL?.trim() || 'https://api.deepseek.com/anthropic';
+  const endpoint = new URL(providerURL.replace(/\/+$/, '') + '/v1/messages');
+  const transport = globalThis.fetch;
+  // The provider supports uploading persistent Files before a Messages call. This service
+  // only permits Messages, so the stock adapter sends its normalized image inline.
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input);
+    const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+    if (url.href !== endpoint.href || method !== 'POST') {
+      throw new Error('Only the configured Messages endpoint is available');
+    }
+    return transport(input, { ...init, redirect: 'error' });
+  };
+  const engine = await createEngine({ model: model.trim(), baseURL: providerURL });
+  const imageSetting = (process.env.DEEPSEEK_IMAGE_INPUT || 'auto').toLowerCase();
+  const allowImages = imageSetting === 'auto' ? ['deepseek-flash', 'deepseek-v4.1-flash'].includes(model.trim()) : imageSetting === 'true';
+  const server = createService({ secret, engine, allowImages });
   server.once('error', () => {
     console.error('Harness service could not listen');
     process.exitCode = 1;

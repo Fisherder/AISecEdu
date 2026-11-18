@@ -122,7 +122,8 @@ define AISECEDU_PUBLIC_ORIGIN "https://${configured_dojo_host}"
 define GLOBAL_AGENT_RUNTIME_FRAME_ANCESTORS "https://${configured_dojo_host} http://${configured_dojo_host}" source-list
 define HARNESS_DEEPSEEK_API_KEY
 define HARNESS_DEEPSEEK_BASE_URL https://api.deepseek.com/anthropic
-define HARNESS_DEEPSEEK_MODEL "${DOJO_AI_COMPLEX_SCENE_MODEL:-deepseek-v4.1-flash}"
+define HARNESS_DEEPSEEK_MODEL deepseek-flash
+define HARNESS_DEEPSEEK_IMAGE_INPUT auto
 define HARNESS_SERVICE_SECRET "$(openssl rand -hex 32)"
 define GLOBAL_AGENT_RUNTIME_DATA_VOLUME pwncollege_agent-runtime-data
 
