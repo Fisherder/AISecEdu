@@ -3,7 +3,7 @@
 import hashlib
 
 
-VERSION = "student-guide-harness-v1"
+VERSION = "student-guide-harness-v2"
 
 _PURPOSE = (
     "你是玄甲 Guide，学生的学习顾问。先理解学生本轮真正想解决的问题："
@@ -50,10 +50,8 @@ _EVIDENCE = (
 
 _TOOLS = (
     "工具只是能力，不是固定工作流；不需要工具时 toolCalls 为空。"
-    "只有学生明确要求创建内容时才调用 create_workspace；明确要求记住或忘记某件事时才调用 remember 或 forget。"
+    "明确要求记住或忘记某件事时才调用 remember 或 forget。"
     "open 只能使用 studentWorkspace 已存在的 url。"
-    "create_workspace.arguments 可含 mode、goal、dojoId、moduleIndex；mode 只能是 "
-    "learning-path、slides、attack-defense-scene、simulation、quiz、debate。"
     "remember.arguments 包含 category 和 content；forget.arguments 包含 memoryId 或 query；"
     "open.arguments 包含 url、label、title。不要把提议或工具请求当作已经执行成功的结果。"
 )

@@ -32,6 +32,7 @@ from CTFd.utils.decorators import authed_only
 from CTFd.utils.user import get_current_user
 
 from ... import config
+from ...learning import course_catalog
 from ...runtime_profiles import RUNTIME_PROFILES
 from ...learning.legacy_runtime import catalog_icon, is_runtime_reference, runtime_reference_matches, runtime_url
 from ...agent_runtime.conversation import (
@@ -1555,28 +1556,6 @@ def _dojo_summary_views(dojos):
             }
         )
     return summaries
-
-
-def _dojo_catalog_view(summary):
-    activity = summary.get("recentActivity") or []
-    latest = max(
-        (str(item.get("updated") or "") for item in activity),
-        default="",
-    )
-    return {
-        "id": summary.get("id"),
-        "referenceId": summary.get("referenceId"),
-        "name": summary.get("name"),
-        "description": str(summary.get("description") or "")[:320] or None,
-        "access": summary.get("access"),
-        "official": bool(summary.get("official")),
-        "repositoryBacked": bool(summary.get("repositoryBacked")),
-        "studentCount": int(summary.get("studentCount") or 0),
-        "moduleCount": int(summary.get("moduleCount") or 0),
-        "challengeCount": int(summary.get("challengeCount") or 0),
-        "counts": summary.get("counts") or {},
-        "lastActivityAt": latest or None,
-    }
 
 
 def _management_audit(user, action, resource_type, resource_id, details=None):
@@ -4376,79 +4355,11 @@ class ManagedCourseCollection(Resource):
         try:
             _require_teacher(user)
             page, page_size = _course_content_page_args()
-            query = str(request.args.get("q") or "").strip().casefold()[:120]
-            status = str(request.args.get("filter") or "all").strip().lower()
-            sort = str(request.args.get("sort") or "recent").strip().lower()
-            if status not in {"all", "recent", "attention", "drafts", "published"}:
-                raise ValueError("课程状态筛选无效。")
-            if sort not in {"recent", "attention", "name"}:
-                raise ValueError("课程排序方式无效。")
+            filters = course_catalog.filters(request.args)
             summaries = _dojo_summary_views(_teacher_dojos(user))
-            items = [_dojo_catalog_view(summary) for summary in summaries]
-
-            def aggregates(item):
-                values = list((item.get("counts") or {}).values())
-                return {
-                    "attention": sum(int(value.get("needsAttention") or 0) for value in values),
-                    "drafts": sum(int(value.get("draft") or 0) for value in values),
-                    "published": sum(int(value.get("published") or 0) for value in values),
-                }
-
-            indexed = [(item, aggregates(item)) for item in items]
-            counts = {
-                "total": len(indexed),
-                "recent": sum(bool(item.get("lastActivityAt")) for item, _ in indexed),
-                "attention": sum(values["attention"] > 0 for _, values in indexed),
-                "drafts": sum(values["drafts"] > 0 for _, values in indexed),
-                "published": sum(values["published"] > 0 for _, values in indexed),
-            }
-            if query:
-                indexed = [
-                    (item, values)
-                    for item, values in indexed
-                    if query
-                    in f"{item.get('name') or ''} {item.get('description') or ''}".casefold()
-                ]
-            if status == "recent":
-                indexed = [(item, values) for item, values in indexed if item.get("lastActivityAt")]
-            elif status in {"attention", "drafts", "published"}:
-                indexed = [(item, values) for item, values in indexed if values[status] > 0]
-            if sort == "name":
-                indexed.sort(key=lambda row: str(row[0].get("name") or "").casefold())
-            elif sort == "attention":
-                indexed.sort(
-                    key=lambda row: (
-                        row[1]["attention"],
-                        str(row[0].get("lastActivityAt") or ""),
-                    ),
-                    reverse=True,
-                )
-            else:
-                indexed.sort(
-                    key=lambda row: (
-                        str(row[0].get("lastActivityAt") or ""),
-                        row[1]["attention"],
-                        str(row[0].get("name") or "").casefold(),
-                    ),
-                    reverse=True,
-                )
-            total = len(indexed)
-            start = (page - 1) * page_size
-            presented = [item for item, _ in indexed[start : start + page_size]]
-            return _ok(
-                {
-                    "items": presented,
-                    "pagination": _course_content_pagination(page, page_size, total),
-                    "counts": counts,
-                    "filters": {"q": query, "filter": status, "sort": sort},
-                    "capabilities": {
-                        "canCreate": True,
-                        "canRename": True,
-                        "canDelete": True,
-                    },
-                    "asOf": _timestamp(datetime.datetime.utcnow()),
-                }
-            )
+            result = course_catalog.page(summaries, filters, page, page_size)
+            result["asOf"] = _timestamp(datetime.datetime.utcnow())
+            return _ok(result)
         except ValueError as exc:
             return _error(exc, 400, code="INVALID_REQUEST")
         except ScopeError as exc:
@@ -4561,18 +4472,6 @@ def _course_content_page_args():
     except (TypeError, ValueError) as exc:
         raise ValueError("分页参数必须为正整数。") from exc
     return page, page_size
-
-
-def _course_content_pagination(page, page_size, total):
-    total_pages = max(1, (int(total) + page_size - 1) // page_size)
-    return {
-        "page": page,
-        "pageSize": page_size,
-        "total": int(total),
-        "totalPages": total_pages,
-        "hasPrevious": page > 1,
-        "hasNext": page < total_pages,
-    }
 
 
 @teaching_namespace.route("/courses/<string:dojo_id>/content")
@@ -4795,7 +4694,7 @@ class ManagedCourseContentCollection(Resource):
                         "filters": applied_filters,
                     },
                     "items": items,
-                    "pagination": _course_content_pagination(page, page_size, total),
+                    "pagination": course_catalog.pagination(page, page_size, total),
                     "counts": counts if kind == "questions" else None,
                     "filters": applied_filters,
                     "evidence": {
@@ -7020,7 +6919,9 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 # Persist the complete teacher brief too, so later selection,
                 # refinement and materialization keep the same original intent.
                 payload["prompt"] = question_reply_prompt(question_context)
-            assistant_text = "正在理解完整要求、选择相关技能并规划下一步…"
+            if not continuation:
+                payload["chatBackend"] = "upstream"
+            assistant_text = "正在准备教学对话回复…"
 
         if job_kind == "agent.chat":
             payload["harnessVersion"] = HARNESS_VERSION

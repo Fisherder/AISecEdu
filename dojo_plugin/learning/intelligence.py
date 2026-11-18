@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from CTFd.models import db
 
+from ..agent_runtime.upstream_turn import UpstreamTurnError, invoke_turn, request_body
 from ..config import (
     DOJO_AI_API_KEY,
     DOJO_AI_BASE_URL,
@@ -2047,6 +2048,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
     provider = "DETERMINISTIC"
     error = None
     generated = None
+    model_used = None
     safe_actions = []
     tool_calls = []
     guide_prompt, guide_prompt_manifest = build_guide_prompt(scope["mode"])
@@ -2059,25 +2061,42 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
     }
     try:
         with usage_scope(current_attempt.id if current_attempt and reference_ids == [current_reference_id] else None, '当前实验学习指导'):
-            generated = None if needs_reference else model_json(
-                guide_prompt,
-                {
-                    "question": question,
-                    "conversation": history,
-                    "scope": scope,
-                    "learningProfile": model_profile,
-                    "activeStudyContext": active_context,
-                    "referencedStudyContexts": referenced_contexts,
-                    "studentWorkspace": agent_context,
-                },
-                model=DOJO_AI_GUIDE_MODEL,
-                thinking=False,
-                temperature=0.25,
-                max_tokens=3500,
-                total_timeout_seconds=90,
-            )
+            if not needs_reference and DOJO_AI_ENABLED:
+                dispatch_id = record_model_dispatch(DOJO_AI_GUIDE_MODEL)
+                response = None
+                try:
+                    response = invoke_turn(request_body(guide_prompt, {
+                        "question": question,
+                        "conversation": history,
+                        "scope": scope,
+                        "learningProfile": model_profile,
+                        "activeStudyContext": active_context,
+                        "referencedStudyContexts": referenced_contexts,
+                        "studentWorkspace": agent_context,
+                    }))
+                finally:
+                    settle_model_dispatch(dispatch_id, response)
+                content = re.sub(
+                    r"^```(?:json)?\s*|\s*```$", "", response["text"], flags=re.IGNORECASE,
+                )
+                model_used = response["model"]
+                candidate = json.loads(content)
+                if not isinstance(candidate, dict):
+                    raise UpstreamTurnError("学习助手返回格式无效")
+                answer_text = candidate.get("answer")
+                if not isinstance(answer_text, str) or not answer_text.strip():
+                    raise UpstreamTurnError("学习助手返回空白答复")
+                generated = candidate
+                generated["_agentMeta"] = {
+                    "provider": "DEEPSEEK",
+                    "model": model_used,
+                    "usage": response["usage"],
+                }
         if generated:
-            tool_calls = sanitize_tool_calls(generated.get("toolCalls"))
+            tool_calls = [
+                call for call in sanitize_tool_calls(generated.get("toolCalls"))
+                if call["tool"] in {"open", "remember", "forget"}
+            ]
             actions = [
                 item
                 for item in (generated.get("actions") or [])[:4]
@@ -2124,6 +2143,9 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
                 answer_text, fallback
             )
             provider = "MODEL_BLOCKED" if blocked else "MODEL"
+            if blocked:
+                safe_actions = []
+                tool_calls = []
             if reference_ids:
                 try:
                     used_reference_ids = (
@@ -2159,6 +2181,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
                     error = "Guide 模型回答偏离了引用题目，已替换为范围安全的回答。"
                     answer = fallback
                     safe_actions = []
+                    tool_calls = []
                     provider = "MODEL_SCOPE_BLOCKED"
     except (
         requests.RequestException,
@@ -2175,11 +2198,8 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
         tool_calls = []
 
     if not thread.messages:
-        proposed = (
-            str((generated or {}).get("title") or "").strip()
-            or question.replace("\n", " ")[:48]
-            or "New conversation"
-        )
+        proposed = str((generated or {}).get("title") or "").strip()
+        proposed = proposed or question.replace("\n", " ")[:48] or "New conversation"
         thread.title = proposed[:160]
     db.session.add(
         LearningGuideMessages(
@@ -2201,7 +2221,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
         content=answer,
         metadata_json={
             "provider": provider,
-            "model": DOJO_AI_GUIDE_MODEL if provider.startswith("MODEL") else None,
+            "model": model_used,
             "contextDigest": digest,
             "activeContextIncluded": bool(active_context),
             "promptManifest": [] if needs_reference else [guide_prompt_manifest],
@@ -2240,7 +2260,7 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
             "created": assistant.created.isoformat() + "Z",
         },
         "provider": provider,
-        "model": DOJO_AI_GUIDE_MODEL if provider.startswith("MODEL") else None,
+        "model": model_used,
         "toolCalls": tool_calls,
         "profileSummary": profile.get("summary") or {},
         "contextCoverage": {

@@ -119,7 +119,7 @@ def freeze_prepared(job, payload, model_route):
         return existing
     fixed = {'prompt', 'phase', 'constraints', 'allowDegraded', 'generationRefinement',
              'userMessageId', 'submissionFingerprint', 'harnessVersion', 'harnessRootJobId',
-             'harnessInternal', 'waitForJobIds', 'dependsOnJobIds'}
+             'harnessInternal', 'waitForJobIds', 'dependsOnJobIds', 'chatBackend'}
     if any(payload.get(key) != admitted['payload'].get(key) for key in fixed):
         raise ModelInputError('组装后的模型请求改变了已接收的创作要求。')
     value = {key: _copy(admitted[key]) for key in ('version', 'jobId', 'kind', 'idempotencyKey', 'scope')}

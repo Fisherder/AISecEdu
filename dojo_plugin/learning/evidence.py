@@ -70,7 +70,7 @@ def redact_text(value, limit=8000):
     return result[:limit]
 
 
-def scrub_payload(value, key=None, depth=0):
+def scrub_payload(value, key=None, depth=0, *, text_limit=8000):
     # Booleans describe security contracts and validation outcomes; they can
     # never contain a credential even when their descriptive key mentions a
     # sensitive concept such as ``oneDynamicFlagPerItem``.
@@ -86,16 +86,17 @@ def scrub_payload(value, key=None, depth=0):
                 item_value,
                 str(item_key),
                 depth + 1,
+                text_limit=text_limit,
             )
             for item_key, item_value in list(value.items())[:100]
         }
     if isinstance(value, list):
-        return [scrub_payload(item, depth=depth + 1) for item in value[:100]]
+        return [scrub_payload(item, depth=depth + 1, text_limit=text_limit) for item in value[:100]]
     if isinstance(value, str):
-        return redact_text(value)
+        return redact_text(value, limit=text_limit)
     if isinstance(value, (int, float)) or value is None:
         return value
-    return redact_text(value)
+    return redact_text(value, limit=text_limit)
 
 
 def canonical_json(value):
