@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { POST as postLessonPlan } from '@/app/api/integration/jobs/ordinary-lesson-plan/route';
 import { coursewareSlideDataSchema } from '@/lib/courseware/schema';
 import { compileCoursewareSlide } from '@/lib/courseware/compiler';
 import { ordinaryCandidate, ordinaryMaterialAnalysis, ordinarySlidePatch } from '@/lib/server/agent-harness/ordinary-teaching';
@@ -185,8 +186,7 @@ describe('ordinary teaching worker service routes', () => {
       return modelResponse(planOutput);
     });
     vi.stubGlobal('fetch', fetch);
-    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
-    const response = await POST(materializeRequest());
+    const response = await postLessonPlan(materializeRequest());
     expect(response.status).toBe(200);
     const completed = await response.json();
     expect(completed).toMatchObject({
@@ -214,17 +214,16 @@ describe('ordinary teaching worker service routes', () => {
   it('rejects unauthorized, cross-scope, and unpinned lesson plans without reaching a model', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
-    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
-    expect((await POST(materializeRequest({}, 'official-model', 'wrong-secret'))).status).toBe(401);
+    expect((await postLessonPlan(materializeRequest({}, 'official-model', 'wrong-secret'))).status).toBe(401);
     for (const payload of [{expectedRevision: 0}, {workspaceId: 'lab'}, {artifactType: 'slide-deck'}, {plan: {}},
       {materialContext: {complete: true, expectedMaterialCount: 1, materialIds: ['other-course']}}, {requestPrompt: '请复现漏洞利用'}]) {
-      expect((await POST(materializeRequest(payload))).status).toBe(422);
+      expect((await postLessonPlan(materializeRequest(payload))).status).toBe(422);
     }
-    expect((await POST(materializeRequest({}, 'old-model'))).status).toBe(503);
-    expect((await POST(materializeRequest({}, 'official-model', 'integration-secret', null))).status).toBe(503);
-    expect((await POST(materializeRequest({}, 'official-model', 'integration-secret', 'old-model'))).status).toBe(503);
+    expect((await postLessonPlan(materializeRequest({}, 'old-model'))).status).toBe(503);
+    expect((await postLessonPlan(materializeRequest({}, 'official-model', 'integration-secret', null))).status).toBe(503);
+    expect((await postLessonPlan(materializeRequest({}, 'official-model', 'integration-secret', 'old-model'))).status).toBe(503);
     vi.stubEnv('DOJO_AI_ENABLED', 'false');
-    expect((await POST(materializeRequest())).status).toBe(503);
+    expect((await postLessonPlan(materializeRequest())).status).toBe(503);
     expect(fetch).not.toHaveBeenCalled();
     expect(mocks.resolveModel).not.toHaveBeenCalled();
   });
@@ -235,9 +234,8 @@ describe('ordinary teaching worker service routes', () => {
       .mockImplementationOnce(async () => modelResponse({sections: [{...planOutput.sections[0], explanation: '<script>'}]}))
       .mockImplementationOnce(async () => Response.json({model: 'official-model', text: JSON.stringify(planOutput)}));
     vi.stubGlobal('fetch', fetch);
-    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
     for (const status of [422, 422, 503]) {
-      const response = await POST(materializeRequest());
+      const response = await postLessonPlan(materializeRequest());
       expect(response.status).toBe(status);
       expect(await response.json()).not.toHaveProperty('result');
     }
@@ -270,7 +268,6 @@ describe('ordinary teaching worker service routes', () => {
       .mockResolvedValueOnce(modelResponse(injectedCandidate))
       .mockResolvedValueOnce(modelResponse(sourcedCandidate));
     vi.stubGlobal('fetch', fetch);
-    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
     const payload = {
       materialContext: coverage, materialDossier: {coverage, materials: [material], private: 'PRIVATE DOSSIER'},
       sourceRefs: [sourceRef, {type: 'other', value: 'PRIVATE OTHER REF'}],
@@ -279,7 +276,7 @@ describe('ordinary teaching worker service routes', () => {
       sourceCandidates: ['PRIVATE PREVIOUS CANDIDATE'], context: {history: ['PRIVATE HISTORY']},
       tools: ['PRIVATE TOOL'],
     };
-    const response = await POST(candidateRequest(payload));
+    const response = await postLessonPlan(candidateRequest(payload));
     const result = await response.json();
     expect(response.status, JSON.stringify(result)).toBe(200);
     expect(result.model).toMatchObject({actualModel: 'official-model', usage: {inputTokens: 40, outputTokens: 20, totalTokens: 60}});
@@ -302,9 +299,9 @@ describe('ordinary teaching worker service routes', () => {
         }} : {}),
       });
     }
-    expect((await POST(candidateRequest({...payload, sourceRefs: []}))).status).toBe(422);
-    expect((await POST(candidateRequest({...payload, sourceRefs: [{...sourceRef, revisionId: 'other-revision'}]}))).status).toBe(422);
-    expect((await POST(candidateRequest({...payload, materialDossier: {coverage, materials: [
+    expect((await postLessonPlan(candidateRequest({...payload, sourceRefs: []}))).status).toBe(422);
+    expect((await postLessonPlan(candidateRequest({...payload, sourceRefs: [{...sourceRef, revisionId: 'other-revision'}]}))).status).toBe(422);
+    expect((await postLessonPlan(candidateRequest({...payload, materialDossier: {coverage, materials: [
       material, {...material, id: 'unapproved-material'},
     ]}}))).status).toBe(422);
     expect(fetch).toHaveBeenCalledTimes(4);
@@ -312,7 +309,6 @@ describe('ordinary teaching worker service routes', () => {
   });
 
   it('supports a pinned candidate without materials and rejects missing, zero or mismatched model receipts', async () => {
-    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
     const fetch = vi.fn()
       .mockResolvedValueOnce(modelResponse(blueprint))
       .mockResolvedValueOnce(modelResponse(lessonCandidate))
@@ -325,9 +321,9 @@ describe('ordinary teaching worker service routes', () => {
       .mockResolvedValueOnce(Response.json({text: JSON.stringify(blueprint),
         usage: {prompt_tokens: 10, completion_tokens: 5}}));
     vi.stubGlobal('fetch', fetch);
-    expect((await POST(candidateRequest())).status).toBe(200);
+    expect((await postLessonPlan(candidateRequest())).status).toBe(200);
     for (let index = 0; index < 4; index++) {
-      const response = await POST(candidateRequest());
+      const response = await postLessonPlan(candidateRequest());
       expect(response.status).toBe(503);
       expect(await response.json()).not.toHaveProperty('result');
     }
@@ -338,8 +334,7 @@ describe('ordinary teaching worker service routes', () => {
   it('rejects an overlong teacher request before calling the pinned model', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
-    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
-    const response = await POST(candidateRequest({prompt: '教'.repeat(4001)}));
+    const response = await postLessonPlan(candidateRequest({prompt: '教'.repeat(4001)}));
     expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({errorCode: 'ORDINARY_LESSON_PLAN_REQUEST_TOO_LONG', error: expect.stringContaining('4000')});
     expect(fetch).not.toHaveBeenCalled();
@@ -355,8 +350,7 @@ describe('ordinary teaching worker service routes', () => {
       .mockResolvedValueOnce(modelResponse(tooManySections))
       .mockResolvedValueOnce(modelResponse(oversizedObjective));
     vi.stubGlobal('fetch', fetch);
-    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
-    const response = await POST(candidateRequest());
+    const response = await postLessonPlan(candidateRequest());
     expect(response.ok).toBe(false);
     expect(await response.json()).not.toHaveProperty('result');
     expect(fetch).toHaveBeenCalledTimes(3);
@@ -366,7 +360,6 @@ describe('ordinary teaching worker service routes', () => {
   it('keeps the dedicated worker URL private and rejects every unpinned or mismatched job before dispatch', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
-    const {POST} = await import('@/app/api/integration/jobs/ordinary-lesson-plan/route');
     const {integratedSessionApiAllowed} = await import('@/middleware');
     const base = await candidateRequest().json();
     const url = 'http://localhost/api/integration/jobs/ordinary-lesson-plan';
@@ -378,8 +371,8 @@ describe('ordinary teaching worker service routes', () => {
       body: JSON.stringify(body),
     });
     expect(integratedSessionApiAllowed(new URL(url).pathname, 'POST')).toBe(false);
-    expect((await POST(internal(base, false))).status).toBe(401);
-    expect((await POST(internal(null))).status).toBe(400);
+    expect((await postLessonPlan(internal(base, false))).status).toBe(401);
+    expect((await postLessonPlan(internal(null))).status).toBe(400);
     const mismatches = [
       {...base, kind: 'material.analyze'},
       {...base, kind: 'artifact.materialize'},
@@ -394,11 +387,11 @@ describe('ordinary teaching worker service routes', () => {
         payload: {...base.payload, ...candidatePin}},
     ];
     for (const malformed of mismatches) {
-      const response = await POST(internal(malformed));
+      const response = await postLessonPlan(internal(malformed));
       expect(response.status).toBe(422);
       expect(await response.json()).toMatchObject({errorCode: 'INVALID_ORDINARY_LESSON_PLAN_JOB'});
     }
-    const prefixed = await POST(internal(mismatches[0], true, 'http://localhost/agent-runtime' + new URL(url).pathname));
+    const prefixed = await postLessonPlan(internal(mismatches[0], true, 'http://localhost/agent-runtime' + new URL(url).pathname));
     expect(prefixed.status).toBe(422);
     expect(await prefixed.json()).toMatchObject({errorCode: 'INVALID_ORDINARY_LESSON_PLAN_JOB'});
     expect(fetch).not.toHaveBeenCalled();
