@@ -6,10 +6,19 @@ from unittest.mock import MagicMock
 import pytest
 
 
-MODULE = Path(__file__).resolve().parents[1] / "dojo_plugin/agent_runtime/upstream_turn.py"
-SPEC = importlib.util.spec_from_file_location("upstream_turn_fixture", MODULE)
-turn = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(turn)
+RUNTIME = Path(__file__).resolve().parents[1] / "dojo_plugin/agent_runtime"
+
+
+def load_file(name):
+    spec = importlib.util.spec_from_file_location(name + "_fixture", RUNTIME / (name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+turn = load_file("upstream_turn")
+model_context = load_file("teacher_model_context")
+documents = load_file("teacher_documents")
 
 
 @pytest.fixture
@@ -83,15 +92,13 @@ def test_teacher_request_omits_person_rows_from_both_model_backends(backend, mod
     import ast
     from types import SimpleNamespace
 
-    model_context_path = MODULE.with_name("teacher_model_context.py")
-    model_context_spec = importlib.util.spec_from_file_location("teacher_model_context_fixture", model_context_path)
-    model_context = importlib.util.module_from_spec(model_context_spec)
-    model_context_spec.loader.exec_module(model_context)
-    tree = ast.parse(MODULE.with_name("jobs.py").read_text())
+    tree = ast.parse((RUNTIME / "jobs.py").read_text())
     functions = {"_runtime_request_body", "_harness_courseware_authorized"}
     tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in functions]
     namespace = {
         "request_body": turn.request_body,
+        "requested_document_formats": documents.requested_document_formats,
+        "DOCUMENT_INSTRUCTION": documents.DOCUMENT_INSTRUCTION,
         "scrub_payload": lambda value, **kwargs: value,
         "teacher_model_payload": model_context.teacher_model_payload,
         "teacher_platform_facts": model_context.teacher_platform_facts,
