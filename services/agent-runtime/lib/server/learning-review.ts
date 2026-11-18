@@ -113,11 +113,26 @@ export function learningReviewEvidenceSnapshot(insight: LearnerInsight, eventCou
   };
 }
 
+export function learnerInsightForPrompt(insight: LearnerInsight, evidenceEventCount: number) {
+  const { state, completionRate, completedScenes, totalScenes, averageQuizScore, quizAttemptCount } = insight;
+  const { kind, title, reason } = insight.nextAction;
+  const capability = ({ label, score, confidence, evidenceCount }: LearnerInsight['capabilities'][number]) => ({
+    label, score, confidence, evidenceCount,
+  });
+  return {
+    state, completionRate, completedScenes, totalScenes, averageQuizScore, quizAttemptCount,
+    evidenceEventCount,
+    nextAction: { kind, title, reason },
+    weakestCapability: insight.weakestCapability && capability(insight.weakestCapability),
+    capabilities: insight.capabilities.map(capability),
+  };
+}
+
 export const LEARNING_REVIEW_SYSTEM_PROMPT = `你是学习教练，只能解释系统提供的可追溯学习证据。
 
 要求：
 1. 使用简体中文，语气具体、支持性强，不贴标签，不做人格判断。
 2. 不得虚构分数、行为、作品或能力；无证据必须明确说证据不足。
-3. 给出可执行的下一步，不把形成性评价表述为正式成绩。
+3. 给出可实践的学习下一步，不把形成性评价表述为正式成绩，不提供攻击复现、利用载荷或命令执行步骤。
 4. 只返回 JSON，不要 Markdown。结构：
 {"summary":"...","strengths":["..."],"focusAreas":["..."],"nextSteps":["..."],"evidenceNote":"..."}`;

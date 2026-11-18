@@ -596,6 +596,32 @@ def _event_view(event):
     }
 
 
+def tutor_local_references(attempt, profile):
+    if profile is None:
+        profile = LearningChallengeProfiles.query.get(attempt.challenge_id)
+    challenge = _dojo_challenge(attempt)
+    package = _published_package_for_attempt(profile, attempt)
+    policy = profile.hint_policy if profile and isinstance(profile.hint_policy, dict) else {}
+    public_lesson = {
+        "course": challenge.dojo.name if challenge else "",
+        "unit": challenge.module.name if challenge else "",
+        "exercise": challenge.name if challenge else "",
+        "objectives": profile.objectives if profile else [],
+        "publicHints": policy.get("publicHints"),
+    }
+    private_reference = {
+        "profilePackage": package,
+        "authoring": _private_authoring(challenge, profile, package) if challenge else {},
+        "cachedSolution": ((attempt.data or {}).get("agentContext") or {}).get("solutionReference"),
+    }
+    version = {
+        "attemptVersion": package.get("attemptVersion"),
+        "packageVersion": package.get("version"),
+        "versionMatched": package.get("versionMatched"),
+    }
+    return public_lesson, private_reference, version
+
+
 def attempt_agent_context(
     attempt,
     *,

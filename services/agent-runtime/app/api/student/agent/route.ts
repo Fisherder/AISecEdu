@@ -1,13 +1,9 @@
 import { nanoid } from 'nanoid';
-import { NextRequest } from 'next/server';
+import { NextRequest, type NextResponse } from 'next/server';
 import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
-import { resolvePrincipal } from '@/lib/server/auth/session';
+import { resolvePrincipal, type Principal } from '@/lib/server/auth/session';
 import { getDb } from '@/lib/server/db';
 import { ensureAppSchema } from '@/lib/server/schema';
-import {
-  createStudentSelfStudyPackage,
-  SelfStudyGenerationError,
-} from '@/lib/server/self-study-generation';
 import {
   decideStudentAgentMessage,
   type StudentAgentHistoryMessage,
@@ -70,18 +66,8 @@ function threadView(row: Record<string, unknown>) {
   };
 }
 
-function linksForState(
-  state: StudentAgentLearningState,
-  generatedPackage?: { classroomId: string; title: string },
-) {
+function linksForState(state: StudentAgentLearningState) {
   const links: Array<{ label: string; href: string; kind: string }> = [];
-  if (generatedPackage) {
-    links.push({
-      label: `进入《${generatedPackage.title}》`,
-      href: `/classroom/${generatedPackage.classroomId}`,
-      kind: 'classroom',
-    });
-  }
   const task = state.activeContext.taskId
     ? state.tasks.find((item) => item.id === state.activeContext.taskId)
     : undefined;
@@ -120,7 +106,7 @@ function linksForState(
   return links.slice(0, 4);
 }
 
-async function requireStudent(req: NextRequest) {
+async function requireStudent(req: NextRequest): Promise<{ response: NextResponse } | { principal: Principal }> {
   const principal = await resolvePrincipal(req);
   if (!principal) {
     return { response: apiError(API_ERROR_CODES.INVALID_CREDENTIALS, 401, 'Not authenticated') };
@@ -240,7 +226,7 @@ export async function POST(req: NextRequest) {
     history,
     state,
     context: state.activeContext,
-  });
+  }, { signal: req.signal });
   if (Object.keys(decision.profileUpdates).length > 0 || decision.memoryFacts.length > 0) {
     await saveStudentLearningProfile(learnerKey, decision.profileUpdates, decision.memoryFacts, db);
   }
@@ -252,53 +238,15 @@ export async function POST(req: NextRequest) {
         db,
       )
     : undefined;
-  let generatedPackage:
-    | { id: string; title: string; classroomId: string; classroomUrl: string }
-    | undefined;
-  let reply = decision.reply;
-  const trace = [...decision.trace];
-  if (decision.action === 'generate_package' && decision.packageRequest) {
-    try {
-      const created = await createStudentSelfStudyPackage(
-        req,
-        access.principal,
-        decision.packageRequest,
-      );
-      generatedPackage = {
-        id: created.id,
-        title: created.title,
-        classroomId: created.classroomId,
-        classroomUrl: created.classroomUrl,
-      };
-      trace.push({
-        label: '生成并校验个人学习包',
-        detail: `已生成《${created.title}》，并只向当前学生授权`,
-        status: 'completed',
-      });
-      reply = `${reply}\n\n个人学习包《${created.title}》已经生成，可以从下方直接进入。`;
-    } catch (error) {
-      const reason =
-        error instanceof SelfStudyGenerationError
-          ? error.publicMessage
-          : '内容生成暂时失败，请稍后重试';
-      trace.push({
-        label: '生成个人学习包',
-        detail: '本次生成未完成，可保留当前对话后重试',
-        status: 'completed',
-      });
-      reply = `${reply}\n\n本次个人学习包没有成功生成：${reason}。对话和学习目标已保留，你可以直接让我重试或先调整范围。`;
-    }
-  }
-
   const refreshedState = await loadStudentAgentLearningState(learnerKey, state.activeContext, db);
   const metadata = {
     action: decision.action,
     title: decision.title,
     source: decision.source,
-    trace,
+    trace: decision.trace,
     plan,
-    generatedPackage,
-    links: linksForState(refreshedState, generatedPackage),
+    modelUsage: decision.modelUsage,
+    links: linksForState(refreshedState),
     remembered: decision.memoryFacts,
   };
   const assistantMessageId = `student_message_${nanoid(12)}`;
@@ -307,7 +255,7 @@ export async function POST(req: NextRequest) {
     `INSERT INTO student_agent_messages
        (id, thread_id, learner_key, role, kind, content, metadata, created_at)
      VALUES ($1,$2,$3,'assistant','result',$4,$5,$6)`,
-    [assistantMessageId, threadId, learnerKey, reply, JSON.stringify(metadata), completedAt],
+    [assistantMessageId, threadId, learnerKey, decision.reply, JSON.stringify(metadata), completedAt],
   );
   const firstTurn = String(threadRow.title) === '新学习对话';
   await db.query(
@@ -341,7 +289,7 @@ export async function POST(req: NextRequest) {
         id: assistantMessageId,
         role: 'assistant',
         kind: 'result',
-        content: reply,
+        content: decision.reply,
         metadata,
         createdAt: completedAt,
       },

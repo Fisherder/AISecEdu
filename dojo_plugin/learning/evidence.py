@@ -151,12 +151,13 @@ def append_evidence(
     return event
 
 
-def verify_evidence_chain(attempt_id):
-    events = (
-        LearningEvidenceEvents.query.filter_by(attempt_id=attempt_id)
-        .order_by(LearningEvidenceEvents.sequence)
-        .all()
-    )
+def verify_evidence_chain(attempt_id, *, events=None):
+    if events is None:
+        events = (
+            LearningEvidenceEvents.query.filter_by(attempt_id=attempt_id)
+            .order_by(LearningEvidenceEvents.sequence)
+            .all()
+        )
     previous_hash = "0" * 64
     for expected_sequence, event in enumerate(events, 1):
         material = canonical_json(

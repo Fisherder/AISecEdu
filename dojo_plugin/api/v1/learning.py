@@ -75,7 +75,6 @@ from ...learning.intelligence import (
     guide_reply,
     guide_thread_view,
     new_guide_thread,
-    prefetch_solution_reference,
     tutor_reply,
 )
 from ...learning.student_agent import (
@@ -3138,7 +3137,6 @@ class CurrentLearningAttempt(Resource):
         if attempt is not None:
             sync_live_progress(attempt, get_current_container(user))
             db.session.commit()
-            prefetch_solution_reference(attempt)
         return {
             "success": True,
             "active": bool(attempt),
@@ -3238,11 +3236,7 @@ class LearningTutor(Resource):
         if not question:
             return {"success": False, "error": "问题不能为空"}, 400
         profile = LearningChallengeProfiles.query.get(attempt.challenge_id)
-        container = get_current_container(user)
-        mark("containerLookup")
-        sync_live_progress(attempt, container)
-        mark("liveProgress")
-        reply = tutor_reply(attempt, user, question, profile, container)
+        reply = tutor_reply(attempt, user, question, profile)
         mark("tutor")
         db.session.commit()
         mark("commit")
