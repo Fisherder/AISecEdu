@@ -229,7 +229,7 @@ jobs:
           output-file: ${{ runner.temp }}/ai-result/initial-review.json
           output-schema-file: ${{ github.workspace }}/policy/ops/team/ai_review.schema.json
           codex-args: '["--ephemeral", "-c", "web_search=\"disabled\"", "-c", "model_catalog_json=\"${{ github.workspace }}/policy/ops/team/deepseek-models.json\""]'
-          allow-bot-users: github-actions[bot]
+          allow-bot-users: github-actions[bot],aisecedu-codex-pr[bot]
       - name: Bind valid model output to the exact Git patch SHA-256
         env:
           AI_CHUNK: ${{ matrix.chunk }}

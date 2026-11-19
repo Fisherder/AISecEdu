@@ -65,6 +65,9 @@ def test_irreversible_model_execution_uses_one_action_per_fresh_job_and_no_publi
         assert 'safety-strategy: drop-sudo' in body and 'runs-on: ubuntu-24.04' in body
         assert 'name: aisecedu-ai-model' in body and 'AI_AUTOPILOT_SSH_KEY' not in body
         assert 'contents: write' not in body and 'pull-requests: write' not in body
+        bot_actor = ai.POLICY['review_only_app']['login']
+        assert (bot_actor in body) == (name == 'large_review'), name
+    assert 'sandbox: read-only' in jobs['large_review']
     assert 'uses: openai/codex-action@' not in jobs['publish']
     assert 'needs: [analyze, repair, final_review, large_review]' in jobs['publish']
 
@@ -1034,6 +1037,146 @@ def test_large_publication_binds_every_report_and_cannot_repair_or_auto_approve(
             (folder / 'repair.patch').write_text('malicious artifact')
             rejects(publish)
             git.assert_not_called()
+
+
+def codex_app_pr():
+    return {
+        'number': 1, 'node_id': 'node', 'state': 'open', 'draft': False, 'title': 'synthetic', 'body': '',
+        'changed_files': 1, 'additions': 1, 'deletions': 1,
+        'user': {'login': 'aisecedu-codex-pr[bot]', 'id': 358521998, 'type': 'Bot'},
+        'base': {'ref': 'develop', 'sha': 'b' * 40},
+        'head': {'sha': 'a' * 40, 'ref': 'feat/codex/task', 'repo': {'full_name': 'Fisherder/AISecEdu'}},
+    }
+
+
+def mock_codex_app_review(client, pr, folder):
+    client.repo = 'Fisherder/AISecEdu'
+
+    def repo_api(path, data=None, method=None):
+        if data is not None:
+            assert path in ('/check-runs', '/issues/1/comments'), (path, method)
+            return {'id': 17}
+        if path == '/pulls/1':
+            return pr
+        if path == '/git/ref/heads/develop':
+            return {'object': {'sha': pr['base']['sha']}}
+        if '/check-runs' in path:
+            return {'check_runs': []}
+        if path.startswith('/compare/'):
+            return {'behind_by': 1}
+        raise AssertionError(path)
+
+    client.repo_api.side_effect = repo_api
+    client.pages.return_value = []
+    event = folder / 'event.json'
+    event.write_text(json.dumps({'number': pr['number']}))
+    return event
+
+
+def test_prepare_gates_codex_app_by_identity_and_pull_request_scope():
+    valid = codex_app_pr()
+    for prefix in ('feat', 'fix', 'team'):
+        pr = {**valid, 'head': {**valid['head'], 'ref': f'{prefix}/codex/task'}}
+        with tempfile.TemporaryDirectory() as directory, patch.object(ai, 'GitHub') as github, \
+                patch.object(ai, 'set_outputs') as outputs:
+            folder = Path(directory)
+            event = mock_codex_app_review(github.return_value, pr, folder)
+            with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event)}):
+                ai.prepare(folder, gate_only=True)
+            assert outputs.call_args.kwargs['mode'] == 'large_pending'
+
+    invalid = [
+        *({**valid, 'user': {**valid['user'], **user}} for user in (
+            {'login': 'lookalike[bot]'}, {'id': None}, {'id': 358521999}, {'id': '358521998'},
+            {'id': 358521998.0}, {'type': 'User'},
+        )),
+        *({**valid, 'head': {**valid['head'], **head}} for head in (
+            {'ref': 'feat/member/task'}, {'ref': 'fix/codex-other/task'}, {'ref': 'release/codex/task'},
+            {'repo': {'full_name': 'external/fork'}}, {'repo': None},
+        )),
+        {**valid, 'base': {**valid['base'], 'ref': 'main'}},
+        {**valid, 'draft': True},
+        {**valid, 'state': 'closed'},
+    ]
+    for pr in invalid:
+        with tempfile.TemporaryDirectory() as directory, patch.object(ai, 'GitHub') as github, \
+                patch.object(ai, 'set_outputs') as outputs:
+            folder = Path(directory)
+            event = mock_codex_app_review(github.return_value, pr, folder)
+            with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event)}):
+                ai.prepare(folder, gate_only=True)
+            assert outputs.call_args.kwargs['mode'] == 'skip', pr
+            assert not (folder / 'context.json').exists()
+            github.return_value.repo_api.assert_called_once_with('/pulls/1')
+
+
+def test_codex_app_reviews_and_comments_are_not_trusted_feedback():
+    bot = {'id': 1, 'user': codex_app_pr()['user'], 'body': 'bot feedback',
+           'state': 'APPROVED', 'commit_id': 'a' * 40}
+    human = {'id': 2, 'user': {'login': 'Fisherder'}, 'body': 'maintainer feedback'}
+    with patch.object(ai, 'GitHub') as github:
+        client = github.return_value
+        client.pages.side_effect = [[bot, human], [bot], [bot]]
+        feedback = ai.review_feedback(client, 1)
+    assert [row['author'] for row in feedback] == ['Fisherder']
+
+
+def test_small_codex_app_pr_uses_read_only_review_and_publication():
+    pr = codex_app_pr()
+    diff = (b'diff --git a/example.py b/example.py\nnew file mode 100644\n'
+            b'--- /dev/null\n+++ b/example.py\n@@ -0,0 +1 @@\n+value = 1\n')
+    chunks = ai.large_diff_chunks(diff)
+    evidence = {'chunks': [row for row, _ in chunks], 'application_paths': 1, 'vendor': [],
+                'merge_base': 'c' * 40}
+    with (tempfile.TemporaryDirectory() as directory,
+          patch.object(ai, 'GitHub') as github,
+          patch.object(ai, 'load_large_diff', return_value=(evidence, [('A', 'example.py')], chunks, '')),
+          patch.object(ai, 'set_outputs') as outputs, patch.object(ai, 'git') as git):
+        folder = Path(directory)
+        client = github.return_value
+        event = mock_codex_app_review(client, pr, folder)
+        with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event)}):
+            ai.prepare(folder)
+        context_path = folder / 'context.json'
+        context = json.loads(context_path.read_text())
+        assert context['mode'] == outputs.call_args.kwargs['mode'] == 'large_review'
+        assert context['large_review']['merge_base'] != context['base']
+        assert not outputs.call_args.kwargs['can_repair']
+        assert not context['repairable_files']
+        assert (folder / 'diff-chunks/0.patch').read_bytes() == diff
+
+        ai.large_prompt(folder, 0)
+        assert (folder / 'review.txt').read_text().endswith(diff.decode())
+        (folder / 'initial-review.json').write_text(json.dumps(report()))
+        ai.package_large_report(folder, 0)
+        report_path = folder / 'segment-reports/deepseek-segment-0/segment-report.json'
+        report_path.parent.mkdir(parents=True)
+        (folder / 'segment-report.json').replace(report_path)
+        (folder / 'review.json').write_text(json.dumps(report()))
+        publish = lambda: ai.publish(folder, folder / 'never-check-out', expected=context)
+        for mode in ('update', 'analyze'):
+            context_path.write_text(json.dumps({**context, 'mode': mode}))
+            rejects(publish)
+        context_path.write_text(json.dumps(context))
+        repair = folder / 'repair.patch'
+        repair.write_text('forged patch')
+        rejects(publish)
+        repair.unlink()
+
+        client.repo_api.reset_mock()
+        pr['user']['id'] = 358521999
+        publish()
+        client.repo_api.assert_called_once_with('/pulls/1')
+        pr['user']['id'] = 358521998
+
+        client.repo_api.reset_mock()
+        publish()
+        write_calls = [call.args for call in client.repo_api.call_args_list if len(call.args) == 3]
+        assert [args[0] for args in write_calls] == ['/check-runs', '/issues/1/comments']
+        assert write_calls[0][1]['conclusion'] == 'success'
+        assert ai.MARKER in write_calls[1][1]['body']
+        client.api.assert_not_called()
+        git.assert_not_called()
 
 
 if __name__ == '__main__':

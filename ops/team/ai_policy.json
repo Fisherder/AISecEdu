@@ -1,6 +1,12 @@
 {
   "base_branch": "develop",
   "trusted_authors": ["Fisherder", "yunie666", "hunry-1-code"],
+  "review_only_app": {
+    "login": "aisecedu-codex-pr[bot]",
+    "id": 358521998,
+    "repository": "Fisherder/AISecEdu",
+    "branch_prefixes": ["feat/codex/", "fix/codex/", "team/codex/"]
+  },
   "max_rounds": 2,
   "max_files": 40,
   "max_changed_lines": 1500,

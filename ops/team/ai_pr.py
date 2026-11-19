@@ -356,10 +356,19 @@ def event_number(client, event):
     return int(number) if number else None
 
 
+def review_only_app_pr(pr):
+    app = POLICY['review_only_app']
+    user, head = pr['user'], pr['head']
+    return (user.get('type') == 'Bot' and user['login'] == app['login']
+            and type(user.get('id')) is int and user['id'] == app['id']
+            and (head.get('repo') or {}).get('full_name') == app['repository']
+            and head['ref'].startswith(tuple(app['branch_prefixes'])))
+
+
 def eligible(client, pr):
     return (pr['state'] == 'open' and not pr['draft'] and pr['base']['ref'] == POLICY['base_branch']
             and pr['head']['repo'] and pr['head']['repo']['full_name'] == client.repo
-            and pr['user']['login'] in POLICY['trusted_authors']
+            and (pr['user']['login'] in POLICY['trusted_authors'] or review_only_app_pr(pr))
             and pr['head']['ref'].startswith(('feat/', 'fix/', 'team/')))
 
 
@@ -396,7 +405,8 @@ def prepare(folder, *, gate_only=False):
         }))
         set_outputs(mode='skip')
         return
-    large = is_large_pr(pr)
+    # App contributions use the existing patch-only reviewer, even for a one-file PR.
+    large = is_large_pr(pr) or review_only_app_pr(pr)
     if large and gate_only:
         (folder / 'context.json').write_text(json.dumps({
             'mode': 'large_pending', 'number': pr['number'], 'node_id': pr['node_id'], 'head': pr['head']['sha'],
@@ -446,7 +456,7 @@ def prepare(folder, *, gate_only=False):
         context['bootstrap_authorized'] = True
     if large:
         context.update(large_review=evidence, blocked_reason=blocked,
-                       repairable_files=[], manual_reasons=['超大 PR 需要维护者复核。'])
+                       repairable_files=[], manual_reasons=['分段审查完成后需要维护者复核。'])
     mode = ('large_blocked' if blocked else 'large_review') if large else (
         'update' if comparison['behind_by'] else 'analyze')
     retry = event.get('inputs', {}).get('retry') == 'true' and rounds < POLICY['max_rounds']
@@ -722,10 +732,8 @@ def publish(folder, candidate, *, expected):
         raise ValueError('Publication artifact does not match trusted workflow outputs')
     client = GitHub()
     pr = client.repo_api(f'/pulls/{context["number"]}')
-    if (pr['state'] != 'open' or pr['draft'] or pr['base']['ref'] != POLICY['base_branch']
-            or pr['head']['sha'] != context['head'] or pr['head']['ref'] != context['branch']
-            or pr['head']['repo']['full_name'] != client.repo or pr['user']['login'] not in POLICY['trusted_authors']
-            or not pr['head']['ref'].startswith(('feat/', 'fix/', 'team/'))):
+    if (pr['head']['sha'] != context['head'] or not eligible(client, pr)
+            or pr['head']['ref'] != context['branch']):
         print('Stale or ineligible PR; no publication')
         return
     pr = live_base(client, pr)
@@ -741,16 +749,16 @@ def publish(folder, candidate, *, expected):
         record_check(client, context, 'completed', '自动流程已暂停', PAUSE_LABEL + ' 标签仍在，等待维护者恢复。', 'failure')
         suspend_approval(client, context, pr)
         return
-    if is_large_pr(pr):
+    if is_large_pr(pr) or review_only_app_pr(pr):
         evidence, inventory, _, blocked = load_large_diff(client, pr)
         if (context['mode'] != ('large_blocked' if blocked else 'large_review')
                 or evidence != context.get('large_review')
                 or blocked != context.get('blocked_reason') or (folder / 'repair.patch').exists()):
             raise ValueError('Large review artifact does not match trusted review evidence')
-        context['manual_reasons'] = ['超大 PR 需要维护者复核。']
+        context['manual_reasons'] = ['分段审查完成后需要维护者复核。']
         suspend_approval(client, context, pr)
         if blocked:
-            report = {'summary': 'AI 未完成超大 PR 审查。' + blocked, 'requires_human': True,
+            report = {'summary': 'AI 未完成本次分段审查。' + blocked, 'requires_human': True,
                       'human_reason': '请拆分应用变更后重新审查。', 'findings': []}
             title, conclusion = 'AI 审查预算不足', 'failure'
         else:
@@ -869,8 +877,7 @@ def dispatch_pr(client, pr, retry=False):
 def dispatch_updates():
     client = GitHub()
     for pr in client.pages('/pulls?state=open&base=' + POLICY['base_branch']):
-        if (not pr['draft'] and pr['user']['login'] in POLICY['trusted_authors']
-                and pr['head']['repo'] and pr['head']['repo']['full_name'] == client.repo):
+        if eligible(client, pr):
             dispatch_pr(client, pr)
 
 
