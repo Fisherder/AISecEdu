@@ -71,8 +71,10 @@ jobs:
       number: ${{ steps.gate.outputs.number }}
       head: ${{ steps.gate.outputs.head }}
       check_id: ${{ steps.gate.outputs.check_id }}
+      policy_commit: ${{ steps.policy.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
+        id: policy
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
           persist-credentials: false
@@ -85,7 +87,7 @@ jobs:
         run: python3 ops/team/ai_pr.py gate --folder "$RUNNER_TEMP/ai-gate"
   analyze:
     needs: gate
-    if: needs.gate.outputs.mode != 'skip' && needs.gate.outputs.mode != ''
+    if: needs.gate.outputs.mode != 'skip' && needs.gate.outputs.mode != '' && needs.gate.outputs.policy_commit != ''
     runs-on: ubuntu-24.04
     environment:
       name: aisecedu-ai-model
@@ -105,10 +107,11 @@ jobs:
       branch: ${{ steps.prepare.outputs.branch }}
       should_repair: ${{ steps.plan.outputs.should_repair }}
       chunks: ${{ steps.prepare.outputs.chunks }}
+      policy_commit: ${{ needs.gate.outputs.policy_commit }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
+          ref: ${{ needs.gate.outputs.policy_commit }}
           path: policy
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -198,7 +201,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: develop
+          ref: ${{ needs.analyze.outputs.policy_commit }}
           path: policy
           persist-credentials: false
       - uses: actions/download-artifact@v4
@@ -256,7 +259,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
+          ref: ${{ needs.analyze.outputs.policy_commit }}
           path: policy
           persist-credentials: false
       - uses: actions/download-artifact@v4
@@ -326,7 +329,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
+          ref: ${{ needs.analyze.outputs.policy_commit }}
           path: policy
           persist-credentials: false
       - uses: actions/download-artifact@v4
@@ -403,7 +406,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
+          ref: ${{ needs.analyze.outputs.policy_commit }}
           path: policy
           persist-credentials: false
       - uses: actions/download-artifact@v4
@@ -452,7 +455,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD && github.event.pull_request.user.login == 'Fisherder' && github.event.pull_request.head.sha || 'develop' }}
+          ref: ${{ needs.gate.outputs.policy_commit || 'develop' }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
         continue-on-error: true
