@@ -619,3 +619,403 @@ def test_driver_durable_replay_tool_completion_and_continuation(setup, monkeypat
 def test_multi_job_result_ids_are_deduplicated():
     h = load("dojo_plugin/agent_runtime/harness.py", {"__name__": "harness_test"})
     assert h.tool_job_ids({"result": {"job": {"id": "a"}, "jobs": [{"id": "a"}, {"id": "b"}]}}) == ["a", "b"]
+
+
+def test_upstream_teacher_turn_only_enqueues_approved_teaching_operations():
+    tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
+    functions = {"_upstream_teacher_result", "_validated_tool_proposals"}
+    constants = {"AGENT_TOOL_SCHEMAS", "UPSTREAM_APPROVED_TEACHING_TOOLS"}
+    tree.body = [
+        node for node in tree.body
+        if (isinstance(node, ast.FunctionDef) and node.name in functions)
+        or (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in constants)
+    ]
+    namespace = {
+        "result_object": json.loads,
+        "redact_text": lambda value, limit: value[:limit],
+        "scrub_payload": lambda value, key: value,
+        "requested_document_formats": load("dojo_plugin/agent_runtime/teacher_documents.py", {}).requested_document_formats,
+    }
+    exec(compile(tree, "jobs.py", "exec"), namespace)
+    project = namespace["_upstream_teacher_result"]
+    validate = namespace["_validated_tool_proposals"]
+    job = SimpleNamespace(payload={"chatBackend": "upstream"}, dojo_id=None, module_index=None)
+    proposal = {"tool": "course.create", "arguments": {"name": "课程示例", "unexpected": True}}
+    text = json.dumps({"answer": "课程创建草案", "proposal": proposal})
+    result = project({}, text)
+    assert result["executionMode"] == "execute"
+    assert result["intentDecision"]["intent"] == "operate"
+    validated, = validate(job, result)
+    assert validated["requiresConfirmation"] is True
+    assert validated["arguments"] == {"name": "课程示例"}
+    assert validate(job, {"toolProposals": [{"tool": "challenge.generate", "arguments": {}}]}) == []
+    assert "toolProposals" not in project({"executionMode": "ask"}, text)
+    assert "toolProposals" not in project({"context": {"agentLoop": {"trace": [{"status": "verified"}]}}}, text)
+
+
+def test_provider_audit_records_only_fingerprints_and_compatible_legacy_retries(setup):
+    session, thread, _ = setup
+    journal = importlib.import_module("harness_fixture.agent_runtime.model_journal")
+    job = add_job(session, "audit", status="RUNNING")
+    job.attempt_count, job.lease_owner = 1, "worker"
+    session.commit()
+
+    parent = "audit:1:1"
+    transport = f"{parent}:http:1"
+    common = {"parentCallId": parent, "transportNumber": 1, "journalVersion": 2}
+    request = {"auditVersion": 2, "stepJournalVersion": 1, "transportJournalVersion": 2, "source": "synthetic"}
+
+    def record(kind, call_id, detail):
+        return journal.record_model_event(job.id, {"type": kind, "callId": call_id, "attemptCount": 1, "detail": detail})
+
+    assert record("model.requested", parent, request)["accepted"]
+    with pytest.raises(journal.ModelJournalError, match="metadata-only"):
+        record("model.requested", "audit:1:3", {"transportJournalVersion": 1, "prompt": "synthetic legacy prompt"})
+    request_bytes = b"synthetic student input"
+    response_bytes = b"synthetic provider response"
+    request_detail = {
+        **common, "providerId": "test", "providerType": "openai", "modelId": "test",
+        "url": "https://provider.example/chat", "method": "POST", "headers": {},
+        "byteLength": len(request_bytes), "bodySha256": hashlib.sha256(request_bytes).hexdigest(),
+    }
+    with pytest.raises(journal.ModelJournalError, match="Unexpected provider journal metadata field"):
+        record("provider.request", transport, {**request_detail, "bodyBase64": "c3ludGhldGlj"})
+    assert record("provider.request", transport, request_detail)["accepted"]
+    assert record("provider.request", transport, request_detail)["duplicate"]
+    response_detail = {**common, "status": 200, "headers": {}, "bodySemantics": "fetch-decoded-body"}
+    assert record("provider.response", transport, response_detail)["accepted"]
+    digest = hashlib.sha256(response_bytes).hexdigest()
+    chunk = {**common, "chunkNumber": 1, "offset": 0, "byteLength": len(response_bytes), "prefixSha256": digest}
+    with pytest.raises(journal.ModelJournalError, match="Unexpected provider journal metadata field"):
+        record("provider.chunk", f"{transport}:chunk:1", {**chunk, "body": "synthetic raw response"})
+    assert record("provider.chunk", f"{transport}:chunk:1", chunk)["accepted"]
+    done = {**common, "status": "completed", "chunksCount": 1, "byteLength": len(response_bytes), "bodySha256": digest}
+    with pytest.raises(journal.ModelJournalError, match="does not match"):
+        record("provider.finished", transport, {**done, "bodySha256": "0" * 64})
+    assert record("provider.finished", transport, done)["accepted"]
+    step = {"parentCallId": parent, "stepNumber": 0, "usage": {"totalTokens": 9}}
+    with pytest.raises(journal.ModelJournalError, match="Invalid model audit usage metadata"):
+        record("model.step", f"{parent}:step:1", {**step, "usage": {"raw": {"text": "synthetic raw"}}})
+    assert record("model.step", f"{parent}:step:1", step)["accepted"]
+    assert record("model.settled", parent, {"stepsCount": 1, "totalUsage": {"totalTokens": 9}})["accepted"]
+
+    legacy_parent = "audit:1:2"
+    legacy_transport = f"{legacy_parent}:http:1"
+    legacy = {"transportJournalVersion": 1, "prompt": "synthetic historic input"}
+    canonical = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    session.add(Event(thread_id=thread.id, event_type="model.requested", payload={
+        "callId": legacy_parent, "detail": legacy, "detailSha256": hashlib.sha256(canonical).hexdigest(),
+    }))
+    session.commit()
+    assert record("model.requested", legacy_parent, legacy)["duplicate"]
+    legacy_common = {"parentCallId": legacy_parent, "transportNumber": 1}
+    legacy_request = {**request_detail, **legacy_common, "bodyEncoding": "base64", "bodyBase64": "eA==",
+                      "byteLength": 1, "bodySha256": hashlib.sha256(b"x").hexdigest()}
+    legacy_request.pop("journalVersion")
+    assert record("provider.request", legacy_transport, legacy_request)["accepted"]
+    assert record("provider.response", legacy_transport, {
+        **legacy_common, "status": 200, "headers": {}, "bodySemantics": "fetch-decoded-body", "bodyEncoding": "base64",
+    })["accepted"]
+    legacy_chunk = {**legacy_common, "chunkNumber": 1, "offset": 0, "byteLength": 1,
+                    "bodyBase64": "eQ==", "bodySha256": hashlib.sha256(b"y").hexdigest()}
+    assert record("provider.chunk", f"{legacy_transport}:chunk:1", legacy_chunk)["accepted"]
+    assert record("provider.finished", legacy_transport, {
+        **legacy_common, "status": "completed", "chunksCount": 1, "byteLength": 1, "bodySha256": legacy_chunk["bodySha256"],
+    })["accepted"]
+    assert record("model.settled", legacy_parent, {"text": "synthetic historic result"})["accepted"]
+
+
+def test_canceling_provider_audit_uses_the_last_committed_response_fingerprint(setup):
+    session, thread, _ = setup
+    journal = importlib.import_module("harness_fixture.agent_runtime.model_journal")
+    job = add_job(session, "cancel-audit", status="CANCELED", attempt_count=1)
+    parent = f"{job.id}:1:1"
+    transport = f"{parent}:http:1"
+    common = {"parentCallId": parent, "transportNumber": 1, "journalVersion": 2}
+    body = b"private synthetic stream"
+    fingerprint = hashlib.sha256(body).hexdigest()
+    samples = [
+        ("model.requested", parent, {"auditVersion": 2, "transportJournalVersion": 2}),
+        ("provider.request", transport, common),
+        ("provider.chunk", f"{transport}:chunk:1",
+         {**common, "chunkNumber": 1, "offset": 0, "byteLength": len(body), "prefixSha256": fingerprint}),
+    ]
+    for kind, call_id, detail in samples:
+        session.add(Event(thread_id=thread.id, event_type=kind, payload={
+            "jobId": job.id, "attemptCount": "1", "callId": call_id, "detail": detail,
+        }))
+    session.commit()
+    assert journal.close_canceled_model_calls(job) == {"models": 1, "tools": 0}
+    result = Event.query.filter_by(thread_id=thread.id, event_type="provider.finished").one().payload["detail"]
+    assert result == {
+        **common, "status": "cancelled", "terminationSource": "job-cancellation", "providerOutcomeKnown": False,
+        "chunksCount": 1, "byteLength": len(body), "bodySha256": fingerprint,
+    }
+
+
+def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifact():
+    tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
+    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                 and node.name == "_harness_courseware_authorized"]
+
+    def table(**row):
+        def filter_by(**criteria):
+            return SimpleNamespace(first=lambda: SimpleNamespace(**row) if all(
+                row.get(key) == value for key, value in criteria.items()
+            ) else None)
+        return SimpleNamespace(query=SimpleNamespace(filter_by=filter_by))
+
+    namespace = {
+        "TeachingArtifacts": table(id="artifact", owner_id=7, dojo_id=2, artifact_type="slide-deck",
+                                   self_workspace_id=None),
+        "Users": table(id=7, type="user"),
+        "DojoAdmins": table(dojo_id=2, user_id=7),
+        "upstream_enabled": lambda: True,
+    }
+    exec(compile(tree, "jobs.py", "exec"), namespace)
+    eligible = namespace["_harness_courseware_authorized"]
+    job = {"kind": "artifact.materialize", "dojo_id": 2, "owner_id": 7}
+    payload = {"artifactId": "artifact", "artifactType": "slide-deck"}
+    assert eligible(SimpleNamespace(**job), payload)
+    for changes in ({"owner_id": 9}, {"dojo_id": 4}, {"dojo_id": None}, {"kind": "self.candidate.generate"}):
+        assert not eligible(SimpleNamespace(**{**job, **changes}), payload)
+    assert not eligible(SimpleNamespace(**job), {**payload, "workspaceId": "student-workspace"})
+    assert not eligible(SimpleNamespace(**job), {**payload, "artifactType": "simulation"})
+    namespace["DojoAdmins"] = table(dojo_id=2, user_id=9)
+    assert not eligible(SimpleNamespace(**job), payload)
+
+
+@pytest.mark.parametrize("prompt, mode, expected", [
+    ("请帮我写一份关于蒸发的Word教案", "auto", ("docx",)),
+    ("制作蒸发教案，给我DOCX和Markdown文件", "execute", ("docx", "md")),
+    ("帮我写一份古诗教学教案", "auto", ("docx",)),
+    ("请制作教案，不要 DOCX，只要 Markdown", "auto", ("md",)),
+    ("如何制作一份 Word 教案？", "auto", ()),
+    ("请制作 Markdown 教案", "ask", ()),
+    ("请制作 Markdown 教案", "plan", ()),
+    ("不要制作教案，请解释评估方法", "auto", ()),
+    ("请把教学文档输出为 HTML", "auto", ()),
+])
+def test_teacher_document_requires_an_explicit_supported_request(prompt, mode, expected):
+    documents = load("dojo_plugin/agent_runtime/teacher_documents.py", {})
+    assert documents.requested_document_formats({"prompt": prompt, "executionMode": mode}) == expected
+
+
+def test_upstream_teacher_documents_reach_the_real_private_download_handler(setup, monkeypatch, tmp_path):
+    import io
+    import zipfile
+
+    from flask import Flask, request, send_file
+
+    session, thread, _ = setup
+    thread.dojo_id, thread.module_index = 2, 0
+    package = "harness_fixture"
+    docs = importlib.import_module(package + ".agent_runtime.teacher_documents")
+    files = importlib.import_module(package + ".agent_runtime.files")
+    upstream = importlib.import_module(package + ".agent_runtime.upstream_turn")
+    monkeypatch.setattr(files, "_storage_root", lambda: tmp_path)
+
+    class ScopeError(ValueError):
+        pass
+
+    class PermanentJobError(RuntimeError):
+        pass
+
+    def require_teacher(owner):
+        if owner.id != 7:
+            raise ScopeError("Teacher permission required")
+
+    permitted_courses = {2}
+
+    def build_scope(owner, *, role, dojo_id, module_index):
+        assert role == "teacher"
+        if owner.id != 7 or dojo_id not in permitted_courses:
+            raise ScopeError("Course not found")
+
+    monkeypatch.setitem(sys.modules, package + ".api.v1.teaching", SimpleNamespace(
+        _require_teacher=require_teacher, _teacher_dojos=lambda _owner: [SimpleNamespace(reference_id="science")],
+    ))
+    monkeypatch.setitem(sys.modules, package + ".agent_runtime.scope", SimpleNamespace(build_scope=build_scope))
+
+    approved_source = {"id": "handout", "type": "material", "revisionId": "r1", "sha256": "1" * 64}
+    payload = {
+        "chatBackend": "upstream", "executionMode": "auto",
+        "prompt": "基于已授权讲义制作蒸发教案，交付DOCX和Markdown文件",
+        "context": {"platformFacts": {"scope": {"dojoId": 2, "moduleIndex": 0}, "availableCourses": [{"referenceId": "science"}]}},
+        "sourceRefs": [approved_source],
+        "sourceMaterials": [dict(approved_source, title="蒸发讲义", excerpts=["记录水量与实际观察"])],
+        "materialContext": {"complete": True, "expectedMaterialCount": 1},
+    }
+    payload["materialDossier"] = {
+        "coverage": payload["materialContext"],
+        "materials": payload["sourceMaterials"],
+    }
+    job = add_job(session, "document-job", kind="agent.chat", dojo_id=2, module_index=0, payload=payload)
+    existing_message = Message(id=8, thread_id=thread.id, user_id=7, role="assistant", metadata_json={})
+    session.add(existing_message)
+    session.commit()
+    allowed_ids = {"handout"}
+
+    class MaterialContextError(ValueError):
+        pass
+
+    def material_context(*, owner_id, dojo_id, source_refs, require_complete):
+        assert (owner_id, dojo_id, require_complete) == (7, 2, True)
+        if any(ref["id"] not in allowed_ids for ref in source_refs):
+            raise MaterialContextError("unavailable synthetic material")
+        return {"sourceRefs": [approved_source]}
+
+    wire_requests = []
+
+    def invoke_turn(body, *, encoded):
+        assert json.loads(encoded) == body
+        wire_requests.append(body)
+        context = json.loads(body["messages"][1]["content"])
+        assert context["requestedDocumentFormats"] == ["docx", "md"]
+        assert context["sourceRefs"] == [approved_source]
+        assert "普通教学文档" in body["messages"][0]["content"]
+        return {
+            "model": "synthetic-harness",
+            "usage": {"prompt_tokens": 7, "completion_tokens": 11},
+            "text": json.dumps({
+                "answer": "模型声称的链接不作为交付地址 https://example.invalid/file",
+                "document": {"title": "蒸发教学教案", "sections": [{
+                    "heading": "观察目标",
+                    "paragraphs": ["记录同样大小的碟子中温水与冷水的变化。", "HTML 字符示例 <b>是文本</b>。"],
+                }]},
+                "proposal": {"tool": "course.create", "arguments": {"name": "不会自动执行"}},
+            }, ensure_ascii=False),
+        }
+
+    wanted = {"_runtime_request_body", "_runtime_json_bytes", "_upstream_teacher_result", "_invoke_agent_runtime",
+              "_require_upstream_teacher_scope", "_require_teacher_document_sources", "_persist_result", "_agent_answer"}
+    tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
+    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in wanted]
+    facts = importlib.import_module(package + ".agent_runtime.teacher_model_context")
+    job_namespace = {
+        "__name__": package + ".agent_runtime.test_document_job",
+        "__package__": package + ".agent_runtime",
+        "json": json, "request_body": upstream.request_body, "result_object": upstream.result_object,
+        "teacher_model_payload": facts.teacher_model_payload, "scrub_payload": lambda value, **_: value,
+        "redact_text": lambda value, limit: value[:limit], "requested_document_formats": docs.requested_document_formats,
+        "document_deliverables": docs.document_deliverables, "DOCUMENT_INSTRUCTION": docs.DOCUMENT_INSTRUCTION,
+        "upstream_enabled": lambda: True, "invoke_turn": invoke_turn, "UpstreamTurnError": upstream.UpstreamTurnError,
+        "RuntimeJobError": reliability.RuntimeJobError, "PermanentJobError": PermanentJobError,
+        "MaterialContextError": MaterialContextError, "Users": User, "TeachingAgentThreads": Thread,
+        "build_course_material_context": material_context, "_record_runtime_dispatch": lambda *args: None,
+        "restore_input_cache": lambda *args, **kwargs: None, "prepared_input": lambda _job: {"payload": payload},
+        "validated_generation_options": lambda *args: None, "_validated_tool_proposals": lambda *args: [],
+        "persist_agent_deliverables": files.persist_agent_deliverables, "public_agent_file": files.public_agent_file,
+        "_agent_message_for_job": lambda _job: existing_message,
+        "ConversationCards": SimpleNamespace(query=SimpleNamespace(filter_by=lambda **_: SimpleNamespace(all=lambda: []))),
+    }
+    exec(compile(tree, "jobs.py", "exec"), job_namespace)
+
+    result = job_namespace["_invoke_agent_runtime"](job, {}, payload)
+    assert result["model"]["usage"]["completion_tokens"] == 11
+    assert "toolProposals" not in result["result"]
+    stored = job_namespace["_persist_result"](job, result["result"])
+    assert stored["requiresAction"] is False
+    assert [file["format"] for file in stored["files"]] == ["docx", "md"]
+    assert stored["answer"] == "教学文档草稿已生成，可通过下方链接下载。"
+    assert stored["materialModelCoverage"] == json.loads(wire_requests[0]["messages"][-1]["content"])["materialModelCoverage"]
+    assert existing_message.metadata_json["materialModelCoverage"] == stored["materialModelCoverage"]
+    assert job_namespace["_persist_result"](job, result["result"])["files"] == stored["files"]
+    job.result = stored
+    session.commit()
+    public_files = existing_message.metadata_json["files"]
+    assert all("storageKey" not in file for file in public_files)
+
+    tree = ast.parse((ROOT / "dojo_plugin/api/v1/teaching.py").read_text())
+    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_job_for_user"
+                 or isinstance(node, ast.ClassDef) and node.name == "TeachingJobFile"]
+    endpoint = tree.body[-1]
+    endpoint.decorator_list = []
+    endpoint.body[0].decorator_list = []
+    route_namespace = {
+        "Resource": object, "TeachingJobs": Job, "ScopeError": ScopeError,
+        "_current_user": lambda: SimpleNamespace(id=int(request.headers["Fixture-User"])),
+        "public_agent_file": files.public_agent_file, "agent_file_path": files.agent_file_path,
+        "send_file": send_file, "_error": lambda _message, status, **_: ("missing", status),
+    }
+    exec(compile(tree, "teaching.py", "exec"), route_namespace)
+    app = Flask(__name__)
+    app.add_url_rule("/pwncollege_api/v1/teaching/jobs/<job_id>/files/<file_id>",
+                     view_func=route_namespace["TeachingJobFile"]().get)
+    browser = app.test_client()
+    for public in public_files:
+        owner_download = browser.get(public["downloadUrl"], headers={"Fixture-User": "7"})
+        assert owner_download.status_code == 200
+        assert owner_download.headers["Cache-Control"] == "private, no-store"
+        assert owner_download.headers["Content-Disposition"].startswith("attachment")
+        assert browser.get(public["downloadUrl"], headers={"Fixture-User": "8"}).status_code == 404
+        if public["format"] == "docx":
+            with zipfile.ZipFile(io.BytesIO(owner_download.data)) as archive:
+                assert "观察目标" in archive.read("word/document.xml").decode()
+                assert not any("vba" in name.lower() for name in archive.namelist())
+        else:
+            assert "## 观察目标" in owner_download.text
+            assert "&lt;b&gt;是文本&lt;/b&gt;" in owner_download.text
+
+    allowed_ids.clear()
+    with pytest.raises(PermanentJobError, match="引用资料权限或版本"):
+        job_namespace["_invoke_agent_runtime"](job, {}, payload)
+    with pytest.raises(PermanentJobError, match="引用资料权限或版本"):
+        job_namespace["_persist_result"](job, result["result"])
+    permitted_courses.clear()
+    with pytest.raises(ScopeError, match="Course not found"):
+        job_namespace["_invoke_agent_runtime"](job, {}, payload)
+    assert len(wire_requests) == 1
+    with pytest.raises(ValueError, match="普通教学文本"):
+        docs.document_deliverables(
+            {"title": "文档", "sections": [{"heading": "示例", "paragraphs": ["<script>placeholder</script>"]}]},
+            ("md",),
+        )
+
+
+def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_targets(monkeypatch):
+    turn = load("dojo_plugin/agent_runtime/upstream_turn.py", {})
+
+    tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
+    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                 and node.name == "_ordinary_teaching_job_scope"]
+
+    def table(**row):
+        def filter_by(**criteria):
+            return SimpleNamespace(first=lambda: SimpleNamespace(**row) if all(
+                row.get(key) == value for key, value in criteria.items()
+            ) else None)
+        return SimpleNamespace(query=SimpleNamespace(filter_by=filter_by))
+
+    namespace = {
+        "ordinary_teaching_course": turn.ordinary_teaching_course, "re": re, "upstream_enabled": lambda: True,
+        "Users": table(id=7, type="user"), "DojoAdmins": table(dojo_id=2, user_id=7),
+        "TeachingCandidateSets": table(id="candidate", owner_id=7, dojo_id=2, kind="lesson-plan",
+                                       self_workspace_id=None),
+        "TeachingArtifacts": table(id="slide", owner_id=7, dojo_id=2, artifact_type="slide-deck",
+                                    self_workspace_id=None),
+        "TeachingMaterials": table(id="material", owner_id=7, dojo_id=2, filename="handout.txt", status="READY"),
+        "TeachingMaterialRevisions": table(id="revision", material_id="material", storage_key="stored",
+                                            status="READY", sha256="a" * 64),
+    }
+    exec(compile(tree, "jobs.py", "exec"), namespace)
+    scope = namespace["_ordinary_teaching_job_scope"]
+    candidate = {"artifactType": "lesson-plan", "candidateSetId": "candidate"}
+    material = {"materialId": "material", "revisionId": "revision", "storageKey": "stored"}
+    slide = {"artifactType": "slide-deck", "artifactId": "slide", "instruction": "只润色第1页措辞：表述更清楚"}
+    create = SimpleNamespace(kind="candidate.generate", owner_id=7, dojo_id=2)
+    enrich = SimpleNamespace(kind="material.enrich", owner_id=7, dojo_id=2)
+    revise = SimpleNamespace(kind="artifact.revise", owner_id=7, dojo_id=2)
+    monkeypatch.delenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", raising=False)
+    assert scope(create, candidate) is None
+    monkeypatch.setenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "2, -5")
+    assert scope(create, candidate) == "candidate-plan"
+    assert scope(enrich, material) == "material-summary"
+    assert scope(revise, slide) == "slide-wording"
+    assert scope(create, {**candidate, "workspaceId": "personal"}) is None
+    assert scope(create, {**candidate, "artifactType": "simulation"}) is None
+    assert scope(enrich, {**material, "storageKey": "other-version"}) is None
+    assert scope(revise, {**slide, "instruction": "修改所有页面布局"}) is None
+    namespace["DojoAdmins"] = table(dojo_id=3, user_id=7)
+    assert scope(create, candidate) is None

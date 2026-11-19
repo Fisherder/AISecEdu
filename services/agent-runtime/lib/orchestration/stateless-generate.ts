@@ -1,33 +1,24 @@
-/**
- * Stateless Multi-Agent Generation
- *
- * Single-pass generation with structured JSON Array output format:
- * [{"type":"action","name":"...","params":{...}},{"type":"text","content":"natural speech"},...]
- *
- * Key design decisions:
- * - Backend is stateless (all state in request/response)
- * - Single generation pass (no generate/tool/loop)
- * - Text is natural teacher speech, NOT meta-commentary
- * - Tool calls are silent actions - students see results only
- * - Action and text objects can freely interleave in the array
- * - Uses partial-json for robust streaming of incomplete JSON
- *
- * Multi-agent orchestration:
- * - When multiple agents are configured, a director agent decides who speaks
- * - Uses LangGraph StateGraph for the orchestration loop
- * - Events are streamed via LangGraph's custom stream mode
- */
+/** Stateless classroom speech and display events driven by Harness turns. */
 
-import type { LanguageModel } from 'ai';
+import type {
+  ClassroomTurn,
+  ClassroomTurnMessage,
+} from '@/lib/server/agent-harness/classroom-turn';
 import type { StatelessChatRequest, StatelessEvent, ParsedAction } from '@/lib/types/chat';
-import type { ThinkingConfig } from '@/lib/types/provider';
 import type { WhiteboardActionRecord } from './types';
-import { createOrchestrationGraph, buildInitialState } from './director-graph';
+import { useAgentRegistry } from './registry/store';
+import { SLIDE_ACTIONS, WHITEBOARD_ACTIONS, type AgentConfig } from './registry/types';
+import { buildStructuredPrompt } from './prompt-builder';
+import { buildDirectorPrompt, parseDirectorDecision } from './director-prompt';
+import { summarizeConversation } from './summarizers/conversation-summary';
+import { convertMessagesToOpenAI } from './summarizers/message-converter';
+import { getEffectiveActions } from './tool-schemas';
 import { parse as parsePartialJson, Allow } from 'partial-json';
 import { jsonrepair } from 'jsonrepair';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('StatelessGenerate');
+const classroomActions = new Set([...SLIDE_ACTIONS, ...WHITEBOARD_ACTIONS]);
 
 // ==================== Structured Output Parser ====================
 
@@ -90,7 +81,7 @@ function emitItem(
     if (content) {
       result.textChunks.push(content);
       // Use per-call array index (not cumulative segment index) so that
-      // director-graph can read result.textChunks[entry.index] correctly.
+      // the classroom stream can read result.textChunks[entry.index] correctly.
       result.ordered.push({
         type: 'text',
         index: result.textChunks.length - 1,
@@ -107,7 +98,7 @@ function emitItem(
     };
     result.actions.push(action);
     // Use per-call array index (not cumulative segment index) so that
-    // director-graph can read result.actions[entry.index] correctly.
+    // the classroom stream can read result.actions[entry.index] correctly.
     result.ordered.push({ type: 'action', index: result.actions.length - 1 });
     return { textSegmentIndex, actionSegmentIndex: actionSegmentIndex + 1 };
   }
@@ -389,11 +380,167 @@ export function finalizeParser(state: ParserState): ParseResult {
  * @param abortSignal - Signal for cancellation
  * @yields StatelessEvent objects for streaming
  */
+function classroomAgents(request: StatelessChatRequest): AgentConfig[] {
+  const now = new Date();
+  const overrides = new Map(
+    request.config.agentConfigs?.map((agent) => [
+      agent.id,
+      { ...agent, isDefault: false, createdAt: now, updatedAt: now },
+    ]),
+  );
+  return request.config.agentIds
+    .map((id) => overrides.get(id) ?? useAgentRegistry.getState().getAgent(id))
+    .filter((agent): agent is AgentConfig => agent !== undefined);
+}
+
+async function* selectSpeaker(
+  request: StatelessChatRequest,
+  signal: AbortSignal,
+  runTurn: ClassroomTurn,
+): AsyncGenerator<StatelessEvent, AgentConfig | undefined> {
+  const agents = classroomAgents(request);
+  const { agentIds, triggerAgentId, discussionTopic, discussionPrompt } = request.config;
+  const turnCount = request.directorState?.turnCount ?? 0;
+  if (agentIds.length === 1 && turnCount > 0) {
+    yield { type: 'cue_user', data: { fromAgentId: agentIds[0] } };
+    return undefined;
+  }
+
+  const firstSpeaker =
+    agentIds.length === 1
+      ? agents[0]
+      : turnCount === 0
+        ? agents.find((agent) => agent.id === triggerAgentId)
+        : undefined;
+  if (firstSpeaker || agents.length === 0 || agentIds.length === 1) return firstSpeaker;
+
+  yield { type: 'thinking', data: { stage: 'director' } };
+  const prompt = buildDirectorPrompt(
+    agents,
+    summarizeConversation(convertMessagesToOpenAI(request.messages)),
+    request.directorState?.agentResponses ?? [],
+    turnCount,
+    discussionTopic ? { topic: discussionTopic, prompt: discussionPrompt } : null,
+    triggerAgentId || null,
+    request.directorState?.whiteboardLedger ?? [],
+    request.userProfile,
+    request.storeState.whiteboardOpen,
+  );
+  const answer = await runTurn(
+    [
+      { role: 'system', content: prompt },
+      { role: 'user', content: 'Decide which agent should speak next.' },
+    ],
+    signal,
+    'chat-adapter',
+  );
+  const decision = parseDirectorDecision(answer);
+  if (decision.nextAgentId === 'USER') {
+    yield { type: 'cue_user', data: {} };
+    return undefined;
+  }
+  return agents.find((agent) => agent.id === decision.nextAgentId);
+}
+
+async function* classroomPresentation(
+  request: StatelessChatRequest,
+  signal: AbortSignal,
+  runTurn: ClassroomTurn,
+): AsyncGenerator<StatelessEvent> {
+  const agent = yield* selectSpeaker(request, signal, runTurn);
+  if (!agent) return;
+  signal.throwIfAborted();
+
+  const agentId = agent.id;
+  const messageId = `assistant-${agentId}-${Date.now()}`;
+  yield { type: 'thinking', data: { stage: 'agent_loading', agentId } };
+  yield {
+    type: 'agent_start',
+    data: {
+      messageId,
+      agentId,
+      agentName: agent.name,
+      agentAvatar: agent.avatar,
+      agentColor: agent.color,
+    },
+  };
+
+  const { storeState, directorState, userProfile, config } = request;
+  const scene = storeState.currentSceneId
+    ? storeState.scenes.find(({ id }) => id === storeState.currentSceneId)
+    : undefined;
+  const actions = getEffectiveActions(
+    agent.allowedActions.filter((action) => classroomActions.has(action)),
+    scene?.type,
+  );
+  const prompt = buildStructuredPrompt(
+    { ...agent, allowedActions: actions },
+    storeState,
+    config.discussionTopic
+      ? { topic: config.discussionTopic, prompt: config.discussionPrompt }
+      : undefined,
+    directorState?.whiteboardLedger,
+    userProfile,
+    directorState?.agentResponses,
+  );
+  const messages: ClassroomTurnMessage[] = [
+    { role: 'system', content: prompt },
+    ...convertMessagesToOpenAI(request.messages, agentId),
+  ];
+  if (!messages.some((message) => message.role === 'user')) {
+    messages.push({ role: 'user', content: 'Please begin.' });
+  } else if (messages.at(-1)?.role === 'assistant') {
+    messages.push({
+      role: 'user',
+      content: "It's your turn to speak. Respond from your perspective.",
+    });
+  }
+
+  try {
+    const answer = await runTurn(messages, signal, 'chat-adapter-stream');
+    signal.throwIfAborted();
+    const parser = createParserState();
+    const result = parseStructuredChunk(answer, parser);
+    const emittedText = new Set<number>();
+    for (const entry of result.ordered) {
+      if (entry.type === 'text') {
+        emittedText.add(entry.index);
+        const content = result.textChunks[entry.index]?.replace(/^>+\s?/gm, '');
+        if (content) yield { type: 'text_delta', data: { content, messageId } };
+      } else {
+        const action = result.actions[entry.index];
+        if (action && actions.includes(action.actionName)) {
+          yield { type: 'action', data: { ...action, agentId, messageId } };
+        }
+      }
+    }
+    for (const [index, rawText] of result.textChunks.entries()) {
+      const content = rawText.replace(/^>+\s?/gm, '');
+      if (content && !emittedText.has(index))
+        yield { type: 'text_delta', data: { content, messageId } };
+    }
+    const final = finalizeParser(parser);
+    for (const entry of final.ordered) {
+      if (entry.type !== 'text') continue;
+      const content = final.textChunks[entry.index]?.replace(/^>+\s?/gm, '');
+      if (content) yield { type: 'text_delta', data: { content, messageId } };
+    }
+  } catch (error) {
+    if (signal.aborted) throw error;
+    log.error(`Classroom role ${agentId} failed`, error);
+    yield {
+      type: 'error',
+      data: { message: error instanceof Error ? error.message : String(error) },
+    };
+  }
+
+  yield { type: 'agent_end', data: { messageId, agentId } };
+}
+
 export async function* statelessGenerate(
   request: StatelessChatRequest,
   abortSignal: AbortSignal,
-  languageModel: LanguageModel,
-  thinkingConfig?: ThinkingConfig,
+  runTurn: ClassroomTurn,
 ): AsyncGenerator<StatelessEvent> {
   log.info(
     `[StatelessGenerate] Starting orchestration for agents: ${request.config.agentIds.join(', ')}`,
@@ -403,15 +550,6 @@ export async function* statelessGenerate(
   );
 
   try {
-    const graph = createOrchestrationGraph();
-    const initialState = buildInitialState(request, languageModel, thinkingConfig);
-
-    const stream = await graph.stream(initialState, {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      streamMode: 'custom' as any,
-      signal: abortSignal,
-    });
-
     let totalActions = 0;
     let totalAgents = 0;
     // Tracks whether the agent dispatched in this turn produced any text or actions.
@@ -425,9 +563,7 @@ export async function* statelessGenerate(
     let agentActionCount = 0;
     const agentWbActions: WhiteboardActionRecord[] = [];
 
-    for await (const chunk of stream) {
-      const event = chunk as StatelessEvent;
-
+    for await (const event of classroomPresentation(request, abortSignal, runTurn)) {
       if (event.type === 'agent_start') {
         totalAgents++;
         currentAgentId = event.data.agentId;

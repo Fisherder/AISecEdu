@@ -32,6 +32,7 @@ from CTFd.utils.decorators import authed_only
 from CTFd.utils.user import get_current_user
 
 from ... import config
+from ...learning import course_catalog
 from ...runtime_profiles import RUNTIME_PROFILES
 from ...learning.legacy_runtime import catalog_icon, is_runtime_reference, runtime_reference_matches, runtime_url
 from ...agent_runtime.conversation import (
@@ -63,7 +64,6 @@ from ...coursework import (
     generate_assignment_payload,
     override_submission_grade,
     publish_assignment,
-    roster_submissions,
     update_assignment,
 )
 from ...models import (
@@ -175,6 +175,7 @@ from ...agent_runtime.materials import (
 from ...agent_runtime.model_journal import ModelJournalError, record_model_event
 from ...agent_runtime.project_collection import project_collection_view
 from ...agent_runtime.reliability import public_recovery
+from ...agent_runtime.upstream_turn import ordinary_teaching_image_allowed
 from ...agent_runtime.scope import (
     ScopeError,
     assert_capability,
@@ -1557,28 +1558,6 @@ def _dojo_summary_views(dojos):
     return summaries
 
 
-def _dojo_catalog_view(summary):
-    activity = summary.get("recentActivity") or []
-    latest = max(
-        (str(item.get("updated") or "") for item in activity),
-        default="",
-    )
-    return {
-        "id": summary.get("id"),
-        "referenceId": summary.get("referenceId"),
-        "name": summary.get("name"),
-        "description": str(summary.get("description") or "")[:320] or None,
-        "access": summary.get("access"),
-        "official": bool(summary.get("official")),
-        "repositoryBacked": bool(summary.get("repositoryBacked")),
-        "studentCount": int(summary.get("studentCount") or 0),
-        "moduleCount": int(summary.get("moduleCount") or 0),
-        "challengeCount": int(summary.get("challengeCount") or 0),
-        "counts": summary.get("counts") or {},
-        "lastActivityAt": latest or None,
-    }
-
-
 def _management_audit(user, action, resource_type, resource_id, details=None):
     db.session.add(
         LearningAuditEvents(
@@ -2701,135 +2680,27 @@ def _attempt_is_completed(attempt):
 
 def _agent_progress_snapshot(dojo):
     challenges = DojoChallenges.query.filter_by(dojo_id=dojo.dojo_id).all()
-    challenge_ids = [row.challenge_id for row in challenges if row.challenge_id]
-    required_ids = {
-        row.challenge_id for row in challenges if row.challenge_id and row.required
-    }
-    students = {
-        row.user_id: {
-            "userId": row.user_id,
-            "name": row.user.name if row.user else str(row.user_id),
-            "solved": set(),
-            "attempts": [],
-            "scores": [],
-            "evidence": {},
-            "lastSolve": None,
-        }
-        for row in DojoUsers.query.filter(
-            DojoUsers.dojo_id == dojo.dojo_id,
-            DojoUsers.type != "admin",
-        ).all()
-    }
-
-    def student_row(user_id):
-        return students.setdefault(
-            user_id,
-            {
-                "userId": user_id,
-                "name": str(user_id),
-                "solved": set(),
-                "attempts": [],
-                "scores": [],
-                "evidence": {},
-                "lastSolve": None,
-            },
-        )
-
-    solve_rows = (
-        db.session.query(Solves.user_id, Solves.challenge_id, func.max(Solves.date))
-        .filter(Solves.challenge_id.in_(challenge_ids or [-1]))
-        .group_by(Solves.user_id, Solves.challenge_id)
-        .all()
+    challenge_ids = {row.challenge_id for row in challenges if row.challenge_id}
+    required_ids = {row.challenge_id for row in challenges if row.challenge_id and row.required}
+    enrolled = DojoUsers.query.filter(
+        DojoUsers.dojo_id == dojo.dojo_id, DojoUsers.type != "admin",
     )
-    for user_id, challenge_id, solved_at in solve_rows:
-        row = student_row(user_id)
-        row["solved"].add(challenge_id)
-        if solved_at and (row["lastSolve"] is None or solved_at > row["lastSolve"]):
-            row["lastSolve"] = solved_at
-
-    attempts = LearningAttempts.query.filter_by(dojo_id=dojo.dojo_id).all()
-    attempts_by_id = {}
-    for attempt in attempts:
-        attempts_by_id[attempt.id] = attempt
-        student_row(attempt.user_id)["attempts"].append(attempt)
-    if attempts_by_id:
-        for assessment in LearningAssessments.query.filter(
-            LearningAssessments.attempt_id.in_(list(attempts_by_id))
-        ).all():
-            attempt = attempts_by_id.get(assessment.attempt_id)
-            if attempt:
-                student_row(attempt.user_id)["scores"].append(
-                    float(assessment.total_score)
-                )
-    evidence_rows = (
-        db.session.query(
-            LearningAttempts.user_id,
-            LearningEvidenceEvents.event_type,
-            func.count(LearningEvidenceEvents.id),
+    verified_complete = 0
+    if required_ids:
+        completed = (
+            db.session.query(Solves.user_id)
+            .join(DojoUsers, DojoUsers.user_id == Solves.user_id)
+            .filter(DojoUsers.dojo_id == dojo.dojo_id, DojoUsers.type != "admin",
+                    Solves.challenge_id.in_(required_ids))
+            .group_by(Solves.user_id)
+            .having(func.count(func.distinct(Solves.challenge_id)) == len(required_ids))
         )
-        .join(
-            LearningEvidenceEvents,
-            LearningEvidenceEvents.attempt_id == LearningAttempts.id,
-        )
-        .filter(LearningAttempts.dojo_id == dojo.dojo_id)
-        .group_by(LearningAttempts.user_id, LearningEvidenceEvents.event_type)
-        .all()
-    )
-    for user_id, event_type, count in evidence_rows:
-        student_row(user_id)["evidence"][event_type] = int(count)
-
-    rows = []
-    for row in students.values():
-        solved = row.pop("solved")
-        user_attempts = row.pop("attempts")
-        scores = row.pop("scores")
-        required_solved = len(solved & required_ids)
-        rows.append(
-            {
-                **row,
-                "solvedChallengeIds": sorted(solved),
-                "requiredSolved": required_solved,
-                "requiredTotal": len(required_ids),
-                "verifiedCompletion": (
-                    required_solved / len(required_ids) if required_ids else 0.0
-                ),
-                "attemptCount": len(user_attempts),
-                "activeAttempts": sum(
-                    1 for attempt in user_attempts if attempt.status == "ACTIVE"
-                ),
-                "completedAttempts": sum(
-                    1 for attempt in user_attempts if _attempt_is_completed(attempt)
-                ),
-                "averageAssessment": sum(scores) / len(scores) if scores else None,
-                "averageTrust": (
-                    sum(float(attempt.trust_score) for attempt in user_attempts)
-                    / len(user_attempts)
-                    if user_attempts
-                    else None
-                ),
-                "lastSolve": _timestamp(row["lastSolve"]),
-            }
-        )
-    rows.sort(key=lambda item: (item["name"], item["userId"]))
+        verified_complete = completed.count()
     return {
         "challengeCount": len(challenge_ids),
         "requiredChallengeCount": len(required_ids),
-        "studentCount": len(rows),
-        "verifiedCompleteCount": sum(
-            1 for row in rows if row["verifiedCompletion"] >= 1
-        ),
-        "students": rows[:500],
-        "truncated": len(rows) > 500,
-        "sourceOfTruth": [
-            "Solves",
-            "LearningAttempts",
-            "LearningEvidenceEvents",
-            "LearningAssessments",
-        ],
-        "completionPolicy": (
-            "Only verified challenge solves satisfy required completion; "
-            "content views and preview browsing are engagement signals only."
-        ),
+        "studentCount": enrolled.count(),
+        "verifiedCompleteCount": verified_complete,
     }
 
 
@@ -3000,17 +2871,6 @@ def _teacher_agent_context(user, thread):
             }
             for item in dojo.modules[:100]
         ],
-        "members": [
-            {
-                "username": membership.user.name,
-                "role": "teacher" if membership.type == "admin" else "student",
-            }
-            for membership in DojoUsers.query.filter_by(dojo_id=dojo.dojo_id)
-            .order_by(DojoUsers.type, DojoUsers.user_id)
-            .limit(500)
-            .all()
-            if membership.user is not None
-        ],
         "selectedModule": (
             {
                 "index": module.module_index,
@@ -3180,17 +3040,6 @@ def _teacher_agent_context(user, thread):
                 "status": assignment.status,
                 "moduleIndex": assignment.module_index,
                 "itemCount": len(assignment.items),
-                "submissions": [
-                    {
-                        "id": row["submission"]["id"],
-                        "studentName": row["studentName"],
-                        "status": row["submission"]["status"],
-                        "score": row["submission"]["score"],
-                        "maxScore": row["submission"]["maxScore"],
-                    }
-                    for row in roster_submissions(assignment)[:100]
-                    if row.get("submission")
-                ],
             }
             for assignment in recent_assignments
         ],
@@ -3257,7 +3106,6 @@ def _teacher_agent_context(user, thread):
                 "status": row.status,
                 "stage": row.stage,
                 "progress": row.progress,
-                "error": row.error[:1000] if row.error else None,
             }
             for row in job_query.order_by(TeachingJobs.updated.desc()).limit(10).all()
         ],
@@ -4376,79 +4224,11 @@ class ManagedCourseCollection(Resource):
         try:
             _require_teacher(user)
             page, page_size = _course_content_page_args()
-            query = str(request.args.get("q") or "").strip().casefold()[:120]
-            status = str(request.args.get("filter") or "all").strip().lower()
-            sort = str(request.args.get("sort") or "recent").strip().lower()
-            if status not in {"all", "recent", "attention", "drafts", "published"}:
-                raise ValueError("课程状态筛选无效。")
-            if sort not in {"recent", "attention", "name"}:
-                raise ValueError("课程排序方式无效。")
+            filters = course_catalog.filters(request.args)
             summaries = _dojo_summary_views(_teacher_dojos(user))
-            items = [_dojo_catalog_view(summary) for summary in summaries]
-
-            def aggregates(item):
-                values = list((item.get("counts") or {}).values())
-                return {
-                    "attention": sum(int(value.get("needsAttention") or 0) for value in values),
-                    "drafts": sum(int(value.get("draft") or 0) for value in values),
-                    "published": sum(int(value.get("published") or 0) for value in values),
-                }
-
-            indexed = [(item, aggregates(item)) for item in items]
-            counts = {
-                "total": len(indexed),
-                "recent": sum(bool(item.get("lastActivityAt")) for item, _ in indexed),
-                "attention": sum(values["attention"] > 0 for _, values in indexed),
-                "drafts": sum(values["drafts"] > 0 for _, values in indexed),
-                "published": sum(values["published"] > 0 for _, values in indexed),
-            }
-            if query:
-                indexed = [
-                    (item, values)
-                    for item, values in indexed
-                    if query
-                    in f"{item.get('name') or ''} {item.get('description') or ''}".casefold()
-                ]
-            if status == "recent":
-                indexed = [(item, values) for item, values in indexed if item.get("lastActivityAt")]
-            elif status in {"attention", "drafts", "published"}:
-                indexed = [(item, values) for item, values in indexed if values[status] > 0]
-            if sort == "name":
-                indexed.sort(key=lambda row: str(row[0].get("name") or "").casefold())
-            elif sort == "attention":
-                indexed.sort(
-                    key=lambda row: (
-                        row[1]["attention"],
-                        str(row[0].get("lastActivityAt") or ""),
-                    ),
-                    reverse=True,
-                )
-            else:
-                indexed.sort(
-                    key=lambda row: (
-                        str(row[0].get("lastActivityAt") or ""),
-                        row[1]["attention"],
-                        str(row[0].get("name") or "").casefold(),
-                    ),
-                    reverse=True,
-                )
-            total = len(indexed)
-            start = (page - 1) * page_size
-            presented = [item for item, _ in indexed[start : start + page_size]]
-            return _ok(
-                {
-                    "items": presented,
-                    "pagination": _course_content_pagination(page, page_size, total),
-                    "counts": counts,
-                    "filters": {"q": query, "filter": status, "sort": sort},
-                    "capabilities": {
-                        "canCreate": True,
-                        "canRename": True,
-                        "canDelete": True,
-                    },
-                    "asOf": _timestamp(datetime.datetime.utcnow()),
-                }
-            )
+            result = course_catalog.page(summaries, filters, page, page_size)
+            result["asOf"] = _timestamp(datetime.datetime.utcnow())
+            return _ok(result)
         except ValueError as exc:
             return _error(exc, 400, code="INVALID_REQUEST")
         except ScopeError as exc:
@@ -4561,18 +4341,6 @@ def _course_content_page_args():
     except (TypeError, ValueError) as exc:
         raise ValueError("分页参数必须为正整数。") from exc
     return page, page_size
-
-
-def _course_content_pagination(page, page_size, total):
-    total_pages = max(1, (int(total) + page_size - 1) // page_size)
-    return {
-        "page": page,
-        "pageSize": page_size,
-        "total": int(total),
-        "totalPages": total_pages,
-        "hasPrevious": page > 1,
-        "hasNext": page < total_pages,
-    }
 
 
 @teaching_namespace.route("/courses/<string:dojo_id>/content")
@@ -4795,7 +4563,7 @@ class ManagedCourseContentCollection(Resource):
                         "filters": applied_filters,
                     },
                     "items": items,
-                    "pagination": _course_content_pagination(page, page_size, total),
+                    "pagination": course_catalog.pagination(page, page_size, total),
                     "counts": counts if kind == "questions" else None,
                     "filters": applied_filters,
                     "evidence": {
@@ -6635,6 +6403,7 @@ def _agent_continuation_context(user, thread, body):
         raise ValueError("Original teacher request is no longer available")
     return {
         "prompt": prompt,
+        "chatBackend": root_payload.get("chatBackend"),
         "requestProvenance": (root_payload.get("context") or {}).get("requestProvenance"),
         "questionReply": (root_payload.get("context") or {}).get("questionReply"),
         "intentDecision": (source_job.result or {}).get("intentDecision"),
@@ -7020,7 +6789,9 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 # Persist the complete teacher brief too, so later selection,
                 # refinement and materialization keep the same original intent.
                 payload["prompt"] = question_reply_prompt(question_context)
-            assistant_text = "正在理解完整要求、选择相关技能并规划下一步…"
+            if not continuation or (continuation_context or {}).get("chatBackend") == "upstream":
+                payload["chatBackend"] = "upstream"
+            assistant_text = "正在准备教学对话回复…"
 
         if job_kind == "agent.chat":
             payload["harnessVersion"] = HARNESS_VERSION
@@ -12111,6 +11882,7 @@ class AgentRuntimeIntrospect(Resource):
                     "sessionId": session_id,
                     "user": {"id": user.id, "name": user.name},
                     "scope": scope.as_dict(),
+                    "ordinaryTeachingImageAllowed": ordinary_teaching_image_allowed(user, scope, model_quota),
                     "modelQuota": model_quota,
                 }
             )

@@ -16,7 +16,10 @@
  * write a small MockLanguageModelV3 helper for both Instructor and
  * Evaluator together.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { GET as getEvaluationCapability, POST as postEvaluation } from '@/app/api/pbl/v2/evaluate/route';
+import { middleware } from '@/middleware';
 import { MockLanguageModelV3, convertArrayToReadableStream } from 'ai/test';
 import {
   runFinalEvaluation,
@@ -248,5 +251,170 @@ describe('Evaluator agent — milestone/final JSON-only output', () => {
     expect(patch.evaluation.whatYouLearned).toEqual(['用 key 找到对应值']);
     expect(patch.evaluation.whatsNext).toBe('下一步可以加入新增和删除键值对的功能。');
     expect(patch.evaluation.stars).toBe(4.5);
+  });
+});
+
+describe('Evaluator API through Harness', () => {
+  it('uses only learner evidence and emits evaluation patch before done', async () => {
+    vi.stubEnv('DOJO_AI_ENABLED', 'true');
+    vi.stubEnv('HARNESS_INTERNAL_URL', 'http://harness.invalid:3081');
+    vi.stubEnv('HARNESS_SERVICE_SECRET', 'fixture-auth');
+    const fetchTurn = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        model: 'fixture-model',
+        text: JSON.stringify({ feedback: '说明了植物浇水安排。', score: 91 }),
+      }),
+    );
+    vi.stubGlobal('fetch', fetchTurn);
+    try {
+      const project = mkProject();
+      addSubmission(project, {
+        microtaskId: 't1',
+        kind: 'text',
+        content: '每周二给盆栽浇水。',
+      });
+      const response = await postEvaluation(
+        new NextRequest('http://localhost/api/pbl/v2/evaluate', {
+          method: 'POST',
+          body: JSON.stringify({
+            project: { ...project, hiddenAnswer: 'never forward' },
+            kind: 'task',
+            milestoneId: 'ms1',
+            microtaskId: 't1',
+            apiKey: 'browser-key',
+          }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      const frames = (await response.text()).trim().split('\n\n');
+      expect(frames.map((frame) => frame.split('\n')[0])).toEqual([
+        'event: project_patch',
+        'event: done',
+      ]);
+      const payload = JSON.parse(frames[0].split('\n')[1].slice(6));
+      expect(payload).toMatchObject({
+        patch: { evaluation: { score: 91, feedback: '说明了植物浇水安排。' } },
+      });
+      expect(fetchTurn).toHaveBeenCalledTimes(1);
+      const [url, request] = fetchTurn.mock.calls[0];
+      expect(String(url)).toBe('http://harness.invalid:3081/v1/turn');
+      expect(request?.headers).toMatchObject({ Authorization: 'Bearer fixture-auth' });
+      expect(request?.body).toContain('每周二给盆栽浇水');
+      expect(request?.body).not.toMatch(/browser-key|never forward/);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe('Evaluator API teaching image boundary', () => {
+  it('requires an active ordinary course session and consent for each new image', async () => {
+    vi.stubEnv('AISECEDU_INTEGRATED', 'true');
+    vi.stubEnv('AISECEDU_INTERNAL_URL', 'http://platform.invalid');
+    vi.stubEnv('AISECEDU_SERVICE_SECRET', 'fixture-aisecedu-service-secret');
+    vi.stubEnv('DOJO_AI_ENABLED', 'true');
+    vi.stubEnv('HARNESS_INTERNAL_URL', 'http://harness.invalid:3081');
+    vi.stubEnv('HARNESS_SERVICE_SECRET', 'fixture-auth');
+    const ordinarySession = {
+      active: true,
+      ordinaryTeachingImageAllowed: true,
+      user: { id: 21 },
+      scope: { role: 'student', user_id: 21, dojo_id: -9, capabilities: ['self-learning:chat'] },
+      modelQuota: { available: true },
+    };
+    let enabled = true;
+    const introspect = vi.fn((init?: RequestInit) => {
+      const bearer = new Headers(init?.headers).get('Authorization');
+      if (bearer === 'Bearer student-one') {
+        return Response.json({ data: { ...ordinarySession, ordinaryTeachingImageAllowed: enabled } });
+      }
+      if (bearer === 'Bearer student-two') {
+        return Response.json({
+          data: {
+            ...ordinarySession, ordinaryTeachingImageAllowed: false, user: { id: 22 },
+            scope: { ...ordinarySession.scope, user_id: 22, dojo_id: 19 },
+          },
+        });
+      }
+      return Response.json({}, { status: 401 });
+    });
+    const fetchTurn = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+      if (String(url).startsWith('http://platform.invalid/')) return introspect(init);
+      return Response.json({
+        model: 'fixture-model',
+        text: JSON.stringify({ feedback: '观察记录清楚。', score: 88 }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchTurn);
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8R8AAAAASUVORK5CYII=';
+    const dataUrl = 'data:image/png;base64,' + png;
+    const project = mkProject();
+    const submission = addSubmission(project, {
+      microtaskId: 't1',
+      kind: 'file',
+      filename: '盆栽观察.png',
+      mimeType: 'image/png',
+      fileUrl: 'https://browser-storage.invalid/private-delivery',
+      content: '',
+    });
+    const request = (changes?: Record<string, unknown>, token = 'student-one') =>
+      new NextRequest('http://localhost/api/pbl/v2/evaluate', {
+        method: changes ? 'POST' : 'GET',
+        headers: token ? { cookie: `aisecedu_agent_runtime=${token}` } : {},
+        body: changes && JSON.stringify({
+          project, kind: 'task', milestoneId: 'ms1', microtaskId: 't1', ...changes,
+        }),
+      });
+    const image = { newTeachingImage: { consent: true, dataUrl, caption: '本轮上传的标注' } };
+    const harnessCalls = () => fetchTurn.mock.calls.filter(([url]) =>
+      String(url).startsWith('http://harness.invalid:3081/'));
+    try {
+      expect((await middleware(request(image, ''))).status).toBe(401);
+      expect((await postEvaluation(request(image, ''))).status).toBe(403);
+      expect((await middleware(request())).status).toBe(200);
+      expect(await (await getEvaluationCapability(request())).json()).toEqual({ allowed: true });
+      expect(await (await getEvaluationCapability(request(undefined, 'student-two'))).json()).toEqual({ allowed: false });
+      expect((await postEvaluation(request({ ...image, dojoId: -9, userId: 21 }, 'student-two'))).status).toBe(403);
+      expect((await postEvaluation(request({}))).status).toBe(415);
+      expect((await postEvaluation(request({
+        selectedSubmissionImage: { submissionId: submission.id, dataUrl },
+      }))).status).toBe(400);
+      expect((await postEvaluation(request({
+        newTeachingImage: { consent: false, dataUrl },
+      }))).status).toBe(400);
+      expect((await postEvaluation(request({
+        ...image, project: { ...project, scenario: { private: true } },
+      }))).status).toBe(400);
+      enabled = false;
+      expect((await postEvaluation(request(image))).status).toBe(403);
+      expect(harnessCalls()).toHaveLength(0);
+
+      enabled = true;
+      const response = await postEvaluation(request(image));
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('观察记录清楚。');
+      expect(harnessCalls()).toHaveLength(1);
+      const [url, init] = harnessCalls()[0];
+      expect(String(url)).toBe('http://harness.invalid:3081/v1/teaching-image-turn');
+      expect(JSON.parse(String(init?.body)).images).toEqual([{ mediaType: 'image/png', data: png }]);
+      expect(init?.body).toContain('本轮上传的标注');
+      expect(init?.body).not.toMatch(/browser-storage[.]invalid|盆栽观察[.]png|private-delivery/);
+
+      enabled = false;
+      submission.content = '叶片增加两片';
+      const textResponse = await postEvaluation(request({}));
+      expect(textResponse.status).toBe(200);
+      expect(await textResponse.text()).toContain('观察记录清楚。');
+      const [textUrl, textInit] = harnessCalls()[1];
+      expect(String(textUrl)).toBe('http://harness.invalid:3081/v1/turn');
+      expect(textInit?.body).toContain('叶片增加两片');
+      expect(textInit?.body).not.toContain('browser-storage.invalid');
+      expect(textInit?.body).not.toContain(png);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
 });

@@ -15,6 +15,7 @@ describe('玄甲 integrated browser API policy', () => {
     ['/api/debates/artifact_123', 'GET'],
     ['/api/debates/artifact_123', 'POST'],
     ['/api/chat/pi', 'POST'],
+    ['/api/pbl/chat', 'POST'],
     ['/api/pbl/v2/instructor', 'POST'],
     ['/api/quiz-grade', 'POST'],
     ['/api/generate/tts', 'POST'],

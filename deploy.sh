@@ -121,7 +121,13 @@ COVERAGE=no
 while getopts "r:c:he:tvD:W:pbMgNKC" OPT
 do
 	case $OPT in
-		r) DB_RESTORE="$OPTARG" ;;
+		r)
+			if [ ! -f "$OPTARG" ]; then
+				printf 'Error: database backup file does not exist: %s\n' "$OPTARG" >&2
+				exit 1
+			fi
+			DB_RESTORE="$OPTARG"
+			;;
 		c) DOJO_CONTAINER="$OPTARG" ;;
 		t) TEST=yes ;;
 		v) VIBECHECK=yes ;;
@@ -346,9 +352,9 @@ fi
 
 if [ -n "$DB_RESTORE" ]; then
 	log_newgroup "Restoring database backup"
-	BASENAME=$(basename $DB_RESTORE)
+	BASENAME=$(basename -- "$DB_RESTORE")
 	docker exec "$DOJO_CONTAINER" mkdir -p /data/backups/
-	[ -f "$DB_RESTORE" ] && docker cp "$DB_RESTORE" "$DOJO_CONTAINER":/data/backups/"$BASENAME"
+	docker cp "$DB_RESTORE" "$DOJO_CONTAINER:/data/backups/$BASENAME"
 	docker exec "$DOJO_CONTAINER" dojo restore "$BASENAME"
 	log_endgroup
 fi

@@ -10,7 +10,7 @@ import {
 } from '@/lib/quiz/view-state';
 
 describe('quiz view runtime hydration', () => {
-  it('hydrates a draft or submission back into answering', () => {
+  it('hydrates a draft back into answering', () => {
     expect(
       quizViewStateFromAttempt({
         sessionId: 'attempt-1',
@@ -126,7 +126,7 @@ describe('quiz view runtime hydration', () => {
 
     expect(calls).toEqual([
       { ...base, phase: 'submitted' },
-      { ...base, phase: 'reviewed', results: [] },
+      { ...base, phase: 'reviewed', results: [], requireCurrentSubmission: true },
     ]);
     expect(settled).toBe(false);
 

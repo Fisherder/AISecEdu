@@ -1,0 +1,195 @@
+{
+  "source": "Team quick checks classroom-contracts for PR #7 at merge e45cab542e0acf77fc1630526e2ef2cc9f736469",
+  "diagnostics": [
+    {
+      "location": "tests/lib/cinematic/assembly-quality.test.ts(148,12)",
+      "code": "TS18048",
+      "sha256": "e96036cc1374ae07496953d0e91c41804b954a6dee71371477a4382d8a52410d"
+    },
+    {
+      "location": "tests/lib/cinematic/assembly-quality.test.ts(149,12)",
+      "code": "TS18048",
+      "sha256": "057e8d8e316db473d8e49d45494833049b0686ec772cacad30b29a9cee66eaa2"
+    },
+    {
+      "location": "tests/lib/cinematic/assembly-quality.test.ts(182,12)",
+      "code": "TS18048",
+      "sha256": "703f47002852b6065e873f997d222dc67d38d261425d6fc53a90df799afcf4b6"
+    },
+    {
+      "location": "tests/lib/cinematic/assembly-quality.test.ts(183,12)",
+      "code": "TS18048",
+      "sha256": "58dee15ba54d381ebd7d20c56f9c0deab44aeec5b8aaa838e5c49b1f515e1b28"
+    },
+    {
+      "location": "tests/lib/cinematic/cpu-layer-repair.test.ts(12,31)",
+      "code": "TS2339",
+      "sha256": "47121fe52e99b215f367a4ebaf94daf65745d6d621ffd9c85a5db02eda30ffc5"
+    },
+    {
+      "location": "tests/lib/cinematic/cpu-layer-repair.test.ts(12,35)",
+      "code": "TS7006",
+      "sha256": "5c45414913215889800eaa783e4552610356cb5c8c9b53b8d4f5f27614bb994f"
+    },
+    {
+      "location": "tests/lib/cinematic/cpu-layer-repair.test.ts(13,31)",
+      "code": "TS2339",
+      "sha256": "90b6a2f3cddb78ad1b12a79c87c7b7dc59cb23cf70b7370b14c465536baddf74"
+    },
+    {
+      "location": "tests/lib/cinematic/cpu-layer-repair.test.ts(13,36)",
+      "code": "TS7006",
+      "sha256": "638ccf3def7e33bd5cae8fc302b185ebff877a084a833c41339364a43c80d808"
+    },
+    {
+      "location": "tests/lib/cinematic/cpu-layer-repair.test.ts(14,36)",
+      "code": "TS2339",
+      "sha256": "0ea6fd4c11473f1646e4f009a986edee9d403625173f4ed8e29268a40bd4a539"
+    },
+    {
+      "location": "tests/lib/cinematic/cpu-layer-repair.test.ts(14,40)",
+      "code": "TS7006",
+      "sha256": "11ed4333cea5c01fc32b7a80f0a6c1cc6f9d2ca1982bc1b3bba7afabaa224099"
+    },
+    {
+      "location": "tests/lib/cinematic/quality-semantics.test.ts(470,28)",
+      "code": "TS2345",
+      "sha256": "bac574f8a4290a0f69271395c94b7950af01a2962b370c66d8d1d144fa820f4f"
+    },
+    {
+      "location": "tests/lib/cinematic/scene-workflow-normalization.test.ts(23,7)",
+      "code": "TS2322",
+      "sha256": "60c89e12ef5ef94a4cb580009d3db14e07ca84c0afd00abb4e375973cbfdc8a2"
+    },
+    {
+      "location": "tests/lib/cinematic/scene-workflow-normalization.test.ts(24,41)",
+      "code": "TS2353",
+      "sha256": "2e26405cf7172641fd33e47939199e3e00c9f82b5b81451e04a657b97b1daced"
+    },
+    {
+      "location": "tests/lib/cinematic/scene-workflow-normalization.test.ts(28,12)",
+      "code": "TS18048",
+      "sha256": "3e7dfe927b0aaf454bdc525cdef98c9c49493dd4f6a6c27e67fe1f628d0f502e"
+    },
+    {
+      "location": "tests/lib/cinematic/scene-workflow-normalization.test.ts(39,7)",
+      "code": "TS2322",
+      "sha256": "5ee5d467c22e312de005a0f4a9092bff1a0ccedd1967046d45a85030a7d59e1a"
+    },
+    {
+      "location": "tests/lib/cinematic/scene-workflow-normalization.test.ts(40,7)",
+      "code": "TS2322",
+      "sha256": "239fdd2932938c72dfbc38294f7e49a79cd0c75e8659c3cda026e66133b7f115"
+    },
+    {
+      "location": "tests/lib/cinematic/scene-workflow-normalization.test.ts(41,41)",
+      "code": "TS2353",
+      "sha256": "aa00560e1a56f08b5ab4f34ec849a990f7aca38170cafdbf821a8ffaf0f5ead3"
+    },
+    {
+      "location": "tests/lib/cinematic/scene-workflow-normalization.test.ts(45,12)",
+      "code": "TS18048",
+      "sha256": "870dc768a09c15b0cc4fc8a9ae095166e9b04e1333ddb5bb44b67fa8bc0b3a20"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(7,38)",
+      "code": "TS2307",
+      "sha256": "7f37ace93e23524359d864aa9cd11eaf1138772e98944dc1c77a43771ccbdf19"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(8,37)",
+      "code": "TS2307",
+      "sha256": "9294275c4881e91e76377da061b7db4b87e21b65cee45d4333aa70db1fe98553"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(9,44)",
+      "code": "TS2307",
+      "sha256": "c410d192b3582b53cad9df15d9ba6979419d78444ce635013f3bc8ce42b045fe"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(55,55)",
+      "code": "TS2345",
+      "sha256": "0b69b07780372fd5c8435a712e34a9c5b9cc90b4aeaa034c5268517db4d9e537"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(56,45)",
+      "code": "TS2345",
+      "sha256": "230b8470fc2f57d3084a8389fa268e6009f85013087b3649ff6774537e8cf423"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(72,55)",
+      "code": "TS2345",
+      "sha256": "7aec0bd3ee46d5e06f38a3e5486ea33d9c07214cb4bef7de3dba333a6ddf1587"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(74,44)",
+      "code": "TS2345",
+      "sha256": "b83433c8c03b0486206097efc29c6200a347c5d97c04300c5728a98ff1f125a1"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(91,17)",
+      "code": "TS2339",
+      "sha256": "392ce4dcd7f8c2c974886918358c4ea0ccaa3b42cd4c41f10441ac67494c6a29"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(109,42)",
+      "code": "TS2551",
+      "sha256": "93216d4784315aea832c2b25bf691c1ac904c217921c5abf2fbbdbc1669e31ad"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(110,58)",
+      "code": "TS2345",
+      "sha256": "58fced57595c576a0b5f89a31c0cccfb363b891cb50946371a53019f38b570ce"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(125,52)",
+      "code": "TS2345",
+      "sha256": "1afe78627b5d2770ed01e661578943ee3627d9bfc325c65b70f4c14bfc6892fe"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(127,55)",
+      "code": "TS2345",
+      "sha256": "6ed151a2ffe2d1cd7fc8c6f96cc29ea23f8d724a3b8d3af108fdb930e4be3e5b"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(181,84)",
+      "code": "TS2488",
+      "sha256": "bbea05bfb09af964923c50d6230f0cf9e2e6febb6464180ddbbe3de6a6e4e20c"
+    },
+    {
+      "location": "tests/lib/server/cinematic-reference-scenes.test.ts(424,12)",
+      "code": "TS18048",
+      "sha256": "2907d89571bed1be38e2f7ee7628f31aad4f95a8508fe3ea1d525bf36f81689f"
+    },
+    {
+      "location": "tests/lib/server/process-recovery-v2.test.ts(370,12)",
+      "code": "TS18046",
+      "sha256": "f182c57b57453047bf6991c4f5f99fbf526ee5960ca68c4eccd8f0431021d7cc"
+    },
+    {
+      "location": "tests/lib/server/process-reference-scenes.test.ts(204,29)",
+      "code": "TS2339",
+      "sha256": "e1170b4e989b8c1813975c5b38324b4b826c9d926d969d1e7fdcb7238aa171e7"
+    },
+    {
+      "location": "tests/lib/server/process-reference-scenes.test.ts(205,29)",
+      "code": "TS2339",
+      "sha256": "2b4521786acc9222faf2954cffb1109fb889ad1851f7ce3528a2fa0c0fdc69fd"
+    },
+    {
+      "location": "tests/lib/server/process-reference-scenes.test.ts(206,29)",
+      "code": "TS2339",
+      "sha256": "1e464e74a80d71d50ae3905227f16ab76c101d3fd3884d5ef213f52bfd763c8d"
+    },
+    {
+      "location": "tests/security/debate-proxy.test.ts(17,24)",
+      "code": "TS2345",
+      "sha256": "3b1980f10ec222f992766c74ddb2dd52c95d48a40d5f87f01d80c8f08dc08ec0"
+    },
+    {
+      "location": "tests/unit/generation-repair-routing.test.ts(73,52)",
+      "code": "TS2345",
+      "sha256": "bcbead44312971acce8450989116d01366eb25543582ab8a00f77dd75eab36ba"
+    }
+  ]
+}

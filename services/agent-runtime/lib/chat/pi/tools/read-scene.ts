@@ -36,7 +36,11 @@ export type DirectorSceneEvidenceMetadata = Pick<
 
 const MAX_SCENE_EVIDENCE_CHARS = 24_000;
 
-function buildSceneEvidence(body: StatelessChatRequest, sceneId: string): string | null {
+function buildSceneEvidence(
+  body: StatelessChatRequest,
+  sceneId: string,
+  includeAnswerKeys: boolean | undefined,
+): string | null {
   const scene = body.storeState.scenes.find((candidate) => candidate.id === sceneId);
   if (!scene) return null;
 
@@ -44,15 +48,18 @@ function buildSceneEvidence(body: StatelessChatRequest, sceneId: string): string
   const stageWithoutWhiteboard = body.storeState.stage
     ? { ...body.storeState.stage, whiteboard: [] }
     : null;
-  const sceneContext = buildStateContext({
-    ...body.storeState,
-    stage: stageWithoutWhiteboard,
-    scenes: [scene],
-    currentSceneId: scene.id,
-    outlines: [outline],
-    quizResults:
-      body.storeState.quizResults?.sceneId === scene.id ? body.storeState.quizResults : undefined,
-  });
+  const sceneContext = buildStateContext(
+    {
+      ...body.storeState,
+      stage: stageWithoutWhiteboard,
+      scenes: [scene],
+      currentSceneId: scene.id,
+      outlines: [outline],
+      quizResults:
+        body.storeState.quizResults?.sceneId === scene.id ? body.storeState.quizResults : undefined,
+    },
+    { includeAnswerKeys },
+  );
   const outlineContext = [
     `Outline description: ${outline.description || '(none)'}`,
     `Outline key points: ${outline.keyPoints?.join('; ') || '(none)'}`,
@@ -67,6 +74,7 @@ function buildSceneEvidence(body: StatelessChatRequest, sceneId: string): string
 
 export function buildReadSceneTool(opts: {
   body: StatelessChatRequest;
+  includeAnswerKeys?: boolean;
   onEvidence?: (evidence: DirectorSceneEvidencePacket) => void;
 }): AgentTool<typeof ReadSceneParams, ReadSceneDetails> {
   return {
@@ -100,7 +108,7 @@ export function buildReadSceneTool(opts: {
         };
       }
 
-      const evidence = buildSceneEvidence(opts.body, scene.id) ?? '';
+      const evidence = buildSceneEvidence(opts.body, scene.id, opts.includeAnswerKeys) ?? '';
       const revision = String(
         scene.updatedAt ?? opts.body.storeState.stage?.updatedAt ?? 'request-start',
       );

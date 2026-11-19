@@ -379,7 +379,7 @@ def _docx_body(deliverable):
     return "".join(nodes)
 
 
-def render_docx(deliverable):
+def render_docx(deliverable, *, created_at=None):
     body = _docx_body(deliverable)
     document_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -397,7 +397,7 @@ def render_docx(deliverable):
 <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/><w:spacing w:before="260" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/><w:spacing w:before="220" w:after="100"/></w:pPr><w:rPr><w:b/><w:sz w:val="23"/></w:rPr></w:style>
 </w:styles>"""
-    timestamp = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    timestamp = (created_at or datetime.datetime.utcnow()).replace(microsecond=0).isoformat() + "Z"
     core_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>{_xml_text(deliverable.get("title") or deliverable.get("filename"))}</dc:title><dc:creator>玄甲</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">{timestamp}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">{timestamp}</dcterms:modified></cp:coreProperties>"""
     entries = {
@@ -412,7 +412,7 @@ def render_docx(deliverable):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, value in entries.items():
-            archive.writestr(name, value.encode("utf-8"))
+            archive.writestr(zipfile.ZipInfo(name), value.encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
     return output.getvalue()
 
 
@@ -470,7 +470,7 @@ def _render_notebook(deliverable):
     return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
-def render_deliverable(deliverable):
+def render_deliverable(deliverable, *, created_at=None):
     if not isinstance(deliverable, dict):
         raise ValueError("Deliverable must be an object")
     file_format = _text(deliverable.get("format"), 16).strip().lower()
@@ -481,7 +481,7 @@ def render_deliverable(deliverable):
     content = deliverable.get("content")
     data = deliverable.get("data")
     if file_format == "docx":
-        rendered = render_docx(deliverable)
+        rendered = render_docx(deliverable, created_at=created_at)
     elif file_format == "md":
         rendered = (
             _text(content)
@@ -544,7 +544,8 @@ def _public_download_url(job_id, file_id):
 def persist_agent_deliverables(job, deliverables):
     if not isinstance(deliverables, list):
         return []
-    rendered_deliverables = [render_deliverable(item) for item in deliverables[:4]]
+    created_at = getattr(job, "created", None)
+    rendered_deliverables = [render_deliverable(item, created_at=created_at) for item in deliverables[:4]]
     stored = []
     for ordinal, rendered in enumerate(rendered_deliverables):
         digest = hashlib.sha256(rendered["content"]).hexdigest()

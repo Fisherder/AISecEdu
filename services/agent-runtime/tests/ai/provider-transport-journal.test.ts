@@ -3,9 +3,10 @@ import { createServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateText } from 'ai';
 import { journalProviderTransport, waitForProviderTransports } from '@/lib/ai/provider-transport-journal';
+import { callLLM } from '@/lib/ai/llm';
 import { providerFetch } from '@/lib/ai/provider-fetch';
 import { getModel } from '@/lib/ai/providers';
-import { withActiveModelCall, type ActiveModelCall } from '@/lib/ai/model-call-journal';
+import { withActiveModelCall, withModelCallJournal, type ActiveModelCall } from '@/lib/ai/model-call-journal';
 
 const identity = { providerId: 'deepseek', providerType: 'openai', modelId: 'test' };
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
@@ -16,9 +17,18 @@ const fixture = () => {
   } };
   return { active, events };
 };
-const bytesOf = (events: ReturnType<typeof fixture>['events']) => Buffer.concat(
-  events.filter(e => e.type === 'provider.chunk').map(e => Buffer.from(e.detail.bodyBase64, 'base64')),
-);
+const chunksOf = (events: ReturnType<typeof fixture>['events']) =>
+  events.filter(e => e.type === 'provider.chunk').map(e => e.detail);
+
+function expectNoBodyCopies(events: ReturnType<typeof fixture>['events'], ...bodies: (Uint8Array | string)[]) {
+  const serialized = JSON.stringify(events);
+  expect(serialized).not.toMatch(/"bodyBase64"|"requestBody"|"responseBody"|"bodyEncoding"/);
+  for (const body of bodies) {
+    const bytes = Buffer.from(body);
+    expect(serialized).not.toContain(bytes.toString());
+    expect(serialized).not.toContain(bytes.toString('base64'));
+  }
+}
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -40,7 +50,7 @@ describe('provider transport durability', () => {
     expect(committed).toBe(true);expect(active.transports?.unfinished.size).toBe(0);expect(events.at(-1)?.type).toBe('provider.finished');
   });
 
-  it('records the effective request before sending and byte-exact UTF-8 fragments before consumption', async () => {
+  it('records request and cumulative response fingerprints before forwarding UTF-8 fragments', async () => {
     const { active, events } = fixture();
     const expected = Buffer.from('data: {"text":"概率论🧪"}\n\n');
     let sourceReads = 0;
@@ -63,10 +73,12 @@ describe('provider transport durability', () => {
     expect(first.done).toBe(false);
     expect(events.at(-1)?.type).toBe('provider.chunk');
     expect(events.some(e => e.type === 'provider.finished')).toBe(false);
-    await reader.read(); await reader.read();
-    expect(bytesOf(events)).toEqual(expected);
-    expect(events[0].detail.bodySha256).toBe(hash(request));
-    expect(Buffer.from(events[0].detail.bodyBase64, 'base64').toString()).toBe(request);
+    const second = await reader.read();
+    await reader.read();
+    expect(Buffer.concat([Buffer.from(first.value!), Buffer.from(second.value!)])).toEqual(expected);
+    expect(chunksOf(events).map(chunk => chunk.prefixSha256)).toEqual([hash(expected.subarray(0, 22)), hash(expected)]);
+    expect(events[0].detail).toMatchObject({ journalVersion: 2, byteLength: Buffer.byteLength(request), bodySha256: hash(request) });
+    expectNoBodyCopies(events, request, expected, expected.subarray(0, 22), expected.subarray(22));
     expect(events[0].detail.url).not.toMatch(/secret|password|user|private/);
     expect(events[0].detail.headers).toEqual({ 'content-type': 'application/json' });
     expect(events[1].detail.headers).toEqual({ 'content-type': 'text/event-stream', 'x-request-id': 'id1' });
@@ -94,7 +106,7 @@ describe('provider transport durability', () => {
     const response = await journalProviderTransport(active, identity, async () => new Response(source),
       'https://provider.example/v1/chat', { method: 'POST', body: '{}' });
     await expect(response.text()).rejects.toThrow('socket error');
-    expect(bytesOf(events).toString()).toBe('first');
+    expect(chunksOf(events)[0].prefixSha256).toBe(hash('first'));
     expect(events.at(-1)?.detail).toMatchObject({ status: 'failed', chunksCount: 1, bodySha256: hash('first'), errorType: 'TypeError' });
     expect(JSON.stringify(events)).not.toContain('secret');
   });
@@ -162,7 +174,7 @@ describe('provider transport durability', () => {
     const response = await journalProviderTransport(active, identity, async () => new Response(source),
       'https://provider.example/v1/chat', { method: 'POST', body: '{}' });
     await expect(response.body!.getReader().read()).rejects.toThrow('chunk write failed');
-    expect(cancel).toHaveBeenCalledOnce(); expect(bytesOf(events).length).toBe(0);
+    expect(cancel).toHaveBeenCalledOnce(); expect(chunksOf(events)).toHaveLength(0);
     expect(active.journalFailure).toBeInstanceOf(Error);
     expect(events.some(e => e.type === 'provider.finished')).toBe(false);
   });
@@ -175,7 +187,9 @@ describe('provider transport durability', () => {
     const chunks = events.filter(e => e.type === 'provider.chunk');
     expect(chunks.map(e => e.detail.byteLength)).toEqual([65536, 65536, 48928]);
     expect(chunks.map(e => e.detail.offset)).toEqual([0, 65536, 131072]);
-    expect(bytesOf(events)).toEqual(expected);
+    expect(chunks.map(e => e.detail.prefixSha256)).toEqual(
+      [65536, 131072, 180000].map(length => hash(expected.subarray(0, length))),
+    );
   });
 
   it('rejects oversized requests before network activity and response limits explicitly', async () => {
@@ -220,9 +234,9 @@ describe('provider transport durability', () => {
       const response = await withActiveModelCall(active, () => providerFetch(identity)(`http://127.0.0.1:${address.port}/chat`, { method: 'POST', body: '{"actual":true}' }));
       const reader = response.body!.getReader(); const first = await reader.read();
       expect(Buffer.from(first.value!).toString()).toBe('data: first\n\n');
-      expect(bytesOf(events).toString()).toBe('data: first\n\n');
+      expect(chunksOf(events)[0].prefixSha256).toBe(hash('data: first\n\n'));
       expect(events.some(e => e.type === 'provider.finished')).toBe(false);
-      expect(Buffer.from(events[0].detail.bodyBase64, 'base64').toString()).toBe(received);
+      expect(events[0].detail.bodySha256).toBe(hash(received));
       end(); await reader.read(); await reader.read();
       expect(events.at(-1)?.detail.status).toBe('completed');
     } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
@@ -240,10 +254,47 @@ describe('provider transport durability', () => {
     const type = providerId === 'deepseek' ? 'openai' : providerId;
     const { model } = getModel({ providerId, providerType: type, modelId: providerCase === 'openai-responses' ? 'gpt-5.6' : 'test', apiKey: 'private-key', baseUrl: 'https://provider.example/v1' } as Parameters<typeof getModel>[0]);
     const result = await withActiveModelCall(active, () => generateText({ model, prompt: 'hello', maxRetries: 0 }));
-    expect(result.text).toBe('ok'); expect(bytesOf(events).toString()).toBe(expected);
+    expect(result.text).toBe('ok'); expect(chunksOf(events).at(-1)?.prefixSha256).toBe(hash(expected));
+    expectNoBodyCopies(events, expected);
     expect(events[0].detail.headers).not.toHaveProperty('authorization');
     expect(events[0].detail.headers).not.toHaveProperty('x-api-key');
     expect(events[0].detail.url).not.toContain('private-key');
     expect(events.at(-1)?.detail.status).toBe('completed');
   });
+
+  it('keeps the model journal free of normalized and wire copies while preserving usage', async () => {
+    const { active, events } = fixture();
+    const privatePrompt = 'SYNTHETIC-STUDENT-PROMPT-f29c7761';
+    const privateReply = 'SYNTHETIC-MODEL-REPLY-bdde357e';
+    const privateReasoning = 'SYNTHETIC-REASONING-89ca1776';
+    const payload = JSON.stringify({
+      id: 'reply', object: 'chat.completion', created: 1, model: 'test',
+      choices: [{ index: 0, message: { role: 'assistant', content: privateReply,
+        reasoning_content: privateReasoning }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 },
+    });
+    let requestBody = '';
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      requestBody = String(init?.body);
+      return new Response(payload, { headers: { 'content-type': 'application/json' } });
+    }));
+    const { model } = getModel({ providerId: 'deepseek', providerType: 'openai', modelId: 'test',
+      apiKey: 'synthetic-key', baseUrl: 'https://provider.example/v1' });
+    active.journal.nextCallId = () => active.callId;
+    const result = await withModelCallJournal(active.journal, () => callLLM({
+      model, system: 'Synthetic accounting fixture', prompt: privatePrompt, maxRetries: 0,
+    }, 'audit-regression'));
+    expect(result.text).toBe(privateReply);
+    expect(requestBody).toContain(privatePrompt);
+    expectNoBodyCopies(events, privatePrompt, privateReply, privateReasoning, requestBody, payload);
+    expect(events.find(e => e.type === 'model.requested')?.detail).toMatchObject({
+      transportJournalVersion: 2, source: 'audit-regression', modelId: 'test',
+    });
+    expect(events.find(e => e.type === 'model.settled')?.detail).toMatchObject({
+      finishReason: 'stop', stepsCount: 1, totalUsage: { inputTokens: 7, outputTokens: 2, totalTokens: 9 },
+    });
+    expect(events.find(e => e.type === 'provider.request')?.detail.bodySha256).toBe(hash(requestBody));
+    expect(events.find(e => e.type === 'provider.finished')?.detail.bodySha256).toBe(hash(payload));
+  });
+
 });

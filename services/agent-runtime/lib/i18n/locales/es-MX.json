@@ -551,6 +551,9 @@
     "submitAnswers": "Enviar respuestas",
     "aiGrading": "La IA está calificando...",
     "aiGradingWait": "Espera un momento, analizando tus respuestas",
+    "gradingPending": "Calificación pendiente",
+    "gradingPendingDetail": "Tus respuestas se guardaron. Reintenta para completar la calificación.",
+    "retryGrading": "Reintentar calificación",
     "quizReport": "Reporte del cuestionario",
     "retry": "Reintentar"
   },
@@ -761,6 +764,8 @@
         "pdfNoText": "No se encontró texto extraíble en este PDF.",
         "imageUploadFailed": "No se pudo subir la imagen: {{error}}",
         "imageTooLargeNoStorage": "La imagen es demasiado grande para adjuntarla sin almacenamiento configurado (máx. 2 MB en local).",
+        "imageCaptionForEvaluation": "Agrega una descripción para la evaluación o elige enviar una imagen educativa nueva si tu curso lo permite.",
+        "sendNewTeachingImage": "Envía la imagen educativa que acabas de elegir al modelo externo para esta evaluación. Los archivos guardados permanecen en el historial de entregas.",
         "imageNeedsCaptionNoVision": "El modelo actual no puede leer imágenes. Agrega una descripción de texto de la imagen antes de entregar, o cambia a un modelo con visión en Configuración.",
         "unsupportedFileType": "Tipo de archivo no compatible. Solo se aceptan archivos de texto (.txt, .md, .csv, .json, .py, …) y PDF.",
         "pasteTab": "Pegar texto / imagen",

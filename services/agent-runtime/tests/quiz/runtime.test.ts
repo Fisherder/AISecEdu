@@ -5,6 +5,7 @@ import {
   backfillQuizAttempt,
   createQuizAttemptWriter,
   loadQuizAttemptState,
+  QuizRetryProgressedError,
   quizAttemptId,
   recordQuizAttempt,
   type QuizAttemptRuntimeDeps,
@@ -52,6 +53,26 @@ describe('quiz attempt runtime persistence', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('keeps the already saved assessment when a stale grading request completes', async () => {
+    const { store, deps } = makeHarness();
+    const stageId = 'stage-quiz';
+    const sceneId = 'quiz';
+    const attemptId = quizAttemptId(stageId, sceneId, deps.learnerKey!);
+    const base = { stageId, sceneId, attemptId, answers: { q1: 'original' } };
+    await recordQuizAttempt({ ...base, phase: 'submitted' }, deps);
+    await recordQuizAttempt({ ...base, phase: 'reviewed', results, requireCurrentSubmission: true }, deps);
+    await expect(recordQuizAttempt({
+      ...base,
+      phase: 'reviewed',
+      results: [{ questionId: 'q1', correct: false, status: 'incorrect', earned: 0 }],
+      requireCurrentSubmission: true,
+    }, deps)).rejects.toBeInstanceOf(QuizRetryProgressedError);
+    expect(await loadQuizAttemptState(base, deps)).toMatchObject({
+      state: { phase: 'reviewed', answers: base.answers, results },
+    });
+    expect(await store.listSessions(stageId, deps.learnerKey!)).toHaveLength(1);
   });
 
   it('coalesces rapid draft changes into one latest snapshot', async () => {

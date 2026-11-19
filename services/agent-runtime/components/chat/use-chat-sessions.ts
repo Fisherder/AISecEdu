@@ -23,7 +23,6 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { useUserProfileStore } from '@/lib/store/user-profile';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { useI18n } from '@/lib/hooks/use-i18n';
-import { getCurrentModelConfig } from '@/lib/utils/model-config';
 import { USER_AVATAR } from '@/lib/types/roundtable';
 import { StreamBuffer } from '@/lib/buffer/stream-buffer';
 import type { AgentStartItem, ActionItem } from '@/lib/buffer/stream-buffer';
@@ -150,7 +149,7 @@ export type ChatRequestTemplate = {
     [key: string]: unknown;
   };
   userProfile?: { nickname?: string; bio?: string };
-  apiKey: string;
+  apiKey?: string;
   baseUrl?: string;
   model?: string;
   providerType?: string;
@@ -1182,11 +1181,6 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         {
           config: requestTemplate.config,
           userProfile: requestTemplate.userProfile,
-          apiKey: requestTemplate.apiKey,
-          baseUrl: requestTemplate.baseUrl,
-          model: requestTemplate.model,
-          providerType: requestTemplate.providerType,
-          thinkingConfig: requestTemplate.thinkingConfig,
         },
         {
           getStoreState: buildFreshAgentLoopStoreState,
@@ -1554,7 +1548,6 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         log.info(`[ChatArea] Resuming session: ${sessionId}`);
 
         const userProfileState = useUserProfileStore.getState();
-        const mc = getCurrentModelConfig();
 
         const agentIds =
           useSettingsStore.getState().selectedAgentIds?.length > 0
@@ -1573,11 +1566,6 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
               nickname: userProfileState.nickname || undefined,
               bio: userProfileState.bio || undefined,
             },
-            apiKey: mc.apiKey,
-            baseUrl: mc.baseUrl,
-            model: mc.modelString,
-            providerType: mc.providerType,
-            thinkingConfig: mc.thinkingConfig,
             directorState: session.directorState,
           },
           controller,
@@ -1660,19 +1648,6 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       // An interrupted action may still be finishing a delayed state mutation.
       // Capture the next request only after that mutation has settled.
       await pendingRetirementRef.current;
-
-      // Validate model configuration before sending
-      const modelConfig = getCurrentModelConfig();
-      if (!modelConfig.modelId) {
-        toast.error(t('settings.modelNotConfigured'));
-        return;
-      }
-      if (modelConfig.requiresApiKey && !modelConfig.apiKey && !modelConfig.isServerConfigured) {
-        toast.error(t('settings.setupNeeded'), {
-          description: t('settings.apiKeyDesc'),
-        });
-        return;
-      }
 
       // Create a new session when there's no active QA session to append to.
       // A completed session should NOT be reused — start a fresh one instead.
@@ -1766,7 +1741,6 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         );
 
         const userProfileState = useUserProfileStore.getState();
-        const mc = getCurrentModelConfig();
 
         await runAgentLoopFn(
           sessionId!,
@@ -1780,11 +1754,6 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
               nickname: userProfileState.nickname || undefined,
               bio: userProfileState.bio || undefined,
             },
-            apiKey: mc.apiKey,
-            baseUrl: mc.baseUrl,
-            model: mc.modelString,
-            providerType: mc.providerType,
-            thinkingConfig: mc.thinkingConfig,
             directorState: existingSession?.directorState,
           },
           controller,
@@ -1832,19 +1801,6 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       // Explicitly clear buffer-pause intent (also cleared transitively via endSession,
       // but being explicit guards against future refactors)
       livePausedRef.current = false;
-
-      // Validate model configuration before starting discussion
-      const modelConfig = getCurrentModelConfig();
-      if (!modelConfig.modelId) {
-        toast.error(t('settings.modelNotConfigured'));
-        return;
-      }
-      if (modelConfig.requiresApiKey && !modelConfig.apiKey && !modelConfig.isServerConfigured) {
-        toast.error(t('settings.setupNeeded'), {
-          description: t('settings.apiKeyDesc'),
-        });
-        return;
-      }
 
       // Auto-end previous active QA/Discussion sessions to ensure only one is active
       const activeQAOrDiscussion = sessionsRef.current.filter(isOpenLiveSession);
@@ -1897,7 +1853,6 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
 
       try {
         const userProfileState = useUserProfileStore.getState();
-        const mc = getCurrentModelConfig();
 
         await runAgentLoopFn(
           sessionId,
@@ -1914,11 +1869,6 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
               nickname: userProfileState.nickname || undefined,
               bio: userProfileState.bio || undefined,
             },
-            apiKey: mc.apiKey,
-            baseUrl: mc.baseUrl,
-            model: mc.modelString,
-            providerType: mc.providerType,
-            thinkingConfig: mc.thinkingConfig,
           },
           controller,
           'discussion',

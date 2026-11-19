@@ -58,7 +58,7 @@ from ...learning.exercise_modes import (
     is_retired_exercise,
     is_supported_exercise,
 )
-from ...learning.context import guide_reference_catalog, learning_profile_context
+from ...learning.context import guide_reference_options, learning_profile_context
 from ...learning.standards import ABILITY_LABELS
 from ...learning.student_experience import (
     activity_state,
@@ -75,10 +75,12 @@ from ...learning.intelligence import (
     guide_reply,
     guide_thread_view,
     new_guide_thread,
-    prefetch_solution_reference,
     tutor_reply,
 )
+from ...agent_runtime.upstream_turn import UpstreamTurnError
 from ...learning.student_agent import (
+    create_personal_study_package,
+    personal_study_package_requested,
     execute_student_tools,
     forget_memory,
     memory_view,
@@ -3138,7 +3140,6 @@ class CurrentLearningAttempt(Resource):
         if attempt is not None:
             sync_live_progress(attempt, get_current_container(user))
             db.session.commit()
-            prefetch_solution_reference(attempt)
         return {
             "success": True,
             "active": bool(attempt),
@@ -3238,11 +3239,7 @@ class LearningTutor(Resource):
         if not question:
             return {"success": False, "error": "问题不能为空"}, 400
         profile = LearningChallengeProfiles.query.get(attempt.challenge_id)
-        container = get_current_container(user)
-        mark("containerLookup")
-        sync_live_progress(attempt, container)
-        mark("liveProgress")
-        reply = tutor_reply(attempt, user, question, profile, container)
+        reply = tutor_reply(attempt, user, question, profile)
         mark("tutor")
         db.session.commit()
         mark("commit")
@@ -3305,6 +3302,16 @@ class LearningGuide(Resource):
         if selected is None and threads:
             selected = threads[0]
         profile = learning_profile_context(user)
+        selected_view = guide_thread_view(selected, include_messages=True) if selected else None
+        reference_options = guide_reference_options(
+            user, profile, selected_view["referenceIds"] if selected_view else (),
+        )
+        visible_reference_ids = {item["id"] for item in reference_options}
+        if selected_view:
+            selected_view["referenceIds"] = [
+                reference_id for reference_id in selected_view["referenceIds"]
+                if reference_id in visible_reference_ids
+            ]
         guide_skills = [
             {
                 **item,
@@ -3319,11 +3326,12 @@ class LearningGuide(Resource):
             (
                 attempt
                 for attempt in profile.get("recentAttempts") or []
-                if attempt.get("status") == "ACTIVE"
+                if attempt.get("status") == "ACTIVE" and attempt.get("referenceId") in visible_reference_ids
             ),
             None,
         )
         quick_prompts = [
+            "帮我生成一份关于怎样用证据支持结论的个人学习包。",
             "根据我最近的学习情况，帮我安排下一次 45 分钟练习。",
             "我目前最薄弱的能力是什么？应该怎样补强？",
             "总结我最近几次练习的进步和重复出现的问题。",
@@ -3336,11 +3344,7 @@ class LearningGuide(Resource):
         return {
             "success": True,
             "threads": [guide_thread_view(thread) for thread in threads],
-            "thread": (
-                guide_thread_view(selected, include_messages=True)
-                if selected
-                else None
-            ),
+            "thread": selected_view,
             "profile": {
                 "summary": profile.get("summary") or {},
                 "activeAttempt": active,
@@ -3353,7 +3357,7 @@ class LearningGuide(Resource):
                 )[:3],
                 "recommendations": (profile.get("recommendations") or [])[:4],
             },
-            "referenceOptions": guide_reference_catalog(profile),
+            "referenceOptions": reference_options,
             "quickPrompts": quick_prompts,
             "workspace": student_agent_snapshot(user),
         }
@@ -3373,6 +3377,7 @@ class LearningGuide(Resource):
                 "error": "该对话已归档，请恢复后再发送消息。",
             }, 409
         try:
+            study_package_requested = personal_study_package_requested(question)
             snapshot = student_agent_snapshot(user)
             result = guide_reply(
                 user,
@@ -3384,8 +3389,12 @@ class LearningGuide(Resource):
                     else None
                 ),
                 agent_context=snapshot,
+                skip_model=study_package_requested,
             )
-            tool_calls = resolve_tool_calls(question, result.get("toolCalls"))
+            tool_calls = [
+                call for call in resolve_tool_calls(question, result.get("toolCalls"))
+                if call["tool"] in {"remember", "forget"}
+            ]
             resolved_thread = LearningGuideThreads.query.filter_by(
                 id=result["thread"]["id"],
                 user_id=user.id,
@@ -3397,6 +3406,17 @@ class LearningGuide(Resource):
                 tool_calls,
                 snapshot,
             )
+            study_package_reply = None
+            if study_package_requested:
+                try:
+                    with db.session.begin_nested():
+                        package = create_personal_study_package(user, resolved_thread, question)
+                    agent_actions.append(package)
+                    study_package_reply = "个人学习包已生成。打开下方卡片即可阅读讲解和完成文字自检。"
+                except UpstreamTurnError:
+                    study_package_reply = "学习包服务暂时不可用。请求已保存在对话中，请稍后重试。"
+                except (ScopeError, ValueError):
+                    study_package_reply = "本次个人学习包未能生成。个人学习包仅支持普通概念讲解和文字自检。"
             assistant = LearningGuideMessages.query.filter_by(
                 id=result["message"]["id"],
                 thread_id=resolved_thread.id,
@@ -3404,6 +3424,9 @@ class LearningGuide(Resource):
                 role="assistant",
             ).first()
             if assistant is not None:
+                if study_package_reply is not None:
+                    assistant.content = study_package_reply
+                    result["message"]["content"] = study_package_reply
                 assistant.metadata_json = {
                     **(assistant.metadata_json or {}),
                     "agentActions": agent_actions,

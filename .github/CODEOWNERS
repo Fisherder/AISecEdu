@@ -51,3 +51,4 @@
 **/*lock* @Fisherder
 **/requirements* @Fisherder
 **/pyproject.toml @Fisherder
+/vendor/deepseek-harness/ @Fisherder

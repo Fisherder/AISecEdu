@@ -133,6 +133,10 @@ docker exec pwncollege-dojo dojo backup
 ls -lh data/backups/
 ```
 
+备份从配置的 `DB_NAME` 导出。命令成功后会报告一份权限为 `0600` 的
+`.dump` 文件。使用 `dojo restore <备份文件名>` 可恢复 `/data/backups` 下的
+备份。恢复在单个数据库事务中执行，文件缺失或恢复失败时返回非零状态。
+
 ## 从零重建
 
 本机 Docker 守护进程访问 Docker Hub 和 Dockerfile 的远程 `ADD` 不稳定，因此使用固定提交的本地构建上下文。脚本不会修改上游 `Dockerfile`。

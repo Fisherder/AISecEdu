@@ -150,7 +150,7 @@ export function buildStructuredPrompt(
     actionDescriptions: getActionDescriptions(effectiveActions),
     slideActionGuidelines: hasSlideActions ? SLIDE_ACTION_GUIDELINES : '',
     mutualExclusionNote: hasSlideActions ? MUTUAL_EXCLUSION_NOTE : '',
-    stateContext: buildStateContext(storeState),
+    stateContext: buildStateContext(storeState, { includeAnswerKeys: false }),
     virtualWhiteboardContext: buildVirtualWhiteboardContext(storeState, whiteboardLedger),
     lengthGuidelines: buildLengthGuidelines(agentConfig.role),
     whiteboardGuidelines: buildWhiteboardGuidelines(agentConfig.role),

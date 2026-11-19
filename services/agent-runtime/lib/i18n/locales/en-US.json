@@ -551,6 +551,9 @@
     "submitAnswers": "Submit Answers",
     "aiGrading": "AI is grading...",
     "aiGradingWait": "Please wait, analyzing your answers",
+    "gradingPending": "Grading pending",
+    "gradingPendingDetail": "Your answers are saved. Try again to complete grading.",
+    "retryGrading": "Retry grading",
     "quizReport": "Quiz Report",
     "retry": "Retry"
   },
@@ -761,6 +764,8 @@
         "pdfNoText": "No extractable text found in this PDF.",
         "imageUploadFailed": "Failed to upload image: {{error}}",
         "imageTooLargeNoStorage": "Image too large to attach without storage configured (max 2 MB locally).",
+        "imageCaptionForEvaluation": "Add a text description for evaluation, or explicitly choose to send a new teaching image if your course allows it.",
+        "sendNewTeachingImage": "Send the newly selected teaching image to the external model for this evaluation. Saved attachments stay in the submission history.",
         "imageNeedsCaptionNoVision": "The current model can't read images. Add a text description of the image before submitting, or switch to a vision-capable model in Settings.",
         "unsupportedFileType": "Unsupported file type. Only text files (.txt, .md, .csv, .json, .py, …) and PDF are accepted.",
         "pasteTab": "Paste text / image",

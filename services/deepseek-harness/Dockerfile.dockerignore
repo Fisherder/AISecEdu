@@ -1,0 +1,12 @@
+**
+!services/
+!services/deepseek-harness/
+!services/deepseek-harness/package*.json
+!services/deepseek-harness/*.mjs
+!vendor/
+!vendor/deepseek-harness/
+!vendor/deepseek-harness/**
+**/.git
+**/node_modules
+**/.env
+**/__pycache__

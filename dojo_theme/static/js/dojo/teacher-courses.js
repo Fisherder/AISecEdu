@@ -216,11 +216,19 @@
 
   function setCourseView(view) {
     if (view !== "detail" && state.filterDrawerKind) closeFilterDrawer({restoreFocus: false});
-    if (view !== "detail") closeMaterialPreview({restoreFocus: false});
+    if (view !== "detail") {
+      closeCourseCodeDialog({restoreFocus: false});
+      closeMaterialPreview({restoreFocus: false});
+      analyticsWorkspace?.setCourse(null);
+    }
     state.view = view === "detail" ? "detail" : "list";
     elements.courseListView.hidden = state.view !== "list";
     elements.courseDetailView.hidden = state.view !== "detail";
     document.body.classList.toggle("is-course-list-view", state.view === "list");
+  }
+
+  function isCurrentWorkspace(sequence) {
+    return state.view === "detail" && sequence === state.workspaceLoadSequence;
   }
 
   function setWorkspaceLoading(busy, message) {
@@ -382,6 +390,7 @@
 
   async function loadCourseCode(regenerate) {
     if (!state.course || !elements.courseCode) return false;
+    const workspace = state.workspaceLoadSequence;
     resetCourseCodeCopyFeedback();
     state.courseCode = "";
     state.courseCodeState = "loading";
@@ -394,6 +403,7 @@
         `/teaching/courses/${encodeURIComponent(state.course.referenceId)}/join-code`,
         {regenerate: Boolean(regenerate)},
       ));
+      if (!isCurrentWorkspace(workspace)) return false;
       state.courseCode = payload.code || "";
       state.courseCodeState = state.courseCode ? "ready" : "error";
       elements.courseCode.textContent = state.courseCode || "暂不可用";
@@ -404,17 +414,19 @@
       if (regenerate) window.AISecEduUI?.notify("课程码已更换。", "success");
       return Boolean(state.courseCode);
     } catch (error) {
+      if (!isCurrentWorkspace(workspace)) return false;
       state.courseCodeState = "error";
       elements.courseCode.textContent = "暂不可用";
       setCourseCodeStatus(error.message || "课程码暂时无法读取。", "danger");
       return false;
     } finally {
-      syncCourseCodeControls(false);
+      if (isCurrentWorkspace(workspace)) syncCourseCodeControls(false);
     }
   }
 
   async function writeCourseCodeToClipboard() {
     if (!state.courseCode) return;
+    const workspace = state.workspaceLoadSequence;
     const icon = elements.copyCourseCode?.querySelector("i");
     resetCourseCodeCopyFeedback();
     try {
@@ -434,6 +446,7 @@
           input.remove();
         }
       }
+      if (!isCurrentWorkspace(workspace)) return;
       setCourseCodeStatus("课程码已复制，可以直接发送给学生。", "success");
       elements.copyCourseCode?.classList.add("is-success");
       if (elements.copyCourseCodeLabel) elements.copyCourseCodeLabel.textContent = "已复制";
@@ -445,6 +458,7 @@
       }, 1800);
       window.AISecEduUI?.notify("课程码已复制。", "success");
     } catch (error) {
+      if (!isCurrentWorkspace(workspace)) return;
       resetCourseCodeCopyFeedback();
       setCourseCodeStatus("复制失败，请手动选择课程码。", "danger");
       window.AISecEduUI?.notify(error.message || "课程码复制失败。", "danger");
@@ -452,11 +466,12 @@
   }
 
   async function regenerateCourseCode() {
+    const workspace = state.workspaceLoadSequence;
     const confirmed = await window.AISecEduUI.confirm(
       "更换后，学生将无法再使用旧课程码加入。已加入课程的学生不会受影响。",
       {title: "更换课程码", confirmLabel: "确认更换", confirmStyle: "warning"},
     );
-    if (confirmed) await loadCourseCode(true);
+    if (confirmed && isCurrentWorkspace(workspace)) await loadCourseCode(true);
   }
 
   function courseCodeDialogIsOpen() {
@@ -1459,7 +1474,9 @@
     const paging = state.contentPaging[kind];
     if (options?.resetPage) paging.page = 1;
     if (Number.isFinite(Number(options?.page))) paging.page = Math.max(1, Number(options.page));
+    const workspace = state.workspaceLoadSequence;
     const sequence = ++state.contentLoadSequence[kind];
+    const isCurrent = () => isCurrentWorkspace(workspace) && sequence === state.contentLoadSequence[kind];
     const controls = contentControls(kind);
     controls?.list?.setAttribute("aria-busy", "true");
     const filters = contentFilterValues(kind);
@@ -1479,7 +1496,7 @@
       const data = unwrap(await api.request(
         `/teaching/courses/${encodeURIComponent(state.course.referenceId || state.course.id)}/content?${params.toString()}`,
       ));
-      if (sequence !== state.contentLoadSequence[kind]) return false;
+      if (!isCurrent()) return false;
       state.contentPaging[kind] = {...paging, ...(data.pagination || {})};
       state.contentLoaded[kind] = true;
       if (kind === "materials") state.materials = data.items || [];
@@ -1491,12 +1508,12 @@
       if (kind === "demos") renderSimulations();
       return true;
     } catch (error) {
-      if (sequence === state.contentLoadSequence[kind]) {
+      if (isCurrent()) {
         showNotice(error.message || "课程内容加载失败。", "danger");
       }
       return false;
     } finally {
-      if (sequence === state.contentLoadSequence[kind]) controls?.list?.removeAttribute("aria-busy");
+      if (isCurrent()) controls?.list?.removeAttribute("aria-busy");
     }
   }
 
@@ -1508,6 +1525,7 @@
   }
 
   async function loadCourseAssignments(reference) {
+    const workspace = state.workspaceLoadSequence;
     const list = document.getElementById("cs-assignment-list");
     if (!list) return;
     list.textContent = "正在读取测验与作业…";
@@ -1515,11 +1533,11 @@
     if (library) library.href = `/teacher/library?dojo=${encodeURIComponent(reference)}`;
     try {
       const result = unwrap(await api.request(`/coursework/dojos/${encodeURIComponent(reference)}/assignments`));
-      if (String(state.course?.referenceId || state.course?.id) !== String(reference)) return;
+      if (!isCurrentWorkspace(workspace)) return;
       const rows = result.assignments || [];
       list.innerHTML = rows.length ? rows.map(item => `<article class="cs-library-row is-managed"><a class="cs-managed-main" href="/teacher/assignments/${encodeURIComponent(item.id)}"><span class="cs-library-icon"><i class="fas fa-tasks" aria-hidden="true"></i></span><span><strong>${escape(item.title)}</strong><small>${item.kind === "QUIZ" ? "测验" : "作业"} · ${escape(statusLabel(item.status))} · ${item.itemCount} 道题 · ${escape(moduleName(item.moduleIndex))}</small></span><em>检查与编辑 <i class="fas fa-arrow-right" aria-hidden="true"></i></em></a></article>`).join("") : '<p class="cs-empty">还没有测验或作业，可从素材库选用，或通过 AI 共创创建。</p>';
     } catch (error) {
-      if (String(state.course?.referenceId || state.course?.id) === String(reference)) list.textContent = error.message || "测验与作业暂时未能加载，请重新打开课程。";
+      if (isCurrentWorkspace(workspace)) list.textContent = error.message || "测验与作业暂时未能加载，请重新打开课程。";
     }
   }
 
@@ -1925,13 +1943,15 @@
     if (filters.required) params.set("required", filters.required);
     if (filters.mode) params.set("mode", filters.mode);
     syncWorkspaceCollectionUrl("questions");
+    const workspace = state.workspaceLoadSequence;
     const sequence = ++state.questionLoadSequence;
+    const isCurrent = () => isCurrentWorkspace(workspace) && sequence === state.questionLoadSequence;
     elements.challengeList?.setAttribute("aria-busy", "true");
     try {
       const data = unwrap(await api.request(
         `/teaching/courses/${encodeURIComponent(state.course.referenceId || state.course.id)}/content?${params.toString()}`,
       ));
-      if (sequence !== state.questionLoadSequence) return false;
+      if (!isCurrent()) return false;
       state.questionItems = data.items || [];
       selectedQuestionDrafts();
       state.questionCounts = data.counts || {total: 0, draft: 0, published: 0, needsAttention: 0};
@@ -1943,19 +1963,21 @@
         const selected = state.questionItems.find(item => String(item.id) === requestedId || String(item.draftId) === requestedId);
         if (selected?.kind === "draft") {
           state.questionSelectionHandled = true;
-          window.setTimeout(() => void openQuestionDrawer(selected.draftId, null), 0);
+          window.setTimeout(() => {
+            if (isCurrent()) void openQuestionDrawer(selected.draftId, null);
+          }, 0);
         }
       }
       return true;
     } catch (error) {
-      if (sequence === state.questionLoadSequence) {
+      if (isCurrent()) {
         state.questionLoaded = true;
         elements.challengeList.innerHTML = `<div class="cs-empty cs-empty-with-action"><span>${escape(error.message || "题目列表加载失败。")}</span><button class="hub-button is-secondary" type="button" data-retry-question-load><i class="fas fa-sync-alt" aria-hidden="true"></i>重新加载</button></div>`;
         showNotice(error.message || "题目列表加载失败。", "danger");
       }
       return false;
     } finally {
-      if (sequence === state.questionLoadSequence) elements.challengeList?.removeAttribute("aria-busy");
+      if (isCurrent()) elements.challengeList?.removeAttribute("aria-busy");
     }
   }
 
@@ -2033,10 +2055,12 @@
       renderQuestionBatchReview();
       return true;
     }
+    const workspace = state.workspaceLoadSequence;
     const sequence = ++state.questionReviewLoadSequence;
+    const isCurrent = () => isCurrentWorkspace(workspace) && sequence === state.questionReviewLoadSequence;
     try {
       const data = unwrap(await api.request(`/teaching/generation-batches/${encodeURIComponent(batchId)}`));
-      if (sequence !== state.questionReviewLoadSequence) return false;
+      if (!isCurrent()) return false;
       const batch = data.batch;
       if (!batch || String(batch.course?.referenceId || batch.course?.id) !== String(state.course.referenceId || state.course.id)) {
         throw new Error("这组题目不属于当前课程。");
@@ -2046,7 +2070,7 @@
       renderQuestionBatchReview();
       return true;
     } catch (error) {
-      if (sequence === state.questionReviewLoadSequence) {
+      if (isCurrent()) {
         state.questionReviewBatch = null;
         renderQuestionBatchReview();
         showNotice(error.message || "批次审核信息加载失败。", "danger");
@@ -2058,6 +2082,7 @@
   async function ensureTabData(name) {
     if (!state.workspace) return true;
     if (state.tabLoads[name]) return state.tabLoads[name];
+    const workspace = state.workspaceLoadSequence;
     const task = (async () => {
       const loaders = [];
       if (name === "courseware") {
@@ -2074,6 +2099,7 @@
       if (name === "students" && !state.learningScopeInitialized) {
         loaders.push(
           reloadLearningProgress({syncUrl: false}).then(result => {
+            if (!isCurrentWorkspace(workspace)) return false;
             if (result) state.learningScopeInitialized = true;
             return result;
           })
@@ -2081,6 +2107,7 @@
       }
       if (!loaders.length) return true;
       const results = await Promise.all(loaders);
+      if (!isCurrentWorkspace(workspace)) return false;
       if (results.every(Boolean)) showNotice("");
       return results.every(Boolean);
     })();
@@ -2923,7 +2950,8 @@
     closeCourseCodeDialog({restoreFocus: false});
     closeMaterialPreview({restoreFocus: false});
     closeQuestionDrawer({restoreFocus: false});
-    closeStudentDrawer({restoreFocus: false});
+    analyticsWorkspace?.setCourse(null);
+    state.learningScopeInitialized = false;
     state.course = (state.context.teacherDojos || []).find(item =>
       item.id === Number(courseId) || item.referenceId === String(courseId || "")
     );
@@ -2938,6 +2966,11 @@
     elements.title.textContent = state.course.name || "未命名课程";
     courseLinks();
     setWorkspaceLoading(true);
+    for (const kind of Object.keys(state.contentPaging)) {
+      contentControls(kind)?.list?.removeAttribute("aria-busy");
+    }
+    elements.challengeList?.removeAttribute("aria-busy");
+    resetCourseCodeCopyFeedback();
     state.materials = [];
     state.artifacts = [];
     state.coursewareArtifacts = [];

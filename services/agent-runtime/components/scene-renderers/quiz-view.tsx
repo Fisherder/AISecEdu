@@ -15,13 +15,13 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/hooks/use-i18n';
-import { getCurrentModelConfig } from '@/lib/utils/model-config';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('QuizView');
 import type { QuizQuestion } from '@/lib/types/stage';
 import { SpeechButton } from '@/components/audio/speech-button';
-import { gradeChoiceQuestions, isShortAnswer, type QuestionResult } from '@/lib/quiz/grading';
+import type { QuestionResult } from '@/lib/quiz/grading';
+import { gradeQuizForReview } from '@/lib/quiz/short-answer';
 import { renderQuizMathText } from '@/lib/quiz/math-text';
 import { writeDraftRecovery } from '@/lib/quiz/persistence';
 import {
@@ -44,7 +44,7 @@ import {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type Phase = 'not_started' | 'answering' | 'submitting' | 'grading' | 'reviewing';
+type Phase = 'not_started' | 'answering' | 'submitting' | 'grading' | 'grading_pending' | 'reviewing';
 
 interface QuizViewProps {
   readonly questions: QuizQuestion[];
@@ -88,61 +88,6 @@ const QuizMathText = memo(function QuizMathText({
     </span>
   );
 });
-
-/** Call /api/quiz-grade for a single short-answer question. */
-async function gradeShortAnswerQuestion(
-  q: QuizQuestion,
-  userAnswer: string,
-  language: string,
-): Promise<QuestionResult> {
-  const pts = q.points ?? 1;
-  try {
-    const modelConfig = getCurrentModelConfig();
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'x-model': modelConfig.modelString,
-      'x-api-key': modelConfig.apiKey,
-    };
-    if (modelConfig.baseUrl) headers['x-base-url'] = modelConfig.baseUrl;
-    if (modelConfig.providerType) headers['x-provider-type'] = modelConfig.providerType;
-
-    const res = await fetch('/api/quiz-grade', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        question: q.question,
-        userAnswer,
-        points: pts,
-        commentPrompt: q.commentPrompt,
-        language,
-      }),
-    });
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = (await res.json()) as { score: number; comment: string };
-    const earned = Math.max(0, Math.min(pts, data.score));
-    return {
-      questionId: q.id,
-      correct: earned >= pts * 0.8,
-      status: earned >= pts * 0.8 ? 'correct' : 'incorrect',
-      earned,
-      aiComment: data.comment,
-    };
-  } catch (err) {
-    log.error('[quiz-view] AI grading failed for', q.id, err);
-    // Fallback: give half credit
-    return {
-      questionId: q.id,
-      correct: null,
-      status: 'incorrect',
-      earned: Math.round(pts * 0.5),
-      aiComment:
-        language === 'zh-CN'
-          ? '评分服务暂时不可用，已给予基础分。'
-          : 'Grading service unavailable. Base score given.',
-    };
-  }
-}
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
@@ -793,31 +738,18 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     );
   }, [attemptId, answers, runtimeWriter, sceneId, stageId, viewLifetime]);
 
-  // When entering grading phase, grade choice questions locally + call API for short-answer
   useEffect(() => {
     if (phase !== 'grading') return;
+    const controller = new AbortController();
     let cancelled = false;
 
     (async () => {
-      // 1. Grade choice questions locally (instant)
-      const choiceResults = gradeChoiceQuestions(questions, answers);
-
-      // 2. Grade short-answer questions via AI API (parallel)
-      const shortAnswerQs = questions.filter(isShortAnswer);
-      const aiResults = await Promise.all(
-        shortAnswerQs.map((q) =>
-          gradeShortAnswerQuestion(q, (answers[q.id] as string) ?? '', locale),
-        ),
-      );
-
+      const ordered = await gradeQuizForReview(questions, answers, locale, controller.signal);
       if (cancelled) return;
-
-      // 3. Merge results in original question order
-      const allResultsMap = new Map<string, QuestionResult>();
-      for (const r of [...choiceResults, ...aiResults]) {
-        allResultsMap.set(r.questionId, r);
+      if (!ordered) {
+        setPhase('grading_pending');
+        return;
       }
-      const ordered = questions.map((q) => allResultsMap.get(q.id)!).filter(Boolean);
 
       if (!attemptId) {
         setRuntimeGate({ status: 'error' });
@@ -830,7 +762,12 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
         );
       } catch (error) {
         log.warn('Failed to persist quiz review:', error);
-        if (!cancelled) setRuntimeGate({ status: 'error' });
+        if (cancelled) return;
+        if (error instanceof QuizRetryProgressedError) {
+          setHydrationVersion((version) => version + 1);
+          return;
+        }
+        setPhase('grading_pending');
         return;
       }
       if (cancelled) return;
@@ -851,6 +788,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [phase, questions, answers, locale, sceneId, stageId, attemptId, runtimeWriter]);
 
@@ -866,6 +804,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
         setAnswers({});
         setResults([]);
         setRetrying(false);
+        setHydrationVersion((version) => version + 1);
       },
       (error) => {
         log.warn('Failed to persist quiz retry:', error);
@@ -879,15 +818,18 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     );
   }, [attemptId, retrying, runtimeWriter, sceneId, stageId, viewLifetime]);
 
-  const earnedScore = useMemo(() => results.reduce((sum, r) => sum + r.earned, 0), [results]);
-
   const resultMap = useMemo(() => {
-    const map: Record<string, QuestionResult> = {};
-    results.forEach((r) => {
-      map[r.questionId] = r;
-    });
-    return map;
-  }, [results]);
+    const validResults: Record<string, QuestionResult> = {};
+    for (const result of results) {
+      const question = questions.find((item) => item.id === result.questionId);
+      if (question && Number.isFinite(result.earned) && result.earned >= 0 && result.earned <= (question.points ?? 1)) {
+        validResults[result.questionId] = result;
+      }
+    }
+    return validResults;
+  }, [questions, results]);
+  const reviewedResults = questions.map((question) => resultMap[question.id]).filter(Boolean);
+  const earnedScore = reviewedResults.reduce((sum, result) => sum + result.earned, 0);
 
   if (runtimeGate.status === 'error') {
     return (
@@ -1048,6 +990,23 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
           </motion.div>
         )}
 
+        {phase === 'grading_pending' && (
+          <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+            <p className="text-base font-semibold text-gray-700 dark:text-gray-200">
+              {t('quiz.gradingPending')}
+            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t('quiz.gradingPendingDetail')}</p>
+            <button
+              type="button"
+              onClick={() => setPhase('grading')}
+              className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700"
+            >
+              <RotateCcw className="h-4 w-4" />
+              {t('quiz.retryGrading')}
+            </button>
+          </div>
+        )}
+
         {phase === 'reviewing' && (
           <motion.div
             key="reviewing"
@@ -1076,7 +1035,13 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
 
             {/* Results */}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-              <ScoreBanner score={earnedScore} total={totalPoints} results={results} />
+              {reviewedResults.length === questions.length ? (
+                <ScoreBanner score={earnedScore} total={totalPoints} results={reviewedResults} />
+              ) : (
+                <p role="status" className="text-sm text-gray-500 dark:text-gray-400">
+                  {t('quiz.gradingPending')}
+                </p>
+              )}
 
               {questions.map((q, i) => {
                 const r = resultMap[q.id];

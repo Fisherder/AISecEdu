@@ -51,21 +51,29 @@
     }
     function disposeCharts() { for (const observer of state.chartResizers.values()) observer.disconnect(); state.chartResizers.clear(); for (const chart of state.charts.values()) chart.dispose(); state.charts.clear(); }
     function setCourse(course) {
-      if (!course) return;
-      const key = course.referenceId || course.id;
+      const key = course?.referenceId || course?.id;
       if (key === (state.course?.referenceId || state.course?.id)) { state.course = course; return; }
-      state.sequence++; state.controller?.abort(); closeDialog(); disposeCharts();
+      state.sequence++; state.controller?.abort(); disposeCharts();
+      state.returnFocus = null;
+      closeDialog();
+      $("ix-dialog-content").textContent = "";
+      $("ix-scene-tooltip").hidden = true;
       state.busy = false; win.clearTimeout(searchTimer);
       if (state.screen) screen(false, false);
       $("ix-module").innerHTML = '<option value="">全部章节</option>';
       $("ix-student").innerHTML = '<option value="">全班学生</option>';
       state.course = course; state.data = null; state.atlasTaskPage = 0; state.atlasStudentPage = 0; state.sceneTask = ""; state.pendingFilters = null; state.search = ""; state.status = "all"; state.rosterPage = 0; state.taskPage = 0; state.focusTask = ""; state.activeOnly = false; state.newOnly = false;
+      $("ix-title").textContent = "学情分析";
+      $("ix-headline").textContent = "从作业进度找到学生需要的支持。";
+      $("ix-freshness").textContent = "";
+      $("ix-scope").textContent = "";
+      message("");
       const params = new URL(win.location.href).searchParams;
       state.filters = {timeRange: params.get("learningRange") || "30d", moduleIndex: params.get("learningModule") || "", studentId: params.get("learningStudent") || "", taskKey: params.get("learningTask") || (params.get("learningQuestion") ? "q:" + params.get("learningQuestion") : "")};
       state.view = ["overview", "students", "followups"].includes(params.get("learningView")) ? params.get("learningView") : "overview";
       state.status = ["all", "attention", ...Object.keys(names)].includes(params.get("learningStatus")) ? params.get("learningStatus") : "all";
       state.focusTask = params.get("learningFocus") || "";
-      $("ix-content").innerHTML = `<div class="ix-loading" role="status"><span></span><strong>准备${esc(course.name || "课程")}的学习记录</strong><p>选择“学情”后按需读取。</p></div>`;
+      $("ix-content").innerHTML = `<div class="ix-loading" role="status"><span></span><strong>准备${esc(course?.name || "课程")}的学习记录</strong><p>选择“学情”后按需读取。</p></div>`;
       syncControls();
     }
     function syncControls() {
@@ -78,7 +86,7 @@
       $("ix-range").value = displayed.timeRange || "30d";
       $("ix-module").value = displayed.moduleIndex ?? "";
       $("ix-student").value = displayed.studentId ?? "";
-      root.querySelector('[data-ix="refresh"]').disabled = state.busy;
+      root.querySelector('[data-ix="refresh"]').disabled = !state.course || state.busy;
       root.querySelector('[data-ix="export"]').disabled = !state.data || state.busy;
       $("ix-content").setAttribute("aria-busy", String(state.busy));
     }
@@ -395,11 +403,16 @@
       event.preventDefault(); if (form.dataset.busy === "true") return;
       form.dataset.busy = "true"; const button = form.querySelector('[type="submit"]'); button.disabled = true; const label = button.textContent; button.textContent = "保存中…";
       const formData = new win.FormData(form);
-      const courseRef = encodeURIComponent(state.course.referenceId || state.course.id);
+      const course = state.course;
+      const courseRef = encodeURIComponent(course.referenceId || course.id);
       const isFollowup = form.id === "ix-followup-form";
       try {
         await options.json("POST", `/teaching/insights/${courseRef}/followups${isFollowup ? "" : "/" + encodeURIComponent(form.dataset.record) + "/review"}`, isFollowup ? {studentId: Number(form.dataset.student), plan: formData.get("plan"), days: Number(formData.get("days")), requestKey: form.dataset.requestKey} : {outcome: formData.get("outcome"), note: formData.get("note")});
-        closeDialog(); state.view = "followups"; await load(state.course); message(isFollowup ? "跟进计划已保存，已保留当前进度作为复查依据。" : "复查结果已保存。");
+        if (!form.isConnected) return;
+        closeDialog();
+        state.view = "followups";
+        await load(course);
+        if (form.isConnected) message(isFollowup ? "跟进计划已保存，已保留当前进度作为复查依据。" : "复查结果已保存。");
       } catch (error) { form.querySelector('.ix-form-error').textContent = error.message || "保存失败，请重试。原有记录未受影响。"; }
       finally { if (form.isConnected) { form.dataset.busy = "false"; button.disabled = false; button.textContent = label; } }
     });

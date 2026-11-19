@@ -596,6 +596,32 @@ def _event_view(event):
     }
 
 
+def tutor_local_references(attempt, profile):
+    if profile is None:
+        profile = LearningChallengeProfiles.query.get(attempt.challenge_id)
+    challenge = _dojo_challenge(attempt)
+    package = _published_package_for_attempt(profile, attempt)
+    policy = profile.hint_policy if profile and isinstance(profile.hint_policy, dict) else {}
+    public_lesson = {
+        "course": challenge.dojo.name if challenge else "",
+        "unit": challenge.module.name if challenge else "",
+        "exercise": challenge.name if challenge else "",
+        "objectives": profile.objectives if profile else [],
+        "publicHints": policy.get("publicHints"),
+    }
+    private_reference = {
+        "profilePackage": package,
+        "authoring": _private_authoring(challenge, profile, package) if challenge else {},
+        "cachedSolution": ((attempt.data or {}).get("agentContext") or {}).get("solutionReference"),
+    }
+    version = {
+        "attemptVersion": package.get("attemptVersion"),
+        "packageVersion": package.get("version"),
+        "versionMatched": package.get("versionMatched"),
+    }
+    return public_lesson, private_reference, version
+
+
 def attempt_agent_context(
     attempt,
     *,
@@ -948,7 +974,7 @@ def learning_profile_context(user):
     }
 
 
-def guide_reference_catalog(profile):
+def guide_reference_catalog(profile, *, include_historical=True):
     recent_attempts = {}
     for attempt in profile.get("recentAttempts") or []:
         reference_id = str(attempt.get("referenceId") or "")
@@ -992,6 +1018,8 @@ def guide_reference_catalog(profile):
                         "url": exercise.get("url"),
                     }
                 )
+    if not include_historical:
+        return result
     known = {item["id"] for item in result}
     for reference_id, recent in recent_attempts.items():
         if reference_id in known:
@@ -1018,6 +1046,105 @@ def guide_reference_catalog(profile):
                 "url": attempt.get("url"),
             }
         )
+    return result
+
+
+def _visible_guide_challenge(user, reference_id):
+    parts = reference_id.split("/")
+    if len(parts) != 3 or not all(parts):
+        return None
+    course_id, module_id, challenge_id = parts
+    try:
+        courses = Dojos.from_id(course_id) if getattr(user, "type", "") == "admin" else (
+            Dojos.viewable(id=course_id, user=user)
+        )
+    except ValueError:
+        return None
+    course = courses.first()
+    if course is None:
+        return None
+    module = next((item for item in course.modules if item.id == module_id), None)
+    if module is None or not module.visible():
+        return None
+    challenge = next((item for item in module.challenges if item.id == challenge_id), None)
+    if challenge is None or challenge.reference_id != reference_id:
+        return None
+    if not challenge.visible():
+        return None
+    return challenge
+
+
+def guide_reference_options(user, profile, saved_reference_ids=()):
+    # The bounded profile is convenient for browsing. Recent and saved references may
+    # belong to a currently accessible course outside that catalog.
+    visible = guide_reference_catalog(profile, include_historical=False)
+    known = {item["id"] for item in visible}
+    recent = guide_reference_catalog(profile)
+    historical = {item["id"]: item for item in recent if item["id"] not in known}
+    for reference_id in dict.fromkeys([*historical, *saved_reference_ids]):
+        if reference_id in known or not isinstance(reference_id, str):
+            continue
+        challenge = _visible_guide_challenge(user, reference_id)
+        if challenge is not None:
+            visible.append(_guide_reference_option(challenge, historical.get(reference_id)))
+    return visible
+
+
+def _guide_reference_option(challenge, recent):
+    recent = recent or {}
+    return {
+        "id": challenge.reference_id,
+        "courseId": challenge.dojo.reference_id,
+        "moduleId": challenge.module.id,
+        "challengeId": challenge.id,
+        "course": challenge.dojo.name,
+        "unit": challenge.module.name,
+        "exercise": challenge.name,
+        "exerciseMode": challenge.exercise_mode,
+        "completed": bool(recent.get("completed")),
+        "recentAttempts": recent.get("recentAttempts", 0),
+        "latestStatus": recent.get("latestStatus"),
+        "url": f"/{challenge.reference_id}",
+    }
+
+
+def _guide_evidence_count(attempts):
+    # Event bodies are used locally to verify the chain. Only the count is returned.
+    count = 0
+    for attempt in attempts:
+        events = (
+            LearningEvidenceEvents.query.filter_by(attempt_id=attempt.id)
+            .order_by(LearningEvidenceEvents.sequence).all()
+        )
+        if verify_evidence_chain(attempt.id, events=events).get("valid") is True:
+            count += sum(
+                event.trust_level >= 2 and event.source not in {"CLIENT", "TUTOR"}
+                for event in events
+            )
+    return count
+
+
+def guide_reference_summaries(user, profile, references):
+    known = {item["id"]: item for item in guide_reference_catalog(profile)}
+    result = []
+    for reference_id in references:
+        challenge = _visible_guide_challenge(user, reference_id)
+        if challenge is None:
+            continue
+        attempts = LearningAttempts.query.filter_by(
+            user_id=user.id, dojo_id=challenge.dojo_id, module_index=challenge.module_index,
+            challenge_index=challenge.challenge_index,
+        )
+        count = attempts.count()
+        recent = attempts.order_by(LearningAttempts.started.desc()).limit(4).all()
+        challenge_profile = LearningChallengeProfiles.query.get(challenge.challenge_id)
+        objectives = challenge_profile.objectives if challenge_profile else []
+        result.append({
+            **_guide_reference_option(challenge, known.get(reference_id)),
+            "attemptCount": count,
+            "verifiedEvidenceCount": _guide_evidence_count(recent),
+            "objectives": objectives if isinstance(objectives, list) else [],
+        })
     return result
 
 

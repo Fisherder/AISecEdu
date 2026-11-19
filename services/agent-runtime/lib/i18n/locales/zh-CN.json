@@ -551,6 +551,9 @@
     "submitAnswers": "提交答案",
     "aiGrading": "AI 正在批改中...",
     "aiGradingWait": "请稍候，正在分析你的答案",
+    "gradingPending": "答卷待评",
+    "gradingPendingDetail": "答案已保存，可重试完成评分。",
+    "retryGrading": "重试评分",
     "quizReport": "答题报告",
     "retry": "重新答题"
   },
@@ -761,6 +764,8 @@
         "pdfNoText": "未能从该 PDF 中提取到文本。",
         "imageUploadFailed": "图片上传失败：{{error}}",
         "imageTooLargeNoStorage": "未配置存储时图片过大，本地最大 2 MB。",
+        "imageCaptionForEvaluation": "请填写用于评价的文字说明；课程允许时，也可以明确选择发送本轮新图。",
+        "sendNewTeachingImage": "将本轮新选的教学图片发送给外部模型进行评价。历史附件仅供在提交记录中查看。",
         "imageNeedsCaptionNoVision": "当前模型无法识别图片，请用文字补充图片内容后再提交，或在设置中切换支持视觉的模型。",
         "unsupportedFileType": "不支持的文件类型。仅接受文本文件（.txt, .md, .csv, .json, .py 等）与 PDF。",
         "pasteTab": "粘贴文本 / 图片",

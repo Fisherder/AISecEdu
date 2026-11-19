@@ -1,12 +1,12 @@
-import { waitForProviderTransports } from './provider-transport-journal';
+import { PROVIDER_TRANSPORT_JOURNAL_VERSION, waitForProviderTransports } from './provider-transport-journal';
 /**
  * Unified LLM Call Layer
  *
  * All LLM interactions should go through callLLM / streamLLM.
  */
 
-import { asSchema, generateText, streamText } from 'ai';
-import type { GenerateTextResult, JSONValue, LanguageModel, StreamTextResult } from 'ai';
+import { generateText, streamText } from 'ai';
+import type { GenerateTextResult, JSONValue, LanguageModel, LanguageModelUsage, StreamTextResult } from 'ai';
 import { createLogger } from '@/lib/logger';
 import { PROVIDERS } from './providers';
 import { thinkingContext } from './thinking-context';
@@ -306,82 +306,66 @@ async function writeModelEvent(
   }
 }
 
-async function modelRequestEvent(
+function modelRequestEvent(
   params: GenerateTextParams,
   source: string,
   attempt: number,
   thinking: ThinkingConfig | undefined,
-): Promise<Record<string, unknown>> {
-  const raw = params as Record<string, unknown>;
-  const tools = raw.tools && typeof raw.tools === 'object'
-    ? await Promise.all(Object.entries(raw.tools as Record<string, {
-        description?: string;
-        inputSchema?: Parameters<typeof asSchema>[0];
-        strict?: boolean;
-      }>).map(async ([name, tool]) => ({
-        name,
-        description: tool?.description || '',
-        inputSchema: tool?.inputSchema ? await asSchema(tool.inputSchema).jsonSchema : null,
-        strict: tool?.strict ?? null,
-      })))
-    : [];
+): Record<string, unknown> {
   return {
+    auditVersion: 2,
     stepJournalVersion: 1,
     source,
     attempt,
     modelId: getModelId(params),
     providerId: getModelProviderId(params) ?? 'unknown',
-    system: raw.system ?? null,
-    prompt: raw.prompt ?? null,
-    messages: raw.messages ?? null,
-    tools,
-    providerOptions: raw.providerOptions ?? null,
-    thinking: thinking ?? null,
-    maxOutputTokens: raw.maxOutputTokens ?? null,
-    temperature: raw.temperature ?? null,
-    topP: raw.topP ?? null,
-    maxRetries: raw.maxRetries ?? null,
+    toolCount: Object.keys(params.tools ?? {}).length,
+    thinkingMode: thinking ? getThinkingMode(thinking) : null,
+    maxOutputTokens: params.maxOutputTokens ?? null,
+    temperature: params.temperature ?? null,
+    topP: params.topP ?? null,
+    maxRetries: params.maxRetries ?? null,
   };
 }
 
-function modelStepEvent(step: unknown, parentCallId: string, stepNumber: number): Record<string, unknown> {
-  const value = step as Record<string, unknown>;
-  const request = value.request as Record<string, unknown> | undefined;
-  const response = value.response as Record<string, unknown> | undefined;
+function modelUsageEvent(usage: LanguageModelUsage) {
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+    inputTokenDetails: {
+      noCacheTokens: usage.inputTokenDetails?.noCacheTokens,
+      cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
+      cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
+    },
+    outputTokenDetails: {
+      textTokens: usage.outputTokenDetails?.textTokens,
+      reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
+    },
+  };
+}
+
+function modelStepEvent(
+  step: GenerateTextResult<any, any>['steps'][number],
+  parentCallId: string,
+  stepNumber: number,
+): Record<string, unknown> {
   return {
     parentCallId,
     stepNumber,
-    text: value.text ?? '',
-    reasoningText: value.reasoningText ?? null,
-    finishReason: value.finishReason ?? null,
-    rawFinishReason: value.rawFinishReason ?? null,
-    usage: value.usage ?? null,
-    toolCalls: value.toolCalls ?? [],
-    toolResults: value.toolResults ?? [],
-    requestBody: request?.body ?? null,
-    responseBody: response?.body ?? null,
-    response: response ? {
-      id: response.id ?? null,
-      modelId: response.modelId ?? null,
-      timestamp: response.timestamp ?? null,
-      headers: response.headers ?? null,
-    } : null,
-    warnings: value.warnings ?? [],
+    finishReason: step.finishReason,
+    usage: modelUsageEvent(step.usage),
+    toolCallCount: step.toolCalls.length,
+    toolResultCount: step.toolResults.length,
   };
 }
 
 function modelResultEvent(result: GenerateTextResult<any, any>): Record<string, unknown> {
-  const value = result as unknown as Record<string, unknown>;
   return {
-    text: result.text,
     finishReason: result.finishReason,
-    usage: result.usage,
-    totalUsage: result.totalUsage,
+    usage: modelUsageEvent(result.usage),
+    totalUsage: modelUsageEvent(result.totalUsage),
     stepsCount: result.steps.length,
-    reasoningText: value.reasoningText ?? null,
-    toolCalls: value.toolCalls ?? [],
-    toolResults: value.toolResults ?? [],
-    response: value.response ?? null,
   };
 }
 
@@ -590,8 +574,8 @@ export async function callLLM<T extends GenerateTextParams>(
       let modelParams = injectedParams;
       let observedSteps = 0;
       if (journal) {
-        const requestDetail = await modelRequestEvent(injectedParams, source, attempt, effectiveThinking);
-        if (hasTransportJournal(params.model)) requestDetail.transportJournalVersion = 1;
+        const requestDetail = modelRequestEvent(injectedParams, source, attempt, effectiveThinking);
+        if (hasTransportJournal(params.model)) requestDetail.transportJournalVersion = PROVIDER_TRANSPORT_JOURNAL_VERSION;
         const reservedCallId = journal.nextCallId();
         callId = reservedCallId;
         await writeModelEvent(
@@ -601,11 +585,6 @@ export async function callLLM<T extends GenerateTextParams>(
         const callerOnStepFinish = injectedParams.onStepFinish;
         modelParams = {
           ...injectedParams,
-          experimental_include: {
-            ...injectedParams.experimental_include,
-            requestBody: true,
-            responseBody: true,
-          },
           onStepFinish: async (step) => {
             const stepNumber = observedSteps++;
             try {
@@ -760,7 +739,6 @@ export async function callLLM<T extends GenerateTextParams>(
             source,
             attempt,
             errorType: 'ExecutionJournalWriteError',
-            errorMessage: 'An execution event could not be saved',
           });
         } catch { /* Preserve the original durable-write failure. */ }
         throw new ModelJournalWriteError(activeCall.journalFailure);
@@ -783,7 +761,7 @@ export async function callLLM<T extends GenerateTextParams>(
           source,
           attempt,
           errorType: error instanceof Error ? error.name : 'UnknownError',
-          errorMessage: error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000),
+          ...(isTransientProviderError(error) ? { retryable: true } : {}),
         });
       }
       lastError = error;

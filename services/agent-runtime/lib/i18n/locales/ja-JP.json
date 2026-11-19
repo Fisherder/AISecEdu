@@ -551,6 +551,9 @@
     "submitAnswers": "回答を提出",
     "aiGrading": "AIが採点中...",
     "aiGradingWait": "回答を分析しています。お待ちください",
+    "gradingPending": "採点待ち",
+    "gradingPendingDetail": "回答は保存済みです。採点をやり直せます。",
+    "retryGrading": "採点を再試行",
     "quizReport": "クイズレポート",
     "retry": "やり直す"
   },
@@ -761,6 +764,8 @@
         "pdfNoText": "この PDF から抽出できるテキストがありません。",
         "imageUploadFailed": "画像のアップロードに失敗しました：{{error}}",
         "imageTooLargeNoStorage": "ストレージ未設定では画像が大きすぎます（ローカルは最大 2 MB）。",
+        "imageCaptionForEvaluation": "評価用の説明を入力してください。コースで許可されている場合は、今回新しく選んだ教材画像の送信を選択できます。",
+        "sendNewTeachingImage": "今回新しく選んだ教材画像を評価のために外部モデルに送信します。過去の添付ファイルは提出履歴に残ります。",
         "imageNeedsCaptionNoVision": "現在のモデルは画像を認識できません。送信する前に画像の内容をテキストで補足するか、設定でビジョン対応モデルに切り替えてください。",
         "unsupportedFileType": "未対応のファイル形式です。テキストファイル（.txt, .md, .csv, .json, .py など）と PDF のみ受け付けます。",
         "pasteTab": "テキスト / 画像を貼り付け",
