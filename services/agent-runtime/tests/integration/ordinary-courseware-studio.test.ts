@@ -3,9 +3,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileCoursewareSlide } from '@/lib/courseware/compiler';
-import { coursewareSlideDataSchema } from '@/lib/courseware/schema';
-import { applyProposal, nativeOf, type StudioLesson } from '@/lib/courseware-studio/document';
+import {
+  compileCoursewareSlide,
+  evaluateCoursewareCheck,
+  inspectCoursewareSlide,
+} from '@/lib/courseware/compiler';
+import { coursewareSlideDataSchema, type CoursewarePage } from '@/lib/courseware/schema';
+import {
+  applyProposal,
+  contentOf,
+  nativeOf,
+  plainText,
+  studioOf,
+  type StudioLesson,
+} from '@/lib/courseware-studio/document';
 
 const mocks = vi.hoisted(() => ({
   callbacks: [] as Array<() => Promise<unknown>>,
@@ -154,6 +165,71 @@ function makeRequest(lesson: StudioLesson, extras: Record<string, unknown> = {})
   });
 }
 
+const fractionCheck = {
+  question: '三等份中涂了两份，涂色部分占几分之几？',
+  options: [
+    { id: 'choice-blue', label: '三分之二', feedback: '正确，三等份中涂色的有两份。' },
+    { id: 'choice-white', label: '三分之一', feedback: '一份是空白部分，请重新数涂色的份数。' },
+  ],
+  correctOptionId: 'choice-blue',
+};
+
+const fractionImage =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAAAgCAIAAABiouoDAAAAWUlEQVR4nO3QsQkAIAwAQdewdgedyW3dSAX7dAGLC582gSu1DQWVu32upN6P7Ps7bQABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgH4AUtABxcU+RJHdSZEAAAAASUVORK5CYII=';
+
+function makeQuizLesson(kind: 'comparison' | 'chart' | 'image') {
+  const lesson = makeLesson();
+  const page = lesson.artifacts[0];
+  const original = studioOf(page)!;
+  const visuals: Record<typeof kind, CoursewarePage['visual']> = {
+    comparison: {
+      kind: 'comparison',
+      columns: ['涂色', '空白'],
+      rows: [
+        { label: '份数', values: ['2', '1'] },
+        { label: '总份数', values: ['3', '3'] },
+      ],
+    },
+    chart: {
+      kind: 'chart',
+      chartType: 'column',
+      labels: ['涂色', '空白'],
+      series: [{ name: '份数', values: [2, 1] }],
+      unit: '份',
+      basis: '合成的三等份教学示例',
+      illustrative: true,
+    },
+    image: {
+      kind: 'image',
+      assetId: 'fixture-image',
+      alt: '分成三等份的涂色图形',
+      caption: '数一数涂色的份数',
+      annotations: [],
+    },
+  };
+  const studio = coursewareSlideDataSchema.parse({
+    ...original,
+    page: {
+      ...original.page,
+      role: 'check',
+      takeaway: '先看总份数',
+      visual: visuals[kind],
+      check: fractionCheck,
+    },
+    assets: [{ ...original.assets[0], src: fractionImage, width: 96, height: 32 }],
+  });
+  const { elements, background } = compileCoursewareSlide(studio);
+  const title = elements.find((element) => element.id === 'page-title')!;
+  Object.assign(title, { top: title.top + 4, rotate: 2 });
+  Object.assign(contentOf(page), {
+    studio: { ...studio, privateStudio: 'PRIVATE STUDIO' },
+    elements,
+    background,
+    speakerNotes: 'PRIVATE MANUAL NOTES',
+  });
+  return lesson;
+}
+
 function fixture(lesson: StudioLesson) {
   const authorize = vi.fn<() => unknown>().mockReturnValue(policy);
   const provider = vi
@@ -164,6 +240,7 @@ function fixture(lesson: StudioLesson) {
       usage: { prompt_tokens: 11, completion_tokens: 7 },
     });
   const usageEvents = vi.fn();
+  const saves = vi.fn();
   const fetch = vi.fn(async (url: string | URL, init: RequestInit) => {
     if (String(url) === harness) {
       const body = JSON.parse(String(init.body));
@@ -196,6 +273,12 @@ function fixture(lesson: StudioLesson) {
       if (current instanceof Response) return current;
       return Response.json({ success: true, data: { ownerId: 7, agentPolicy: current } });
     }
+    if (init.method === 'PUT') {
+      expect(target.pathname).toBe('/pwncollege_api/v1/teaching/runtime/lessons/' + artifactId);
+      const saved = JSON.parse(String(init.body));
+      saves(saved);
+      return Response.json({ success: true, data: { lesson: saved.lesson } });
+    }
     expect(init.method).toBeUndefined();
     return Response.json({
       success: true,
@@ -203,7 +286,7 @@ function fixture(lesson: StudioLesson) {
     });
   });
   vi.stubGlobal('fetch', fetch);
-  return { authorize, provider, usageEvents };
+  return { authorize, provider, saves, usageEvents };
 }
 
 async function runAfter() {
@@ -341,6 +424,190 @@ describe('integrated Courseware Studio with a pinned ordinary Harness policy', (
         expect(nativeOf(changed.artifacts[0]).elements[0].left).toBe(90);
       } else expect(result.proposals).toEqual([]);
     }
+  });
+
+  it.each([
+    ['comparison', 'comparison-0-0'],
+    ['chart', 'evidence-chart'],
+    ['image', 'verified-image'],
+  ] as const)('adopts a local title edit on a static %s quiz page', async (kind, visualId) => {
+    const lesson = makeQuizLesson(kind);
+    const source = lesson.artifacts[0];
+    const { provider, saves } = fixture(lesson);
+    const { POST } = await import('@/app/api/lessons/[id]/studio/agent/route');
+    const { PUT } = await import('@/app/api/lessons/[id]/studio/route');
+    const { readRun, readRunBase } = await import('@/lib/server/courseware-studio');
+    const started = await POST(makeRequest(lesson), ctx);
+    expect(started.status).toBe(202);
+    const { run } = await started.json();
+    await runAfter();
+    const result = await readRun(artifactId, run.id, 7);
+    expect(result).toMatchObject({
+      status: 'ready',
+      proposals: [
+        { pageId: source.id, changes: [{ path: '/studio/page/title', value: '什么是单位分数' }] },
+      ],
+    });
+    expect(saves).not.toHaveBeenCalled();
+    expect(await readRunBase(artifactId, run.id, 7)).toEqual(lesson);
+    expect(provider).toHaveBeenCalledOnce();
+    const packet = provider.mock.calls[0][0];
+    expect(packet).toEqual({
+      instruction: '将标题写成一个问题',
+      pageNumber: 1,
+      pageCount: 2,
+      scope: 'page',
+      fields: expect.any(Array),
+    });
+    expect(packet.fields).toEqual([
+      { key: 'title', value: '单位分数' },
+      { key: 'takeaway', value: '先看总份数' },
+      { key: 'title.left', value: 40 },
+      { key: 'title.top', value: 26 },
+      { key: 'title.width', value: 510 },
+      { key: 'title.height', value: 60 },
+      { key: 'title.fontSize', value: 34 },
+      { key: 'title.align', value: 'left' },
+      { key: 'takeaway.left', value: 40 },
+      { key: 'takeaway.top', value: 92 },
+      { key: 'takeaway.width', value: 750 },
+      { key: 'takeaway.height', value: 42 },
+      { key: 'takeaway.fontSize', value: 22 },
+      { key: 'takeaway.align', value: 'left' },
+      { key: 'visual.left', value: 40 },
+      { key: 'visual.top', value: 160 },
+      { key: 'visual.width', value: 920 },
+      { key: 'visual.height', value: 355 },
+    ]);
+    const sent = JSON.stringify(packet);
+    for (const quizValue of [
+      fractionCheck.question,
+      ...fractionCheck.options.flatMap(({ id, label, feedback }) => [id, label, feedback]),
+      'correctOptionId',
+      '分数的大小',
+    ])
+      expect(sent).not.toContain(quizValue);
+
+    const adopted = applyProposal(lesson, result.proposals[0], result.scope);
+    const response = await PUT(
+      new NextRequest('http://localhost/agent-runtime/api/lessons/studio-deck/studio', {
+        method: 'PUT',
+        body: JSON.stringify({ lesson: adopted, instruction: '采用标题修改' }),
+      }),
+      ctx,
+    );
+    expect(response.status).toBe(200);
+    expect(saves).toHaveBeenCalledExactlyOnceWith({
+      lesson: adopted,
+      instruction: '采用标题修改',
+    });
+    const saved = (await response.json()).lesson as StudioLesson;
+    const changed = saved.artifacts[0];
+    const before = studioOf(source)!;
+    const after = studioOf(changed)!;
+    expect(after).toEqual({ ...before, page: { ...before.page, title: '什么是单位分数' } });
+    expect(contentOf(changed).speakerNotes).toBe(contentOf(source).speakerNotes);
+    expect(contentOf(changed).remark).toBe(contentOf(source).remark);
+    expect(saved.artifacts[1]).toEqual(lesson.artifacts[1]);
+    expect(inspectCoursewareSlide(after)).toEqual([]);
+    expect(evaluateCoursewareCheck(after.page, 'choice-blue')).toEqual({
+      correct: true,
+      feedback: fractionCheck.options[0].feedback,
+    });
+    expect(evaluateCoursewareCheck(after.page, 'choice-white')).toEqual({
+      correct: false,
+      feedback: fractionCheck.options[1].feedback,
+    });
+    const elements = nativeOf(changed).elements;
+    const title = elements.find((element) => element.id === 'page-title');
+    expect(title).toMatchObject({ type: 'text', top: 30, rotate: 2 });
+    expect(title?.type === 'text' && plainText(title.content)).toBe('什么是单位分数');
+    expect(elements.find((element) => element.id === visualId)).toEqual(
+      nativeOf(source).elements.find((element) => element.id === visualId),
+    );
+    expect(elements.some((element) => element.id === visualId)).toBe(true);
+  });
+
+  it('allows a selected native quiz-page object and rejects quiz objects and guessed answer keys', async () => {
+    const lesson = makeQuizLesson('comparison');
+    const page = lesson.artifacts[0];
+    const { elements } = contentOf(page);
+    const title = elements.find((element) => element.id === 'page-title');
+    if (title?.type !== 'text') throw new Error('Fixture title did not compile to native text');
+    elements.push({
+      ...title,
+      id: 'quiz-question',
+      content: '<p>' + fractionCheck.question + '</p>',
+    });
+    const { authorize, provider, saves } = fixture(lesson);
+    const { POST } = await import('@/app/api/lessons/[id]/studio/agent/route');
+    const { listRuns, readRun, readRunBase } = await import('@/lib/server/courseware-studio');
+    const pageIds = [page.id];
+    for (const elementId of ['quiz-option-choice-blue', 'quiz-question']) {
+      const rejected = await POST(makeRequest(lesson, { scope: { pageIds, elementId } }), ctx);
+      expect(rejected.status).toBe(400);
+    }
+    authorize.mockReturnValueOnce({ ...policy, enabled: false, model: null });
+    expect((await POST(makeRequest(lesson), ctx)).status).toBe(503);
+    expect(await listRuns(artifactId, 7)).toEqual([]);
+    expect(mocks.callbacks).toHaveLength(0);
+    expect(provider).not.toHaveBeenCalled();
+
+    const scope = { pageIds, elementId: 'page-title' };
+    const objectEdit = { key: 'object.left', value: 90 };
+    for (const [requestId, changes] of [
+      ['object-valid', [objectEdit]],
+      ['object-answer', [objectEdit, { key: 'check.correctOptionId', value: 'choice-white' }]],
+      ['object-geometry', [{ key: 'object.left', value: 990 }]],
+      ['page-answer', [{ key: 'check.correctOptionId', value: 'choice-white' }]],
+    ] as const) {
+      provider.mockReturnValueOnce({
+        model: 'pinned-model',
+        usage: { prompt_tokens: 5, completion_tokens: 5 },
+        text: JSON.stringify({ changes }),
+      });
+      const started = await POST(
+        makeRequest(lesson, {
+          requestId,
+          scope: requestId === 'page-answer' ? { pageIds } : scope,
+          instruction: '把选中的内容向右移动',
+        }),
+        ctx,
+      );
+      expect(started.status).toBe(202);
+      const { run } = await started.json();
+      await runAfter();
+      const result = await readRun(artifactId, run.id, 7);
+      expect(await readRunBase(artifactId, run.id, 7)).toEqual(lesson);
+      if (requestId === 'object-valid') {
+        expect(result.status).toBe('ready');
+        const adopted = applyProposal(lesson, result.proposals[0], scope);
+        expect(studioOf(adopted.artifacts[0])?.page.check).toEqual(fractionCheck);
+        expect(contentOf(adopted.artifacts[0]).elements).toEqual(
+          elements.map((element) => (element.id === title.id ? { ...element, left: 90 } : element)),
+        );
+      } else {
+        expect(result).toMatchObject({ status: 'failed', processed: 0, proposals: [] });
+      }
+    }
+    for (const [packet] of provider.mock.calls.slice(0, 3)) {
+      expect(packet).toEqual({
+        instruction: '把选中的内容向右移动',
+        pageNumber: 1,
+        pageCount: 2,
+        scope: 'object',
+        fields: expect.any(Array),
+      });
+      expect(packet.fields).toEqual([
+        { key: 'object.left', value: 40 },
+        { key: 'object.top', value: 30 },
+        { key: 'object.width', value: 510 },
+        { key: 'object.height', value: 60 },
+        { key: 'object.text', value: '单位分数' },
+      ]);
+    }
+    expect(saves).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
   });
 
   it('rejects missing/disabled/mismatched policy and source selection without ever routing legacy', async () => {

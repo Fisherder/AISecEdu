@@ -65,8 +65,7 @@ export function ordinaryStudioFields(page: LessonArtifact, scope: EditScope) {
   if (
     !studio.success ||
     !['chart', 'comparison', 'image'].includes(studio.data.page.visual.kind) ||
-    studio.data.page.beats.length ||
-    studio.data.page.check
+    studio.data.page.beats.length
   ) {
     throw new Error('普通课件调整只支持静态图表、对照表和内嵌图片页。');
   }
@@ -86,9 +85,15 @@ export function ordinaryStudioFields(page: LessonArtifact, scope: EditScope) {
     const index = elements.findIndex((item) => item.id === scope.elementId);
     const item = elements[index];
     const saved = contentOf(page).elements;
+    const compiled =
+      item && (studio.data.page.check || item.type === 'text')
+        ? compileCoursewareSlide(studio.data)
+        : undefined;
+    const canonical = compiled?.elements.find((element) => element.id === scope.elementId);
     if (
       !item ||
       !['text', 'shape', 'image'].includes(item.type) ||
+      (studio.data.page.check && canonical?.type !== item.type) ||
       (Array.isArray(saved) && saved[index]?.id !== item.id)
     ) {
       throw new Error('当前对象不支持普通课件调整。');
@@ -103,10 +108,8 @@ export function ordinaryStudioFields(page: LessonArtifact, scope: EditScope) {
       );
     }
     if (item.type === 'shape') add('object.fill', path + '/fill', item.fill, hex);
-    if (item.type === 'text') {
+    if (compiled && item.type === 'text') {
       // Use the compiler's visible text only when the rendered native HTML is canonical.
-      const compiled = compileCoursewareSlide(studio.data);
-      const canonical = compiled.elements.find((element) => element.id === item.id);
       if (canonical?.type === 'text' && canonical.content === item.content) {
         const visible = compiled.textBoxes.find((box) => box.id === item.id)?.text;
         const paragraph = /^(<p[^>]*>)[\s\S]*(<\/p>)$/.exec(item.content);
