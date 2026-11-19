@@ -59,14 +59,22 @@ def test_irreversible_model_execution_uses_one_action_per_fresh_job_and_no_publi
     jobs = {match.group(1): source[match.end():starts[index + 1].start() if index + 1 < len(starts) else len(source)]
             for index, match in enumerate(starts)}
     model_jobs = {name: body for name, body in jobs.items() if 'uses: openai/codex-action@' in body}
-    assert set(model_jobs) == {'analyze', 'repair', 'final_review'}
+    assert set(model_jobs) == {'analyze', 'repair', 'final_review', 'large_review'}
     for name, body in model_jobs.items():
         assert body.count('uses: openai/codex-action@') == 1, name
         assert 'safety-strategy: drop-sudo' in body and 'runs-on: ubuntu-24.04' in body
         assert 'name: aisecedu-ai-model' in body and 'AI_AUTOPILOT_SSH_KEY' not in body
         assert 'contents: write' not in body and 'pull-requests: write' not in body
+        bot_actor = ai.POLICY['review_only_app']['login']
+        assert (bot_actor in body) == (name == 'large_review'), name
+    assert 'sandbox: read-only' in jobs['large_review']
+    assert "policy_commit: ${{ steps.policy.outputs.commit }}" in jobs['gate']
+    assert 'ref: ${{ needs.gate.outputs.policy_commit }}' in jobs['analyze']
+    assert 'policy_commit: ${{ needs.gate.outputs.policy_commit }}' in jobs['analyze']
+    for name in ('large_review', 'repair', 'final_review', 'publish'):
+        assert 'ref: ${{ needs.analyze.outputs.policy_commit }}\n          path: policy' in jobs[name], name
     assert 'uses: openai/codex-action@' not in jobs['publish']
-    assert 'needs: [analyze, repair, final_review]' in jobs['publish']
+    assert 'needs: [analyze, repair, final_review, large_review]' in jobs['publish']
 
 
 def test_only_latest_required_check_results_affect_failure_context():
@@ -929,6 +937,413 @@ def test_base_sync_publishes_the_live_develop_commit_when_the_pr_snapshot_is_old
         retry.assert_not_called()
         assert ai.git(remote, 'rev-parse', 'refs/heads/' + context['branch']).stdout.strip() == current_base
         assert ai.git(remote, 'show', current_base + ':dojo_plugin/example.py').stdout == 'value = 3\n'
+
+def test_large_git_inventory_matches_exact_vendor_tree_and_preserves_all_application_bytes():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        ai.git(repo, 'init', '-q')
+        ai.git(repo, 'config', 'user.name', 'Synthetic')
+        ai.git(repo, 'config', 'user.email', 'synthetic@example.com')
+        (repo / 'app.txt').write_text('before\n')
+        ai.git(repo, 'add', '.')
+        ai.git(repo, 'commit', '-qm', 'base')
+        base = ai.git(repo, 'rev-parse', 'HEAD').stdout.strip()
+        vendor = repo / 'vendor' / 'example'
+        vendor.mkdir(parents=True)
+        for index in range(1050):
+            (vendor / f'{index}.txt').write_text('upstream\n')
+        (repo / 'vendor' / 'example-local.lock').write_text('锁' * 80_000)
+        (repo / 'app.txt').rename(repo / 'renamed.txt')
+        ai.git(repo, 'add', '-A')
+        ai.git(repo, 'commit', '-qm', 'head')
+        head = ai.git(repo, 'rev-parse', 'HEAD').stdout.strip()
+        tree = ai.git(repo, 'rev-parse', 'HEAD:vendor/example').stdout.strip()
+        pins = [{'path': 'vendor/example', 'tree': tree, 'commit': head,
+                 'release': 'synthetic-v1', 'source': 'https://example.com/release'}]
+        with patch.dict(ai.POLICY, verified_vendor_trees=pins):
+            evidence, paths, chunks, blocked = ai.exact_large_diff(repo, base, head)
+            assert not blocked
+            assert evidence['total_paths'] == len(paths) == 1053
+            assert evidence['application_paths'] == 3
+            assert evidence['vendor'][0]['after']['tree'] == tree
+            assert len(chunks) > 2
+            actual = b''.join(part.encode() for _, part in chunks)
+            expected = ai.git(repo, 'diff', '--full-index', '--no-ext-diff', '--no-renames', base, head, '--',
+                              ':(exclude,literal)vendor/example').stdout.encode()
+            assert actual == expected
+            assert evidence['patch_sha256'] == ai.hashlib.sha256(actual).hexdigest()
+            for item, part in chunks:
+                assert actual[item['start']:item['end']] == part.encode()
+                assert item['sha256'] == ai.hashlib.sha256(part.encode()).hexdigest()
+            with patch.object(ai, 'LARGE_DIFF_CHUNK_LIMIT', 1):
+                assert ai.exact_large_diff(repo, base, head)[3]
+            (vendor / '1.txt').write_text('local modification\n')
+            ai.git(repo, 'commit', '-qam', 'untrusted vendor')
+            unverified, _, _, _ = ai.exact_large_diff(repo, base, 'HEAD')
+            assert not unverified['vendor']
+            assert unverified['application_paths'] == 1053
+
+
+def test_large_publication_binds_every_report_and_cannot_repair_or_auto_approve():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        head, base = '1' * 40, '2' * 40
+        pr = {'number': 1, 'node_id': 'node', 'state': 'open', 'draft': False, 'changed_files': 1000,
+              'base': {'ref': 'develop', 'sha': base}, 'user': {'login': 'hunry-1-code'},
+              'head': {'sha': head, 'ref': 'feat/member/task', 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
+        with patch.object(ai, 'LARGE_DIFF_CHUNK_BYTES', 5):
+            chunks = [row for row, _ in ai.large_diff_chunks(b'abcdefghij')]
+        evidence = {'chunks': chunks, 'application_paths': 1, 'vendor': []}
+        context = {'mode': 'large_review', 'number': 1, 'head': head, 'base': base, 'branch': 'feat/member/task',
+                   'large_review': evidence, 'blocked_reason': '', 'failures': [],
+                   'model': 'synthetic', 'large_review_key': ai.large_review_key(pr, [], [], 'synthetic'),
+                   'signature': ai.state_signature(pr, [], [])}
+        (folder / 'context.json').write_text(json.dumps(context))
+        reports = folder / 'segment-reports'
+
+        class Client:
+            repo = 'Fisherder/AISecEdu'
+
+            def repo_api(self, path, data=None, method=None):
+                assert data is None
+                if path == '/pulls/1':
+                    return pr
+                if path == '/git/ref/heads/develop':
+                    return {'object': {'sha': base}}
+                assert '/check-runs' in path
+                return {'check_runs': []}
+
+            def pages(self, path):
+                assert not path.endswith('/files')
+                return []
+
+        def add(index, value=None):
+            target = reports / f'deepseek-segment-{index}' / 'segment-report.json'
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps({'head': head, 'base': base, 'signature': context['signature'],
+                                          'chunk': chunks[index] if value is None else value, 'report': report()}))
+            return target
+
+        with (patch.object(ai, 'GitHub', Client),
+              patch.object(ai, 'load_large_diff', return_value=(evidence, [('A', 'example.py')], [], '')),
+              patch.object(ai, 'post_comment') as comment,
+              patch.object(ai, 'record_check') as record,
+              patch.object(ai, 'suspend_approval'),
+              patch.object(ai, 'git') as git):
+            publish = lambda: ai.publish(folder, folder / 'never-check-out', expected=context)
+            add(0)
+            rejects(publish)
+            add(1, {**chunks[1], 'sha256': 'wrong'})
+            rejects(publish)
+            add(1)
+            publish()
+            assert record.call_args.args[-1] == 'success'
+            assert '等待人工审批' in record.call_args.args[3]
+            assert record.call_args.kwargs['external_id'] == context['large_review_key']
+            comment.assert_called_once()
+            (folder / 'repair.patch').write_text('malicious artifact')
+            rejects(publish)
+            git.assert_not_called()
+
+
+def codex_app_pr():
+    return {
+        'number': 1, 'node_id': 'node', 'state': 'open', 'draft': False, 'title': 'synthetic', 'body': '',
+        'changed_files': 1, 'additions': 1, 'deletions': 1,
+        'user': {'login': 'aisecedu-codex-pr[bot]', 'id': 358521998, 'type': 'Bot'},
+        'base': {'ref': 'develop', 'sha': 'b' * 40},
+        'head': {'sha': 'a' * 40, 'ref': 'feat/codex/task', 'repo': {'full_name': 'Fisherder/AISecEdu'}},
+    }
+
+
+def mock_codex_app_review(client, pr, folder):
+    client.repo = 'Fisherder/AISecEdu'
+
+    def repo_api(path, data=None, method=None):
+        if data is not None:
+            assert path in ('/check-runs', '/issues/1/comments'), (path, method)
+            return {'id': 17}
+        if path == '/pulls/1':
+            return pr
+        if path == '/git/ref/heads/develop':
+            return {'object': {'sha': pr['base']['sha']}}
+        if '/check-runs' in path:
+            return {'check_runs': []}
+        if path.startswith('/compare/'):
+            return {'behind_by': 1}
+        raise AssertionError(path)
+
+    client.repo_api.side_effect = repo_api
+    client.pages.return_value = []
+    event = folder / 'event.json'
+    event.write_text(json.dumps({'number': pr['number']}))
+    return event
+
+
+def test_prepare_gates_codex_app_by_identity_and_pull_request_scope():
+    valid = codex_app_pr()
+    for prefix in ('feat', 'fix', 'team'):
+        pr = {**valid, 'head': {**valid['head'], 'ref': f'{prefix}/codex/task'}}
+        with tempfile.TemporaryDirectory() as directory, patch.object(ai, 'GitHub') as github, \
+                patch.object(ai, 'set_outputs') as outputs:
+            folder = Path(directory)
+            event = mock_codex_app_review(github.return_value, pr, folder)
+            with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event)}):
+                ai.prepare(folder, gate_only=True)
+            assert outputs.call_args.kwargs['mode'] == 'large_pending'
+
+    invalid = [
+        *({**valid, 'user': {**valid['user'], **user}} for user in (
+            {'login': 'lookalike[bot]'}, {'id': None}, {'id': 358521999}, {'id': '358521998'},
+            {'id': 358521998.0}, {'type': 'User'},
+        )),
+        *({**valid, 'head': {**valid['head'], **head}} for head in (
+            {'ref': 'feat/member/task'}, {'ref': 'fix/codex-other/task'}, {'ref': 'release/codex/task'},
+            {'repo': {'full_name': 'external/fork'}}, {'repo': None},
+        )),
+        {**valid, 'base': {**valid['base'], 'ref': 'main'}},
+        {**valid, 'draft': True},
+        {**valid, 'state': 'closed'},
+    ]
+    for pr in invalid:
+        with tempfile.TemporaryDirectory() as directory, patch.object(ai, 'GitHub') as github, \
+                patch.object(ai, 'set_outputs') as outputs:
+            folder = Path(directory)
+            event = mock_codex_app_review(github.return_value, pr, folder)
+            with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event)}):
+                ai.prepare(folder, gate_only=True)
+            assert outputs.call_args.kwargs['mode'] == 'skip', pr
+            assert not (folder / 'context.json').exists()
+            github.return_value.repo_api.assert_called_once_with('/pulls/1')
+
+
+def test_codex_app_reviews_and_comments_are_not_trusted_feedback():
+    bot = {'id': 1, 'user': codex_app_pr()['user'], 'body': 'bot feedback',
+           'state': 'APPROVED', 'commit_id': 'a' * 40}
+    human = {'id': 2, 'user': {'login': 'Fisherder'}, 'body': 'maintainer feedback'}
+    with patch.object(ai, 'GitHub') as github:
+        client = github.return_value
+        client.pages.side_effect = [[bot, human], [bot], [bot]]
+        feedback = ai.review_feedback(client, 1)
+    assert [row['author'] for row in feedback] == ['Fisherder']
+
+
+def test_small_codex_app_pr_uses_read_only_review_and_publication():
+    pr = codex_app_pr()
+    diff = (b'diff --git a/example.py b/example.py\nnew file mode 100644\n'
+            b'--- /dev/null\n+++ b/example.py\n@@ -0,0 +1 @@\n+value = 1\n')
+    chunks = ai.large_diff_chunks(diff)
+    evidence = {'chunks': [row for row, _ in chunks], 'application_paths': 1, 'vendor': [],
+                'merge_base': 'c' * 40}
+    with (tempfile.TemporaryDirectory() as directory,
+          patch.object(ai, 'GitHub') as github,
+          patch.object(ai, 'load_large_diff', return_value=(evidence, [('A', 'example.py')], chunks, '')),
+          patch.object(ai, 'set_outputs') as outputs, patch.object(ai, 'git') as git):
+        folder = Path(directory)
+        client = github.return_value
+        event = mock_codex_app_review(client, pr, folder)
+        with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event)}):
+            ai.prepare(folder)
+        context_path = folder / 'context.json'
+        context = json.loads(context_path.read_text())
+        assert context['mode'] == outputs.call_args.kwargs['mode'] == 'large_review'
+        assert context['large_review']['merge_base'] != context['base']
+        assert not outputs.call_args.kwargs['can_repair']
+        assert not context['repairable_files']
+        assert (folder / 'diff-chunks/0.patch').read_bytes() == diff
+
+        ai.large_prompt(folder, 0)
+        assert (folder / 'review.txt').read_text().endswith(diff.decode())
+        (folder / 'initial-review.json').write_text(json.dumps(report()))
+        ai.package_large_report(folder, 0)
+        report_path = folder / 'segment-reports/deepseek-segment-0/segment-report.json'
+        report_path.parent.mkdir(parents=True)
+        (folder / 'segment-report.json').replace(report_path)
+        (folder / 'review.json').write_text(json.dumps(report()))
+        publish = lambda: ai.publish(folder, folder / 'never-check-out', expected=context)
+        for mode in ('update', 'analyze'):
+            context_path.write_text(json.dumps({**context, 'mode': mode}))
+            rejects(publish)
+        context_path.write_text(json.dumps(context))
+        repair = folder / 'repair.patch'
+        repair.write_text('forged patch')
+        rejects(publish)
+        repair.unlink()
+
+        client.repo_api.reset_mock()
+        pr['user']['id'] = 358521999
+        publish()
+        client.repo_api.assert_called_once_with('/pulls/1')
+        pr['user']['id'] = 358521998
+
+        client.repo_api.reset_mock()
+        publish()
+        write_calls = [call.args for call in client.repo_api.call_args_list if len(call.args) == 3]
+        assert [args[0] for args in write_calls] == ['/issues/1/comments', '/check-runs']
+        assert ai.MARKER in write_calls[0][1]['body']
+        assert write_calls[1][1]['conclusion'] == 'success'
+        assert write_calls[1][1]['external_id'] == context['large_review_key']
+        assert write_calls[1][1]['completed_at'].endswith('Z')
+        client.api.assert_not_called()
+        git.assert_not_called()
+
+
+def test_large_review_locates_split_hunks_and_rejects_findings_from_other_segments():
+    with unittest.TestCase().assertRaises(UnicodeDecodeError):
+        ai.large_diff_chunks('Résumé'.encode('latin-1'))
+    first = (b'diff --git a/example.py b/example.py\n--- a/example.py\n+++ b/example.py\n'
+             b'@@ -39,2 +39,3 @@\n context\n-old\n')
+    long_line = ('+' + '锁' * len(first) + '\n').encode()
+    diff = (first + long_line + b'+following\n'
+            b'diff --git a/other.py b/other.py\n--- /dev/null\n+++ b/other.py\n@@ -0,0 +1 @@\n+extra\n')
+    with patch.object(ai, 'LARGE_DIFF_CHUNK_BYTES', len(first)):
+        chunks = ai.large_diff_chunks(diff)
+    ai.locate_large_diff(diff, chunks, ['example.py', 'other.py'])
+
+    assert b''.join(part.encode() for _, part in chunks) == diff
+    locations = [row['locations'] for row, _ in chunks]
+    assert locations[0][-1]['head_lines'] == [39, 39]
+    assert locations[1][0] == {
+        'file': 'example.py', 'patch_line': 1, 'old_line': 41, 'new_line': 40,
+        'partial_line': False, 'head_lines': [40, 40], 'anchor': 40,
+    }
+    assert locations[2][0]['partial_line']
+    assert locations[2][0]['new_line'] == 40
+
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        context = {'mode': 'large_review', 'head': 'a' * 40, 'base': 'b' * 40, 'signature': 'signature',
+                   'large_review': {'chunks': [row for row, _ in chunks], 'application_paths': 2}}
+        (folder / 'context.json').write_text(json.dumps(context))
+        inputs = folder / 'diff-chunks'
+        inputs.mkdir()
+        finding = {'file': 'example.py', 'line': 40, 'priority': 2, 'message': 'Located regression'}
+        for item, part in chunks:
+            index = item['index']
+            (inputs / f'{index}.patch').write_bytes(part.encode())
+            initial = folder / 'initial-review.json'
+            if index == 1:
+                for wrong_location in ({'line': 39}, {'file': 'other.py', 'line': 1}):
+                    initial.write_text(json.dumps({**report(), 'findings': [{**finding, **wrong_location}]}))
+                    rejects(lambda: ai.package_large_report(folder, index))
+            initial.write_text(json.dumps({**report(), 'findings': [finding] if index == 1 else []}))
+            ai.package_large_report(folder, index)
+            target = folder / 'segment-reports' / f'deepseek-segment-{index}' / 'segment-report.json'
+            target.parent.mkdir(parents=True)
+            (folder / 'segment-report.json').replace(target)
+
+        aggregate = ai.aggregate_large_review(folder, context)
+        assert aggregate['findings'] == [finding]
+        target = folder / 'segment-reports/deepseek-segment-0/segment-report.json'
+        data = json.loads(target.read_text())
+        data['report']['findings'] = [finding]
+        target.write_text(json.dumps(data))
+        rejects(lambda: ai.aggregate_large_review(folder, context))
+
+
+def test_large_review_preserves_git_file_locations_for_type_changes():
+    with tempfile.TemporaryDirectory() as directory:
+        repo = Path(directory)
+        ai.git(repo, 'init', '-q')
+        ai.git(repo, 'config', 'user.name', 'Synthetic')
+        ai.git(repo, 'config', 'user.email', 'synthetic@example.com')
+        path = 'wide 教\tfile'
+        item = repo / path
+        item.write_text('before\n')
+        ai.git(repo, 'add', '.')
+        ai.git(repo, 'commit', '-qm', 'base')
+        base = ai.git(repo, 'rev-parse', 'HEAD').stdout.strip()
+        item.unlink()
+        item.symlink_to('replacement')
+        ai.git(repo, 'add', '.')
+        ai.git(repo, 'commit', '-qm', 'head')
+
+        evidence, inventory, _, blocked = ai.exact_large_diff(repo, base, 'HEAD')
+        assert not blocked
+        assert inventory == [('T', path)]
+        locations = [row for row in evidence['chunks'][0]['locations'] if row['new_line'] is not None]
+        assert [(row['file'], row['head_lines'], row['anchor']) for row in locations] == [
+            (path, None, 1), (path, [1, 1], 1),
+        ]
+
+
+def test_large_review_gate_retains_only_current_complete_github_checks():
+    pr = codex_app_pr()
+    model = 'synthetic'
+    workflow = 'e' * 40
+    failed = {'id': 19, 'name': 'contributor-checks', 'conclusion': 'failure'}
+    now = ai.datetime.now(ai.timezone.utc)
+    with patch.dict(os.environ, {'GITHUB_WORKFLOW_SHA': workflow}):
+        external_id = ai.large_review_key(pr, [failed], [], model)
+    check = {'id': 20, 'name': ai.CHECK, 'head_sha': pr['head']['sha'], 'status': 'completed',
+             'app': {'slug': 'github-actions'}, 'conclusion': 'success',
+             'output': {'title': ai.LARGE_REVIEW_TITLES['success']},
+             'external_id': external_id, 'completed_at': (now - ai.timedelta(minutes=1)).isoformat()}
+    human = {'id': 21, 'user': {'login': 'Fisherder'}, 'body': 'current feedback'}
+    bot_approval = {'id': 22, 'user': {'login': 'github-actions[bot]'}, 'state': 'APPROVED'}
+    other_author = {'login': 'Fisherder', 'id': 1, 'type': 'User'}
+    cases = (
+        ('same input', {}, True),
+        ('completed review with findings', {'check': {**check, 'conclusion': 'failure',
+                                                       'output': {'title': ai.LARGE_REVIEW_TITLES['failure']}}}, True),
+        ('explicit retry', {'retry': 'true'}, False),
+        ('in-progress check', {'check': {**check, 'status': 'in_progress'}}, False),
+        ('failed execution', {'check': {**check, 'conclusion': 'failure', 'output': {'title': 'AI 执行失败'}}}, False),
+        ('expired', {'check': {**check, 'completed_at': (now - ai.timedelta(days=2)).isoformat()}}, False),
+        ('missing date', {'check': {**check, 'completed_at': None}}, False),
+        ('missing check', {'check': None}, False),
+        ('missing reuse marker', {'check': {**check, 'external_id': ''}}, False),
+        ('another check app', {'check': {**check, 'app': {'slug': 'another-check-app'}}}, False),
+        ('another pull request', {'pr': {**pr, 'number': 2}}, False),
+        ('another head', {'pr': {**pr, 'head': {**pr['head'], 'sha': 'f' * 40}}}, False),
+        ('another author', {'pr': {**pr, 'user': other_author, 'changed_files': 1000}}, False),
+        ('another base', {'pr': {**pr, 'base': {**pr['base'], 'sha': 'f' * 40}}}, False),
+        ('policy rollout', {'workflow': 'f' * 40}, False),
+        ('another model', {'model': 'new model'}, False),
+        ('new feedback', {'comments': [human]}, False),
+        ('CI outcome changed on the same run', {'failed': {**failed, 'conclusion': 'cancelled'}}, False),
+        ('CI run changed', {'failed': {**failed, 'id': 23}}, False),
+        ('CI recovered', {'failed': {**failed, 'conclusion': 'success'}}, False),
+        ('bot approval needs revocation', {'reviews': [bot_approval]}, False),
+        ('auto-merge needs revocation', {'pr': {**pr, 'auto_merge': {'enabled': True}}}, False),
+        ('newer check supersedes the result', {'extra_check': {**check, 'id': 30, 'status': 'in_progress'}}, False),
+    )
+
+    for label, values, reused in cases:
+        current_pr = values.get('pr', pr)
+        existing_checks = [values.get('failed', failed), values.get('check', check), values.get('extra_check')]
+        with (tempfile.TemporaryDirectory() as directory, patch.object(ai, 'GitHub') as github,
+              patch.object(ai, 'load_large_diff') as load, patch.object(ai, 'set_outputs') as outputs,
+              patch.object(ai, 'suspend_approval') as suspend):
+            folder = Path(directory)
+            client = github.return_value
+            client.repo = 'Fisherder/AISecEdu'
+
+            def repo_api(path, data=None, method=None):
+                if data is not None:
+                    assert path == '/check-runs' and method == 'POST' and data['status'] == 'in_progress'
+                    return {'id': 31}
+                if path == f'/pulls/{current_pr["number"]}':
+                    return current_pr
+                if path == '/git/ref/heads/develop':
+                    return {'object': {'sha': current_pr['base']['sha']}}
+                assert path == f'/commits/{current_pr["head"]["sha"]}/check-runs?filter=all&per_page=100'
+                return {'check_runs': [row for row in existing_checks if row is not None]}
+
+            client.repo_api.side_effect = repo_api
+            client.pages.side_effect = lambda path: (values.get('reviews', []) if path.endswith('/reviews')
+                                                      else values.get('comments', []) if path.endswith('/comments')
+                                                      and path.startswith('/issues/') else [])
+            event = folder / 'event.json'
+            event.write_text(json.dumps({'number': current_pr['number'], 'inputs': {'retry': values.get('retry')}}))
+            with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event), 'AI_MODEL': values.get('model', model),
+                                         'GITHUB_WORKFLOW_SHA': values.get('workflow', workflow)}):
+                ai.gate(folder)
+            assert any(call.kwargs.get('mode') == ('skip' if reused else 'large_pending')
+                       for call in outputs.call_args_list), label
+            assert suspend.call_count == int(not reused), label
+            assert sum(len(call.args) == 3 for call in client.repo_api.call_args_list) == int(not reused), label
+            load.assert_not_called()
 
 
 if __name__ == '__main__':
