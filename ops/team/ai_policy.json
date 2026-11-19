@@ -1,6 +1,12 @@
 {
   "base_branch": "develop",
   "trusted_authors": ["Fisherder", "yunie666", "hunry-1-code"],
+  "review_only_app": {
+    "login": "aisecedu-codex-pr[bot]",
+    "id": 358521998,
+    "repository": "Fisherder/AISecEdu",
+    "branch_prefixes": ["feat/codex/", "fix/codex/", "team/codex/"]
+  },
   "max_rounds": 2,
   "max_files": 40,
   "max_changed_lines": 1500,
@@ -17,6 +23,15 @@
     "services/**", "ctfd/**", "docs/development*", "docs/development/**",
     "package.json", "*lock*", "requirements*", "pyproject.toml",
     "**/package.json", "**/*lock*", "**/requirements*", "**/pyproject.toml"
+  ],
+  "verified_vendor_trees": [
+    {
+      "path": "vendor/deepseek-harness",
+      "source": "https://github.com/deepseek-ai/deepseek-harness",
+      "release": "dsh-v0.2.2-rc.4",
+      "commit": "3f321d32bfe382212a8ed8785c1d47a5a300aa23",
+      "tree": "6778b1f1e75fde6d62f69d345792bf08e32178d4"
+    }
   ],
   "repair_paths": ["dojo_plugin/**", "dojo_theme/**", "test/**", "docs/**"],
   "required_checks": ["contributor-checks", "audit", "singlenode DOJO Test", "multinode DOJO Test"]
