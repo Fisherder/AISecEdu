@@ -25,6 +25,7 @@ from ...models import (
     TeachingAssignments,
 )
 from ...agent_runtime.scope import ScopeError, dojo_for_user
+from ...courseware_quiz import CoursewareQuizError
 from ...learning.student_experience import error_contract, timestamp
 
 
@@ -131,10 +132,15 @@ class CourseAssignmentGeneration(Resource):
         user = _user()
         try:
             dojo = dojo_for_user(user, dojo_id, teacher=True)
-            payload = generate_assignment_payload(_body(), dojo)
+            payload = generate_assignment_payload(_body(), dojo, user=user)
             assignment = create_assignment(user, dojo, payload)
             db.session.commit()
             return _ok({"assignment": assignment_view(assignment, user=user, teacher=True)}, 201)
+        except CoursewareQuizError as exc:
+            db.session.rollback()
+            response, status = _error(exc, 422, exc.code)
+            response["details"] = {key: exc.report[key] for key in ("requestedCount", "acceptedCount", "rounds") if key in exc.report}
+            return response, status
         except (ScopeError, ValueError) as exc:
             db.session.rollback()
             return _error(exc, 404 if isinstance(exc, ScopeError) else 400, "NOT_FOUND" if isinstance(exc, ScopeError) else "INVALID_REQUEST")

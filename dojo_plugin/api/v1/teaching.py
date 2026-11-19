@@ -7700,7 +7700,7 @@ def execute_teacher_tool(user, body, request_key=None):
         thread = _thread_for_owner(str(body.get("threadId") or ""), user)
         raw_arguments = body.get("arguments")
         proposal_source_refs = []
-        if tool == "module.inquiry" and body.get("sourceJobId"):
+        if tool in {"module.inquiry", "assignment.generate"} and body.get("sourceJobId"):
             source_job = TeachingJobs.query.filter_by(id=str(body["sourceJobId"]), owner_id=user.id, thread_id=thread.id, kind="agent.chat", status="SUCCEEDED").first()
             if source_job is None:
                 raise ScopeError("创作来源任务不存在或尚未完成。")
