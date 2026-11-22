@@ -4,6 +4,7 @@ import importlib
 import json
 import re
 import sys
+from copy import copy
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
@@ -149,6 +150,33 @@ def test_invalid_private_grades_go_to_local_review(scoring, monkeypatch, model_o
     assert submission.item_results[0]["source"] == "FALLBACK"
     assert submission.item_results[0]["needsReview"] is True
     assert submission.grading["agent"] == {}
+    entry["model_json"].assert_not_called()
+
+
+@pytest.mark.parametrize("extra_rows", [
+    [],
+    [{"itemIndex": 1, "score": 2}, {"itemIndex": 1, "score": 9}],
+    [{"itemIndex": 1, "score": 9}, {"itemIndex": 1, "score": 2}],
+    [{"itemIndex": 1, "score": None}, {"itemIndex": 1, "score": 9}],
+])
+def test_private_grading_preserves_independently_matched_questions(scoring, monkeypatch, extra_rows):
+    entry, _, private = scoring
+    submission = submission_fixture()
+    first = submission.assignment.items[0]
+    second = copy(first)
+    second.id = "second-synthetic-item"
+    submission.assignment.items.append(second)
+    submission.answers[second.id] = "椭圆形。"
+    rows = [{"itemIndex": 2, "score": 4}, *extra_rows]
+    service = MagicMock(return_value={"text": json.dumps({"grades": rows}),
+                                      "model": "fixture", "usage": {"total_tokens": 8}})
+    monkeypatch.setattr(private, "invoke_ordinary_grading_turn", service)
+    entry["grade_submission"](submission)
+    assert [(row["score"], row["source"], row["needsReview"]) for row in submission.item_results] == [
+        (6.75, "FALLBACK", True), (4, "AI", False),
+    ]
+    assert submission.grading["agent"]["usage"] == {"total_tokens": 8}
+    service.assert_called_once()
     entry["model_json"].assert_not_called()
 
 

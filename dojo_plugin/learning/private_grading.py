@@ -21,7 +21,7 @@ def grade_with_private_harness(items, answers, connection):
         rows = result_object(response["text"]).get("grades")
     except (UpstreamTurnError, ValueError):
         return {}, None
-    if not isinstance(rows, list) or len(rows) != len(items):
+    if not isinstance(rows, list):
         return {}, None
     rows = [
         {key: value for key, value in row.items() if key != "itemId"}

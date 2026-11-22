@@ -58,6 +58,7 @@ class ModelFixture(BaseHTTPRequestHandler):
             reply = json.dumps({"grades": [
                 {"itemIndex": q["itemIndex"], "score": q["itemIndex"], "feedback": "已观察到变化。"}
                 for q in reversed(questions)
+                if not getattr(self.server, "omit_first_grade", False) or q["itemIndex"] != 1
             ]}, ensure_ascii=False)
         events = [
             ("message_start", {"message": {"id": "fixture", "model": "fixture", "usage": {"input_tokens": 5}}}),
@@ -163,7 +164,7 @@ class HarnessClientContract(unittest.TestCase):
                 with self.subTest("only the requested excerpt crosses the provider boundary"):
                     self.check_material_read(url, model.requests)
                 with self.subTest("private coursework grades return to the correct items"):
-                    self.check_private_grades(url, model.requests)
+                    self.check_private_grades(url, model)
             finally:
                 service.terminate()
                 try:
@@ -171,7 +172,8 @@ class HarnessClientContract(unittest.TestCase):
                 except subprocess.TimeoutExpired:
                     service.kill()
 
-    def check_private_grades(self, url, requests_seen):
+    def check_private_grades(self, url, model):
+        requests_seen = model.requests
         # Load the real plugin leaves without initializing the CTFd application or database.
         packages = {}
         for suffix in ("", ".learning", ".agent_runtime"):
@@ -206,6 +208,12 @@ class HarnessClientContract(unittest.TestCase):
         self.assertEqual([(q["itemIndex"], q["answer"], q["rubric"]) for q in questions],
                          [(1, "水位下降", "描述观察现象"), (2, "记录了液面", "描述观察现象")])
         self.assertTrue(all("itemId" not in q for q in questions))
+
+        with patch.object(model, "omit_first_grade", True, create=True):
+            partial, receipt = grading.grade_with_private_harness(items, answers, connection)
+        self.assertEqual({key: row["score"] for key, row in partial.items()}, {items[1].id: 2})
+        self.assertEqual(receipt["usage"]["total_tokens"], 8)
+        self.assertEqual(len(requests_seen), start + 2)
 
     def check_material_read(self, url, requests_seen):
         first = "第一组样本有九片叶子。"
