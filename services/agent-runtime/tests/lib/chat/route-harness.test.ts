@@ -109,7 +109,7 @@ describe('ordinary classroom chat through Harness', () => {
 
     const response = await POST(makeRequest());
     expect(response.status).toBe(200);
-    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    expect(response.headers.get('content-type')).toBe('text/event-stream; charset=utf-8');
     const events = await readEvents(response);
     expect(events.map((event) => event.type)).toEqual([
       'thinking',

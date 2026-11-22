@@ -117,7 +117,7 @@ describe('ordinary classroom browser chat', () => {
     const fetchMock = harnessFetch();
     vi.stubGlobal('fetch', fetchMock);
     const response = await chat(request());
-    expect(response.headers.get('Content-Type')).toBe('text/event-stream');
+    expect(response.headers.get('Content-Type')).toBe('text/event-stream; charset=utf-8');
     expect(response.headers.get('X-AISecEdu-Classroom-Dialogue')).toBe('1');
     const stream = await events(response);
     expect(stream.map(({ type }) => type)).toEqual([
