@@ -11,6 +11,10 @@ _REQUEST = re.compile(
 )
 
 
+def requests_classroom_preparation(prompt):
+    return bool(_REQUEST.fullmatch(str(prompt or "").strip()))
+
+
 def pin_classroom_request(payload, owner_id, dojo_id, module_index):
     # The admission service owns this field. Never inherit a pin from a previous turn or edit.
     clean = {key: value for key, value in payload.items() if key != "classroomPreparation"}

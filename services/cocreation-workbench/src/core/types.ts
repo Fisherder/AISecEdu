@@ -127,6 +127,8 @@ export interface WorkspaceState {
   archived: boolean;
 }
 export const terminal = (job: Job) => ['SUCCEEDED', 'FAILED', 'CANCELED'].includes(job.status);
+export const hasOnlyMaterialSources = (sources: Draft['sources']) =>
+  sources.length > 0 && sources.every((source) => source.type === 'material');
 export const statusLabels: Record<string, string> = {
   WAITING_INPUT: '待回答',
   QUEUED: '等待执行',

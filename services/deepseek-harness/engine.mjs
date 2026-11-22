@@ -13,6 +13,9 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session';
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection';
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt';
 import ToolRuntime from '@deepseek-ai/dsh-tools';
+import {
+  materialSystemPrompt, teachingMaterialPlugin, TeachingMaterialTurnError,
+} from './teaching-material.mjs';
 
 const provider = 'deepseek-official';
 
@@ -59,6 +62,29 @@ function formatUsage(usage) {
     cache_creation_input_tokens: usage.cacheWriteTokens,
     reasoning_tokens: usage.reasoningTokens,
   };
+}
+
+function formatMaterialUsage(usage) {
+  if (!usage || ![usage.inputTokens, usage.outputTokens].every(value =>
+    Number.isSafeInteger(value) && value >= 0,
+  )) return;
+  const fields = formatUsage(usage);
+  // The official adapter initializes absent counters to zero. This nonempty
+  // question and the emitted tool call/answer necessarily consume both kinds.
+  if (fields?.prompt_tokens > 0 && fields.completion_tokens > 0 && Object.values(fields).every(value =>
+    value === undefined || (Number.isSafeInteger(value) && value >= 0),
+  )) return fields;
+}
+
+function sumMaterialUsage(measured) {
+  if (!measured.length) return;
+  const total = {};
+  for (const step of measured) {
+    for (const [key, value] of Object.entries(step)) {
+      if (value !== undefined) total[key] = (total[key] ?? 0) + value;
+    }
+  }
+  if (Object.values(total).every(Number.isSafeInteger)) return total;
 }
 
 export async function createEngine({ model, baseURL, attachmentDir }) {
@@ -122,20 +148,40 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
         }
       }
     },
-    async turn(messages, signal, images = []) {
+    turn: runTurn,
+    materialTurn(question, materials, signal) {
+      return runTurn([
+        { role: 'system', content: materialSystemPrompt(materials.length) },
+        { role: 'user', content: question },
+      ], signal, [], materials);
+    },
+  };
+
+  async function runTurn(messages, signal, images = [], materials) {
+    const materialReads = new Set();
+    const measured = [];
+    let modelAttempts = 0;
+    let assistant;
+    let finish;
+    let unsubscribe;
+    let handle;
+
+    function cancel() {
+      handle.agent.cancel({ kind: 'user' });
+    }
+
+    try {
       signal.throwIfAborted();
       const attachments = images.length ? await ctx.attachments.saveImages(images) : [];
       const system = messages[0].role === 'system' ? messages[0].content : '';
       const history = messages.slice(messages[0].role === 'system' ? 1 : 0, -1);
-      let assistant;
-      let finish;
-      let unsubscribe;
 
-      const handle = await ctx.agents.create({
+      handle = await ctx.agents.create({
         sessionId: SessionId(randomUUID()),
         agentOptions: { provider, model },
         signal,
-        setup(scope, agent) {
+        async setup(scope, agent) {
+          if (materials) await scope.plugin(teachingMaterialPlugin(materials, materialReads));
           scope.systemPrompt.section({
             name: 'request-system', order: 0, interpolate: false, text: system,
           });
@@ -144,32 +190,44 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
             if (session !== agent.session) return;
             if (event.type === 'assistant/message') assistant = event.data;
             if (event.type === 'turn/end') finish = event.data.reason.kind;
+            if (materials && (event.type === 'assistant/message' || event.type === 'assistant/attempt')) {
+              modelAttempts += 1;
+              const usage = event.data.usage ?? event.data.stream.findLast(record =>
+                record.type === 'chunk' && record.chunk.type === 'usage',
+              )?.chunk.usage;
+              const snapshot = formatMaterialUsage(usage);
+              if (snapshot) measured.push(snapshot);
+            }
           });
         },
       });
 
-      function cancel() {
-        handle.agent.cancel({ kind: 'user' });
-      }
+      signal.addEventListener('abort', cancel, { once: true });
+      signal.throwIfAborted();
+      handle.agent.followup(userMessage(messages.at(-1).content, attachments));
+      await handle.agent.whenIdle();
+      signal.throwIfAborted();
+      if (finish !== 'completed' || assistant === undefined) throw new Error('Model turn failed');
+      const { message, usage } = assistant;
+      const text = message.content.filter(block => block.type === 'text').map(block => block.text).join('');
+      if (!text.trim()) throw new Error('Model returned no text');
+      // The official loop records the requested model in source, even when the
+      // provider returns a different model identifier for an alias.
+      if (!materials) return { text, model: message.source.model, usage: formatUsage(usage) };
 
-      try {
-        signal.addEventListener('abort', cancel, { once: true });
-        signal.throwIfAborted();
-        handle.agent.followup(userMessage(messages.at(-1).content, attachments));
-        await handle.agent.whenIdle();
-        signal.throwIfAborted();
-        if (finish !== 'completed' || assistant === undefined) throw new Error('Model turn failed');
-        const { message, usage } = assistant;
-        const text = message.content.filter(block => block.type === 'text').map(block => block.text).join('');
-        if (!text.trim()) throw new Error('Model returned no text');
-        // The official loop records the requested model in source, even when the
-        // provider returns a different model identifier for an alias.
-        return { text, model: message.source.model, usage: formatUsage(usage) };
-      } finally {
-        signal.removeEventListener('abort', cancel);
-        unsubscribe?.();
-        await handle.dispose();
+      const total = sumMaterialUsage(measured);
+      if (!materialReads.size || modelAttempts < 2 || measured.length !== modelAttempts || !total) {
+        throw new Error('Teaching material turn did not complete with measured reads');
       }
-    },
-  };
+      return { text, model: message.source.model, usage: total, materialReads: [...materialReads] };
+    } catch (error) {
+      if (!materials) throw error;
+      const usage = sumMaterialUsage(measured);
+      throw new TeachingMaterialTurnError(usage ? { model, usage } : {});
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      unsubscribe?.();
+      await handle?.dispose();
+    }
+  }
 }

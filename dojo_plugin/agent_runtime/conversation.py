@@ -49,7 +49,7 @@ def submission_fingerprint(body):
         "content", "dojoId", "moduleIndex", "sourceRefs", "artifactType", "learningPattern",
         "candidateMode", "candidateCount", "delivery", "expectedJobId", "questionReply",
     )}
-    fields.update({key: body[key] for key in ("executionMode", "planSourceMessageId") if key in body})
+    fields.update({key: body[key] for key in ("executionMode", "planSourceMessageId", "materialQuestion") if key in body})
     return hashlib.sha256(json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 

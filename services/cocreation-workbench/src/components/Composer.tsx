@@ -14,7 +14,7 @@ import {
   LoaderCircle,
 } from 'lucide-react';
 import { useWorkbench } from '../core/context';
-import { terminal, type PendingTurn } from '../core/types';
+import { hasOnlyMaterialSources, terminal, type PendingTurn } from '../core/types';
 import { Button, IconButton } from './ui';
 
 function QueueRow({ turn }: { turn: PendingTurn }) {
@@ -306,6 +306,11 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
               >
                 <Square size={14} fill="currentColor" />
               </IconButton>
+            )}
+            {hasOnlyMaterialSources(draft.sources) && (
+              <Button disabled={!canSend} onClick={() => void c.send({}, 'ask')}>
+                仅问答
+              </Button>
             )}
             <IconButton
               label={

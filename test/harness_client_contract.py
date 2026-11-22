@@ -58,6 +58,19 @@ class ModelFixture(BaseHTTPRequestHandler):
             ("message_delta", {"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 3}}),
             ("message_stop", {}),
         ]
+        if any(tool.get("name") == "read_teaching_material" for tool in payload.get("tools", [])):
+            content = payload["messages"][-1]["content"]
+            if not any(block.get("type") == "tool_result" for block in content):
+                events[1:-1] = [
+                    ("content_block_start", {"index": 0, "content_block": {
+                        "type": "tool_use", "id": "read-second", "name": "read_teaching_material", "input": {},
+                    }}),
+                    ("content_block_delta", {"index": 0, "delta": {
+                        "type": "input_json_delta", "partial_json": '{"index":2}',
+                    }}),
+                    ("content_block_stop", {"index": 0}),
+                    ("message_delta", {"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 3}}),
+                ]
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -138,12 +151,41 @@ class HarnessClientContract(unittest.TestCase):
                     "ready": True, "model": "fixture", "totalTokens": 8, "unauthenticatedStatus": 401,
                 })
                 self.assertEqual(len(model.requests), 4)
+                with self.subTest("only the requested excerpt crosses the provider boundary"):
+                    self.check_material_read(url, model.requests)
             finally:
                 service.terminate()
                 try:
                     service.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     service.kill()
+
+    def check_material_read(self, url, requests_seen):
+        first = "第一组样本有九片叶子。"
+        second = "第二组样本有六片叶子。"
+        body = {"messages": [{"role": "user", "content": "只根据第二份材料回答叶片有几片。"}],
+                "materials": [{"text": first}, {"text": second}]}
+        start = len(requests_seen)
+        with patch.dict(os.environ, HARNESS_INTERNAL_URL=url, HARNESS_SERVICE_SECRET="fixture-service",
+                        DOJO_AI_ENABLED="true", HARNESS_DEEPSEEK_MODEL="fixture"):
+            result = client.invoke_teaching_material_turn(body)
+        calls = requests_seen[start:]
+        self.assertEqual([(path, key) for path, key, _ in calls], [("/v1/messages", "fixture-provider")] * 2)
+        self.assertEqual(result["materialReads"], [2])
+        self.assertEqual(result["usage"]["prompt_tokens"], 10)
+        self.assertEqual(result["usage"]["completion_tokens"], 6)
+        self.assertEqual(result["usage"]["total_tokens"], 16)
+        self.assertEqual([tool["name"] for tool in calls[0][2]["tools"]], ["read_teaching_material"])
+        initial = json.dumps(calls[0][2], ensure_ascii=False)
+        self.assertNotIn(first, initial)
+        self.assertNotIn(second, initial)
+        followup = calls[1][2]
+        self.assertNotIn(first, json.dumps(followup, ensure_ascii=False))
+        blocks = followup["messages"][-1]["content"]
+        receipts = [block for block in blocks if block["type"] == "tool_result"]
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(receipts[0]["tool_use_id"], "read-second")
+        self.assertIn(second, json.dumps(receipts[0]["content"], ensure_ascii=False))
 
 
 if __name__ == "__main__":
