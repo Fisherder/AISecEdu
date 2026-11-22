@@ -21,6 +21,17 @@ def ratio(numerator, denominator, digits=4):
     return round(numerator / denominator, digits) if denominator else None
 
 
+def _is_unsubmitted_grade(submission):
+    return submission.status in {"SUBMITTED", "GRADED"} and submission.submitted_at is None
+
+
+def assignment_activity_in_window(submissions, start, end):
+    return [
+        row for row in submissions
+        if in_window(row.updated, start, end) and not _is_unsubmitted_grade(row)
+    ]
+
+
 def assignment_snapshot(assignments, submissions, now):
     """Current task status is independent of the selected activity window."""
     current = {row.assignment_id: row for row in submissions if in_window(row.updated, None, now)}
@@ -28,6 +39,8 @@ def assignment_snapshot(assignments, submissions, now):
     for assignment in assignments:
         submission = current.get(assignment.id)
         status = submission.status if submission else 'NOT_STARTED'
+        if submission and _is_unsubmitted_grade(submission):
+            status = 'IN_PROGRESS'
         completed = status in {'SUBMITTED', 'GRADED'}
         score = (round(100 * float(submission.total_score) / float(submission.max_score), 1)
                  if submission and status == 'GRADED' and submission.max_score else None)

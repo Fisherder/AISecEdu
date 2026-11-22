@@ -1,4 +1,7 @@
+import datetime
+import importlib.util
 import pathlib
+from types import SimpleNamespace
 
 
 def test_teacher_learning_dashboard_exposes_deep_diagnostics_and_drilldown():
@@ -109,3 +112,39 @@ def test_teacher_core_dashboard_projects_large_payload_columns():
     )[0]
     assert "presented = job_view(job)" not in dashboard
     assert '"updated": _timestamp(job.updated)' in dashboard
+
+
+def test_coursework_analytics_excludes_legacy_grades_without_a_submission():
+    root = pathlib.Path(__file__).resolve().parents[1]
+    path = root / "dojo_plugin/learning/analytics_contract.py"
+    spec = importlib.util.spec_from_file_location("coursework_analytics_contract", path)
+    assert spec and spec.loader
+    contract = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(contract)
+    now = datetime.datetime(2026, 11, 23)
+    yesterday = now - datetime.timedelta(days=1)
+    rows = [
+        SimpleNamespace(assignment_id=assignment_id, status=status, submitted_at=submitted_at,
+                        updated=yesterday, total_score=score, max_score=10)
+        for assignment_id, status, submitted_at, score in (
+            ("legacy", "GRADED", None, 10),
+            ("graded", "GRADED", yesterday, 7),
+            ("waiting", "SUBMITTED", yesterday, 0),
+            ("revision", "IN_PROGRESS", yesterday, 5),
+            ("draft", "IN_PROGRESS", None, 0),
+        )
+    ]
+    assignments = [
+        SimpleNamespace(id=row.assignment_id, title=row.assignment_id, due_at=yesterday) for row in rows
+    ]
+
+    snapshot = contract.assignment_snapshot(assignments, rows, now)
+
+    assert (snapshot["submitted"], snapshot["overdue"], snapshot["averageScore"]) == (2, 3, 70.0)
+    assert [(row["status"], row["scorePercent"]) for row in snapshot["items"]] == [
+        ("IN_PROGRESS", None), ("GRADED", 70.0), ("SUBMITTED", None),
+        ("IN_PROGRESS", None), ("IN_PROGRESS", None),
+    ]
+    assert [row.assignment_id for row in contract.assignment_activity_in_window(rows, yesterday, now)] == [
+        "graded", "waiting", "revision", "draft",
+    ]

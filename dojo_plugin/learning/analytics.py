@@ -25,7 +25,10 @@ from .container_progress import (
     sync_live_progress,
 )
 from .standards import ABILITY_DIMENSIONS, ABILITY_LABELS
-from .analytics_contract import activity_timeline, assignment_snapshot, in_window, module_rollup, utc_naive, week_start
+from .analytics_contract import (
+    activity_timeline, assignment_activity_in_window, assignment_snapshot, in_window,
+    module_rollup, utc_naive, week_start,
+)
 from .analytics_queries import attempt_activity_window
 
 
@@ -595,6 +598,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
         submission_query = TeachingAssignmentSubmissions.query.options(load_only(
             TeachingAssignmentSubmissions.assignment_id, TeachingAssignmentSubmissions.student_id,
             TeachingAssignmentSubmissions.updated, TeachingAssignmentSubmissions.status,
+            TeachingAssignmentSubmissions.submitted_at,
             TeachingAssignmentSubmissions.total_score, TeachingAssignmentSubmissions.max_score,
             TeachingAssignmentSubmissions.trust_score,
         )).filter(
@@ -603,7 +607,7 @@ def build_course_learning_analytics(dojo, filters=None, *, summary_only=False):
             TeachingAssignmentSubmissions.updated <= now,
         )
         submission_statuses = submission_query.all()
-        submissions = [row for row in submission_statuses if in_window(row.updated, time_start, now)]
+        submissions = assignment_activity_in_window(submission_statuses, time_start, now)
     else:
         submissions, submission_statuses = [], []
 
