@@ -96,7 +96,7 @@ describe('debate lesson artifact', () => {
     }
   });
 
-  it('escapes teacher-authored strings in the iframe document', () => {
+  it('preserves teacher text in the title, description and key points', () => {
     const html = buildDebateArtifactHtml({
       type: 'debate',
       title: '图书馆 <午间开放>',
@@ -109,5 +109,17 @@ describe('debate lesson artifact', () => {
     expect(html).toContain('图书馆 &lt;午间开放&gt;');
     expect(html).toContain('&lt;示例&gt; 讨论两种开放方案。');
     expect(html).toContain('<li>阅读 &amp; 值班</li>');
+  });
+
+  it('escapes teacher-authored strings in the iframe document', () => {
+    const html = buildDebateArtifactHtml({
+      type: 'debate',
+      title: '<img src=x onerror=alert(1)>',
+      description: '<script>alert(1)</script>',
+    });
+
+    expect(html).not.toContain('<img src=x');
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;img');
   });
 });
