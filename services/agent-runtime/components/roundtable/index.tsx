@@ -26,6 +26,7 @@ import { useSettingsStore, PLAYBACK_SPEEDS } from '@/lib/store/settings';
 import { ProactiveCard } from '@/components/chat/proactive-card';
 import { PresentationSpeechOverlay } from '@/components/roundtable/presentation-speech-overlay';
 import { AvatarDisplay } from '@/components/ui/avatar-display';
+import { classroomPortraitUrl } from '@/lib/constants/classroom-portraits';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { DEFAULT_TEACHER_AVATAR, DEFAULT_USER_AVATAR } from '@/components/roundtable/constants';
@@ -1150,7 +1151,7 @@ export function Roundtable({
 
                       <div className="w-10 h-10 rounded-full bg-white dark:bg-gray-800 overflow-hidden relative z-10 shadow-sm border border-gray-50 dark:border-gray-700">
                         <img
-                          src={teacherAvatar}
+                          src={classroomPortraitUrl(teacherAvatar)}
                           alt={teacherName}
                           className="w-full h-full object-cover"
                         />
@@ -1187,7 +1188,7 @@ export function Roundtable({
                         <div className="flex items-center gap-2">
                           <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 bg-gray-100 dark:bg-gray-800">
                             <img
-                              src={teacherAvatar}
+                              src={classroomPortraitUrl(teacherAvatar)}
                               alt={teacherName}
                               className="w-full h-full object-cover"
                             />
@@ -1911,7 +1912,7 @@ export function Roundtable({
                             />
                             <div className="absolute inset-0.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
                               <img
-                                src={student.avatar}
+                                src={classroomPortraitUrl(student.avatar)}
                                 alt={student.name}
                                 className="w-full h-full"
                               />
@@ -1936,7 +1937,7 @@ export function Roundtable({
                           <div className="flex items-center gap-2">
                             <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 bg-gray-100 dark:bg-gray-800">
                               <img
-                                src={student.avatar}
+                                src={classroomPortraitUrl(student.avatar)}
                                 alt={student.name}
                                 className="w-full h-full"
                               />

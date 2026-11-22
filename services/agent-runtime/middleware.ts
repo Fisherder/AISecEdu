@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isBundledClassroomPortrait } from '@/lib/constants/classroom-portraits';
 
 const SERVICE_HEADER = 'X-AISecEdu-Service-Token';
 const SESSION_COOKIE = 'aisecedu_agent_runtime';
@@ -102,6 +103,10 @@ async function activeSessionScope(
 
 export async function middleware(request: NextRequest) {
   const pathname = withoutBasePath(request.nextUrl.pathname);
+  if ((request.method === 'GET' || request.method === 'HEAD') && isBundledClassroomPortrait(pathname)) {
+    return NextResponse.next();
+  }
+
   const integrated = /^(1|true|yes)$/i.test(process.env.AISECEDU_INTEGRATED?.trim() || '');
 
   if (integrated) {

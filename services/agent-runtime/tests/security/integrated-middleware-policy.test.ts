@@ -1,8 +1,12 @@
-import { describe, expect, test } from 'vitest';
+import { existsSync } from 'node:fs';
+import { NextRequest } from 'next/server';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { classroomPortraitUrl } from '@/lib/constants/classroom-portraits';
 import {
   integratedSessionApiAllowed,
   integratedSessionPageAllowed,
   isModelBilledIntegratedApi,
+  middleware,
 } from '../../middleware';
 
 describe('玄甲 integrated browser API policy', () => {
@@ -74,5 +78,50 @@ describe('玄甲 integrated browser API policy', () => {
     ['/eval/whiteboard', 'student'],
   ] as const)('blocks standalone product page %s for %s', (path, role) => {
     expect(integratedSessionPageAllowed(path, role)).toBe(false);
+  });
+});
+
+describe('bundled classroom portraits', () => {
+  const portraits = ['teacher.png', 'assist.png', 'clown.png', 'user.png'];
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  test.each([
+    ['true', '/agent-runtime'],
+    ['false', ''],
+  ])('serves the bundled portraits with integration=%s and base=%s', async (integrated, basePath) => {
+    vi.stubEnv('AISECEDU_INTEGRATED', integrated);
+    vi.stubEnv('NEXT_PUBLIC_BASE_PATH', basePath);
+    for (const portrait of portraits) {
+      const path = '/avatars/' + portrait;
+      expect(existsSync('public' + path)).toBe(true);
+      const url = classroomPortraitUrl(path);
+      expect(url).toBe(basePath + path);
+      for (const method of ['GET', 'HEAD']) {
+        const response = await middleware(new NextRequest('http://runtime.test' + url, { method }));
+        expect(response.headers.get('x-middleware-next')).toBe('1');
+      }
+    }
+    expect(classroomPortraitUrl('/agent-runtime/avatars/user.png')).toBe('/agent-runtime/avatars/user.png');
+    expect(classroomPortraitUrl('/uploads/user.png')).toBe('/uploads/user.png');
+    expect(classroomPortraitUrl('https://example.test/avatars/user.png')).toBe('https://example.test/avatars/user.png');
+    expect(classroomPortraitUrl('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
+  });
+
+  test.each([
+    ['/avatars/teacher.png', 'POST'],
+    ['/avatars/unknown.png', 'GET'],
+    ['/avatars/teacher.png/other', 'GET'],
+    ['/avatars/extra/teacher.png', 'HEAD'],
+    ['/api/private', 'GET'],
+  ])('keeps %s %s subject to integrated authorization', async (path, method) => {
+    vi.stubEnv('AISECEDU_INTEGRATED', 'true');
+    vi.stubEnv('AISECEDU_PUBLIC_ORIGIN', '');
+    vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '/agent-runtime');
+    const response = await middleware(
+      new NextRequest('http://runtime.test/agent-runtime' + path, { method }),
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.has('x-middleware-next')).toBe(false);
   });
 });

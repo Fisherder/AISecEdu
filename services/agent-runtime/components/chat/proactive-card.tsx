@@ -1,5 +1,6 @@
 'use client';
 
+import { classroomPortraitUrl } from '@/lib/constants/classroom-portraits';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
@@ -175,7 +176,7 @@ export const ProactiveCard = ({
             {agentAvatar && (
               <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 border border-gray-100 dark:border-gray-700">
                 <img
-                  src={agentAvatar}
+                  src={classroomPortraitUrl(agentAvatar)}
                   alt={agentName || ''}
                   className="w-full h-full object-cover"
                 />
