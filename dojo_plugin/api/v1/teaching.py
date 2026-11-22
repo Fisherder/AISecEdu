@@ -50,7 +50,8 @@ from ...agent_runtime.approval_journal import (
     record_execution, recorded_decision, request_reference, require_approved,
 )
 from ...agent_runtime.classroom_preparation import (
-    displayed_image_pages, ordinary_static_lesson, published_classroom_deck, teacher_classroom_summaries,
+    displayed_image_pages, ordinary_classroom_chat_context, ordinary_static_lesson, published_classroom_deck,
+    teacher_classroom_summaries,
 )
 from ...models.global_agent import teaching_id
 from ...agent_runtime.commands import action_execution, admit_action, admit_teacher_tool
@@ -13040,6 +13041,56 @@ class AgentRuntimeEvents(Resource):
             return _error(exc, 401)
 
 
+def _runtime_personal_classroom_artifact(classroom_id, user, scope):
+    if scope.role != "student" or not scope.workspace_id:
+        raise ScopeError("Classroom not found")
+    artifact = _lesson_artifact(classroom_id[6:], user, scope)
+    if artifact.self_workspace_id != scope.workspace_id:
+        raise ScopeError("Classroom not found")
+    return artifact
+
+
+def _runtime_viewable_classroom(classroom_id, user, scope):
+    session = TeachingSessions.query.filter_by(id=classroom_id).first()
+    if session is None:
+        raise ScopeError("Classroom not found")
+    if scope.role == "teacher":
+        if not owner_or_teacher(user, session.owner_id, session.dojo_id):
+            raise ScopeError("Classroom not found")
+    elif not can_view_student_classroom(user, session):
+        raise ScopeError("Classroom not found")
+    if scope.dojo_id is not None and session.dojo_id != scope.dojo_id:
+        raise ScopeError("Classroom not found")
+    if scope.module_index is not None and session.module_index != scope.module_index:
+        raise ScopeError("Classroom not found")
+    return session
+
+
+@teaching_namespace.route("/runtime/classrooms/<string:classroom_id>/ordinary-chat-context")
+class AgentRuntimeOrdinaryClassroomChatContext(Resource):
+    @bypass_csrf_protection
+    def get(self, classroom_id):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,48}", classroom_id):
+            return _error("Invalid classroom id")
+        try:
+            user, scope, _ = _service_session("session:view")
+            if classroom_id.startswith("study_"):
+                artifact = _runtime_personal_classroom_artifact(classroom_id, user, scope)
+                _classroom_lesson(artifact)
+                return _ok({"ordinary": False})
+            session = _runtime_viewable_classroom(classroom_id, user, scope)
+            context = ordinary_classroom_chat_context(
+                session, request.args.get("sceneId"), include_ready=scope.role == "teacher",
+            )
+            if context is None or (context["ordinary"] and scope.role == "student" and (
+                scope.workspace_id or scope.dojo_id != session.dojo_id or scope.module_index != session.module_index
+            )):
+                raise ScopeError("Classroom not found")
+            return _ok(context)
+        except ValueError:
+            return _error("Classroom not found", 404, code="NOT_FOUND")
+
+
 @teaching_namespace.route("/runtime/classrooms/<string:classroom_id>")
 class AgentRuntimeClassroom(Resource):
     """Production classroom storage owned by 玄甲, not container files."""
@@ -13051,11 +13102,7 @@ class AgentRuntimeClassroom(Resource):
         try:
             user, scope, _ = _service_session("session:view")
             if classroom_id.startswith("study_"):
-                if scope.role != "student" or not scope.workspace_id:
-                    raise ScopeError("Classroom not found")
-                artifact = _lesson_artifact(classroom_id[6:], user, scope)
-                if artifact.self_workspace_id != scope.workspace_id:
-                    raise ScopeError("Classroom not found")
+                artifact = _runtime_personal_classroom_artifact(classroom_id, user, scope)
                 rendered = _render_classroom(artifact, classroom_id)
                 return _ok(
                     {
@@ -13068,21 +13115,7 @@ class AgentRuntimeClassroom(Resource):
                         }
                     }
                 )
-            session = TeachingSessions.query.filter_by(id=classroom_id).first()
-            if session is None:
-                raise ScopeError("Classroom not found")
-            if scope.role == "teacher":
-                if not owner_or_teacher(user, session.owner_id, session.dojo_id):
-                    raise ScopeError("Classroom not found")
-            elif not can_view_student_classroom(user, session):
-                raise ScopeError("Classroom not found")
-            if scope.dojo_id is not None and session.dojo_id != scope.dojo_id:
-                raise ScopeError("Classroom not found")
-            if (
-                scope.module_index is not None
-                and session.module_index != scope.module_index
-            ):
-                raise ScopeError("Classroom not found")
+            session = _runtime_viewable_classroom(classroom_id, user, scope)
             return _ok(
                 {
                     "classroom": {

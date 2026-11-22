@@ -37,6 +37,21 @@ export interface TeachingTurnImage {
   data: string;
 }
 
+export type ClassroomDirectorRole = 'teacher' | 'assistant' | 'student';
+
+export interface ClassroomDirectorHistoryEntry {
+  speaker: number | 'user';
+  text: string;
+}
+
+export interface ClassroomDirectorInput {
+  roles: ClassroomDirectorRole[];
+  history: ClassroomDirectorHistoryEntry[];
+  turns: number;
+  topic?: string;
+}
+
+const classroomDirectorTurnPath = '/v1/classroom-director-turn';
 const teachingImageTurnPath = '/v1/teaching-image-turn';
 const maxTextTurnBytes = 1024 * 1024;
 export const MAX_TEACHING_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -50,7 +65,9 @@ export function createTeachingImageTurn(image: TeachingTurnImage): HarnessTurn |
   return createHarnessTransport(teachingImageTurnPath, image);
 }
 
-function configuredHarnessEndpoint(path: '/v1/turn' | typeof teachingImageTurnPath) {
+function configuredHarnessEndpoint(
+  path: '/v1/turn' | typeof teachingImageTurnPath | typeof classroomDirectorTurnPath,
+) {
   const mode = (process.env.DOJO_AI_ENABLED || 'auto').trim().toLowerCase();
   const enabled = mode === 'auto' ? process.env.HARNESS_CONFIGURED?.trim().toLowerCase() : mode;
   if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') return undefined;
@@ -139,23 +156,78 @@ function createHarnessTransport(
       throw new Error('对话服务未返回完整答复。');
     }
 
-    const usage: HarnessUsage = {};
-    for (const field of usageFields) {
-      const tokens = result.usage?.[field];
-      if (typeof tokens === 'number' && Number.isSafeInteger(tokens) && tokens >= 0) {
-        usage[field] = tokens;
-      }
+    const usage = validatedUsage(result.usage);
+    return { text: result.text, model: result.model, ...(usage ? { usage } : {}) };
+  };
+}
+
+function validatedUsage(
+  value: Partial<Record<keyof HarnessUsage, unknown>> | undefined,
+): HarnessUsage | undefined {
+  const usage: HarnessUsage = {};
+  for (const field of usageFields) {
+    const tokens = value?.[field];
+    if (typeof tokens === 'number' && Number.isSafeInteger(tokens) && tokens >= 0) {
+      usage[field] = tokens;
     }
-    return {
-      text: result.text,
-      model: result.model,
-      ...(Object.keys(usage).length ? { usage } : {}),
-    };
+  }
+  return Object.keys(usage).length ? usage : undefined;
+}
+
+export function createClassroomDirectorTurn() {
+  const target = configuredHarnessEndpoint(classroomDirectorTurnPath);
+  if (!target) return undefined;
+
+  return async (
+    input: ClassroomDirectorInput,
+    signal: AbortSignal,
+    capturedSession: AISecEduRequestSession,
+  ) => {
+    const { endpoint, secret } = target;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + secret, 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+      cache: 'no-store',
+      redirect: 'error',
+      signal,
+    }).catch(() => {
+      signal.throwIfAborted();
+      throw new Error('课堂导播服务暂时不可用。');
+    });
+    const result: {
+      decision?: { speaker?: unknown };
+      model?: unknown;
+      usage?: Partial<Record<keyof HarnessUsage, unknown>>;
+    } = await response.json().catch(() => {
+      signal.throwIfAborted();
+      throw new Error('课堂导播服务未返回有效答复。');
+    });
+    if (typeof result?.model === 'string' && result.model.trim()) {
+      await recordHarnessUsage(
+        { model: result.model, usage: validatedUsage(result.usage) },
+        'chat-adapter',
+        capturedSession,
+      );
+    }
+    if (!response.ok) throw new Error('课堂导播服务暂时不可用。');
+
+    const speaker = result?.decision?.speaker;
+    if (
+      (speaker !== 'user' && speaker !== 'end' &&
+        (typeof speaker !== 'number' || !Number.isSafeInteger(speaker) ||
+          speaker < 1 || speaker > input.roles.length)) ||
+      typeof result?.model !== 'string' ||
+      !result.model.trim()
+    ) {
+      throw new Error('课堂导播服务未返回有效答复。');
+    }
+    return speaker;
   };
 }
 
 export async function recordHarnessUsage(
-  result: HarnessTurnResult,
+  result: Pick<HarnessTurnResult, 'model' | 'usage'>,
   source: string,
   capturedSession?: AISecEduRequestSession,
 ) {

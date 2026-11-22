@@ -5,6 +5,9 @@ import { createEngine } from './engine.mjs';
 import {
   materialTurnPath, maxMaterialTurnBytes, validateMaterialTurn, TeachingMaterialTurnError,
 } from './teaching-material.mjs';
+import {
+  directorTurnPath, maxDirectorTurnBytes, validateDirectorTurn, ClassroomDirectorTurnError,
+} from './classroom-director.mjs';
 
 const maxBodyBytes = 1024 * 1024;
 const maxMessages = 128;
@@ -59,12 +62,14 @@ function validate(value, withImages) {
   return { messages, images };
 }
 
-async function readMessages(request, withImages, withMaterials) {
+async function readTurn(request, { withImages, withMaterials, withDirector }) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers['content-type'] ?? '')) {
     throw new RequestError(415, 'Expected application/json');
   }
 
-  const maxBytes = withMaterials ? maxMaterialTurnBytes : withImages ? 7 * maxBodyBytes : maxBodyBytes;
+  const maxBytes = withDirector ? maxDirectorTurnBytes
+    : withMaterials ? maxMaterialTurnBytes
+      : withImages ? 7 * maxBodyBytes : maxBodyBytes;
   const chunks = [];
   let size = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
@@ -78,6 +83,11 @@ async function readMessages(request, withImages, withMaterials) {
     payload = JSON.parse(utf8.decode(Buffer.concat(chunks)));
   } catch {
     throw new RequestError(400, 'Invalid JSON');
+  }
+  if (withDirector) {
+    const director = validateDirectorTurn(payload);
+    if (!director) throw new RequestError(400, 'Expected bounded classroom roles, history and turn count');
+    return { director };
   }
   if (!withMaterials) return validate(payload, withImages);
   const validated = validateMaterialTurn(payload);
@@ -98,7 +108,9 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
     const withImages = request.url === '/v1/teaching-image-turn';
     const imageCapability = withImages && request.method === 'GET';
     const withMaterials = request.url === materialTurnPath;
-    if (!imageCapability && (request.method !== 'POST' || (!withImages && !withMaterials && request.url !== '/v1/turn'))) {
+    const withDirector = request.url === directorTurnPath;
+    if (!imageCapability && (request.method !== 'POST' ||
+        (!withImages && !withMaterials && !withDirector && request.url !== '/v1/turn'))) {
       json(response, 404, { error: 'Not found' });
       return;
     }
@@ -128,10 +140,13 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
     response.once('close', abort);
     const deadline = AbortSignal.timeout(timeoutMs);
     try {
-      const { messages, images, question, materials } = await readMessages(request, withImages, withMaterials);
+      const { messages, images, question, materials, director } = await readTurn(request, {
+        withImages, withMaterials, withDirector,
+      });
       const signal = AbortSignal.any([disconnect.signal, deadline]);
       let result;
-      if (withMaterials) result = await engine.materialTurn(question, materials, signal);
+      if (withDirector) result = await engine.directorTurn(director, signal);
+      else if (withMaterials) result = await engine.materialTurn(question, materials, signal);
       else if (withImages) result = await engine.imageTurn(messages, signal, images);
       else result = await engine.turn(messages, signal);
       if (!response.destroyed) json(response, 200, result);
@@ -142,6 +157,11 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
         json(response, error.status, { error: error.message });
       } else if (error?.name === 'AttachmentError') {
         json(response, 400, { error: 'Teaching image could not be read within the configured limits' });
+      } else if (withDirector && error instanceof ClassroomDirectorTurnError) {
+        json(response, deadline.aborted ? 504 : 502, {
+          error: deadline.aborted ? 'Model turn timed out' : 'Classroom director turn failed',
+          ...error.receipt,
+        });
       } else if (withMaterials && error instanceof TeachingMaterialTurnError) {
         json(response, deadline.aborted ? 504 : 502, {
           error: deadline.aborted ? 'Model turn timed out' : 'Teaching material turn failed',

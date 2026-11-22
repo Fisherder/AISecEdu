@@ -1,5 +1,9 @@
 'use client';
 
+import {
+  ordinaryClassroomChatHeader,
+  ordinaryClassroomChatRoute,
+} from '@/lib/chat/ordinary-classroom-contract';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   nextChatUpdatedAt,
@@ -339,8 +343,7 @@ export async function runPiSingleRequest(
   t: (key: string) => string,
   locale: string,
   onResponseAccepted?: () => void,
-): Promise<void> {
-  const consumer = createConsumer(sessionId, controller, sessionType);
+): Promise<'ordinary' | void> {
   const response = await fetch('/api/chat/pi', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-User-Locale': locale },
@@ -348,6 +351,9 @@ export async function runPiSingleRequest(
     signal: controller.signal,
   });
 
+  if (response.status === 409 && response.headers.get(ordinaryClassroomChatHeader) === ordinaryClassroomChatRoute) {
+    return 'ordinary';
+  }
   if (!response.ok) {
     throw new Error(`Pi chat request failed: ${response.status}`);
   }
@@ -355,6 +361,7 @@ export async function runPiSingleRequest(
     throw new Error('Pi chat response body is empty');
   }
   onResponseAccepted?.();
+  const consumer = createConsumer(sessionId, controller, sessionType);
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -1151,7 +1158,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         const piRequestTemplate = firstRequestContext
           ? { ...requestTemplate, storeState, piSessionBoundary: firstRequestContext }
           : { ...requestTemplate, storeState };
-        await runPiSingleRequest(
+        const piOutcome = await runPiSingleRequest(
           sessionId,
           withPiInclassWhiteboardTools(piRequestTemplate),
           controller,
@@ -1174,7 +1181,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
               }
             : undefined,
         );
-        return;
+        if (piOutcome !== 'ordinary') return;
       }
 
       const streamConsumer = createStatelessStreamConsumer(sessionId, controller, sessionType);
@@ -1189,7 +1196,10 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
 
           getMessages: () => {
             const currentSession = sessionsRef.current.find((s) => s.id === sessionId);
-            return currentSession?.messages ?? requestTemplate.messages;
+            const latestMessages = currentSession?.messages;
+            return latestMessages && latestMessages.length >= requestTemplate.messages.length
+              ? latestMessages
+              : requestTemplate.messages;
           },
 
           fetchChat: (body, signal) =>

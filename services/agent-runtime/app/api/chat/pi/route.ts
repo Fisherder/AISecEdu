@@ -6,6 +6,10 @@
  */
 
 import { NextRequest } from 'next/server';
+import {
+  ordinaryClassroomChatHeader,
+  ordinaryClassroomChatRoute,
+} from '@/lib/chat/ordinary-classroom-contract';
 import { isPiChatEnabled } from '@/lib/config/feature-flags';
 import i18n from '@/lib/i18n/config';
 import { defaultLocale, supportedLocales, translate } from '@/lib/i18n';
@@ -19,6 +23,7 @@ import { runHarnessClassroom } from '@/lib/chat/pi/harness-classroom';
 import type { SendEvent } from '@/lib/chat/pi/types';
 import { createHarnessTurn } from '@/lib/server/agent-harness/classroom-turn';
 import { apiError } from '@/lib/server/api-response';
+import { resolveOrdinaryClassroomChat } from '@/lib/server/ordinary-classroom-chat';
 import type { StatelessChatRequest } from '@/lib/types/chat';
 
 const log = createLogger('Pi Chat API');
@@ -61,6 +66,14 @@ export async function POST(req: NextRequest) {
         400,
         'config.agentIds must be a non-empty array of unique, non-empty strings',
       );
+    }
+
+    const authority = await resolveOrdinaryClassroomChat(req, body);
+    if (authority.kind === 'error') return authority.response;
+    if (authority.kind === 'ordinary') {
+      const response = apiError('INVALID_REQUEST', 409, '请使用普通课堂对话。');
+      response.headers.set(ordinaryClassroomChatHeader, ordinaryClassroomChatRoute);
+      return response;
     }
 
     const agentConfigs = resolveAgentConfigs(body);

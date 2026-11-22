@@ -13,11 +13,21 @@
  */
 
 import { NextRequest } from 'next/server';
+import {
+  ordinaryClassroomChatHeader,
+  ordinaryClassroomChatRoute,
+} from '@/lib/chat/ordinary-classroom-contract';
 import { statelessGenerate } from '@/lib/orchestration/stateless-generate';
 import type { StatelessChatRequest, StatelessEvent } from '@/lib/types/chat';
 import { apiError } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
-import { createClassroomTurn } from '@/lib/server/agent-harness/classroom-turn';
+import {
+  createClassroomDirectorTurn,
+  createClassroomTurn,
+  createHarnessTurn,
+} from '@/lib/server/agent-harness/classroom-turn';
+import { ordinaryClassroomChat } from '@/lib/orchestration/ordinary-classroom-chat';
+import { resolveOrdinaryClassroomChat } from '@/lib/server/ordinary-classroom-chat';
 const log = createLogger('Chat API');
 
 // Allow streaming responses up to 60 seconds
@@ -53,17 +63,28 @@ export async function POST(req: NextRequest) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing required field: storeState');
     }
 
-    if (!body.config || !body.config.agentIds || body.config.agentIds.length === 0) {
+    if (!Array.isArray(body.config?.agentIds) || body.config.agentIds.length === 0) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing required field: config.agentIds');
     }
 
-    const runTurn = createClassroomTurn();
-    if (!runTurn) return apiError('UPSTREAM_ERROR', 503, '课堂对话服务尚未配置。');
+    const authority = await resolveOrdinaryClassroomChat(req, body);
+    if (authority.kind === 'error') return authority.response;
 
-    log.info('Processing request');
-    log.info(
-      `Agents: ${body.config.agentIds.join(', ')}, Messages: ${body.messages.length}, Turn: ${body.directorState?.turnCount ?? 0}`,
-    );
+    let generate: (deadline: AbortSignal) => AsyncGenerator<StatelessEvent>;
+    if (authority.kind === 'ordinary') {
+      const runDirector = createClassroomDirectorTurn();
+      const runSpeech = createHarnessTurn();
+      if (!runDirector || !runSpeech) {
+        return apiError('UPSTREAM_ERROR', 503, '课堂对话服务尚未配置。');
+      }
+      generate = (deadline) => ordinaryClassroomChat(
+        body, authority.context, authority.capturedSession, deadline, runDirector, runSpeech,
+      );
+    } else {
+      const runTurn = createClassroomTurn();
+      if (!runTurn) return apiError('UPSTREAM_ERROR', 503, '课堂对话服务尚未配置。');
+      generate = (deadline) => statelessGenerate(body, deadline, runTurn);
+    }
 
     // Use the native request signal for abort propagation
     const signal = req.signal;
@@ -99,7 +120,7 @@ export async function POST(req: NextRequest) {
         startHeartbeat();
 
         const deadline = AbortSignal.any([signal, AbortSignal.timeout(55_000)]);
-        const generator = statelessGenerate(body, deadline, runTurn);
+        const generator = generate(deadline);
 
         for await (const event of generator) {
           if (signal.aborted) {
@@ -153,6 +174,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
+        ...(authority.kind === 'ordinary' ? { [ordinaryClassroomChatHeader]: ordinaryClassroomChatRoute } : {}),
       },
     });
   } catch (error) {

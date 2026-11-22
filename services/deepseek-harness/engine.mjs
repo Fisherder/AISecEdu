@@ -16,6 +16,9 @@ import ToolRuntime from '@deepseek-ai/dsh-tools';
 import {
   materialSystemPrompt, teachingMaterialPlugin, TeachingMaterialTurnError,
 } from './teaching-material.mjs';
+import {
+  classroomDirectorPlugin, directorSystemPrompt, ClassroomDirectorTurnError, validateDirectorTurn,
+} from './classroom-director.mjs';
 
 const provider = 'deepseek-official';
 
@@ -64,19 +67,19 @@ function formatUsage(usage) {
   };
 }
 
-function formatMaterialUsage(usage) {
+function formatMeasuredUsage(usage) {
   if (!usage || ![usage.inputTokens, usage.outputTokens].every(value =>
     Number.isSafeInteger(value) && value >= 0,
   )) return;
   const fields = formatUsage(usage);
   // The official adapter initializes absent counters to zero. This nonempty
-  // question and the emitted tool call/answer necessarily consume both kinds.
+  // input and the emitted tool call or answer necessarily consume both kinds.
   if (fields?.prompt_tokens > 0 && fields.completion_tokens > 0 && Object.values(fields).every(value =>
     value === undefined || (Number.isSafeInteger(value) && value >= 0),
   )) return fields;
 }
 
-function sumMaterialUsage(measured) {
+function sumMeasuredUsage(measured) {
   if (!measured.length) return;
   const total = {};
   for (const step of measured) {
@@ -153,12 +156,21 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
       return runTurn([
         { role: 'system', content: materialSystemPrompt(materials.length) },
         { role: 'user', content: question },
-      ], signal, [], materials);
+      ], signal, [], { materials });
+    },
+    directorTurn(input, signal) {
+      const director = validateDirectorTurn(input);
+      if (!director) throw new Error('Invalid classroom director input');
+      return runTurn([
+        { role: 'system', content: directorSystemPrompt },
+        { role: 'user', content: JSON.stringify(director) },
+      ], signal, [], { director });
     },
   };
 
-  async function runTurn(messages, signal, images = [], materials) {
+  async function runTurn(messages, signal, images = [], { materials, director } = {}) {
     const materialReads = new Set();
+    const decision = {};
     const measured = [];
     let modelAttempts = 0;
     let assistant;
@@ -181,10 +193,11 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
 
       handle = await ctx.agents.create({
         sessionId: SessionId(randomUUID()),
-        agentOptions: { provider, model },
+        agentOptions: { provider, model, ...(director ? { maxTokens: 512 } : {}) },
         signal,
         async setup(scope, agent) {
           if (materials) await scope.plugin(teachingMaterialPlugin(materials, materialReads));
+          if (director) await scope.plugin(classroomDirectorPlugin(director.roles.length, decision));
           scope.systemPrompt.section({
             name: 'request-system', order: 0, interpolate: false, text: system,
           });
@@ -193,12 +206,12 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
             if (session !== agent.session) return;
             if (event.type === 'assistant/message') assistant = event.data;
             if (event.type === 'turn/end') finish = event.data.reason.kind;
-            if (materials && (event.type === 'assistant/message' || event.type === 'assistant/attempt')) {
+            if ((materials || director) && (event.type === 'assistant/message' || event.type === 'assistant/attempt')) {
               modelAttempts += 1;
               const usage = event.data.usage ?? event.data.stream.findLast(record =>
                 record.type === 'chunk' && record.chunk.type === 'usage',
               )?.chunk.usage;
-              const snapshot = formatMaterialUsage(usage);
+              const snapshot = formatMeasuredUsage(usage);
               if (snapshot) measured.push(snapshot);
             }
           });
@@ -211,22 +224,34 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
       await handle.agent.whenIdle();
       signal.throwIfAborted();
       if (finish !== 'completed' || assistant === undefined) throw new Error('Model turn failed');
-      const { message, usage } = assistant;
+      const { message, usage, stream } = assistant;
+      if (director) {
+        const total = sumMeasuredUsage(measured);
+        const stop = stream.findLast(record => record.type === 'chunk' && record.chunk.type === 'finish');
+        if (decision.speaker === undefined || modelAttempts !== 1 || measured.length !== modelAttempts || !total ||
+            stop?.chunk.reason.kind !== 'tool-calls' ||
+            message.content.some(block => block.type !== 'reasoning' && block.type !== 'tool-call')) {
+          throw new Error('Classroom director did not complete with one measured choice');
+        }
+        return { decision, model: message.source.model, usage: total };
+      }
       const text = message.content.filter(block => block.type === 'text').map(block => block.text).join('');
       if (!text.trim()) throw new Error('Model returned no text');
       // The official loop records the requested model in source, even when the
       // provider returns a different model identifier for an alias.
       if (!materials) return { text, model: message.source.model, usage: formatUsage(usage) };
 
-      const total = sumMaterialUsage(measured);
+      const total = sumMeasuredUsage(measured);
       if (!materialReads.size || modelAttempts < 2 || measured.length !== modelAttempts || !total) {
         throw new Error('Teaching material turn did not complete with measured reads');
       }
       return { text, model: message.source.model, usage: total, materialReads: [...materialReads] };
     } catch (error) {
-      if (!materials) throw error;
-      const usage = sumMaterialUsage(measured);
-      throw new TeachingMaterialTurnError(usage ? { model, usage } : {});
+      if (!materials && !director) throw error;
+      const usage = sumMeasuredUsage(measured);
+      const receipt = usage ? { model, usage } : {};
+      if (director) throw new ClassroomDirectorTurnError(receipt);
+      throw new TeachingMaterialTurnError(receipt);
     } finally {
       signal.removeEventListener('abort', cancel);
       unsubscribe?.();

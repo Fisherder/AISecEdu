@@ -7,15 +7,17 @@ import hashlib
 import json
 import re
 import sys
+from html import unescape
 from pathlib import Path
+from sys import float_info
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import requests
 from flask import Flask, request
-from sqlalchemy import create_engine, Column, Integer, String, JSON, DateTime
-from sqlalchemy.orm import declarative_base, scoped_session, sessionmaker
+from sqlalchemy import and_, cast, create_engine, exists, or_, Column, Integer, String, JSON, DateTime
+from sqlalchemy.orm import aliased, declarative_base, scoped_session, sessionmaker
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +60,13 @@ class Message(Base):
 class User(Base):
     __tablename__ = "user"
     id = Column(Integer, primary_key=True)
+    type = Column(String)
+
+
+class Admin(Base):
+    __tablename__ = "dojo_admin"
+    user_id = Column(Integer, primary_key=True)
+    dojo_id = Column(Integer, primary_key=True)
 
 
 class Artifact(Base):
@@ -91,6 +100,8 @@ class Session(Base):
     thread_id = Column(String)
     title = Column(String)
     status = Column(String)
+    started = Column(DateTime)
+    ended = Column(DateTime)
     state = Column(JSON)
 
 
@@ -117,7 +128,8 @@ class ScopeError(ValueError):
 def _source(path, names, namespace, *, all_functions=False):
     selected = []
     for node in ast.parse(path.read_text()).body:
-        if getattr(node, "name", None) in names or (
+        assignment_names = {target.id for target in node.targets if isinstance(target, ast.Name)} if isinstance(node, ast.Assign) else set()
+        if getattr(node, "name", None) in names or assignment_names & names or (
             all_functions and isinstance(node, ast.FunctionDef)
         ) or (all_functions and isinstance(node, ast.Assign)):
             if isinstance(node, ast.ClassDef):
@@ -142,17 +154,34 @@ def _fixture_content():
 
 
 @pytest.fixture
-def prepared(monkeypatch):
+def rendered_chart(request):
+    return getattr(request, "param", None)
+
+
+@pytest.fixture
+def prepared(monkeypatch, rendered_chart):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     db = scoped_session(sessionmaker(bind=engine))
-    for model in (Thread, Job, Message, User, Artifact, Revision, Session, Action):
+    for model in (Thread, Job, Message, User, Admin, Artifact, Revision, Session, Action):
         monkeypatch.setattr(model, "query", db.query_property(), raising=False)
     actor = User(id=1)
     submission = SimpleNamespace(actor_id=1, permitted=True, course_enabled=True, decision="APPROVED")
     content = _fixture_content()
+    content["lesson"]["artifacts"][0]["content"]["speakerNotes"] = "教师私有备注"
+    if rendered_chart is not None:
+        page = content["lesson"]["artifacts"][0]["content"]["studio"]["page"]
+        page["visual"] = {
+            "kind": "chart", "chartType": rendered_chart["chartType"], "labels": ["春", "夏"],
+            "series": [{"name": "样本", "values": [2, 3]}], "unit": "片", "basis": "生长观察",
+            "illustrative": True,
+        }
     hashing = {"hashlib": hashlib, "json": json}
     _source(RUNTIME / "artifacts.py", {"content_hash"}, hashing)
+    redaction = {"re": re}
+    _source(ROOT / "dojo_plugin/learning/evidence.py", {"SENSITIVE_PATTERNS", "redact_text"}, redaction)
+    _source(ROOT / "dojo_plugin/learning/tutor_context.py", {"RESTRICTED_TUTOR_REQUEST"}, redaction)
+    _source(ROOT / "dojo_plugin/learning/guide_model_context.py", {"RAW_TECHNICAL_TEXT", "guide_teaching_text"}, redaction)
     digest = hashing["content_hash"](content)
     proposal = {
         "tool": "classroom.prepare", "requiresConfirmation": True,
@@ -160,7 +189,7 @@ def prepared(monkeypatch):
         "boundScope": {"dojoId": -21, "moduleIndex": 0},
     }
     db.add_all([
-        actor, User(id=2),
+        actor, User(id=2), Admin(user_id=1, dojo_id=-21),
         Thread(id="thread-1", user_id=1, status="ACTIVE", dojo_id=-21, module_index=0),
         Job(id="job-9", owner_id=1, thread_id="thread-1", status="SUCCEEDED", kind="agent.chat",
             dojo_id=-21, module_index=0, payload={"chatBackend": "upstream"}),
@@ -191,19 +220,46 @@ def prepared(monkeypatch):
         assert db.query(Session).count() == 0
         response = MagicMock(status_code=200)
         response.json.return_value = {"success": True, "result": {
-            "stage": {"id": classroom_id, "name": "植物课堂"},
-            "scenes": [{"id": "scene1", "stageId": classroom_id, "type": "slide",
-                        "content": {"type": "slide", "canvas": {"elements": [{"type": "text"}]}}}],
+            "stage": {"id": classroom_id, "name": "植物生长"},
+            "scenes": [{"id": f"{classroom_id}-leaves", "stageId": classroom_id, "type": "slide",
+                        "title": "观察叶片", "content": {"type": "slide", "canvas": {"elements": [
+                            {"type": "text", "content": '<p style="font-size:20px">观察叶片 &amp; 光照</p>'},
+                            {"type": "text", "content": '<p style="font-size:20px">token=fixture-secret</p>'},
+                        ]}}}],
         }}
+        if rendered_chart is not None:
+            elements = response.json.return_value["result"]["scenes"][0]["content"]["canvas"]["elements"]
+            elements.append(rendered_chart)
         return response
 
     renderer = MagicMock(side_effect=render)
+    chat_viewer = SimpleNamespace(
+        role="student", dojo_id=-21, module_index=0, workspace_id=None, member=True, authenticated=True,
+    )
+
+    def service_session(capability):
+        assert capability == "session:view"
+        if not chat_viewer.authenticated:
+            raise ScopeError("Invalid session")
+        return db.get(User, 2 if chat_viewer.role == "student" else 1), chat_viewer, "signed-session"
+
+    def lesson_artifact(artifact_id, user, scope):
+        if artifact_id != "personal" or user.id != 2 or scope.workspace_id != "work-2":
+            raise ScopeError("Classroom not found")
+        return SimpleNamespace(self_workspace_id="work-2")
+
     namespace = dict(
         __name__="dojo_plugin.api.v1.teaching", __package__="dojo_plugin.api.v1",
         re=re, json=json, hashlib=hashlib, datetime=datetime, content_hash=hashing["content_hash"], requests=SimpleNamespace(
             post=renderer, RequestException=requests.RequestException,
         ),
-        ScopeError=ScopeError, Resource=object, request=request,
+        ScopeError=ScopeError, AgentRuntimeAuthError=ScopeError, Resource=object, request=request,
+        unescape=unescape, float_info=float_info, and_=and_, cast=cast, exists=exists, or_=or_, aliased=aliased, String=String,
+        DojoAdmins=Admin, _service_session=service_session, _lesson_artifact=lesson_artifact,
+        _classroom_lesson=lambda _: content["lesson"],
+        guide_teaching_text=redaction["guide_teaching_text"],
+        owner_or_teacher=lambda user, owner_id, _: user.id == owner_id,
+        can_view_student_classroom=lambda user, session: chat_viewer.member and session.status in {"LIVE", "ENDED"},
         db=SimpleNamespace(session=db), TeachingAgentThreads=Thread, TeachingJobs=Job,
         TeachingAgentMessages=Message, TeachingArtifacts=Artifact, TeachingArtifactRevisions=Revision,
         Users=User, TeachingSessions=Session, TeachingAgentActions=Action,
@@ -224,7 +280,8 @@ def prepared(monkeypatch):
     approval = namespace["request_reference"](namespace["proposal_request"]("thread-1", 9, 0, proposal))
     _source(API, {"_ok", "_error", "_supplied_idempotency", "_render_ordinary_classroom",
                   "_ordinary_classroom_scope", "TeachingToolPrepareClassroom", "_classroom_preparation_key",
-                  "_project_classroom_preparation_receipts"}, namespace)
+                  "_project_classroom_preparation_receipts", "_runtime_personal_classroom_artifact",
+                  "_runtime_viewable_classroom", "AgentRuntimeOrdinaryClassroomChatContext"}, namespace)
     metadata = ModuleType("dojo_plugin.agent_runtime.tool_plan")
     metadata.message_metadata = lambda item: item.metadata_json
     monkeypatch.setitem(sys.modules, metadata.__name__, metadata)
@@ -245,7 +302,13 @@ def prepared(monkeypatch):
     declaration = next(node for node in ast.parse(API.read_text()).body
                        if isinstance(node, ast.ClassDef) and node.name == "TeachingToolPrepareClassroom")
     app.add_url_rule(ast.literal_eval(declaration.decorator_list[0].args[0]), view_func=lambda **args: handler(None, **args), methods=["POST"])
+    chat_handler = namespace["AgentRuntimeOrdinaryClassroomChatContext"].get
+    chat_declaration = next(node for node in ast.parse(API.read_text()).body
+                            if isinstance(node, ast.ClassDef) and node.name == "AgentRuntimeOrdinaryClassroomChatContext")
+    app.add_url_rule(ast.literal_eval(chat_declaration.decorator_list[0].args[0]),
+                     endpoint="ordinary_chat", view_func=lambda **args: chat_handler(None, **args), methods=["GET"])
     yield SimpleNamespace(db=db, submission=submission, renderer=renderer, client=app.test_client(),
+                          chat_viewer=chat_viewer,
                           approval=approval, content=content, helper=namespace["published_classroom_deck"], render=render,
                           execution_receipt=namespace["record_execution"],
                           project_receipts=namespace["_project_classroom_preparation_receipts"],
@@ -262,7 +325,7 @@ def test_approved_snapshot_creates_one_ready_teaching_session(prepared):
                                      "artifactRevision": 3, "deduplicated": False}
     row = prepared.db.query(Session).one()
     assert (row.status, row.title, row.dojo_id, row.module_index) == ("READY", "植物课堂", -21, 0)
-    assert row.state["scenes"][0]["id"] == "scene1"
+    assert row.state["scenes"][0]["id"] == "session_synthetic-leaves"
     assert row.state["artifactContentHash"] == prepared.db.query(Revision).one().content_hash
     action = prepared.db.query(Action).one()
     assert action.result["sessionId"] == row.id
@@ -448,3 +511,126 @@ def test_current_classroom_pin_rechecks_original_owner_scope_and_recorded_revisi
         prepared.db.query(Revision).one().content_hash = "0" * 64
     prepared.db.commit()
     assert prepared.current_pin(job, payload) is None
+
+@pytest.mark.parametrize(("role", "status"), [("student", "LIVE"), ("student", "ENDED"), ("teacher", "READY")])
+def test_prepared_static_chat_context_is_readable_by_current_member(prepared, role, status):
+    assert prepared.client.post(PATH, json={"approvalRequest": prepared.approval}).status_code == 201
+    row = prepared.db.query(Session).one()
+    prepared.chat_viewer.role = role
+    if status != "READY":
+        row.started = datetime.datetime(2026, 1, 1)
+    if status == "ENDED":
+        row.ended = datetime.datetime(2026, 1, 2)
+    row.status = status
+    prepared.db.commit()
+    response = prepared.client.get(
+        f"/runtime/classrooms/{row.id}/ordinary-chat-context", query_string={"sceneId": f"{row.id}-leaves"},
+    )
+    assert response.status_code == 200, response.json
+    assert response.json["data"] == {
+        "ordinary": True, "topic": "植物生长", "slideText": "观察叶片\n观察叶片 & 光照\ntoken=[REDACTED]",
+    }
+
+
+@pytest.mark.parametrize("denial", [
+    "student-ready", "revoked-course", "left-course", "wrong-module", "personal-scope",
+    "teacher-removed", "changed-scenes", "deleted-state", "lost-receipt",
+    "lost-scene-hash", "changed-revision", "wrong-scene", "missing-scene", "unsigned",
+])
+def test_prepared_classroom_denial_never_returns_legacy_context(prepared, denial):
+    assert prepared.client.post(PATH, json={"approvalRequest": prepared.approval}).status_code == 201
+    row = prepared.db.query(Session).one()
+    scene_id = f"{row.id}-leaves"
+    if denial != "student-ready":
+        row.started = datetime.datetime(2026, 1, 1)
+        row.status = "LIVE"
+    if denial == "revoked-course":
+        prepared.submission.course_enabled = False
+    if denial == "left-course":
+        prepared.chat_viewer.member = False
+    if denial == "wrong-module":
+        prepared.chat_viewer.module_index = 1
+    if denial == "personal-scope":
+        prepared.chat_viewer.workspace_id = "work-2"
+    if denial == "teacher-removed":
+        prepared.db.query(Admin).delete()
+    if denial == "changed-scenes":
+        changed = copy.deepcopy(row.state)
+        changed["scenes"][0]["title"] = "篡改"
+        row.state = changed
+    if denial == "deleted-state":
+        row.state = {}
+    if denial == "lost-receipt":
+        prepared.db.query(Action).delete()
+    if denial == "lost-scene-hash":
+        action = prepared.db.query(Action).one()
+        action.request_json = {key: value for key, value in action.request_json.items() if key != "ordinaryScenesHash"}
+    if denial == "changed-revision":
+        prepared.db.query(Artifact).one().current_revision = 4
+    if denial == "wrong-scene":
+        scene_id = "forged"
+    if denial == "missing-scene":
+        scene_id = None
+    if denial == "unsigned":
+        prepared.chat_viewer.authenticated = False
+    prepared.db.commit()
+    response = prepared.client.get(
+        f"/runtime/classrooms/{row.id}/ordinary-chat-context",
+        query_string={"sceneId": scene_id} if scene_id else {},
+    )
+    assert response.status_code == 404, response.json
+    assert "data" not in response.json
+
+
+def test_accessible_legacy_and_owned_personal_classes_can_fall_back(prepared):
+    prepared.db.add(Session(id="generic", owner_id=1, dojo_id=-21, module_index=0, status="LIVE",
+                            state={"renderer": "agent-runtime-stage"}))
+    prepared.db.commit()
+    generic = "/runtime/classrooms/generic/ordinary-chat-context"
+    personal = "/runtime/classrooms/study_personal/ordinary-chat-context"
+    assert prepared.client.get(generic).json["data"] == {"ordinary": False}
+    assert prepared.client.get(personal).status_code == 404
+    prepared.chat_viewer.workspace_id = "work-2"
+    assert prepared.client.get(personal).json["data"] == {"ordinary": False}
+    prepared.chat_viewer.member = False
+    assert prepared.client.get(generic).status_code == 404
+
+
+def _chart_fixture(kind, labels, legends, series):
+    return {"id": "evidence-chart", "type": "chart", "chartType": kind,
+            "data": {"labels": labels, "legends": legends, "series": series, "private": "隐藏字段"}}
+
+
+@pytest.mark.parametrize(("rendered_chart", "expected"), [
+    *[
+        (_chart_fixture(kind, ["春", "夏"], ["token=hidden"], [[0, 1.25]]),
+         ["图表类别（按顺序）：春、夏", "token=[REDACTED]：0, 1.25"])
+        for kind in ("bar", "column", "line", "ring", "area")
+    ],
+    (_chart_fixture("column", [f"类别 {i}" for i in range(1, 13)], ["甲", "乙", "丙"],
+                    [list(range(12)), [2] * 12, [-1.25] * 11 + [float_info.max]]),
+     ["类别 12", "甲：0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11", "乙：2, 2, 2", "1.7976931348623157e+308"]),
+    (_chart_fixture("line", ["春", "夏"], ["错误系列"], [[1]]), []),
+    (_chart_fixture("line", ["春", "夏"], ["错误系列"], [[1, True]]), []),
+    (_chart_fixture("line", ["春", "夏"], ["错误系列"], [[1, "2"]]), []),
+    (_chart_fixture("line", ["春"] * 13, ["错误系列"], [[1] * 13]), []),
+    (_chart_fixture("line", ["春", "夏"], ["错误系列"] * 4, [[1, 2]] * 4), []),
+    (_chart_fixture("line", ["春", "夏"], ["错误系列", "额外图例"], [[1, 2]]), []),
+    (_chart_fixture("ring", ["春", "夏"], ["错误系列"], [[-1, 2]]), []),
+], indirect=["rendered_chart"])
+def test_prepared_chat_projects_only_valid_compiled_chart_data(prepared, expected):
+    assert prepared.client.post(PATH, json={"approvalRequest": prepared.approval}).status_code == 201
+    row = prepared.db.query(Session).one()
+    row.status = "LIVE"
+    row.started = datetime.datetime(2026, 1, 1)
+    prepared.db.commit()
+    response = prepared.client.get(
+        f"/runtime/classrooms/{row.id}/ordinary-chat-context", query_string={"sceneId": f"{row.id}-leaves"},
+    )
+    assert response.status_code == 200, response.json
+    slide_text = response.json["data"]["slideText"]
+    assert ("图表类别" in slide_text) is bool(expected)
+    assert all(text in slide_text for text in expected)
+    assert "观察叶片 & 光照" in slide_text
+    assert "隐藏字段" not in slide_text
+    assert "token=hidden" not in slide_text

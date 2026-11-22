@@ -11,6 +11,11 @@
  * indicate something is wrong.
  */
 
+import {
+  ordinaryClassroomChatHeader,
+  ordinaryClassroomChatRoute,
+  ordinaryClassroomRoundLimit,
+} from './ordinary-classroom-contract';
 import type { StatelessEvent, DirectorState } from '@/lib/types/chat';
 import type { ThinkingConfig } from '@/lib/types/provider';
 import { createLogger } from '@/lib/logger';
@@ -158,6 +163,7 @@ export async function runAgentLoop(
   let directorState: DirectorState | undefined = undefined;
   let turnCount = 0;
   let consecutiveEmptyTurns = 0;
+  let ordinaryTurns = 0;
 
   while (true) {
     if (signal.aborted) {
@@ -249,6 +255,14 @@ export async function runAgentLoop(
     // Director said USER — stop loop
     if (iterationResult.cueUserReceived) {
       return { reason: 'cue_user', directorState, turnCount };
+    }
+
+    if (iterationResult.totalAgents > 0 &&
+      response.headers.get(ordinaryClassroomChatHeader) === ordinaryClassroomChatRoute) {
+      ordinaryTurns++;
+      if (ordinaryTurns >= ordinaryClassroomRoundLimit) {
+        return { reason: 'cue_user', directorState, turnCount };
+      }
     }
 
     // Director said END — no agent spoke
