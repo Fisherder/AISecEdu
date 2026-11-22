@@ -525,3 +525,27 @@ def test_creation_uses_only_summaries_of_exact_referenced_versions(flow, monkeyp
     returned_ref["sha256"] = "b" * 64
     with pytest.raises(flow.OrdinaryDebateError):
         flow.prepare(job, job.payload)
+
+
+@pytest.mark.parametrize("status", [404, 307, 308])
+def test_older_or_redirecting_classroom_cannot_reroute_debate(flow, status):
+    from time import monotonic
+    from unittest.mock import Mock
+
+    frozen = flow.admit_job("artifact.materialize", flow.payload)
+    job = flow.new_job("artifact.materialize", frozen)
+    prepared = flow.prepare(job, job.payload)
+    route = flow.route_model(job.kind, payload=prepared)
+    response = Mock(status_code=status)
+    post = Mock(return_value=response)
+    ns = dict(vars(flow), ordinary_debate=flow, time=SimpleNamespace(monotonic=monotonic),
+              config=SimpleNamespace(AGENT_RUNTIME_INTERNAL_URL="http://classroom", AGENT_RUNTIME_SERVICE_SECRET="fixture"),
+              requests=SimpleNamespace(post=post), AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS=(),
+              _runtime_read_timeout=lambda *_: 30, RuntimeJobError=lambda _, **kw: RuntimeError(kw["code"]))
+    load_source("jobs", ns, {"_runtime_request_body", "_invoke_agent_runtime"})
+    with pytest.raises(RuntimeError, match="ORDINARY_DEBATE_ROUTE_UNAVAILABLE"):
+        ns["_invoke_agent_runtime"](job, route, prepared)
+    post.assert_called_once()
+    assert post.call_args.args == ("http://classroom/api/integration/jobs/ordinary-debate",)
+    assert post.call_args.kwargs["allow_redirects"] is False
+    response.close.assert_called_once()

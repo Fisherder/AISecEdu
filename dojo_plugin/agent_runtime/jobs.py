@@ -3557,6 +3557,9 @@ def _invoke_agent_runtime(job, route, payload=None):
                 code="ORDINARY_SLIDE_LAYOUT_ROUTE_UNAVAILABLE" if layout_endpoint else "ORDINARY_DECK_ROUTE_UNAVAILABLE",
                 retry_after=30,
             )
+        if endpoint == "ordinary-debate" and (response.status_code == 404 or 300 <= response.status_code < 400):
+            raise RuntimeJobError("课堂服务尚未提供普通辩论接口，请核对部署版本。",
+                                  category="service", code="ORDINARY_DEBATE_ROUTE_UNAVAILABLE", retry_after=30)
         if endpoint == "ordinary-lesson-plan" and response.status_code == 404:
             raise RuntimeJobError("课堂服务尚未提供普通教案接口，请核对部署版本。",
                                   category="service", code="ORDINARY_LESSON_PLAN_ROUTE_UNAVAILABLE", retry_after=30)
