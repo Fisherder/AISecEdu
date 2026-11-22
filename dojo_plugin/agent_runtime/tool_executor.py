@@ -1,8 +1,9 @@
 def prepare_assignment(operation, user, thread_id):
     from CTFd.models import db
     from ..coursework import generate_assignment_payload
+    from ..coursework_ordinary import LEGACY_ASSIGNMENT_ROUTE, ORDINARY_ASSIGNMENT_ROUTE
     from ..models import TeachingAgentThreads
-    from .scope import dojo_for_user
+    from .scope import dojo_for_user, validate_module
     scope = operation['scope']
     thread = TeachingAgentThreads.query.filter_by(id=thread_id, user_id=user.id).first()
     if thread is None or thread.status != 'ACTIVE' or thread.dojo_id != scope['threadDojoId'] or (thread.module_index != scope['moduleIndex']):
@@ -11,8 +12,11 @@ def prepare_assignment(operation, user, thread_id):
     request = dict(operation['arguments'])
     if request.get('moduleIndex') is None:
         request['moduleIndex'] = scope['moduleIndex']
+    route = operation.get('assignmentAuthoringRoute', LEGACY_ASSIGNMENT_ROUTE)
+    if route == ORDINARY_ASSIGNMENT_ROUTE:
+        validate_module(dojo, scope['moduleIndex'])
     db.session.commit()
-    return generate_assignment_payload(request, dojo)
+    return generate_assignment_payload(request, dojo, authoring_route=route)
 
 def apply_teacher_tool(job, operation, action, user, thread, dojo, *, prepared=None):
     from .tool_registry import ToolContext, execute_handler

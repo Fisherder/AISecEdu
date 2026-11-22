@@ -157,6 +157,15 @@ def admit_teacher_tool(action, actor, operation):
 
     if operation['tool'] not in TOOL_HANDLERS:
         raise ValueError('Unsupported executable teacher tool')
+    if operation['tool'] == 'assignment.generate':
+        from ..coursework import assignment_authoring_route
+
+        operation = {
+            **operation,
+            'assignmentAuthoringRoute': assignment_authoring_route(
+                operation['scope']['dojoId'], operation['arguments'], source_refs=operation.get('sourceRefs'),
+            ),
+        }
     if operation['tool'] == 'challenge.publish':
         from ..models import LearningDrafts
         from ..learning.authoring import _publish_validation_is_current

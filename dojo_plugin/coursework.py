@@ -29,6 +29,11 @@ from .models import (
 from .agent_runtime.scope import ScopeError, dojo_for_user, validate_module
 from .learning.student_experience import activity_state, assessment_state
 from .coursework_answers import resolve_boolean_answer, resolve_choice_answer
+from .coursework_ordinary import (
+    LEGACY_ASSIGNMENT_ROUTE, ORDINARY_ASSIGNMENT_ROUTE, ORDINARY_ASSIGNMENT_SOURCE, ORDINARY_DRAFT_ROLE,
+    normalize_ordinary_item, ordinary_assignment_turn,
+    use_ordinary_assignment,
+)
 from .coursework_quality import review_generated_assignment
 from .authoring_standards import resolve as resolve_standards, prompt as standards_prompt, provenance as standards_provenance
 
@@ -610,8 +615,22 @@ def _generated_item(raw, position):
     }
 
 
-def generate_assignment_payload(body, dojo):
-    """Generate one publishable assignment draft, with deterministic fallback."""
+def assignment_authoring_route(dojo_id, body, *, source_refs=None):
+    if "sourceRefs" in body or "questionTypes" in body or any(
+        isinstance(ref, dict) and ref.get("type") == "material" for ref in (source_refs or [])
+    ):
+        return LEGACY_ASSIGNMENT_ROUTE
+    try:
+        kind = normalize_kind(body.get("kind") or "QUIZ")
+    except ValueError:
+        return LEGACY_ASSIGNMENT_ROUTE
+    if use_ordinary_assignment(dojo_id, kind, body.get("challengeIds")):
+        return ORDINARY_ASSIGNMENT_ROUTE
+    return LEGACY_ASSIGNMENT_ROUTE
+
+
+def generate_assignment_payload(body, dojo, *, authoring_route=None):
+    """Generate one assignment draft with the course-appropriate authoring route."""
 
     prompt = str(body.get("prompt") or body.get("description") or "").strip()
     if not prompt:
@@ -648,65 +667,99 @@ def generate_assignment_payload(body, dojo):
         if DojoChallenges.query.filter_by(dojo_id=dojo.dojo_id, challenge_id=challenge_id).first():
             challenge_ids.append(challenge_id)
     standards = resolve_standards(course_id=dojo.dojo_id, question_type="quiz")
-    generated = None
-    try:
-        generated = model_json(
-            "你是网络安全课程作业设计专家。根据课程上下文生成可直接发布的结构化作业。"
-            "返回 JSON：{title,description,instructions,items:[{type,title,prompt,points,config}]}。"
-            "items 的长度必须与输入 questionCount 完全相等；每个数组元素是一道独立题，"
-            "不得把多道题合并为一道含多个小问的综合题。"
-            "type 只能是 MULTIPLE_CHOICE、TRUE_FALSE、SHORT_ANSWER 或 DEBATE；"
-            "选择题 config 必须有 choices、correctAnswer、explanation；判断题必须有 correctAnswer、explanation；"
-            "选择题 correctAnswer 必须与正确选项的完整字符串完全一致；判断题 correctAnswer 必须为 JSON 布尔值。"
-            "每题 points 必须等于题干各小问和 rubric 各得分点之和，解析必须与正确答案一致。"
-            "平台的单选与判断题只支持选择答案，不能要求另交文字理由或为理由单独计分；论证放在解析或简答题。"
-            "instructions只写学生如何作答，不包含给生成器的出题规则。明确每个算例的输入、单位和假设，"
-            "不要把某种模式或特定平台的条件说成普遍保证；题干、图示、答案和解析必须相互一致。"
-            "简答和辩论必须有 referenceAnswer、keywords、rubric。不要输出 Markdown。"
-            + "\n\n" + standards_prompt(standards),
-            {
-                "course": dojo.name or dojo.id,
-                "moduleIndex": body.get("moduleIndex"),
-                "kind": kind,
-                "difficulty": body.get("difficulty") or "INTERMEDIATE",
-                "questionCount": count,
-                "authoringStandards": standards_provenance(standards),
-                "prompt": prompt[:12000],
-            },
-            model=DOJO_AI_AUTHORING_PLAN_MODEL,
-            thinking=False,
-            temperature=0.25,
-            max_tokens=7000,
-            attempts=2,
-        )
-    except Exception:
-        generated = None
+    if authoring_route is None:
+        authoring_route = assignment_authoring_route(dojo.dojo_id, body)
+    if authoring_route not in {LEGACY_ASSIGNMENT_ROUTE, ORDINARY_ASSIGNMENT_ROUTE}:
+        raise ValueError("未知的作业生成服务")
+    ordinary = authoring_route == ORDINARY_ASSIGNMENT_ROUTE
+    if ordinary and not use_ordinary_assignment(dojo.dojo_id, kind, raw_challenge_ids):
+        raise ValueError("当前课程或作业已不符合普通作业生成条件，请重新确认")
+    module_index = validate_module(dojo, body.get("moduleIndex")) if ordinary else body.get("moduleIndex")
+    generation_prompt = (
+        (ORDINARY_DRAFT_ROLE if ordinary else "你是网络安全课程作业设计专家。根据课程上下文生成可直接发布的结构化作业。")
+        + "返回 JSON：{title,description,instructions,items:[{type,title,prompt,points,config}]}。"
+        "items 的长度必须与输入 questionCount 完全相等；每个数组元素是一道独立题，"
+        "不得把多道题合并为一道含多个小问的综合题。"
+        "type 只能是 MULTIPLE_CHOICE、TRUE_FALSE、SHORT_ANSWER 或 DEBATE；"
+        "选择题 config 必须有 choices、correctAnswer、explanation；判断题必须有 correctAnswer、explanation；"
+        "选择题 correctAnswer 必须与正确选项的完整字符串完全一致；判断题 correctAnswer 必须为 JSON 布尔值。"
+        "每题 points 必须等于题干各小问和 rubric 各得分点之和，解析必须与正确答案一致。"
+        "平台的单选与判断题只支持选择答案，不能要求另交文字理由或为理由单独计分；论证放在解析或简答题。"
+        "instructions只写学生如何作答，不包含给生成器的出题规则。明确每个算例的输入、单位和假设，"
+        "不要把某种模式或特定平台的条件说成普遍保证；题干、图示、答案和解析必须相互一致。"
+        "简答和辩论必须有 referenceAnswer、keywords、rubric。不要输出 Markdown。"
+        + "\n\n" + standards_prompt(standards)
+    )
+    generation_context = {
+        "course": dojo.name or dojo.id,
+        "moduleIndex": module_index,
+        "kind": kind,
+        "difficulty": body.get("difficulty") or "INTERMEDIATE",
+        "questionCount": count,
+        "authoringStandards": standards_provenance(standards),
+        "prompt": prompt[:12000],
+    }
+    draft_model = None
+    normalize_item = _generated_item
+    if ordinary:
+        generated, draft_model = ordinary_assignment_turn(generation_prompt, generation_context)
+        for field, limit in (("title", 240), ("description", 16000), ("instructions", 16000)):
+            if field in generated and (not isinstance(generated[field], str) or len(generated[field]) > limit):
+                raise ValueError("普通作业生成结果包含无效的标题或说明，请重试")
+
+        def normalize_item(raw, index):
+            return normalize_ordinary_item(raw, index, _generated_item)
+    else:
+        try:
+            generated = model_json(
+                generation_prompt, generation_context, model=DOJO_AI_AUTHORING_PLAN_MODEL,
+                thinking=False, temperature=0.25, max_tokens=7000, attempts=2,
+            )
+        except Exception:
+            generated = None
     raw_items = generated.get("items") if isinstance(generated, dict) else None
     normalized = [
         item
         for index, raw in enumerate(raw_items[:count] if isinstance(raw_items, list) else [])
-        if (item := _generated_item(raw, index)) is not None
+        if (item := normalize_item(raw, index)) is not None
     ]
     model_generated_count = len(normalized)
+    if ordinary and (not isinstance(raw_items, list) or len(raw_items) != count or model_generated_count != count):
+        raise ValueError(f"普通作业生成结果必须包含 {count} 道有效文字题，请调整要求后重试")
+    review_models = []
+
+    def call_review(system, payload, **kwargs):
+        system += "\n\n" + standards_prompt(standards)
+        if ordinary:
+            response, model = ordinary_assignment_turn(system, payload)
+            review_models.append(model)
+            return response
+        return model_json(system, payload, **kwargs)
+
     quality_review = {"status": "NOT_REVIEWED", "humanReviewed": False}
     if generated is not None and model_generated_count == count:
         reviewed, quality_review = review_generated_assignment(
             {"title": generated.get("title") or "", "description": generated.get("description") or "", "instructions": generated.get("instructions") or "", "items": normalized},
-            context={"course": dojo.name or dojo.id, "moduleIndex": body.get("moduleIndex"), "prompt": prompt[:12000]},
+            context={"course": dojo.name or dojo.id, "moduleIndex": module_index, "prompt": prompt[:12000]},
             model=DOJO_AI_AUTHORING_PLAN_MODEL,
-            call_model=lambda system, payload, **kwargs: model_json(system + "\n\n" + standards_prompt(standards), payload, **kwargs),
-            normalize_item=_generated_item,
+            call_model=call_review,
+            normalize_item=normalize_item,
+            include_security_examples=not ordinary,
         )
+        if ordinary:
+            quality_review.update(
+                model=review_models[-1], provider="deepseek", source=ORDINARY_ASSIGNMENT_SOURCE, roundModels=review_models,
+            )
         generated = {**generated, **reviewed}
         normalized = reviewed["items"]
-    if len(normalized) < count:
+    if not ordinary and len(normalized) < count:
         fallbacks = _fallback_generated_items(prompt, count)
         normalized.extend(fallbacks[len(normalized):count])
     if len(normalized) != count:
         raise RuntimeError(
             f"Assignment generation produced {len(normalized)} of {count} requested questions"
         )
-    challenges = (
+    challenges = [] if ordinary else (
         DojoChallenges.query.filter(
             DojoChallenges.dojo_id == dojo.dojo_id,
             DojoChallenges.challenge_id.in_(challenge_ids or [-1]),
@@ -726,16 +779,19 @@ def generate_assignment_payload(body, dojo):
         for row in challenges
     ]
     items.extend(normalized[:count])
-    meta = generated.get("_agentMeta") if isinstance(generated, dict) else None
+    meta = generated.get("_agentMeta") if not ordinary and isinstance(generated, dict) else None
     generated_title = str((generated or {}).get("title") or "").strip()
     return {
         "title": (generated_title or str(body.get("title") or "").strip() or f"{dojo.name or dojo.id} · 智能作业")[:240],
         "kind": kind,
-        "moduleIndex": body.get("moduleIndex"),
+        "moduleIndex": module_index,
         "description": str((generated or {}).get("description") or "")[:16000],
         "instructions": str(
             (generated or {}).get("instructions")
-            or "按顺序完成题目；实验题以真实 Dojo 判题为准，主观题由受限评分标准智能批改。"
+            or (
+                "按题目要求作答。" if ordinary
+                else "按顺序完成题目；实验题以真实 Dojo 判题为准，主观题由受限评分标准智能批改。"
+            )
         )[:16000],
         "availableFrom": body.get("availableFrom"),
         "dueAt": body.get("dueAt"),
@@ -746,9 +802,10 @@ def generate_assignment_payload(body, dojo):
             "authoringStandards": standards,
             "generation": {
                 "prompt": prompt[:4000],
-                "model": (meta or {}).get("model"),
-                "provider": (meta or {}).get("provider"),
-                "fallback": meta is None,
+                "model": draft_model if ordinary else (meta or {}).get("model"),
+                "provider": "deepseek" if ordinary else (meta or {}).get("provider"),
+                "fallback": not ordinary and meta is None,
+                **({"source": ORDINARY_ASSIGNMENT_SOURCE} if ordinary else {}),
                 "requestedQuestionCount": count,
                 "generatedQuestionCount": len(normalized),
                 "modelGeneratedQuestionCount": model_generated_count,

@@ -67,7 +67,7 @@ def classroom():
     load_functions(ns, ROOT / "dojo_plugin" / "coursework.py", {
         "_bounded_text", "_item_view", "_submission_view", "assignment_view",
         "override_submission_grade", "generate_assignment_payload", "save_submission", "_normalize_answer",
-        "_submission_status",
+        "_submission_status", "_generated_item",
     })
     load_functions(ns, ROOT / "dojo_plugin" / "learning" / "student_experience.py", {
         "activity_state", "assessment_state", "error_contract",
@@ -198,7 +198,9 @@ def test_new_generation_without_public_description_keeps_prompt_in_internal_meta
     query = MagicMock()
     query.filter.return_value.order_by.return_value.all.return_value = []
     ns.update(
-        normalize_kind=lambda kind: kind, DojoChallenges=SimpleNamespace(
+        normalize_kind=lambda kind: kind, assignment_authoring_route=lambda *args: "legacy",
+        LEGACY_ASSIGNMENT_ROUTE="legacy", ORDINARY_ASSIGNMENT_ROUTE="ordinary-dsh",
+        DojoChallenges=SimpleNamespace(
             query=query, dojo_id=1, challenge_id=MagicMock(), module_index=0, challenge_index=0,
         ),
         resolve_standards=lambda **kwargs: {}, standards_prompt=lambda value: "",
