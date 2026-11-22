@@ -35,6 +35,7 @@ export interface TeachingTurnImage {
   data: string;
 }
 
+const teachingImageTurnPath = '/v1/teaching-image-turn';
 const maxTextTurnBytes = 1024 * 1024;
 export const MAX_TEACHING_IMAGE_BYTES = 2 * 1024 * 1024;
 const maxTeachingImageBase64Length = 4 * Math.ceil(MAX_TEACHING_IMAGE_BYTES / 3);
@@ -44,13 +45,10 @@ export function createHarnessTurn(): HarnessTurn | undefined {
 }
 
 export function createTeachingImageTurn(image: TeachingTurnImage): HarnessTurn | undefined {
-  return createHarnessTransport('/v1/teaching-image-turn', image);
+  return createHarnessTransport(teachingImageTurnPath, image);
 }
 
-function createHarnessTransport(
-  path: '/v1/turn' | '/v1/teaching-image-turn',
-  image?: TeachingTurnImage,
-): HarnessTurn | undefined {
+function configuredHarnessEndpoint(path: '/v1/turn' | typeof teachingImageTurnPath) {
   const mode = (process.env.DOJO_AI_ENABLED || 'auto').trim().toLowerCase();
   const enabled = mode === 'auto' ? process.env.HARNESS_CONFIGURED?.trim().toLowerCase() : mode;
   if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') return undefined;
@@ -59,7 +57,37 @@ function createHarnessTransport(
   const secret = process.env.HARNESS_SERVICE_SECRET;
   if (!root || !secret?.trim()) return undefined;
 
-  const endpoint = new URL(root + path);
+  return { endpoint: new URL(root + path), secret };
+}
+
+export async function hasHarnessTeachingImageCapability(signal: AbortSignal): Promise<boolean> {
+  try {
+    const target = configuredHarnessEndpoint(teachingImageTurnPath);
+    if (!target) return false;
+    const response = await fetch(target.endpoint, {
+      headers: { Authorization: 'Bearer ' + target.secret },
+      cache: 'no-store',
+      redirect: 'error',
+      signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return false;
+    }
+    const capability = await response.json();
+    return capability?.allowed === true;
+  } catch {
+    return false;
+  }
+}
+
+function createHarnessTransport(
+  path: '/v1/turn' | typeof teachingImageTurnPath,
+  image?: TeachingTurnImage,
+): HarnessTurn | undefined {
+  const target = configuredHarnessEndpoint(path);
+  if (!target) return undefined;
+  const { endpoint, secret } = target;
   return async (messages, signal) => {
     if (
       image &&

@@ -64,6 +64,7 @@ export async function runHarnessClassroom(opts: {
   };
   const evidence = new Map<string, DirectorSceneEvidencePacket>();
   const responses: AgentTurnSummary[] = [];
+  // The request-start snapshot already reflects the live board. Replay only this request's mutations.
   const whiteboard: WhiteboardActionRecord[] = [];
   const trace: DirectorToolTraceEntry[] = [];
   const incoming = body.directorState?.agentResponses ?? [];

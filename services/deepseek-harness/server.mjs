@@ -89,7 +89,8 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
       return;
     }
     const withImages = request.url === '/v1/teaching-image-turn';
-    if (request.method !== 'POST' || (!withImages && request.url !== '/v1/turn')) {
+    const imageCapability = withImages && request.method === 'GET';
+    if (!imageCapability && (request.method !== 'POST' || (!withImages && request.url !== '/v1/turn'))) {
       json(response, 404, { error: 'Not found' });
       return;
     }
@@ -97,6 +98,10 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
     if (supplied.length !== token.length || !timingSafeEqual(supplied, token)) {
       response.setHeader('www-authenticate', 'Bearer');
       json(response, 401, { error: 'Unauthorized' });
+      return;
+    }
+    if (imageCapability) {
+      json(response, 200, { allowed: allowImages });
       return;
     }
     if (withImages && !allowImages) {

@@ -58,7 +58,14 @@ export async function POST(req: NextRequest) {
     await recordHarnessUsage(result, 'quiz-grade');
     const text = result.text.trim();
     const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-    const grade = readShortAnswerGrade(JSON.parse(fenced?.[1] ?? text), points);
+    const output: unknown = JSON.parse(fenced?.[1] ?? text);
+    if (
+      output && typeof output === 'object' && Object.keys(output).length === 2 &&
+      'score' in output && output.score === null && 'comment' in output && output.comment === ''
+    ) {
+      return apiError('CONTENT_SENSITIVE', 422, 'This submission is ineligible for automatic grading.');
+    }
+    const grade = readShortAnswerGrade(output, points);
     if (!grade || containsRestrictedQuizText(grade.comment)) return gradingUnavailable();
     return apiSuccess({ ...grade, comment: redactQuizText(grade.comment) });
   } catch {

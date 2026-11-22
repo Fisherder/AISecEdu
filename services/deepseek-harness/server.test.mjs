@@ -5,6 +5,22 @@ import { test } from 'node:test';
 import { createEngine } from './engine.mjs';
 import { createService, validateProviderURL } from './server.mjs';
 
+test('reports effective teaching image capability only with service authorization', async (t) => {
+  for (const allowImages of [true, false]) {
+    const service = createService({ secret, engine: {}, allowImages });
+    const url = await listen(service);
+    t.after(() => stop(service));
+    const capabilityURL = url + '/v1/teaching-image-turn';
+    const unauthorized = await fetch(capabilityURL);
+    assert.equal(unauthorized.status, 401);
+    await unauthorized.body.cancel();
+    const response = await fetch(capabilityURL, { headers: { Authorization: 'Bearer ' + secret } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await response.json(), { allowed: allowImages });
+  }
+});
+
 test('validates provider protocols, credentials, queries and fragments', () => {
   assert.equal(validateProviderURL(), 'https://api.deepseek.com/anthropic');
   assert.equal(validateProviderURL('https://provider.invalid/anthropic/'), 'https://provider.invalid/anthropic');

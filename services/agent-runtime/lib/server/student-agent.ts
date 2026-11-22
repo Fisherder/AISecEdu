@@ -435,8 +435,8 @@ export async function decideStudentAgentMessage(
 
 function personalStudyPackageRequested(question: string): boolean {
   const packageName = /学习包|自学包|学习讲义|概念自检|\b(?:study|learning)\s+pack(?:age)?\b/i;
-  const plainAlias = new RegExp(`^(?:${packageName.source})$`, 'i');
-  const quotedAliasPrefix = /(?:生成|创建|制作|设计|构建|准备|整理成|做|给我|不需要|不要|不用|取消|撤回)\s*(?:[一两]?[份套个])?\s*(?:个人)?\s*$|\b(?:create|make|generate|prepare|build|give\s+me|no|cancel)\s*(?:(?:a|an|the|my)\s+)?$/i;
+  const plainAlias = new RegExp(`^(?:(?:个人|personal\\s+)\\s*)?(?:${packageName.source})$`, 'i');
+  const quotedAliasPrefix = /(?:生成|创建|制作|设计|构建|准备|整理成|做|给我|我想要|我要|我需要|想要|不需要|不要|不用|取消|撤回)\s*(?:[一两]?[份套个])?\s*(?:个人)?\s*$|\b(?:create|make|generate|prepare|build|give\s+me|no|cancel)\s*(?:(?:a|an|the|my)\s+)?$/i;
   const message = question.replace(/“[^”]*”|「[^」]*」|『[^』]*』|《[^》]*》|"[^"\n]*"|(?<!`)`[^`\n]*`(?!`)/g, (quote, offset: number) => {
     // A quoted product name may be a direct target, but quoted instructions are source data.
     const text = quote.slice(1, -1).trim();
@@ -452,13 +452,17 @@ function personalStudyPackageRequested(question: string): boolean {
   const cancelTurn =
     /^(?:(?:我)?改主意了[，,\s]*)?(?:算了|不用了|不需要了|不要了|(?:请)?(?:取消|撤回)(?:刚才|前面|上面|之前|本次)(?:的)?(?:请求|要求|操作))$|^(?:please\s+)?(?:cancel|withdraw)\s+(?:that|the\s+previous)\s+request$/i;
   const create =
-    /(?:生成|创建|制作|设计|构建|准备|整理成|做|给我(?=\s*(?:[一两]?[份套个]|(?:个人)?(?:学习|自学|概念自检)))|(?:我想要|我需要|我要|想要|要)一)|\b(?:create|make|generate|prepare|build|give\s+me(?=\s+(?:(?:a|an|my|the)\s+)?(?:study|learning)\s+pack))\b/i;
-  const chineseRequestLead =
-    /^(?:(?:请你?|麻烦你?|帮我|为我|替我|给我|我想要?|我要|我需要|我希望你?|你能(?:不能)?|能否|可以|先|再|直接|现在|自动|(?:别|不要)忘(?:了|记)?|记得)\s*)*(?:(?:根据|结合|按照|参考|针对|围绕)(?:[^，,。！？；;!?]{1,60}?(?:帮我|为我|替我|请你?)|[^，,。！？；;!?]{0,50}?(?:资料|讲义|笔记|教材|材料|上节课|这节课|内容|知识点|错题|薄弱点|记录)))?\s*$/;
+    /(?:生成|创建|制作|设计|构建|准备|整理成|做|(?:给我|我想要|我需要|我要|想要|要)(?=\s*(?:[一两]?[份套个]|(?:个人)?(?:学习包|自学包|学习讲义|概念自检))))|\b(?:create|make|generate|prepare|build|give\s+me(?=\s+(?:(?:a|an|my|the)\s+)?(?:study|learning)\s+pack))\b/i;
+  const requestModal = /(?:你)?(?:能(?:不能)?|能否|可以|可不可以)/;
+  const chineseRequestLead = new RegExp(
+    `^(?:(?:请(?:你|问)?|麻烦你?|帮我|为我|替我|给我|我想要?|我要|我需要|我希望你?|${requestModal.source}` +
+      String.raw`|先|再|直接|现在|自动|(?:别|不要)忘(?:了|记)?|记得)\s*)*(?:(?:根据|结合|按照|参考|针对|围绕)(?:[^，,。！？；;!?]{1,60}?(?:帮我|为我|替我|请你?)|[^，,。！？；;!?]{0,50}?(?:资料|讲义|笔记|教材|材料|上节课|这节课|内容|知识点|错题|薄弱点|记录)))?\s*$`,
+  );
   const englishRequestLead =
     /^(?:(?:please|help\s+me|(?:can|could|would|will)\s+you|i(?:['’]d\s+like|\s+(?:want|need|would\s+like))\s+you\s+to|(?:do\s+not|don['’]t)\s+forget\s+to)\s+)*(?:(?:based\s+on|using|from)\s+[^,.;!?]{0,50}?(?:notes|materials|handout|lesson|reading|feedback)\s+)?$/i;
   const questionAfterName =
     /^\s*(?:是什么意思|有什么用|有何用途|有什么意义|的(?:意义|用途|方法|步骤)是什么|(?:是否|已经|已)?(?:生成|创建|做好|准备好|完成)(?:了)?(?:吗|没(?:有)?|$)|(?:了|好了)?(?:吗|没(?:有)?)|(?:了|好了|已完成)$|的话|(?:之?前)(?:先|请|看看|说明|确认)|(?:already|yet)\b)/i;
+  const politeRequestLead = new RegExp(String.raw`^(?:请(?:你|问)?\s*)?${requestModal.source}`);
   const createPackage = new RegExp(`(?:${create.source}).{0,50}?(${packageName.source})`, 'i');
   const kind = (alias: string) => alias === '学习讲义' || alias === '概念自检' ? alias : 'package';
   const blocked = new Set<string>();
@@ -469,17 +473,15 @@ function personalStudyPackageRequested(question: string): boolean {
     if (!packageRef) continue;
     const action = createPackage.exec(clause);
     const intentPrefix = clause.slice(0, action?.index ?? packageRef.index);
-    if (decline.test(intentPrefix) || declinePackage.test(clause.slice(packageRef.index + packageRef[0].length))) {
+    if (decline.test(intentPrefix) || decline.test(clause.slice(0, packageRef.index)) ||
+        declinePackage.test(clause.slice(packageRef.index + packageRef[0].length))) {
       for (const match of clause.matchAll(new RegExp(packageName.source, 'gi'))) blocked.add(kind(match[0]));
       continue;
     }
-    if (
-      action && !blocked.has(kind(action[1])) &&
-      (chineseRequestLead.test(intentPrefix) || englishRequestLead.test(intentPrefix)) &&
-      !questionAfterName.test(clause.slice(action.index + action[0].length))
-    ) {
-      return true;
-    }
+    if (!action || blocked.has(kind(action[1])) ||
+        !(chineseRequestLead.test(intentPrefix) || englishRequestLead.test(intentPrefix))) continue;
+    const tail = clause.slice(action.index + action[0].length);
+    if ((tail.trim() === '吗' && politeRequestLead.test(intentPrefix)) || !questionAfterName.test(tail)) return true;
   }
   return false;
 }

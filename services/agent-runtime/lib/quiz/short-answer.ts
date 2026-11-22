@@ -1,3 +1,4 @@
+import { containsRestrictedTeachingSecret } from '@/lib/teaching/ordinary-text';
 import type { QuizQuestion } from '@/lib/types/stage';
 import { gradeChoiceQuestions, isShortAnswer, type QuestionResult } from './grading';
 
@@ -5,10 +6,10 @@ export const MAX_SHORT_ANSWER_TEXT_LENGTH = 8000;
 const PROTECTED_TEXT =
   /\b(?:user[_ -]?id|learner[_ -]?id|student[_ -]?(?:id|number)|candidate[_ -]?id|name|email)\s*[:=]\s*[^\n,;]+|(?:学号|考号|姓名|用户编号)\s*[:：=]\s*[^\n，。；]+|[\w.+-]+@[\w.-]+\.[a-z]{2,}/giu;
 const RESTRICTED_TEXT =
-  /(?:answer key|reference answer|private solution|hidden answer|exploit payload|exploit chain|reverse shell|reproduce (?:an? |the )?(?:exploit|attack))|(?:标准答案|参考答案|验证答案|私有解法)\s*[:：=]|(?:利用链|攻击复现|复现.{0,8}(?:漏洞|攻击)|执行.{0,8}(?:命令|载荷))|pwn\.college\{|Bearer\s+\S+|```/iu;
+  /(?:answer key|reference answer|private solution|hidden answer|exploit payload|exploit chain|reverse shell|reproduce (?:an? |the )?(?:exploit|attack))|(?:标准答案|参考答案|验证答案|私有解法)\s*[:：=]|(?:利用链|攻击复现|复现.{0,8}(?:漏洞|攻击)|执行.{0,8}(?:命令|载荷))|```/iu;
 
 export function containsRestrictedQuizText(value: string): boolean {
-  return RESTRICTED_TEXT.test(value);
+  return containsRestrictedTeachingSecret(value) || RESTRICTED_TEXT.test(value);
 }
 
 export function redactQuizText(value: string): string {

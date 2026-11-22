@@ -14,6 +14,7 @@
 import { tool, stepCountIs } from 'ai';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { isOrdinaryTeachingProse } from '@/lib/teaching/ordinary-text';
 import { recordHarnessUsage, type HarnessTurn } from '@/lib/server/agent-harness/classroom-turn';
 import type { LanguageModel } from 'ai';
 
@@ -1288,7 +1289,7 @@ function difficultyAdjustAck(language: string | undefined): string {
 
 const ordinaryInstructorReply = z
   .object({
-    reply: z.string().trim().max(8000),
+    reply: z.string().trim().max(8000).refine(isOrdinaryTeachingProse),
     observations: z
       .array(RecordObservationArgs.extend({ signature: z.string().trim().min(1).max(80) }).strict())
       .max(2)
@@ -1300,13 +1301,7 @@ const ordinaryInstructorReply = z
   .strict();
 
 function teachingText(text: string | undefined, limit: number): string | undefined {
-  if (
-    !text ||
-    /```|-----BEGIN [^-]+ KEY-----|Traceback \(most recent call last\)|flag\s*\{|攻击复现|利用载荷|终端日志|命令输出/i.test(
-      text,
-    )
-  )
-    return;
+  if (!text || !isOrdinaryTeachingProse(text)) return;
   return text.trim().slice(0, limit) || undefined;
 }
 

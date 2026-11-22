@@ -32,6 +32,7 @@ import { apiError } from '@/lib/server/api-response';
 import {
   createHarnessTurn,
   createTeachingImageTurn,
+  hasHarnessTeachingImageCapability,
   MAX_TEACHING_IMAGE_BYTES,
   type TeachingTurnImage,
 } from '@/lib/server/agent-harness/classroom-turn';
@@ -95,7 +96,7 @@ async function canSendNewTeachingImage(req: NextRequest): Promise<boolean> {
 
 export async function GET(req: NextRequest) {
   return Response.json(
-    { allowed: Boolean(createHarnessTurn()) && await canSendNewTeachingImage(req) },
+    { allowed: await canSendNewTeachingImage(req) && await hasHarnessTeachingImageCapability(req.signal) },
     { headers: { 'Cache-Control': 'no-store' } },
   );
 }

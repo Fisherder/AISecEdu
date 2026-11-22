@@ -616,8 +616,9 @@ def personal_study_package_requested(question):
         "self_check": r"概念自检",
     }
     package_name = "|".join(f"(?P<{kind}>{pattern})" for kind, pattern in aliases.items())
+    plain_alias = rf"(?:(?:个人|personal\s+)\s*)?(?:{package_name})"
     quoted_alias_prefix = (
-        r"(?:生成|创建|制作|设计|构建|准备|整理成|做|给我|不需要|不要|不用|取消|撤回)"
+        r"(?:生成|创建|制作|设计|构建|准备|整理成|做|给我|我想要|我要|我需要|想要|不需要|不要|不用|取消|撤回)"
         r"\s*(?:[一两]?[份套个])?\s*(?:个人)?\s*$"
         r"|\b(?:create|make|generate|prepare|build|give\s+me|no|cancel)\s*(?:(?:a|an|the|my)\s+)?$"
     )
@@ -625,7 +626,7 @@ def personal_study_package_requested(question):
     def mask_quote(match):
         # A quoted product name may be a direct target. Quoted instructions are source data.
         text = match.group()[1:-1].strip()
-        if re.fullmatch(package_name, text, re.I) and re.search(quoted_alias_prefix, request[:match.start()], re.I):
+        if re.fullmatch(plain_alias, text, re.I) and re.search(quoted_alias_prefix, request[:match.start()], re.I):
             return f" {text} "
         return "资料"
 
@@ -655,12 +656,14 @@ def personal_study_package_requested(question):
         r"|(?:please\s+)?(?:cancel|withdraw)\s+(?:that|the\s+previous)\s+request"
     )
     create = (
-        r"生成|创建|制作|设计|构建|准备|整理成|做|给我(?=\s*(?:[一两]?[份套个]|(?:个人)?(?:学习|自学|概念自检)))|(?:我想要|我需要|我要|想要|要)一"
+        r"生成|创建|制作|设计|构建|准备|整理成|做"
+        r"|(?:给我|我想要|我需要|我要|想要|要)(?=\s*(?:[一两]?[份套个]|(?:个人)?(?:学习包|自学包|学习讲义|概念自检)))"
         r"|\b(?:create|make|generate|prepare|build|give\s+me(?=\s+(?:(?:a|an|my|the)\s+)?(?:study|learning)\s+pack))\b"
     )
+    request_modal = r"(?:你)?(?:能(?:不能)?|能否|可以|可不可以)"
     request_lead = (
-        r"(?:(?:请你?|麻烦你?|帮我|为我|替我|给我|我想要?|我要|我需要|我希望你?|"
-        r"你能(?:不能)?|能否|可以|先|再|直接|现在|自动|(?:别|不要)忘(?:了|记)?|记得)\s*)*"
+        rf"(?:(?:请(?:你|问)?|麻烦你?|帮我|为我|替我|给我|我想要?|我要|我需要|我希望你?|{request_modal}"
+        r"|先|再|直接|现在|自动|(?:别|不要)忘(?:了|记)?|记得)\s*)*"
         r"(?:(?:根据|结合|按照|参考|针对|围绕)(?:[^，,。！？；;!?]{1,60}?(?:帮我|为我|替我|请你?)"
         r"|[^，,。！？；;!?]{0,50}?(?:资料|讲义|笔记|教材|材料|上节课|这节课|内容|知识点|错题|薄弱点|记录)))?\s*"
         r"|(?:(?:please|help\s+me|(?:can|could|would|will)\s+you|i(?:['’]d\s+like|\s+(?:want|need|would\s+like))\s+you\s+to"
@@ -683,11 +686,15 @@ def personal_study_package_requested(question):
             continue
         action = re.search(create_package, clause, re.I)
         intent_prefix = clause[:(action or package_ref).start()]
-        if re.search(decline, intent_prefix, re.I) or re.match(decline_package, clause[package_ref.end():], re.I):
+        if (re.search(decline, intent_prefix, re.I) or re.search(decline, clause[:package_ref.start()], re.I)
+                or re.match(decline_package, clause[package_ref.end():], re.I)):
             blocked.update(match.lastgroup for match in re.finditer(package_name, clause, re.I))
             continue
-        if (action and action.lastgroup not in blocked and re.fullmatch(request_lead, intent_prefix, re.I)
-                and not re.search(question_after_name, clause[action.end():], re.I)):
+        if action is None or action.lastgroup in blocked or not re.fullmatch(request_lead, intent_prefix, re.I):
+            continue
+        tail = clause[action.end():]
+        polite_request = tail.strip() == "吗" and re.match(rf"(?:请(?:你|问)?\s*)?{request_modal}", intent_prefix)
+        if polite_request or not re.search(question_after_name, tail, re.I):
             return True
     return False
 

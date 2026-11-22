@@ -69,6 +69,27 @@ describe('concept short-answer grading', () => {
     expect(harness.recordHarnessUsage).toHaveBeenCalledOnce();
   });
 
+  it('reports explicit provider abstention as unsupported and preserves the submitted answer', async () => {
+    harness.runTurn.mockResolvedValue({ ...response, text: '{"score":null,"comment":""}' });
+    const answers = { concept: userAnswer };
+    const questions: QuizQuestion[] = [{ id: 'concept', type: 'short_answer', question, points }];
+    const grader = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      const result = await POST(request(JSON.parse(String(init?.body))));
+      expect(result.status).toBe(422);
+      expect(await result.clone().json()).not.toHaveProperty('score');
+      return result;
+    });
+    vi.stubGlobal('fetch', grader);
+    try {
+      expect(await gradeQuizForReview(questions, answers, 'en-US')).toEqual({ status: 'unsupported' });
+      expect(answers).toEqual({ concept: userAnswer });
+      expect(harness.recordHarnessUsage).toHaveBeenCalledOnce();
+      expect(grader).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('reports temporarily unavailable when the grader is disabled', async () => {
     harness.createHarnessTurn.mockReturnValue(undefined);
     expect((await POST(request({ question, userAnswer, points }))).status).toBe(503);
@@ -77,6 +98,8 @@ describe('concept short-answer grading', () => {
   });
 
   it.each([
+    { question: 'Explain this classroom example flag{PRIVATE_CLASSROOM_TEXT}.' },
+    { userAnswer: 'The label was FLAG {PRIVATE_CLASSROOM_TEXT}.' },
     { question: 'Explain the provided answer key: PRIVATE_CLASSROOM_TEXT.' },
     { userAnswer: 'The reference answer is PRIVATE_CLASSROOM_TEXT.' },
     { question: 'Name: PRIVATE_CLASSROOM_TEXT' },
