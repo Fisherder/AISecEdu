@@ -26,6 +26,8 @@ describe('slide deck page policy', () => {
     ['create a 20-slide deck about secure coding', 20],
     ['修改课件并保持总页数为 14 页', 14],
     ['保持总页数恰好为 14 个完整教学页', 14],
+    ['请把这份植物生长课件扩成 8 页', 8],
+    ['请压缩成四页', 4],
   ])('honors an exact page count in %s', (prompt, expected) => {
     const requirement = parseSlideDeckPageRequirement(prompt);
 

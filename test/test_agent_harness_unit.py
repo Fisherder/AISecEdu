@@ -1030,9 +1030,9 @@ def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_target
     policy_path = ROOT / "dojo_plugin/agent_runtime/ordinary_slide_layout.py"
     policy_nodes = [
         node for node in ast.parse(policy_path.read_text()).body
-        if (isinstance(node, ast.FunctionDef) and node.name == "pinned")
+        if (isinstance(node, ast.FunctionDef) and node.name in {"pinned", "deck_pinned"})
         or (isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id in {"BACKEND", "PIN"} for target in node.targets
+            isinstance(target, ast.Name) and target.id in {"BACKEND", "PIN", "DECK_BACKEND", "DECK_PIN"} for target in node.targets
         ))
     ]
     policy = {}

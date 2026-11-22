@@ -1,4 +1,4 @@
-"""Admission and receipt checks for geometry changes to ordinary static slides."""
+"""Admission and receipt checks for revisions to ordinary static slides."""
 
 import math
 import re
@@ -15,6 +15,9 @@ from .upstream_turn import ordinary_slide_wording_request, ordinary_teaching_cou
 
 BACKEND = "ordinary-slide-layout"
 SCOPE = "slide-layout"
+DECK_BACKEND = "ordinary-deck-revision"
+DECK_SCOPE = "deck-revision"
+DECK_PIN = "ordinaryDeckRevision"
 PIN = "ordinarySlideLayout"
 _SOURCE_CHANGED = "课件版本或课程权限已变化，请重新打开当前版本后再修改版式。"
 _LAYOUT_REQUEST = re.compile(
@@ -29,6 +32,20 @@ _INVALID_INTENT = re.compile(
 )
 _ALL_PAGES = re.compile(r"(?:整份|整套|全套|整个|全部|所有|每一?|这份|当前)?\s*(?:课件|幻灯片|页面|页)?")
 _PAGE_NUMBERS = re.compile(r"第\s*[0-9]{1,3}\s*页?(?:\s*(?:[、，,]|和|及|与)\s*(?:第\s*)?[0-9]{1,3}\s*页?)*")
+
+_DECK_TEXT_REQUEST = re.compile(r"文字|正文|标题|文案|措辞|用词|表达|表述|润色|改写|可读性|语句|术语|说明")
+_DECK_COUNT_INTENT = re.compile(
+    r"(?:(?:扩展|扩充|压缩|缩减|扩|缩|调整|改)(?:到|为|成)|控制在|总页数(?:保持)?(?:为|是|在))"
+    r"\s*[0-9０-９零〇一二两三四五六七八九十]"
+)
+_DECK_STYLE_INTENT = re.compile(
+    r"(?:换|改|调整|修改|做成|重做|重新设计|统一|设置|使用|采用|更换)[^，。；！？,;!?\n]{0,14}"
+    r"(?:主题|风格|颜色|色调|配色|强调色|背景色|版式|排版|布局|字体|字号|字色)"
+    r"|(?:主题|风格|颜色|色调|配色|强调色|背景色|版式|排版|布局|字体|字号|字色)"
+    r"\s*(?:调整|改|设|换|用|统一)"
+    r"|\b(?:change|switch|redesign|use|update)\b[^,;.!?\n]{0,32}\b(?:theme|colors?|palette|layout|fonts?)\b",
+    re.I,
+)
 
 
 class OrdinarySlideLayoutError(ValueError):
@@ -91,6 +108,26 @@ def _source(artifact, expected, pages):
     return revision, lesson
 
 
+def _ordinary_deck_request(instruction):
+    original, _ = split_source_selection(instruction)
+    if any(
+        not re.search(r"(?:不|不要|不必|不用|无需|不需要|别|保留)\s*$", clause[:match.start()])
+        for clause in re.split(r"[，。；！？,;!?]", original)
+        for match in _DECK_STYLE_INTENT.finditer(clause)
+    ):
+        # Keep the existing native revision behavior for theme and other style requests.
+        return False
+    return bool(_DECK_TEXT_REQUEST.search(original) or _DECK_COUNT_INTENT.search(original))
+
+
+def _deck_instruction(instruction):
+    original, attached = split_source_selection(instruction)
+    if (attached or not 1 <= len(original) <= 2000 or _INVALID_INTENT.search(original)
+            or re.search(r"脚本|终端|浏览器代理", original)):
+        raise OrdinarySlideLayoutError("请提交普通静态课件的单行修订要求，勿附源码或链接。")
+    return original
+
+
 def admit(user, artifact, payload):
     if artifact.artifact_type != "slide-deck" or artifact.self_workspace_id is not None:
         return payload
@@ -99,15 +136,23 @@ def admit(user, artifact, payload):
     if not enabled_course:
         return payload
     command = layout_request(payload.get("instruction"))
-    if command is None:
-        return payload
+    is_deck = command is None
+    if is_deck:
+        if (ordinary_slide_wording_request(payload.get("instruction"))
+                or not _ordinary_deck_request(payload.get("instruction"))):
+            return payload
+        if not isinstance(payload.get("currentContent"), dict) or not ordinary_static_lesson(
+            payload["currentContent"], allow_missing_layout=True,
+        ):
+            return payload
+        _deck_instruction(payload.get("instruction"))
     _scope(user, artifact)
     if not config.HARNESS_DEEPSEEK_MODEL or not upstream_enabled():
         raise OrdinarySlideLayoutError("当前课程未配置普通课件版式修订服务。")
-    revision, _ = _source(artifact, payload["expectedRevision"], command[1])
+    revision, _ = _source(artifact, payload["expectedRevision"], "all" if is_deck else command[1])
     return {
-        **payload, "allowDegraded": False, "revisionBackend": BACKEND,
-        PIN: {
+        **payload, "allowDegraded": False, "revisionBackend": DECK_BACKEND if is_deck else BACKEND,
+        (DECK_PIN if is_deck else PIN): {
             "artifactId": artifact.id, "revisionId": revision.id,
             "revisionSha256": revision.content_hash,
             "instructionSha256": content_hash(payload["instruction"]),
@@ -116,18 +161,25 @@ def admit(user, artifact, payload):
     }
 
 
+def deck_pinned(payload):
+    return DECK_PIN in payload or payload.get("revisionBackend") == DECK_BACKEND
+
+
 def pinned(payload):
-    return PIN in payload or payload.get("revisionBackend") == BACKEND
+    return deck_pinned(payload) or PIN in payload or payload.get("revisionBackend") == BACKEND
 
 
 def model(payload):
-    return (payload.get(PIN) or {}).get("model")
+    return (payload.get(DECK_PIN if deck_pinned(payload) else PIN) or {}).get("model")
 
 
 def prepare(job, payload, *, lock=False):
     reject_source_selection(payload.get("instruction"))
-    pin = payload.get(PIN)
-    if (payload.get("revisionBackend") != BACKEND or not isinstance(pin, dict)
+    is_deck = deck_pinned(payload)
+    pin_key = DECK_PIN if is_deck else PIN
+    backend = DECK_BACKEND if is_deck else BACKEND
+    pin = payload.get(pin_key)
+    if ((is_deck and PIN in payload) or payload.get("revisionBackend") != backend or not isinstance(pin, dict)
             or not config.HARNESS_DEEPSEEK_MODEL or pin.get("model") != config.HARNESS_DEEPSEEK_MODEL
             or not upstream_enabled() or job.kind != "artifact.revise" or payload.get("workspaceId")):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
@@ -143,7 +195,7 @@ def prepare(job, payload, *, lock=False):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
     _scope(owner, artifact)
     instruction = payload.get("instruction")
-    command = layout_request(instruction)
+    command = (_deck_instruction(instruction), "all") if is_deck else layout_request(instruction)
     if command is None or pin.get("instructionSha256") != content_hash(instruction):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
     intent, pages = command
@@ -151,14 +203,15 @@ def prepare(job, payload, *, lock=False):
     if (revision.id, revision.content_hash) != (pin.get("revisionId"), pin.get("revisionSha256")):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
     return {
-        PIN: pin, "revisionBackend": BACKEND, "artifactType": "slide-deck",
+        pin_key: pin, "revisionBackend": backend, "artifactType": "slide-deck",
         "artifactId": artifact.id, "expectedRevision": revision.revision,
-        "instruction": intent, "pageSelection": pages, "currentContent": revision.content,
+        "instruction": intent, "currentContent": revision.content,
+        **({} if is_deck else {"pageSelection": pages}),
     }
 
 
 def wire_payload(payload):
-    return {key: value for key, value in payload.items() if key != PIN}
+    return {key: value for key, value in payload.items() if key not in {PIN, DECK_PIN}}
 
 
 def _except_fields(record, *fields):
@@ -206,6 +259,9 @@ def validate_receipt(route, payload, response):
     meta = response.get("model") or {}
     result = response.get("result") or {}
     content = result.get("content")
+    if deck_pinned(payload):
+        _validate_deck_receipt(route, payload, meta, content)
+        return
     before = ordinary_static_lesson(payload["currentContent"], allow_missing_layout=True)
     after = ordinary_static_lesson(content, allow_missing_layout=True)
     revision = content.get("revisionMetadata") if isinstance(content, dict) else None
@@ -235,6 +291,10 @@ def validate_receipt(route, payload, response):
         legacy_migration = _legacy_migration(old, new)
         if _slide_semantics(old, legacy_migration=legacy_migration) != _slide_semantics(new, legacy_migration=legacy_migration):
             raise OrdinarySlideLayoutError("版式修订改变了教学文字、素材或其他页面信息。")
+    _validate_render_evidence(revision, selected)
+
+
+def _validate_render_evidence(revision, selected):
     evidence = revision.get("renderEvidence")
     if (not isinstance(evidence, list)
             or any(not isinstance(item, dict) or item.get("mode") != "headless-chromium-dom-and-pixels"
@@ -248,3 +308,44 @@ def validate_receipt(route, payload, response):
         raise OrdinarySlideLayoutError("版式修订缺少浏览器检查回执。")
     if [item.get("pageId") for item in evidence] != selected:
         raise OrdinarySlideLayoutError("版式修订的浏览器检查范围与本次选择不一致。")
+
+
+def _validate_deck_receipt(route, payload, meta, content):
+    before = ordinary_static_lesson(payload["currentContent"], allow_missing_layout=True)
+    after = ordinary_static_lesson(content, allow_missing_layout=True)
+    revision = content.get("revisionMetadata") if isinstance(content, dict) else None
+    usage = meta.get("usage")
+    if (
+        meta.get("executionMode") != DECK_BACKEND or meta.get("provider") != "deepseek"
+        or meta.get("actualModel") != route.get("required_model") or meta.get("degraded") is not False
+        or not isinstance(usage, dict) or not all(
+            type(usage.get(key)) is int and usage[key] >= 0 for key in ("inputTokens", "outputTokens", "totalTokens")
+        ) or usage["inputTokens"] + usage["outputTokens"] <= 0
+        or not isinstance(revision, dict) or revision.get("mode") != DECK_BACKEND
+        or before is None or after is None or before.get("id") != after.get("id")
+    ):
+        raise OrdinarySlideLayoutError("整套课件修订缺少指定模型或静态课件的有效回执。")
+    old, new = before["artifacts"], after["artifacts"]
+    output_ids = [_page_id(slide) for slide in new]
+    if revision.get("recomposed") is False:
+        target_ids = revision.get("pageIds")
+        if (
+            [_page_id(slide) for slide in old] != output_ids or old == new
+            or not isinstance(target_ids, list) or not target_ids
+            or any(not isinstance(page_id, str) or page_id not in output_ids for page_id in target_ids)
+            or len(set(target_ids)) != len(target_ids)
+            or any(source != output and page_id not in target_ids
+                   for page_id, source, output in zip(output_ids, old, new))
+        ):
+            raise OrdinarySlideLayoutError("文字修订改变了课件页标识、超出所选范围或未产生有效修改。")
+    elif revision.get("recomposed") is True:
+        requested = revision.get("requestedPages")
+        if (not isinstance(requested, dict) or requested.get("explicit") is not True
+                or type(requested.get("min")) is not int or type(requested.get("max")) is not int
+                or not 1 <= requested["min"] <= len(new) <= requested["max"] <= 120
+                or requested["min"] <= len(old) <= requested["max"]):
+            raise OrdinarySlideLayoutError("整套课件修订回执与请求的页数不一致。")
+        target_ids = output_ids
+    else:
+        raise OrdinarySlideLayoutError("整套课件修订回执缺少修订方式。")
+    _validate_render_evidence(revision, target_ids)

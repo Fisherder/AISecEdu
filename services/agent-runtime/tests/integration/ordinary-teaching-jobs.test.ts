@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { ordinaryDeckPageRequirement } from '@/lib/server/agent-harness/ordinary-deck-revision';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -452,6 +453,82 @@ describe('ordinary teaching worker service routes', () => {
       pageSelection, instruction, currentContent: {lesson: {title: '分数课', artifacts}},
       privateContext: 'PRIVATE HISTORY', sourceSnippet: 'PRIVATE RAW',
     }, token, 'official-model', 'official-model', endpoint);
+
+  function deckRevisionRequest(artifacts: ReturnType<typeof mathLayoutDeck>, instruction: string, endpoint = 'ordinary-deck-revision') {
+    return new NextRequest(`http://localhost/api/integration/jobs/${endpoint}`, {
+      method: 'POST',
+      headers: {'X-AISecEdu-Service-Token': 'integration-secret', 'Content-Type': 'application/json'},
+      body: JSON.stringify({...job, kind: 'artifact.revise',
+        scope: {...job.scope, ordinaryTeaching: 'deck-revision'},
+        modelRoute: {provider: 'deepseek', actual_model: 'official-model', required_model: 'official-model', allow_degraded: false},
+        payload: {artifactType: 'slide-deck', revisionBackend: 'ordinary-deck-revision', artifactId: 'math-deck',
+          instruction, expectedRevision: 4, currentContent: {lesson: {id: 'lesson-a', title: '分数课', artifacts}},
+          sourceSnippet: 'PRIVATE SOURCE SELECTION'},
+      }),
+    });
+  }
+
+  it('revises selected text through the official Harness while keeping unchanged pages and source bytes private', async () => {
+    const deck = mathLayoutDeck();
+    mocks.inspectRendered.mockResolvedValueOnce({issues: [], evidence: {
+      mode: 'headless-chromium-dom-and-pixels', sourceSha256: 'a'.repeat(64),
+      inspectedAt: '2026-01-01T00:00:00Z', frames: [{step: -1, screenshotSha256: 'b'.repeat(64)}],
+    }});
+    const fetch = vi.fn(async (url, init) => {
+      expect(String(url)).toBe(harness);
+      expect(init.body).not.toMatch(/PRIVATE|data:image/);
+      const {messages, ...rest} = JSON.parse(init.body);
+      expect(rest).toEqual({});
+      const packet = JSON.parse(messages[1].content);
+      return modelResponse(packet.pages ? {pageIds: ['plant-2']} :
+        {changes: [{op: 'set', path: ['title'], value: '如何平均分'}]});
+    });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const response = await POST(deckRevisionRequest(deck, '请把整套课件的文字改得更清楚'));
+    const output = await response.json();
+    expect(response.status, JSON.stringify(output)).toBe(200);
+    expect(output.result.content.lesson.artifacts[0]).toEqual(deck[0]);
+    expect(output.result.content.lesson.artifacts[1]).toMatchObject({title: '如何平均分',
+      content: {studio: {page: {visual: deck[1].content.studio.page.visual, speakerNotes: deck[1].content.studio.page.speakerNotes}}}});
+    expect(output.result.content.lesson.artifacts[2]).toEqual(deck[2]);
+    expect(output.result.content.revisionMetadata).toMatchObject({mode: 'ordinary-deck-revision', recomposed: false,
+      renderEvidence: [{pageId: 'plant-2'}]});
+    expect(output.model).toMatchObject({actualModel: 'official-model', usage: {totalTokens: 30}});
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '问一下，扩成8页可以吗？',
+    '不要把课件扩成8页',
+    '把课件改成3页',
+  ])('keeps the source without calling the model when no revision is needed for %s', async instruction => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const response = await POST(deckRevisionRequest(mathLayoutDeck(), instruction));
+    expect(response.status).toBe(422);
+    expect(await response.json()).not.toHaveProperty('result');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects the generic endpoint, a source selection, and a wrong Harness model without a draft', async () => {
+    const deck = mathLayoutDeck();
+    const snapshot = JSON.stringify(deck);
+    const fetch = vi.fn(async () => Response.json({text: '{"pageIds":["plant-2"]}', model: 'wrong-model',
+      usage: {prompt_tokens: 1, completion_tokens: 1}}));
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    expect((await POST(deckRevisionRequest(deck, '清楚解释分数', 'execute'))).status).toBe(422);
+    expect((await POST(deckRevisionRequest(deck, '改写措辞\n仅修改当前版本 V4 中所选范围（源码第 2 行）：\nPRIVATE'))).status).toBe(422);
+    expect(fetch).not.toHaveBeenCalled();
+    const response = await POST(deckRevisionRequest(deck, '请把整套课件的文字改得更清楚'));
+    expect(response.status).toBe(503);
+    expect(await response.json()).not.toHaveProperty('result');
+    expect(JSON.stringify(deck)).toBe(snapshot);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
 
   function layoutTurn(change: (layout: any, packet: any) => void) {
     return vi.fn(async (url, init) => {
@@ -910,5 +987,30 @@ describe('ordinary teaching worker service routes', () => {
     await POST(request(kind, scope, payload));
     expect(fetch).not.toHaveBeenCalled();
     expect(mocks.resolveModel).toHaveBeenCalledOnce();
+  });
+});
+
+describe('ordinary deck revisions require an affirmative whole-deck count', () => {
+  it.each([
+    '不要扩展到6页，只把标题改短',
+    '不要改成6页，只调整文字',
+    '只润色前2到4页的文字',
+    '把标题改成“8页练习”',
+    '请把标题改成8页练习',
+    '问一下，扩成8页可以吗？',
+    '请在说明中引用“把课件扩成8页”',
+    '解释为什么把课件扩成8页',
+    '把第2页的示例改成 8 页练习提纲',
+  ])('keeps the existing deck size for %s', instruction => {
+    expect(ordinaryDeckPageRequirement(instruction)).toBeUndefined();
+  });
+
+  it.each([
+    ['请把这份植物生长课件从5页扩成8页', 8],
+    ['请压缩成四页', 4],
+    ['把课件扩成8页，不要改成6页', 8],
+    ['总页数为6页', 6],
+  ])('uses an explicit total in %s', (instruction, expected) => {
+    expect(ordinaryDeckPageRequirement(instruction)).toMatchObject({min: expected, max: expected});
   });
 });

@@ -1,7 +1,8 @@
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { coursewareDesignSchema, coursewarePageSchema } from '@/lib/courseware/schema';
+import { coursewareDesignSchema, coursewarePageSchema, coursewareSlideDataSchema } from '@/lib/courseware/schema';
+import { compileCoursewareSlide } from '@/lib/courseware/compiler';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,8 +42,8 @@ const job = {
   },
 };
 
-function request(body: Record<string, unknown>, secret = 'integration-secret') {
-  return new NextRequest('http://localhost/api/integration/jobs/execute', {
+function request(body: Record<string, unknown>, secret = 'integration-secret', endpoint = 'execute') {
+  return new NextRequest(`http://localhost/api/integration/jobs/${endpoint}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-AISecEdu-Service-Token': secret },
     body: JSON.stringify(body),
@@ -138,6 +139,68 @@ describe('teacher native courseware Harness job', () => {
     expect(mocks.resolveModel).not.toHaveBeenCalled();
     expect(mocks.call).not.toHaveBeenCalled();
   }, 15_000);
+
+  it('recomposes a saved five-page ordinary teaching deck into eight static pages using Harness', async () => {
+    const theme = {name: '课堂', background: '#ffffff', foreground: '#000000', muted: '#555555',
+      accent: '#2222ee', secondary: '#005544', surface: '#cccccc'};
+    const makeSlide = (number: number) => {
+      const title = `观察植物第 ${number} 页`;
+      const studio = coursewareSlideDataSchema.parse({theme, assets: [], page: {
+        schema: 'courseware-page-v2', id: `page-${number}`, title, role: 'opening', composition: 'wide',
+        durationSeconds: 60, takeaway: '依据观察比较条件', objective: '了解光照对植物的影响',
+        layout: {
+          title: {box: {left: 30, top: 28, width: 940, height: 60}, fontSize: 32},
+          takeaway: {box: {left: 30, top: 98, width: 940, height: 45}, fontSize: 22},
+          supporting: [], visual: {left: 40, top: 155, width: 920, height: 360},
+        },
+        visual: {kind: 'comparison', columns: ['明处', '暗处'], rows: [
+          {label: '环境', values: ['阳光充足', '光照较少']}, {label: '生长', values: ['待观察', '待记录']},
+        ]}, speakerNotes: 'PRIVATE TEACHER NOTES '.repeat(5),
+      }});
+      return {id: `slide-${number}`, title, order: number, type: 'slide',
+        outline: {title, type: 'slide'}, content: {...compileCoursewareSlide(studio), studio}};
+    };
+    const source = Array.from({length: 5}, (_, index) => makeSlide(index + 1));
+    const revised = Array.from({length: 8}, (_, index) => makeSlide(index + 1));
+    const design = {title: '植物生长', promise: '比较不同条件下的植物生长',
+      pages: revised.map(slide => ({id: slide.content.studio.page.id}))};
+    const fetch = vi.fn(async (url, init) => {
+      expect(String(url)).toBe(harnessEndpoint);
+      expect(init.body).not.toMatch(/PRIVATE|data:image/);
+      expect(Object.keys(JSON.parse(init.body))).toEqual(['messages']);
+      return Response.json({text: '{}', model: 'official-model',
+        usage: {prompt_tokens: 8, completion_tokens: 2}});
+    });
+    vi.stubGlobal('fetch', fetch);
+    mocks.generate.mockImplementation(async input => {
+      expect(input).toMatchObject({staticTeaching: true, pageRequirement: {min: 8, max: 8}});
+      expect(input.resolveImage).toBeUndefined();
+      expect(input.plan.priorTeachingPages).toHaveLength(5);
+      await input.aiCall('生成普通课堂结构', JSON.stringify(input.plan));
+      return {design, artifacts: revised, quality: {renderEvidence: revised.map(slide => ({pageId: slide.content.studio.page.id}))}};
+    });
+    mocks.review.mockImplementation(async input => {
+      await input.aiCall('复核普通课堂课件', '复核光照观察');
+      return {design, artifacts: revised, review: {status: 'passed'}, finalRenderEvidence: {}};
+    });
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const response = await POST(request({...job, kind: 'artifact.revise',
+      scope: {ownerId: 1, dojoId: 2, ordinaryTeaching: 'deck-revision'},
+      modelRoute: {provider: 'deepseek', actual_model: 'official-model', required_model: 'official-model', allow_degraded: false},
+      payload: {artifactId: 'artifact-1', artifactType: 'slide-deck', revisionBackend: 'ordinary-deck-revision',
+        expectedRevision: 4, instruction: '请把这份植物生长课件扩成 8 页',
+        currentContent: {lesson: {id: 'lesson-1', title: '植物生长', artifacts: source}}},
+    }, undefined, 'ordinary-deck-revision'));
+    const output = await response.json();
+    expect(response.status, JSON.stringify(output)).toBe(200);
+    expect(output.result.content.lesson).toMatchObject({id: 'lesson-1'});
+    expect(output.result.content.lesson.artifacts).toHaveLength(8);
+    expect(output.result.content.revisionMetadata).toMatchObject({mode: 'ordinary-deck-revision', recomposed: true});
+    expect(output.model).toMatchObject({actualModel: 'official-model', usage: {totalTokens: 20}});
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+    expect(mocks.call).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['personal workspace', {payload: {...job.payload, workspaceId: 'student'}}],

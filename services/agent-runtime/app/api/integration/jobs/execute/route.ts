@@ -7,6 +7,8 @@ import { hasMeasuredLessonUsage, InvalidLessonPlanResponse, materializeOrdinaryL
 } from '@/lib/server/agent-harness/ordinary-lesson-plan';
 import { OrdinaryLayoutError, ordinarySlideLayoutTarget, reviseOrdinarySlideLayout,
 } from '@/lib/server/agent-harness/ordinary-slide-layout';
+import { deckText, inspectOrdinaryDeckPage, inspectOrdinaryDeckTextPage, ordinaryDeckTarget, ordinaryDeckTurn, ordinaryDeckPageRequirement, selectOrdinaryDeckTextPages,
+} from '@/lib/server/agent-harness/ordinary-deck-revision';
 import { createHarnessTurn, recordHarnessUsage } from '@/lib/server/agent-harness/classroom-turn';
 import { persistDurableModelEvent } from '@/lib/server/durable-model-events';
 import { openDebateCheckpoint } from '@/lib/debate/checkpoint';
@@ -125,7 +127,7 @@ type CinematicModelCall = (
 type JobRequest = {
   jobId?: string;
   kind?: string;
-  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean; ordinaryTeaching?: 'material-summary' | 'candidate-plan' | 'slide-wording' | 'lesson-plan-materialize' | 'slide-layout' };
+  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean; ordinaryTeaching?: 'material-summary' | 'candidate-plan' | 'slide-wording' | 'lesson-plan-materialize' | 'slide-layout' | 'deck-revision' };
   payload?: Record<string, unknown>;
   modelRoute?: {
     route?: string;
@@ -2505,20 +2507,24 @@ async function materializeNativeCourseware(
   modelString: string,
   aiCall: AICallFn,
   usage: Record<string, number>,
+  staticRevisionSignal?: AbortSignal,
 ) {
+  const staticTeaching = Boolean(staticRevisionSignal);
   const { plan, materialContext, expectedMaterials, materialGrounding } = source;
   const request = String(payload.requestPrompt || plan.summary || payload.title || plan.title || '');
   const requestedPolicy = parseSlideDeckPageRequirement(request);
-  const policy = requestedPolicy.explicit ? requestedPolicy : slideDeckPageRequirementFromValue(plan.pageCountPolicy);
-  const checkpoint = payload.artifactId ? await openCoursewareCheckpoint({
+  const policy = !staticTeaching && requestedPolicy.explicit ? requestedPolicy : slideDeckPageRequirementFromValue(plan.pageCountPolicy);
+  const checkpoint = payload.artifactId && !staticTeaching ? await openCoursewareCheckpoint({
     artifactId: payload.artifactId, request, plan, materialGrounding,
     model: modelString, policy,
   }, process.env.COURSEWARE_CHECKPOINT_DIR) : undefined;
+  const inspectRendered: typeof inspectRenderedCourseware = staticTeaching
+    ? data => inspectOrdinaryDeckPage(data, staticRevisionSignal) : inspectRenderedCourseware;
   const generated = await generateModernCourseware({ request, plan, pageRequirement: policy,
-    aiCall, inspectRendered: inspectRenderedCourseware, checkpoint, resolveImage: searchCoursewareImage,
+    aiCall, inspectRendered, checkpoint, ...(staticTeaching ? {staticTeaching} : {resolveImage: searchCoursewareImage}),
     sourceIds: Array.isArray(materialContext?.materialIds) ? materialContext.materialIds.map(String) : [],
   });
-  const reviewed = await reviewAndRepairCourseware({ request, design: generated.design, artifacts: generated.artifacts, aiCall, inspectRendered: inspectRenderedCourseware, checkpoint });
+  const reviewed = await reviewAndRepairCourseware({ request, design: generated.design, artifacts: generated.artifacts, aiCall, inspectRendered, checkpoint });
   const finalDesign = reviewed.design || generated.design;
   const reviewedDesign = { ...finalDesign, pages: finalDesign.pages.map((page, index) => {
     const current = (reviewed.artifacts[index].content as GeneratedSlideContent).studio!.page;
@@ -3226,14 +3232,22 @@ const ordinarySlideSystem = ordinaryTeachingRules + '\n' +
 async function reviseOrdinarySlide(
   target: Exclude<ReturnType<typeof ordinarySlideTarget>, {error: string}>,
   model: OrdinaryTeachingModel,
+  deckCall?: AICallFn,
 ) {
   let usage: Record<string, number> = {};
   const revised = await reviseModernCourseware({
     artifacts: target.artifacts, instruction: target.instruction,
     onlyPageIds: target.pageIds, textOnlyPageIds: target.pageIds,
-    inspectRendered: inspectRenderedCourseware,
+    inspectRendered: deckCall ? data => inspectOrdinaryDeckTextPage(data, model.signal) : inspectRenderedCourseware,
     projectedTextPatch: async (instruction, editableTextFields) => {
       const prompt = JSON.stringify({instruction, editableTextFields});
+      if (deckCall) {
+        const patch = ordinarySlidePatch(parseJson(await deckCall(ordinarySlideSystem, prompt)));
+        if (patch.changes.some(change => deckText.test(change.value))) {
+          throw new Error('课件文字修订内容超出普通静态课堂范围。');
+        }
+        return patch;
+      }
       const result = await ordinaryTeachingText(model, ordinarySlideSystem, prompt, 'generate-classroom')
         .catch(() => { throw new OrdinarySlideModelUnavailable(); });
       usage = mergeUsage(usage, result.usage);
@@ -3271,6 +3285,45 @@ async function reviseOrdinarySlide(
   return {result: {content: next}, usage};
 }
 
+async function reviseOrdinaryDeck(target: ReturnType<typeof ordinaryDeckTarget>, model: OrdinaryTeachingModel) {
+  const policy = ordinaryDeckPageRequirement(target.instruction);
+  const turn = ordinaryDeckTurn(target, model);
+  if (policy && slideDeckPageCountIssue(target.targets.length, policy)) {
+    if (target.targets.some(({studio, locked}) => studio.assets.length || locked.length) ||
+        /保留(?:原稿|原有|当前)(?:页面|画布|布局|不变)?|不改(?:原|已有|现有)/.test(target.instruction)) {
+      throw new OrdinaryLayoutError(422, 'INVALID_ORDINARY_DECK',
+        '图片、手工画布或明确要求保留的原稿不能整套重排。请在课件编辑器中增删页面。');
+    }
+    const plan = {title: target.lesson.title, priorTeachingPages: turn.pages, pageCountPolicy: policy};
+    const generated = await materializeNativeCourseware(
+      {artifactId: target.artifactId, requestPrompt: target.instruction}, 'slide-deck',
+      {plan, materialContext: null, expectedMaterials: 0, materialGrounding: ''},
+      'deepseek:' + model.modelId, turn.aiCall, turn.usage, model.signal,
+    );
+    const revised = generated.parsed.content;
+    if (slideDeckPageCountIssue(revised.lesson.artifacts.length, policy)) {
+      throw new Error('The recomposed deck does not satisfy the requested page count');
+    }
+    return {usage: turn.usage, result: {content: {
+      ...target.content, coursewareDesign: revised.coursewareDesign,
+      plan: {...recordValue(target.content.plan), pageCountPolicy: policy},
+      lesson: {...target.lesson, title: revised.lesson.title, description: revised.lesson.description,
+        artifacts: revised.lesson.artifacts, updatedAt: revised.lesson.updatedAt},
+      revisionMetadata: {mode: 'ordinary-deck-revision', recomposed: true, requestedPages: policy,
+        renderEvidence: generated.parsed.validation.quality.renderEvidence},
+    }}};
+  }
+
+  const pageNumbers = await selectOrdinaryDeckTextPages(target, turn);
+  const wording = ordinarySlideTarget({currentContent: target.content, instruction:
+    `只修改第${pageNumbers.join('、')}页的文字：${target.instruction}`});
+  if (wording.error || !wording.pageIds) throw new Error(wording.error || '当前课件文字无法安全修订。');
+  const revised = await reviseOrdinarySlide(wording, model, turn.aiCall);
+  return {usage: turn.usage, result: {content: {...revised.result.content, revisionMetadata: {
+    ...revised.result.content.revisionMetadata, mode: 'ordinary-deck-revision', recomposed: false,
+  }}}};
+}
+
 export async function POST(req: NextRequest) {
   const pathname = req.nextUrl.pathname.replace(/\/$/, '');
   const ordinaryLessonPath = '/api/integration/jobs/ordinary-lesson-plan';
@@ -3278,7 +3331,9 @@ export async function POST(req: NextRequest) {
   const ordinaryLayoutPath = '/api/integration/jobs/ordinary-slide-layout';
   const ordinaryLessonEndpoint = pathname === ordinaryLessonPath || pathname === basePath + ordinaryLessonPath;
   const ordinaryLayoutEndpoint = pathname === ordinaryLayoutPath || pathname === basePath + ordinaryLayoutPath;
-  const jsonOnly = ordinaryLessonEndpoint || ordinaryLayoutEndpoint;
+  const ordinaryDeckPath = '/api/integration/jobs/ordinary-deck-revision';
+  const ordinaryDeckEndpoint = pathname === ordinaryDeckPath || pathname === basePath + ordinaryDeckPath;
+  const jsonOnly = ordinaryLessonEndpoint || ordinaryLayoutEndpoint || ordinaryDeckEndpoint;
   if (!jsonOnly && req.headers.get('accept')?.includes('application/x-ndjson')) {
     const bodyText = await req.text();
     let submitted: JobRequest = {};
@@ -3400,6 +3455,17 @@ export async function POST(req: NextRequest) {
         errorCode: 'INVALID_ORDINARY_SLIDE_LAYOUT_JOB', failureCategory: 'permanent',
       }, 422);
     }
+    const ordinaryDeckJob = ordinaryScope === 'deck-revision' || payload.revisionBackend === 'ordinary-deck-revision';
+    if ((ordinaryDeckEndpoint || ordinaryDeckJob) && (
+      !ordinaryDeckEndpoint || kind !== 'artifact.revise' || ordinaryScope !== 'deck-revision' ||
+      payload.revisionBackend !== 'ordinary-deck-revision' || payload.artifactType !== 'slide-deck' ||
+      payload.workspaceId != null || !Number.isSafeInteger(body.scope?.ownerId) ||
+      !Number.isSafeInteger(body.scope?.dojoId) || (body.scope?.ownerId ?? 0) <= 0 ||
+      (body.scope?.dojoId ?? 0) <= 0
+    )) {
+      return reply({success: false, error: '此内部地址仅接收已锁定的普通静态课件修订。',
+        errorCode: 'INVALID_ORDINARY_DECK', failureCategory: 'permanent'}, 422);
+    }
     const candidateGeneration = kind === 'candidate.generate' || kind === 'self.candidate.generate';
     const requestedCandidateCount = Number(payload.candidateCount);
     const expectedCandidateCount = candidateGeneration
@@ -3424,6 +3490,31 @@ export async function POST(req: NextRequest) {
     }
 
     const executeJob = async () => {
+
+    if (ordinaryDeckEndpoint) {
+      const unavailable = () => reply({success: false, error: '普通课件修订服务暂不可用。当前版本已保留。',
+        errorCode: 'ORDINARY_DECK_UNAVAILABLE', failureCategory: 'service'}, 503);
+      try {
+        const target = ordinaryDeckTarget(payload);
+        const modelId = process.env.HARNESS_DEEPSEEK_MODEL?.trim();
+        if (!modelId || body.modelRoute?.provider !== 'deepseek' || requestedModel !== modelId ||
+            body.modelRoute.required_model !== modelId || body.modelRoute.allow_degraded !== false) return unavailable();
+        const turn = createHarnessTurn();
+        if (!turn) return unavailable();
+        const signal = AbortSignal.any([req.signal, AbortSignal.timeout(30 * 60_000)]);
+        const {result, usage} = await reviseOrdinaryDeck(target, {turn, modelId, signal});
+        signal.throwIfAborted();
+        return reply({success: true, result, model: {
+          provider: 'deepseek', actualModel: modelId, modelVersion: 'deepseek:' + modelId, usage,
+          latencyMs: Date.now() - started, responseHash: createHash('sha256').update(JSON.stringify(result)).digest('hex'),
+          degraded: false, executionMode: 'ordinary-deck-revision',
+        }});
+      } catch (error) {
+        if (error instanceof OrdinaryLayoutError) return reply({success: false, error: error.message,
+          errorCode: error.code, failureCategory: 'permanent'}, error.status);
+        return unavailable();
+      }
+    }
 
     if (ordinaryLayoutEndpoint) {
       const unavailable = () => reply({

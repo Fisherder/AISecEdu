@@ -104,6 +104,7 @@ export type CoursewareGenerationInput = {
   pageRequirement: SlideDeckPageRequirement;
   aiCall: AICallFn;
   assets?: CoursewareAsset[];
+  staticTeaching?: boolean;
   sourceIds?: string[];
   checkpoint?: CoursewareCheckpoint;
   resolveImage?: (query: string) => Promise<CoursewareAsset | null>;
@@ -125,10 +126,13 @@ function designIssues(design: CoursewareDesign, input: CoursewareGenerationInput
   const compositions = new Set(design.pages.map((page) => page.composition));
   if (design.pages.length >= 5 && !roles.includes('worked-example'))
     issues.push('The narrative needs a concrete worked example');
-  if (design.pages.length >= 5 && !roles.some((role) => ['practice', 'check'].includes(role)))
+  if (input.staticTeaching && design.pages.some((page) =>
+    !['chart', 'comparison'].includes(page.visualKind) || ['practice', 'check'].includes(page.role)))
+    issues.push('Static teaching pages use charts or comparisons and no interactive assessment');
+  if (!input.staticTeaching && design.pages.length >= 5 && !roles.some((role) => ['practice', 'check'].includes(role)))
     issues.push('The narrative needs an actionable learning check');
   if (
-    design.pages.length >= 8 &&
+    !input.staticTeaching && design.pages.length >= 8 &&
     roles.filter((role) => ['practice', 'check'].includes(role)).length < 2
   )
     issues.push('A full deck needs two learning checks');
@@ -187,13 +191,16 @@ export async function generateModernCourseware(input: CoursewareGenerationInput)
         name: 'design',
         aiCall: input.aiCall,
         schema: coursewareDesignSchema,
-        system: `${COURSEWARE_PLANNING_BRIEF}
+        system: input.staticTeaching
+          ? '规划整套普通静态课件。保留主题、可核验的原有事实和教师要求的页数。每页只选择 chart 或 comparison；用不同构图组织真正的示例和对比，至少保留一页具体的 worked-example。将学习检查写成讲稿中的口头问题，不选择 practice 或 check。为每页写清 visualReason 和 teachingAction。主题颜色需满足对比度要求。只返回 JSON。'
+          : `${COURSEWARE_PLANNING_BRIEF}
 你是整套课件的教学设计师和美术指导。先规划完整叙事，不直接写每页正文。每页选择最能解释知识的真实视觉编码和课堂动作。保留所有原要求与页数，不能给短课件添加封面和目录凑页数。即使教师只有一句话，也要自主完成面向受众的完整设计。
 先检查规划契约：5页及以上必须有至少一页 role="worked-example"，用具体数值、情境或观察对象走完一次解释（不要求所有学科都做算术）；至少一页 role="practice" 或 "check"，提出学生能实际回答的问题。不要把已有算例和检测页都标成explain。8页及以上至少两页practice/check。5页及以上采用互补的信息表达和至少两种composition：通常结合两种visualKind，但scene是通用绘图面，可以用同一scene类型实现不同的数组、轨迹、曲线、记录表和交互，不应为凑类型把正确图解改成卡片。表达变化必须服务内容并在实际图形中兑现，不靠增加页面凑齐。每条objectives不超过100个字符，细节放在对应页的teachingAction中。这些契约与教师的主题、页数和难度约束必须同时满足。
 主题可以采用温暖纸白、深色科学画布或清爽编辑式配色，不要每套都用蓝色圆角卡片。foreground/background 对比度至少 7:1，muted/background 至少 4.5:1，accent/background 至少 3:1，foreground/surface 至少 4.5:1。可用纸白示例：background=#F7F4ED,foreground=#172C2A,muted=#506762,accent=#146B5F,secondary=#B44E29,surface=#E6ECE6；深色示例：background=#101922,foreground=#F0F3ED,muted=#AFBFCC,accent=#EAAF50,secondary=#69BCB8,surface=#223443。可自主设计其他合规颜色。
 visualReason 必须解释该页为什么需要这个图，teachingAction 描述学习者能观察、尝试或判断的内容。具体空间形态、数据结构和运动过程使用scene，不要用diagram把实体替换成写着名称的圆圈。图片能提供真实观察证据时应使用已检索到的合适图片。跨页尽量延续同一组例子，若更换数据明确说明。所有算例先计算再写，难度必须符合受众，不为凑视觉类型给初中课件硬塞三角函数公式。页面标题要具体，objectives 的每个条目都必须对应实际页面。不要把上一稿中的外观和禁止事项当成教师要求。没有真实图片资产时不得选 image。只返回 JSON。`,
         context: {
           request: input.request,
+          staticTeaching: input.staticTeaching,
           candidatePlan: input.plan,
           pageRequirement: input.pageRequirement,
           availableImages: assets.map(({ src: _, ...asset }) => asset),
@@ -252,9 +259,10 @@ visualReason 必须解释该页为什么需要这个图，teachingAction 描述�
                 (schema) => schema.shape.kind.value === brief.visualKind,
               )!,
             }),
-            system:
-              PAGE_SYSTEM +
-              `\n本页只能使用 ${brief.visualKind} 视觉，不能改为其他视觉类型。图表逐步讲解时用 chartFocusIndexes 高亮当前讨论的数据点，不能为产生动画而篡改数据；若不需要分步变化，beats=[]。`,
+            system: input.staticTeaching
+              ? `生成一个普通静态课堂页面，遵守已选角色和页 id。只使用 ${brief.visualKind} 展现可核对的数据或对比，给标题、要点和视觉分配不重叠的真实 layout。保留事实，beats=[]，不输出 check。备注可保留课堂口头提问。只返回 JSON。`
+              : PAGE_SYSTEM +
+                `\n本页只能使用 ${brief.visualKind} 视觉，不能改为其他视觉类型。图表逐步讲解时用 chartFocusIndexes 高亮当前讨论的数据点，不能为产生动画而篡改数据；若不需要分步变化，beats=[]。`,
             context: {
               request: input.request,
               candidatePlan: input.plan,
@@ -266,6 +274,8 @@ visualReason 必须解释该页为什么需要这个图，teachingAction 描述�
             },
             inspect: async (page) => {
               const issues = inspectCoursewareSlide({ page, theme: design.theme, assets });
+              if (input.staticTeaching && (page.beats.length || page.check))
+                issues.push('Static teaching pages cannot contain interactive or animated states');
               if (!page.layout)
                 issues.push('Design the actual freeform layout, not a preset template');
               if (page.id !== brief.id)

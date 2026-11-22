@@ -281,3 +281,129 @@ def test_revision_conflict_uses_lock_refreshed_artifact_before_creating_row(case
         ns["create_revision"](loaded, user, expected_revision=2, instruction=REVISE, content={}, commit=False)
     query_chain.populate_existing.assert_called_once()
     ns["db"].session.add.assert_not_called()
+
+
+def test_teacher_whole_deck_request_dispatches_pinned_saved_revision(case):
+    ns, jobs, job, user, artifact, revision = case
+    instruction = "请把这份植物生长课件扩成 8 页"
+    enqueue = MagicMock(return_value=(job, True))
+    api = {
+        "artifact_for_user": lambda *_: artifact,
+        "_supplied_idempotency": lambda *_: "revise-once",
+        "TeachingJobs": SimpleNamespace(query=MagicMock()),
+        "artifact_view": lambda _: {"revision": {"content": revision.content}},
+        "artifact_revision_source_issue": lambda *_: None,
+        "ordinary_slide_layout": jobs["ordinary_slide_layout"],
+        "enqueue_job": enqueue, "job_view": lambda queued: {"id": queued.id},
+        "_ok": lambda body, status: (body, status),
+        "ScopeError": ns["ScopeError"],
+    }
+    api["TeachingJobs"].query.filter_by.return_value.first.return_value = None
+    path = __import__("pathlib").Path(__file__).resolve().parents[1] / "dojo_plugin/api/v1/teaching.py"
+    ast = __import__("ast")
+    function = next(node for node in ast.parse(path.read_text()).body
+                    if isinstance(node, ast.FunctionDef) and node.name == "revise_teacher_artifact")
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), api)
+    assert api["revise_teacher_artifact"](user, artifact.id, {"instruction": instruction, "expectedRevision": 2})[1] == 202
+    job.payload = enqueue.call_args.kwargs["payload"]
+    job.payload["currentContent"] = {"not": "trusted"}
+    prepared = jobs["_runtime_payload"](job)
+    route = ns["route_model"](job.kind, payload=prepared, allow_degraded=True)
+    request = jobs["_runtime_request_body"](job, route, prepared)
+    assert request["scope"]["ordinaryTeaching"] == "deck-revision"
+    assert request["payload"]["currentContent"] == revision.content
+    assert request["payload"]["instruction"] == instruction
+    assert ns["DECK_PIN"] not in request["payload"]
+    assert route["required_model"] == "pinned-fixture"
+    assert route["allow_degraded"] is False
+
+    response = MagicMock(status_code=404)
+    post = MagicMock(return_value=response)
+    jobs.update(config=ns["config"], AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS=(), time=ns["time"],
+                requests=SimpleNamespace(post=post), _runtime_read_timeout=lambda *_: 30,
+                RuntimeJobError=lambda message, **kwargs: ValueError(message))
+    with pytest.raises(ValueError, match="整套修订接口"):
+        jobs["_invoke_agent_runtime"](job, route, prepared)
+    post.assert_called_once()
+    assert post.call_args.args == ("http://runtime.test/api/integration/jobs/ordinary-deck-revision",)
+    assert post.call_args.kwargs["allow_redirects"] is False
+    assert artifact.current_revision == 2
+
+
+def test_whole_deck_rechecks_teacher_revision_before_persistence(case):
+    ns, jobs, job, user, artifact, revision = case
+    job.payload = ns["admit"](user, artifact, {
+        **job.payload, "currentContent": revision.content, "instruction": "请统一整套课件的措辞",
+    })
+    artifact_query = ns["TeachingArtifacts"].query.filter_by.return_value
+    artifact_query.first.return_value = artifact
+    artifact_query.with_for_update.return_value.populate_existing.return_value.first.return_value = artifact
+    ns["Users"].query.filter_by.return_value.first.return_value = user
+    create_revision = MagicMock()
+    jobs.update(TeachingArtifacts=ns["TeachingArtifacts"], Users=ns["Users"], create_revision=create_revision)
+    original = copy.deepcopy(revision.content)
+    ns["build_scope"].side_effect = ns["ScopeError"]("permission revoked")
+    with pytest.raises(ns["OrdinarySlideLayoutError"]):
+        jobs["_persist_result"](job, {"content": {"attempt": "should not persist"}})
+    ns["build_scope"].side_effect = None
+    artifact.current_revision = 3
+    with pytest.raises(ns["OrdinarySlideLayoutError"]):
+        jobs["_persist_result"](job, {"content": {"attempt": "stale"}})
+    create_revision.assert_not_called()
+    assert revision.content == original
+
+
+def test_whole_deck_receipt_requires_official_usage_rendering_and_scope(case):
+    ns, jobs, job, user, artifact, revision = case
+    job.payload = ns["admit"](user, artifact, {
+        **job.payload, "currentContent": revision.content, "instruction": "请统一整套课件的措辞",
+    })
+    prepared = jobs["_runtime_payload"](job)
+    route = ns["route_model"](job.kind, payload=prepared)
+    content = copy.deepcopy(revision.content)
+    content["lesson"]["artifacts"][0]["outline"]["title"] = "比较叶片"
+    content["revisionMetadata"] = {
+        "mode": "ordinary-deck-revision", "recomposed": False, "pageIds": ["one"],
+        "renderEvidence": [{
+            "pageId": "one", "mode": "headless-chromium-dom-and-pixels", "sourceSha256": "a" * 64,
+            "frames": [{"step": -1, "screenshotSha256": "b" * 64}], "inspectedAt": "now",
+        }],
+    }
+    response = {
+        "result": {"content": content},
+        "model": {"provider": "deepseek", "actualModel": "pinned-fixture", "executionMode": "ordinary-deck-revision",
+                  "degraded": False, "usage": {"inputTokens": 5, "outputTokens": 3, "totalTokens": 8}},
+    }
+    ns["validate_receipt"](route, prepared, response)
+    for mutation in ("model", "render", "scope"):
+        invalid = copy.deepcopy(response)
+        if mutation == "model":
+            invalid["model"]["actualModel"] = "legacy"
+        elif mutation == "render":
+            invalid["result"]["content"]["revisionMetadata"]["renderEvidence"] = []
+        else:
+            invalid["result"]["content"]["lesson"]["artifacts"][1]["outline"]["title"] = "未经修改授权"
+        with pytest.raises(ns["OrdinarySlideLayoutError"]):
+            ns["validate_receipt"](route, prepared, invalid)
+
+
+@pytest.mark.parametrize("instruction", [
+    "把整套课件改成暖色主题",
+    "请统一整套课件的配色，然后润色所有标题",
+    "请把整套课件的主题改成暖色",
+    "Switch the deck to a warm color theme and refine the wording",
+    "重新组织课件结构",
+])
+def test_style_and_other_generic_edits_keep_the_existing_native_dispatch(case, instruction):
+    ns, _, job, user, artifact, revision = case
+    payload = {**job.payload, "currentContent": revision.content, "instruction": instruction}
+    assert ns["admit"](user, artifact, payload) is payload
+    assert not ns["pinned"](payload)
+
+
+def test_text_revision_can_ask_to_preserve_the_existing_style(case):
+    ns, _, job, user, artifact, revision = case
+    payload = {**job.payload, "currentContent": revision.content,
+               "instruction": "保留现有配色和布局，让整套课件的措辞更清楚"}
+    admitted = ns["admit"](user, artifact, payload)
+    assert ns["deck_pinned"](admitted)
