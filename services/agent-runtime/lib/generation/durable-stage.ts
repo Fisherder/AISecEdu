@@ -1,15 +1,10 @@
-import { createHash } from 'node:crypto';
+import { generationFingerprint } from './fingerprint';
 import type { AICallFn } from './pipeline-types';
 import { generationValidationIssues, GenerationStageError, type GenerationStateStore } from './validated-stage';
 import { parseCinematicJson } from '@/lib/cinematic/json';
 import { getServerAgentRunTrace } from '@/lib/agent-run/server-context';
 
-export function generationFingerprint(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value, (_key, item) =>
-    item && typeof item === 'object' && !Array.isArray(item)
-      ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item,
-  )).digest('hex');
-}
+export { generationFingerprint } from './fingerprint';
 
 export function durableStageFingerprint(name: string, input: unknown, contractVersion = '1') {
   return generationFingerprint({version: 'simulation-workflow-v3', name, contractVersion, input});

@@ -12,6 +12,7 @@ const prose = (max: number) =>
     .trim()
     .min(1)
     .max(max)
+    .refine(isOrdinaryTeachingProse)
     .refine(
       (value) =>
         !/[<>\u0000-\u0008\u000b\u000c\u000e-\u001f]|`|~{3,}|(?:https?|ftp|file|data|javascript):|靶场|攻防演练|漏洞复现|漏洞利用|攻击步骤|可执行载荷|\b(?:ctf|exploit)\b/i.test(
@@ -126,10 +127,6 @@ export function ordinaryLessonCandidateInput(payload: Record<string, unknown>, a
     title,
     summary: analysis.summary,
   }));
-  if (artifactType === 'debate' && ![input.prompt, ...sources.flatMap(({title, summary}) => [title, summary])]
-      .every(isOrdinaryTeachingProse)) {
-    throw new Error('Debate proposal inputs must contain ordinary teaching prose');
-  }
   if (Buffer.byteLength(JSON.stringify({ request: input.prompt, sources }), 'utf8') > 80_000) {
     throw new Error('Ordinary candidate materials exceed the teaching context limit');
   }

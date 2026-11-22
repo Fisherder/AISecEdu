@@ -367,7 +367,7 @@ describe('process runtime diagnostics and recovery', () => {
       patches: [{op: 'add', path: '/actions/@add/locals/0', value: {id: 'increment', value: {input: 'delta'}}}],
       tests: pkg.tests,
     }, undefined, {deriveExpected: true});
-    expect(repaired.draft.actions[0].locals).toEqual([{id: 'increment', value: {input: 'delta'}}]);
+    expect(parseProcessScene(repaired.draft).actions[0].locals).toEqual([{id: 'increment', value: {input: 'delta'}}]);
   });
   it('uses a verified immutable hash for compact automatic repairs while keeping user revision old-value checks strict', () => {
     const pkg = fixture();

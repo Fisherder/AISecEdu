@@ -49,11 +49,17 @@ const lessonCandidate = {candidate: {
     activities: [{title: '小组讨论', instruction: '交流预测依据'}],
     assessment: {criteria: ['根据记录说明差异']}, sourceGrounding: []},
 }};
-const request = (kind: string, ordinaryTeaching: string, payload: Record<string, unknown>, token = 'integration-secret', model = job.modelRoute.actual_model, requiredModel?: string, endpoint = 'execute') =>
-  new NextRequest(`http://localhost/api/integration/jobs/${endpoint}`, {
+const request = (kind: string, ordinaryTeaching: string, payload: Record<string, unknown>, token = 'integration-secret', model = job.modelRoute.actual_model, requiredModel?: string, endpoint = 'execute') => {
+  const lessonPin = endpoint === 'ordinary-lesson-plan' ? {
+    route: kind === 'candidate.generate' ? 'upstream-lesson-plan-candidate' : 'upstream-lesson-plan-materialize',
+    allow_degraded: false,
+  } : {};
+  return new NextRequest(`http://localhost/api/integration/jobs/${endpoint}`, {
     method: 'POST', headers: {'Content-Type': 'application/json', 'X-AISecEdu-Service-Token': token},
-    body: JSON.stringify({...job, kind, modelRoute: {...job.modelRoute, actual_model: model, required_model: requiredModel}, scope: {...job.scope, ordinaryTeaching}, payload}),
+    body: JSON.stringify({...job, kind, modelRoute: {...job.modelRoute, actual_model: model, required_model: requiredModel, ...lessonPin},
+      scope: {...job.scope, ordinaryTeaching}, payload}),
   });
+};
 const modelResponse = (value: unknown) => Response.json({
   text: JSON.stringify(value), model: 'official-model', usage: {prompt_tokens: 10, completion_tokens: 5},
 });
@@ -399,22 +405,42 @@ describe('ordinary teaching worker service routes', () => {
     expect(mocks.resolveModel).not.toHaveBeenCalled();
   });
 
-  it('does not fall back from an explicitly pinned ordinary lesson candidate', async () => {
+  it('keeps pinned candidates and materialization off the generic executor', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     const {POST} = await import('@/app/api/integration/jobs/execute/route');
-    const payload = {artifactType: 'lesson-plan', candidateSetId: 'candidate-one',
-      generationReason: 'teacher_requested_ordinary_lesson_plan', ordinaryCandidateModel: 'official-model'};
-    expect((await POST(request('candidate.generate', '', payload))).status).toBe(422);
-    expect((await POST(request('candidate.generate', 'candidate-plan', payload))).status).toBe(503);
-    vi.stubEnv('DOJO_AI_ENABLED', 'false');
-    const original = request('candidate.generate', 'candidate-plan', payload, 'integration-secret', 'official-model');
-    const pinned = await original.json();
-    pinned.modelRoute.required_model = 'official-model';
-    const disabled = new NextRequest(original.url, {
-      method: 'POST', headers: original.headers, body: JSON.stringify(pinned),
-    });
-    expect((await POST(disabled)).status).toBe(503);
+    for (const dedicatedRequest of [candidateRequest(), materializeRequest()]) {
+      const job = await dedicatedRequest.json();
+      const execute = (body: unknown) => POST(new NextRequest(
+        'http://localhost/api/integration/jobs/execute', {
+          method: 'POST', headers: dedicatedRequest.headers, body: JSON.stringify(body),
+        },
+      ));
+      const response = await execute(job);
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({errorCode: 'INVALID_ORDINARY_LESSON_PLAN_JOB'});
+      const routeOnly = await execute({...job, payload: {}, scope: {}});
+      expect(routeOnly.status).toBe(422);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cross-route or degraded pin on the dedicated lesson plan endpoint', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const candidate = candidateRequest();
+    const base = await candidate.json();
+    for (const modelRoute of [
+      {...base.modelRoute, route: 'upstream-lesson-plan-materialize'},
+      {...base.modelRoute, allow_degraded: true},
+    ]) {
+      const response = await postLessonPlan(new NextRequest(candidate.url, {
+        method: 'POST', headers: candidate.headers, body: JSON.stringify({...base, modelRoute}),
+      }));
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({errorCode: 'ORDINARY_LESSON_PLAN_CANDIDATE_UNAVAILABLE'});
+    }
     expect(fetch).not.toHaveBeenCalled();
     expect(mocks.resolveModel).not.toHaveBeenCalled();
   });

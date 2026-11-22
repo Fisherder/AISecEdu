@@ -125,7 +125,7 @@ DSH 每页接收本轮版式要求、页序、区域类型和坐标。正文、�
 
 教师在工作台选择已开通普通教学的课程，需要使用教材时先选择「引用资料」。发送「请生成普通教案候选：比较两种植物叶片的形状和叶脉，留出五分钟分组讨论」。工作台返回两份可以比较的方案。在「审阅生成成品」中找到要采用的方案，点击「打开成品工作区」。生成结束后，点击「打开交互预览」即可按所选大纲查看各节讲解和要点。需要可下载的文件时，仍可以直接要求制作 Word 或 Markdown 教案。
 
-候选生成和成品生成分别登记 DSH 调用及模型用量。后者根据已选择的候选、初始版本和教材摘要生成课堂展示稿。同一候选的重复请求复用已有任务。若课程权限、已引用资料或模型配置发生变化，界面会显示任务失败原因，教师可在核对后重新提交。
+候选和成品都调用课堂专用接口 `/api/integration/jobs/ordinary-lesson-plan`。工作线程从任务中读取固定模型，分别使用 `upstream-lesson-plan-candidate` 和 `upstream-lesson-plan-materialize` 路由。两次任务各自登记模型用量。成品沿用教师选定的候选、初始版本和教材摘要。同一候选的重复请求复用已有任务。若课程权限、已引用资料或模型配置发生变化，界面会显示任务失败原因，教师可在核对后重新提交。
 
 教师打开已生成的普通教案，可以用「生成新版本」修订课堂文字。例如，「把第二节的讲解改得更通俗」只向 DSH 提交第二节的标题、讲解、学习要点和本次指令。「精简各节学习要点」会提交各节的可见文字。成功后教师可以打开新版本；小节顺序、图文元素标识、原教案资料和私有备注保留在平台。更改标题或增删小节请重新生成教案。课堂服务的专用接口为 `/api/integration/jobs/ordinary-lesson-plan-revise`。
 
@@ -283,7 +283,9 @@ DSH 的 `teaching` 网络用于后续接入已审核的教学客户端，`model-
 
 ### 发布配套的课堂和浏览器检查器
 
-课堂使用 Next 的生产包和固定版本的 Chromium 检查器。`Teaching runtime images` 的联调步骤从同一提交构建课堂、检查器和 DSH 三个 Linux amd64 镜像，启动单独的 Compose 项目。合成模型只监听 DSH 容器内的回环地址。工作流先用真实 Chromium 渲染分数图表，再通过课堂服务的内部修订接口为同一类图表调色。验收核对页标识、模型用量、真实渲染回执，以及模型只收到调色要求和当前颜色。容器通过项目内私网相连。测试结束后移除本次容器、网络和临时数据卷。[课堂配置](../../ops/staging/classroom.compose.yml) · [断外网配置](../../test/fixtures/teaching-harness-offline.compose.yml)
+在 GitHub Actions 的具体运行中查看 `Teaching runtime images` 的步骤。出现 `Verify the production pair on an internal network` 时，该运行检查课堂与 Chromium 两个镜像。打开课堂图表后，检查器验证分数图表、标题和要点是否可见。
+
+三服务联调还会启动固定版本的 DSH，让课堂向合成模型提交调色要求，并核对当前颜色、页标识和模型用量。自动执行这项联调的步骤名是 `Verify the classroom, official Harness and Chromium on private networks`。合成模型仅监听 DSH 容器的回环地址。两种验收都在临时环境中运行，结束后清理。具体提交的覆盖范围以该运行的日志为准。[课堂配置](../../ops/staging/classroom.compose.yml) · [三服务隔离配置](../../test/fixtures/teaching-harness-offline.compose.yml)
 
 在 `develop` 和 `team/teaching-harness-*` 推送相关变更时会触发构建，维护者也可以手动运行。课堂与检查器继续以 `teaching-runtime-images-完整提交号` 归档两天，DSH 镜像和官方源码核验由同一提交的 Harness 检查归档。
 
