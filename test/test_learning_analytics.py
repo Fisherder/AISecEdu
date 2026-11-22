@@ -1,3 +1,4 @@
+import ast
 import datetime
 import importlib.util
 import pathlib
@@ -96,7 +97,13 @@ def test_teacher_core_dashboard_projects_large_payload_columns():
     # Core dashboard polling must not deserialize full authoring conversations,
     # candidate packages, completed job results, or assistant prose. Those
     # payloads grow with course history while the cards only need metadata.
-    assert "from sqlalchemy.orm import load_only, selectinload" in teaching
+    orm_imports = {
+        name.name
+        for node in ast.parse(teaching).body
+        if isinstance(node, ast.ImportFrom) and node.module == "sqlalchemy.orm"
+        for name in node.names
+    }
+    assert {"load_only", "selectinload"} <= orm_imports
     for model in (
         "LearningDrafts",
         "TeachingArtifacts",
