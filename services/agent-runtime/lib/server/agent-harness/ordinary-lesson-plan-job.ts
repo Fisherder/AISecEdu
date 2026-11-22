@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {createHarnessTurn} from './classroom-turn';
-import {createPinnedCandidateModel, generateOrdinaryCandidates} from './ordinary-candidate-generation';
+import {createPinnedTeachingModel} from './ordinary-teaching';
+import {generateOrdinaryCandidates} from './ordinary-candidate-generation';
 import {
   InvalidLessonPlanResponse, materializeOrdinaryLessonPlan, ORDINARY_LESSON_REQUEST_LIMIT,
   ordinaryLessonCandidateInput, ordinaryLessonPlanInput,
@@ -106,7 +107,7 @@ export async function executeOrdinaryLessonPlanJob(body: Record<string, unknown>
     }
     const requestedCount = Number(payload.candidateCount);
     const count = Number.isFinite(requestedCount) ? Math.max(1, Math.min(4, Math.trunc(requestedCount))) : 1;
-    const {model, hasInvalidReceipt} = createPinnedCandidateModel(transport, modelId, signal);
+    const {model, hasInvalidReceipt} = createPinnedTeachingModel(transport, modelId, signal);
     try {
       const {result, usage} = await generateOrdinaryCandidates(selected, count, model, 'lesson-plan');
       if (hasInvalidReceipt()) return unavailable(true);

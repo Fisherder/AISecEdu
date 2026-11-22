@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {createHarnessTurn} from './classroom-turn';
-import {createPinnedCandidateModel, generateOrdinaryCandidates} from './ordinary-candidate-generation';
+import {createPinnedTeachingModel} from './ordinary-teaching';
+import {generateOrdinaryCandidates} from './ordinary-candidate-generation';
 import {DebateCandidateCheckpointError, replayOrdinaryDebateCandidates} from './ordinary-debate-candidate-checkpoint';
 import {ordinaryLessonCandidateInput} from './ordinary-lesson-plan';
 
@@ -97,7 +98,7 @@ export async function executeOrdinaryDebateCandidateJob(body: Record<string, unk
     return invalidOrdinaryDebateCandidateJob;
   }
 
-  const {model, hasInvalidReceipt} = createPinnedCandidateModel(transport, modelId, signal);
+  const {model, hasInvalidReceipt} = createPinnedTeachingModel(transport, modelId, signal);
 
   try {
     const {result, usage} = await replayOrdinaryDebateCandidates({

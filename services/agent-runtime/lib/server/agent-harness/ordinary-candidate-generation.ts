@@ -1,8 +1,7 @@
 import {runCandidatePipeline} from '@/lib/generation/candidate-pipeline';
 import {generationFingerprint} from '@/lib/generation/fingerprint';
 import {parseJsonResponse} from '@/lib/generation/json-repair';
-import {recordHarnessUsage, type HarnessTurn} from './classroom-turn';
-import {hasMeasuredLessonUsage, ordinaryLessonCandidateBlueprint, ordinaryLessonCandidateDraft,
+import {ordinaryLessonCandidateBlueprint, ordinaryLessonCandidateDraft,
   type ordinaryLessonCandidateInput} from './ordinary-lesson-plan';
 import {ordinaryBlueprint, ordinaryCandidate, ordinaryTeachingJson, ordinaryTeachingRules,
   type OrdinaryTeachingModel} from './ordinary-teaching';
@@ -98,27 +97,4 @@ sourceGrounding 必须准确覆盖授权资料 ${JSON.stringify(materialIds)}。
   });
 
   return {result: {candidates, generationReport: report}, usage};
-}
-
-export function createPinnedCandidateModel(
-  transport: HarnessTurn, modelId: string, signal: AbortSignal,
-) {
-  let invalidReceipt = false;
-  const model: OrdinaryTeachingModel = {modelId, signal, async turn(messages, turnSignal) {
-    if (invalidReceipt) throw new Error('A candidate call returned an invalid receipt');
-    const response = await transport(messages, turnSignal).catch(error => {
-      invalidReceipt = true;
-      throw error;
-    });
-    if (response.model !== modelId || !hasMeasuredLessonUsage(response) ||
-        response.usage.prompt_tokens <= 0 || response.usage.completion_tokens <= 0 ||
-        (response.usage.total_tokens != null &&
-          response.usage.total_tokens !== response.usage.prompt_tokens + response.usage.completion_tokens)) {
-      invalidReceipt = true;
-      await recordHarnessUsage(response, 'aisecedu-integration-job');
-      throw new Error('The pinned candidate turn did not return a model and measured usage');
-    }
-    return response;
-  }};
-  return {model, hasInvalidReceipt: () => invalidReceipt};
 }

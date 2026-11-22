@@ -185,8 +185,9 @@ describe('teacher native courseware Harness job', () => {
     });
     const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
     const response = await POST(request({...job, kind: 'artifact.revise',
-      scope: {ownerId: 1, dojoId: 2, ordinaryTeaching: 'deck-revision'},
-      modelRoute: {provider: 'deepseek', actual_model: 'official-model', required_model: 'official-model', allow_degraded: false},
+      scope: {ownerId: 1, dojoId: -2, moduleIndex: 0, ordinaryTeaching: 'deck-revision'},
+      modelRoute: {route: 'upstream-ordinary-deck-revision', provider: 'deepseek', actual_model: 'official-model',
+        required_model: 'official-model', allow_degraded: false, degraded: false, request_hash: 'a'.repeat(64)},
       payload: {artifactId: 'artifact-1', artifactType: 'slide-deck', revisionBackend: 'ordinary-deck-revision',
         expectedRevision: 4, instruction: '请把这份植物生长课件扩成 8 页',
         currentContent: {lesson: {id: 'lesson-1', title: '植物生长', artifacts: source}}},

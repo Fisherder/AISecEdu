@@ -64,7 +64,7 @@ from .files import persist_agent_deliverables, public_agent_file
 from .model_router import (
     UPSTREAM_DEBATE_CANDIDATE_ROUTE, UPSTREAM_DEBATE_ROUTE, UPSTREAM_DECK_REVISION_ROUTE,
     UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_PLAN_REVISION_ROUTE,
-    UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_SLIDE_NOTES_ROUTE, UPSTREAM_TEACHER_ROUTE,
+    UPSTREAM_ORDINARY_TEACHING_ROUTE, UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_SLIDE_NOTES_ROUTE, UPSTREAM_TEACHER_ROUTE,
     route_model, validate_actual_model,
 )
 from . import (
@@ -1617,6 +1617,9 @@ def enqueue_job(
         # silently reroute the teacher's slides to a different model backend.
         payload = {**payload, "revisionBackend": "ordinary-slide-wording"}
 
+    if kind in {"candidate.generate", "material.enrich"} and "ordinaryTeachingPin" in payload:
+        # Only the queue may admit and pin this backend.
+        payload = {key: value for key, value in payload.items() if key != "ordinaryTeachingPin"}
     inherited_trace_id = get_trace_id()
     if inherited_trace_id in {None, "", "NONE", "LOCAL"}:
         inherited_trace_id = None
@@ -1637,6 +1640,8 @@ def enqueue_job(
         payload=payload,
         max_attempts=max_attempts,
     )
+    if kind in {"candidate.generate", "material.enrich"}:
+        job.payload = _admit_ordinary_teaching_job(job, payload)
     db.session.add(job)
     db.session.flush()
     if kind == "agent.chat":
@@ -2639,6 +2644,8 @@ def _prepare_model_request(job):
     if saved:
         restore_input_cache(job)
         return saved["payload"], saved["modelRoute"]
+    if job.kind in {"candidate.generate", "material.enrich"} and "ordinaryTeachingPin" in (job.payload or {}):
+        _require_ordinary_teaching_job(job, job.payload)
     payload = _runtime_payload(job)
     if job.kind == "candidate.generate" and not ordinary_debate_candidate.explicit(payload):
         ordinary_lesson_plan.generation_model(job, payload, _ordinary_teaching_job_scope(job, payload))
@@ -2760,7 +2767,7 @@ def _runtime_payload(job):
         dojo_id=job.dojo_id if include_course_materials else None,
         prompt=prompt,
         source_refs=material_refs,
-        require_complete=required,
+        require_complete=required or bool(material_refs and "ordinaryTeachingPin" in payload),
     )
     resolved_source_refs = (
         material_context["sourceRefs"]
@@ -2876,10 +2883,10 @@ def _harness_courseware_authorized(job, payload):
     ))
 
 
-def _ordinary_teaching_job_scope(job, payload):
+def _ordinary_teaching_job_scope(job, payload, *, require_upstream=True):
     if (
         job.kind not in {"candidate.generate", "material.enrich", "artifact.revise"}
-        or job.dojo_id is None or payload.get("workspaceId") or not upstream_enabled()
+        or job.dojo_id is None or payload.get("workspaceId") or (require_upstream and not upstream_enabled())
     ):
         return None
     if not ordinary_teaching_course(job.dojo_id):
@@ -2933,6 +2940,68 @@ def _ordinary_teaching_job_scope(job, payload):
     if revision is None or not revision.sha256:
         return None
     return "material-summary"
+
+
+def _admit_ordinary_teaching_job(job, payload):
+    if job.kind == "candidate.generate" and (
+        ordinary_debate_candidate.explicit(payload) or ordinary_lesson_plan.explicit_generation(payload)
+    ):
+        return payload
+    scope = _ordinary_teaching_job_scope(job, payload, require_upstream=False)
+    if scope not in {"candidate-plan", "material-summary"}:
+        return payload
+    pin = {"scope": scope, "model": config.HARNESS_DEEPSEEK_MODEL}
+    if scope == "material-summary":
+        revision = TeachingMaterialRevisions.query.filter_by(
+            id=payload["revisionId"], material_id=payload["materialId"],
+            storage_key=payload["storageKey"], status="READY",
+        ).populate_existing().first()
+        if revision is None or not revision.sha256:
+            raise PermanentJobError("普通教材摘要所用资料版本已变化，请重新发起。")
+        pin["materialSha256"] = revision.sha256
+    return {**payload, "ordinaryTeachingPin": pin, "allowDegraded": False}
+
+
+def _require_ordinary_teaching_job(job, payload):
+    pin = payload.get("ordinaryTeachingPin")
+    expected_scope = {"candidate.generate": "candidate-plan", "material.enrich": "material-summary"}.get(job.kind)
+    if not isinstance(pin, dict) or not expected_scope or pin.get("scope") != expected_scope:
+        raise PermanentJobError("普通教学任务缺少有效的引擎记录，请重新发起。")
+    if not upstream_enabled() or not pin.get("model") or pin["model"] != config.HARNESS_DEEPSEEK_MODEL:
+        raise RuntimeJobError("普通教学服务或指定模型当前不可用。", category="service", retry_after=30)
+    if _ordinary_teaching_job_scope(job, payload) != expected_scope:
+        raise PermanentJobError("普通教学任务的课程权限或资料版本已变化，请重新发起。")
+    if expected_scope == "material-summary":
+        revision = TeachingMaterialRevisions.query.filter_by(
+            id=payload["revisionId"], material_id=payload["materialId"], storage_key=payload["storageKey"], status="READY",
+        ).populate_existing().first()
+        if revision is None or not pin.get("materialSha256") or revision.sha256 != pin["materialSha256"]:
+            raise PermanentJobError("普通教材摘要所用资料版本已变化，请重新发起。")
+    return expected_scope
+
+
+def _validate_ordinary_teaching_receipt(job, payload, route, response):
+    scope = _require_ordinary_teaching_job(job, payload)
+    if scope == "candidate-plan":
+        refs = [ref for ref in payload.get("sourceRefs", [])
+                if isinstance(ref, dict) and ref.get("type") == "material"]
+        if refs:
+            build_course_material_context(
+                owner_id=job.owner_id, dojo_id=job.dojo_id, source_refs=refs, require_complete=True,
+            )
+    model = payload["ordinaryTeachingPin"]["model"]
+    meta = response.get("model")
+    usage = meta.get("usage") if isinstance(meta, dict) else None
+    measured = (
+        isinstance(usage, dict)
+        and all(type(usage.get(field)) is int and usage[field] > 0
+                for field in ("inputTokens", "outputTokens", "totalTokens"))
+        and usage["totalTokens"] == usage["inputTokens"] + usage["outputTokens"]
+    )
+    if (not measured or route.get("required_model") != model or meta.get("provider") != "deepseek"
+            or meta.get("actualModel") != model or meta.get("modelVersion") != f"deepseek:{model}"
+            or meta.get("executionMode") != f"ordinary-{scope}" or meta.get("degraded") is not False):
+        raise RuntimeJobError("普通教学任务未取得指定 Harness 模型和有效用量的回执。", category="service", retry_after=30)
 
 
 def _runtime_request_body(job, route, payload):
@@ -3045,7 +3114,9 @@ def _runtime_request_body(job, route, payload):
             + ("\n" + DOCUMENT_INSTRUCTION if formats else ""),
             model_context,
         )
-    ordinary_teaching = _ordinary_teaching_job_scope(job, payload)
+    ordinary_pinned = "ordinaryTeachingPin" in payload
+    ordinary_teaching = (_require_ordinary_teaching_job(job, payload) if ordinary_pinned
+                         else _ordinary_teaching_job_scope(job, payload))
     if job.kind == "candidate.generate":
         ordinary_lesson_plan.generation_model(job, payload, ordinary_teaching)
     if (job.kind == "artifact.revise" and payload.get("revisionBackend") == "ordinary-slide-wording"
@@ -3060,8 +3131,9 @@ def _runtime_request_body(job, route, payload):
             "moduleIndex": job.module_index,
             **({"teacherCourseware": True} if _harness_courseware_authorized(job, payload) else {}),
             **({"ordinaryTeaching": ordinary_teaching} if ordinary_teaching else {}),
+            **({"ordinaryTeachingPinned": True} if ordinary_pinned else {}),
         },
-        "payload": payload,
+        "payload": {key: value for key, value in payload.items() if key != "ordinaryTeachingPin"} if ordinary_pinned else payload,
         "modelRoute": route,
     }
 
@@ -3530,8 +3602,11 @@ def _invoke_agent_runtime(job, route, payload=None):
             "actualModel": response["model"],
             "usage": response["usage"],
         }}
+    pinned_ordinary = "ordinaryTeachingPin" in payload
     endpoint = "execute"
-    if job.kind == "candidate.generate" and route.get("route") == UPSTREAM_DEBATE_CANDIDATE_ROUTE:
+    if pinned_ordinary:
+        endpoint = "ordinary-teaching"
+    elif job.kind == "candidate.generate" and route.get("route") == UPSTREAM_DEBATE_CANDIDATE_ROUTE:
         endpoint = "ordinary-debate-candidate"
     elif "ordinaryDebate" in payload:
         endpoint = "ordinary-debate"
@@ -3551,6 +3626,9 @@ def _invoke_agent_runtime(job, route, payload=None):
         },
         "timeout": (10, _runtime_read_timeout(job, payload)),
     }
+    if pinned_ordinary:
+        request_kwargs["allow_redirects"] = False
+        request_kwargs["headers"]["Accept"] = "application/json"
     if endpoint in {
         "ordinary-slide-layout", "ordinary-deck-revision", "ordinary-debate", "ordinary-debate-candidate",
         "ordinary-lesson-plan-revise",
@@ -3569,6 +3647,8 @@ def _invoke_agent_runtime(job, route, payload=None):
     retry_delays = AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS
     execution_deadline = time.monotonic() + request_kwargs["timeout"][1]
     for attempt in range(len(retry_delays) + 1):
+        if attempt and pinned_ordinary:
+            _require_ordinary_teaching_job(job, payload)
         if attempt and endpoint == "ordinary-debate-candidate":
             ordinary_debate_candidate.require_current(job, payload)
         try:
@@ -3594,6 +3674,8 @@ def _invoke_agent_runtime(job, route, payload=None):
         # to the durable scheduler, never another untracked immediate POST.
         break
     try:
+        if pinned_ordinary and (300 <= response.status_code < 400 or response.status_code == 404):
+            raise RuntimeJobError("课堂服务尚未提供普通教学接口，请核对部署版本。", category="service", retry_after=30)
         if endpoint in {"ordinary-slide-layout", "ordinary-deck-revision"} and (response.status_code == 404 or 300 <= response.status_code < 400):
             layout_endpoint = endpoint == "ordinary-slide-layout"
             raise RuntimeJobError(
@@ -3637,6 +3719,16 @@ def _invoke_agent_runtime(job, route, payload=None):
         if (job.kind == "agent.chat" and job.thread_id
                 and "application/x-ndjson" in response.headers.get("Content-Type", "")):
             return _consume_agent_run_stream(response, job, deadline=execution_deadline)
+        if pinned_ordinary:
+            if response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+                raise RuntimeJobError("普通教学接口未返回 JSON 回执。", category="service", retry_after=30)
+            try:
+                body = response.json()
+            except ValueError:
+                raise RuntimeJobError("普通教学接口返回无效的 JSON 回执。", category="service", retry_after=30) from None
+            if not isinstance(body, dict) or body.get("success") is not True or not isinstance(body.get("result"), dict):
+                raise RuntimeJobError("普通教学接口返回无效的 JSON 结果。", category="service", retry_after=30)
+            return body
         body = response.json()
     finally:
         response.close()
@@ -4992,6 +5084,9 @@ def process_job(job_id, *, worker_id=None):
                     model_meta.setdefault(
                         "latencyMs", int((time.monotonic() - started) * 1000)
                     )
+                if route.get("route") == UPSTREAM_ORDINARY_TEACHING_ROUTE:
+                    failed_model_meta = model_meta
+                    _validate_ordinary_teaching_receipt(job, runtime_payload, route, response)
                 if debate_candidate:
                     failed_model_meta = model_meta
                 elif route.get("route") in {
@@ -5027,6 +5122,8 @@ def process_job(job_id, *, worker_id=None):
                 }
                 db.session.commit()
 
+            if route.get("route") == UPSTREAM_ORDINARY_TEACHING_ROUTE:
+                _validate_ordinary_teaching_receipt(job, runtime_payload, route, response)
             if lesson_revision:
                 ordinary_lesson_plan_revision.validate_receipt(route, response)
             if debate_candidate:

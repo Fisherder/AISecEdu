@@ -7,6 +7,7 @@ from .. import config
 
 UPSTREAM_DEBATE_CANDIDATE_ROUTE = "upstream-ordinary-debate-candidate"
 UPSTREAM_DEBATE_ROUTE = "ordinary-debate-harness"
+UPSTREAM_ORDINARY_TEACHING_ROUTE = "upstream-ordinary-teaching"
 UPSTREAM_TEACHER_ROUTE = "upstream-teacher-turn"
 UPSTREAM_LESSON_PLAN_ROUTE = "upstream-lesson-plan-materialize"
 UPSTREAM_LESSON_CANDIDATE_ROUTE = "upstream-lesson-plan-candidate"
@@ -154,6 +155,10 @@ def route_model(kind, *, prompt="", payload=None, allow_degraded=False):
                       if payload.get("generationReason") == "teacher_requested_ordinary_debate"
                       else UPSTREAM_LESSON_CANDIDATE_ROUTE)
         actual_model = required_model = payload["ordinaryCandidateModel"]
+        allow_degraded = False
+    elif kind in {"candidate.generate", "material.enrich"} and isinstance(payload, dict) and "ordinaryTeachingPin" in payload:
+        route_name = UPSTREAM_ORDINARY_TEACHING_ROUTE
+        actual_model = required_model = payload["ordinaryTeachingPin"]["model"]
         allow_degraded = False
     elif kind == "artifact.materialize" and isinstance(payload, dict) and "ordinaryLessonPlan" in payload:
         route_name = UPSTREAM_LESSON_PLAN_ROUTE

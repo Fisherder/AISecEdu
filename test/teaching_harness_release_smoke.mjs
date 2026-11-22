@@ -43,7 +43,7 @@ const artifact = {
 const job = {
   jobId: 'synthetic-release-palette', kind: 'artifact.revise',
   scope: { ownerId: 1, dojoId: 1, ordinaryTeaching: 'deck-revision' },
-  modelRoute: { provider: 'deepseek', actual_model: model, required_model: model, allow_degraded: false },
+  modelRoute: { route: 'upstream-ordinary-deck-revision', provider: 'deepseek', actual_model: model, required_model: model, allow_degraded: false },
   payload: {
     artifactType: 'slide-deck', revisionBackend: 'ordinary-deck-revision', artifactId: artifact.id,
     expectedRevision: 1, deckOperation: 'palette', instruction: '请将整个课件换成蓝绿色主题',

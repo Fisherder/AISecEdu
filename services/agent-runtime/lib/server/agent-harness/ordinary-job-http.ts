@@ -4,7 +4,7 @@ import { AISECEDU_SERVICE_HEADER, serviceTokenForInternalCall } from '@/lib/serv
 import { recordIntegrationRequest } from '@/lib/server/integration-metrics';
 
 type JobReply = {status: number; body: Record<string, unknown>};
-type OrdinaryJob = (body: Record<string, unknown>, signal: AbortSignal, started: number) => Promise<JobReply>;
+type OrdinaryJob = (body: Record<string, unknown>, signal: AbortSignal, started: number, traceId: string) => Promise<JobReply>;
 
 export async function runOrdinaryJob(req: NextRequest, execute: OrdinaryJob) {
   const started = Date.now();
@@ -22,7 +22,8 @@ export async function runOrdinaryJob(req: NextRequest, execute: OrdinaryJob) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return reply(400, {success: false, error: 'Invalid job request'});
     }
-    const result = await execute(value as Record<string, unknown>, req.signal, started);
+    const traceId = (req.headers.get('x-trace-id') || req.headers.get('pwn-trace-id') || crypto.randomUUID()).slice(0, 128);
+    const result = await execute(value as Record<string, unknown>, req.signal, started, traceId);
     return reply(result.status, result.body);
   } catch {
     return reply(503, {success: false, error: '普通教学服务暂不可用，请稍后重试。', failureCategory: 'service'});

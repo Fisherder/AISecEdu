@@ -1,11 +1,12 @@
-import { ordinaryBlueprint, ordinaryCandidate, ordinaryMaterialAnalysis, ordinarySlidePatch,
-  ordinaryTeachingJson, ordinaryTeachingRules, ordinaryTeachingText, type OrdinaryTeachingModel,
+import { materialChapterMinimum, materialChapterOutlineIssue, slideDeckCandidateIssue } from '@/lib/server/teaching-generation-quality';
+import { extractMaterial } from '@/lib/server/teaching-material-source';
+import {hasOrdinaryTeachingPin} from '@/lib/server/agent-harness/ordinary-teaching-job-contract';
+import { ordinaryBlueprint, ordinaryCandidate, ordinaryMaterialAnalysis,
+  ordinaryTeachingJson, ordinaryTeachingRules, type OrdinaryTeachingModel,
 } from '@/lib/server/agent-harness/ordinary-teaching';
 import { invalidOrdinaryLessonPlanJob, isPinnedOrdinaryLessonPlanJob } from '@/lib/server/agent-harness/ordinary-lesson-plan-job';
-import { OrdinaryLayoutError, ordinarySlideLayoutTarget, reviseOrdinarySlideLayout,
-} from '@/lib/server/agent-harness/ordinary-slide-layout';
-import { deckText, inspectOrdinaryDeckPage, inspectOrdinaryDeckTextPage, ordinaryDeckTarget, ordinaryDeckTurn, ordinaryDeckPageRequirement, selectOrdinaryDeckTextPages, reviseOrdinaryDeckPalette,
-} from '@/lib/server/agent-harness/ordinary-deck-revision';
+import { pinnedOrdinarySlideRevision } from '@/lib/server/agent-harness/ordinary-slide-revision-contract';
+import { OrdinarySlideModelUnavailable, ordinarySlideTarget, reviseOrdinarySlide } from '@/lib/server/agent-harness/ordinary-slide-wording';
 import { createHarnessTurn, recordHarnessUsage } from '@/lib/server/agent-harness/classroom-turn';
 import { persistDurableModelEvent } from '@/lib/server/durable-model-events';
 import { invalidOrdinaryDebateCandidateJob, isOrdinaryDebateCandidateJob } from '@/lib/server/agent-harness/ordinary-debate-candidate';
@@ -32,10 +33,7 @@ import {
 } from '@/lib/generation/candidate-pipeline';
 import { generateSingleArtifact, type SingleArtifactInput } from '@/lib/server/lesson-generation';
 import { generateModernCourseware } from '@/lib/courseware/generation';
-import { coursewareDisplayPositions } from '@/lib/courseware-studio/document';
-import { reconcileOrdinarySlideCanvas } from '@/lib/courseware/saved-canvas';
 import { inspectRenderedCourseware } from '@/lib/courseware/render-client';
-import { COURSEWARE_MAX_PAGES, coursewareSlideDataSchema } from '@/lib/courseware/schema';
 import { openCoursewareCheckpoint } from '@/lib/courseware/checkpoints';
 import { reviseModernCourseware } from '@/lib/courseware/revision';
 import { searchCoursewareImage } from '@/lib/courseware/assets';
@@ -335,58 +333,6 @@ function candidateTextArray(...values: unknown[]): string[] {
   return [];
 }
 
-const MATERIAL_CHAPTER_MINIMUM_CHARACTERS = 24_000;
-
-function materialChapterMinimum(extractedCharacters: number): number {
-  // A short handout can quite reasonably become one focused lesson.  A
-  // substantial uploaded document, however, must yield a teachable outline
-  // instead of a single generic "chapter" card.
-  return extractedCharacters >= MATERIAL_CHAPTER_MINIMUM_CHARACTERS ? 3 : 1;
-}
-
-function materialChapterTitleKey(value: unknown): string {
-  return candidateText(value).replace(/\s+/g, ' ').toLocaleLowerCase();
-}
-
-function materialChapterOutlineIssue(
-  analysis: Record<string, unknown>,
-  minimumChapterCount: number,
-): string | null {
-  const chapters = Array.isArray(analysis.chapterCandidates) ? analysis.chapterCandidates : [];
-  if (chapters.length < minimumChapterCount) {
-    return `needs at least ${minimumChapterCount} chapter candidate(s)`;
-  }
-
-  const titles = new Set<string>();
-  for (let index = 0; index < chapters.length; index++) {
-    const chapter = recordValue(chapters[index]);
-    if (!chapter) return `chapter ${index + 1} must be an object`;
-    const title = candidateText(chapter.title);
-    const compactTitle = title.replace(/\s+/g, '');
-    if (compactTitle.length < 2) return `chapter ${index + 1} needs a durable title`;
-    if (
-      /^(?:第?\d+(?:章|节|部分)?|(?:章节|章|节|部分)\s*\d+|(?:chapter|section)\s*\d+)$/iu.test(
-        title,
-      )
-    ) {
-      return `chapter ${index + 1} uses a generic ordinal instead of a topic title`;
-    }
-    const titleKey = materialChapterTitleKey(title);
-    if (titles.has(titleKey)) return 'chapter titles must be distinct';
-    titles.add(titleKey);
-
-    const objectives = candidateTextArray(chapter.objectives, chapter.learningObjectives);
-    const description = candidateText(chapter.description || chapter.summary || chapter.overview);
-    if (
-      !objectives.some((objective) => objective.replace(/\s+/g, '').length >= 4) &&
-      description.replace(/\s+/g, '').length < 12
-    ) {
-      return `chapter ${index + 1} needs a learning objective or teaching description`;
-    }
-  }
-  return null;
-}
-
 function materialGroundingIssue(payload: Record<string, unknown>): string | null {
   const coverage = recordValue(payload.materialContext);
   const expected = Number(coverage?.expectedMaterialCount || 0);
@@ -436,104 +382,6 @@ function materialGroundingIssue(payload: Record<string, unknown>): string | null
   return dossierMissing.length
     ? `course material dossier is missing: ${dossierMissing.join(', ')}`
     : null;
-}
-
-function slideDeckCandidateIssue(
-  content: Record<string, unknown>,
-  candidateIndex: number,
-  pageRequirement: SlideDeckPageRequirement,
-): string | null {
-  if (
-    String(content.type || '')
-      .trim()
-      .toLowerCase() !== 'slide-deck'
-  ) {
-    return `candidate ${candidateIndex} content.type must be slide-deck`;
-  }
-  const outline = nonEmptyArray(content.outline) || [];
-  const pageCountIssue = slideDeckPageCountIssue(outline.length, pageRequirement);
-  if (pageCountIssue) {
-    return `candidate ${candidateIndex} slide deck ${pageCountIssue}`;
-  }
-  const titles = new Set<string>();
-  const layouts = new Set<string>();
-  let speakerNotePages = 0;
-  let casePages = 0;
-  let learnerCheckPages = 0;
-  let visualRelationshipPages = 0;
-  let summaryPages = 0;
-  for (let pageIndex = 0; pageIndex < outline.length; pageIndex++) {
-    const page = recordValue(outline[pageIndex]);
-    if (!page) {
-      return `candidate ${candidateIndex} page ${pageIndex + 1} must be a detailed object`;
-    }
-    const title = candidateText(page.title || page.name);
-    if (!title) return `candidate ${candidateIndex} page ${pageIndex + 1} title is empty`;
-    const titleKey = title.toLocaleLowerCase();
-    if (titles.has(titleKey)) {
-      return `candidate ${candidateIndex} slide titles must be unique`;
-    }
-    titles.add(titleKey);
-    const description = candidateText(
-      page.description || page.purpose || page.teachingIntent || page.summary,
-    );
-    if (description.replace(/\s+/g, '').length < 8) {
-      return `candidate ${candidateIndex} page ${pageIndex + 1} needs a concrete teaching purpose`;
-    }
-    const layout = candidateText(page.layout || page.pageType || page.visualType).toLowerCase();
-    const keyPoints = candidateTextArray(
-      page.keyPoints,
-      page.coreMessages,
-      page.contentPoints,
-      page.bullets,
-    );
-    const minimumKeyPoints = layout === 'cover' ? 1 : 2;
-    if (keyPoints.length < minimumKeyPoints) {
-      return `candidate ${candidateIndex} page ${pageIndex + 1} needs at least ${minimumKeyPoints} concrete point(s)`;
-    }
-    const visual = candidateText(page.visualBrief || page.visual || page.visualIntent);
-    if (!layout || !visual) {
-      return `candidate ${candidateIndex} page ${pageIndex + 1} needs layout and visualBrief`;
-    }
-    layouts.add(layout);
-    if (layout === 'case') casePages += 1;
-    if (layout === 'activity' || layout === 'checkpoint') learnerCheckPages += 1;
-    if (['concept', 'comparison', 'process', 'timeline'].includes(layout)) {
-      visualRelationshipPages += 1;
-    }
-    if (layout === 'summary') summaryPages += 1;
-    const speakerNotes = candidateText(
-      page.speakerNotes || page.teacherNotes || page.teachingNotes,
-    );
-    if (speakerNotes.replace(/\s+/g, '').length >= 60) speakerNotePages += 1;
-  }
-  const requiredLayouts =
-    outline.length >= 8 ? 4 : outline.length >= 5 ? 3 : outline.length >= 3 ? 2 : 1;
-  if (layouts.size < requiredLayouts) {
-    return `candidate ${candidateIndex} slide deck needs at least ${requiredLayouts} distinct layout(s)`;
-  }
-  if (speakerNotePages !== outline.length) {
-    return `candidate ${candidateIndex} speaker notes must cover every page`;
-  }
-  // Four-page decks are an explicitly compressed format: cover + relationship
-  // visual + learner check + summary cannot also fit a standalone worked-case
-  // page.  Require the case once there is room for five pages; otherwise the
-  // short-deck contract would make deterministic exact-count fallbacks
-  // impossible by construction.
-  if (outline.length >= 5 && casePages < 1) {
-    return `candidate ${candidateIndex} needs a complete case or worked example`;
-  }
-  const requiredLearnerChecks = outline.length >= 8 ? 2 : outline.length >= 5 ? 1 : 0;
-  if (learnerCheckPages < requiredLearnerChecks) {
-    return `candidate ${candidateIndex} needs at least ${requiredLearnerChecks} learner check(s)`;
-  }
-  if (outline.length >= 3 && visualRelationshipPages < 1) {
-    return `candidate ${candidateIndex} needs a visual relationship page`;
-  }
-  if (outline.length >= 2 && summaryPages < 1) {
-    return `candidate ${candidateIndex} needs a closing summary`;
-  }
-  return null;
 }
 
 /**
@@ -2501,21 +2349,18 @@ async function materializeNativeCourseware(
   modelString: string,
   aiCall: AICallFn,
   usage: Record<string, number>,
-  staticRevisionSignal?: AbortSignal,
 ) {
-  const staticTeaching = Boolean(staticRevisionSignal);
   const { plan, materialContext, expectedMaterials, materialGrounding } = source;
   const request = String(payload.requestPrompt || plan.summary || payload.title || plan.title || '');
   const requestedPolicy = parseSlideDeckPageRequirement(request);
-  const policy = !staticTeaching && requestedPolicy.explicit ? requestedPolicy : slideDeckPageRequirementFromValue(plan.pageCountPolicy);
-  const checkpoint = payload.artifactId && !staticTeaching ? await openCoursewareCheckpoint({
+  const policy = requestedPolicy.explicit ? requestedPolicy : slideDeckPageRequirementFromValue(plan.pageCountPolicy);
+  const checkpoint = payload.artifactId ? await openCoursewareCheckpoint({
     artifactId: payload.artifactId, request, plan, materialGrounding,
     model: modelString, policy,
   }, process.env.COURSEWARE_CHECKPOINT_DIR) : undefined;
-  const inspectRendered: typeof inspectRenderedCourseware = staticTeaching
-    ? data => inspectOrdinaryDeckPage(data, staticRevisionSignal) : inspectRenderedCourseware;
+  const inspectRendered = inspectRenderedCourseware;
   const generated = await generateModernCourseware({ request, plan, pageRequirement: policy,
-    aiCall, inspectRendered, checkpoint, ...(staticTeaching ? {staticTeaching} : {resolveImage: searchCoursewareImage}),
+    aiCall, inspectRendered, checkpoint, resolveImage: searchCoursewareImage,
     sourceIds: Array.isArray(materialContext?.materialIds) ? materialContext.materialIds.map(String) : [],
   });
   const reviewed = await reviewAndRepairCourseware({ request, design: generated.design, artifacts: generated.artifacts, aiCall, inspectRendered, checkpoint });
@@ -2906,72 +2751,6 @@ async function materializeWithRuntime(
   }
 }
 
-async function extractMaterial(jobId: string, payload: Record<string, unknown>, traceId: string) {
-  const response = await fetch(
-    `${aiseceduInternalOrigin()}/pwncollege_api/v1/teaching/runtime/jobs/${encodeURIComponent(jobId)}/material`,
-    {
-      headers: {
-        [AISECEDU_SERVICE_HEADER]: serviceTokenForInternalCall(),
-        'X-Trace-ID': traceId,
-      },
-      cache: 'no-store',
-    },
-  );
-  if (!response.ok) throw new Error(`Unable to fetch course material (HTTP ${response.status})`);
-  const blob = await response.blob();
-  const filename = String(payload.filename || 'material');
-  const mimeType = String(payload.mimeType || blob.type || 'application/octet-stream');
-  let text: string;
-  if (mimeType.startsWith('text/')) {
-    text = await blob.text();
-  } else {
-    const form = new FormData();
-    form.set('file', new File([blob], filename, { type: mimeType }));
-    const basePath = process.env.NEXT_PUBLIC_BASE_PATH?.trim() || '';
-    const extraction = await fetch(
-      `http://127.0.0.1:${process.env.PORT || '3000'}${basePath}/api/extract-document`,
-      {
-        method: 'POST',
-        headers: {
-          [AISECEDU_SERVICE_HEADER]: serviceTokenForInternalCall(),
-          'X-Trace-ID': traceId,
-        },
-        body: form,
-        cache: 'no-store',
-      },
-    );
-    const body = (await extraction.json().catch(() => ({}))) as {
-      success?: boolean;
-      data?: { text?: string; data?: { text?: string } };
-      error?: string;
-    };
-    // apiSuccess() exposes the parsed document as data.text. Keep accepting the
-    // older nested form while every deployed extractor converges on that
-    // contract.
-    const extractedText = body.data?.text || body.data?.data?.text;
-    if (!extraction.ok || !body.success || !extractedText) {
-      throw new Error(body.error || `Document extraction failed (HTTP ${extraction.status})`);
-    }
-    text = extractedText;
-  }
-  if (!text.trim()) throw new Error('Course material extraction returned no readable text');
-  if (text.length > 1_000_000) {
-    throw new Error(
-      'Course material contains more than 1,000,000 extracted characters; split it into smaller source files so every part can be read completely',
-    );
-  }
-  const chunks: Array<Record<string, unknown>> = [];
-  for (let offset = 0, ordinal = 0; offset < text.length; offset += 6_000, ordinal++) {
-    chunks.push({
-      sourceType: 'document',
-      sourceLocator: { filename, offset, ordinal },
-      content: text.slice(offset, offset + 6_000),
-      metadata: { mimeType },
-    });
-  }
-  return { text, chunks };
-}
-
 const COMPLETE_MATERIAL_ANALYSIS_VERSION = 'complete-map-reduce-v1';
 const MATERIAL_INDEX_VERSION = 'source-index-v1';
 const MATERIAL_ANALYSIS_SEGMENT_CHARACTERS = 24_000;
@@ -3152,181 +2931,8 @@ async function analyzeMaterialComprehensively(
   return { analysis, chunks: extracted.chunks, usage };
 }
 
-function ordinarySlideTarget(payload: Record<string, unknown>) {
-  const specification = typeof payload.instruction === 'string' ? payload.instruction.trim() : '';
-  if (specification.length > 4096) return {error: '本次文字修订要求过长。'};
-  const match = /^(?:请\s*)?(?:只|仅)\s*(?:修改|调整|润色)\s*(.*?)\s*(?:的\s*)?(?:文字|文案|措辞)\s*[：:]\s*([\s\S]+)$/u.exec(specification);
-  if (!match || !match[1].includes('页') || !match[2].trim() || match[2].trim().length > 2000) {
-    return {error: '请指定要润色的页码和文字要求，例如“仅润色第2、4页的文字：改用初学者能理解的措辞”。'};
-  }
-  const pageNumbers = match[1].trim().split(/\s*[、,，和及]\s*/u).map(raw => {
-    const page = /^(?:第\s*)?([1-9][0-9]{0,2})(?:\s*页)?$/u.exec(raw);
-    return page ? Number(page[1]) : 0;
-  });
-  if (pageNumbers.includes(0) || new Set(pageNumbers).size !== pageNumbers.length ||
-      pageNumbers.length > COURSEWARE_MAX_PAGES) {
-    return {error: `请逐一列出不同的页码，每次最多 ${COURSEWARE_MAX_PAGES} 页。`};
-  }
-
-  const content = recordValue(payload.currentContent);
-  const lesson = recordValue(content?.lesson);
-  const artifacts = Array.isArray(lesson?.artifacts) ? lesson.artifacts : [];
-  if (!content || !lesson || !artifacts.length || artifacts.some(item =>
-    recordValue(item)?.type !== 'slide' ||
-    recordValue(recordValue(recordValue(recordValue(item)?.content)?.studio)?.page)?.schema !== 'courseware-page-v2'
-  )) return {error: '课件原稿尚未准备好进行文字修订。'};
-  if (pageNumbers.some(page => page > artifacts.length)) return {error: '选中的页码超出了当前课件。'};
-
-  const allPageIds = artifacts.map(item => {
-    const studio = recordValue(recordValue(recordValue(item)?.content)?.studio);
-    return recordValue(studio?.page)?.id;
-  });
-  if (allPageIds.some(id => typeof id !== 'string' || !id) || new Set(allPageIds).size !== artifacts.length) {
-    return {error: '课件页标识缺失或重复，无法安全修订。'};
-  }
-  const pageIds: string[] = [];
-  const displayPositions = coursewareDisplayPositions(artifacts.map(item => recordValue(item) || {}));
-  const reconciledArtifacts = displayPositions.map(index => artifacts[index]) as LessonArtifact[];
-  for (const number of pageNumbers.sort((a, b) => a - b)) {
-    const native = recordValue(recordValue(reconciledArtifacts[number - 1])?.content);
-    const target = coursewareSlideDataSchema.safeParse(native?.studio);
-    if (!target.success || !['image', 'chart', 'comparison'].includes(target.data.page.visual.kind) ||
-        target.data.page.beats.length || target.data.page.check) {
-      return {error: `第${number}页不符合静态课件文字修订条件。`};
-    }
-    const studio = reconcileOrdinarySlideCanvas(native, target.data);
-    if (!studio) {
-      return {
-        error: `第${number}页有手工画布修改。当前版本已保留，请在课件画布编辑器中调整该页文字。`,
-        canvasConflict: true,
-      };
-    }
-    if (studio !== target.data) {
-      const original = reconciledArtifacts[number - 1];
-      const savedStudio = recordValue(native?.studio);
-      const savedPage = recordValue(savedStudio?.page);
-      const updatedStudio = {
-        ...studio, ...savedStudio,
-        page: {...studio.page, ...savedPage, layout: studio.page.layout},
-      };
-      reconciledArtifacts[number - 1] = {...original, content: {...original.content, studio: updatedStudio}};
-    }
-    pageIds.push(studio.page.id);
-  }
-  return {content, lesson, artifacts: reconciledArtifacts, storedArtifacts: artifacts, displayPositions, pageIds, instruction: match[2].trim()};
-}
-
-class OrdinarySlideModelUnavailable extends Error {}
-
-const ordinarySlideSystem = ordinaryTeachingRules + '\n' +
-  '只润色当前页中列出的现有教学文字。逐字保留每个字段的 protectedLiterals；只修改需要调整的字段。' +
-  '使用较简洁的措辞以适应原版面。返回 JSON {"changes":[{"op":"set","path":["title"],"value":"新文字"}]}。' +
-  'path 由字段名和数字数组下标组成，只能使用 editableTextFields 列出的路径。';
-
-async function reviseOrdinarySlide(
-  target: Exclude<ReturnType<typeof ordinarySlideTarget>, {error: string}>,
-  model: OrdinaryTeachingModel,
-  deckCall?: AICallFn,
-) {
-  let usage: Record<string, number> = {};
-  const revised = await reviseModernCourseware({
-    artifacts: target.artifacts, instruction: target.instruction,
-    onlyPageIds: target.pageIds, textOnlyPageIds: target.pageIds,
-    inspectRendered: deckCall ? data => inspectOrdinaryDeckTextPage(data, model.signal) : inspectRenderedCourseware,
-    projectedTextPatch: async (instruction, editableTextFields) => {
-      const prompt = JSON.stringify({instruction, editableTextFields});
-      if (deckCall) {
-        const patch = ordinarySlidePatch(parseJson(await deckCall(ordinarySlideSystem, prompt)));
-        if (patch.changes.some(change => deckText.test(change.value))) {
-          throw new Error('课件文字修订内容超出普通静态课堂范围。');
-        }
-        return patch;
-      }
-      const result = await ordinaryTeachingText(model, ordinarySlideSystem, prompt, 'generate-classroom')
-        .catch(() => { throw new OrdinarySlideModelUnavailable(); });
-      usage = mergeUsage(usage, result.usage);
-      return ordinarySlidePatch(parseJson(result.text));
-    },
-  });
-  const design = recordValue(target.content.coursewareDesign);
-  const editedTitles = new Map(
-    revised.artifacts.flatMap(item => {
-      const id = recordValue(recordValue(recordValue(item.content)?.studio)?.page)?.id;
-      return typeof id === 'string' && target.pageIds.includes(id) ? [[id, item.title] as const] : [];
-    }),
-  );
-  const storedArtifacts = [...target.storedArtifacts];
-  target.displayPositions.forEach((index, displayIndex) => {
-    storedArtifacts[index] = revised.artifacts[displayIndex];
-  });
-  const next = {
-    ...target.content,
-    lesson: { ...target.lesson, artifacts: storedArtifacts, updatedAt: Date.now() },
-    ...(Array.isArray(design?.pages) ? {coursewareDesign: {
-      ...design, pages: design.pages.map(page => {
-        const item = recordValue(page);
-        const title = typeof item?.id === 'string' ? editedTitles.get(item.id) : undefined;
-        return title === undefined ? page : {...item, title};
-      }),
-    }} : {}),
-    revisionMetadata: {
-      mode: 'ordinary-slide-wording',
-      ...(target.pageIds.length === 1 ? {pageId: target.pageIds[0]} : {}),
-      pageIds: target.pageIds,
-      renderEvidence: revised.revision.renderEvidence,
-    },
-  };
-  return {result: {content: next}, usage};
-}
-
-async function reviseOrdinaryDeck(target: ReturnType<typeof ordinaryDeckTarget>, model: OrdinaryTeachingModel) {
-  const policy = ordinaryDeckPageRequirement(target.instruction);
-  const turn = ordinaryDeckTurn(target, model);
-  if (policy && slideDeckPageCountIssue(target.targets.length, policy)) {
-    if (target.targets.some(({studio, locked}) => studio.assets.length || locked.length) ||
-        /保留(?:原稿|原有|当前)(?:页面|画布|布局|不变)?|不改(?:原|已有|现有)/.test(target.instruction)) {
-      throw new OrdinaryLayoutError(422, 'INVALID_ORDINARY_DECK',
-        '图片、手工画布或明确要求保留的原稿不能整套重排。请在课件编辑器中增删页面。');
-    }
-    const plan = {title: target.lesson.title, priorTeachingPages: turn.pages, pageCountPolicy: policy};
-    const generated = await materializeNativeCourseware(
-      {artifactId: target.artifactId, requestPrompt: target.instruction}, 'slide-deck',
-      {plan, materialContext: null, expectedMaterials: 0, materialGrounding: ''},
-      'deepseek:' + model.modelId, turn.aiCall, turn.usage, model.signal,
-    );
-    const revised = generated.parsed.content;
-    if (slideDeckPageCountIssue(revised.lesson.artifacts.length, policy)) {
-      throw new Error('The recomposed deck does not satisfy the requested page count');
-    }
-    return {usage: turn.usage, result: {content: {
-      ...target.content, coursewareDesign: revised.coursewareDesign,
-      plan: {...recordValue(target.content.plan), pageCountPolicy: policy},
-      lesson: {...target.lesson, title: revised.lesson.title, description: revised.lesson.description,
-        artifacts: revised.lesson.artifacts, updatedAt: revised.lesson.updatedAt},
-      revisionMetadata: {mode: 'ordinary-deck-revision', recomposed: true, requestedPages: policy,
-        renderEvidence: generated.parsed.validation.quality.renderEvidence},
-    }}};
-  }
-
-  const pageNumbers = await selectOrdinaryDeckTextPages(target, turn);
-  const wording = ordinarySlideTarget({currentContent: target.content, instruction:
-    `只修改第${pageNumbers.join('、')}页的文字：${target.instruction}`});
-  if (wording.error || !wording.pageIds) throw new Error(wording.error || '当前课件文字无法安全修订。');
-  const revised = await reviseOrdinarySlide(wording, model, turn.aiCall);
-  return {usage: turn.usage, result: {content: {...revised.result.content, revisionMetadata: {
-    ...revised.result.content.revisionMetadata, mode: 'ordinary-deck-revision', recomposed: false,
-  }}}};
-}
-
 export async function POST(req: NextRequest) {
-  const pathname = req.nextUrl.pathname.replace(/\/$/, '');
-  const basePath = req.nextUrl.basePath || process.env.NEXT_PUBLIC_BASE_PATH?.trim().replace(/\/$/, '') || '/agent-runtime';
-  const ordinaryLayoutPath = '/api/integration/jobs/ordinary-slide-layout';
-  const ordinaryLayoutEndpoint = pathname === ordinaryLayoutPath || pathname === basePath + ordinaryLayoutPath;
-  const ordinaryDeckPath = '/api/integration/jobs/ordinary-deck-revision';
-  const ordinaryDeckEndpoint = pathname === ordinaryDeckPath || pathname === basePath + ordinaryDeckPath;
-  const jsonOnly = ordinaryLayoutEndpoint || ordinaryDeckEndpoint;
-  if (!jsonOnly && req.headers.get('accept')?.includes('application/x-ndjson')) {
+  if (req.headers.get('accept')?.includes('application/x-ndjson')) {
     const bodyText = await req.text();
     let submitted: JobRequest = {};
     try {
@@ -3406,10 +3012,7 @@ export async function POST(req: NextRequest) {
     if (!authorized(req)) {
       return reply({ success: false, error: 'Invalid 玄甲 service credential' }, 401);
     }
-    const body = (await req.json().catch(error => {
-      if (jsonOnly) return null;
-      throw error;
-    })) as JobRequest | null;
+    const body = (await req.json()) as JobRequest | null;
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return reply({ success: false, error: 'Invalid job request' }, 400);
     }
@@ -3419,6 +3022,10 @@ export async function POST(req: NextRequest) {
     auditKind = kind || 'unknown';
     const payload = body.payload && typeof body.payload === 'object' ? body.payload : {};
     const ordinaryScope = body.scope?.ordinaryTeaching;
+    if (hasOrdinaryTeachingPin(body)) {
+      return reply({success: false, error: '此任务必须使用普通教学专用接口。',
+        errorCode: 'INVALID_ORDINARY_TEACHING_PIN', failureCategory: 'permanent'}, 422);
+    }
     if (ordinaryScope === 'ordinary-lesson-plan-revise' ||
         Object.hasOwn(payload, 'ordinaryLessonPlanRevisionModel') ||
         Object.hasOwn(payload, 'ordinaryLessonPlanRevision') ||
@@ -3440,32 +3047,8 @@ export async function POST(req: NextRequest) {
     if (isPinnedOrdinaryLessonPlanJob(body)) {
       return reply(invalidOrdinaryLessonPlanJob.body, invalidOrdinaryLessonPlanJob.status);
     }
-    const ordinaryLayoutJob = ordinaryScope === 'slide-layout' || payload.revisionBackend === 'ordinary-slide-layout';
-    if ((ordinaryLayoutEndpoint || ordinaryLayoutJob) && (
-      !ordinaryLayoutEndpoint || kind !== 'artifact.revise' || ordinaryScope !== 'slide-layout' ||
-      payload.revisionBackend !== 'ordinary-slide-layout' || payload.artifactType !== 'slide-deck' ||
-      payload.workspaceId != null || typeof body.scope?.ownerId !== 'number' ||
-      !Number.isSafeInteger(body.scope.ownerId) || body.scope.ownerId <= 0 ||
-      !Number.isSafeInteger(body.scope.dojoId)
-    )) {
-      return reply({
-        success: false, error: '此内部地址仅接收锁定的普通静态课件版式修订。',
-        errorCode: 'INVALID_ORDINARY_SLIDE_LAYOUT_JOB', failureCategory: 'permanent',
-      }, 422);
-    }
-    const ordinaryDeckJob = ordinaryScope === 'deck-revision' || payload.revisionBackend === 'ordinary-deck-revision' ||
-      payload.deckOperation !== undefined;
-    if ((ordinaryDeckEndpoint || ordinaryDeckJob) && (
-      !ordinaryDeckEndpoint || kind !== 'artifact.revise' || ordinaryScope !== 'deck-revision' ||
-      payload.revisionBackend !== 'ordinary-deck-revision' || payload.artifactType !== 'slide-deck' ||
-      (payload.deckOperation !== undefined && payload.deckOperation !== 'palette') ||
-      payload.workspaceId != null || !Number.isSafeInteger(body.scope?.ownerId) ||
-      !Number.isSafeInteger(body.scope?.dojoId) || (body.scope?.ownerId ?? 0) <= 0 ||
-      (body.scope?.dojoId ?? 0) <= 0
-    )) {
-      return reply({success: false, error: '此内部地址仅接收已锁定的普通静态课件修订。',
-        errorCode: 'INVALID_ORDINARY_DECK', failureCategory: 'permanent'}, 422);
-    }
+    const pinnedSlideRevision = pinnedOrdinarySlideRevision(body);
+    if (pinnedSlideRevision) return reply(pinnedSlideRevision.body, pinnedSlideRevision.status);
     const candidateGeneration = kind === 'candidate.generate' || kind === 'self.candidate.generate';
     const requestedCandidateCount = Number(payload.candidateCount);
     const expectedCandidateCount = candidateGeneration
@@ -3491,67 +3074,6 @@ export async function POST(req: NextRequest) {
 
     const executeJob = async () => {
 
-    if (ordinaryDeckEndpoint) {
-      const unavailable = () => reply({success: false, error: '普通课件修订服务暂不可用。当前版本已保留。',
-        errorCode: 'ORDINARY_DECK_UNAVAILABLE', failureCategory: 'service'}, 503);
-      try {
-        const target = ordinaryDeckTarget(payload);
-        const modelId = process.env.HARNESS_DEEPSEEK_MODEL?.trim();
-        if (!modelId || body.modelRoute?.provider !== 'deepseek' || requestedModel !== modelId ||
-            body.modelRoute.required_model !== modelId || body.modelRoute.allow_degraded !== false) return unavailable();
-        const turn = createHarnessTurn();
-        if (!turn) return unavailable();
-        const signal = AbortSignal.any([req.signal, AbortSignal.timeout(30 * 60_000)]);
-        const revise = payload.deckOperation === 'palette' ? reviseOrdinaryDeckPalette : reviseOrdinaryDeck;
-        const {result, usage} = await revise(target, {turn, modelId, signal});
-        signal.throwIfAborted();
-        return reply({success: true, result, model: {
-          provider: 'deepseek', actualModel: modelId, modelVersion: 'deepseek:' + modelId, usage,
-          latencyMs: Date.now() - started, responseHash: createHash('sha256').update(JSON.stringify(result)).digest('hex'),
-          degraded: false, executionMode: 'ordinary-deck-revision',
-        }});
-      } catch (error) {
-        if (error instanceof OrdinaryLayoutError) return reply({success: false, error: error.message,
-          errorCode: error.code, failureCategory: 'permanent'}, error.status);
-        return unavailable();
-      }
-    }
-
-    if (ordinaryLayoutEndpoint) {
-      const unavailable = () => reply({
-        success: false, error: '普通课件版式服务暂不可用。当前版本已保留。',
-        errorCode: 'ORDINARY_SLIDE_LAYOUT_UNAVAILABLE', failureCategory: 'service',
-      }, 503);
-      let target: ReturnType<typeof ordinarySlideLayoutTarget>;
-      try {
-        target = ordinarySlideLayoutTarget(payload);
-      } catch (error) {
-        if (!(error instanceof OrdinaryLayoutError)) throw error;
-        return reply({success: false, error: error.message, errorCode: error.code, failureCategory: 'permanent'}, error.status);
-      }
-      const modelId = process.env.HARNESS_DEEPSEEK_MODEL?.trim();
-      if (!modelId || body.modelRoute?.provider !== 'deepseek' ||
-          requestedModel !== modelId || body.modelRoute.required_model !== modelId) return unavailable();
-      try {
-        const turn = createHarnessTurn();
-        if (!turn) return unavailable();
-        const {result, usage} = await reviseOrdinarySlideLayout(target, {turn, modelId, signal: req.signal}, {
-          jobId, ownerId: body.scope!.ownerId!, dojoId: body.scope!.dojoId!, moduleIndex: body.scope!.moduleIndex,
-        });
-        return reply({
-          success: true, result,
-          model: {
-            provider: 'deepseek', actualModel: modelId, modelVersion: 'deepseek:' + modelId, usage,
-            latencyMs: Date.now() - started, responseHash: createHash('sha256').update(JSON.stringify(result)).digest('hex'),
-            degraded: false, executionMode: 'ordinary-slide-layout',
-          },
-        });
-      } catch (error) {
-        if (!(error instanceof OrdinaryLayoutError)) return unavailable();
-        return reply({success: false, error: error.message, errorCode: error.code,
-          failureCategory: error.status === 503 ? 'service' : error.status === 409 ? 'permanent' : 'quality'}, error.status);
-      }
-    }
     const ordinaryWording = ordinaryScope === 'slide-wording';
     const ordinaryWordingInvalid = (error: string) => reply({
       success: false, error, errorCode: 'INVALID_SLIDE_WORDING_TARGET', failureCategory: 'permanent',

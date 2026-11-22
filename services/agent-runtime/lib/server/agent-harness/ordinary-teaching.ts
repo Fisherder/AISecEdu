@@ -76,6 +76,29 @@ export type OrdinaryTeachingModel = {
   thinkingConfig?: undefined;
 };
 
+export function createPinnedTeachingModel(transport: HarnessTurn, modelId: string, signal: AbortSignal) {
+  let invalidReceipt = false;
+  const model: OrdinaryTeachingModel = {modelId, signal, async turn(messages, turnSignal) {
+    if (invalidReceipt) throw new Error('A previous teaching turn failed receipt verification');
+    const response = await transport(messages, turnSignal).catch(error => {
+      invalidReceipt = true;
+      throw error;
+    });
+    const input = response.usage?.prompt_tokens;
+    const output = response.usage?.completion_tokens;
+    const total = response.usage?.total_tokens;
+    if (response.model !== modelId || typeof input !== 'number' || !Number.isSafeInteger(input) || input <= 0 ||
+        typeof output !== 'number' || !Number.isSafeInteger(output) || output <= 0 ||
+        !Number.isSafeInteger(input + output) || (total != null && total !== input + output)) {
+      invalidReceipt = true;
+      await recordHarnessUsage(response, 'aisecedu-integration-job');
+      throw new Error('The teaching turn did not return the pinned model and measured usage');
+    }
+    return response;
+  }};
+  return {model, hasInvalidReceipt: () => invalidReceipt};
+}
+
 export async function ordinaryTeachingText(model: OrdinaryTeachingModel, system: string, prompt: string, source: string) {
   const result = await model.turn([{role: 'system', content: system}, {role: 'user', content: prompt}], model.signal);
   await recordHarnessUsage(result, source);

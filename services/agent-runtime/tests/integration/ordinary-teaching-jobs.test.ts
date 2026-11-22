@@ -54,10 +54,15 @@ const request = (kind: string, ordinaryTeaching: string, payload: Record<string,
     route: kind === 'candidate.generate' ? 'upstream-lesson-plan-candidate' : 'upstream-lesson-plan-materialize',
     allow_degraded: false,
   } : {};
+  const layoutPin = ordinaryTeaching === 'slide-layout' ? {
+    route: 'upstream-ordinary-slide-layout', allow_degraded: false,
+    degraded: false, request_hash: 'a'.repeat(64),
+  } : {};
+  const scope = ordinaryTeaching === 'slide-layout' ? {...job.scope, dojoId: -2, moduleIndex: 0} : job.scope;
   return new NextRequest(`http://localhost/api/integration/jobs/${endpoint}`, {
     method: 'POST', headers: {'Content-Type': 'application/json', 'X-AISecEdu-Service-Token': token},
-    body: JSON.stringify({...job, kind, modelRoute: {...job.modelRoute, actual_model: model, required_model: requiredModel, ...lessonPin},
-      scope: {...job.scope, ordinaryTeaching}, payload}),
+    body: JSON.stringify({...job, kind, modelRoute: {...job.modelRoute, actual_model: model, required_model: requiredModel, ...lessonPin, ...layoutPin},
+      scope: {...scope, ordinaryTeaching}, payload}),
   });
 };
 const modelResponse = (value: unknown) => Response.json({
@@ -477,7 +482,6 @@ describe('ordinary teaching worker service routes', () => {
     request('artifact.revise', 'slide-layout', {
       artifactType: 'slide-deck', revisionBackend: 'ordinary-slide-layout', artifactId: 'math-deck', expectedRevision: 4,
       pageSelection, instruction, currentContent: {lesson: {title: '分数课', artifacts}},
-      privateContext: 'PRIVATE HISTORY', sourceSnippet: 'PRIVATE RAW',
     }, token, 'official-model', 'official-model', endpoint);
 
   function deckRevisionRequest(artifacts: unknown[], instruction: string,
@@ -487,8 +491,10 @@ describe('ordinary teaching worker service routes', () => {
       method: 'POST',
       headers: {'X-AISecEdu-Service-Token': 'integration-secret', 'Content-Type': 'application/json'},
       body: JSON.stringify({...job, kind: 'artifact.revise',
-        scope: {...job.scope, ordinaryTeaching: 'deck-revision'},
-        modelRoute: {provider: 'deepseek', actual_model: 'official-model', required_model: 'official-model', allow_degraded: false},
+        scope: {...job.scope, dojoId: -2, moduleIndex: null, ordinaryTeaching: 'deck-revision'},
+        modelRoute: {route: 'upstream-ordinary-deck-revision', provider: 'deepseek',
+          actual_model: 'official-model', required_model: 'official-model', allow_degraded: false,
+          degraded: false, request_hash: 'a'.repeat(64)},
         payload: {artifactType: 'slide-deck', revisionBackend: 'ordinary-deck-revision', artifactId: 'math-deck',
           instruction, expectedRevision: 4, deckOperation, pageSelection, currentContent: {...extraContent, lesson: {id: 'lesson-a', title: '分数课', artifacts}},
           sourceSnippet: 'PRIVATE SOURCE SELECTION'},
@@ -787,13 +793,68 @@ describe('ordinary teaching worker service routes', () => {
       usage: {prompt_tokens: 1, completion_tokens: 1}}));
     vi.stubGlobal('fetch', fetch);
     const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
-    expect((await POST(deckRevisionRequest(deck, '清楚解释分数', 'execute'))).status).toBe(422);
+    const {POST: execute} = await import('@/app/api/integration/jobs/execute/route');
+    expect((await execute(deckRevisionRequest(deck, '清楚解释分数', 'execute'))).status).toBe(422);
     expect((await POST(deckRevisionRequest(deck, '改写措辞\n仅修改当前版本 V4 中所选范围（源码第 2 行）：\nPRIVATE'))).status).toBe(422);
     expect(fetch).not.toHaveBeenCalled();
     const response = await POST(deckRevisionRequest(deck, '请把整套课件的文字改得更清楚'));
     expect(response.status).toBe(503);
     expect(await response.json()).not.toHaveProperty('result');
     expect(JSON.stringify(deck)).toBe(snapshot);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing or degraded model pins for both static workers without a Harness call', async () => {
+    const deck = mathLayoutDeck();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST: layout} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
+    const {POST: revise} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    for (const [handler, valid, errorCode] of [
+      [layout, layoutJob(deck, [1]), 'ORDINARY_SLIDE_LAYOUT_UNAVAILABLE'],
+      [revise, deckRevisionRequest(deck, paletteInstruction, undefined, 'palette'), 'ORDINARY_DECK_UNAVAILABLE'],
+    ] as const) {
+      const body = await valid.json();
+      for (const modelPin of [
+        {route: undefined}, {route: 'teaching-default'}, {allow_degraded: undefined},
+        {allow_degraded: true}, {required_model: null}, {actual_model: 'legacy-model'},
+      ]) {
+        const response = await handler(new NextRequest(valid.url, {method: 'POST', headers: valid.headers,
+          body: JSON.stringify({...body, modelRoute: {...body.modelRoute, ...modelPin}})}));
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({success: false, errorCode, failureCategory: 'service'});
+      }
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('blocks partial static revision pins at generic ingress and rejects cross-route worker dispatch', async () => {
+    const deck = mathLayoutDeck();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST: execute} = await import('@/app/api/integration/jobs/execute/route');
+    const {POST: layout} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
+    const {POST: revise} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const layoutRequest = layoutJob(deck, [1]);
+    const deckRequest = deckRevisionRequest(deck, '请把整套课件的文字改得更清楚');
+    expect((await layout(deckRequest)).status).toBe(422);
+    expect((await revise(layoutRequest)).status).toBe(422);
+    for (const [route, pin] of [
+      ['upstream-ordinary-slide-layout', 'ordinarySlideLayout'],
+      ['upstream-ordinary-deck-revision', 'ordinaryDeckRevision'],
+    ]) {
+      for (const partial of [
+        {modelRoute: {...job.modelRoute, route}, payload: {artifactType: 'slide-deck'}},
+        {modelRoute: job.modelRoute, payload: {artifactType: 'slide-deck', [pin]: null}},
+      ]) {
+        const request = new NextRequest('http://localhost/api/integration/jobs/execute', {
+          method: 'POST', headers: layoutRequest.headers, body: JSON.stringify({...job, kind: 'artifact.revise', ...partial}),
+        });
+        expect((await execute(request)).status).toBe(422);
+      }
+    }
+    expect(fetch).not.toHaveBeenCalled();
     expect(mocks.resolveModel).not.toHaveBeenCalled();
   });
 
@@ -868,7 +929,8 @@ describe('ordinary teaching worker service routes', () => {
     vi.stubGlobal('fetch', fetch);
     const {POST} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
     expect((await POST(layoutJob(deck, [1], '右上对齐', 'ordinary-slide-layout', 'wrong-secret'))).status).toBe(401);
-    expect((await POST(layoutJob(deck, [1], '右上对齐', 'execute'))).status).toBe(422);
+    const {POST: execute} = await import('@/app/api/integration/jobs/execute/route');
+    expect((await execute(layoutJob(deck, [1], '右上对齐', 'execute'))).status).toBe(422);
     for (const bad of ['右上对齐\n\n仅修改当前版本 V4 中所选范围（源码第 1 行），保留其余内容与交互：\nPRIVATE RAW',
       '右上对齐\n', '右上对齐，修改源码第 1 行']) {
       expect((await POST(layoutJob(deck, [1], bad))).status).toBe(422);
@@ -949,6 +1011,81 @@ describe('ordinary teaching worker service routes', () => {
     expect(result.result.content.lesson.artifacts[0].title).toBe(revisedTitles[4]);
     expect(result.result.content.lesson.artifacts.slice(1)).toEqual(stored.slice(1));
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  const admittedTeacherJob = (
+    kind: 'candidate.generate' | 'material.enrich',
+    overrides: {scope?: Record<string, unknown>; route?: Record<string, unknown>; payload?: Record<string, unknown>} = {},
+  ) => {
+    const candidate = kind === 'candidate.generate';
+    return new NextRequest('http://localhost/api/integration/jobs/ordinary-teaching', {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'X-AISecEdu-Service-Token': 'integration-secret'},
+      body: JSON.stringify({...job, kind,
+        scope: {...job.scope, ordinaryTeaching: candidate ? 'candidate-plan' : 'material-summary',
+          ordinaryTeachingPinned: true, ...overrides.scope},
+        modelRoute: {route: 'upstream-ordinary-teaching', provider: 'deepseek', actual_model: 'official-model',
+          required_model: 'official-model', allow_degraded: false, ...overrides.route},
+        payload: {...(candidate ? {artifactType: 'lesson-plan', candidateSetId: 'synthetic-set', prompt: '比较两组水量', candidateCount: 1}
+          : {materialId: 'm1', revisionId: 'r1', filename: '蒸发讲义.txt', mimeType: 'text/plain'}), ...overrides.payload},
+      }),
+    });
+  };
+
+  it('keeps newly admitted materials and candidates on their pinned engine when the connection is unavailable', async () => {
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-teaching/route');
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    vi.stubEnv('DOJO_AI_ENABLED', 'false');
+    for (const kind of ['candidate.generate', 'material.enrich'] as const) {
+      const response = await POST(admittedTeacherJob(kind));
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({success: false, errorCode: 'ORDINARY_TEACHING_HARNESS_UNAVAILABLE'});
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('requires matching route, scope and model on both sides of the ordinary teaching pin', async () => {
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-teaching/route');
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    for (const overrides of [{scope: {ordinaryTeachingPinned: false}}, {scope: {ordinaryTeaching: 'slide-wording'}},
+      {route: {route: 'teaching-default'}}, {payload: {workspaceId: 'personal'}}, {scope: {ownerId: null}},
+      {payload: {ordinaryTeachingPin: {scope: 'candidate-plan', model: 'other'}}}]) {
+      expect((await POST(admittedTeacherJob('candidate.generate', overrides))).status).toBe(422);
+    }
+    for (const route of [{provider: 'other'}, {required_model: 'other'}, {actual_model: 'other'}, {allow_degraded: true}]) {
+      expect((await POST(admittedTeacherJob('material.enrich', {route}))).status).toBe(503);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('returns the admitted model and measured receipts for ordinary candidates and rejects a partial receipt', async () => {
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-teaching/route');
+    const fetch = vi.fn().mockResolvedValueOnce(modelResponse(blueprint)).mockResolvedValueOnce(modelResponse(lessonCandidate));
+    vi.stubGlobal('fetch', fetch);
+    const response = await POST(admittedTeacherJob('candidate.generate'));
+    expect(response.status).toBe(200);
+    expect((await response.json()).model).toMatchObject({modelVersion: 'deepseek:official-model', degraded: false,
+      executionMode: 'ordinary-candidate-plan', usage: {inputTokens: 20, outputTokens: 10, totalTokens: 30}});
+    fetch.mockReset();
+    fetch.mockResolvedValueOnce(Response.json({text: JSON.stringify(blueprint), model: 'official-model', usage: {prompt_tokens: 10}}));
+    const missing = await POST(admittedTeacherJob('candidate.generate'));
+    expect(missing.status).toBe(503);
+    expect((await missing.json()).errorCode).toBe('ORDINARY_TEACHING_HARNESS_UNAVAILABLE');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('rejects marked jobs submitted to the historical generic route', async () => {
+    const request = admittedTeacherJob('material.enrich');
+    const {POST} = await import('@/app/api/integration/jobs/execute/route');
+    const response = await POST(new NextRequest('http://localhost/api/integration/jobs/execute', {
+      method: 'POST', headers: request.headers, body: await request.text(),
+    }));
+    expect(response.status).toBe(422);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
   });
 
   it('summarizes the authorized extracted text without executing it and retains grounded chunk coverage', async () => {
