@@ -640,7 +640,7 @@ def personal_study_product_requested(question):
     )
     clauses = re.split(
         r"[。！？.!?；;\n]+|(?:[，,]|然后|接着|同时|并且?|以及|而是|但(?:是)?|和(?=\s*(?:请)?(?:不|别))|\b(?:but|(?:and\s+)?then)\b)"
-        r"(?=\s*(?:请|帮我|给我|生成|创建|制作|准备|先|再|我|别|不|只|仅|取消|撤回|算了|解释|分析|讲讲"
+        r"(?=\s*(?:请|帮我|给我|生成|创建|制作|准备|先|再|我|别|不|只|仅|取消|撤回|停止|算了|解释|分析|讲讲"
         r"|(?:please|actually|i|do|don['’]t|no|create|make|generate|cancel|withdraw|how|what|explain)\b))",
         message,
         flags=re.I,
@@ -655,7 +655,7 @@ def personal_study_product_requested(question):
         r"|^\s+(?:is\s+not|isn['’]t)\s+(?:needed|required|wanted)\b"
     )
     cancel_turn = (
-        r"(?:(?:我)?改主意了[，,\s]*)?(?:算了|不用了|不需要了|不要了|"
+        r"(?:(?:我)?改主意了[，,\s]*)?(?:算了|(?:请|先)?(?:(?:不用|不需要|不要)(?:了)?|停止)|"
         r"(?:请)?(?:取消|撤回)(?:(?:刚才|前面|上面|之前|本次)(?:的)?(?:请求|要求|操作))?"
         r"|(?:请)?(?:不要|不用|别)\s*(?:生成|创建|制作)\s*任何(?:东西|内容))"
         r"|(?:please\s+)?(?:cancel|withdraw)(?:\s+(?:that|the\s+previous)\s+request)?"
@@ -731,7 +731,9 @@ def _plain_study_text(value, limit):
         raise ValueError("内容需要文字格式")
     value = value.strip()
     sanitized = guide_teaching_text(value, limit)
-    if not value or len(value) > limit or not sanitized or re.search(r"```|<[/!a-z]|https?://", value, re.I):
+    if not value or len(value) > limit or not sanitized or re.search(
+        r"`|~~~|<[/!a-z]|https?://|\[[^\n]*?\]\s*[\[(]", value, re.I,
+    ):
         raise ValueError("个人学习包的文字不符合格式")
     return sanitized
 

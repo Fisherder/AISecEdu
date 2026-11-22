@@ -248,3 +248,17 @@ def test_tutor_keeps_local_hint_when_no_model_sentence_fits(tutor):
     assert result["safety"]["blockedReason"] == "OVERLONG_HINT"
     assert result["provider"] == "MODEL_BLOCKED"
     tutor.settle_model_dispatch.assert_called_once()
+
+
+@pytest.mark.parametrize("text", ['{}', '{"answer":42}', '{"answer":"   "}'])
+def test_tutor_invalid_answer_settles_measured_usage_but_attributes_no_model_answer(tutor, text):
+    receipt = tutor.invoke_turn.return_value
+    receipt["text"] = text
+    receipt["usage"] = {"prompt_tokens": 13, "completion_tokens": 7, "total_tokens": 20}
+    result = tutor.call("怎样理解分数？")
+    assert result["provider"] == "MODEL_UNAVAILABLE"
+    assert result["model"] is None
+    metadata = tutor.db.session.add.call_args.args[0].metadata_json
+    assert metadata["model"] is None
+    assert metadata["agentMeta"] == {}
+    tutor.settle_model_dispatch.assert_called_once_with("model-call", receipt)

@@ -860,9 +860,8 @@ def tutor_reply(attempt, user, question, challenge_profile=None):
             response = timings.run(
                 "model", lambda: invoke_turn(request_body(TUTOR_TEACHING_PROMPT, context)),
             )
-            model, usage = response["model"], response["usage"]
             draft = result_object(response["text"]).get("answer")
-            if not isinstance(draft, str):
+            if not isinstance(draft, str) or not draft.strip():
                 raise UpstreamTurnError("题内学习助手返回格式无效")
             answer, blocked, blocked_reason = _safe_tutor_text(draft, fallback, safety_reference)
             if not blocked and (RESTRICTED_TUTOR_REQUEST.search(answer) or "```" in answer):
@@ -871,9 +870,11 @@ def tutor_reply(attempt, user, question, challenge_profile=None):
                 answer = _short_tutor_answer(answer)
                 if not answer:
                     answer, blocked, blocked_reason = fallback, True, "OVERLONG_HINT"
+            model, usage = response["model"], response["usage"]
             provider = "MODEL_BLOCKED" if blocked else "MODEL"
         except (ValueError, TypeError, KeyError) as exception:
             error = str(exception)[:500]
+            answer = fallback
             provider = "MODEL_UNAVAILABLE"
         finally:
             settle_model_dispatch(dispatch_id, response)
@@ -1219,16 +1220,14 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
                     response = invoke_turn(request_body(guide_prompt, model_context))
                 finally:
                     settle_model_dispatch(dispatch_id, response)
-                model_used = response["model"]
                 candidate = result_object(response["text"])
                 answer_text = candidate.get("answer")
                 if not isinstance(answer_text, str) or not answer_text.strip():
                     raise UpstreamTurnError("学习助手返回空白答复")
-                generated = candidate
-                generated["_agentMeta"] = {
-                    "provider": "DEEPSEEK",
-                    "model": model_used,
-                    "usage": response["usage"],
+                model_used, usage = response["model"], response["usage"]
+                generated = {
+                    **candidate,
+                    "_agentMeta": {"provider": "DEEPSEEK", "model": model_used, "usage": usage},
                 }
         if generated:
             tool_calls = [
@@ -1311,6 +1310,8 @@ def guide_reply(user, question, thread=None, references=None, agent_context=None
     ) as exception:
         error = str(exception)[:500]
         logger.warning("Guide model request failed: %s", exception)
+        model_used = None
+        generated = None
         provider = "MODEL_UNAVAILABLE"
         answer = "学习助手暂时没有收到模型回答，请稍后重试。你的问题已保存在这段对话中。"
         safe_actions = []

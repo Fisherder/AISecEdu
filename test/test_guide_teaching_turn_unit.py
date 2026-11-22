@@ -303,3 +303,17 @@ def test_real_guide_summary_provides_zero_counts_and_navigation_title():
     assert section["_guide_navigation_options"]({}, rows) == {
         "course-option-1": {"title": "观察", "url": f"/{REFERENCE}"},
     }
+
+
+@pytest.mark.parametrize("text", ['{}', '{"answer":42}', '{"answer":"   "}'])
+def test_guide_invalid_answer_settles_measured_usage_but_attributes_no_model_answer(guide, text):
+    receipt = guide.invoke_turn.return_value
+    receipt["text"] = text
+    receipt["usage"] = {"prompt_tokens": 13, "completion_tokens": 7, "total_tokens": 20}
+    result = guide.call("怎样理解分数？")
+    assert result["provider"] == "MODEL_UNAVAILABLE"
+    assert result["model"] is None
+    metadata = result["message"]["metadata"]
+    assert metadata["model"] is None
+    assert metadata["agentMeta"] == {}
+    guide.settle_model_dispatch.assert_called_once_with("usage-id", receipt)
