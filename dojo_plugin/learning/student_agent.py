@@ -609,26 +609,50 @@ def _create_workspace(user, thread, question, arguments, *, personal_study_packa
 
 
 def personal_study_package_requested(question):
-    message = str(question or "")
-    package_name = r"学习包|自学包|\b(?:study|learning)\s+pack(?:age)?\b"
-    if not re.search(package_name, message, re.I):
-        package_name = r"学习讲义|概念自检"
+    request = str(question or "")
+    aliases = {
+        "package": r"学习包|自学包|\b(?:study|learning)\s+pack(?:age)?\b",
+        "handout": r"学习讲义",
+        "self_check": r"概念自检",
+    }
+    package_name = "|".join(f"(?P<{kind}>{pattern})" for kind, pattern in aliases.items())
+    quoted_alias_prefix = (
+        r"(?:生成|创建|制作|设计|构建|准备|整理成|做|给我|不需要|不要|不用|取消|撤回)"
+        r"\s*(?:[一两]?[份套个])?\s*(?:个人)?\s*$"
+        r"|\b(?:create|make|generate|prepare|build|give\s+me|no|cancel)\s*(?:(?:a|an|the|my)\s+)?$"
+    )
+
+    def mask_quote(match):
+        # A quoted product name may be a direct target. Quoted instructions are source data.
+        text = match.group()[1:-1].strip()
+        if re.fullmatch(package_name, text, re.I) and re.search(quoted_alias_prefix, request[:match.start()], re.I):
+            return f" {text} "
+        return "资料"
+
+    message = re.sub(
+        r'“[^”]*”|「[^」]*」|『[^』]*』|《[^》]*》|"[^"\n]*"|(?<!`)`[^`\n]*`(?!`)',
+        mask_quote, request,
+    )
     clauses = re.split(
         r"[。！？.!?；;\n]+|(?:[，,]|然后|接着|同时|并且?|以及|而是|但是|\b(?:but|(?:and\s+)?then)\b)"
-        r"(?=\s*(?:请|帮我|给我|生成|创建|制作|准备|先|再|我|别|不|取消|解释|分析|讲讲"
+        r"(?=\s*(?:请|帮我|给我|生成|创建|制作|准备|先|再|我|别|不|取消|撤回|算了|解释|分析|讲讲"
         r"|(?:please|actually|i|do|don['’]t|no|create|make|generate|how|what|explain)\b))",
         message,
         flags=re.I,
     )
     decline = (
-        r"(?:不需要|不想|不必|不要|不用|无需|无须|(?:^|请|先|也)别(?!忘)|停止|取消)"
+        r"(?:不需要|不想|不必|不要(?!忘)|不用|无需|无须|(?:^|请|先|也)别(?!忘)|停止|取消|撤回)"
         r"|\b(?:do\s+not|don['’]t|never|no\s+need|stop|cancel)\b(?!\s+forget\b).{0,35}$"
         r"|\b(?:no|not)\s*$"
     )
     decline_package = (
-        r"^(?:个人)?(?:学习包|自学包|学习讲义|概念自检)\s*(?:不需要|不必|不要|不用|无需|无须|别)"
-        r"|^(?:(?:the|a|my)\s+)?(?:study|learning)\s+pack(?:age)?\s+"
-        r"(?:is\s+not|isn['’]t)\s+(?:needed|required|wanted)\b"
+        r"^\s*(?:不需要|不必|不要(?!忘)|不用|无需|无须|别(?!忘))"
+        r"|^\s+(?:is\s+not|isn['’]t)\s+(?:needed|required|wanted)\b"
+    )
+    cancel_turn = (
+        r"(?:(?:我)?改主意了[，,\s]*)?(?:算了|不用了|不需要了|不要了|"
+        r"(?:请)?(?:取消|撤回)(?:刚才|前面|上面|之前|本次)(?:的)?(?:请求|要求|操作))"
+        r"|(?:please\s+)?(?:cancel|withdraw)\s+(?:that|the\s+previous)\s+request"
     )
     create = (
         r"生成|创建|制作|设计|构建|准备|整理成|做|给我(?=\s*(?:[一两]?[份套个]|(?:个人)?(?:学习|自学|概念自检)))|(?:我想要|我需要|我要|想要|要)一"
@@ -636,24 +660,34 @@ def personal_study_package_requested(question):
     )
     request_lead = (
         r"(?:(?:请你?|麻烦你?|帮我|为我|替我|给我|我想要?|我要|我需要|我希望你?|"
-        r"你能(?:不能)?|能否|可以|先|再|直接|现在|自动|别忘(?:了|记)?|记得)\s*)*"
-        r"(?:(?:根据|结合|按照|参考|针对|围绕)[^，,。！？；;!?]{1,60}?(?:帮我|为我|替我|请你?))?"
+        r"你能(?:不能)?|能否|可以|先|再|直接|现在|自动|(?:别|不要)忘(?:了|记)?|记得)\s*)*"
+        r"(?:(?:根据|结合|按照|参考|针对|围绕)(?:[^，,。！？；;!?]{1,60}?(?:帮我|为我|替我|请你?)"
+        r"|[^，,。！？；;!?]{0,50}?(?:资料|讲义|笔记|教材|材料|上节课|这节课|内容|知识点|错题|薄弱点|记录)))?\s*"
         r"|(?:(?:please|help\s+me|(?:can|could|would|will)\s+you|i(?:['’]d\s+like|\s+(?:want|need|would\s+like))\s+you\s+to"
         r"|(?:do\s+not|don['’]t)\s+forget\s+to)\s+)*"
+        r"(?:(?:based\s+on|using|from)\s+[^,.;!?]{0,50}?(?:notes|materials|handout|lesson|reading|feedback)\s+)?"
     )
-    question_after_name = r"^\s*(?:是什么意思|有什么用|有何用途|有什么意义|的(?:意义|用途|方法|步骤)是什么)"
-    create_package = rf"(?:{create}).{{0,50}}(?:{package_name})"
+    question_after_name = (
+        r"^\s*(?:是什么意思|有什么用|有何用途|有什么意义|的(?:意义|用途|方法|步骤)是什么"
+        r"|(?:是否|已经|已)?(?:生成|创建|做好|准备好|完成)(?:了)?(?:吗|没(?:有)?|$)"
+        r"|(?:了|好了)?(?:吗|没(?:有)?)|(?:了|好了|已完成)$|的话|(?:之?前)(?:先|请|看看|说明|确认)|(?:already|yet)\b)"
+    )
+    create_package = rf"(?:{create}).{{0,50}}?(?:{package_name})"
+    blocked = set()
     for part in reversed(clauses):
         clause = part.strip()
+        if re.fullmatch(cancel_turn, clause, re.I):
+            return False
         package_ref = re.search(package_name, clause, re.I)
         if not package_ref:
             continue
         action = re.search(create_package, clause, re.I)
         intent_prefix = clause[:(action or package_ref).start()]
-        if re.search(decline, intent_prefix, re.I) or re.search(decline_package, clause, re.I):
-            return False
-        if (action and re.fullmatch(request_lead, intent_prefix, re.I)
-                and not re.search(question_after_name, clause[package_ref.end():])):
+        if re.search(decline, intent_prefix, re.I) or re.match(decline_package, clause[package_ref.end():], re.I):
+            blocked.update(match.lastgroup for match in re.finditer(package_name, clause, re.I))
+            continue
+        if (action and action.lastgroup not in blocked and re.fullmatch(request_lead, intent_prefix, re.I)
+                and not re.search(question_after_name, clause[action.end():], re.I)):
             return True
     return False
 

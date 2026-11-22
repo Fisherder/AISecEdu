@@ -553,6 +553,8 @@
     "aiGradingWait": "يرجى الانتظار، جارٍ تحليل إجاباتك",
     "gradingPending": "التصحيح قيد الانتظار",
     "gradingPendingDetail": "تم حفظ إجاباتك. حاول مجددًا لإكمال التصحيح.",
+    "gradingUnsupported": "التصحيح التلقائي غير متاح",
+    "gradingUnsupportedDetail": "تم حفظ إجاباتك. اسأل معلمك عن طريقة تقييم هذا الاختبار.",
     "retryGrading": "إعادة محاولة التصحيح",
     "quizReport": "تقرير الاختبار",
     "retry": "إعادة المحاولة"

@@ -12,29 +12,35 @@ import {
 describe('quiz view runtime hydration', () => {
   it('hydrates a draft back into answering', () => {
     expect(
-      quizViewStateFromAttempt({
-        sessionId: 'attempt-1',
-        status: 'active',
-        phase: 'draft',
-        answers: { q1: 'A' },
-      }),
+      quizViewStateFromAttempt(
+        {
+          sessionId: 'attempt-1',
+          status: 'active',
+          phase: 'draft',
+          answers: { q1: 'A' },
+        },
+        [],
+      ),
     ).toEqual({ phase: 'answering', answers: { q1: 'A' }, results: [] });
   });
 
   it('hydrates reviewed empty results into reviewing', () => {
     expect(
-      quizViewStateFromAttempt({
-        sessionId: 'attempt-1',
-        status: 'completed',
-        phase: 'reviewed',
-        answers: { q1: 'A' },
-        results: [],
-      }),
+      quizViewStateFromAttempt(
+        {
+          sessionId: 'attempt-1',
+          status: 'completed',
+          phase: 'reviewed',
+          answers: { q1: 'A' },
+          results: [],
+        },
+        [],
+      ),
     ).toEqual({ phase: 'reviewing', answers: { q1: 'A' }, results: [] });
   });
 
   it('uses a clean cover when no attempt exists', () => {
-    expect(quizViewStateFromAttempt(undefined)).toEqual({
+    expect(quizViewStateFromAttempt(undefined, [])).toEqual({
       phase: 'not_started',
       answers: {},
       results: [],
@@ -43,12 +49,15 @@ describe('quiz view runtime hydration', () => {
 
   it('uses the cover for a persisted empty retry marker', () => {
     expect(
-      quizViewStateFromAttempt({
-        sessionId: 'attempt-1:retry:1',
-        status: 'active',
-        phase: 'draft',
-        answers: {},
-      }),
+      quizViewStateFromAttempt(
+        {
+          sessionId: 'attempt-1:retry:1',
+          status: 'active',
+          phase: 'draft',
+          answers: {},
+        },
+        [],
+      ),
     ).toEqual({ phase: 'not_started', answers: {}, results: [] });
   });
 

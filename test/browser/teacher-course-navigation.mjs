@@ -19,6 +19,9 @@ const html = `<!doctype html><meta charset="utf-8"><style>${styles}</style>
 <body class="teacher-course-center-page">${markup}
 <script>
 const courseRows = [{id: 1, referenceId: 'alpha', name: 'Course Alpha'}, {id: 2, referenceId: 'beta', name: 'Course Beta'}];
+const alphaStudent = {userId: 21, name: 'Alpha Fixture Student', status: 'working', statusLabel: '正在练习',
+  reason: '正在记录植物的生长。', completed: 0, required: 0, cells: []};
+const followups = [];
 const pending = new Map();
 const mutations = [];
 let confirmRotation;
@@ -26,9 +29,11 @@ let delayBetaWorkspace = false;
 const success = data => ({success: true, data});
 const hold = key => new Promise(resolve => pending.set(key, resolve));
 const report = (course, students) => ({course, summary: {students, tasks: 0}, scope: {label: 'Fixture'},
-  trend: [], tasks: [], students: [], followups: [], statuses: [], source: {label: 'Fixture'},
+  trend: [], tasks: [], students: course.id === 1 ? [alphaStudent] : [],
+  followups: course.id === 1 ? followups.map(row => ({...row})) : [], statuses: [], source: {label: 'Fixture'},
   filterOptions: {modules: [], students: []}});
-const finish = (key, data) => { pending.get(key)(success(data)); pending.delete(key); };
+const settle = (key, response) => { pending.get(key)(response); pending.delete(key); };
+const finish = (key, data) => settle(key, success(data));
 const go = url => { history.pushState(null, '', url); dispatchEvent(new PopStateEvent('popstate')); };
 window.AISecEduUI = {confirm: () => new Promise(resolve => { confirmRotation = resolve; }), notify() {}};
 window.DojoLearning = {
@@ -49,6 +54,16 @@ window.DojoLearning = {
     throw new Error('Unexpected fixture request ' + path);
   },
   json: async (method, path, body) => {
+    if (path === '/teaching/insights/alpha/followups') {
+      const id = 'fixture-followup-' + (followups.length + 1);
+      followups.push({id, studentId: body.studentId, studentName: alphaStudent.name,
+        title: '植物观察', plan: body.plan, status: 'open'});
+      return success({id});
+    }
+    if (path === '/teaching/insights/alpha/followups/fixture-followup-1/review') {
+      Object.assign(followups[0], {status: 'reviewed', outcome: body.outcome, note: body.note});
+      return success({id: 'fixture-followup-1'});
+    }
     const course = path.split('/')[3];
     mutations.push({method, course, regenerate: body.regenerate});
     return hold(course + ':code');
@@ -119,12 +134,47 @@ try {
     await page.waitFor('pending.has("alpha:insights")', {timeout: 5000});
     await page.evaluate(() => finish('alpha:insights', report(courseRows[0], 12)));
     await page.waitFor('document.querySelector("#cs-stat-students").textContent === "12"', {timeout: 5000});
+    await page.click('[data-ix=view][data-view=students]');
+    await page.click('[data-ix=student][data-student="21"]');
+    assert.equal(await page.text('#ix-dialog-title'), 'Alpha Fixture Student');
+    await page.click('#ix-dialog [data-ix=followup]');
+    await page.evaluate(() => { document.querySelector('#ix-followup-form textarea').value = '本周每天记录叶片数量。'; });
+    await page.click('#ix-followup-form [type=submit]');
+    await page.waitFor('pending.has("alpha:insights") && !document.querySelector("#ix-dialog").open', {timeout: 5000});
+    await page.evaluate(() => finish('alpha:insights', report(courseRows[0], 12)));
+    await page.waitFor('document.querySelector("#ix-message").textContent.includes("跟进计划已保存")', {timeout: 5000});
+    assert.match(await page.text('.ix-followups'), /本周每天记录叶片数量/);
+
+    await page.click('[data-ix=review][data-record=fixture-followup-1]');
+    await page.evaluate(() => { document.querySelector('#ix-review-form textarea').value = '记录完整，可以比较变化。'; });
+    await page.click('#ix-review-form [type=submit]');
+    await page.waitFor('pending.has("alpha:insights") && !document.querySelector("#ix-dialog").open', {timeout: 5000});
+    await page.click('[data-ix=student][data-student="21"]');
+    await page.waitFor('document.querySelector("#ix-dialog").open && !document.querySelector("#ix-review-form")', {timeout: 5000});
+    await page.evaluate(() => finish('alpha:insights', report(courseRows[0], 12)));
+    await page.waitFor('document.querySelector("#ix-message").textContent.includes("复查结果已保存")', {timeout: 5000});
+    assert.match(await page.text('.ix-followups'), /记录完整，可以比较变化/);
+    await page.click('#ix-dialog [data-ix=followup]');
+    await page.evaluate(() => { document.querySelector('#ix-followup-form textarea').value = '下周记录花苞数量。'; });
+    await page.click('#ix-followup-form [type=submit]');
+    await page.waitFor('pending.has("alpha:insights") && !document.querySelector("#ix-dialog").open', {timeout: 5000});
+    await page.evaluate(() => settle('alpha:insights', {success: false}));
+    await page.waitFor('document.querySelector("#ix-message").classList.contains("is-error")', {timeout: 5000});
+    assert.match(await page.text('#ix-message'), /跟进计划已保存.*已保留上次快照/);
+    assert.doesNotMatch(await page.text('.ix-followups'), /下周记录花苞数量/);
+
     await page.evaluate(() => {
       document.querySelector('[data-ix=refresh]').click();
+      document.querySelector('[data-ix=student][data-student="21"]').click();
+    });
+    await page.waitFor('document.querySelector("#ix-dialog").open && pending.has("alpha:insights")', {timeout: 5000});
+    await page.evaluate(() => {
       delayBetaWorkspace = true;
       go('/teacher/courses?dojo=beta&tab=students');
     });
     await page.waitFor('pending.has("alpha:insights") && pending.has("beta:workspace")', {timeout: 5000});
+    assert.equal(await page.evaluate(() => document.querySelector('#ix-dialog').open), false);
+    assert.equal(await page.text('#ix-dialog-content'), '');
     await page.evaluate(async () => {
       finish('alpha:insights', report(courseRows[0], 99));
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -139,7 +189,7 @@ try {
     assert.deepEqual(page.pageErrors, []);
     await browser.closePage(page);
   }
-  console.log('Teacher course navigation keeps delayed content, course codes, confirmations and learning insights in their originating workspace.');
+  console.log('Teacher course navigation scopes delayed data and dialogs to the current course and confirms follow-up saves.');
 } finally {
   await browser?.close();
   await new Promise(resolve => server.close(resolve));

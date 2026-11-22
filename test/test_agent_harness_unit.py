@@ -843,6 +843,21 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     ("请给我《植物观察教案》", "auto", ("docx",)),
     ("请把《植物观察教案》改写得更清楚", "auto", ("docx",)),
     ("制作教案，给我“DOCX”和“Markdown”文件", "auto", ("docx", "md")),
+    ("请告诉我如何写一份教案", "auto", ()),
+    ("我想知道怎样制作教案", "execute", ()),
+    ("Can you tell me how to write a lesson plan?", "auto", ()),
+    ("请告诉我如何写教案，提供编写教案的建议", "auto", ()),
+    ("请告诉我如何写 Markdown 教案，再帮我生成 DOCX 教案", "auto", ("docx",)),
+    ("请告诉我如何写一份教案，再给我一份可下载的文件", "auto", ("docx",)),
+    ("Can you tell me how to write a lesson plan? Then give me a downloadable file.", "auto", ("docx",)),
+    ("Can you tell me how to write a lesson plan, and then generate a Markdown handout?", "auto", ("md",)),
+    ("不要生成任何一份教学文档", "auto", ()),
+    ("不要生成任何一份 docx 教案", "auto", ()),
+    ("请勿生成任何可下载的讲义", "execute", ()),
+    ("别生成任何一份可下载的 DOCX 教案，只要 Markdown", "auto", ("md",)),
+    ("参考资料“不要生成任何一份教学文档”，帮我写一份特别教案", "auto", ("docx",)),
+    ("参考《请告诉我如何写教案》，帮我写一份特别教案", "auto", ("docx",)),
+    ("帮我写一份特别教案", "auto", ("docx",)),
 ])
 def test_teacher_document_requires_an_explicit_supported_request(prompt, mode, expected):
     documents = load("dojo_plugin/agent_runtime/teacher_documents.py", {})

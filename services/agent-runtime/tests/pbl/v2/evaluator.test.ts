@@ -441,6 +441,16 @@ describe('Evaluator API teaching image boundary', () => {
       expect(maximumImage.status).toBe(200);
       expect(await maximumImage.text()).toContain('观察记录清楚。');
       expect(harnessCalls()).toHaveLength(1);
+
+      fetchTurn.mockClear();
+      fetchTurn.mockImplementationOnce(async (_url, init) => introspect(init));
+      fetchTurn.mockResolvedValueOnce(Response.json({ error: 'fixture image unavailable' }, { status: 503 }));
+      const rejectedImage = await postEvaluation(request(image));
+      expect(await rejectedImage.text()).toContain('STREAM_ERROR');
+      expect(fetchTurn.mock.calls.map(([destination]) => String(destination))).toEqual([
+        'http://platform.invalid/pwncollege_api/v1/teaching/runtime/introspect',
+        'http://harness.invalid:3081/v1/teaching-image-turn',
+      ]);
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();

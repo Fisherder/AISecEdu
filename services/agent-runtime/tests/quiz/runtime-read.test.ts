@@ -15,6 +15,9 @@ import {
   writeDraftRecovery,
 } from '@/lib/quiz/persistence';
 import type { QuestionResult } from '@/lib/quiz/grading';
+import { gradeQuizForReview } from '@/lib/quiz/short-answer';
+import { quizViewStateFromAttempt } from '@/lib/quiz/view-state';
+import type { QuizQuestion } from '@/lib/types/stage';
 
 const values = new Map<string, string>();
 const localStorageStub = {
@@ -318,6 +321,32 @@ describe('quiz runtime authoritative reads', () => {
     });
     expect(localStorageStub.getItem(ANSWERS_KEY_PREFIX + 'quiz-1')).toBeNull();
   });
+
+  it.each([{ choice: 'A' }, { choice: 'A', short: '  ' }])(
+    'preserves a legacy submission with an unanswered short answer without scoring it',
+    async (answers) => {
+      const store = makeStore();
+      const runtimeDeps = deps(store, 'learner-a');
+      localStorageStub.setItem(ANSWERS_KEY_PREFIX + 'quiz-1', JSON.stringify(answers));
+      const questions: QuizQuestion[] = [
+        { id: 'choice', type: 'single', question: 'Select the observation.', answer: ['A'] },
+        { id: 'short', type: 'short_answer', question: 'Explain how you measured the leaves.' },
+      ];
+      const fetchGrade = vi.fn();
+      vi.stubGlobal('fetch', fetchGrade);
+
+      const input = { stageId: 'stage-1', sceneId: 'quiz-1' };
+      const loaded = await loadQuizAttemptState(input, runtimeDeps);
+      expect(loaded.state).toMatchObject({ phase: 'submitted', status: 'active', answers });
+      const hydrated = quizViewStateFromAttempt(loaded.state, questions);
+      expect(hydrated).toEqual({ phase: 'grading_unsupported', answers, results: [] });
+      expect(await gradeQuizForReview(questions, hydrated.answers, 'en-US')).toEqual({
+        status: 'unsupported',
+      });
+      expect(fetchGrade).not.toHaveBeenCalled();
+      expect((await loadQuizAttemptState(input, runtimeDeps)).state).toEqual(loaded.state);
+    },
+  );
 
   it.each([
     ['an array container', []],

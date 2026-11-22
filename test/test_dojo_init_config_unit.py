@@ -305,10 +305,13 @@ def test_deploy_rejects_missing_restore_source_before_starting_containers():
         assert result.returncode == 1 and "backup file does not exist" in result.stderr, result
 
 
+def database_action_script():
+    return (ROOT / "dojo/dojo").read_text().replace("/opt/pwn.college", ".").replace("/data/", "./").replace("/tmp/", "./")
+
+
 def run_database_action(folder, action, commands, *arguments):
-    script = (ROOT / "dojo/dojo").read_text().replace("/opt/pwn.college", ".").replace("/data/", "./").replace("/tmp/", "./")
     return subprocess.run(
-        ["/bin/bash", "-e", "-c", commands + "\n" + script, "dojo", action, *arguments],
+        ["/bin/bash", "-e", "-c", commands + "\n" + database_action_script(), "dojo", action, *arguments],
         cwd=folder, capture_output=True, text=True, timeout=10,
         env={"PATH": os.environ["PATH"], "DB_NAME": "test_database"},
     )
@@ -363,6 +366,40 @@ aws() { printf '%s\n' "$4"; }
         assert result.returncode == 0, result.stderr
         assert "s3://synthetic/complete backup.dump.enc" in result.stdout
         assert ".db-fixed-time.partial" not in result.stdout
+
+
+def test_cloud_backup_stops_on_encryption_or_upload_failure_with_either_invocation():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        (folder / "backups").mkdir()
+        (folder / "backups/synthetic.dump").write_text("synthetic backup")
+        (folder / "key-placeholder").touch()
+        script = folder / "dojo"
+        script.write_text(database_action_script())
+        script.chmod(0o700)
+        mocks = folder / "bin"
+        mocks.mkdir()
+        openssl = mocks / "openssl"
+        openssl.write_text("#!/bin/bash\necho openssl >> calls\nprintf synthetic > \"$5\"\nexit \"$OPENSSL_STATUS\"\n")
+        aws = mocks / "aws"
+        aws.write_text("#!/bin/bash\necho aws >> calls\nexit \"$AWS_STATUS\"\n")
+        for command in (openssl, aws):
+            command.chmod(0o700)
+
+        for invocation in ([str(script)], ["/bin/bash", str(script)]):
+            for encryption, upload, expected_calls in ((7, 0, ["openssl"]), (0, 8, ["openssl", "aws"])):
+                (folder / "calls").write_text("")
+                result = subprocess.run(
+                    [*invocation, "cloud-backup"], cwd=folder, capture_output=True, text=True, timeout=10,
+                    env={
+                        "PATH": os.pathsep.join((str(mocks), os.defpath)),
+                        "BACKUP_AES_KEY_FILE": "key-placeholder", "S3_BACKUP_BUCKET": "synthetic",
+                        "OPENSSL_STATUS": str(encryption), "AWS_STATUS": str(upload),
+                    },
+                )
+                assert result.returncode == (encryption or upload), result
+                assert (folder / "calls").read_text().splitlines() == expected_calls
+                assert "backed up" not in result.stdout
 
 
 def test_database_restore_surfaces_missing_and_failed_transactional_restores():

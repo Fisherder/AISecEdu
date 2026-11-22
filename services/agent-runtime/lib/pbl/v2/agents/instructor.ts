@@ -1834,7 +1834,8 @@ export async function* runInstructorTurn(
     shouldReportEmptyOutput({
       mainTurnAdvanced,
       assistantText: shownText,
-      producedAck: didAdjustDifficulty,
+      // A difficulty directive does not imply an acknowledgment was emitted.
+      producedAck: false,
     })
   ) {
     // Empty-bubble fallback: the turn produced NOTHING the learner can

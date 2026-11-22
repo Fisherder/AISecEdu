@@ -117,12 +117,13 @@
         if (sequence !== state.sequence) return false;
         state.filters = {...proposed, ...report.scope}; state.data = report; state.pendingFilters = null; state.rosterPage = 0;
         if (!report.tasks.some(t => t.key === state.focusTask)) state.focusTask = "";
-        state.busy = false; syncControls(); render(); syncUrl(); message(""); options.onSnapshot?.(report);
+        state.busy = false; syncControls(); render(); syncUrl(); message(config.savedMessage || ""); options.onSnapshot?.(report);
         return true;
       } catch (error) {
         if (sequence !== state.sequence || error?.name === "AbortError" || error?.code === "REQUEST_ABORTED") return false;
         state.busy = false; state.pendingFilters = null; syncControls();
-        message(`${error.message || "暂时无法读取学习记录。"}${state.data ? " 已保留上次快照与筛选范围。" : " 点击重试，课程记录不会受影响。"}`, true);
+        const refreshError = `${error.message || "暂时无法读取学习记录。"}${state.data ? " 已保留上次快照与筛选范围。" : " 点击重试，课程记录不会受影响。"}`;
+        message([config.savedMessage, refreshError].filter(Boolean).join(" "), true);
         if (!state.data) $("ix-content").innerHTML = `${empty("暂时无法读取学情", "请检查网络后重试。") }<button class="ix-primary" type="button" data-ix="refresh">重新加载</button>`;
         return false;
       } finally { if (sequence === state.sequence) { state.busy = false; syncControls(); } }
@@ -411,8 +412,8 @@
         if (!form.isConnected) return;
         closeDialog();
         state.view = "followups";
-        await load(course);
-        if (form.isConnected) message(isFollowup ? "跟进计划已保存，已保留当前进度作为复查依据。" : "复查结果已保存。");
+        const savedMessage = isFollowup ? "跟进计划已保存，已保留当前进度作为复查依据。" : "复查结果已保存。";
+        await load(course, {savedMessage});
       } catch (error) { form.querySelector('.ix-form-error').textContent = error.message || "保存失败，请重试。原有记录未受影响。"; }
       finally { if (form.isConnected) { form.dataset.busy = "false"; button.disabled = false; button.textContent = label; } }
     });

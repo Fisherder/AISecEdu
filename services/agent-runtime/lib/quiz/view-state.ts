@@ -1,6 +1,8 @@
 import type { QuestionResult } from '@/lib/quiz/grading';
 import type { QuizAnswers } from '@/lib/quiz/persistence';
 import type { QuizAttemptState, QuizAttemptWriter, QuizDraftInput } from '@/lib/quiz/runtime';
+import { isQuizGradingUnsupported } from '@/lib/quiz/short-answer';
+import type { QuizQuestion } from '@/lib/types/stage';
 
 export type QuizRuntimeGate =
   | { status: 'loading' }
@@ -73,13 +75,14 @@ export async function persistQuizReview(
 }
 
 export interface QuizViewHydratedState {
-  phase: 'not_started' | 'answering' | 'grading_pending' | 'reviewing';
+  phase: 'not_started' | 'answering' | 'grading_pending' | 'grading_unsupported' | 'reviewing';
   answers: QuizAnswers;
   results: QuestionResult[];
 }
 
 export function quizViewStateFromAttempt(
   state: QuizAttemptState | undefined,
+  questions: QuizQuestion[],
 ): QuizViewHydratedState {
   if (!state) return { phase: 'not_started', answers: {}, results: [] };
   if (state.phase === 'reviewed') {
@@ -90,7 +93,10 @@ export function quizViewStateFromAttempt(
     };
   }
   if (state.phase === 'submitted') {
-    return { phase: 'grading_pending', answers: state.answers, results: [] };
+    const phase = isQuizGradingUnsupported(questions, state.answers)
+      ? 'grading_unsupported'
+      : 'grading_pending';
+    return { phase, answers: state.answers, results: [] };
   }
   if (state.phase === 'draft' && Object.keys(state.answers).length === 0) {
     return { phase: 'not_started', answers: {}, results: [] };

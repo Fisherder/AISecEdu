@@ -44,7 +44,7 @@ import {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type Phase = 'not_started' | 'answering' | 'submitting' | 'grading' | 'grading_pending' | 'reviewing';
+type Phase = 'not_started' | 'answering' | 'submitting' | 'grading' | 'grading_pending' | 'grading_unsupported' | 'reviewing';
 
 interface QuizViewProps {
   readonly questions: QuizQuestion[];
@@ -672,7 +672,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     void loadQuizAttemptState({ stageId, sceneId })
       .then(({ attemptId: nextAttemptId, state }) => {
         if (cancelled) return;
-        const next = quizViewStateFromAttempt(state);
+        const next = quizViewStateFromAttempt(state, questions);
         setPhase(next.phase);
         setAnswers(next.answers);
         setResults(next.results);
@@ -687,7 +687,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
       viewLifetime.invalidate();
       void runtimeWriter.flushDraft();
     };
-  }, [hydrationVersion, runtimeWriter, sceneId, stageId, viewLifetime]);
+  }, [hydrationVersion, questions, runtimeWriter, sceneId, stageId, viewLifetime]);
 
   const attemptId = isQuizRuntimeReady(runtimeGate) ? runtimeGate.attemptId : null;
 
@@ -744,12 +744,13 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     let cancelled = false;
 
     (async () => {
-      const ordered = await gradeQuizForReview(questions, answers, locale, controller.signal);
+      const grading = await gradeQuizForReview(questions, answers, locale, controller.signal);
       if (cancelled) return;
-      if (!ordered) {
-        setPhase('grading_pending');
+      if (grading.status !== 'graded') {
+        setPhase(grading.status === 'unsupported' ? 'grading_unsupported' : 'grading_pending');
         return;
       }
+      const ordered = grading.results;
 
       if (!attemptId) {
         setRuntimeGate({ status: 'error' });
@@ -990,20 +991,24 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
           </motion.div>
         )}
 
-        {phase === 'grading_pending' && (
+        {(phase === 'grading_pending' || phase === 'grading_unsupported') && (
           <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
             <p className="text-base font-semibold text-gray-700 dark:text-gray-200">
-              {t('quiz.gradingPending')}
+              {t(phase === 'grading_pending' ? 'quiz.gradingPending' : 'quiz.gradingUnsupported')}
             </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{t('quiz.gradingPendingDetail')}</p>
-            <button
-              type="button"
-              onClick={() => setPhase('grading')}
-              className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700"
-            >
-              <RotateCcw className="h-4 w-4" />
-              {t('quiz.retryGrading')}
-            </button>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {t(phase === 'grading_pending' ? 'quiz.gradingPendingDetail' : 'quiz.gradingUnsupportedDetail')}
+            </p>
+            {phase === 'grading_pending' && (
+              <button
+                type="button"
+                onClick={() => setPhase('grading')}
+                className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700"
+              >
+                <RotateCcw className="h-4 w-4" />
+                {t('quiz.retryGrading')}
+              </button>
+            )}
           </div>
         )}
 

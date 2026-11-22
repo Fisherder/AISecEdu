@@ -553,6 +553,8 @@
     "aiGradingWait": "请稍候，正在分析你的答案",
     "gradingPending": "答卷待评",
     "gradingPendingDetail": "答案已保存，可重试完成评分。",
+    "gradingUnsupported": "此答卷不支持自动评分",
+    "gradingUnsupportedDetail": "答案已保存，请向老师确认评分方式。",
     "retryGrading": "重试评分",
     "quizReport": "答题报告",
     "retry": "重新答题"
