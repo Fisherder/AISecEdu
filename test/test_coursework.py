@@ -639,6 +639,57 @@ def test_open_grading_preserves_valid_rows_and_existing_bounds():
     }
     assert GRADING.map_open_grade_rows([{"itemIndex": True, "score": 3}], [leaf]) == {}
     assert GRADING.map_open_grade_rows([{"itemIndex": 1.5, "score": 3}], [leaf]) == {}
+    assert GRADING.map_open_grade_rows([{"itemId": "another-item", "score": 5}], [leaf]) == {}
+    assert GRADING.map_open_grade_rows([{"itemId": "leaf", "itemIndex": None, "score": 3}], [leaf])["leaf"]["score"] == 3
+
+
+@pytest.mark.parametrize("provider_available", [True, False])
+def test_optional_open_answers_only_grade_submitted_content(provider_available):
+    def question(identifier, kind):
+        return SimpleNamespace(
+            id=identifier, item_type=kind, points=5, title=identifier, prompt=identifier,
+            config={"keywords": ["0", "false"]}, challenge_id=None,
+        )
+
+    items = [question("blank", "SHORT_ANSWER"), question("zero", "SHORT_ANSWER"),
+             question("false", "DEBATE"), question("whitespace", "DEBATE")]
+    submission = SimpleNamespace(assignment=SimpleNamespace(items=items), student_id=1)
+    model = MagicMock(return_value={
+        "grades": [{"itemIndex": 1, "score": 2}, {"itemIndex": 2, "score": 4}],
+    } if provider_available else None)
+    solves = MagicMock()
+    solves.query.filter.return_value.all.return_value = []
+    namespace = {
+        "utcnow": datetime.datetime.now, "re": re, "Solves": solves, "model_json": model,
+        "DOJO_AI_GRADER_MODEL": "synthetic-grader", "map_open_grade_rows": GRADING.map_open_grade_rows,
+        "build_open_grade_questions": GRADING.build_open_grade_questions,
+    }
+    coursework = GRADING_PATH.parents[1] / "coursework.py"
+    names = {"grade_submission", "_ai_open_grades", "_normalize_answer", "_fallback_open_grade"}
+    tree = ast.parse(coursework.read_text())
+    tree.body = [node for node in tree.body if getattr(node, "name", None) in names]
+    exec(compile(tree, str(coursework), "exec"), namespace)
+
+    submission.answers = {"whitespace": [" ", "\t"]}
+    namespace["grade_submission"](submission)
+    model.assert_not_called()
+    assert submission.total_score == 0 and submission.grading["agent"] == {}
+    assert all(row["feedback"] == "未作答。" and not row["needsReview"] for row in submission.item_results)
+
+    submission.answers = {"zero": 0, "false": False, "whitespace": " \t "}
+    namespace["grade_submission"](submission)
+    model.assert_called_once()
+    sent = model.call_args.args[1]["questions"]
+    assert [(q["itemIndex"], q["itemId"], q["answer"]) for q in sent] == [(1, "zero", "0"), (2, "false", "False")]
+    blank, zero, false, whitespace = submission.item_results
+    for row in (blank, whitespace):
+        assert (row["score"], row["source"], row["feedback"]) == (0, "DETERMINISTIC", "未作答。")
+    if provider_available:
+        assert (zero["score"], false["score"], submission.ai_score) == (2, 4, 6)
+    else:
+        for row in (zero, false):
+            assert row["source"] == "FALLBACK" and row["needsReview"]
+            assert row["score"] > 0 and "1/2" in row["feedback"]
 
 
 @pytest.mark.parametrize("invalid_grade", [
@@ -650,6 +701,8 @@ def test_open_grading_preserves_valid_rows_and_existing_bounds():
     {"itemIndex": True, "score": 3},
     {"itemIndex": 1.5, "score": 3},
     {"itemId": "leaf", "itemIndex": 2, "score": 3},
+    {"itemId": "leaf", "itemIndex": 99, "score": 5},
+    {"itemId": "leaf", "itemIndex": True, "score": 5},
 ])
 def test_assignment_work_routes_invalid_open_grade_to_review(invalid_grade):
     from flask import Flask, request

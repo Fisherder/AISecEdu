@@ -9,7 +9,7 @@ def build_open_grade_questions(items, answers):
             "itemIndex": index,
             "itemId": item.id,
             "question": item.prompt or item.title,
-            "answer": str(answers.get(item.id) or "")[:12000],
+            "answer": "" if answers.get(item.id) is None else str(answers[item.id])[:12000],
             "points": float(item.points),
             "referenceAnswer": str(
                 (item.config or {}).get("referenceAnswer") or ""
@@ -46,19 +46,22 @@ def map_open_grade_rows(rows, items):
     for row in rows:
         if not isinstance(row, dict):
             continue
-        item_id = str(row.get("itemId") or "")
+        supplied_id = row.get("itemId")
+        item_id = str(supplied_id or "")
         item_index = _grade_item_index(row.get("itemIndex"))
         indexed_id = (
             ordered_ids[item_index - 1]
             if item_index is not None and 1 <= item_index <= len(ordered_ids)
             else None
         )
+        if row.get("itemIndex") is not None and indexed_id is None:
+            continue
         if item_id not in points:
             item_id = indexed_id
         elif indexed_id is not None and item_id != indexed_id:
             continue
         if (
-            item_id is None and row.get("itemIndex") is None
+            item_id is None and supplied_id in (None, "") and row.get("itemIndex") is None
             and len(ordered_ids) == 1 and len(rows) == 1
         ):
             item_id = ordered_ids[0]

@@ -194,7 +194,7 @@ def _item_view(
     return view
 
 
-def _submission_view(submission, *, include_answers=False):
+def _submission_view(submission, *, include_answers=False, teacher=False, expose_answer=False):
     if submission is None:
         return None
     normalized_activity = activity_state(submission.status)
@@ -203,6 +203,13 @@ def _submission_view(submission, *, include_answers=False):
         activity=normalized_activity,
     )
     score_ready = normalized_assessment == "READY"
+    grading = submission.grading if isinstance(submission.grading, dict) else {}
+    override = grading.get("teacherOverride")
+    if not isinstance(override, dict):
+        override = {}
+    show_item_feedback = score_ready and expose_answer
+    show_summary = teacher or show_item_feedback or (score_ready and override.get("explicitFeedback") is True)
+    feedback = submission.feedback if show_summary else ""
     result = {
         "id": submission.id,
         "studentId": submission.student_id,
@@ -220,7 +227,7 @@ def _submission_view(submission, *, include_answers=False):
             else None
         ),
         "trustScore": float(submission.trust_score),
-        "feedback": submission.feedback,
+        "feedback": feedback,
         "submittedAt": timestamp(submission.submitted_at),
         "gradedAt": timestamp(submission.graded_at),
         "started": timestamp(submission.started),
@@ -228,8 +235,21 @@ def _submission_view(submission, *, include_answers=False):
     }
     if include_answers:
         result["answers"] = submission.answers or {}
-        result["itemResults"] = submission.item_results or []
-        result["grading"] = submission.grading or {}
+        item_results = submission.item_results or []
+        if teacher:
+            result["itemResults"] = item_results
+            result["grading"] = grading
+        else:
+            result["itemResults"] = [
+                {
+                    **{key: row[key] for key in ("itemId", "score", "maxScore", "source", "needsReview") if key in row},
+                    "feedback": row.get("feedback", "") if show_item_feedback else "",
+                }
+                for row in item_results if isinstance(row, dict)
+            ]
+            result["grading"] = {
+                "teacherOverride": {key: override[key] for key in ("score", "at") if key in override},
+            } if override else {}
     return result
 
 
@@ -260,11 +280,6 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
         started = sum(counts.values())
         counts["TOTAL"] = roster
         counts["NOT_STARTED"] = max(0, roster - started)
-    result_by_item = {
-        str(row.get("itemId")): row
-        for row in (submission.item_results if submission else [])
-        if isinstance(row, dict) and row.get("itemId")
-    }
     settings = assignment.settings or {}
     answer_policy = str(settings.get("answerPolicy") or "AFTER_SUBMISSION").upper()
     if answer_policy not in {"NEVER", "AFTER_SUBMISSION", "AFTER_DUE", "IMMEDIATE"}:
@@ -279,7 +294,24 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
         and assignment.due_at is not None
         and assignment.due_at <= now
     )
-    submission_view = _submission_view(submission, include_answers=True)
+    submission_view = _submission_view(
+        submission, include_answers=True, teacher=teacher, expose_answer=expose_answer,
+    )
+    result_by_item = {
+        str(row["itemId"]): row
+        for row in (submission_view["itemResults"] if submission_view else [])
+        if isinstance(row, dict) and row.get("itemId")
+    }
+    description = assignment.description
+    if not teacher:
+        generation = settings.get("generation")
+        generation_prompt = generation.get("prompt") if isinstance(generation, dict) else None
+        # Historical generation could use the prompt as the description, but retained only its first 4,000 chars.
+        if isinstance(generation_prompt, str) and generation_prompt and (
+            description == generation_prompt
+            or len(generation_prompt) == 4000 and (description or "").startswith(generation_prompt)
+        ):
+            description = ""
     view = {
         "id": assignment.id,
         "dojoId": assignment.dojo_id,
@@ -289,9 +321,13 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
         "title": assignment.title,
         "kind": assignment.kind,
         "status": assignment.status,
-        "description": assignment.description,
+        "description": description,
         "instructions": assignment.instructions,
-        "settings": settings if teacher else {key: value for key, value in settings.items() if key not in {"librarySource", "authoringStandards"}},
+        "settings": settings if teacher else {
+            key: settings[key]
+            for key in ("allowLate", "allowResubmit", "passPercent", "answerPolicy")
+            if key in settings and type(settings[key]) in (str, bool, int, float)
+        },
         "answerPolicy": {
             "mode": answer_policy,
             "answersVisible": expose_answer,
@@ -674,7 +710,7 @@ def generate_assignment_payload(body, dojo):
         "title": (generated_title or str(body.get("title") or "").strip() or f"{dojo.name or dojo.id} · 智能作业")[:240],
         "kind": kind,
         "moduleIndex": body.get("moduleIndex"),
-        "description": str((generated or {}).get("description") or prompt)[:16000],
+        "description": str((generated or {}).get("description") or "")[:16000],
         "instructions": str(
             (generated or {}).get("instructions")
             or "按顺序完成题目；实验题以真实 Dojo 判题为准，主观题由受限评分标准智能批改。"
@@ -829,7 +865,7 @@ def _fallback_open_grade(item, answer):
     config = item.config or {}
     reference = str(config.get("referenceAnswer") or "")
     keywords = [str(value).strip().casefold() for value in (config.get("keywords") or []) if str(value).strip()]
-    answer_text = str(answer or "").strip()
+    answer_text = "" if answer is None else str(answer).strip()
     answer_lower = answer_text.casefold()
     if not answer_text:
         return 0.0, "未作答。", True
@@ -882,7 +918,10 @@ def _ai_open_grades(items, answers):
 def grade_submission(submission, *, grader_id=None):
     assignment = submission.assignment
     answers = submission.answers or {}
-    open_items = [item for item in assignment.items if item.item_type in {"SHORT_ANSWER", "DEBATE"}]
+    open_items = [
+        item for item in assignment.items
+        if item.item_type in {"SHORT_ANSWER", "DEBATE"} and _normalize_answer(answers.get(item.id))
+    ]
     ai_grades, agent_meta = _ai_open_grades(open_items, answers)
     challenge_ids = [item.challenge_id for item in assignment.items if item.challenge_id]
     solved_ids = {
@@ -920,9 +959,11 @@ def grade_submission(submission, *, grader_id=None):
                 score = float(item.points) if is_correct else 0.0
                 feedback = config.get("explanation") or ("回答正确。" if is_correct else "回答不正确，请复习相关知识点。")
         elif item.item_type in {"SHORT_ANSWER", "DEBATE"}:
-            source = "AI"
             ai_grade = ai_grades.get(item.id)
-            if ai_grade:
+            if not _normalize_answer(answer):
+                feedback = "未作答。"
+            elif ai_grade:
+                source = "AI"
                 score = ai_grade["score"]
                 feedback = ai_grade["feedback"]
                 confidence_values.append(ai_grade["confidence"])
@@ -1064,9 +1105,15 @@ def override_submission_grade(assignment, submission_id, user, score, feedback=N
     submission.status = "GRADED"
     submission.grader_id = user.id
     submission.graded_at = utcnow()
+    grading = submission.grading if isinstance(submission.grading, dict) else {}
+    previous_override = grading.get("teacherOverride")
+    explicit_feedback = feedback is not None or (
+        isinstance(previous_override, dict) and previous_override.get("explicitFeedback") is True
+    )
     submission.grading = {
-        **(submission.grading or {}),
+        **grading,
         "teacherOverride": {
+            "explicitFeedback": explicit_feedback,
             "graderId": user.id,
             "score": submission.total_score,
             "at": timestamp(submission.graded_at),
@@ -1099,7 +1146,7 @@ def roster_submissions(assignment):
             "studentId": member.user_id,
             "studentName": member.user.name if member.user else str(member.user_id),
             "status": submissions[member.user_id].status if member.user_id in submissions else "NOT_STARTED",
-            "submission": _submission_view(submissions.get(member.user_id), include_answers=True),
+            "submission": _submission_view(submissions.get(member.user_id), include_answers=True, teacher=True),
         }
         for member in members
     ]
