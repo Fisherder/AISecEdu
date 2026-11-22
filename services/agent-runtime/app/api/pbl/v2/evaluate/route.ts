@@ -32,6 +32,7 @@ import { apiError } from '@/lib/server/api-response';
 import {
   createHarnessTurn,
   createTeachingImageTurn,
+  MAX_TEACHING_IMAGE_BYTES,
   type TeachingTurnImage,
 } from '@/lib/server/agent-harness/classroom-turn';
 import { latestSubmissionForMicrotask } from '@/lib/pbl/v2/operations/submission';
@@ -59,11 +60,11 @@ interface EvaluateRequest {
 }
 
 function parseSelectedImage(value: unknown): TeachingTurnImage | undefined {
-  if (typeof value !== 'string' || value.length > (2 * 1024 * 1024 * 4) / 3 + 64) return;
+  if (typeof value !== 'string' || value.length > (MAX_TEACHING_IMAGE_BYTES * 4) / 3 + 64) return;
   const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
   if (!match || match[2].length % 4 !== 0) return;
   const image = { mediaType: match[1] as TeachingTurnImage['mediaType'], data: match[2] };
-  if (Buffer.byteLength(image.data, 'base64') > 2 * 1024 * 1024) return;
+  if (Buffer.byteLength(image.data, 'base64') > MAX_TEACHING_IMAGE_BYTES) return;
   return image;
 }
 

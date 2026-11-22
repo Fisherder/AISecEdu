@@ -35,6 +35,10 @@ export interface TeachingTurnImage {
   data: string;
 }
 
+const maxTextTurnBytes = 1024 * 1024;
+export const MAX_TEACHING_IMAGE_BYTES = 2 * 1024 * 1024;
+const maxTeachingImageBase64Length = 4 * Math.ceil(MAX_TEACHING_IMAGE_BYTES / 3);
+
 export function createHarnessTurn(): HarnessTurn | undefined {
   return createHarnessTransport('/v1/turn');
 }
@@ -57,8 +61,16 @@ function createHarnessTransport(
 
   const endpoint = new URL(root + path);
   return async (messages, signal) => {
+    if (
+      image &&
+      (image.data.length > maxTeachingImageBase64Length ||
+        Buffer.byteLength(image.data, 'base64') > MAX_TEACHING_IMAGE_BYTES)
+    ) {
+      throw new Error('教学图片过大，请缩小后重试。');
+    }
+
     const body = JSON.stringify({ messages });
-    if (Buffer.byteLength(body, 'utf8') > 1024 * 1024 || messages.length > 128) {
+    if (Buffer.byteLength(body, 'utf8') > maxTextTurnBytes || messages.length > 128) {
       throw new Error('对话资料过长，请缩短后重试。');
     }
 

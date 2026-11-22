@@ -16,10 +16,16 @@
  * write a small MockLanguageModelV3 helper for both Instructor and
  * Evaluator together.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { crc32 } from 'node:zlib';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET as getEvaluationCapability, POST as postEvaluation } from '@/app/api/pbl/v2/evaluate/route';
 import { middleware } from '@/middleware';
+import {
+  createHarnessTurn,
+  createTeachingImageTurn,
+  type ClassroomTurnMessage,
+} from '@/lib/server/agent-harness/classroom-turn';
 import { MockLanguageModelV3, convertArrayToReadableStream } from 'ai/test';
 import {
   runFinalEvaluation,
@@ -419,9 +425,110 @@ describe('Evaluator API teaching image boundary', () => {
           'http://harness.invalid:3081/v1/turn',
         ]),
       );
+
+      enabled = true;
+      fetchTurn.mockClear();
+      const requestWithImageBytes = (bytes: number) =>
+        request({
+          newTeachingImage: {
+            consent: true,
+            dataUrl: 'data:image/png;base64,' + classroomImage(bytes).data,
+          },
+        });
+      expect((await postEvaluation(requestWithImageBytes(2 * oneMiB + 1))).status).toBe(400);
+      expect(harnessCalls()).toHaveLength(0);
+      const maximumImage = await postEvaluation(requestWithImageBytes(2 * oneMiB));
+      expect(maximumImage.status).toBe(200);
+      expect(await maximumImage.text()).toContain('观察记录清楚。');
+      expect(harnessCalls()).toHaveLength(1);
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();
     }
+  });
+});
+
+const oneMiB = 1024 * 1024;
+
+function classroomImage(bytes: number) {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8R8AAAAASUVORK5CYII=',
+    'base64',
+  );
+  const metadata = Buffer.alloc(bytes - png.length - 8, 'a');
+  metadata.write('tEXtComment\0');
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(metadata.length - 4);
+  const checksum = Buffer.alloc(4);
+  checksum.writeUInt32BE(crc32(metadata));
+  return {
+    mediaType: 'image/png' as const,
+    data: Buffer.concat([
+      png.subarray(0, -12),
+      length,
+      metadata,
+      checksum,
+      png.subarray(-12),
+    ]).toString('base64'),
+  };
+}
+
+function classroomMessages(bytes: number): ClassroomTurnMessage[] {
+  const contentBytes =
+    bytes - Buffer.byteLength(JSON.stringify({ messages: [{ role: 'user', content: '' }] }));
+  return [
+    {
+      role: 'user',
+      content: '叶'.repeat(Math.floor(contentBytes / 3)) + 'a'.repeat(contentBytes % 3),
+    },
+  ];
+}
+
+describe('Harness classroom transport limits', () => {
+  const fetchTurn = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    vi.stubEnv('DOJO_AI_ENABLED', 'true');
+    vi.stubEnv('HARNESS_INTERNAL_URL', 'http://harness.invalid:3081');
+    vi.stubEnv('HARNESS_SERVICE_SECRET', 'fixture-auth');
+    vi.stubGlobal('fetch', fetchTurn);
+    fetchTurn.mockImplementation(async () =>
+      Response.json({ text: '观察记录清楚。', model: 'fixture' }),
+    );
+  });
+
+  afterEach(() => {
+    fetchTurn.mockReset();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('accepts the image and multibyte text at their inclusive limits', async () => {
+    const image = classroomImage(2 * oneMiB);
+    const messages = classroomMessages(oneMiB);
+    await expect(createTeachingImageTurn(image)!(messages)).resolves.toMatchObject({
+      model: 'fixture',
+    });
+    const [url, init] = fetchTurn.mock.calls[0];
+    expect(String(url)).toBe('http://harness.invalid:3081/v1/teaching-image-turn');
+    expect(JSON.parse(String(init?.body))).toEqual({ messages, images: [image] });
+  });
+
+  it('rejects an image one byte over its decoded limit before calling Harness', async () => {
+    const image = classroomImage(2 * oneMiB + 1);
+    const messages: ClassroomTurnMessage[] = [{ role: 'user', content: '请评价观察记录。' }];
+    expect(image.data).toHaveLength(4 * Math.ceil((2 * oneMiB) / 3));
+    await expect(createTeachingImageTurn(image)!(messages)).rejects.toThrow('教学图片过大');
+    expect(fetchTurn).not.toHaveBeenCalled();
+  });
+
+  it('keeps the same text limit for text and image turns', async () => {
+    const textTurn = createHarnessTurn()!;
+    const imageTurn = createTeachingImageTurn(classroomImage(512))!;
+    await expect(textTurn(classroomMessages(oneMiB))).resolves.toMatchObject({ model: 'fixture' });
+    const messages = classroomMessages(oneMiB + 1);
+    await expect(textTurn(messages)).rejects.toThrow('对话资料过长');
+    await expect(imageTurn(messages)).rejects.toThrow('对话资料过长');
+    expect(fetchTurn).toHaveBeenCalledTimes(1);
   });
 });

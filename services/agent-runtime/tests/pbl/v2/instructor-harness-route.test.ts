@@ -175,6 +175,17 @@ describe('ordinary PBL v2 instructor via Harness', () => {
     expect(events.some((event) => event.type === 'token')).toBe(true);
   });
 
+  it('rejects an observation without a signature before recording it', async () => {
+    receive({
+      reply: '试着每天记录叶片数量。',
+      observations: [{ kind: 'question' }],
+    });
+    const events = await frames(await teach(request('instructor', { userMessage: '怎样记录？' })));
+    expect(events.map((event) => event.type)).toEqual(['project_patch', 'error', 'done']);
+    expect(events[0].patch).toMatchObject({ kind: 'engagement_event', eventKind: 'learner_turn' });
+    expect(events[1].code).toBe('STREAM_ERROR');
+  });
+
   it('fails closed for unsupported operations and missing configuration', async () => {
     receive({ reply: '不要显示这条。', operations: [{ type: 'external_lookup' }] });
     const events = await frames(await teach(request('instructor', { userMessage: '怎样记录？' })));
