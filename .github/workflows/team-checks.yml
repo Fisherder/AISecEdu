@@ -158,7 +158,7 @@ jobs:
           python -m pip install -r ops/team/requirements.txt
           # requirements.txt pins SQLAlchemy for the SQLite resolver and preparation suites.
           python -m pytest -q \
-            test/test_upstream_teaching_turn_unit.py test/test_teacher_harness_model_pin_unit.py \
+            test/test_upstream_teaching_turn_unit.py test/test_teaching_image_auth_unit.py test/test_teacher_harness_model_pin_unit.py \
             test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_tutor_illustrations_unit.py \
             test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py \
             test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py \
