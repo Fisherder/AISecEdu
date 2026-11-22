@@ -1,7 +1,18 @@
+import { createHash } from 'node:crypto';
+import { isEqual } from 'lodash';
 import { z } from 'zod';
+import {
+  compileCoursewareSlide,
+  coursewareThemeIssues,
+  inspectCoursewareSlide,
+} from '@/lib/courseware/compiler';
 import { coursewareModelStage } from '@/lib/courseware/generation';
 import { inspectRenderedCourseware } from '@/lib/courseware/render-client';
-import { COURSEWARE_MAX_PAGES, type CoursewareSlideData } from '@/lib/courseware/schema';
+import {
+  COURSEWARE_MAX_PAGES,
+  coursewareThemeSchema,
+  type CoursewareSlideData,
+} from '@/lib/courseware/schema';
 import type { AICallFn } from '@/lib/generation/pipeline-types';
 import { parseSlideDeckPageRequirement } from '@/lib/server/slide-page-policy';
 import { coursewareLanguageUnit } from '@/lib/teaching/learner-language-surfaces';
@@ -174,4 +185,195 @@ export async function selectOrdinaryDeckTextPages(
   return target.targets
     .filter((page) => selection.pageIds.includes(page.studio.page.id))
     .map((page) => page.pageNumber);
+}
+
+const paletteSchema = coursewareThemeSchema.omit({ name: true }).strict();
+const paletteResponseSchema = z.strictObject({ palette: paletteSchema });
+const paletteRenderEvidence = z.object({
+  pageId: z.string(),
+  mode: z.literal('headless-chromium-dom-and-pixels'),
+  sourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  inspectedAt: z.string().min(1),
+  frames: z.tuple([
+    z.object({ step: z.literal(-1), screenshotSha256: z.string().regex(/^[a-f0-9]{64}$/) }),
+  ]),
+});
+
+const paletteElementFields: Partial<Record<string, readonly string[]>> = {
+  text: ['defaultColor', 'content'],
+  shape: ['fill'],
+  line: ['color'],
+  chart: ['themeColors', 'textColor', 'lineColor'],
+  image: [],
+};
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function normalizedPalette(theme: CoursewareSlideData['theme']) {
+  const { name: _name, ...colors } = theme;
+  return Object.fromEntries(
+    Object.entries(colors).map(([key, color]) => [key, color.toLowerCase()]),
+  );
+}
+
+function invalidPalette(message: string) {
+  return new OrdinaryLayoutError(422, 'INVALID_ORDINARY_DECK_PALETTE', message);
+}
+
+function applyPaletteToCanvas(
+  source: CoursewareSlideData,
+  updated: CoursewareSlideData,
+  native: Record<string, unknown>,
+) {
+  const before = compileCoursewareSlide(source);
+  const after = compileCoursewareSlide(updated);
+  const result = { ...native };
+  if (native.background !== undefined) {
+    result.background = { ...record(native.background), color: updated.theme.background };
+  }
+  if (!Array.isArray(native.elements)) return result;
+  if (before.elements.length !== after.elements.length) {
+    throw invalidPalette('课件对象数量与原稿不一致，无法安全应用配色。');
+  }
+  result.elements = native.elements.map((item, index) => {
+    const original = before.elements[index];
+    const revised = after.elements[index];
+    const saved = record(item);
+    const fields = paletteElementFields[original.type];
+    if (!saved || !fields || !revised || original.id !== saved.id || original.id !== revised.id) {
+      throw invalidPalette('课件包含无法安全应用配色的画布对象。');
+    }
+    const oldValues = { ...original } as Record<string, unknown>;
+    const newValues = { ...revised } as Record<string, unknown>;
+    const next = { ...saved };
+    for (const field of fields) {
+      if (!isEqual(oldValues[field], newValues[field])) next[field] = newValues[field];
+      delete oldValues[field];
+      delete newValues[field];
+    }
+    if (!isEqual(oldValues, newValues)) {
+      throw invalidPalette('课件配色改变了非颜色画布字段。');
+    }
+    return next;
+  });
+  return result;
+}
+
+export async function reviseOrdinaryDeckPalette(
+  target: ReturnType<typeof ordinaryDeckTarget>,
+  model: OrdinaryTeachingModel,
+) {
+  const design = record(target.content.coursewareDesign);
+  const designTheme = record(design?.theme);
+  if (
+    target.targets.some(({ studio }) => {
+      const { visual } = studio.page;
+      return visual.kind === 'image'
+        ? studio.assets.length !== 1 ||
+            studio.assets[0].id !== visual.assetId ||
+            !/^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(studio.assets[0].src)
+        : studio.assets.length !== 0;
+    })
+  ) {
+    throw invalidPalette('整套配色仅支持原生图表、对比表和已内嵌的普通教学图片。');
+  }
+  const currentPalettes = [
+    ...new Set(target.targets.map(({ studio }) => JSON.stringify(normalizedPalette(studio.theme)))),
+  ].map((value) => JSON.parse(value));
+  model.signal.throwIfAborted();
+  const turn = await model.turn(
+    [
+      {
+        role: 'system',
+        content:
+          '仅按教师要求调整整套普通静态课件的主题颜色。只返回 JSON，顶层为 palette，' +
+          '包含 background、foreground、muted、accent、secondary、surface 六种 #RRGGBB 颜色。' +
+          '未要求调整的颜色尽量保留，只有为保持对比度时才调整关联色。' +
+          '前景与背景对比度至少 7:1，次要文字与背景至少 4.5:1，前景与面板至少 4.5:1，强调色与背景至少 3:1。',
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({ instruction: target.instruction, currentPalettes }),
+      },
+    ],
+    model.signal,
+  );
+  await recordHarnessUsage(turn, 'generate-classroom');
+  if (turn.model !== model.modelId || !hasMeasuredLessonUsage(turn)) {
+    throw new Error('Official ordinary teaching model or measured usage is unavailable');
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(turn.text);
+  } catch {
+    throw invalidPalette('教学引擎没有返回可验证的主题颜色。');
+  }
+  const parsed = paletteResponseSchema.safeParse(raw);
+  if (!parsed.success) throw invalidPalette('主题配色回执必须包含六种有效的十六进制颜色。');
+  const palette = normalizedPalette({ name: 'palette', ...parsed.data.palette });
+  if (coursewareThemeIssues({ ...target.targets[0].studio.theme, ...palette }).length) {
+    throw invalidPalette('新主题的文字或强调色对比度不足。');
+  }
+  if (target.targets.every(({ studio }) => isEqual(normalizedPalette(studio.theme), palette))) {
+    throw invalidPalette('课件颜色没有变化。');
+  }
+
+  const artifacts = [...target.artifacts];
+  const pageIds: string[] = [];
+  const renderEvidence: Record<string, unknown>[] = [];
+  for (const page of target.targets) {
+    model.signal.throwIfAborted();
+    const studio = { ...page.studio, theme: { ...page.studio.theme, ...palette } };
+    if (inspectCoursewareSlide(studio).length) {
+      throw invalidPalette('新主题没有通过课件版面校验。');
+    }
+    const native = applyPaletteToCanvas(page.studio, studio, page.native);
+    const rendered = await inspectOrdinaryDeckTextPage(studio, model.signal);
+    if (rendered.issues.length) throw invalidPalette('新主题没有通过浏览器渲染验收。');
+    const proof = paletteRenderEvidence.safeParse(rendered.evidence);
+    if (
+      !proof.success ||
+      proof.data.pageId !== studio.page.id ||
+      proof.data.sourceSha256 !== createHash('sha256').update(JSON.stringify(studio)).digest('hex')
+    ) {
+      throw new Error('Incomplete browser verification evidence for the palette revision');
+    }
+    pageIds.push(studio.page.id);
+    renderEvidence.push(rendered.evidence);
+    artifacts[page.position] = {
+      ...page.artifact,
+      content: {
+        ...native,
+        studio: { ...page.savedStudio, theme: { ...record(page.savedStudio.theme), ...palette } },
+      },
+    };
+  }
+  const { prompt_tokens, completion_tokens, total_tokens } = turn.usage;
+  return {
+    result: {
+      content: {
+        ...target.content,
+        ...(design && designTheme
+          ? { coursewareDesign: { ...design, theme: { ...designTheme, ...palette } } }
+          : {}),
+        lesson: { ...target.lesson, artifacts, updatedAt: Date.now() },
+        revisionMetadata: {
+          mode: 'ordinary-deck-revision',
+          operation: 'palette',
+          recomposed: false,
+          pageIds,
+          renderEvidence,
+        },
+      },
+    },
+    usage: {
+      inputTokens: prompt_tokens,
+      outputTokens: completion_tokens,
+      totalTokens: total_tokens ?? prompt_tokens + completion_tokens,
+    },
+  };
 }

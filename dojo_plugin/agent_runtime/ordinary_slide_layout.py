@@ -48,6 +48,25 @@ _DECK_STYLE_INTENT = re.compile(
 )
 
 
+_PALETTE_DECK = r"(?:整套|整份|全套|整个|全部)(?:课件|幻灯片|PPT)"
+_PALETTE_STYLE = (
+    r"(?:暖色(?:调)?|冷色(?:调)?|浅色|深色|高对比(?:度)?|低饱和(?:度)?|黑白|"
+    r"蓝白(?:色)?|蓝绿(?:色)?|红白(?:色)?|蓝色|绿色|橙色|紫色|棕色)"
+)
+_PALETTE_REQUEST = re.compile(
+    rf"(?:请\s*)?(?:只|仅)?\s*(?:"
+    rf"(?:把|将)?{_PALETTE_DECK}(?:的)?(?:配色|色调|颜色|色彩|主题)?\s*"
+    rf"(?:改成|改为|换成|换为|调整为|统一成|统一为|使用|采用)\s*{_PALETTE_STYLE}(?:配色|色调|主题)?"
+    rf"|(?:调整|修改|更换|统一|切换){_PALETTE_DECK}(?:的)?(?:配色|色调|颜色|色彩|主题)"
+    rf"\s*(?:：|:|为|成)\s*{_PALETTE_STYLE}(?:配色|色调|主题)?"
+    r")[。！!]?",
+    re.I,
+)
+_PALETTE_FIELDS = ("background", "foreground", "muted", "accent", "secondary", "surface")
+_PALETTE_HEX = re.compile(r"#[a-fA-F0-9]{6}")
+_PALETTE_TEXT_STYLE = re.compile(r'\A<p style="[^"]*?;color:(#[a-fA-F0-9]{6});[^"]*">')
+
+
 class OrdinarySlideLayoutError(ValueError):
     pass
 
@@ -120,6 +139,37 @@ def _ordinary_deck_request(instruction):
     return bool(_DECK_TEXT_REQUEST.search(original) or _DECK_COUNT_INTENT.search(original))
 
 
+def _palette_request(instruction):
+    original, _ = split_source_selection(instruction)
+    return _PALETTE_REQUEST.fullmatch(original) is not None
+
+
+def _palette_colors(theme):
+    if not isinstance(theme, dict) or not isinstance(theme.get("name"), str) or not theme["name"].strip():
+        return None
+    colors = {key: theme.get(key) for key in _PALETTE_FIELDS}
+    return colors if all(isinstance(color, str) and _PALETTE_HEX.fullmatch(color) for color in colors.values()) else None
+
+
+def _palette_source(content, lesson):
+    if "subjectProfile" in content:
+        return False
+    design = content.get("coursewareDesign")
+    if isinstance(design, dict) and "theme" in design and _palette_colors(design["theme"]) is None:
+        return False
+    for slide in lesson["artifacts"]:
+        native = slide["content"]
+        colors = _palette_colors(native["studio"].get("theme"))
+        if colors is None:
+            return False
+        if "background" in native:
+            background = native["background"]
+            if (not isinstance(background, dict) or background.get("type") != "solid"
+                    or background.get("color") != colors["background"]):
+                return False
+    return True
+
+
 def _deck_instruction(instruction):
     original, attached = split_source_selection(instruction)
     if (attached or not 1 <= len(original) <= 2000 or _INVALID_INTENT.search(original)
@@ -137,19 +187,22 @@ def admit(user, artifact, payload):
         return payload
     command = layout_request(payload.get("instruction"))
     is_deck = command is None
+    is_palette = is_deck and _palette_request(payload.get("instruction"))
     if is_deck:
         if (ordinary_slide_wording_request(payload.get("instruction"))
-                or not _ordinary_deck_request(payload.get("instruction"))):
+                or not (is_palette or _ordinary_deck_request(payload.get("instruction")))):
             return payload
-        if not isinstance(payload.get("currentContent"), dict) or not ordinary_static_lesson(
-            payload["currentContent"], allow_missing_layout=True,
-        ):
+        source = payload.get("currentContent")
+        lesson = ordinary_static_lesson(source, allow_missing_layout=True)
+        if lesson is None or (is_palette and not _palette_source(source, lesson)):
             return payload
         _deck_instruction(payload.get("instruction"))
     _scope(user, artifact)
     if not config.HARNESS_DEEPSEEK_MODEL or not upstream_enabled():
-        raise OrdinarySlideLayoutError("当前课程未配置普通课件版式修订服务。")
-    revision, _ = _source(artifact, payload["expectedRevision"], "all" if is_deck else command[1])
+        raise OrdinarySlideLayoutError("当前课程未配置普通课件修订服务。")
+    revision, lesson = _source(artifact, payload["expectedRevision"], "all" if is_deck else command[1])
+    if is_palette and not _palette_source(revision.content, lesson):
+        return payload
     return {
         **payload, "allowDegraded": False, "revisionBackend": DECK_BACKEND if is_deck else BACKEND,
         (DECK_PIN if is_deck else PIN): {
@@ -157,6 +210,7 @@ def admit(user, artifact, payload):
             "revisionSha256": revision.content_hash,
             "instructionSha256": content_hash(payload["instruction"]),
             "model": config.HARNESS_DEEPSEEK_MODEL,
+            **({"operation": "palette"} if is_palette else {}),
         },
     }
 
@@ -199,13 +253,20 @@ def prepare(job, payload, *, lock=False):
     if command is None or pin.get("instructionSha256") != content_hash(instruction):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
     intent, pages = command
-    revision, _ = _source(artifact, payload.get("expectedRevision"), pages)
+    revision, lesson = _source(artifact, payload.get("expectedRevision"), pages)
     if (revision.id, revision.content_hash) != (pin.get("revisionId"), pin.get("revisionSha256")):
+        raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
+    operation = pin.get("operation")
+    if "operation" in pin and (
+        not is_deck or operation != "palette" or not _palette_request(instruction)
+        or not _palette_source(revision.content, lesson)
+    ):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
     return {
         pin_key: pin, "revisionBackend": backend, "artifactType": "slide-deck",
         "artifactId": artifact.id, "expectedRevision": revision.revision,
         "instruction": intent, "currentContent": revision.content,
+        **({"deckOperation": operation} if operation == "palette" else {}),
         **({} if is_deck else {"pageSelection": pages}),
     }
 
@@ -325,6 +386,11 @@ def _validate_deck_receipt(route, payload, meta, content):
         or before is None or after is None or before.get("id") != after.get("id")
     ):
         raise OrdinarySlideLayoutError("整套课件修订缺少指定模型或静态课件的有效回执。")
+    if (payload[DECK_PIN].get("operation") if isinstance(payload.get(DECK_PIN), dict) else None) == "palette":
+        _validate_palette_receipt(payload["currentContent"], content, before, after, revision)
+        return
+    if revision.get("operation") == "palette":
+        raise OrdinarySlideLayoutError("课件修订回执与已锁定的请求不一致。")
     old, new = before["artifacts"], after["artifacts"]
     output_ids = [_page_id(slide) for slide in new]
     if revision.get("recomposed") is False:
@@ -349,3 +415,102 @@ def _validate_deck_receipt(route, payload, meta, content):
     else:
         raise OrdinarySlideLayoutError("整套课件修订回执缺少修订方式。")
     _validate_render_evidence(revision, target_ids)
+
+
+def _palette_equal(left, right):
+    # JavaScript round-trips numbers without preserving int/float spelling.
+    # Boolean values must still remain distinct from numeric geometry and data.
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(_palette_equal(value, right[key]) for key, value in left.items())
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(_palette_equal(a, b) for a, b in zip(left, right))
+    return isinstance(left, bool) == isinstance(right, bool) and left == right
+
+
+def _palette_element_matches(before, after, original, palette):
+    element_type = before["type"]
+    if element_type == "text":
+        old_color, new_color = before.get("defaultColor"), after.get("defaultColor")
+        source = before["content"]
+        style = _PALETTE_TEXT_STYLE.match(source)
+        roles = [role for role in ("foreground", "muted") if old_color == original[role]]
+        if not roles:
+            return _palette_equal(before, after)
+        if not style or style.group(1) != old_color or not any(new_color == palette[role] for role in roles):
+            return False
+        return _palette_equal({
+            **before, "defaultColor": new_color,
+            "content": source[:style.start(1)] + new_color + source[style.end(1):],
+        }, after)
+    element_id = before.get("id")
+    if element_type == "shape" and isinstance(element_id, str) and element_id.startswith("image-label-backdrop-"):
+        return before.get("fill") == original["surface"] and _palette_equal({**before, "fill": palette["surface"]}, after)
+    if element_type == "line":
+        role = ("accent" if element_id == "table-header-rule"
+                else "surface" if isinstance(element_id, str) and re.fullmatch(r"row-rule-[0-9]+", element_id)
+                else None)
+        if role:
+            return before.get("color") == original[role] and _palette_equal({**before, "color": palette[role]}, after)
+    if element_type == "chart" and element_id == "evidence-chart":
+        roles = ("accent", "secondary", "muted")
+        return (
+            before.get("themeColors") == [original[role] for role in roles]
+            and before.get("textColor") == original["foreground"] and before.get("lineColor") == original["surface"]
+            and _palette_equal({
+                **before, "themeColors": [palette[role] for role in roles],
+                "textColor": palette["foreground"], "lineColor": palette["surface"],
+            }, after)
+        )
+    return _palette_equal(before, after)
+
+
+def _palette_slide_matches(before, after, palette):
+    old, new = before["content"], after["content"]
+    old_studio, new_studio = old["studio"], new["studio"]
+    original = _palette_colors(old_studio.get("theme"))
+    if (
+        original is None or not _palette_equal({**old_studio["theme"], **palette}, new_studio.get("theme"))
+        or not _palette_equal(_except_fields(old_studio, "theme"), _except_fields(new_studio, "theme"))
+        or not _palette_equal(_except_fields(before, "content"), _except_fields(after, "content"))
+        or not _palette_equal(_except_fields(old, "studio", "background", "elements"),
+                              _except_fields(new, "studio", "background", "elements"))
+        or ("background" in old) != ("background" in new)
+        or ("elements" in old) != ("elements" in new)
+    ):
+        return False
+    if "background" in old and not _palette_equal({**old["background"], "color": palette["background"]}, new["background"]):
+        return False
+    left, right = old.get("elements", []), new.get("elements", [])
+    return len(left) == len(right) and all(
+        _palette_element_matches(source, output, original, palette) for source, output in zip(left, right)
+    )
+
+
+def _validate_palette_receipt(source, result, before, after, revision):
+    old, new = before["artifacts"], after["artifacts"]
+    displayed = [_page_id(slide) for slide in _displayed_pages(old)]
+    palette = _palette_colors(new[0]["content"]["studio"].get("theme"))
+    if (
+        set(revision) != {"mode", "operation", "recomposed", "pageIds", "renderEvidence"}
+        or revision.get("operation") != "palette" or revision.get("recomposed") is not False
+        or revision.get("pageIds") != displayed or palette is None or not _palette_source(source, before)
+        or not _palette_equal(_except_fields(source, "lesson", "revisionMetadata", "coursewareDesign"),
+                              _except_fields(result, "lesson", "revisionMetadata", "coursewareDesign"))
+        or not _palette_equal(_except_fields(before, "artifacts", "updatedAt"), _except_fields(after, "artifacts", "updatedAt"))
+        or type(after.get("updatedAt")) is not int or after["updatedAt"] < 0
+        or len(old) != len(new)
+        or not all(_palette_slide_matches(left, right, palette) for left, right in zip(old, new))
+    ):
+        raise OrdinarySlideLayoutError("整套配色修订改变了颜色以外的课件内容，或未覆盖全部页面。")
+
+    old_design, new_design = source.get("coursewareDesign"), result.get("coursewareDesign")
+    if isinstance(old_design, dict) and "theme" in old_design:
+        old_design = {**old_design, "theme": {**old_design["theme"], **palette}}
+    if ("coursewareDesign" in source) != ("coursewareDesign" in result) or not _palette_equal(old_design, new_design):
+        raise OrdinarySlideLayoutError("整套配色修订改变了颜色以外的设计信息。")
+    if not any(
+        any(slide["content"]["studio"]["theme"][key].lower() != color.lower() for key, color in palette.items())
+        for slide in old
+    ):
+        raise OrdinarySlideLayoutError("整套配色修订没有可保存的颜色变化。")
+    _validate_render_evidence(revision, displayed)

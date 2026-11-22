@@ -7,7 +7,7 @@ import { hasMeasuredLessonUsage, InvalidLessonPlanResponse, materializeOrdinaryL
 } from '@/lib/server/agent-harness/ordinary-lesson-plan';
 import { OrdinaryLayoutError, ordinarySlideLayoutTarget, reviseOrdinarySlideLayout,
 } from '@/lib/server/agent-harness/ordinary-slide-layout';
-import { deckText, inspectOrdinaryDeckPage, inspectOrdinaryDeckTextPage, ordinaryDeckTarget, ordinaryDeckTurn, ordinaryDeckPageRequirement, selectOrdinaryDeckTextPages,
+import { deckText, inspectOrdinaryDeckPage, inspectOrdinaryDeckTextPage, ordinaryDeckTarget, ordinaryDeckTurn, ordinaryDeckPageRequirement, selectOrdinaryDeckTextPages, reviseOrdinaryDeckPalette,
 } from '@/lib/server/agent-harness/ordinary-deck-revision';
 import { createHarnessTurn, recordHarnessUsage } from '@/lib/server/agent-harness/classroom-turn';
 import { persistDurableModelEvent } from '@/lib/server/durable-model-events';
@@ -3455,10 +3455,12 @@ export async function POST(req: NextRequest) {
         errorCode: 'INVALID_ORDINARY_SLIDE_LAYOUT_JOB', failureCategory: 'permanent',
       }, 422);
     }
-    const ordinaryDeckJob = ordinaryScope === 'deck-revision' || payload.revisionBackend === 'ordinary-deck-revision';
+    const ordinaryDeckJob = ordinaryScope === 'deck-revision' || payload.revisionBackend === 'ordinary-deck-revision' ||
+      payload.deckOperation !== undefined;
     if ((ordinaryDeckEndpoint || ordinaryDeckJob) && (
       !ordinaryDeckEndpoint || kind !== 'artifact.revise' || ordinaryScope !== 'deck-revision' ||
       payload.revisionBackend !== 'ordinary-deck-revision' || payload.artifactType !== 'slide-deck' ||
+      (payload.deckOperation !== undefined && payload.deckOperation !== 'palette') ||
       payload.workspaceId != null || !Number.isSafeInteger(body.scope?.ownerId) ||
       !Number.isSafeInteger(body.scope?.dojoId) || (body.scope?.ownerId ?? 0) <= 0 ||
       (body.scope?.dojoId ?? 0) <= 0
@@ -3502,7 +3504,8 @@ export async function POST(req: NextRequest) {
         const turn = createHarnessTurn();
         if (!turn) return unavailable();
         const signal = AbortSignal.any([req.signal, AbortSignal.timeout(30 * 60_000)]);
-        const {result, usage} = await reviseOrdinaryDeck(target, {turn, modelId, signal});
+        const revise = payload.deckOperation === 'palette' ? reviseOrdinaryDeckPalette : reviseOrdinaryDeck;
+        const {result, usage} = await revise(target, {turn, modelId, signal});
         signal.throwIfAborted();
         return reply({success: true, result, model: {
           provider: 'deepseek', actualModel: modelId, modelVersion: 'deepseek:' + modelId, usage,

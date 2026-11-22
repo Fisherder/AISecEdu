@@ -407,3 +407,159 @@ def test_text_revision_can_ask_to_preserve_the_existing_style(case):
                "instruction": "保留现有配色和布局，让整套课件的措辞更清楚"}
     admitted = ns["admit"](user, artifact, payload)
     assert ns["deck_pinned"](admitted)
+
+
+PALETTE_REQUEST = "请将整个课件换成蓝绿色主题"
+ORIGINAL_PALETTE = {
+    "background": "#FAFAFA", "foreground": "#171717", "muted": "#444444",
+    "accent": "#215738", "secondary": "#826242", "surface": "#EEEEEE",
+}
+NEW_PALETTE = {
+    "background": "#EEF6FA", "foreground": "#122233", "muted": "#334455",
+    "accent": "#136052", "secondary": "#4C2357", "surface": "#D7E5E4",
+}
+
+
+def palette_source(case):
+    ns, _, _, _, _, revision = case
+    content = revision.content
+    content["coursewareDesign"] = {
+        "theme": {"name": "design", **ORIGINAL_PALETTE}, "private": "preserve actual metadata",
+    }
+    for i, slide in enumerate(content["lesson"]["artifacts"], 1):
+        slide["order"] = 4 - i
+        native = slide["content"]
+        native["studio"]["theme"] = {"name": f"page {i}", **ORIGINAL_PALETTE}
+        native["background"] = {"type": "solid", "color": ORIGINAL_PALETTE["background"]}
+        native["elements"] = [
+            {"type": "text", "id": "page-title", "left": 36,
+             "defaultColor": ORIGINAL_PALETTE["foreground"],
+             "content": '<p style="font-size:20px;color:#171717;line-height:1.2">叶片观察 #171717</p>'},
+            {"type": "chart", "id": "evidence-chart", "left": 220, "data": {"series": [[1, 2]]},
+             "themeColors": [ORIGINAL_PALETTE[role] for role in ("accent", "secondary", "muted")],
+             "textColor": ORIGINAL_PALETTE["foreground"], "lineColor": ORIGINAL_PALETTE["surface"]},
+        ]
+    revision.content_hash = ns["content_hash"](content)
+    return content
+
+
+def palette_response(source):
+    output = copy.deepcopy(source)
+    output["coursewareDesign"]["theme"].update(NEW_PALETTE)
+    for page in output["lesson"]["artifacts"]:
+        native = page["content"]
+        native["studio"]["theme"].update(NEW_PALETTE)
+        native["background"]["color"] = NEW_PALETTE["background"]
+        text, chart = native["elements"]
+        text["defaultColor"] = NEW_PALETTE["foreground"]
+        text["content"] = text["content"].replace("color:#171717;", "color:#122233;")
+        chart["themeColors"] = [NEW_PALETTE[role] for role in ("accent", "secondary", "muted")]
+        chart["textColor"] = NEW_PALETTE["foreground"]
+        chart["lineColor"] = NEW_PALETTE["surface"]
+    output["lesson"]["updatedAt"] = 1
+    ids = ["three", "two", "one"]
+    output["revisionMetadata"] = {
+        "mode": "ordinary-deck-revision", "operation": "palette", "recomposed": False, "pageIds": ids,
+        "renderEvidence": [
+            {"pageId": page, "mode": "headless-chromium-dom-and-pixels", "sourceSha256": "a" * 64,
+             "frames": [{"step": -1, "screenshotSha256": "b" * 64}], "inspectedAt": "now"} for page in ids
+        ],
+    }
+    return {
+        "result": {"content": output},
+        "model": {"actualModel": "pinned-fixture", "executionMode": "ordinary-deck-revision", "provider": "deepseek",
+                  "degraded": False, "usage": {"inputTokens": 5, "outputTokens": 3, "totalTokens": 8}},
+    }
+
+
+def test_palette_is_pinned_to_current_teacher_revision_and_resources(case):
+    ns, jobs, job, user, artifact, revision = case
+    source = palette_source(case)
+    job.payload = ns["admit"](user, artifact, {
+        **job.payload, "currentContent": source, "instruction": PALETTE_REQUEST, "deckOperation": "untrusted",
+    })
+    assert job.payload[ns["DECK_PIN"]]["operation"] == "palette"
+    prepared = jobs["_runtime_payload"](job)
+    route = ns["route_model"](job.kind, payload=prepared, allow_degraded=True)
+    request = jobs["_runtime_request_body"](job, route, prepared)
+    assert request["scope"]["ordinaryTeaching"] == "deck-revision"
+    assert request["payload"]["deckOperation"] == "palette"
+    assert request["payload"]["currentContent"] == source
+    assert ns["DECK_PIN"] not in request["payload"]
+    assert route["required_model"] == "pinned-fixture" and not route["allow_degraded"]
+    ns["validate_receipt"](route, prepared, palette_response(source))
+
+    revision.content_hash = "0" * 64
+    with pytest.raises(ns["OrdinarySlideLayoutError"]):
+        jobs["_runtime_payload"](job)
+
+
+@pytest.mark.parametrize("instruction", [
+    "不要将整个课件换成蓝绿色主题",
+    "请将整个课件换成蓝绿色主题，然后润色所有标题",
+    "请增补两页并把整套课件改为暖色",
+    "请把第2页的主题换成暖色",
+    "请把整套课件做成海报式风格",
+])
+def test_palette_does_not_admit_negated_mixed_scoped_or_unknown_style(case, instruction):
+    ns, _, job, user, artifact, _ = case
+    source = palette_source(case)
+    payload = {**job.payload, "currentContent": source, "instruction": instruction}
+    admitted = ns["admit"](user, artifact, payload)
+    assert (admitted.get(ns["DECK_PIN"]) or {}).get("operation") is None
+
+
+def test_palette_with_unverifiable_native_background_is_not_admitted(case):
+    ns, _, job, user, artifact, revision = case
+    source = palette_source(case)
+    source["lesson"]["artifacts"][0]["content"]["background"]["color"] = "#FFEEDD"
+    revision.content_hash = ns["content_hash"](source)
+    payload = {**job.payload, "currentContent": source, "instruction": PALETTE_REQUEST}
+    assert ns["admit"](user, artifact, payload) is payload
+
+
+@pytest.mark.parametrize("mutation", [
+    "operation", "render_order", "geometry", "notes", "text", "layout", "series", "design",
+    "unapproved_color", "outside_palette", "metadata", "drop_native_layer", "recompose", "boolean_chart_data",
+])
+def test_palette_receipt_rejects_tampering(case, mutation):
+    ns, jobs, job, user, artifact, _ = case
+    source = palette_source(case)
+    job.payload = ns["admit"](user, artifact, {**job.payload, "currentContent": source, "instruction": PALETTE_REQUEST})
+    prepared = jobs["_runtime_payload"](job)
+    route = ns["route_model"](job.kind, payload=prepared)
+    response = palette_response(source)
+    output = response["result"]["content"]
+    metadata = output["revisionMetadata"]
+    native = output["lesson"]["artifacts"][0]["content"]
+    page = native["studio"]["page"]
+    if mutation == "operation":
+        metadata["operation"] = "text"
+    elif mutation == "render_order":
+        metadata["renderEvidence"].reverse()
+    elif mutation == "geometry":
+        native["elements"][0]["left"] += 1
+    elif mutation == "notes":
+        native["speakerNotes"] = "改写了私有备注"
+    elif mutation == "text":
+        native["elements"][0]["content"] = native["elements"][0]["content"].replace("叶片", "树根")
+    elif mutation == "layout":
+        page["layout"]["title"]["left"] += 1
+    elif mutation == "series":
+        native["elements"][1]["data"]["series"] = [[2, 3]]
+    elif mutation == "boolean_chart_data":
+        native["elements"][1]["data"]["series"] = [[True, 2]]
+    elif mutation == "design":
+        output["coursewareDesign"]["private"] = "removed"
+    elif mutation == "unapproved_color":
+        native["studio"]["theme"]["foreground"] = "#FF0000"
+    elif mutation == "outside_palette":
+        native["elements"][0]["defaultColor"] = "#FF0000"
+    elif mutation == "metadata":
+        metadata["approved"] = True
+    elif mutation == "drop_native_layer":
+        del native["elements"]
+    else:
+        metadata["recomposed"] = True
+    with pytest.raises(ns["OrdinarySlideLayoutError"]):
+        ns["validate_receipt"](route, prepared, response)

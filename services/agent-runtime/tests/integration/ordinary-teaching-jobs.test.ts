@@ -454,7 +454,8 @@ describe('ordinary teaching worker service routes', () => {
       privateContext: 'PRIVATE HISTORY', sourceSnippet: 'PRIVATE RAW',
     }, token, 'official-model', 'official-model', endpoint);
 
-  function deckRevisionRequest(artifacts: ReturnType<typeof mathLayoutDeck>, instruction: string, endpoint = 'ordinary-deck-revision') {
+  function deckRevisionRequest(artifacts: unknown[], instruction: string,
+    endpoint = 'ordinary-deck-revision', deckOperation?: string, extraContent?: Record<string, unknown>) {
     return new NextRequest(`http://localhost/api/integration/jobs/${endpoint}`, {
       method: 'POST',
       headers: {'X-AISecEdu-Service-Token': 'integration-secret', 'Content-Type': 'application/json'},
@@ -462,11 +463,154 @@ describe('ordinary teaching worker service routes', () => {
         scope: {...job.scope, ordinaryTeaching: 'deck-revision'},
         modelRoute: {provider: 'deepseek', actual_model: 'official-model', required_model: 'official-model', allow_degraded: false},
         payload: {artifactType: 'slide-deck', revisionBackend: 'ordinary-deck-revision', artifactId: 'math-deck',
-          instruction, expectedRevision: 4, currentContent: {lesson: {id: 'lesson-a', title: '分数课', artifacts}},
+          instruction, expectedRevision: 4, deckOperation, currentContent: {...extraContent, lesson: {id: 'lesson-a', title: '分数课', artifacts}},
           sourceSnippet: 'PRIVATE SOURCE SELECTION'},
       }),
     });
   }
+
+  const paletteInstruction = '请将整个课件换成蓝绿色主题';
+  const palette = {
+    background: '#102531', foreground: '#f0fff9', muted: '#b6d9ca',
+    accent: '#51ebc3', secondary: '#85aaff', surface: '#255248',
+  };
+
+  function paletteDeck() {
+    const deck = mathLayoutDeck();
+    return deck.map((fixture, index) => {
+      const {content} = fixture;
+      const {studio} = content;
+      const visual = index === 1 ? {
+        kind: 'chart', chartType: 'bar', basis: '教学示例中的份数', unit: '份', illustrative: true,
+        labels: ['第一组', '第二组'], series: [{name: '合计', values: [3, 6]}],
+      } : index === 2 ? {
+        kind: 'image', assetId: 'asset-3', alt: '分数组件教学配图观察', caption: '观察图片',
+        annotations: [{label: '标注', x: 0.3, y: 0.4}],
+      } : studio.page.visual;
+      const source = coursewareSlideDataSchema.parse({
+        ...studio, assets: index === 2 ? studio.assets : [], page: {...studio.page, visual},
+      });
+      const canvas = index === 0 ? coursewareSlideDataSchema.parse({...source, page: {
+        ...source.page, layout: {...source.page.layout!,
+          title: {...source.page.layout!.title, box: {...source.page.layout!.title.box, left: 60}},
+        },
+      }}) : source;
+      const compiled = compileCoursewareSlide(canvas);
+      return {...fixture, order: index === 0 ? 3 : index, content: {
+        remark: content.remark, elements: compiled.elements, background: compiled.background,
+        studio: {...source, privateMarker: 'PRIVATE STUDIO', page: {...source.page, privateMarker: 'PRIVATE PAGE'}},
+      }};
+    });
+  }
+
+  it('uses one color-only Harness turn and recolors a comparison, chart and image without changing saved content', async () => {
+    const deck = paletteDeck();
+    const fetch = vi.fn(async (url, init) => {
+      expect(String(url)).toBe(harness);
+      expect(init.body).not.toMatch(/PRIVATE|data:image|份数|分数课|plant-|3,6/);
+      const {messages, ...rest} = JSON.parse(init.body);
+      expect(rest).toEqual({});
+      expect(messages.map(({role}: {role: string}) => role)).toEqual(['system', 'user']);
+      const {name: _name, ...existingColors} = deck[0].content.studio.theme;
+      expect(JSON.parse(messages[1].content)).toEqual({
+        instruction: paletteInstruction, currentPalettes: [existingColors],
+      });
+      return modelResponse({palette});
+    });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const coursewareDesign = {theme: deck[0].content.studio.theme, title: '分数课', pages: []};
+    const response = await POST(deckRevisionRequest(deck, paletteInstruction, undefined, 'palette', {coursewareDesign}));
+    const output = await response.json();
+    expect(response.status, JSON.stringify(output)).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+    expect(output.model).toMatchObject({executionMode: 'ordinary-deck-revision', usage: {totalTokens: 15}});
+    expect(output.result.content.coursewareDesign).toEqual({
+      ...coursewareDesign, theme: {...coursewareDesign.theme, ...palette},
+    });
+    const artifacts: typeof deck = output.result.content.lesson.artifacts;
+    const receipts: {
+      renderEvidence: Array<{sourceSha256: string; frames: Array<{step: number}>}>;
+    } = output.result.content.revisionMetadata;
+    expect(artifacts.map(({id}) => id)).toEqual(deck.map(({id}) => id));
+    expect(receipts).toMatchObject({
+      mode: 'ordinary-deck-revision', operation: 'palette', recomposed: false,
+      pageIds: ['plant-2', 'plant-3', 'plant-1'],
+      renderEvidence: [{pageId: 'plant-2'}, {pageId: 'plant-3'}, {pageId: 'plant-1'}],
+    });
+    expect(mocks.inspectRendered).toHaveBeenCalledTimes(3);
+    for (const [index, receipt] of receipts.renderEvidence.entries()) {
+      const inspected = mocks.inspectRendered.mock.calls[index][0];
+      expect(receipt.sourceSha256).toBe(createHash('sha256').update(JSON.stringify(inspected)).digest('hex'));
+      expect(receipt.frames.map(({step}) => step)).toEqual([-1]);
+    }
+    for (const [index, artifact] of artifacts.entries()) {
+      const old = deck[index].content;
+      expect(artifact.content.studio).toEqual({...old.studio, theme: {...old.studio.theme, ...palette}});
+      expect(artifact.content.remark).toEqual(old.remark);
+      expect(artifact.content.background).toEqual({...old.background, color: palette.background});
+    }
+    const element = (index: number, id: string) => artifacts[index].content.elements.find(item => item.id === id);
+    const oldTitle = deck[0].content.elements.find(item => item.id === 'page-title');
+    expect(element(0, 'page-title')).toEqual({
+      ...oldTitle, defaultColor: palette.foreground,
+      content: oldTitle?.type === 'text' ? oldTitle.content.replace('#000000', palette.foreground) : undefined,
+    });
+    expect(element(0, 'table-header-rule')).toMatchObject({color: palette.accent});
+    expect(element(1, 'evidence-chart')).toEqual({
+      ...deck[1].content.elements.find(item => item.id === 'evidence-chart'),
+      themeColors: [palette.accent, palette.secondary, palette.muted],
+      textColor: palette.foreground, lineColor: palette.surface,
+    });
+    expect(element(2, 'verified-image')).toEqual(deck[2].content.elements.find(item => item.id === 'verified-image'));
+    expect(element(2, 'image-label-backdrop-0')).toMatchObject({fill: palette.surface});
+  });
+
+  it.each([
+    ['extra response field', {palette, pageIds: ['plant-1']}],
+    ['incomplete palette', {palette: {accent: palette.accent}}],
+    ['low contrast', {palette: {...palette, foreground: palette.background}}],
+  ])('rejects %s before browser inspection', async (_label, responseBody) => {
+    const fetch = vi.fn(async () => modelResponse(responseBody));
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const response = await POST(deckRevisionRequest(paletteDeck(), paletteInstruction, undefined, 'palette'));
+    expect(response.status).toBe(422);
+    expect(await response.json()).not.toHaveProperty('result');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.inspectRendered).not.toHaveBeenCalled();
+  });
+
+  it('rejects a custom saved canvas before calling the model', async () => {
+    const deck = paletteDeck();
+    const title = deck[0].content.elements.find(({id}) => id === 'page-title');
+    if (title?.type !== 'text') throw new Error('Missing fixture title');
+    title.defaultColor = '#9b2c56';
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const response = await POST(deckRevisionRequest(deck, paletteInstruction, undefined, 'palette'));
+    expect(response.status).toBe(409);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.inspectRendered).not.toHaveBeenCalled();
+  });
+
+  it('requires a matching browser receipt for every recolored page', async () => {
+    mocks.inspectRendered.mockResolvedValueOnce({
+      issues: [], evidence: {
+        mode: 'headless-chromium-dom-and-pixels', sourceSha256: 'a'.repeat(64), inspectedAt: '2026-01-01',
+        frames: [{step: -1, screenshotSha256: 'b'.repeat(64)}],
+      },
+    });
+    const fetch = vi.fn(async () => modelResponse({palette}));
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const response = await POST(deckRevisionRequest(paletteDeck(), paletteInstruction, undefined, 'palette'));
+    expect(response.status).toBe(503);
+    expect(await response.json()).not.toHaveProperty('result');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 
   it('revises selected text through the official Harness while keeping unchanged pages and source bytes private', async () => {
     const deck = mathLayoutDeck();
