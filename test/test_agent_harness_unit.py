@@ -800,6 +800,17 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     ("请制作 Markdown 教案", "plan", ()),
     ("不要制作教案，请解释评估方法", "auto", ()),
     ("请把教学文档输出为 HTML", "auto", ()),
+    ("不要帮我生成一份教案", "auto", ()),
+    ("无需帮我写 一篇 教学讲义，只解释怎么写", "execute", ()),
+    ("不要帮我生成 docx", "execute", ()),
+    ("请给我一份教案，不要帮我导出为 .docx，只要 Markdown", "auto", ("md",)),
+    ("请把这份教案导出为 PDF", "auto", ()),
+    ("帮我写一份 PDF 教案", "execute", ()),
+    ("请导出这份教案为 PDF", "auto", ()),
+    ("请写一份教案，PDF 格式", "auto", ()),
+    ("请导出这份教案为 PDF，也给我 Markdown", "execute", ("md",)),
+    ("请根据我提供的 PDF 资料写一份教案", "auto", ("docx",)),
+    ("请写一份教案，不用导出为 PDF", "auto", ("docx",)),
 ])
 def test_teacher_document_requires_an_explicit_supported_request(prompt, mode, expected):
     documents = load("dojo_plugin/agent_runtime/teacher_documents.py", {})

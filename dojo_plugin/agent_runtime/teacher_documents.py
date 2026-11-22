@@ -12,14 +12,24 @@ DOCUMENT_REQUEST = re.compile(
     re.I,
 )
 DOCUMENT_QUESTION = re.compile(r"^(?:请问[，, ]*)?(?:如何|怎样|怎么|什么是|how\b|what\b)", re.I)
+_REFUSAL = r"(?:无需|不需要|不用|不要|不必)(?:\s*(?:请)?帮我)?"
+_DELIVERY_VERB = r"(?:生成|制作|创建|写|做|撰写|编写|起草|导出|输出|返回|交付|提供|下载|给我)"
+_DOCUMENT_AMOUNT = r"(?:一份|一个|一篇|任何|可下载的?)"
 NO_DOCUMENT = re.compile(
-    r"(?:无需|不需要|不用|不要)(?:生成|制作|创建|提供|下载)?(?:任何|可下载的?)?(?:文件|文档|教案|讲义)"
+    rf"{_REFUSAL}(?:\s*{_DELIVERY_VERB})?(?:\s*{_DOCUMENT_AMOUNT})?\s*(?:教学|课堂)?(?:文件|文档|教案|讲义)"
     r"|只(?:在|用)聊天回答|\bno downloadable files?\b", re.I,
 )
 NO_FORMAT = re.compile(
-    r"(?:(?:不要|无需|不用|不需要|不必)(?:\s*(?:生成|制作|创建|导出|输出|返回|交付|提供|下载)(?:\s*[为成])?)?"
+    rf"(?:{_REFUSAL}(?:\s*{_DELIVERY_VERB}(?:\s*[为成])?)?(?:\s*{_DOCUMENT_AMOUNT})?"
     r"|不生成|\bno|\bnot)\s*\.?$", re.I,
 )
+PDF_FORMAT = re.compile(r"(?<![a-z\d_])\.?pdf(?![a-z\d_])", re.I)
+PDF_DELIVERY_PREFIX = re.compile(
+    rf"(?:{_DELIVERY_VERB}(?:\s*[为成])?(?:\s*{_DOCUMENT_AMOUNT})?"
+    r"|(?:导出|输出|交付|保存)[^，。；！？,;!?\n]{0,24}[为成]"
+    r"|\b(?:export|return|deliver|save|convert)\b[^,;.!?\n]{0,40}\b(?:as|to))\s*$", re.I,
+)
+PDF_DELIVERY_SUFFIX = re.compile(r"\s*(?:格式|版)")
 UNSUPPORTED_FORMAT = re.compile(
     r"(?:导出|交付|输出|返回|制作)(?:为|成)?\s*(?:html|ipynb|docm|xlsm|exe|powershell|notebook|脚本|可执行)"
     r"|\.(?:html|ipynb|docm|xlsm|exe|ps1)(?![a-z\d_])|脚本文件|可执行文件", re.I,
@@ -55,13 +65,19 @@ def requested_document_formats(payload):
     formats = []
     for file_format, pattern in FORMATS:
         for match in pattern.finditer(prompt):
-            prefix = prompt[max(0, match.start() - 20):match.start()]
-            if not NO_FORMAT.search(prefix):
+            if not NO_FORMAT.search(prompt, 0, match.start()):
                 formats.append(file_format)
                 break
     if formats:
         return tuple(formats)
-    return () if any(pattern.search(prompt) for _, pattern in FORMATS) else ("docx",)
+    if any(pattern.search(prompt) for _, pattern in FORMATS):
+        return ()
+    for match in PDF_FORMAT.finditer(prompt):
+        if not NO_FORMAT.search(prompt, 0, match.start()) and (
+            PDF_DELIVERY_PREFIX.search(prompt, 0, match.start()) or PDF_DELIVERY_SUFFIX.match(prompt, match.end())
+        ):
+            return ()
+    return ("docx",)
 
 
 def _plain_text(value, limit):
