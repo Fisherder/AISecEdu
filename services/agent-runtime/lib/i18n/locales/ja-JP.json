@@ -553,6 +553,8 @@
     "aiGradingWait": "回答を分析しています。お待ちください",
     "gradingPending": "採点待ち",
     "gradingPendingDetail": "回答は保存済みです。採点をやり直せます。",
+    "gradingUnsupported": "自動採点は利用できません",
+    "gradingUnsupportedDetail": "回答は保存されました。この小テストの採点方法は担当の先生に確認してください。",
     "retryGrading": "採点を再試行",
     "quizReport": "クイズレポート",
     "retry": "やり直す"

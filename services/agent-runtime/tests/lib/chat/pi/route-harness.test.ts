@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/chat/pi/route';
 import { recordUsage } from '@/lib/server/usage-storage';
-import type { StatelessEvent } from '@/lib/types/chat';
+import type { DirectorState, StatelessEvent } from '@/lib/types/chat';
 
 vi.mock('@/lib/server/usage-storage', () => ({ recordUsage: vi.fn() }));
 
 const fetchTurn = vi.fn<typeof fetch>();
 
-function request(agentIds: unknown = ['default-1', 'default-2']) {
+function request(agentIds: unknown = ['default-1', 'default-2'], directorState?: DirectorState) {
   return new NextRequest('http://localhost/api/chat/pi', {
     method: 'POST',
     body: JSON.stringify({
@@ -44,7 +44,8 @@ function request(agentIds: unknown = ['default-1', 'default-2']) {
           },
         ],
       },
-      config: { agentIds, piEnableWhiteboardTools: true },
+      config: { agentIds, piEnableWhiteboardTools: true, discussionTopic: '如何量水' },
+      directorState,
       apiKey: 'browser-secret',
       baseUrl: 'https://browser.invalid',
       model: 'browser-model',
@@ -144,6 +145,11 @@ describe('Pi classroom through Harness', () => {
         /browser-secret|browser\.invalid|browser-model|internal-lab-title|do-not-forward/,
       );
     }
+    const firstDirectorTurn = JSON.parse(String(fetchTurn.mock.calls[0][1]?.body));
+    expect(firstDirectorTurn.messages.at(-1)).toMatchObject({
+      role: 'user',
+      content: expect.stringContaining('Discussion context: 如何量水\nLatest user message: 请讲盆栽需要多少水。'),
+    });
     expect(fetchTurn.mock.calls[3][1]?.body).toContain('量杯刻度是 50 毫升');
     expect(recordUsage).toHaveBeenCalledTimes(5);
     expect(recordUsage).toHaveBeenCalledWith(
@@ -158,6 +164,37 @@ describe('Pi classroom through Harness', () => {
     propose({ type: 'web_search', query: 'weather' });
     expect((await events(await POST(request()))).map((event) => event.type)).toEqual(['error']);
     expect(fetchTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains agent history while counting only the current Pi round', async () => {
+    const previous = {
+      agentId: 'default-1', agentName: '老师', contentPreview: '上次介绍了观察量杯。',
+      actionCount: 0, whiteboardActions: [],
+    };
+    const state = { turnCount: 4, agentResponses: [previous], whiteboardLedger: [] };
+    propose({ type: 'call_agent', agentId: 'default-1', instruction: '用一句话回顾。' });
+    propose([{ type: 'text', content: '把量杯放平再读数。' }]);
+    propose({ type: 'cue_user' });
+
+    const received = await events(await POST(request(undefined, state)));
+    expect(received.at(-1)?.data).toMatchObject({
+      totalAgents: 1,
+      cueUserReceived: true,
+      directorState: {
+        turnCount: 1,
+        agentResponses: [previous, { contentPreview: '把量杯放平再读数。' }],
+      },
+    });
+  });
+
+  it('ends the request on a failed child turn without spending another director attempt', async () => {
+    propose({ type: 'call_agent', agentId: 'default-1', instruction: '介绍量杯。' });
+    fetchTurn.mockResolvedValueOnce(Response.json({ error: 'fixture unavailable' }, { status: 503 }));
+    propose({ type: 'call_agent', agentId: 'default-1', instruction: '不应继续下一轮。' });
+
+    const received = await events(await POST(request()));
+    expect(received.map((event) => event.type)).toEqual(['agent_start', 'agent_end', 'error']);
+    expect(fetchTurn).toHaveBeenCalledTimes(2);
   });
 
   it('closes only after a visible classroom turn', async () => {

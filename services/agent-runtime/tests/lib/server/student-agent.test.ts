@@ -108,6 +108,47 @@ describe('student learning agent', () => {
     });
   });
 
+  it.each([
+    ['请根据上节课内容生成一份学习包。', true],
+    ['请根据之前的课堂笔记生成学习包。', true],
+    ['请根据上节课的学习包资料生成学习讲义。', true],
+    ['请解释学习包。再生成一份学习讲义。', true],
+    ['请不要忘了生成一份学习包。', true],
+    ['请生成一个“学习包”。', true],
+    ['请生成学习包。不要概念自检。', true],
+    ['请参考“不要生成学习包”这段课堂资料生成概念自检。', true],
+    ['Please create a study package from my notes.', true],
+    ['生成学习包了吗？', false],
+    ['生成学习包已完成。', false],
+    ['请生成学习包之前先讲讲概念。', false],
+    ['请生成学习包。请取消刚才的请求。', false],
+    ['请生成自学包。不要学习包。', false],
+    ['请生成自学包。不要“学习包”。', false],
+    ['请制作学习讲义。不要学习讲义。', false],
+    ['请制作学习讲义。不要学习包和学习讲义。', false],
+    ['“请生成学习包”是课堂记录。', false],
+    ['继续。', false],
+  ])('gates package suggestions on explicit current-turn authorization in %s', async (message, allowed) => {
+    const decision = await decideStudentAgentMessage(
+      {
+        message,
+        history: [{role: 'user', content: '请生成一个植物观察学习包。'}],
+        state,
+        context: state.activeContext,
+      },
+      {
+        aiCall: async () => JSON.stringify({
+          action: 'generate_package',
+          title: '植物观察学习包',
+          reply: '准备植物观察的文字学习材料。',
+          packageRequest: {goal: '观察叶片生长', level: 'beginner', preference: 'explain', durationMinutes: 20},
+        }),
+      },
+    );
+    expect(decision.action).toBe(allowed ? 'generate_package' : 'answer');
+    expect(Boolean(decision.packageRequest)).toBe(allowed);
+  });
+
   it('normalizes a trackable plan while ignoring malformed steps', () => {
     const decision = normalizeStudentAgentDecision(
       {

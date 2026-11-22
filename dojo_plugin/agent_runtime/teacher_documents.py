@@ -11,20 +11,44 @@ DOCUMENT_REQUEST = re.compile(
     r"|\b(?:write|draft|create|prepare|generate|provide|export|deliver)\b",
     re.I,
 )
-DOCUMENT_QUESTION = re.compile(r"^(?:请问[，, ]*)?(?:如何|怎样|怎么|什么是|how\b|what\b)", re.I)
-_REFUSAL = r"(?:无需|不需要|不用|不要|不必|不想|请勿|别)(?:\s*(?:请)?帮我)?"
+DOCUMENT_QUESTION = re.compile(
+    r"^\s*(?:(?:请问|(?:请|能|可以)?(?:告诉我|教我|解释一下)|(?:我)?想(?:知道|了解))[，,\s]*)?"
+    r"(?:如何|怎样|怎么|什么是)"
+    r"|^\s*(?:(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?"
+    r"(?:(?:tell|show|teach)\s+me|explain)\s+|i\s+(?:(?:want|need)|would\s+like)\s+to\s+know\s+)?"
+    r"(?:how|what)\b",
+    re.I,
+)
+# The bare imperative 别 cannot begin in the middle of a CJK word such as 特别.
+_REFUSAL = r"(?:无需|不需要|不用|不要|不必|不想|请勿|(?:请|也|先|就|千万)别|(?<![\u3400-\u9fff])别)(?:\s*(?:请)?帮我)?"
 _DELIVERY_VERB = r"(?:生成|制作|创建|写|做|撰写|编写|起草|导出|输出|返回|交付|提供|保存|下载|给我)"
-_DOCUMENT_AMOUNT = r"(?:一份|一个|一篇|任何|可下载的?)"
+_DOCUMENT_AMOUNT = r"(?:\s*任何)?(?:\s*(?:一份|一个|一篇))?(?:\s*可下载的?)?"
+_SENTENCE_BREAK = re.compile(r"([。！？!?；;\n]+|(?<=\S)\.(?=\s))")
+_QUESTION_CONTINUATION = re.compile(
+    r"[，,]|(?:并且|并请|然后|再请|另外请)|\b(?:and then|then|but please)\b", re.I,
+)
+_INDEPENDENT_DELIVERY = re.compile(
+    r"^\s*(?:(?:然后|另外|最后|再|并|请)\s*)*(?:(?:帮我|为我)\s*)?"
+    r"(?:(?P<draft_zh>生成|制作|创建|写|做|撰写|编写|起草|导出|交付)|给我|提供|下载|输出)"
+    r"|^\s*(?:(?:and|but|also|then|please)\s+)*"
+    r"(?:(?P<draft_en>generate|write|draft|make|create|export|deliver)|provide|give\s+me|download)\b",
+    re.I,
+)
+_DOWNLOAD_REQUEST = re.compile(
+    r"可(?:以)?下载的?\s*(?:文件|文档|草稿|稿件|版本|教案|讲义)|导出为?\s*(?:文件|文档)"
+    r"|\bdownloadable\s+(?:files?|documents?|drafts?|versions?)\b",
+    re.I,
+)
 _ENGLISH_REFUSAL = r"\b(?:do\s+not|don['’]t|never|no|not)"
 _ENGLISH_DELIVERY = r"(?:write|draft|make|create|prepare|generate|provide|export|deliver|return|want|need)"
 _ENGLISH_AMOUNT = r"(?:(?:an?|any)\s+)?(?:downloadable\s+)?"
 NO_DOCUMENT = re.compile(
-    rf"{_REFUSAL}(?:\s*{_DELIVERY_VERB})?(?:\s*{_DOCUMENT_AMOUNT})?\s*(?:教学|课堂)?(?:文件|文档|教案|讲义)"
+    rf"{_REFUSAL}(?:\s*{_DELIVERY_VERB})?{_DOCUMENT_AMOUNT}\s*(?:教学|课堂)?(?:文件|文档|教案|讲义)"
     rf"|{_ENGLISH_REFUSAL}\s+(?:{_ENGLISH_DELIVERY}\s+)?{_ENGLISH_AMOUNT}(?:files?|documents?|lesson plans?|handouts?)\b"
     r"|只(?:在|用)聊天回答", re.I,
 )
 NO_FORMAT = re.compile(
-    rf"(?:{_REFUSAL}(?:\s*{_DELIVERY_VERB}(?:\s*[为成])?)?(?:\s*{_DOCUMENT_AMOUNT})?"
+    rf"(?:{_REFUSAL}(?:\s*{_DELIVERY_VERB}(?:\s*[为成])?)?{_DOCUMENT_AMOUNT}"
     rf"|不生成|{_ENGLISH_REFUSAL}(?:\s+{_ENGLISH_DELIVERY})?\s*{_ENGLISH_AMOUNT})\s*\.?$", re.I,
 )
 UNSUPPORTED_FORMAT = re.compile(
@@ -35,7 +59,7 @@ _ACTIVE_FORMATS = {
     "html", "htm", "ipynb", "docm", "xlsm", "exe", "ps1", "powershell", "notebook", "脚本文件", "可执行文件",
 }
 _FORMAT_DELIVERY_PREFIX = re.compile(
-    rf"(?:{_DELIVERY_VERB}(?:\s*[为成])?(?:\s*{_DOCUMENT_AMOUNT})?"
+    rf"(?:{_DELIVERY_VERB}(?:\s*[为成])?{_DOCUMENT_AMOUNT}"
     rf"|{_DELIVERY_VERB}[^，。；！？,;!?\n]{{0,24}}[为成]"
     rf"|\b{_ENGLISH_DELIVERY}\s+{_ENGLISH_AMOUNT}"
     r"|\b(?:export|return|deliver|save|convert)\b[^,;.!?\n]{0,40}\b(?:as|to)\s*)\s*$", re.I,
@@ -82,6 +106,29 @@ def _unquoted_request(prompt):
     return _QUOTED_TEXT.sub(mask, prompt)
 
 
+def _independent_document_delivery(clause):
+    delivery = _INDEPENDENT_DELIVERY.match(clause)
+    return delivery and (
+        delivery.group("draft_zh") or delivery.group("draft_en") or _DOWNLOAD_REQUEST.search(clause)
+        or any(pattern.search(clause) for _, pattern in FORMATS)
+        or UNSUPPORTED_FORMAT.search(clause)
+    )
+
+
+def _document_delivery_text(prompt):
+    portions = _SENTENCE_BREAK.split(prompt)
+    for index in range(0, len(portions), 2):
+        sentence = portions[index]
+        if DOCUMENT_QUESTION.match(sentence):
+            # Keep only an independent file request after a question, never its format mentions.
+            portions[index] = next(
+                (sentence[boundary.end():] for boundary in _QUESTION_CONTINUATION.finditer(sentence)
+                 if _independent_document_delivery(sentence[boundary.end():])),
+                "",
+            )
+    return "".join(portions)
+
+
 def _unsupported_outputs(prompt):
     for match in UNSUPPORTED_FORMAT.finditer(prompt):
         if NO_FORMAT.search(prompt, 0, match.start()):
@@ -101,11 +148,16 @@ def requested_document_formats(payload):
         or (context.get("agentLoop") or {}).get("trace")
     ):
         return ()
-    prompt = _unquoted_request(str(payload.get("prompt") or "").strip())
+    request = _unquoted_request(str(payload.get("prompt") or "").strip())
+    prompt = _document_delivery_text(request)
     if (
-        not DOCUMENT_REQUEST.search(prompt)
-        or not (DOCUMENT_SUBJECT.search(prompt) or any(pattern.search(prompt) for _, pattern in FORMATS))
-        or DOCUMENT_QUESTION.match(prompt) or NO_DOCUMENT.search(prompt)
+        not (DOCUMENT_REQUEST.search(prompt)
+             or any(_independent_document_delivery(sentence) for sentence in _SENTENCE_BREAK.split(prompt)[::2]))
+        or not (
+            DOCUMENT_SUBJECT.search(prompt) or any(pattern.search(prompt) for _, pattern in FORMATS)
+            or (DOCUMENT_SUBJECT.search(request) and _DOWNLOAD_REQUEST.search(prompt))
+        )
+        or NO_DOCUMENT.search(prompt)
     ):
         return ()
     unsupported = set(_unsupported_outputs(prompt))

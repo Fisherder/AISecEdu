@@ -175,6 +175,50 @@ describe('ordinary PBL v2 instructor via Harness', () => {
     expect(events.some((event) => event.type === 'token')).toBe(true);
   });
 
+  it.each(['', '   '])('shows a retry error for empty Harness text: %j', async (reply) => {
+    receive({ reply });
+    const opening = await frames(await openTask(request('open-task', { phase: 'greeting' })));
+    expect(opening.map((event) => event.type)).toEqual(['error', 'done']);
+    expect(opening[0].code).toBe('EMPTY_LLM_OUTPUT');
+
+    receive({ reply });
+    const teaching = await frames(
+      await teach(request('instructor', { userMessage: '怎样记录？' })),
+    );
+    expect(teaching.map((event) => event.type)).toEqual(['project_patch', 'error', 'done']);
+    expect(teaching[1].code).toBe('EMPTY_LLM_OUTPUT');
+  });
+
+  it('acknowledges a valid difficulty-only reply when an instructor can speak', async () => {
+    receive({ reply: ' ', difficulty: { target: 'easier', learnerQuote: '请简单一点' } });
+    const events = await frames(await teach(request('instructor', { userMessage: '请简单一点' })));
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'project_patch',
+        patch: expect.objectContaining({
+          kind: 'message',
+          message: expect.objectContaining({ content: '好的，我来调整一下讲解的方式。' }),
+        }),
+      }),
+    );
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('shows a retry error when a difficulty-only reply cannot produce an instructor acknowledgment', async () => {
+    receive({ reply: ' ', difficulty: { target: 'easier', learnerQuote: '请简单一点' } });
+    const events = await frames(
+      await teach(
+        request('instructor', {
+          userMessage: '请简单一点',
+          project: { ...project(), roles: [], threads: [] },
+        }),
+      ),
+    );
+    expect(events.at(-2)).toMatchObject({ type: 'error', code: 'EMPTY_LLM_OUTPUT' });
+    expect(events.at(-1)?.type).toBe('done');
+    expect(events.some((event) => event.patch?.kind === 'message')).toBe(false);
+  });
+
   it('rejects an observation without a signature before recording it', async () => {
     receive({
       reply: '试着每天记录叶片数量。',

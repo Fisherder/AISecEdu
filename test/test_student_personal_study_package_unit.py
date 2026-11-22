@@ -133,6 +133,18 @@ def test_personal_study_package_rejects_executable_fields_before_materialization
     "No need to generate a study package.",
     "请生成一份复习计划。不要学习包。",
     "请生成学习包。不要给我学习包。",
+    "生成学习包了吗？",
+    "生成学习包已完成。",
+    "请生成学习包之前先讲讲概念。",
+    "请生成学习包。请取消刚才的请求。",
+    "请生成自学包。不要学习包。",
+    "请生成自学包。不要“学习包”。",
+    "请制作学习讲义。不要学习讲义。",
+    "请制作学习讲义。不要学习包和学习讲义。",
+    "“请生成学习包”是课堂记录。",
+    "请解释之前保存的学习包。",
+    "继续。",
+
 ])
 def test_denied_package_requests_do_not_create_a_workspace_or_call_the_model(prompt):
     ns = fixture()
@@ -164,6 +176,16 @@ def test_denied_package_requests_do_not_create_a_workspace_or_call_the_model(pro
     "Don't make a slide deck. Please generate a learning package.",
     "Create a 30-minute, beginner-friendly learning package.",
     "不要生成学习包。改主意了，请生成一个学习包。",
+    "请根据上节课内容生成一份学习包。",
+    "请根据之前的课堂笔记生成学习包。",
+    "请根据上节课的学习包资料生成学习讲义。",
+    "请解释学习包。再生成一份学习讲义。",
+    "请不要忘了生成一份学习包。",
+    "请生成一个“学习包”。",
+    "请生成学习讲义。不要概念自检。",
+    "请参考“不要生成学习包”这段课堂资料生成概念自检。",
+    "Please create a study package from my notes.",
+
 ])
 def test_explicit_package_requests_keep_other_clauses_separate(prompt):
     ns = fixture()

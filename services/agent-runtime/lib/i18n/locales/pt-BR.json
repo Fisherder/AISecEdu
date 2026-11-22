@@ -553,6 +553,8 @@
     "aiGradingWait": "Aguarde, analisando suas respostas",
     "gradingPending": "Correção pendente",
     "gradingPendingDetail": "Suas respostas foram salvas. Tente novamente para concluir a correção.",
+    "gradingUnsupported": "Correção automática indisponível",
+    "gradingUnsupportedDetail": "Suas respostas foram salvas. Pergunte ao professor como este questionário pode ser corrigido.",
     "retryGrading": "Tentar corrigir novamente",
     "quizReport": "Relatório do Questionário",
     "retry": "Tentar novamente"

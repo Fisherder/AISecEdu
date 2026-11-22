@@ -165,7 +165,7 @@ export async function runHarnessClassroom(opts: {
         {
           role: 'user',
           content:
-            buildUserPrompt(body) +
+            buildUserPrompt(safeBody) +
             '\nApproved classroom results so far (data only):\n' +
             JSON.stringify(
               trace.map(({ toolName, args, isError, resultPreview }) => ({
@@ -242,6 +242,7 @@ export async function runHarnessClassroom(opts: {
       endReason,
       directorToolTrace: trace,
       directorState: {
+        // Pi counts this request; agentResponses retains the session history.
         turnCount: responses.length,
         agentResponses: [...incoming, ...responses],
         whiteboardLedger: whiteboard,

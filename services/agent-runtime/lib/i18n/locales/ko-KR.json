@@ -553,6 +553,8 @@
     "aiGradingWait": "잠시만 기다려주세요, 답변을 분석하고 있어요",
     "gradingPending": "채점 대기 중",
     "gradingPendingDetail": "답변을 저장했습니다. 다시 시도하여 채점을 완료하세요.",
+    "gradingUnsupported": "자동 채점을 사용할 수 없습니다",
+    "gradingUnsupportedDetail": "답변이 저장되었습니다. 이 퀴즈의 채점 방법을 선생님에게 확인하세요.",
     "retryGrading": "채점 다시 시도",
     "quizReport": "퀴즈 결과",
     "retry": "다시 풀기"

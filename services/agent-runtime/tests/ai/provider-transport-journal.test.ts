@@ -25,7 +25,9 @@ function expectNoBodyCopies(events: ReturnType<typeof fixture>['events'], ...bod
   expect(serialized).not.toMatch(/"bodyBase64"|"requestBody"|"responseBody"|"bodyEncoding"/);
   for (const body of bodies) {
     const bytes = Buffer.from(body);
-    expect(serialized).not.toContain(bytes.toString());
+    const text = bytes.toString();
+    expect(serialized).not.toContain(text);
+    expect(serialized).not.toContain(JSON.stringify(text).slice(1, -1));
     expect(serialized).not.toContain(bytes.toString('base64'));
   }
 }
@@ -264,6 +266,7 @@ describe('provider transport durability', () => {
 
   it('keeps the model journal free of normalized and wire copies while preserving usage', async () => {
     const { active, events } = fixture();
+    const privateSystem = 'SYNTHETIC-CLASSROOM-SYSTEM-6adf8e72';
     const privatePrompt = 'SYNTHETIC-STUDENT-PROMPT-f29c7761';
     const privateReply = 'SYNTHETIC-MODEL-REPLY-bdde357e';
     const privateReasoning = 'SYNTHETIC-REASONING-89ca1776';
@@ -282,11 +285,12 @@ describe('provider transport durability', () => {
       apiKey: 'synthetic-key', baseUrl: 'https://provider.example/v1' });
     active.journal.nextCallId = () => active.callId;
     const result = await withModelCallJournal(active.journal, () => callLLM({
-      model, system: 'Synthetic accounting fixture', prompt: privatePrompt, maxRetries: 0,
+      model, system: privateSystem, prompt: privatePrompt, maxRetries: 0,
     }, 'audit-regression'));
     expect(result.text).toBe(privateReply);
+    expect(requestBody).toContain(privateSystem);
     expect(requestBody).toContain(privatePrompt);
-    expectNoBodyCopies(events, privatePrompt, privateReply, privateReasoning, requestBody, payload);
+    expectNoBodyCopies(events, privateSystem, privatePrompt, privateReply, privateReasoning, requestBody, payload);
     expect(events.find(e => e.type === 'model.requested')?.detail).toMatchObject({
       transportJournalVersion: 2, source: 'audit-regression', modelId: 'test',
     });

@@ -553,6 +553,8 @@
     "aiGradingWait": "Espera un momento, analizando tus respuestas",
     "gradingPending": "Calificación pendiente",
     "gradingPendingDetail": "Tus respuestas se guardaron. Reintenta para completar la calificación.",
+    "gradingUnsupported": "Calificación automática no disponible",
+    "gradingUnsupportedDetail": "Tus respuestas se guardaron. Pregunta a tu docente cómo se puede calificar este cuestionario.",
     "retryGrading": "Reintentar calificación",
     "quizReport": "Reporte del cuestionario",
     "retry": "Reintentar"

@@ -553,6 +553,8 @@
     "aiGradingWait": "Please wait, analyzing your answers",
     "gradingPending": "Grading pending",
     "gradingPendingDetail": "Your answers are saved. Try again to complete grading.",
+    "gradingUnsupported": "Automatic grading unavailable",
+    "gradingUnsupportedDetail": "Your answers are saved. Ask your teacher how this quiz can be graded.",
     "retryGrading": "Retry grading",
     "quizReport": "Quiz Report",
     "retry": "Retry"

@@ -69,13 +69,37 @@ describe('concept short-answer grading', () => {
     expect(harness.recordHarnessUsage).toHaveBeenCalledOnce();
   });
 
-  it('keeps disabled and task-specific private grading pending without a model call', async () => {
+  it('reports temporarily unavailable when the grader is disabled', async () => {
     harness.createHarnessTurn.mockReturnValue(undefined);
     expect((await POST(request({ question, userAnswer, points }))).status).toBe(503);
-    harness.createHarnessTurn.mockReturnValue(harness.runTurn);
-    expect((await POST(request({ question: 'Explain the provided answer key: secret.', userAnswer, points }))).status).toBe(503);
     expect(harness.runTurn).not.toHaveBeenCalled();
     expect(harness.recordHarnessUsage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { question: 'Explain the provided answer key: PRIVATE_CLASSROOM_TEXT.' },
+    { userAnswer: 'The reference answer is PRIVATE_CLASSROOM_TEXT.' },
+    { question: 'Name: PRIVATE_CLASSROOM_TEXT' },
+    { userAnswer: 'Student ID: PRIVATE_CLASSROOM_TEXT' },
+  ])('returns a nonretryable response before contacting Harness for ineligible text', async (input) => {
+    const result = await POST(request({ question, userAnswer, points, ...input }));
+    expect(result.status).toBe(422);
+    const payload = await result.json();
+    expect(payload).toMatchObject({ success: false, errorCode: 'CONTENT_SENSITIVE' });
+    expect(JSON.stringify(payload)).not.toContain('PRIVATE_CLASSROOM_TEXT');
+    expect(harness.createHarnessTurn).not.toHaveBeenCalled();
+    expect(harness.runTurn).not.toHaveBeenCalled();
+    expect(harness.recordHarnessUsage).not.toHaveBeenCalled();
+  });
+
+  it('redacts identifying text in otherwise valid feedback', async () => {
+    harness.runTurn.mockResolvedValue({
+      ...response,
+      text: JSON.stringify({ score: 3, comment: `Name: PRIVATE_CLASSROOM_TEXT\n${feedback}` }),
+    });
+    expect(await (await POST(request({ question, userAnswer, points }))).json()).toMatchObject({
+      score: 3, comment: `[redacted]\n${feedback}`,
+    });
   });
 
   it('accepts an explicitly assessed zero', async () => {
@@ -97,13 +121,16 @@ describe('learner short-answer submit and retry', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ score: null }), { status: 503 }))
       .mockResolvedValueOnce(Response.json({ score: 3, comment: feedback }));
     vi.stubGlobal('fetch', fetchGrade);
-    const pending = quizViewStateFromAttempt({ sessionId: 'attempt-1', status: 'active', phase: 'submitted', answers });
+    const pending = quizViewStateFromAttempt({ sessionId: 'attempt-1', status: 'active', phase: 'submitted', answers }, questions);
     expect(pending).toEqual({ phase: 'grading_pending', answers, results: [] });
-    expect(await gradeQuizForReview(questions, pending.answers, 'en-US')).toBeNull();
-    expect(await gradeQuizForReview(questions, pending.answers, 'en-US')).toEqual([
-      { questionId: 'choice', correct: true, status: 'correct', earned: 1 },
-      { questionId: 'short', correct: false, status: 'incorrect', earned: 3, aiComment: feedback },
-    ]);
+    expect(await gradeQuizForReview(questions, pending.answers, 'en-US')).toEqual({ status: 'unavailable' });
+    expect(await gradeQuizForReview(questions, pending.answers, 'en-US')).toEqual({
+      status: 'graded',
+      results: [
+        { questionId: 'choice', correct: true, status: 'correct', earned: 1 },
+        { questionId: 'short', correct: false, status: 'incorrect', earned: 3, aiComment: feedback },
+      ],
+    });
     expect(fetchGrade).toHaveBeenCalledTimes(2);
     for (const [url, config] of fetchGrade.mock.calls) {
       expect(url).toBe('/api/quiz-grade');
@@ -111,5 +138,29 @@ describe('learner short-answer submit and retry', () => {
       expect(config.headers).toEqual({ 'Content-Type': 'application/json' });
     }
     expect(readShortAnswerGrade({ score: NaN, comment: feedback }, points)).toBeNull();
+  });
+
+  it('keeps ineligible submissions saved and skips grading on submit and hydration', async () => {
+    const questions: QuizQuestion[] = [
+      { id: 'ordinary', type: 'short_answer', question, points },
+      { id: 'second', type: 'short_answer', question, points },
+    ];
+    const answers = { ordinary: userAnswer, second: 'Student ID: PRIVATE_CLASSROOM_TEXT' };
+    const fetchGrade = vi.fn();
+    vi.stubGlobal('fetch', fetchGrade);
+    expect(await gradeQuizForReview(questions, answers, 'en-US')).toEqual({ status: 'unsupported' });
+    const submitted = { sessionId: 'attempt-2', status: 'active', phase: 'submitted', answers } as const;
+    expect(quizViewStateFromAttempt(submitted, questions)).toEqual({ phase: 'grading_unsupported', answers, results: [] });
+    expect(fetchGrade).not.toHaveBeenCalled();
+  });
+
+  it('recognizes a 422 response and sends only redacted classroom text', async () => {
+    const questions: QuizQuestion[] = [{ id: 'short', type: 'short_answer', question, points }];
+    const answers = { short: `Student ID: PRIVATE_CLASSROOM_TEXT\n${userAnswer}` };
+    const fetchGrade = vi.fn().mockResolvedValue(new Response(null, { status: 422 }));
+    vi.stubGlobal('fetch', fetchGrade);
+    expect(await gradeQuizForReview(questions, answers, 'en-US')).toEqual({ status: 'unsupported' });
+    expect(JSON.parse(fetchGrade.mock.calls[0][1].body).userAnswer).toBe(`[redacted]\n${userAnswer}`);
+    expect(answers.short).toContain('PRIVATE_CLASSROOM_TEXT');
   });
 });
