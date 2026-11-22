@@ -19,6 +19,9 @@ import {
 import {
   classroomDirectorPlugin, directorSystemPrompt, ClassroomDirectorTurnError, validateDirectorTurn,
 } from './classroom-director.mjs';
+import {
+  classroomDialoguePlugin, dialogueSystemPrompt, validateClassroomDialogue, ClassroomDialogueError,
+} from './classroom-dialogue.mjs';
 
 const provider = 'deepseek-official';
 
@@ -166,13 +169,24 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
         { role: 'user', content: JSON.stringify(director) },
       ], signal, [], { director });
     },
+    classroomDialogue(input, signal, sendSpeech) {
+      const dialogue = validateClassroomDialogue(input);
+      if (!dialogue) throw new ClassroomDialogueError({});
+      return runTurn([
+        { role: 'system', content: dialogueSystemPrompt },
+        { role: 'user', content: JSON.stringify(dialogue) },
+      ], signal, [], { dialogue, sendSpeech });
+    },
   };
 
-  async function runTurn(messages, signal, images = [], { materials, director } = {}) {
+  async function runTurn(messages, signal, images = [], { materials, director, dialogue, sendSpeech } = {}) {
     const materialReads = new Set();
     const decision = {};
+    const discussion = { speeches: 0, next: undefined };
     const measured = [];
     let modelAttempts = 0;
+    let approvedSteps = 0;
+    let approvedStep;
     let assistant;
     let finish;
     let unsubscribe;
@@ -180,6 +194,15 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
 
     function cancel() {
       handle.agent.cancel({ kind: 'user' });
+    }
+
+    function approveStep(log, call) {
+      if (!log || !approvedStep || log.turn !== approvedStep.turn || log.step !== approvedStep.step ||
+          call.id !== approvedStep.call.id || call.name !== approvedStep.call.name ||
+          call.arguments !== approvedStep.call.arguments) return false;
+      approvedStep = undefined;
+      approvedSteps += 1;
+      return true;
     }
 
     try {
@@ -193,11 +216,21 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
 
       handle = await ctx.agents.create({
         sessionId: SessionId(randomUUID()),
-        agentOptions: { provider, model, ...(director ? { maxTokens: 512 } : {}) },
+        agentOptions: {
+          provider, model,
+          ...(dialogue ? { maxTokens: 4096 } : director ? { maxTokens: 512 } : {}),
+        },
         signal,
         async setup(scope, agent) {
           if (materials) await scope.plugin(teachingMaterialPlugin(materials, materialReads));
           if (director) await scope.plugin(classroomDirectorPlugin(director.roles.length, decision));
+          if (dialogue) {
+            await scope.plugin(classroomDialoguePlugin(dialogue.roles.length, discussion, approveStep, speech => {
+              const usage = sumMeasuredUsage(measured);
+              if (!usage) throw new Error('Classroom dialogue usage is unavailable');
+              sendSpeech({ ...speech, model, usage });
+            }));
+          }
           scope.systemPrompt.section({
             name: 'request-system', order: 0, interpolate: false, text: system,
           });
@@ -206,13 +239,25 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
             if (session !== agent.session) return;
             if (event.type === 'assistant/message') assistant = event.data;
             if (event.type === 'turn/end') finish = event.data.reason.kind;
-            if ((materials || director) && (event.type === 'assistant/message' || event.type === 'assistant/attempt')) {
+            if ((materials || director || dialogue) &&
+                (event.type === 'assistant/message' || event.type === 'assistant/attempt')) {
               modelAttempts += 1;
               const usage = event.data.usage ?? event.data.stream.findLast(record =>
                 record.type === 'chunk' && record.chunk.type === 'usage',
               )?.chunk.usage;
               const snapshot = formatMeasuredUsage(usage);
               if (snapshot) measured.push(snapshot);
+              if (dialogue) {
+                approvedStep = undefined;
+                if (event.type !== 'assistant/message' || event.data.interrupted || !snapshot) return;
+                const { message, stream, turn, step } = event.data;
+                const stop = stream.findLast(record => record.type === 'chunk' && record.chunk.type === 'finish');
+                const calls = message.content.filter(block => block.type === 'tool-call');
+                if (stop?.chunk.reason.kind === 'tool-calls' && calls.length === 1 &&
+                    message.content.every(block => block.type === 'tool-call' || block.type === 'reasoning')) {
+                  approvedStep = { turn, step, call: calls[0] };
+                }
+              }
             }
           });
         },
@@ -225,6 +270,13 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
       signal.throwIfAborted();
       if (finish !== 'completed' || assistant === undefined) throw new Error('Model turn failed');
       const { message, usage, stream } = assistant;
+      if (dialogue) {
+        const total = sumMeasuredUsage(measured);
+        if (!discussion.next || !total || approvedSteps !== modelAttempts || measured.length !== modelAttempts) {
+          throw new Error('Classroom dialogue did not finish with measured native actions');
+        }
+        return { next: discussion.next, model: message.source.model, usage: total };
+      }
       if (director) {
         const total = sumMeasuredUsage(measured);
         const stop = stream.findLast(record => record.type === 'chunk' && record.chunk.type === 'finish');
@@ -247,10 +299,11 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
       }
       return { text, model: message.source.model, usage: total, materialReads: [...materialReads] };
     } catch (error) {
-      if (!materials && !director) throw error;
+      if (!materials && !director && !dialogue) throw error;
       const usage = sumMeasuredUsage(measured);
       const receipt = usage ? { model, usage } : {};
       if (director) throw new ClassroomDirectorTurnError(receipt);
+      if (dialogue) throw new ClassroomDialogueError(receipt);
       throw new TeachingMaterialTurnError(receipt);
     } finally {
       signal.removeEventListener('abort', cancel);

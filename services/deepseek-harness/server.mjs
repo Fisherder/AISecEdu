@@ -8,11 +8,16 @@ import {
 import {
   directorTurnPath, maxDirectorTurnBytes, validateDirectorTurn, ClassroomDirectorTurnError,
 } from './classroom-director.mjs';
+import {
+  dialoguePath, maxDialogueBytes, validateClassroomDialogue, ClassroomDialogueError,
+} from './classroom-dialogue.mjs';
 
 const maxBodyBytes = 1024 * 1024;
 const maxMessages = 128;
 const maxTurns = 8;
 const turnTimeout = 90_000;
+const dialogueTimeout = 150_000;
+const dialogueIdleTimeout = 45_000;
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
 class RequestError extends Error {
@@ -62,14 +67,13 @@ function validate(value, withImages) {
   return { messages, images };
 }
 
-async function readTurn(request, { withImages, withMaterials, withDirector }) {
+async function readTurn(request, { withImages, withMaterials, withDirector, withDialogue }) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers['content-type'] ?? '')) {
     throw new RequestError(415, 'Expected application/json');
   }
 
-  const maxBytes = withDirector ? maxDirectorTurnBytes
-    : withMaterials ? maxMaterialTurnBytes
-      : withImages ? 7 * maxBodyBytes : maxBodyBytes;
+  const maxBytes = withDialogue ? maxDialogueBytes : withDirector ? maxDirectorTurnBytes :
+    withMaterials ? maxMaterialTurnBytes : withImages ? 7 * maxBodyBytes : maxBodyBytes;
   const chunks = [];
   let size = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
@@ -84,6 +88,11 @@ async function readTurn(request, { withImages, withMaterials, withDirector }) {
   } catch {
     throw new RequestError(400, 'Invalid JSON');
   }
+  if (withDialogue) {
+    const dialogue = validateClassroomDialogue(payload);
+    if (!dialogue) throw new RequestError(400, 'Expected bounded classroom roles, history, topic and slide text');
+    return { dialogue };
+  }
   if (withDirector) {
     const director = validateDirectorTurn(payload);
     if (!director) throw new RequestError(400, 'Expected bounded classroom roles, history and turn count');
@@ -95,7 +104,37 @@ async function readTurn(request, { withImages, withMaterials, withDirector }) {
   return validated;
 }
 
-export function createService({ secret, engine, allowImages = true, timeoutMs = turnTimeout }) {
+async function streamClassroomDialogue(response, engine, dialogue, signal, idleTimeoutMs) {
+  response.writeHead(200, {
+    'content-type': 'application/x-ndjson; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-accel-buffering': 'no',
+  });
+  response.flushHeaders();
+  const idle = new AbortController();
+  const lifetime = AbortSignal.any([signal, idle.signal]);
+  const inactivity = setTimeout(() => idle.abort(), idleTimeoutMs);
+  let terminal;
+  try {
+    const result = await engine.classroomDialogue(dialogue, lifetime, speech => {
+      lifetime.throwIfAborted();
+      response.write(JSON.stringify(speech) + '\n');
+      inactivity.refresh();
+    });
+    lifetime.throwIfAborted();
+    terminal = { type: 'done', ...result };
+  } catch (error) {
+    terminal = { type: 'error', ...(error instanceof ClassroomDialogueError ? error.receipt : {}) };
+  } finally {
+    clearTimeout(inactivity);
+  }
+  if (!response.destroyed) response.end(JSON.stringify(terminal) + '\n');
+}
+
+export function createService({
+  secret, engine, allowImages = true, timeoutMs = turnTimeout,
+  dialogueTimeoutMs = dialogueTimeout, dialogueIdleTimeoutMs = dialogueIdleTimeout,
+}) {
   if (typeof secret !== 'string' || !secret.trim()) throw new Error('HARNESS_SERVICE_SECRET is required');
   const token = Buffer.from('Bearer ' + secret);
   let active = 0;
@@ -109,8 +148,9 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
     const imageCapability = withImages && request.method === 'GET';
     const withMaterials = request.url === materialTurnPath;
     const withDirector = request.url === directorTurnPath;
+    const withDialogue = request.url === dialoguePath;
     if (!imageCapability && (request.method !== 'POST' ||
-        (!withImages && !withMaterials && !withDirector && request.url !== '/v1/turn'))) {
+        (!withImages && !withMaterials && !withDirector && !withDialogue && request.url !== '/v1/turn'))) {
       json(response, 404, { error: 'Not found' });
       return;
     }
@@ -138,12 +178,16 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
     const disconnect = new AbortController();
     const abort = () => disconnect.abort();
     response.once('close', abort);
-    const deadline = AbortSignal.timeout(timeoutMs);
+    const deadline = AbortSignal.timeout(withDialogue ? dialogueTimeoutMs : timeoutMs);
     try {
-      const { messages, images, question, materials, director } = await readTurn(request, {
-        withImages, withMaterials, withDirector,
+      const { messages, images, question, materials, director, dialogue } = await readTurn(request, {
+        withImages, withMaterials, withDirector, withDialogue,
       });
       const signal = AbortSignal.any([disconnect.signal, deadline]);
+      if (withDialogue) {
+        await streamClassroomDialogue(response, engine, dialogue, signal, dialogueIdleTimeoutMs);
+        return;
+      }
       let result;
       if (withDirector) result = await engine.directorTurn(director, signal);
       else if (withMaterials) result = await engine.materialTurn(question, materials, signal);

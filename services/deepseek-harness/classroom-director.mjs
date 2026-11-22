@@ -5,32 +5,41 @@ export const maxDirectorTurnBytes = 48 * 1024;
 const toolName = 'choose_classroom_speaker';
 const classroomRoles = ['teacher', 'assistant', 'student'];
 
-function boundedText(value, length) {
-  return typeof value === 'string' && Boolean(value.trim()) && [...value].length <= length;
+export function boundedText(value, length) {
+  return typeof value === 'string' && value.length <= 2 * length &&
+    Boolean(value.trim()) && [...value].length <= length;
 }
 
 function participantSlot(value, count) {
   return Number.isSafeInteger(value) && value >= 1 && value <= count;
 }
 
-function record(value) {
+export function record(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function validateClassroomParticipants(roles, history) {
+  if (!Array.isArray(roles) || roles.length < 1 || roles.length > 16 ||
+      roles.some(role => !classroomRoles.includes(role)) ||
+      !Array.isArray(history) || history.length > 24 ||
+      history.some(entry => !record(entry) || Object.keys(entry).length !== 2 ||
+        !Object.hasOwn(entry, 'speaker') || !Object.hasOwn(entry, 'text') ||
+        (entry.speaker !== 'user' && !participantSlot(entry.speaker, roles.length)) ||
+        !boundedText(entry.text, 1000))) return;
+  return {
+    roles: [...roles],
+    history: history.map(({ speaker, text }) => ({ speaker, text })),
+  };
 }
 
 export function validateDirectorTurn(body) {
   if (!record(body) || Object.keys(body).some(key => !['roles', 'history', 'turns', 'topic'].includes(key)) ||
-      !Array.isArray(body.roles) || body.roles.length < 1 || body.roles.length > 16 ||
-      body.roles.some(role => !classroomRoles.includes(role)) ||
       !Number.isSafeInteger(body.turns) || body.turns < 0 || body.turns > 10000 ||
-      (Object.hasOwn(body, 'topic') && !boundedText(body.topic, 240)) ||
-      !Array.isArray(body.history) || body.history.length > 24 ||
-      body.history.some(entry => !record(entry) || Object.keys(entry).length !== 2 ||
-        !Object.hasOwn(entry, 'speaker') || !Object.hasOwn(entry, 'text') ||
-        (entry.speaker !== 'user' && !participantSlot(entry.speaker, body.roles.length)) ||
-        !boundedText(entry.text, 1000))) return;
+      (Object.hasOwn(body, 'topic') && !boundedText(body.topic, 240))) return;
+  const participants = validateClassroomParticipants(body.roles, body.history);
+  if (!participants) return;
   return {
-    roles: [...body.roles],
-    history: body.history.map(({ speaker, text }) => ({ speaker, text })),
+    ...participants,
     turns: body.turns,
     ...(Object.hasOwn(body, 'topic') ? { topic: body.topic } : {}),
   };

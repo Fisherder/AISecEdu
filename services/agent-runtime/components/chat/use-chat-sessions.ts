@@ -3,6 +3,8 @@
 import {
   ordinaryClassroomChatHeader,
   ordinaryClassroomChatRoute,
+  ordinaryClassroomDialogueVersion,
+  ordinaryClassroomDialogueVersionHeader,
 } from '@/lib/chat/ordinary-classroom-contract';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
@@ -303,6 +305,7 @@ export type PiSingleRequestOutcome =
 
 export function getPiSingleRequestOutcome(
   doneData: Awaited<ReturnType<ReturnType<StatelessStreamConsumerFactory>['onIterationEnd']>>,
+  ordinary = false,
 ): PiSingleRequestOutcome {
   if (!doneData) {
     return { type: 'error', messageKey: 'chat.error.streamInterrupted' };
@@ -314,7 +317,7 @@ export function getPiSingleRequestOutcome(
       directorState: doneData.directorState,
     };
   }
-  if (doneData.totalAgents === 0 || doneData.agentHadContent === false) {
+  if (!ordinary && (doneData.totalAgents === 0 || doneData.agentHadContent === false)) {
     return { type: 'error', messageKey: 'chat.error.streamInterrupted' };
   }
   if (doneData.cueUserReceived) {
@@ -343,19 +346,25 @@ export async function runPiSingleRequest(
   t: (key: string) => string,
   locale: string,
   onResponseAccepted?: () => void,
-): Promise<'ordinary' | void> {
+): Promise<void> {
   const response = await fetch('/api/chat/pi', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-User-Locale': locale },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-User-Locale': locale,
+      [ordinaryClassroomDialogueVersionHeader]: ordinaryClassroomDialogueVersion,
+    },
     body: JSON.stringify(requestTemplate),
     signal: controller.signal,
   });
 
-  if (response.status === 409 && response.headers.get(ordinaryClassroomChatHeader) === ordinaryClassroomChatRoute) {
-    return 'ordinary';
-  }
   if (!response.ok) {
     throw new Error(`Pi chat request failed: ${response.status}`);
+  }
+  const ordinary = response.headers.get(ordinaryClassroomChatHeader) === ordinaryClassroomChatRoute;
+  if (ordinary && response.headers.get(ordinaryClassroomDialogueVersionHeader) !== ordinaryClassroomDialogueVersion) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(t('chat.error.streamInterrupted'));
   }
   if (!response.body) {
     throw new Error('Pi chat response body is empty');
@@ -367,29 +376,40 @@ export async function runPiSingleRequest(
   const decoder = new TextDecoder();
   let sseBuffer = '';
   let sawDoneEvent = false;
+  let reachedEOF = false;
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    sseBuffer += decoder.decode(value, { stream: true });
-    const parts = sseBuffer.split('\n\n');
-    sseBuffer = parts.pop() || '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        reachedEOF = true;
+        break;
+      }
+      sseBuffer += decoder.decode(value, { stream: true });
+      const parts = sseBuffer.split('\n\n');
+      sseBuffer = parts.pop() || '';
 
-    for (const part of parts) {
-      if (!part.trim() || part.startsWith(':')) continue;
-      const dataLine = part.split('\n').find((line) => line.startsWith('data: '));
-      if (!dataLine) continue;
-      const event = JSON.parse(dataLine.slice(6)) as StatelessEvent;
-      if (event.type === 'done') sawDoneEvent = true;
-      consumer.onEvent(event);
+      for (const part of parts) {
+        if (!part.trim() || part.startsWith(':')) continue;
+        const dataLine = part.split('\n').find((line) => line.startsWith('data: '));
+        if (!dataLine) continue;
+        const event = JSON.parse(dataLine.slice(6)) as StatelessEvent;
+        if (ordinary && sawDoneEvent) throw new Error(t('chat.error.streamInterrupted'));
+        if (event.type === 'done') sawDoneEvent = true;
+        consumer.onEvent(event);
+      }
     }
+  } finally {
+    if (!reachedEOF) void reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 
-  const doneData = sawDoneEvent ? await consumer.onIterationEnd() : null;
+  const completed = sawDoneEvent && (!ordinary || !sseBuffer.trim());
+  const doneData = completed ? await consumer.onIterationEnd() : null;
 
   if (controller.signal.aborted) return;
 
-  const outcome = getPiSingleRequestOutcome(doneData);
+  const outcome = getPiSingleRequestOutcome(doneData, ordinary);
   if (outcome.type === 'error') {
     clearLiveSessionAfterError(sessionId, t(outcome.messageKey));
     onStopSessionRef.current?.({ sessionId, source: 'error' });
@@ -1158,7 +1178,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         const piRequestTemplate = firstRequestContext
           ? { ...requestTemplate, storeState, piSessionBoundary: firstRequestContext }
           : { ...requestTemplate, storeState };
-        const piOutcome = await runPiSingleRequest(
+        await runPiSingleRequest(
           sessionId,
           withPiInclassWhiteboardTools(piRequestTemplate),
           controller,
@@ -1181,7 +1201,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
               }
             : undefined,
         );
-        if (piOutcome !== 'ordinary') return;
+        return;
       }
 
       const streamConsumer = createStatelessStreamConsumer(sessionId, controller, sessionType);
@@ -1205,7 +1225,10 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
           fetchChat: (body, signal) =>
             fetch('/api/chat', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                [ordinaryClassroomDialogueVersionHeader]: ordinaryClassroomDialogueVersion,
+              },
               body: JSON.stringify(body),
               signal,
             }),

@@ -68,19 +68,34 @@ class ModelFixture(BaseHTTPRequestHandler):
             ("message_delta", {"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 3}}),
             ("message_stop", {}),
         ]
-        if any(tool.get("name") == "read_teaching_material" for tool in payload.get("tools", [])):
+        tools = {tool["name"] for tool in payload.get("tools", [])}
+        call = None
+        if "read_teaching_material" in tools:
             content = payload["messages"][-1]["content"]
             if not any(block.get("type") == "tool_result" for block in content):
-                events[1:-1] = [
-                    ("content_block_start", {"index": 0, "content_block": {
-                        "type": "tool_use", "id": "read-second", "name": "read_teaching_material", "input": {},
-                    }}),
-                    ("content_block_delta", {"index": 0, "delta": {
-                        "type": "input_json_delta", "partial_json": '{"index":2}',
-                    }}),
-                    ("content_block_stop", {"index": 0}),
-                    ("message_delta", {"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 3}}),
-                ]
+                call = ("read-second", "read_teaching_material", {"index": 2})
+        if tools == {"speak_in_classroom", "finish_classroom_discussion"}:
+            if any(message["role"] == "assistant" for message in payload["messages"]):
+                # A buffered HTTP response deadlocks here: the client releases the provider only
+                # after reading the first complete, validated speech from the real service.
+                if not self.server.speech_received.wait(timeout=10):
+                    self.send_error(504, "Speech was not delivered incrementally")
+                    return
+                call = ("return", "finish_classroom_discussion", {"next": "user"})
+            else:
+                call = ("first", "speak_in_classroom", {"speaker": 2, "text": "第二组多四片叶子。"})
+        if call is not None:
+            call_id, name, arguments = call
+            events[1:-1] = [
+                ("content_block_start", {"index": 0, "content_block": {
+                    "type": "tool_use", "id": call_id, "name": name, "input": {},
+                }}),
+                ("content_block_delta", {"index": 0, "delta": {
+                    "type": "input_json_delta", "partial_json": json.dumps(arguments, ensure_ascii=False),
+                }}),
+                ("content_block_stop", {"index": 0}),
+                ("message_delta", {"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 3}}),
+            ]
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -163,6 +178,8 @@ class HarnessClientContract(unittest.TestCase):
                 self.assertEqual(len(model.requests), 4)
                 with self.subTest("only the requested excerpt crosses the provider boundary"):
                     self.check_material_read(url, model.requests)
+                with self.subTest("one classroom request delivers speech before the next native step finishes"):
+                    self.check_classroom_dialogue(url, model)
                 with self.subTest("private coursework grades return to the correct items"):
                     self.check_private_grades(url, model)
             finally:
@@ -171,6 +188,35 @@ class HarnessClientContract(unittest.TestCase):
                     service.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     service.kill()
+
+    def check_classroom_dialogue(self, url, model):
+        start = len(model.requests)
+        model.speech_received = threading.Event()
+        body = {
+            "roles": ["teacher", "assistant"], "history": [{"speaker": "user", "text": "两组相差多少？"}],
+            "topic": "比较两组观察记录", "slideText": "第一组有五片叶子，第二组有九片。",
+        }
+        with requests.post(url + "/v1/classroom-dialogue", headers={"Authorization": "Bearer fixture-service"},
+                           json=body, stream=True, timeout=15) as response:
+            response.raise_for_status()
+            self.assertEqual(response.headers["Content-Type"].split(";")[0], "application/x-ndjson")
+            frames = response.iter_lines(chunk_size=1)
+            try:
+                self.assertEqual(json.loads(next(frames)), {
+                    "type": "speech", "speaker": 2, "text": "第二组多四片叶子。", "model": "fixture",
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+                })
+            finally:
+                model.speech_received.set()
+            self.assertEqual([json.loads(line) for line in frames], [{
+                "type": "done", "next": "user", "model": "fixture",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 6, "total_tokens": 16},
+            }])
+        calls = model.requests[start:]
+        self.assertEqual([(path, key) for path, key, _ in calls], [("/v1/messages", "fixture-provider")] * 2)
+        second = calls[1][2]["messages"]
+        self.assertTrue(any(block.get("type") == "tool_result" and block["tool_use_id"] == "first"
+                            for message in second for block in message["content"]))
 
     def check_private_grades(self, url, model):
         requests_seen = model.requests

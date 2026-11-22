@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
+import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { directorTurnPath, maxDirectorTurnBytes } from './classroom-director.mjs';
+import { dialoguePath, maxDialogueBytes } from './classroom-dialogue.mjs';
 import { createEngine } from './engine.mjs';
 import { createService } from './server.mjs';
 
@@ -194,4 +196,196 @@ test('stock Messages adapter and native executor accept exactly one measured cla
   assert.deepEqual(available, { status: 200, body: { decision: { speaker: 2 }, model, usage } });
   const concurrentSchemas = requests.slice(-2).map(call => call.tools[0].input_schema.properties.speaker.oneOf[0].enum);
   assert.deepEqual(concurrentSchemas.map(slots => slots.length).sort(), [1, 2]);
+});
+
+test('one stock AgentLoop streams an entire bounded classroom dialogue', { timeout: 8000 }, async t => {
+  const requests = [];
+  let reply;
+  const fixture = createServer(async (incoming, outgoing) => {
+    assert.equal(incoming.method, 'POST');
+    assert.equal(incoming.url, '/v1/messages');
+    const chunks = [];
+    for await (const chunk of incoming) chunks.push(chunk);
+    requests.push(JSON.parse(Buffer.concat(chunks)));
+    const response = await reply(requests.at(-1), outgoing);
+    if (response) {
+      outgoing.writeHead(200, { 'content-type': 'text/event-stream' });
+      outgoing.end(await response.text());
+    }
+  });
+  async function listen(server) {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    t.after(() => {
+      server.closeAllConnections();
+      return new Promise(resolve => server.close(resolve));
+    });
+    return 'http://127.0.0.1:' + server.address().port;
+  }
+  const baseURL = await listen(fixture);
+  const previousKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = 'fixture-key';
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = previousKey;
+  });
+  const engine = await createEngine({ model, baseURL });
+  t.after(() => engine.close());
+  const serviceURL = await listen(createService({ secret, engine }));
+  const { turns, ...historyAndRoles } = input;
+  const dialogue = { ...historyAndRoles, slideText: '蒸发、凝结、降水和地表径流。' };
+
+  function start(body = dialogue, authorization = 'Bearer ' + secret, url = serviceURL) {
+    return fetch(url + dialoguePath, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+  function speech(speaker, text) {
+    return tool({ speaker, text }, 'speak_in_classroom');
+  }
+  function conclusion(next) {
+    return tool({ next }, 'finish_classroom_discussion');
+  }
+  function receipt(steps) {
+    return { model, usage: Object.fromEntries(Object.entries(usage).map(([key, value]) => [key, value * steps])) };
+  }
+  async function read(response) {
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^application\/x-ndjson/);
+    const body = await response.text();
+    assert.ok(body.endsWith('\n'));
+    return body.trimEnd().split('\n').map(line => JSON.parse(line));
+  }
+
+  assert.equal((await start(dialogue, '')).status, 401);
+  assert.equal((await start('x'.repeat(maxDialogueBytes))).status, 413);
+  for (const invalid of [
+    { ...dialogue, slideText: '水'.repeat(6001) },
+    { ...dialogue, slideText: '' },
+    { ...dialogue, topic: ' ' },
+    { ...dialogue, topic: '水'.repeat(241) },
+    { ...dialogue, history: [{ speaker: 3, text: '无效的角色' }] },
+    { ...dialogue, turns },
+  ]) {
+    assert.equal((await start(invalid)).status, 400);
+  }
+  assert.equal(requests.length, 0);
+
+  const lines = [
+    { type: 'speech', speaker: 1, text: '水汽冷却时形成水滴。\n下一步是什么？' },
+    { type: 'speech', speaker: 2, text: '水滴会聚成云，随后降水。' },
+  ];
+  let step = 0;
+  const { promise: releaseSecond, resolve: continueDialogue } = Promise.withResolvers();
+  reply = async () => {
+    step += 1;
+    if (step === 2) await releaseSecond;
+    const line = lines[step - 1];
+    const call = line ? speech(line.speaker, line.text) : conclusion('end');
+    return messagesResponse([{ ...call, id: 'discussion-' + step }]);
+  };
+  const response = await start();
+  const reader = response.body.getReader();
+  let firstLine = '';
+  const decoder = new TextDecoder();
+  try {
+    while (!firstLine.includes('\n')) {
+      const { value, done } = await reader.read();
+      assert.equal(done, false);
+      firstLine += decoder.decode(value, { stream: true });
+    }
+    assert.deepEqual(JSON.parse(firstLine), { ...lines[0], ...receipt(1) });
+    assert.match(firstLine, /\n$/);
+  } finally {
+    continueDialogue();
+  }
+  const rest = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    rest.push(value);
+  }
+  assert.deepEqual(Buffer.concat(rest).toString().trimEnd().split('\n').map(line => JSON.parse(line)), [
+    { ...lines[1], ...receipt(2) }, { type: 'done', next: 'end', ...receipt(3) },
+  ]);
+  assert.equal(requests.length, 3);
+  assert.deepEqual(requests[0].tools.map(tool => tool.name).sort(), ['finish_classroom_discussion', 'speak_in_classroom']);
+  assert.deepEqual(JSON.parse(requests[0].messages.at(-1).content[0].text), dialogue);
+  assert.ok(requests[1].messages.some(message => message.content.some(
+    item => item.type === 'tool_result' && item.tool_use_id === 'discussion-1',
+  )));
+
+  const startCap = requests.length;
+  reply = () => messagesResponse([{ ...speech(1, '继续讲解。'), id: 'cap-' + requests.length }]);
+  const cap = await read(await start());
+  assert.equal(requests.length - startCap, 6);
+  assert.equal(cap.filter(line => line.type === 'speech').length, 6);
+  assert.deepEqual(cap.at(-1), { type: 'done', next: 'user', ...receipt(6) });
+
+  for (const [blocks, options] of [
+    [[tool({ speaker: 1 }, 'read_teaching_material')]],
+    [[speech(3, '无效的角色')]],
+    [[speech(1, ' ')]],
+    [[speech(1, '水'.repeat(1501))]],
+    [[tool('{"text":"初稿","speaker":1,"text":"重复字段"}', 'speak_in_classroom')]],
+    [[speech(1, '不得发送这句。'), { type: 'text', text: '工具外的文本' }]],
+    [[speech(1, '不得发送这句。'), { ...conclusion('user'), id: 'extra' }]],
+    [[conclusion('user'), { ...speech(1, '结束后说话。'), id: 'extra' }]],
+    [[speech(1, '不得发送这句。')], { stop: 'end_turn' }],
+    [[speech(1, '不得发送这句。')], { measured: false }],
+  ]) {
+    const before = requests.length;
+    reply = () => messagesResponse(blocks, options);
+    assert.deepEqual(await read(await start()), [
+      { type: 'error', ...(options?.measured === false ? {} : receipt(1)) },
+    ]);
+    assert.equal(requests.length, before + 1);
+  }
+
+  reply = () => messagesResponse([conclusion('user')]);
+  assert.deepEqual(await read(await start()), [{ type: 'done', next: 'user', ...receipt(1) }]);
+
+  // Even a closed tool block with a stop reason must wait for Messages to settle the step.
+  reply = async () => {
+    const sse = await messagesResponse([speech(1, '没有完整结束。')]).text();
+    return new Response(sse.slice(0, sse.indexOf('event: message_stop')));
+  };
+  assert.deepEqual(await read(await start()), [{ type: 'error' }]);
+
+  // A stalled second request retains the receipt for the completed speech and is cancelled.
+  const idleService = await listen(createService({ secret, engine, dialogueIdleTimeoutMs: 300 }));
+  const { promise: transportClosed, resolve: onTransportClosed } = Promise.withResolvers();
+  let interruptedStep = 0;
+  reply = (_request, outgoing) => {
+    interruptedStep += 1;
+    if (interruptedStep === 1) return messagesResponse([speech(1, '已完成的发言。')]);
+    outgoing.once('close', onTransportClosed);
+  };
+  assert.deepEqual(await read(await start(dialogue, 'Bearer ' + secret, idleService)), [
+    { type: 'speech', speaker: 1, text: '已完成的发言。', ...receipt(1) },
+    { type: 'error', ...receipt(1) },
+  ]);
+  await transportClosed;
+  assert.equal(interruptedStep, 2);
+
+  const { promise: providerWaiting, resolve: onProviderWaiting } = Promise.withResolvers();
+  const { promise: clientAbortReachedProvider, resolve: onClientAbort } = Promise.withResolvers();
+  interruptedStep = 0;
+  reply = (_request, outgoing) => {
+    interruptedStep += 1;
+    if (interruptedStep === 1) return messagesResponse([speech(2, '请现场用户继续。')]);
+    outgoing.once('close', onClientAbort);
+    onProviderWaiting();
+  };
+  const client = (await start()).body.getReader();
+  const firstCheckpoint = await client.read();
+  assert.deepEqual(JSON.parse(Buffer.from(firstCheckpoint.value).toString()), {
+    type: 'speech', speaker: 2, text: '请现场用户继续。', ...receipt(1),
+  });
+  await providerWaiting;
+  await client.cancel();
+  await clientAbortReachedProvider;
+  assert.equal(interruptedStep, 2);
 });

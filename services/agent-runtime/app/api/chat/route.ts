@@ -13,25 +13,18 @@
  */
 
 import { NextRequest } from 'next/server';
-import {
-  ordinaryClassroomChatHeader,
-  ordinaryClassroomChatRoute,
-} from '@/lib/chat/ordinary-classroom-contract';
 import { statelessGenerate } from '@/lib/orchestration/stateless-generate';
-import type { StatelessChatRequest, StatelessEvent } from '@/lib/types/chat';
+import type { StatelessChatRequest } from '@/lib/types/chat';
 import { apiError } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
-import {
-  createClassroomDirectorTurn,
-  createClassroomTurn,
-  createHarnessTurn,
-} from '@/lib/server/agent-harness/classroom-turn';
-import { ordinaryClassroomChat } from '@/lib/orchestration/ordinary-classroom-chat';
+import { createClassroomTurn } from '@/lib/server/agent-harness/classroom-turn';
 import { resolveOrdinaryClassroomChat } from '@/lib/server/ordinary-classroom-chat';
+import { streamChatEvents } from './stream';
+import { streamOrdinaryClassroomChat } from './ordinary';
 const log = createLogger('Chat API');
 
-// Allow streaming responses up to 60 seconds
-export const maxDuration = 60;
+// Allow Harness to finish and report usage after its 150s dialogue deadline.
+export const maxDuration = 170;
 
 /**
  * POST /api/chat
@@ -47,7 +40,6 @@ export const maxDuration = 60;
  * Response: SSE stream of StatelessEvent
  */
 export async function POST(req: NextRequest) {
-  const encoder = new TextEncoder();
   let chatMessageCount: number | undefined;
 
   try {
@@ -70,113 +62,11 @@ export async function POST(req: NextRequest) {
     const authority = await resolveOrdinaryClassroomChat(req, body);
     if (authority.kind === 'error') return authority.response;
 
-    let generate: (deadline: AbortSignal) => AsyncGenerator<StatelessEvent>;
-    if (authority.kind === 'ordinary') {
-      const runDirector = createClassroomDirectorTurn();
-      const runSpeech = createHarnessTurn();
-      if (!runDirector || !runSpeech) {
-        return apiError('UPSTREAM_ERROR', 503, '课堂对话服务尚未配置。');
-      }
-      generate = (deadline) => ordinaryClassroomChat(
-        body, authority.context, authority.capturedSession, deadline, runDirector, runSpeech,
-      );
-    } else {
-      const runTurn = createClassroomTurn();
-      if (!runTurn) return apiError('UPSTREAM_ERROR', 503, '课堂对话服务尚未配置。');
-      generate = (deadline) => statelessGenerate(body, deadline, runTurn);
-    }
+    if (authority.kind === 'ordinary') return streamOrdinaryClassroomChat(req, body, authority);
 
-    // Use the native request signal for abort propagation
-    const signal = req.signal;
-
-    // Create SSE stream
-    const { readable, writable } = new TransformStream();
-    const writer = writable.getWriter();
-
-    // Stream generation in background with heartbeat to prevent connection timeout
-    const HEARTBEAT_INTERVAL_MS = 15_000;
-    (async () => {
-      // Heartbeat: periodically send SSE comments to keep the connection alive.
-      // Proxies / browsers may close idle SSE connections after 30-120s of silence.
-      let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-      const startHeartbeat = () => {
-        stopHeartbeat();
-        heartbeatTimer = setInterval(() => {
-          try {
-            writer.write(encoder.encode(`:heartbeat\n\n`)).catch(() => stopHeartbeat());
-          } catch {
-            stopHeartbeat();
-          }
-        }, HEARTBEAT_INTERVAL_MS);
-      };
-      const stopHeartbeat = () => {
-        if (heartbeatTimer) {
-          clearInterval(heartbeatTimer);
-          heartbeatTimer = null;
-        }
-      };
-
-      try {
-        startHeartbeat();
-
-        const deadline = AbortSignal.any([signal, AbortSignal.timeout(55_000)]);
-        const generator = generate(deadline);
-
-        for await (const event of generator) {
-          if (signal.aborted) {
-            log.info('Request was aborted');
-            break;
-          }
-
-          const data = `data: ${JSON.stringify(event)}\n\n`;
-          await writer.write(encoder.encode(data));
-        }
-
-        stopHeartbeat();
-        await writer.close();
-      } catch (error) {
-        stopHeartbeat();
-
-        // If aborted, just close the writer silently
-        if (signal.aborted) {
-          log.info('Request aborted during streaming');
-          try {
-            await writer.close();
-          } catch {
-            /* already closed */
-          }
-          return;
-        }
-
-        log.error(
-          `Chat stream error [agents=${body.config?.agentIds?.length ?? 0}, messages=${body.messages?.length ?? 0}]:`,
-          error,
-        );
-
-        // Try to send error event
-        try {
-          const errorEvent: StatelessEvent = {
-            type: 'error',
-            data: {
-              message: error instanceof Error ? error.message : String(error),
-            },
-          };
-          await writer.write(encoder.encode(`data: ${JSON.stringify(errorEvent)}\n\n`));
-          await writer.close();
-        } catch {
-          // Writer may already be closed
-        }
-      }
-    })();
-
-    return new Response(readable, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        ...(authority.kind === 'ordinary' ? { [ordinaryClassroomChatHeader]: ordinaryClassroomChatRoute } : {}),
-      },
-    });
+    const runTurn = createClassroomTurn();
+    if (!runTurn) return apiError('UPSTREAM_ERROR', 503, '课堂对话服务尚未配置。');
+    return streamChatEvents((deadline) => statelessGenerate(body, deadline, runTurn), req.signal, 55_000);
   } catch (error) {
     log.error(`Chat request failed [messages=${chatMessageCount ?? 0}]:`, error);
     return apiError(

@@ -1,4 +1,17 @@
-# Classroom director turn
+# Classroom dialogue
+
+Send an authenticated JSON POST to `/v1/classroom-dialogue` with positional `roles` and `history` as defined below, a nonblank `topic` of up to 240 Unicode code points, and nonblank public `slideText` of up to 6,000 code points. The complete request body is limited to 80 KiB.
+
+The service runs the whole dialogue in one stock AgentLoop turn. A successful HTTP response streams newline-terminated records as `application/x-ndjson`. Each validated native speech has a one-based speaker and 1–1,500 Unicode code points of nonblank text. A `done` record carries `next: "user"` or `next: "end"`. Six role speeches automatically hand control to the user.
+
+```ndjson
+{"type":"speech","speaker":3,"text":"Rain falls when water drops in clouds grow heavy enough.","model":"configured-model","usage":{"prompt_tokens":165,"completion_tokens":43,"total_tokens":208}}
+{"type":"done","next":"user","model":"configured-model","usage":{"prompt_tokens":398,"completion_tokens":56,"total_tokens":454}}
+```
+
+Each speech carries cumulative measured usage. On a provider failure or timeout the stream ends with a `{"type":"error"}` record, which also carries `model` and `usage` when measured counts are available. Use the latest receipt as the total for the dialogue. The service cancels processing when the client disconnects, after 45 seconds without a validated speech, or after 150 seconds overall. Request validation and service capacity errors use ordinary JSON status responses.
+
+## Classroom director turn
 
 Send an authenticated JSON POST to `/v1/classroom-director-turn` with the Harness service bearer token. The caller authorizes classroom access and sends only positional roles and the bounded conversation needed to choose the next speaker.
 

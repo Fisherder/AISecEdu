@@ -1,3 +1,4 @@
+import { ordinaryClassroomRoundLimit } from '@/lib/chat/ordinary-classroom-contract';
 import type { AISecEduRequestSession } from '../aisecedu-integration';
 
 export interface ClassroomTurnMessage {
@@ -37,21 +38,21 @@ export interface TeachingTurnImage {
   data: string;
 }
 
-export type ClassroomDirectorRole = 'teacher' | 'assistant' | 'student';
+export type ClassroomDialogueRole = 'teacher' | 'assistant' | 'student';
 
-export interface ClassroomDirectorHistoryEntry {
+export interface ClassroomDialogueHistoryEntry {
   speaker: number | 'user';
   text: string;
 }
 
-export interface ClassroomDirectorInput {
-  roles: ClassroomDirectorRole[];
-  history: ClassroomDirectorHistoryEntry[];
-  turns: number;
-  topic?: string;
+export interface ClassroomDialogueInput {
+  roles: ClassroomDialogueRole[];
+  history: ClassroomDialogueHistoryEntry[];
+  topic: string;
+  slideText: string;
 }
 
-const classroomDirectorTurnPath = '/v1/classroom-director-turn';
+const classroomDialoguePath = '/v1/classroom-dialogue';
 const teachingImageTurnPath = '/v1/teaching-image-turn';
 const maxTextTurnBytes = 1024 * 1024;
 export const MAX_TEACHING_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -66,7 +67,7 @@ export function createTeachingImageTurn(image: TeachingTurnImage): HarnessTurn |
 }
 
 function configuredHarnessEndpoint(
-  path: '/v1/turn' | typeof teachingImageTurnPath | typeof classroomDirectorTurnPath,
+  path: '/v1/turn' | typeof teachingImageTurnPath | typeof classroomDialoguePath,
 ) {
   const mode = (process.env.DOJO_AI_ENABLED || 'auto').trim().toLowerCase();
   const enabled = mode === 'auto' ? process.env.HARNESS_CONFIGURED?.trim().toLowerCase() : mode;
@@ -174,55 +175,148 @@ function validatedUsage(
   return Object.keys(usage).length ? usage : undefined;
 }
 
-export function createClassroomDirectorTurn() {
-  const target = configuredHarnessEndpoint(classroomDirectorTurnPath);
+type ClassroomDialogueEvent =
+  | { type: 'speech'; speaker: number; text: string }
+  | { type: 'done'; next: 'user' | 'end' };
+
+const maxDialogueFrameBytes = 16 * 1024;
+const dialogueFailure = '课堂对话服务暂时不可用。';
+const incompleteDialogue = '课堂对话服务未返回完整答复。';
+
+export function createClassroomDialogue() {
+  const target = configuredHarnessEndpoint(classroomDialoguePath);
   if (!target) return undefined;
 
-  return async (
-    input: ClassroomDirectorInput,
+  return async function* (
+    input: ClassroomDialogueInput,
     signal: AbortSignal,
     capturedSession: AISecEduRequestSession,
-  ) => {
-    const { endpoint, secret } = target;
-    const response = await fetch(endpoint, {
+  ): AsyncGenerator<ClassroomDialogueEvent> {
+    const response = await fetch(target.endpoint, {
       method: 'POST',
-      headers: { Authorization: 'Bearer ' + secret, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: 'Bearer ' + target.secret,
+        'Content-Type': 'application/json',
+        Accept: 'application/x-ndjson',
+      },
       body: JSON.stringify(input),
       cache: 'no-store',
       redirect: 'error',
       signal,
     }).catch(() => {
       signal.throwIfAborted();
-      throw new Error('课堂导播服务暂时不可用。');
+      throw new Error(dialogueFailure);
     });
-    const result: {
-      decision?: { speaker?: unknown };
-      model?: unknown;
-      usage?: Partial<Record<keyof HarnessUsage, unknown>>;
-    } = await response.json().catch(() => {
-      signal.throwIfAborted();
-      throw new Error('课堂导播服务未返回有效答复。');
-    });
-    if (typeof result?.model === 'string' && result.model.trim()) {
-      await recordHarnessUsage(
-        { model: result.model, usage: validatedUsage(result.usage) },
-        'chat-adapter',
-        capturedSession,
-      );
-    }
-    if (!response.ok) throw new Error('课堂导播服务暂时不可用。');
 
-    const speaker = result?.decision?.speaker;
-    if (
-      (speaker !== 'user' && speaker !== 'end' &&
-        (typeof speaker !== 'number' || !Number.isSafeInteger(speaker) ||
-          speaker < 1 || speaker > input.roles.length)) ||
-      typeof result?.model !== 'string' ||
-      !result.model.trim()
-    ) {
-      throw new Error('课堂导播服务未返回有效答复。');
+    if (!response.ok || !response.body ||
+      response.headers.get('Content-Type')?.split(';', 1)[0].trim() !== 'application/x-ndjson') {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(dialogueFailure);
     }
-    return speaker;
+
+    const reader = response.body.getReader();
+    const cancelRead = () => { void reader.cancel().catch(() => {}); };
+    signal.addEventListener('abort', cancelRead, { once: true });
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    let frame = '';
+    let frameBytes = 0;
+    let speeches = 0;
+    let next: 'user' | 'end' | undefined;
+    let reachedEOF = false;
+    let billing: { model: string; usage: HarnessUsage } | undefined;
+
+    function acceptUsage(model: unknown, usage: unknown) {
+      if (typeof model !== 'string' || !model.trim() || model.length > 200 ||
+        !usage || typeof usage !== 'object' || Array.isArray(usage)) {
+        throw new Error(incompleteDialogue);
+      }
+
+      const validated: HarnessUsage = {};
+      const reported = usage as Record<string, unknown>;
+      for (const field of usageFields) {
+        if (!Object.hasOwn(reported, field)) continue;
+        const tokens = reported[field];
+        if (typeof tokens !== 'number' || !Number.isSafeInteger(tokens) || tokens < 0) {
+          throw new Error(incompleteDialogue);
+        }
+        validated[field] = tokens;
+      }
+      if (!validated.prompt_tokens || !validated.completion_tokens) {
+        throw new Error(incompleteDialogue);
+      }
+      if (billing && (billing.model !== model || usageFields.some((field) =>
+        (validated[field] ?? 0) < (billing?.usage[field] ?? 0)))) {
+        throw new Error(incompleteDialogue);
+      }
+      billing = { model, usage: validated };
+    }
+
+    try {
+      for (;;) {
+        signal.throwIfAborted();
+        const { value, done } = await reader.read();
+        if (done) {
+          reachedEOF = true;
+          break;
+        }
+
+        for (let offset = 0; offset < value.length;) {
+          if (next) throw new Error(incompleteDialogue);
+          const newline = value.indexOf(10, offset);
+          const end = newline === -1 ? value.length : newline;
+          frameBytes += end - offset;
+          if (frameBytes > maxDialogueFrameBytes) throw new Error(incompleteDialogue);
+          frame += decoder.decode(value.subarray(offset, end), { stream: newline === -1 });
+          if (newline === -1) break;
+
+          offset = newline + 1;
+          const event: unknown = JSON.parse(frame);
+          frame = '';
+          frameBytes = 0;
+          if (!event || typeof event !== 'object') throw new Error(incompleteDialogue);
+          const record = event as Record<string, unknown>;
+          if (record.type === 'speech') {
+            const { speaker, text } = record;
+            if (typeof speaker !== 'number' || !Number.isInteger(speaker) ||
+              speaker < 1 || speaker > input.roles.length ||
+              typeof text !== 'string' || !text.trim() || Array.from(text).length > 1500 ||
+              ++speeches > ordinaryClassroomRoundLimit) {
+              throw new Error(incompleteDialogue);
+            }
+            acceptUsage(record.model, record.usage);
+            yield { type: 'speech', speaker, text };
+            continue;
+          }
+
+          if (record.type === 'error') {
+            if (record.model !== undefined && record.usage !== undefined) {
+              acceptUsage(record.model, record.usage);
+            }
+            throw new Error(dialogueFailure);
+          }
+          if (record.type !== 'done' || (record.next !== 'user' && record.next !== 'end')) {
+            throw new Error(incompleteDialogue);
+          }
+          acceptUsage(record.model, record.usage);
+          next = record.next;
+        }
+      }
+      signal.throwIfAborted();
+      if (!next || frameBytes !== 0) throw new Error(incompleteDialogue);
+    } catch (error) {
+      signal.throwIfAborted();
+      throw new Error(error instanceof Error && error.message === dialogueFailure
+        ? dialogueFailure
+        : incompleteDialogue);
+    } finally {
+      signal.removeEventListener('abort', cancelRead);
+      if (!reachedEOF) cancelRead();
+      reader.releaseLock();
+      if (billing && Object.keys(billing.usage).length) {
+        await recordHarnessUsage(billing, 'chat-adapter-stream', capturedSession);
+      }
+    }
+    yield { type: 'done', next };
   };
 }
 

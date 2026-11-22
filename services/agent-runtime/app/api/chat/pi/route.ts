@@ -6,10 +6,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import {
-  ordinaryClassroomChatHeader,
-  ordinaryClassroomChatRoute,
-} from '@/lib/chat/ordinary-classroom-contract';
+import { streamOrdinaryClassroomChat } from '../ordinary';
 import { isPiChatEnabled } from '@/lib/config/feature-flags';
 import i18n from '@/lib/i18n/config';
 import { defaultLocale, supportedLocales, translate } from '@/lib/i18n';
@@ -70,11 +67,7 @@ export async function POST(req: NextRequest) {
 
     const authority = await resolveOrdinaryClassroomChat(req, body);
     if (authority.kind === 'error') return authority.response;
-    if (authority.kind === 'ordinary') {
-      const response = apiError('INVALID_REQUEST', 409, '请使用普通课堂对话。');
-      response.headers.set(ordinaryClassroomChatHeader, ordinaryClassroomChatRoute);
-      return response;
-    }
+    if (authority.kind === 'ordinary') return streamOrdinaryClassroomChat(req, body, authority);
 
     const agentConfigs = resolveAgentConfigs(body);
     const resolvedAgentIds = new Set(agentConfigs.map((agent) => agent.id));

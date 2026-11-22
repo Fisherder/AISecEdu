@@ -14,7 +14,8 @@
 import {
   ordinaryClassroomChatHeader,
   ordinaryClassroomChatRoute,
-  ordinaryClassroomRoundLimit,
+  ordinaryClassroomDialogueVersion,
+  ordinaryClassroomDialogueVersionHeader,
 } from './ordinary-classroom-contract';
 import type { StatelessEvent, DirectorState } from '@/lib/types/chat';
 import type { ThinkingConfig } from '@/lib/types/provider';
@@ -163,7 +164,6 @@ export async function runAgentLoop(
   let directorState: DirectorState | undefined = undefined;
   let turnCount = 0;
   let consecutiveEmptyTurns = 0;
-  let ordinaryTurns = 0;
 
   while (true) {
     if (signal.aborted) {
@@ -204,12 +204,20 @@ export async function runAgentLoop(
       throw new Error(`API error: ${response.status} - ${errorText}`);
     }
 
+    const ordinary = response.headers.get(ordinaryClassroomChatHeader) === ordinaryClassroomChatRoute;
+    if (ordinary && response.headers.get(ordinaryClassroomDialogueVersionHeader) !== ordinaryClassroomDialogueVersion) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error('课堂对话已更新，请刷新页面后重试。');
+    }
+
     // Parse SSE stream and process events
     const reader = response.body?.getReader();
     if (!reader) throw new Error('No response body');
 
     const decoder = new TextDecoder();
     let sseBuffer = '';
+    let sawOrdinaryDone = false;
+    let invalidOrdinaryStream = false;
 
     try {
       while (true) {
@@ -226,9 +234,13 @@ export async function runAgentLoop(
 
           try {
             const event: StatelessEvent = JSON.parse(line.slice(6));
+            if (ordinary) {
+              if (sawOrdinaryDone || event.type === 'error') invalidOrdinaryStream = true;
+              if (event.type === 'done') sawOrdinaryDone = true;
+            }
             callbacks.onEvent(event);
           } catch {
-            // Skip malformed events (heartbeats, etc.)
+            if (ordinary) invalidOrdinaryStream = true;
           }
         }
       }
@@ -238,6 +250,12 @@ export async function runAgentLoop(
 
     if (signal.aborted) {
       return { reason: 'aborted', directorState, turnCount };
+    }
+
+    // The UI buffer drains only after receiving done. A truncated ordinary
+    // response must report interruption without entering that wait.
+    if (ordinary && (!sawOrdinaryDone || invalidOrdinaryStream || sseBuffer.trim())) {
+      return { reason: 'no_done', directorState, turnCount };
     }
 
     // Post-iteration: wait for buffer drain (frontend) or collect results (eval)
@@ -257,12 +275,10 @@ export async function runAgentLoop(
       return { reason: 'cue_user', directorState, turnCount };
     }
 
-    if (iterationResult.totalAgents > 0 &&
-      response.headers.get(ordinaryClassroomChatHeader) === ordinaryClassroomChatRoute) {
-      ordinaryTurns++;
-      if (ordinaryTurns >= ordinaryClassroomRoundLimit) {
-        return { reason: 'cue_user', directorState, turnCount };
-      }
+    // The ordinary stream covers the entire opportunity, including a terminal
+    // END received after one or more contributions.
+    if (ordinary) {
+      return { reason: 'end', directorState, turnCount };
     }
 
     // Director said END — no agent spoke
