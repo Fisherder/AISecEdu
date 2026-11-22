@@ -1,4 +1,4 @@
-import { useAgentRegistry } from '@/lib/orchestration/registry/store';
+import { getDefaultAgent } from '@/lib/orchestration/registry/defaults';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import type { StatelessChatRequest } from '@/lib/types/chat';
 
@@ -18,9 +18,8 @@ export function resolveAgentConfigs(body: StatelessChatRequest): AgentConfig[] {
     });
   }
 
-  const registry = useAgentRegistry.getState();
   return body.config.agentIds
-    .map((id) => overrides.get(id) ?? registry.getAgent(id))
+    .map((id) => overrides.get(id) ?? getDefaultAgent(id))
     .filter((agent): agent is AgentConfig => Boolean(agent));
 }
 

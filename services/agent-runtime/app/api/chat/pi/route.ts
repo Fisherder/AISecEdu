@@ -8,8 +8,9 @@
 import { NextRequest } from 'next/server';
 import { streamOrdinaryClassroomChat } from '../ordinary';
 import { isPiChatEnabled } from '@/lib/config/feature-flags';
-import i18n from '@/lib/i18n/config';
-import { defaultLocale, supportedLocales, translate } from '@/lib/i18n';
+import { supportedLocales } from '@/lib/i18n/locales';
+import { getServerTranslator } from '@/lib/i18n/server';
+import { defaultLocale } from '@/lib/i18n/types';
 import { createLogger } from '@/lib/logger';
 import {
   getPiMaxActionsPerAgent,
@@ -137,7 +138,7 @@ export async function POST(req: NextRequest) {
           ?? supportedLocales.find(({ code }) => code.toLowerCase() === browserLanguage)?.code
           ?? supportedLocales.find(({ code }) => code.split('-')[0] === browserLanguage?.split('-')[0])?.code
           ?? defaultLocale;
-        await i18n.loadLanguages(locale);
+        const translate = await getServerTranslator(locale);
 
         await runHarnessClassroom({
           body,
@@ -146,8 +147,8 @@ export async function POST(req: NextRequest) {
           runTurn,
           signal: deadline,
           messages: {
-            invalidDecision: translate(locale, 'chat.error.invalidDirectorDecision'),
-            interrupted: translate(locale, 'chat.error.directorInterrupted'),
+            invalidDecision: translate('chat.error.invalidDirectorDecision'),
+            interrupted: translate('chat.error.directorInterrupted'),
           },
           maxAgentTurns,
           maxActionsPerAgent,

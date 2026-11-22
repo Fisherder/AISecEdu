@@ -6,6 +6,14 @@ import type { DirectorState, StatelessEvent } from '@/lib/types/chat';
 
 vi.mock('@/lib/server/usage-storage', () => ({ recordUsage: vi.fn() }));
 
+vi.mock('react-i18next', () => {
+  throw new Error('The chat route must load without the React i18n adapter');
+});
+
+vi.mock('@/lib/orchestration/registry/store', () => {
+  throw new Error('The chat route must load without the client agent registry');
+});
+
 const fetchTurn = vi.fn<typeof fetch>();
 
 function request(

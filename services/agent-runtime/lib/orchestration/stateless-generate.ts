@@ -6,7 +6,7 @@ import type {
 } from '@/lib/server/agent-harness/classroom-turn';
 import type { StatelessChatRequest, StatelessEvent, ParsedAction } from '@/lib/types/chat';
 import type { WhiteboardActionRecord } from './types';
-import { useAgentRegistry } from './registry/store';
+import { getDefaultAgent } from './registry/defaults';
 import { SLIDE_ACTIONS, WHITEBOARD_ACTIONS, type AgentConfig } from './registry/types';
 import { buildStructuredPrompt } from './prompt-builder';
 import { buildDirectorPrompt, parseDirectorDecision } from './director-prompt';
@@ -389,7 +389,7 @@ function classroomAgents(request: StatelessChatRequest): AgentConfig[] {
     ]),
   );
   return request.config.agentIds
-    .map((id) => overrides.get(id) ?? useAgentRegistry.getState().getAgent(id))
+    .map((id) => overrides.get(id) ?? getDefaultAgent(id))
     .filter((agent): agent is AgentConfig => agent !== undefined);
 }
 
