@@ -3234,8 +3234,8 @@ class LearningTutor(Resource):
         challenge = get_current_dojo_challenge(user)
         attempt = active_attempt(user.id, challenge) if challenge else None
         mark("attemptLookup")
-        if not attempt:
-            return {"success": False, "error": "当前没有活动题目会话"}, 409
+        if attempt is None or ("attemptId" in data and data["attemptId"] != attempt.id):
+            return {"success": False, "error": "当前题目会话已变化，请重新打开学习助手"}, 409
         if not question:
             return {"success": False, "error": "问题不能为空"}, 400
         profile = LearningChallengeProfiles.query.get(attempt.challenge_id)

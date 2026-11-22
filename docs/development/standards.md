@@ -8,6 +8,8 @@
 
 代码基线由 `/srv/aisecedu-team/repository.git` 提供只读分发，维护源码在 `/srv/aisecedu-team/source`。个人 clone 不包含数据库、Home、运行配置或真实密钥。团队工具链为 Python 3.12、Node.js 22.x、pnpm 10.28.0，项目依赖遵守各自锁文件。
 
+直接在本机运行 `services/deepseek-harness` 或其 HTTP 夹具测试时，使用独立的 Node.js 24 工具链，版本至少为 `24.9.0`。该服务的 Docker 镜像和 CI 已选用 Node.js 24。
+
 普通开发者不获得宿主机 sudo、Docker、ZFS 或生产秘密权限。服务器上 `aisecedu-dev` 的有限 sudo 授权只运行固定的预约和任务登记程序，不提供命令执行或部署能力。新成员名单、公钥和仓库授权由维护者管理。
 
 ## 任务和版本管理

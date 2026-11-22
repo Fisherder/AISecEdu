@@ -145,10 +145,10 @@ export function validateProviderURL(value) {
   const authority = /^https?:\/\/([^/?#]+)/i.exec(baseURL)?.[1];
   const exactLoopback = /^(127\.0\.0\.1|\[::1\]|localhost)(?::[0-9]+)?$/i.test(authority ?? '');
   if (
-    parsed.username || parsed.password || parsed.search || parsed.hash ||
+    parsed.username || parsed.password || /[?#]/.test(baseURL) ||
     (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && exactLoopback))
   ) {
-    throw new Error('Provider URL must use HTTPS or an explicit loopback HTTP fixture');
+    throw new Error('Provider URL must use HTTPS or an explicit loopback HTTP fixture, with no credentials, query, or fragment');
   }
   return parsed.href.replace(/\/+$/, '');
 }

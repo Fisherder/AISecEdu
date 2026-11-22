@@ -622,6 +622,11 @@ export function buildCallAgentTool(opts: {
         };
       }
 
+      const { harnessTurn, languageModel } = opts;
+      if (!harnessTurn && !languageModel) {
+        throw new Error('Classroom role model is unavailable');
+      }
+
       // Evidence is request-scoped and belongs to exactly one valid child delegation.
       // Take it before starting/building the child so any downstream failure cannot
       // leak the packet to a later agent.
@@ -715,8 +720,8 @@ export function buildCallAgentTool(opts: {
       try {
         opts.abortSignal.throwIfAborted();
         signal?.throwIfAborted();
-        if (opts.harnessTurn) {
-          const result = await opts.harnessTurn(
+        if (harnessTurn) {
+          const result = await harnessTurn(
             [
               { role: 'system', content: systemPrompt },
               ...convertMessagesToOpenAI(opts.body.messages.slice(-12), agent.id),
@@ -727,14 +732,14 @@ export function buildCallAgentTool(opts: {
           await recordHarnessUsage(result, 'pi-chat-child');
           rawText = result.text;
           await onText(result.text);
-        } else if (opts.languageModel) {
+        } else if (languageModel) {
           const [{ buildAgent }, { createCallLlmStreamFn }] = await Promise.all([
             import('@/lib/agent/runtime/build-agent'),
             import('@/lib/agent/runtime/stream-fn'),
           ]);
           const child = buildAgent({
             streamFn: createCallLlmStreamFn({
-              languageModel: opts.languageModel,
+              languageModel,
               source: 'pi-chat-child',
               thinkingConfig: opts.thinkingConfig,
               maxOutputTokens: opts.maxOutputTokens,
@@ -752,17 +757,15 @@ export function buildCallAgentTool(opts: {
           await child.prompt(prompt);
           await child.waitForIdle();
           rawText = extractLastAssistantText(child.state.messages);
-        } else {
-          throw new Error('Classroom role model is unavailable');
         }
       } catch (error) {
         childErrored = true;
-        if (opts.abortSignal.aborted || signal?.aborted || opts.harnessTurn) throw error;
+        if (opts.abortSignal.aborted || signal?.aborted || harnessTurn) throw error;
       } finally {
         unsubscribe?.();
         opts.abortSignal.removeEventListener('abort', abortChild);
         signal?.removeEventListener('abort', abortChild);
-        if (opts.harnessTurn && childErrored) {
+        if (harnessTurn && childErrored) {
           await opts.send({ type: 'agent_end', data: { messageId, agentId: agent.id } });
         }
       }

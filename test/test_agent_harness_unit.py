@@ -811,6 +811,26 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     ("请导出这份教案为 PDF，也给我 Markdown", "execute", ("md",)),
     ("请根据我提供的 PDF 资料写一份教案", "auto", ("docx",)),
     ("请写一份教案，不用导出为 PDF", "auto", ("docx",)),
+    ("请生成 HTML 教案", "auto", ()),
+    ("给我一份 PPT 教案", "execute", ()),
+    ("请写一份 ODT 教案", "auto", ()),
+    ("请生成“HTML”教案", "auto", ()),
+    ("请生成 `ODT` 教案", "auto", ()),
+    ("请写一份教案，PPTX 格式", "auto", ()),
+    ("Please generate an ODT lesson plan", "auto", ()),
+    ("我不想做教案，只给我一些建议", "auto", ()),
+    ("别生成 docx", "auto", ()),
+    ("请勿生成 docx", "execute", ()),
+    ("Do not generate a docx.", "execute", ()),
+    ("Don't create a DOCX, but provide a Markdown handout", "auto", ("md",)),
+    ("我不想只生成 Word 教案，还要 Markdown 文件", "auto", ("docx", "md")),
+    ("参考《请勿生成 DOCX》这份资料，帮我写一份教案", "auto", ("docx",)),
+    ("阅读「生成 HTML 教案」这句示例，然后提供授课建议", "auto", ()),
+    ("请根据这份 HTML 格式资料写一份教案", "auto", ("docx",)),
+    ("请根据名为“Markdown”的资料生成教案", "auto", ("docx",)),
+    ("请给我《植物观察教案》", "auto", ("docx",)),
+    ("请把《植物观察教案》改写得更清楚", "auto", ("docx",)),
+    ("制作教案，给我“DOCX”和“Markdown”文件", "auto", ("docx", "md")),
 ])
 def test_teacher_document_requires_an_explicit_supported_request(prompt, mode, expected):
     documents = load("dojo_plugin/agent_runtime/teacher_documents.py", {})
@@ -822,6 +842,7 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
     import zipfile
 
     from flask import Flask, request, send_file
+    from werkzeug.http import parse_options_header
 
     session, thread, _ = setup
     thread.dojo_id, thread.module_index = 2, 0
@@ -882,6 +903,8 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
         return {"sourceRefs": [approved_source]}
 
     wire_requests = []
+    document_title = "蒸发／冷水/温水\\比较\u202e Pokémon"
+    download_stem = "蒸发-冷水-温水-比较 Pokémon"
 
     def invoke_turn(body, *, encoded):
         assert json.loads(encoded) == body
@@ -895,7 +918,7 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
             "usage": {"prompt_tokens": 7, "completion_tokens": 11},
             "text": json.dumps({
                 "answer": "模型声称的链接不作为交付地址 https://example.invalid/file",
-                "document": {"title": "蒸发教学教案", "sections": [{
+                "document": {"title": document_title, "sections": [{
                     "heading": "观察目标",
                     "paragraphs": ["记录同样大小的碟子中温水与冷水的变化。", "HTML 字符示例 <b>是文本</b>。"],
                 }]},
@@ -975,14 +998,20 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
         owner_download = browser.get(public["downloadUrl"], headers={"Fixture-User": "7"})
         assert owner_download.status_code == 200
         assert owner_download.headers["Cache-Control"] == "private, no-store"
-        assert owner_download.headers["Content-Disposition"].startswith("attachment")
+        disposition, params = parse_options_header(owner_download.headers["Content-Disposition"])
+        assert disposition == "attachment"
+        assert params["filename"] == public["filename"] == f"{download_stem}.{public['format']}"
+        assert public["title"] == document_title
         assert browser.get(public["downloadUrl"], headers={"Fixture-User": "8"}).status_code == 404
         if public["format"] == "docx":
             with zipfile.ZipFile(io.BytesIO(owner_download.data)) as archive:
-                assert "观察目标" in archive.read("word/document.xml").decode()
+                docx_text = archive.read("word/document.xml").decode()
+                assert "观察目标" in docx_text
+                assert document_title in docx_text
                 assert not any("vba" in name.lower() for name in archive.namelist())
         else:
             assert "## 观察目标" in owner_download.text
+            assert document_title.replace("\\", "\\\\") in owner_download.text
             assert "&lt;b&gt;是文本&lt;/b&gt;" in owner_download.text
 
     allowed_ids.clear()
@@ -1037,6 +1066,8 @@ def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_target
     monkeypatch.delenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", raising=False)
     assert scope(create, candidate) is None
     monkeypatch.setenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "2, -5")
+    # Dojos use signed 32-bit identifiers. The sign is part of the course identity.
+    assert turn.ordinary_teaching_course(-5) and not turn.ordinary_teaching_course(5)
     assert scope(create, candidate) == "candidate-plan"
     assert scope(enrich, material) == "material-summary"
     assert scope(revise, slide) == "slide-wording"

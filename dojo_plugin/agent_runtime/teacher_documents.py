@@ -12,28 +12,45 @@ DOCUMENT_REQUEST = re.compile(
     re.I,
 )
 DOCUMENT_QUESTION = re.compile(r"^(?:请问[，, ]*)?(?:如何|怎样|怎么|什么是|how\b|what\b)", re.I)
-_REFUSAL = r"(?:无需|不需要|不用|不要|不必)(?:\s*(?:请)?帮我)?"
-_DELIVERY_VERB = r"(?:生成|制作|创建|写|做|撰写|编写|起草|导出|输出|返回|交付|提供|下载|给我)"
+_REFUSAL = r"(?:无需|不需要|不用|不要|不必|不想|请勿|别)(?:\s*(?:请)?帮我)?"
+_DELIVERY_VERB = r"(?:生成|制作|创建|写|做|撰写|编写|起草|导出|输出|返回|交付|提供|保存|下载|给我)"
 _DOCUMENT_AMOUNT = r"(?:一份|一个|一篇|任何|可下载的?)"
+_ENGLISH_REFUSAL = r"\b(?:do\s+not|don['’]t|never|no|not)"
+_ENGLISH_DELIVERY = r"(?:write|draft|make|create|prepare|generate|provide|export|deliver|return|want|need)"
+_ENGLISH_AMOUNT = r"(?:(?:an?|any)\s+)?(?:downloadable\s+)?"
 NO_DOCUMENT = re.compile(
     rf"{_REFUSAL}(?:\s*{_DELIVERY_VERB})?(?:\s*{_DOCUMENT_AMOUNT})?\s*(?:教学|课堂)?(?:文件|文档|教案|讲义)"
-    r"|只(?:在|用)聊天回答|\bno downloadable files?\b", re.I,
+    rf"|{_ENGLISH_REFUSAL}\s+(?:{_ENGLISH_DELIVERY}\s+)?{_ENGLISH_AMOUNT}(?:files?|documents?|lesson plans?|handouts?)\b"
+    r"|只(?:在|用)聊天回答", re.I,
 )
 NO_FORMAT = re.compile(
     rf"(?:{_REFUSAL}(?:\s*{_DELIVERY_VERB}(?:\s*[为成])?)?(?:\s*{_DOCUMENT_AMOUNT})?"
-    r"|不生成|\bno|\bnot)\s*\.?$", re.I,
+    rf"|不生成|{_ENGLISH_REFUSAL}(?:\s+{_ENGLISH_DELIVERY})?\s*{_ENGLISH_AMOUNT})\s*\.?$", re.I,
 )
-PDF_FORMAT = re.compile(r"(?<![a-z\d_])\.?pdf(?![a-z\d_])", re.I)
-PDF_DELIVERY_PREFIX = re.compile(
-    rf"(?:{_DELIVERY_VERB}(?:\s*[为成])?(?:\s*{_DOCUMENT_AMOUNT})?"
-    r"|(?:导出|输出|交付|保存)[^，。；！？,;!?\n]{0,24}[为成]"
-    r"|\b(?:export|return|deliver|save|convert)\b[^,;.!?\n]{0,40}\b(?:as|to))\s*$", re.I,
-)
-PDF_DELIVERY_SUFFIX = re.compile(r"\s*(?:格式|版)")
 UNSUPPORTED_FORMAT = re.compile(
-    r"(?:导出|交付|输出|返回|制作)(?:为|成)?\s*(?:html|ipynb|docm|xlsm|exe|powershell|notebook|脚本|可执行)"
-    r"|\.(?:html|ipynb|docm|xlsm|exe|ps1)(?![a-z\d_])|脚本文件|可执行文件", re.I,
+    r"(?<![a-z\d_])\.?(?:pdf|html?|pptx?|odt|rtf|txt|csv|xlsx?|ods|"
+    r"ipynb|docm|xlsm|exe|ps1|powershell|notebook)(?![a-z\d_])|脚本文件|可执行文件", re.I,
 )
+_ACTIVE_FORMATS = {
+    "html", "htm", "ipynb", "docm", "xlsm", "exe", "ps1", "powershell", "notebook", "脚本文件", "可执行文件",
+}
+_FORMAT_DELIVERY_PREFIX = re.compile(
+    rf"(?:{_DELIVERY_VERB}(?:\s*[为成])?(?:\s*{_DOCUMENT_AMOUNT})?"
+    rf"|{_DELIVERY_VERB}[^，。；！？,;!?\n]{{0,24}}[为成]"
+    rf"|\b{_ENGLISH_DELIVERY}\s+{_ENGLISH_AMOUNT}"
+    r"|\b(?:export|return|deliver|save|convert)\b[^,;.!?\n]{0,40}\b(?:as|to)\s*)\s*$", re.I,
+)
+_FORMAT_DELIVERY_SUFFIX = re.compile(r"\s*(?:格式|版)")
+_FORMAT_CLAUSE_PREFIX = re.compile(r"(?:^|[，。；！？,;!?\n])\s*(?:请)?(?:用|要|需要)?\s*$")
+_QUOTED_TEXT = re.compile(
+    r'“([^”]*)”|「([^」]*)」|『([^』]*)』|《([^》]*)》|"([^"\n]*)"|［([^］]*)］'
+    r'|(?<!`)`([^`\n]*)`(?!`)'
+)
+_FORMAT_JOIN_PREFIX = re.compile(
+    r'(?:docx|word|markdown|\.md|pdf|html?|pptx?|odt)[”」』》"］`]?\s*(?:和|及|或|、|\band\b|\bor\b)\s*$',
+    re.I,
+)
+_UNSAFE_FILENAME_CHARS = frozenset('\\/:*?"<>|／＼∕⁄⧸⧹')
 FORBIDDEN_DOCUMENT_MARKUP = re.compile(r"`{3,}|~{3,}|<\s*/?\s*(?:script|iframe|object|embed)\b", re.I)
 FORMATS = (("docx", WORD_FORMAT), ("md", MARKDOWN_FORMAT))
 DOCUMENT_INSTRUCTION = (
@@ -47,6 +64,35 @@ DOCUMENT_INSTRUCTION = (
 )
 
 
+def _unquoted_request(prompt):
+    def mask(match):
+        text = next(group for group in match.groups() if group is not None).strip()
+        # Teachers can quote a format token. Quoted titles and examples are only reference data.
+        delivery = _FORMAT_DELIVERY_PREFIX.search(prompt, 0, match.start())
+        if (
+            any(pattern.fullmatch(text) for _, pattern in FORMATS) or UNSUPPORTED_FORMAT.fullmatch(text)
+        ) and (
+            delivery or _FORMAT_JOIN_PREFIX.search(prompt, 0, match.start())
+            or _FORMAT_DELIVERY_SUFFIX.match(prompt, match.end())
+        ):
+            return f" {text} "
+        is_document_title = (delivery or match.group().startswith("《")) and DOCUMENT_SUBJECT.search(text)
+        return " 教案 " if is_document_title else " "
+
+    return _QUOTED_TEXT.sub(mask, prompt)
+
+
+def _unsupported_outputs(prompt):
+    for match in UNSUPPORTED_FORMAT.finditer(prompt):
+        if NO_FORMAT.search(prompt, 0, match.start()):
+            continue
+        if _FORMAT_DELIVERY_PREFIX.search(prompt, 0, match.start()) or (
+            _FORMAT_DELIVERY_SUFFIX.match(prompt, match.end())
+            and _FORMAT_CLAUSE_PREFIX.search(prompt, 0, match.start())
+        ):
+            yield match.group().lower().lstrip(".")
+
+
 def requested_document_formats(payload):
     mode = payload.get("executionMode") or "auto"
     context = payload.get("context") or {}
@@ -55,12 +101,15 @@ def requested_document_formats(payload):
         or (context.get("agentLoop") or {}).get("trace")
     ):
         return ()
-    prompt = str(payload.get("prompt") or "").strip()
+    prompt = _unquoted_request(str(payload.get("prompt") or "").strip())
     if (
         not DOCUMENT_REQUEST.search(prompt)
         or not (DOCUMENT_SUBJECT.search(prompt) or any(pattern.search(prompt) for _, pattern in FORMATS))
-        or DOCUMENT_QUESTION.match(prompt) or NO_DOCUMENT.search(prompt) or UNSUPPORTED_FORMAT.search(prompt)
+        or DOCUMENT_QUESTION.match(prompt) or NO_DOCUMENT.search(prompt)
     ):
+        return ()
+    unsupported = set(_unsupported_outputs(prompt))
+    if unsupported & _ACTIVE_FORMATS:
         return ()
     formats = []
     for file_format, pattern in FORMATS:
@@ -70,13 +119,8 @@ def requested_document_formats(payload):
                 break
     if formats:
         return tuple(formats)
-    if any(pattern.search(prompt) for _, pattern in FORMATS):
+    if unsupported or any(pattern.search(prompt) for _, pattern in FORMATS):
         return ()
-    for match in PDF_FORMAT.finditer(prompt):
-        if not NO_FORMAT.search(prompt, 0, match.start()) and (
-            PDF_DELIVERY_PREFIX.search(prompt, 0, match.start()) or PDF_DELIVERY_SUFFIX.match(prompt, match.end())
-        ):
-            return ()
     return ("docx",)
 
 
@@ -98,6 +142,15 @@ def _plain_text(value, limit):
 def _markdown_text(value):
     escaped = re.sub(r"([\\`*_\[\]()!#~|])", r"\\\1", value)
     return html.escape(escaped, quote=False)
+
+
+def _document_filename(title, file_format):
+    stem = "".join(
+        "-" if character in _UNSAFE_FILENAME_CHARS else character
+        for character in title
+        if unicodedata.category(character) != "Cf"
+    )
+    return f"{stem.strip(' .-') or '教学文件'}.{file_format}"
 
 
 def document_deliverables(document, formats):
@@ -127,7 +180,7 @@ def document_deliverables(document, formats):
     return [
         {
             "format": file_format,
-            "filename": f"{title}.{file_format}",
+            "filename": _document_filename(title, file_format),
             "title": title,
             "document": {
                 "title": render_text(title, file_format),

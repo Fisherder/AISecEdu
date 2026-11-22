@@ -177,25 +177,45 @@ def test_online_tutor_omits_observations_from_an_unverified_chain(tutor):
     assert RAW_ENVIRONMENT not in json.dumps(packet)
 
 
-def test_tutor_http_route_binds_the_authenticated_learner_to_their_active_attempt():
+@pytest.mark.parametrize(("active_id", "client_id", "allowed"), [
+    (None, "foreign", False),
+    ("mine", "foreign", False),
+    ("mine", "mine", True),
+    ("mine", None, True),
+])
+def test_tutor_http_route_binds_the_authenticated_learner_to_their_active_attempt(active_id, client_id, allowed):
     user = SimpleNamespace(id=73)
     challenge = object()
-    active = Mock(return_value=None)
-    answer = Mock()
+    attempt = SimpleNamespace(id=active_id, challenge_id=17) if active_id else None
+    active = Mock(return_value=attempt)
+    profile = object()
+    answer = Mock(return_value={"answer": "先回顾本题目标。"})
+    session = Mock()
+    question = "如何复习本题？"
+    body = {"question": question}
+    if client_id is not None:
+        body["attemptId"] = client_id
     namespace = {
         "learning_namespace": SimpleNamespace(route=lambda _: (lambda cls: cls)),
         "Resource": object,
         "authed_only": lambda handler: handler,
         "get_current_user": lambda: user,
-        "request": SimpleNamespace(get_json=lambda **_: {"question": "如何复习本题？", "attemptId": "foreign"}),
+        "request": SimpleNamespace(get_json=lambda **_: body),
         "get_current_dojo_challenge": Mock(return_value=challenge),
         "active_attempt": active,
         "tutor_reply": answer,
-        "time": time,
+        "LearningChallengeProfiles": SimpleNamespace(query=SimpleNamespace(get=Mock(return_value=profile))),
+        "db": SimpleNamespace(session=session), "logger": Mock(), "json": json, "time": time,
     }
     load_definitions("dojo_plugin/api/v1/learning.py", namespace, {"LearningTutor"})
-    payload, status = namespace["LearningTutor"]().post()
-    assert status == 409
-    assert payload["success"] is False
+    result = namespace["LearningTutor"]().post()
     active.assert_called_once_with(user.id, challenge)
-    answer.assert_not_called()
+    if allowed:
+        assert result["success"] and result["reply"] == answer.return_value
+        answer.assert_called_once_with(attempt, user, question, profile)
+        session.commit.assert_called_once_with()
+    else:
+        payload, status = result
+        assert status == 409 and payload["success"] is False
+        answer.assert_not_called()
+        session.commit.assert_not_called()

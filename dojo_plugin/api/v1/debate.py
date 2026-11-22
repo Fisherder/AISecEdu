@@ -93,6 +93,15 @@ def _view(attempt, review=False):
     return data
 
 
+def _reported_model(value):
+    if not isinstance(value, str) or ":" not in value:
+        raise ValueError("AI响应缺少实际模型信息，请重试")
+    provider, model = (part.strip() for part in value.split(":", 1))
+    if not provider or not model or len(provider) > 80 or len(model) > 160:
+        raise ValueError("AI响应中的模型信息无效，请重试")
+    return provider, model
+
+
 def _request_key(body):
     key = body.get("requestId")
     if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", key):
@@ -201,12 +210,7 @@ class DebateActivity(Resource):
             result = response.json()
             if not result.get("success") or not isinstance(result.get("result"), dict):
                 raise ValueError("AI响应格式不完整，请重试")
-            reported_model = result.get("model")
-            if not isinstance(reported_model, str) or ":" not in reported_model:
-                raise ValueError("AI响应缺少实际模型信息，请重试")
-            provider, actual_model = reported_model.split(":", 1)
-            if not provider.strip() or not actual_model.strip() or len(provider) > 80 or len(actual_model) > 160:
-                raise ValueError("AI响应中的模型信息无效，请重试")
+            provider, actual_model = _reported_model(result.get("model"))
             attempt = DebateAttempts.query.filter_by(id=attempt_id, user_id=user.id).populate_existing().with_for_update().one()
             if (attempt.pending or {}).get("lease") != lease:
                 return _error("这次回应已过期，请刷新记录后重试", 409)
@@ -228,7 +232,7 @@ class DebateActivity(Resource):
             attempt.pending = None
             usage = result.get("usage") or {}
             db.session.add(ModelInvocations(owner_id=user.id, route="debate-dialogue",
-                provider=provider, actual_model=actual_model, model_version=reported_model[:80],
+                provider=provider, actual_model=actual_model, model_version=f"{provider}:{actual_model}"[:80],
                 parameters={"artifactId": artifact.id, "attemptId": attempt.id, "action": action,
                             "workspaceId": artifact.self_workspace_id},
                 usage={k: max(0, int(usage.get(k) or 0)) for k in ("inputTokens", "outputTokens")},
