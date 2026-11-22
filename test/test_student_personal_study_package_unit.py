@@ -12,6 +12,7 @@ MODULE = Path(__file__).resolve().parents[1] / "dojo_plugin/learning/student_age
 FUNCTIONS = {
     "_explicit_creation_request",
     "personal_study_package_requested",
+    "personal_study_product_requested",
     "_plain_study_text",
     "_study_values",
     "_plain_study_package",
@@ -143,6 +144,12 @@ def test_personal_study_package_rejects_executable_fields_before_materialization
     "生成学习包已完成。",
     "请生成学习包之前先讲讲概念。",
     "请生成学习包。请取消刚才的请求。",
+    "请生成学习包，不要生成任何东西",
+    "生成学习包算了",
+    "生成学习包取消",
+    "生成学习包，取消",
+    "Create a study package, don't generate anything.",
+    "Create a study package, cancel.",
     "请生成自学包。不要学习包。",
     "请生成自学包。不要“学习包”。",
     "请制作学习讲义。不要学习讲义。",
@@ -177,15 +184,11 @@ def test_denied_package_requests_do_not_create_a_workspace_or_call_the_model(pro
     "请解释盆栽观察。再生成一份学习包。",
     "不需要生成幻灯片。请生成一个学习包。",
     "请生成一个学习包。别生成幻灯片。",
-    "请生成一个学习包。不要概念自检。",
-    "请制作一份关于盆栽观察的学习讲义。",
     "Don't make a slide deck. Please generate a learning package.",
     "Create a 30-minute, beginner-friendly learning package.",
     "不要生成学习包。改主意了，请生成一个学习包。",
     "请根据上节课内容生成一份学习包。",
     "请根据之前的课堂笔记生成学习包。",
-    "请根据上节课的学习包资料生成学习讲义。",
-    "请解释学习包。再生成一份学习讲义。",
     "请不要忘了生成一份学习包。",
     "请生成一个“学习包”。",
     "我要学习包。",
@@ -195,8 +198,8 @@ def test_denied_package_requests_do_not_create_a_workspace_or_call_the_model(pro
     "帮我生成“个人学习包”。",
     'Please create a "personal study pack".',
 
-    "请生成学习讲义。不要概念自检。",
-    "请参考“不要生成学习包”这段课堂资料生成概念自检。",
+    "参考“不要生成任何东西”这句课堂范例，请生成学习包。",
+    "请生成学习包，取消。改主意了。请生成一个学习包。",
     "Please create a study package from my notes.",
 
 ])
@@ -209,3 +212,115 @@ def test_explicit_package_requests_keep_other_clauses_separate(prompt):
     ns["_create_workspace"].assert_called_once()
     assert ns["_create_workspace"].call_args.kwargs == {"personal_study_package": True}
     ns["invoke_turn"].assert_called_once()
+
+
+@pytest.mark.parametrize(("prompt", "product"), [
+    ("请参考“不要生成学习包”这段课堂资料生成概念自检。", "self_check"),
+    ("请生成学习包，只要“概念自检”。", "self_check"),
+    ("请只生成概念自检。", "self_check"),
+    ("请生成学习包，但只生成概念自检。", "self_check"),
+    ("请生成学习包，但不要概念自检。", "handout"),
+    ("请生成学习讲义。不要概念自检。", "handout"),
+    ("请生成学习包，不要概念自检。", "handout"),
+    ("请解释学习包。再生成一份学习讲义。", "handout"),
+    ("请根据上节课的学习包资料生成学习讲义。", "handout"),
+    ("请制作一份关于盆栽观察的学习讲义。", "handout"),
+    ("请生成一个学习包。不要概念自检。", "handout"),
+    ("请生成学习讲义和概念自检。", "package"),
+])
+def test_explicit_study_product_is_the_only_materialized_content(prompt, product):
+    ns = fixture()
+    assert ns["personal_study_product_requested"](prompt) == product
+    raw = ns["result_object"].return_value
+    if product == "self_check":
+        raw["sections"] = []
+    elif product == "handout":
+        raw["concepts"] = []
+    action = ns["create_personal_study_package"](
+        types.SimpleNamespace(id=17), types.SimpleNamespace(id="own", user_id=17), prompt,
+    )
+    assert action["studyProduct"] == product
+    stored = ns["replace_generated_candidates"].call_args.args[1][0]["content"]
+    assert [section["title"] for section in stored["outline"]] == {
+        "self_check": ["概念自检 1"], "handout": ["观察"], "package": ["观察", "概念自检 1"],
+    }[product]
+    assert (stored["assessment"]["criteria"] == []) == (product == "handout")
+    ns["materialize_candidate"].assert_called_once()
+    system = ns["request_body"].call_args.args[0]
+    if product != "package":
+        assert ("sections" if product == "self_check" else "concepts") + " 必须为空数组" in system
+
+
+@pytest.mark.parametrize("prompt", ["请生成概念自检。", "请制作学习讲义。"])
+def test_provider_cannot_expand_an_explicit_study_product(prompt):
+    ns = fixture()
+    with pytest.raises(ValueError, match="条目数量"):
+        ns["create_personal_study_package"](
+            types.SimpleNamespace(id=17), types.SimpleNamespace(id="own", user_id=17), prompt,
+        )
+    ns["create_candidate_set"].assert_not_called()
+    ns["materialize_candidate"].assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["provider", "unsupported", "materialization"])
+def test_http_package_savepoint_does_not_leave_partial_rows(failure):
+    """Run the real route savepoint and package function over real SQLite flushes."""
+    from sqlalchemy import Column, Integer, String, create_engine, select
+    from sqlalchemy.orm import Session, declarative_base
+
+    route = MODULE.parents[1] / "api/v1/learning.py"
+    route_tree = ast.parse(route.read_text())
+    package_block = next(
+        node for node in ast.walk(route_tree)
+        if isinstance(node, ast.If) and isinstance(node.test, ast.Name)
+        and node.test.id == "study_package_requested" and isinstance(node.body[0], ast.Try)
+    )
+    block = compile(ast.Module(body=[package_block], type_ignores=[]), str(route), "exec")
+    base = declarative_base()
+
+    class Row(base):
+        __tablename__ = "ordinary_study_transaction_fixture"
+        id = Column(Integer, primary_key=True)
+        kind = Column(String, nullable=False)
+
+    engine = create_engine("sqlite://")
+    base.metadata.create_all(engine)
+    ns = fixture()
+    with Session(engine) as session:
+        session.add(Row(kind="guide-message"))
+
+        def add(kind, result):
+            session.add(Row(kind=kind))
+            session.flush()
+            return result
+
+        def fail_materialization(*args, **kwargs):
+            add("artifact", None)
+            assert "invocation" in session.scalars(select(Row.kind)).all()
+            raise ValueError("synthetic materialization failure")
+
+        class ProviderError(ValueError):
+            pass
+
+        ns.update(
+            db=types.SimpleNamespace(session=session), UpstreamTurnError=ProviderError,
+            _create_workspace=lambda *args, **kwargs: add("workspace", {"id": "workspace"}),
+            create_candidate_set=lambda **kwargs: add("candidate-set", types.SimpleNamespace(id="candidate-set")),
+            replace_generated_candidates=lambda *args: add("candidate", [types.SimpleNamespace(id="selected")]),
+            ModelInvocations=lambda **kwargs: Row(kind="invocation"),
+            materialize_candidate=fail_materialization,
+            user=types.SimpleNamespace(id=17), resolved_thread=types.SimpleNamespace(id="own", user_id=17),
+            question="请生成一个关于盆栽观察的学习包。",
+            study_package_requested=True, agent_actions=[],
+        )
+        if failure == "provider":
+            ns["invoke_turn"].side_effect = ProviderError("synthetic unavailable")
+        if failure == "unsupported":
+            ns["result_object"].return_value = {"status": "unsupported"}
+        exec(block, ns)
+        assert not ns["agent_actions"]
+        assert "已生成" not in ns["study_package_reply"]
+        session.commit()
+
+    with Session(engine) as fresh_session:
+        assert fresh_session.scalars(select(Row.kind)).all() == ["guide-message"]

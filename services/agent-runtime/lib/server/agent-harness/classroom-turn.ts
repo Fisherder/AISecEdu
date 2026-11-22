@@ -57,7 +57,7 @@ function configuredHarnessEndpoint(path: '/v1/turn' | typeof teachingImageTurnPa
 
   const root = process.env.HARNESS_INTERNAL_URL?.trim().replace(/\/+$/, '');
   const secret = process.env.HARNESS_SERVICE_SECRET;
-  if (!root || !secret?.trim()) return undefined;
+  if (!root || !secret || secret.trim() !== secret) return undefined;
 
   return { endpoint: new URL(root + path), secret };
 }
@@ -105,16 +105,20 @@ function createHarnessTransport(
     }
 
     const duration = AbortSignal.timeout(95_000);
+    const requestSignal = signal ? AbortSignal.any([signal, duration]) : duration;
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + secret, 'Content-Type': 'application/json' },
       body: image ? JSON.stringify({ messages, images: [image] }) : body,
       cache: 'no-store',
       redirect: 'error',
-      signal: signal ? AbortSignal.any([signal, duration]) : duration,
+      signal: requestSignal,
+    }).catch(() => {
+      requestSignal.throwIfAborted();
+      throw new Error('对话服务暂时不可用。');
     });
     if (!response.ok) {
-      await response.body?.cancel();
+      await response.body?.cancel().catch(() => {});
       throw new Error('对话服务暂时不可用。');
     }
 
@@ -122,7 +126,10 @@ function createHarnessTransport(
       text?: unknown;
       model?: unknown;
       usage?: Partial<Record<keyof HarnessUsage, unknown>>;
-    } = await response.json();
+    } = await response.json().catch(() => {
+      requestSignal.throwIfAborted();
+      throw new Error('对话服务未返回完整答复。');
+    });
     if (
       typeof result?.text !== 'string' ||
       !result.text.trim() ||

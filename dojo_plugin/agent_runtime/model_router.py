@@ -10,6 +10,7 @@ UPSTREAM_LESSON_PLAN_ROUTE = "upstream-lesson-plan-materialize"
 UPSTREAM_LESSON_CANDIDATE_ROUTE = "upstream-lesson-plan-candidate"
 UPSTREAM_SLIDE_LAYOUT_ROUTE = "upstream-ordinary-slide-layout"
 UPSTREAM_DECK_REVISION_ROUTE = "upstream-ordinary-deck-revision"
+UPSTREAM_SLIDE_NOTES_ROUTE = "upstream-ordinary-slide-notes"
 
 
 COMPLEX_KINDS = {
@@ -149,6 +150,13 @@ def route_model(kind, *, prompt="", payload=None, allow_degraded=False):
         route_name = UPSTREAM_LESSON_PLAN_ROUTE
         actual_model = required_model = (payload.get("ordinaryLessonPlan") or {}).get("model")
         allow_degraded = False
+    elif kind == "artifact.revise" and isinstance(payload, dict) and (
+        "ordinarySlideNotes" in payload or payload.get("revisionBackend") == "ordinary-slide-notes"
+    ):
+        route_name = UPSTREAM_SLIDE_NOTES_ROUTE
+        pin = payload.get("ordinarySlideNotes")
+        actual_model = required_model = pin.get("model") if isinstance(pin, dict) else None
+        allow_degraded = False
     elif kind == "artifact.revise" and isinstance(payload, dict) and "ordinaryDeckRevision" in payload:
         route_name = UPSTREAM_DECK_REVISION_ROUTE
         actual_model = required_model = (payload.get("ordinaryDeckRevision") or {}).get("model")
@@ -186,7 +194,7 @@ def validate_actual_model(route, actual_model):
     required = route.get("required_model")
     if route.get("route") in {
         UPSTREAM_TEACHER_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_SLIDE_LAYOUT_ROUTE,
-        UPSTREAM_DECK_REVISION_ROUTE,
+        UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_SLIDE_NOTES_ROUTE,
     }:
         if not required or actual_model != required:
             raise ValueError("The teaching job did not use the configured Harness model")

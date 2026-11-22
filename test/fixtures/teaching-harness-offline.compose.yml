@@ -1,0 +1,9 @@
+# Synthetic Messages is served inside the DSH container on loopback.
+services:
+  deepseek-harness:
+    networks: !override [teaching]
+    environment:
+      DEEPSEEK_BASE_URL: http://127.0.0.1:3082
+
+networks:
+  model-egress: !reset null

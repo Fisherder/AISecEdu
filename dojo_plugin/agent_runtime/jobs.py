@@ -63,10 +63,10 @@ from .artifacts import (
 from .files import persist_agent_deliverables, public_agent_file
 from .model_router import (
     UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE,
-    UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_TEACHER_ROUTE,
+    UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_SLIDE_NOTES_ROUTE, UPSTREAM_TEACHER_ROUTE,
     route_model, validate_actual_model,
 )
-from . import ordinary_lesson_plan, ordinary_material_turn, ordinary_slide_layout
+from . import ordinary_lesson_plan, ordinary_material_turn, ordinary_slide_layout, ordinary_slide_notes
 from .model_journal import close_canceled_model_calls
 from .model_inputs import ModelInputError, accepted_input, freeze_input, freeze_prepared, prepared_input, request_payload, restore_input_cache
 from .conversation import turn_wait_state, execution_chain
@@ -2648,6 +2648,8 @@ def _runtime_payload(job):
     if job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload):
         return ordinary_lesson_plan.prepare(job, payload)
     if job.kind == "artifact.revise":
+        if "ordinarySlideNotes" in payload or payload.get("revisionBackend") == "ordinary-slide-notes":
+            return payload
         if ordinary_slide_layout.pinned(payload):
             return ordinary_slide_layout.prepare(job, payload)
         if payload.get("artifactType") == "slide-deck" and not payload.get("workspaceId"):
@@ -3418,8 +3420,37 @@ def _invoke_ordinary_material_question(job, route, payload):
     }
 
 
+def _invoke_ordinary_slide_notes(job, route, payload):
+    # Re-read the selected published revision before any provider request.
+    _, _, page, goal, original, operation = ordinary_slide_notes.prepare(job, payload)
+    body = ordinary_slide_notes.request_for_model(page, goal, original, operation)
+    try:
+        response = invoke_turn(body, encoded=_runtime_json_bytes(body))
+    except UpstreamTurnError as error:
+        raise RuntimeJobError(str(error), category=error.category, retry_after=error.retry_after) from None
+    usage = response["usage"]
+    model = {"actualModel": response["model"], "usage": usage}
+    if (response["model"] != route.get("required_model")
+            or not usage.get("prompt_tokens") or not usage.get("completion_tokens")
+            or usage.get("total_tokens") != usage["prompt_tokens"] + usage["completion_tokens"]):
+        failure = PermanentJobError("讲稿修订未取得指定教学模型和有效用量的回执。")
+        failure.model_meta = model
+        raise failure
+    try:
+        notes = ordinary_slide_notes.parse_notes(response["text"], original, operation)
+    except ValueError:
+        failure = RuntimeJobError("模型未返回合格的本页讲稿，当前版本已保留。", category="quality")
+        failure.model_meta = model
+        raise failure from None
+    return {"success": True, "result": {"speakerNotes": notes}, "model": model}
+
+
 def _invoke_agent_runtime(job, route, payload=None):
     payload = dict(payload or job.payload or {})
+    if job.kind == "artifact.revise" and (
+        "ordinarySlideNotes" in payload or payload.get("revisionBackend") == "ordinary-slide-notes"
+    ):
+        return _invoke_ordinary_slide_notes(job, route, payload)
     if job.kind == "agent.chat" and "ordinaryMaterialQuestion" in payload:
         return _invoke_ordinary_material_question(job, route, payload)
     body = _runtime_request_body(job, route, payload)
@@ -3955,7 +3986,15 @@ def _persist_result(job, result):
         expected_revision = int(job.payload.get("expectedRevision"))
         revision_content = result.get("content")
         pinned_layout = ordinary_slide_layout.pinned(job.payload or {})
-        if pinned_layout:
+        pinned_notes = ("ordinarySlideNotes" in (job.payload or {})
+                        or (job.payload or {}).get("revisionBackend") == "ordinary-slide-notes")
+        if pinned_notes:
+            source, slide, page, _, original, operation = ordinary_slide_notes.prepare(job, job.payload, lock=True)
+            revision_content = ordinary_slide_notes.revised_content(
+                source, slide, page, result.get("speakerNotes"), original, operation,
+            )
+            revision = None
+        elif pinned_layout:
             ordinary_slide_layout.prepare(job, job.payload, lock=True)
             revision = None
         else:
@@ -3972,18 +4011,23 @@ def _persist_result(job, result):
                 expected_revision=expected_revision,
                 instruction=str(job.payload.get("instruction") or ""),
                 content=revision_content,
-                **({"commit": False} if pinned_layout else {}),
+                **({"commit": False} if pinned_layout or pinned_notes else {}),
             )
         invocation = (
             ModelInvocations.query.filter_by(job_id=job.id, status="SUCCEEDED")
             .order_by(ModelInvocations.created.desc())
             .first()
         )
-        if pinned_layout:
-            expected_route = (UPSTREAM_DECK_REVISION_ROUTE if ordinary_slide_layout.deck_pinned(job.payload)
-                              else UPSTREAM_SLIDE_LAYOUT_ROUTE)
+        if pinned_layout or pinned_notes:
+            if pinned_notes:
+                expected_route = UPSTREAM_SLIDE_NOTES_ROUTE
+                expected_model = ordinary_slide_notes.model(job.payload)
+            else:
+                expected_route = (UPSTREAM_DECK_REVISION_ROUTE if ordinary_slide_layout.deck_pinned(job.payload)
+                                  else UPSTREAM_SLIDE_LAYOUT_ROUTE)
+                expected_model = ordinary_slide_layout.model(job.payload)
             if (invocation is None or invocation.route != expected_route
-                    or invocation.actual_model != ordinary_slide_layout.model(job.payload) or invocation.degraded):
+                    or invocation.actual_model != expected_model or invocation.degraded):
                 raise PermanentJobError("课件修订缺少可核验的模型用量回执。")
         if invocation:
             invocation.artifact_revision_id = revision.id

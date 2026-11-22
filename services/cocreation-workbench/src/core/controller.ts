@@ -575,10 +575,11 @@ export class WorkbenchController {
     if (!['http:', 'https:'].includes(url.protocol)) throw new Error('预览地址无效。');
     this.patch({ previews: { ...this.state.previews, [artifact.id]: url.href } });
   }
-  async revise(artifact: Artifact, instruction: string) {
+  async revise(artifact: Artifact, instruction: string, useOriginalSpeakerNotes = false) {
     const data = await this.mutate(`/artifacts/${id(artifact.id)}/revise`, {
       instruction,
       expectedRevision: artifact.currentRevision,
+      ...(useOriginalSpeakerNotes ? { useOriginalSpeakerNotes: true } : {}),
     });
     if (data.job)
       this.patch({

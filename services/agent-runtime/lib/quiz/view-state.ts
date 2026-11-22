@@ -64,7 +64,7 @@ export async function persistQuizSubmission(
   input: QuizDraftInput,
   writer: Pick<QuizAttemptWriter, 'recordPhase'>,
 ): Promise<void> {
-  await writer.recordPhase({ ...input, phase: 'submitted' });
+  await writer.recordPhase({ ...input, phase: 'submitted', allowBlankShortAnswers: true });
 }
 
 export async function persistQuizReview(
@@ -77,6 +77,7 @@ export async function persistQuizReview(
 export interface QuizViewHydratedState {
   phase: 'not_started' | 'answering' | 'grading_pending' | 'grading_unsupported' | 'reviewing';
   answers: QuizAnswers;
+  allowBlankShortAnswers?: true;
   results: QuestionResult[];
 }
 
@@ -93,10 +94,13 @@ export function quizViewStateFromAttempt(
     };
   }
   if (state.phase === 'submitted') {
-    const phase = isQuizGradingUnsupported(questions, state.answers)
+    const phase = isQuizGradingUnsupported(questions, state.answers, state.allowBlankShortAnswers)
       ? 'grading_unsupported'
       : 'grading_pending';
-    return { phase, answers: state.answers, results: [] };
+    return {
+      phase, answers: state.answers, results: [],
+      ...(state.allowBlankShortAnswers ? { allowBlankShortAnswers: true } : {}),
+    };
   }
   if (state.phase === 'draft' && Object.keys(state.answers).length === 0) {
     return { phase: 'not_started', answers: {}, results: [] };

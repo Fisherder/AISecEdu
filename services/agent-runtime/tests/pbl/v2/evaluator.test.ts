@@ -385,13 +385,12 @@ describe('Evaluator API teaching image boundary', () => {
       expect((await postEvaluation(request(image, ''))).status).toBe(403);
       expect((await middleware(request())).status).toBe(200);
       expect(await (await getEvaluationCapability(request())).json()).toEqual({ allowed: false });
-      expect(fetchTurn.mock.calls.at(-1)).toEqual([
-        new URL('http://harness.invalid:3081/v1/teaching-image-turn'),
-        expect.objectContaining({
-          headers: { Authorization: 'Bearer fixture-auth' },
-          redirect: 'error',
-        }),
-      ]);
+      const [capabilityUrl, capabilityRequest] = fetchTurn.mock.calls.at(-1)!;
+      expect(String(capabilityUrl)).toBe('http://harness.invalid:3081/v1/teaching-image-turn');
+      expect(capabilityRequest).toMatchObject({
+        headers: { Authorization: 'Bearer fixture-auth' },
+        redirect: 'error',
+      });
       visionAvailable = true;
       expect(await (await getEvaluationCapability(request())).json()).toEqual({ allowed: true });
       expect(await (await getEvaluationCapability(request(undefined, 'student-two'))).json()).toEqual({ allowed: false });
@@ -541,8 +540,15 @@ describe('Harness classroom transport limits', () => {
   it('rejects an image one byte over its decoded limit before calling Harness', async () => {
     const image = classroomImage(2 * oneMiB + 1);
     const messages: ClassroomTurnMessage[] = [{ role: 'user', content: '请评价观察记录。' }];
-    expect(image.data).toHaveLength(4 * Math.ceil((2 * oneMiB) / 3));
+    expect(Buffer.from(image.data, 'base64').length).toBe(2 * oneMiB + 1);
     await expect(createTeachingImageTurn(image)!(messages)).rejects.toThrow('教学图片过大');
+    expect(fetchTurn).not.toHaveBeenCalled();
+  });
+
+  it('declines a whitespace-padded service secret before any transport', () => {
+    vi.stubEnv('HARNESS_SERVICE_SECRET', ' fixture-auth ');
+    expect(createHarnessTurn()).toBeUndefined();
+    expect(createTeachingImageTurn(classroomImage(512))).toBeUndefined();
     expect(fetchTurn).not.toHaveBeenCalled();
   });
 

@@ -1524,8 +1524,10 @@
     }, 260);
   }
 
-  async function loadCourseAssignments(reference) {
+  async function loadCourseAssignments() {
     const workspace = state.workspaceLoadSequence;
+    const reference = state.course.referenceId || state.course.id;
+    const isCurrent = () => isCurrentWorkspace(workspace) && reference === (state.course.referenceId || state.course.id);
     const list = document.getElementById("cs-assignment-list");
     if (!list) return;
     list.textContent = "正在读取测验与作业…";
@@ -1533,11 +1535,11 @@
     if (library) library.href = `/teacher/library?dojo=${encodeURIComponent(reference)}`;
     try {
       const result = unwrap(await api.request(`/coursework/dojos/${encodeURIComponent(reference)}/assignments`));
-      if (!isCurrentWorkspace(workspace)) return;
+      if (!isCurrent()) return;
       const rows = result.assignments || [];
       list.innerHTML = rows.length ? rows.map(item => `<article class="cs-library-row is-managed"><a class="cs-managed-main" href="/teacher/assignments/${encodeURIComponent(item.id)}"><span class="cs-library-icon"><i class="fas fa-tasks" aria-hidden="true"></i></span><span><strong>${escape(item.title)}</strong><small>${item.kind === "QUIZ" ? "测验" : "作业"} · ${escape(statusLabel(item.status))} · ${item.itemCount} 道题 · ${escape(moduleName(item.moduleIndex))}</small></span><em>检查与编辑 <i class="fas fa-arrow-right" aria-hidden="true"></i></em></a></article>`).join("") : '<p class="cs-empty">还没有测验或作业，可从素材库选用，或通过 AI 共创创建。</p>';
     } catch (error) {
-      if (isCurrentWorkspace(workspace)) list.textContent = error.message || "测验与作业暂时未能加载，请重新打开课程。";
+      if (isCurrent()) list.textContent = error.message || "测验与作业暂时未能加载，请重新打开课程。";
     }
   }
 
@@ -3021,7 +3023,7 @@
       if (sequence !== state.workspaceLoadSequence) return;
       state.workspace = workspace;
       state.course = workspace.course || state.course;
-      void loadCourseAssignments(state.course.referenceId || state.course.id);
+      void loadCourseAssignments();
       const libraryLink = document.getElementById("cs-library-open");
       if (libraryLink) libraryLink.href = `/teacher/library?dojo=${encodeURIComponent(state.course.referenceId || state.course.id)}`;
       state.materials = workspace.materials || [];

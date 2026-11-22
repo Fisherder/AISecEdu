@@ -1,13 +1,13 @@
-from xml.etree import ElementTree
 import ast
 import datetime
 import hashlib
 import importlib.util
 import json
 import re
-from pathlib import Path
-from types import SimpleNamespace, ModuleType
 import sys
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from xml.etree import ElementTree
 
 import pytest
 from sqlalchemy import Column, Integer, String, JSON, DateTime, create_engine, text as sql_text
@@ -143,6 +143,28 @@ def cancellation_function(session):
     }
     exec(compile(ast.Module(body=[function], type_ignores=[]), "jobs.py", "exec"), namespace)
     return namespace["cancel_job"]
+
+
+def test_job_cancellation_event_is_owned_by_reconciliation(setup):
+    session, thread, _ = setup
+    journal = importlib.import_module("harness_fixture.agent_runtime.model_journal")
+    job = add_job(session, "synthetic-cancellation", status="CANCELED", attempt_count=1)
+    call_id = f"{job.id}:1:1"
+    detail = {"terminationSource": "job-cancellation", "reason": "job-cancelled"}
+    with pytest.raises(journal.ModelJournalError, match="Invalid model event") as error:
+        journal.record_model_event(job.id, {
+            "type": "model.cancelled", "attemptCount": 1, "callId": call_id, "detail": detail,
+        })
+    assert error.value.status == 400
+    session.add(Event(thread_id=thread.id, event_type="model.requested", payload={
+        "jobId": job.id, "attemptCount": "1", "callId": call_id, "detail": {"auditVersion": 2},
+    }))
+    session.commit()
+    assert journal.close_canceled_model_calls(job) == {"models": 1, "tools": 0}
+    assert Event.query.filter_by(thread_id=thread.id, event_type="model.cancelled").one().payload["detail"] == detail
+    assert journal.record_model_event(job.id, {
+        "type": "model.failed", "attemptCount": 1, "callId": call_id, "detail": {},
+    }) == {"accepted": True, "ignored": True, "terminalType": "model.cancelled"}
 
 
 def test_cancel_reloads_terminal_state_before_mutation(setup):
@@ -875,6 +897,32 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     ("请制作教案，请用“DOCX”和“Markdown”格式", "auto", ("docx", "md")),
     ("请参考名为“DOCX”和“Markdown”的资料，然后生成教案", "auto", ("docx",)),
     ("请根据“Markdown”格式的材料写教案", "auto", ("docx",)),
+    ("生成“docx 和 markdown”格式的教案", "auto", ("docx", "md")),
+    ("生成「DOCX、md」格式的教案", "execute", ("docx", "md")),
+    ('请生成“DOCX或Markdown”课堂讲义', "auto", ("docx", "md")),
+    ("请参考名为“docx 和 markdown”的资料，生成教案", "auto", ("docx",)),
+    ("请写教案，不要使用“docx 和 markdown”格式", "auto", ()),
+    ("请生成“docx 和 .sh”格式的教案", "auto", ()),
+    ("不要 pdf，改成 md 格式的教案", "auto", ("md",)),
+    ("不要生成 docx，改成 md 教案", "auto", ("md",)),
+    ("请把教案改为 md", "auto", ("md",)),
+    ("请把教案修改为 md", "execute", ("md",)),
+    ("请把教案换成 md", "auto", ("md",)),
+    ("别把教案改为 md，只要 Word", "auto", ("docx",)),
+    ("别把教案换成 md", "auto", ()),
+    ("请写一份教案，但别换成 md", "auto", ("docx",)),
+    ("请告诉我如何写教案，然后改为 md", "auto", ("md",)),
+    ("写一份教案，但不要使用 Markdown", "auto", ("docx",)),
+    ("写一份教案，但不要用 Markdown 或 Word", "execute", ()),
+    ("不要使用 Markdown", "auto", ()),
+    ("请写教案，不要使用 Markdown；改用 Markdown", "auto", ("md",)),
+    ("写一份教案，只导出 .py 文件", "auto", ()),
+    ("写一份教案，只导出 .sh 文件", "execute", ()),
+    ("写一份教案，只导出“.js”格式", "auto", ()),
+    ("写一份教案，只导出 .example 文件", "auto", ()),
+    ("写一份教案，只导出 .docx 文件", "auto", ("docx",)),
+    ("参考 .py 文件的说明写一份教案", "auto", ("docx",)),
+    ("写一份教案，请导出 DOCX 和 .js", "auto", ()),
 ])
 def test_teacher_document_requires_an_explicit_supported_request(prompt, mode, expected):
     documents = load("dojo_plugin/agent_runtime/teacher_documents.py", {})

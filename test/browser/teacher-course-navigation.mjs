@@ -49,7 +49,7 @@ window.DojoLearning = {
       return success({course, materials: [{id: course.id, title: course.name + ' material'}]});
     }
     if (pathname.startsWith('/teaching/insights/')) return hold(course.referenceId + ':insights');
-    if (pathname.endsWith('/assignments')) return success({assignments: []});
+    if (pathname.endsWith('/assignments')) return hold(course.referenceId + ':assignments');
     if (pathname.endsWith('/content')) return hold(course.referenceId + ':' + searchParams.get('kind'));
     throw new Error('Unexpected fixture request ' + path);
   },
@@ -186,6 +186,17 @@ try {
     await page.evaluate(() => finish('beta:insights', report(courseRows[1], 8)));
     await page.waitFor('document.querySelector("#cs-stat-students").textContent === "8"', {timeout: 5000});
     assert.match(await page.text('#ix-title'), /Course Beta/);
+    await page.waitFor('pending.has("alpha:assignments") && pending.has("beta:assignments")', {timeout: 5000});
+    await page.evaluate(() => finish('beta:assignments', {
+      assignments: [{id: 'beta-assignment', title: 'Beta observation notes', itemCount: 1}],
+    }));
+    await page.waitFor('document.querySelector("#cs-assignment-list").textContent.includes("Beta observation notes")', {timeout: 5000});
+    await page.evaluate(async () => {
+      finish('alpha:assignments', {assignments: [{id: 'alpha-assignment', title: 'Alpha observation notes', itemCount: 1}]});
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    assert.match(await page.text('#cs-assignment-list'), /Beta observation notes/);
+    assert.doesNotMatch(await page.text('#cs-assignment-list'), /Alpha observation notes/);
     assert.deepEqual(page.pageErrors, []);
     await browser.closePage(page);
   }

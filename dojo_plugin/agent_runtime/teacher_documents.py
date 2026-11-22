@@ -3,11 +3,12 @@ import re
 import unicodedata
 
 
-WORD_FORMAT = re.compile(r"(?<![a-z\d_])(?:docx|word)(?![a-z\d_])", re.I)
+WORD_FORMAT = re.compile(r"(?<![a-z\d_])(?:\.?docx|word)(?![a-z\d_])", re.I)
 MARKDOWN_FORMAT = re.compile(r"(?<![a-z\d_])(?:markdown|\.?md)(?![a-z\d_])", re.I)
 DOCUMENT_SUBJECT = re.compile(r"教案|教学文档|教学讲义|课堂讲义|\b(?:lesson\s+plan|handout)\b", re.I)
+_FORMAT_CHANGE_VERB = r"(?:改成|改为|修改为|换成|转换为)"
 DOCUMENT_REQUEST = re.compile(
-    r"制作|帮我(?:写|做)|撰写|编写|写(?:一份|一个|个)|做(?:一份|个|一篇)|生成|整理|起草|设计|拟(?:一份|个)|导出|输出|返回|交付|提供|给我|修改|调整|修订|改写|改成"
+    rf"制作|帮我(?:写|做)|撰写|编写|写(?:一份|一个|个)|做(?:一份|个|一篇)|生成|整理|起草|设计|拟(?:一份|个)|导出|输出|返回|交付|提供|给我|修改|调整|修订|改写|{_FORMAT_CHANGE_VERB}"
     r"|\b(?:write|draft|create|prepare|generate|provide|export|deliver)\b",
     re.I,
 )
@@ -20,8 +21,8 @@ DOCUMENT_QUESTION = re.compile(
     re.I,
 )
 # The bare imperative 别 cannot begin in the middle of a CJK word such as 特别.
-_REFUSAL = r"(?:无需|不需要|不用|不要|不必|不想|请勿|(?:请|也|先|就|千万)别|(?<![\u3400-\u9fff])别)(?:\s*(?:请)?帮我)?"
-_DELIVERY_VERB = r"(?:生成|制作|创建|写|做|撰写|编写|起草|导出|输出|返回|交付|提供|保存|下载|给我)"
+_REFUSAL = r"(?:无需|不需要|不用|不要|不必|不想|请勿|(?:请|也|先|就|千万|但(?:是)?)别|(?<![\u3400-\u9fff])别)(?:\s*(?:请)?帮我)?"
+_DELIVERY_VERB = rf"(?:生成|制作|创建|写|做|撰写|编写|起草|导出|输出|返回|交付|提供|保存|下载|给我|{_FORMAT_CHANGE_VERB})"
 _DOCUMENT_AMOUNT = r"(?:\s*任何)?(?:\s*(?:一份|一个|一篇))?(?:\s*可下载的?)?"
 _SENTENCE_BREAK = re.compile(r"([。！？!?；;\n]+|(?<=\S)\.(?=\s))")
 _QUESTION_CONTINUATION = re.compile(
@@ -30,7 +31,7 @@ _QUESTION_CONTINUATION = re.compile(
 _INDEPENDENT_DELIVERY = re.compile(
     r"^\s*(?:(?:然后|另外|最后|再|并|请)\s*)*(?:(?:帮我|为我)\s*)?"
     r"(?:(?:根据|依据|结合|按照|参考|基于)[^，。；！？,;!?\n]{0,40}?(?:资料|材料|教材|课文|讲义|笔记|记录)\s*)?"
-    r"(?:(?P<draft_zh>生成|制作|创建|写|做|撰写|编写|起草|导出|交付)|给我|提供|下载|输出)"
+    rf"(?:(?P<draft_zh>生成|制作|创建|写|做|撰写|编写|起草|导出|交付|{_FORMAT_CHANGE_VERB})|给我|提供|下载|输出)"
     r"|^\s*(?:(?:and|but|also|then|please)\s+)*"
     r"(?:(?P<draft_en>generate|write|draft|make|create|export|deliver)|provide|give\s+me|download)\b",
     re.I,
@@ -42,22 +43,29 @@ _DOWNLOAD_REQUEST = re.compile(
 )
 _ENGLISH_REFUSAL = r"\b(?:do\s+not|don['’]t|never|no|not)"
 _ENGLISH_DELIVERY = r"(?:write|draft|make|create|prepare|generate|provide|export|deliver|return|want|need)"
+_FORMAT_USE_VERB = r"(?:使用|采用|用)"
 _ENGLISH_AMOUNT = r"(?:(?:an?|any)\s+)?(?:downloadable\s+)?"
 NO_DOCUMENT = re.compile(
     rf"{_REFUSAL}(?:\s*{_DELIVERY_VERB})?{_DOCUMENT_AMOUNT}\s*(?:教学|课堂)?(?:文件|文档|教案|讲义)"
     rf"|{_ENGLISH_REFUSAL}\s+(?:{_ENGLISH_DELIVERY}\s+)?{_ENGLISH_AMOUNT}(?:files?|documents?|lesson plans?|handouts?)\b"
     r"|只(?:在|用)聊天回答", re.I,
 )
+_NEGATED_FORMAT_CHANGE = re.compile(
+    rf"{_REFUSAL}\s*(?:(?:把|将)[^，。；！？,;!?\n]{{1,40}}?)?{_FORMAT_CHANGE_VERB}"
+)
 NO_FORMAT = re.compile(
-    rf"(?:{_REFUSAL}(?:\s*{_DELIVERY_VERB}(?:\s*[为成])?)?{_DOCUMENT_AMOUNT}"
-    rf"|不生成|{_ENGLISH_REFUSAL}(?:\s+{_ENGLISH_DELIVERY})?\s*{_ENGLISH_AMOUNT})\s*\.?$", re.I,
+    rf"(?:{_REFUSAL}(?:\s*(?:{_DELIVERY_VERB}(?:\s*[为成])?|{_FORMAT_USE_VERB}))?{_DOCUMENT_AMOUNT}"
+    rf"|{_NEGATED_FORMAT_CHANGE.pattern}{_DOCUMENT_AMOUNT}"
+    rf"|不生成|{_ENGLISH_REFUSAL}(?:\s+(?:{_ENGLISH_DELIVERY}|use))?\s*{_ENGLISH_AMOUNT})\s*\.?$", re.I,
 )
 UNSUPPORTED_FORMAT = re.compile(
     r"(?<![a-z\d_])\.?(?:pdf|html?|pptx?|odt|rtf|txt|csv|xlsx?|ods|"
-    r"ipynb|docm|xlsm|exe|ps1|powershell|notebook)(?![a-z\d_])|脚本文件|可执行文件", re.I,
+    r"ipynb|docm|xlsm|exe|ps1|powershell|notebook)(?![a-z\d_])"
+    r"|(?<![a-z\d_.])\.[a-z][a-z\d]{0,11}(?![a-z\d_])|脚本文件|可执行文件", re.I,
 )
 _ACTIVE_FORMATS = {
-    "html", "htm", "ipynb", "docm", "xlsm", "exe", "ps1", "powershell", "notebook", "脚本文件", "可执行文件",
+    "html", "htm", "ipynb", "docm", "xlsm", "exe", "ps1", "powershell", "notebook",
+    "py", "sh", "js", "脚本文件", "可执行文件",
 }
 _FORMAT_DELIVERY_PREFIX = re.compile(
     rf"(?:{_DELIVERY_VERB}(?:\s*[为成])?{_DOCUMENT_AMOUNT}"
@@ -102,9 +110,9 @@ def requests_lesson_plan_candidates(prompt):
 def _unquoted_request(prompt):
     def mask(match):
         text = next(group for group in match.groups() if group is not None).strip()
-        if re.fullmatch(_FORMAT_TOKEN, text, re.I):
-            # Keep the quote marker until we can classify the whole format list.
-            return f"“{text}”"
+        if _FORMAT_LIST.fullmatch(text):
+            # Keep each item marked as quoted so a source title cannot select formats.
+            return _FORMAT_ITEM.sub(lambda item: f"“{item.group().strip('“”')}”", text)
         delivery = _FORMAT_DELIVERY_PREFIX.search(prompt, 0, match.start())
         is_document_title = (delivery or match.group().startswith("《")) and DOCUMENT_SUBJECT.search(text)
         return " 教案 " if is_document_title else " "
@@ -158,6 +166,12 @@ def _format_requests(prompt):
                 yield value.lower().lstrip("."), not negated
 
 
+def _requests_document_delivery(prompt):
+    return DOCUMENT_REQUEST.search(prompt) or any(
+        _independent_document_delivery(sentence) for sentence in _SENTENCE_BREAK.split(prompt)[::2]
+    )
+
+
 def requested_document_formats(payload):
     mode = payload.get("executionMode") or "auto"
     context = payload.get("context") or {}
@@ -172,8 +186,7 @@ def requested_document_formats(payload):
     requested = tuple(file_format for file_format, _ in FORMATS if formats.get(file_format))
     format_named = any(file_format in formats for file_format, _ in FORMATS)
     if (
-        not (DOCUMENT_REQUEST.search(prompt)
-             or any(_independent_document_delivery(sentence) for sentence in _SENTENCE_BREAK.split(prompt)[::2]))
+        not _requests_document_delivery(prompt)
         or not (
             DOCUMENT_SUBJECT.search(prompt) or format_named or any(formats.values())
             or (DOCUMENT_SUBJECT.search(request) and _DOWNLOAD_REQUEST.search(prompt))
@@ -183,8 +196,10 @@ def requested_document_formats(payload):
         return ()
     if any(formats.get(active) for active in _ACTIVE_FORMATS):
         return ()
-    if format_named or any(formats.values()):
+    if formats.get("docx") is False or any(formats.values()) or (format_named and not DOCUMENT_SUBJECT.search(prompt)):
         return requested
+    if not _requests_document_delivery(_NEGATED_FORMAT_CHANGE.sub("", prompt)):
+        return ()
     return ("docx",)
 
 

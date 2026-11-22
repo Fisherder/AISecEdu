@@ -10,6 +10,7 @@ import {
   recordQuizAttempt,
   type QuizAttemptRuntimeDeps,
 } from '@/lib/quiz/runtime';
+import { persistQuizReview, persistQuizSubmission } from '@/lib/quiz/view-state';
 import type { QuestionResult } from '@/lib/quiz/grading';
 
 const results: QuestionResult[] = [
@@ -1004,6 +1005,30 @@ describe('quiz attempt runtime persistence', () => {
     ]);
   });
 
+  it('accepts an identical review retry without replacing an already recorded grade', async () => {
+    const { store, deps } = makeHarness();
+    const input = {
+      stageId: 'stage-1',
+      sceneId: 'scene-quiz',
+      attemptId: 'attempt-repeat-reviewed',
+      answers: { q1: 'A' },
+    };
+    const writer = { recordPhase: (record: Parameters<typeof recordQuizAttempt>[0]) =>
+      recordQuizAttempt(record, deps) };
+    await persistQuizSubmission(input, writer);
+    await persistQuizReview({ ...input, results }, writer);
+    const before = await store.listRecords(input.attemptId);
+    await persistQuizReview({ ...input, results }, writer);
+    expect(await store.listRecords(input.attemptId)).toEqual(before);
+    expect((await store.getSession(input.attemptId))?.status).toBe('completed');
+
+    await expect(persistQuizReview({ ...input, results: [
+      { questionId: 'q1', correct: false, status: 'incorrect', earned: 0 },
+    ] }, writer)).rejects.toBeInstanceOf(QuizRetryProgressedError);
+    expect(await store.listRecords(input.attemptId)).toEqual(before);
+    expect(await store.listSessions(input.stageId, 'learner-1')).toHaveLength(1);
+  });
+
   it('heals an active reviewed tail without appending the reviewed fact twice', async () => {
     const { store, deps } = makeHarness();
     await store.createSession({
@@ -1035,6 +1060,7 @@ describe('quiz attempt runtime persistence', () => {
         sceneId: 'scene-quiz',
         attemptId: 'attempt-orphan',
         phase: 'reviewed',
+        requireCurrentSubmission: true,
         answers: { q1: 'A' },
         results,
       },

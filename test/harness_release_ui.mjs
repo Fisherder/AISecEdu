@@ -28,14 +28,16 @@ try {
   while (!launchUrl && Date.now() < deadline && app.exitCode === null) await pause(150);
   assert.ok(launchUrl, `Official Web UI startup (exit ${app.exitCode}, signal ${app.signalCode}): ${bootStart}\n${bootError}`);
   assert.ok(launchUrl.origin === address, 'The startup URL must point to the offline loopback listener');
-  const request = { redirect: 'manual', signal: AbortSignal.timeout(5000) };
-  assert.equal((await fetch(address, request)).status, 401);
-  const exchange = await fetch(launchUrl, request);
+  const request = (url, headers) => fetch(url, {
+    headers, redirect: 'manual', signal: AbortSignal.timeout(5000),
+  });
+  assert.equal((await request(address)).status, 401);
+  const exchange = await request(launchUrl);
   assert.equal(exchange.status, 303);
   assert.equal(exchange.headers.get('location'), './');
   const cookie = exchange.headers.get('set-cookie')?.split(';', 1)[0];
   assert.ok(cookie, 'The official first-launch exchange did not issue a session cookie');
-  const page = await fetch(address, { ...request, headers: { cookie } });
+  const page = await request(address, { cookie });
   assert.equal(page.status, 200);
   assert.match(page.headers.get('content-type') ?? '', /text\/html/);
   const html = await page.text();
@@ -52,7 +54,7 @@ try {
   for (const src of assets) {
     const asset = new URL(src, address);
     assert.ok(asset.origin === address, 'The published scripts must be local in the offline build');
-    const response = await fetch(asset, { headers: { cookie }, signal: AbortSignal.timeout(5000) });
+    const response = await request(asset, { cookie });
     assert.equal(response.status, 200, `Unexpected status for ${asset.pathname}`);
     assert.match(response.headers.get('content-type') ?? '', /javascript/);
   }

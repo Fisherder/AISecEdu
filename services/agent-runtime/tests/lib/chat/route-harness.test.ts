@@ -217,7 +217,21 @@ describe('ordinary classroom chat through Harness', () => {
       Response.json({ error: 'fixture provider failure' }, { status: 502 }),
     );
     const response = await POST(makeRequest());
-    expect((await readEvents(response)).map((event) => event.type)).toEqual(['thinking', 'error']);
+    const events = await readEvents(response);
+    expect(events.map((event) => event.type)).toEqual(['thinking', 'error']);
+    expect(events.at(-1)?.data).toEqual({ message: '对话服务暂时不可用。' });
     expect(fetchTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps malformed service replies out of the public error stream', async () => {
+    fetchTurn.mockResolvedValueOnce(new Response('fixture-private-provider-detail'));
+    const events = await readEvents(await POST(makeRequest()));
+    expect(events.at(-1)?.data).toEqual({ message: '对话服务未返回完整答复。' });
+  });
+
+  it('keeps transport errors out of the public error stream', async () => {
+    fetchTurn.mockRejectedValueOnce(new Error('fixture-private-network-detail'));
+    const events = await readEvents(await POST(makeRequest()));
+    expect(events.at(-1)?.data).toEqual({ message: '对话服务暂时不可用。' });
   });
 });

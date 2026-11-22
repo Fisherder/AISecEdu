@@ -22,6 +22,13 @@ import { api, id } from '../core/api';
 import { dateLabel, type Artifact, type Data, typeLabels } from '../core/types';
 import { Button, IconButton, Empty, Status, Dialog } from '../components/ui';
 
+const singlePageNotes = String.raw`第\s*[1-9]\d{0,2}\s*页(?:的)?\s*(?:原有|原|旧|现有)?(?:讲者备注|演讲备注|演讲稿|讲稿)`;
+const editNotes = '(?:改写|重写|重新撰写|重新写|补写|润色|缩短|缩减|改短|精简|压缩|浓缩|简化|校对|修改|修订|优化|调整)';
+const notesInstruction = new RegExp(
+  String.raw`^\s*(?:请\s*)?(?:只|仅)?\s*(?:根据本页(?:可见文字|内容)\s*)?` +
+    String.raw`(?:${editNotes}\s*${singlePageNotes}|(?:把|将)?\s*${singlePageNotes}\s*(?:请\s*)?(?:${editNotes}|改成|改为))`,
+);
+
 function contentSource(artifact: Artifact): string {
   const content = artifact.revision?.content;
   if (typeof content === 'string') return content;
@@ -55,6 +62,7 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
   const { state, controller: c } = useWorkbench();
   const [tab, setTab] = useState<'preview' | 'source' | 'history'>('preview');
   const [instruction, setInstruction] = useState('');
+  const [originalNotesConsent, setOriginalNotesConsent] = useState('');
   const [selection, setSelection] = useState<{ start: number; end: number; text: string } | null>(
     null,
   );
@@ -63,8 +71,12 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
   const [launching, setLaunching] = useState(false);
   const [frameError, setFrameError] = useState(false);
   const source = contentSource(artifact);
+  const notesRequest = artifact.type === 'slide-deck' && artifact.status === 'PUBLISHED'
+    && notesInstruction.test(instruction);
+  const consentKey = JSON.stringify([artifact.id, artifact.currentRevision, instruction]);
+  const useOriginalNotes = notesRequest && !selection && originalNotesConsent === consentKey;
   const pageRequestWithSelection = selection && artifact.type === 'slide-deck' && (
-    /^(?:请\s*)?(?:(?:只|仅)\s*)?(?:调整|修改|更改|优化|统一|重新设计)[^：:\n]*(?:版式|布局|排版)\s*[:：]/.test(instruction.trim()) ||
+    notesRequest || /^(?:请\s*)?(?:(?:只|仅)\s*)?(?:调整|修改|更改|优化|统一|重新设计)[^：:\n]*(?:版式|布局|排版)\s*[:：]/.test(instruction.trim()) ||
     /^(?:请\s*)?(?:只|仅)\s*(?:修改|调整|润色)[^：:\n]*页\s*(?:的\s*)?(?:文字|文案|措辞)\s*[:：]/.test(instruction.trim())
   );
   const codeRef = useRef<HTMLTextAreaElement>(null);
@@ -84,19 +96,22 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
   useEffect(() => {
     setSelection(null);
     setRevision(null);
-  }, [artifact.currentRevision]);
+    setOriginalNotesConsent('');
+  }, [artifact.id, artifact.currentRevision]);
   useEffect(() => {
     const element = codeRef.current;
     if (!element || tab !== 'source') return;
     const readSelection = () => {
       const start = element.selectionStart,
         end = element.selectionEnd;
-      if (end > start)
+      if (end > start) {
+        setOriginalNotesConsent('');
         setSelection({
           start: source.slice(0, start).split('\n').length,
           end: source.slice(0, end).split('\n').length,
           text: source.slice(start, end),
         });
+      }
     };
     element.addEventListener('select', readSelection);
     element.addEventListener('pointerup', readSelection);
@@ -286,8 +301,9 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
             const request = selection
               ? `${instruction}\n\n仅修改当前版本 V${artifact.currentRevision} 中所选范围（源码第 ${selection.start}–${selection.end} 行），保留其余内容与交互：\n${selection.text}`
               : instruction;
+            setOriginalNotesConsent('');
             void c.run(async () => {
-              await c.revise(artifact, request);
+              await c.revise(artifact, request, useOriginalNotes);
               setInstruction('');
               setSelection(null);
             });
@@ -313,7 +329,10 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
                 : '例如：为这个场景增加一个决策分支，保留其他交互…'}
               rows={2}
               value={instruction}
-              onChange={(event) => setInstruction(event.target.value)}
+              onChange={(event) => {
+                setOriginalNotesConsent('');
+                setInstruction(event.target.value);
+              }}
             />
             <button
               className="button send-button"
@@ -323,6 +342,17 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
               <ArrowUp size={17} />
             </button>
           </div>
+          {notesRequest && !selection && (
+            <label className="source-hint">
+              <input
+                type="checkbox"
+                checked={useOriginalNotes}
+                onChange={(event) => setOriginalNotesConsent(event.target.checked ? consentKey : '')}
+              />
+              将指定页的原讲稿用于本次润色。勾选后，该页原稿会发给本课程配置的外部模型，请确认只含可分享的教学文字。
+              未勾选时可根据本页可见文字重写讲稿。
+            </label>
+          )}
           {pageRequestWithSelection
             ? <small role="status">请先取消源码选区，再提交按页修改。</small>
             : <small>修改会保存为新版本，可以比较或恢复。</small>}

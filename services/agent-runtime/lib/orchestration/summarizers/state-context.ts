@@ -135,7 +135,7 @@ export function summarizeElements(
  */
 export function buildStateContext(
   storeState: StatelessChatRequest['storeState'],
-  { includeAnswerKeys = true }: { includeAnswerKeys?: boolean } = {},
+  { includeAnswerKeys = false }: { includeAnswerKeys?: boolean } = {},
 ): string {
   const { stage, scenes, currentSceneId, mode, whiteboardOpen, quizResults } = storeState;
 

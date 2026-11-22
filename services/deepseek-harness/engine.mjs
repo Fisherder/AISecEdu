@@ -172,6 +172,9 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
 
     try {
       signal.throwIfAborted();
+      const finalMessage = messages.at(-1);
+      if (finalMessage?.role !== 'user') throw new Error('A Harness turn must end with a user message');
+      if (images.length && !ctx.attachments) throw new Error('Use imageTurn to submit teaching images');
       const attachments = images.length ? await ctx.attachments.saveImages(images) : [];
       const system = messages[0].role === 'system' ? messages[0].content : '';
       const history = messages.slice(messages[0].role === 'system' ? 1 : 0, -1);
@@ -204,7 +207,7 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
 
       signal.addEventListener('abort', cancel, { once: true });
       signal.throwIfAborted();
-      handle.agent.followup(userMessage(messages.at(-1).content, attachments));
+      handle.agent.followup(userMessage(finalMessage.content, attachments));
       await handle.agent.whenIdle();
       signal.throwIfAborted();
       if (finish !== 'completed' || assistant === undefined) throw new Error('Model turn failed');

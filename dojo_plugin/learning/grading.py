@@ -1,5 +1,7 @@
 """Dependency-free helpers for deterministic open-answer grade mapping."""
 
+import math
+
 
 def build_open_grade_questions(items, answers):
     return [
@@ -19,11 +21,23 @@ def build_open_grade_questions(items, answers):
     ]
 
 
+def _grade_item_index(value):
+    if type(value) is int:
+        return value
+    if isinstance(value, str) and value.strip().isdecimal():
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
 def map_open_grade_rows(rows, items):
     """Map model rows onto server-owned ids, falling back to a bounded index.
 
     Model-returned identifiers are untrusted.  A valid one-based ``itemIndex``
     keeps grading deterministic when a provider rewrites or omits ``itemId``.
+    If both identify different questions, there is no reliable mapping.
     """
 
     by_id = {}
@@ -33,34 +47,40 @@ def map_open_grade_rows(rows, items):
         if not isinstance(row, dict):
             continue
         item_id = str(row.get("itemId") or "")
+        item_index = _grade_item_index(row.get("itemIndex"))
+        indexed_id = (
+            ordered_ids[item_index - 1]
+            if item_index is not None and 1 <= item_index <= len(ordered_ids)
+            else None
+        )
         if item_id not in points:
-            try:
-                item_index = int(row.get("itemIndex") or 0)
-            except (TypeError, ValueError):
-                item_index = 0
-            item_id = (
-                ordered_ids[item_index - 1]
-                if 1 <= item_index <= len(ordered_ids)
-                else ""
-            )
-        if not item_id and len(ordered_ids) == 1 and len(rows) == 1:
+            item_id = indexed_id
+        elif indexed_id is not None and item_id != indexed_id:
+            continue
+        if (
+            item_id is None and row.get("itemIndex") is None
+            and len(ordered_ids) == 1 and len(rows) == 1
+        ):
             item_id = ordered_ids[0]
         if item_id not in points or item_id in by_id:
             continue
+        raw_score = row.get("score")
+        raw_confidence = row.get("confidence", 0.7)
+        if isinstance(raw_score, bool) or isinstance(raw_confidence, bool):
+            continue
         try:
-            score = max(0.0, min(points[item_id], float(row.get("score") or 0)))
-            confidence = max(
-                0.0,
-                min(1.0, float(row.get("confidence") or 0.7)),
-            )
-        except (TypeError, ValueError):
+            score = float(raw_score)
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(score) or not math.isfinite(confidence):
             continue
         feedback = str(row.get("feedback") or "").strip()
         if len(feedback) > 4000:
             continue
         by_id[item_id] = {
-            "score": score,
+            "score": max(0.0, min(points[item_id], score)),
             "feedback": feedback,
-            "confidence": confidence,
+            "confidence": max(0.0, min(1.0, confidence)),
         }
     return by_id

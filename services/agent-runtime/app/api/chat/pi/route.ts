@@ -79,6 +79,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const { currentSceneId, scenes } = body.storeState;
+    const currentScene = Array.isArray(scenes) ? scenes.find(scene => scene?.id === currentSceneId) : undefined;
+    if (currentScene && currentScene.type !== 'slide' && currentScene.type !== 'quiz') {
+      return apiError('INVALID_REQUEST', 422, '当前页面不支持课堂对话。请选择幻灯片或测验后重试。');
+    }
+
     const runTurn = createHarnessTurn();
     if (!runTurn) return apiError('UPSTREAM_ERROR', 503, '课堂对话服务尚未配置。');
 
@@ -123,6 +129,7 @@ export async function POST(req: NextRequest) {
           send,
           runTurn,
           signal: deadline,
+          clientSignal: signal,
           maxAgentTurns,
           maxActionsPerAgent,
           enableWhiteboardTools,

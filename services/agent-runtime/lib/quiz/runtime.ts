@@ -17,6 +17,7 @@ import { getRuntimeStore } from '@/lib/runtime/store';
 
 export interface QuizAttemptPayload extends QuizAttemptSkeleton {
   payloadVersion: 1;
+  allowBlankShortAnswers?: true;
   phase: QuizAttemptPhase;
   answers: QuizAnswers;
   results?: QuestionResult[];
@@ -32,6 +33,7 @@ export interface QuizAttemptRecordInput {
   /** Begin a distinct retry even when the prior attempt has the same payload. */
   startNewAttempt?: boolean;
   requireCurrentSubmission?: boolean;
+  allowBlankShortAnswers?: true;
 }
 
 export interface LegacyQuizAttemptInput {
@@ -60,6 +62,7 @@ export class QuizRetryProgressedError extends Error {
 export interface QuizAttemptState {
   sessionId: string;
   status: RuntimeSession['status'];
+  allowBlankShortAnswers?: true;
   phase: QuizAttemptPhase;
   answers: QuizAnswers;
   results?: QuestionResult[];
@@ -76,7 +79,7 @@ export interface QuizAttemptStateInput {
   sceneId: string;
 }
 
-export type QuizDraftInput = Omit<QuizAttemptRecordInput, 'phase' | 'results'>;
+export type QuizDraftInput = Omit<QuizAttemptRecordInput, 'phase' | 'results' | 'allowBlankShortAnswers'>;
 
 export interface QuizAttemptWriter {
   scheduleDraft(input: QuizDraftInput): void;
@@ -276,6 +279,9 @@ async function readLatestQuizAttemptState(
       status: session.status,
       phase: payload.phase,
       answers: payload.answers,
+      ...(payload.phase === 'submitted' && payload.allowBlankShortAnswers === true
+        ? { allowBlankShortAnswers: true }
+        : {}),
       ...(payload.phase === 'reviewed'
         ? { results: Array.isArray(payload.results) ? payload.results : [] }
         : {}),
@@ -485,6 +491,9 @@ export async function recordQuizAttempt(
         payloadVersion: 1,
         phase: input.phase,
         answers: input.answers,
+        ...(input.phase === 'submitted' && input.allowBlankShortAnswers === true
+          ? { allowBlankShortAnswers: true }
+          : {}),
         ...(input.results === undefined ? {} : { results: input.results }),
       };
       let rolloverIndex = 0;
@@ -543,9 +552,12 @@ export async function recordQuizAttempt(
 
         const lastRecord = records.at(-1);
         const last = asQuizPayload(lastRecord);
+        const identicalReview = input.requireCurrentSubmission && last?.phase === 'reviewed'
+          && samePayload(last, payload);
+        if (identicalReview && session.status === 'completed') return;
         if (input.requireCurrentSubmission
-            && (session.status !== 'active' || last?.phase !== 'submitted'
-              || !sameAnswers(last.answers, input.answers))) {
+            && (session.status !== 'active' || (!identicalReview && (last?.phase !== 'submitted'
+              || !sameAnswers(last.answers, input.answers))))) {
           throw new QuizRetryProgressedError(sessionId);
         }
 
@@ -578,6 +590,10 @@ export async function recordQuizAttempt(
 
         if (session.status === 'active') {
           if (last && PHASE_ORDER[payload.phase] < PHASE_ORDER[last.phase]) return;
+          // Keep the policy recorded by the original submission if a stale
+          // client repeats that same submission.
+          if (last?.phase === 'submitted' && payload.phase === 'submitted'
+              && sameAnswers(last.answers, payload.answers)) return;
 
           // An active session with a reviewed tail can exist from an older
           // client that appended before its separate completion write. Heal

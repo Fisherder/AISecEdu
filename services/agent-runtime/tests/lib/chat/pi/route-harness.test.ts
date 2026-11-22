@@ -12,6 +12,7 @@ function request(
   agentIds: unknown = ['default-1', 'default-2'],
   directorState?: DirectorState,
   whiteboard: unknown[] = [],
+  currentSceneId = 'public-slide',
 ) {
   return new NextRequest('http://localhost/api/chat/pi', {
     method: 'POST',
@@ -21,7 +22,7 @@ function request(
       ],
       storeState: {
         stage: { id: 'lesson', name: '家庭园艺', whiteboard },
-        currentSceneId: 'public-slide',
+        currentSceneId,
         mode: 'autonomous',
         whiteboardOpen: false,
         scenes: [
@@ -164,6 +165,21 @@ describe('Pi classroom through Harness', () => {
     );
   });
 
+  it('accepts a single JSON fence while retaining the strict director schema', async () => {
+    fetchTurn.mockResolvedValueOnce(Response.json({
+      model: 'fixture-model',
+      text: '```json\n{"type":"call_agent","agentId":"default-1","instruction":"介绍量杯。"}\n```',
+    }));
+    propose([{ type: 'text', content: '保持量杯水平。' }]);
+    propose({ type: 'cue_user' });
+    expect((await events(await POST(request()))).at(-1)?.type).toBe('done');
+    expect(fetchTurn).toHaveBeenCalledTimes(3);
+
+    propose({ type: 'call_agent', agentId: 'default-1', instruction: '介绍量杯。', reason: 'extra' });
+    expect((await events(await POST(request()))).map(({ type }) => type)).toEqual(['error']);
+    expect(fetchTurn).toHaveBeenCalledTimes(4);
+  });
+
   it('rejects a search proposal even if the legacy search flag is set', async () => {
     propose({ type: 'web_search', query: 'weather' });
     expect((await events(await POST(request()))).map((event) => event.type)).toEqual(['error']);
@@ -213,6 +229,40 @@ describe('Pi classroom through Harness', () => {
     expect(JSON.stringify(fetchTurn.mock.calls)).not.toContain('STALE_BOARD_FIXTURE');
     expect(JSON.stringify(received)).not.toContain('STALE_BOARD_FIXTURE');
     expect(received.at(-1)?.data).toMatchObject({ directorState: { whiteboardLedger: [] } });
+  });
+
+  it('rejects an unsupported current scene before sending any provider context', async () => {
+    const response = await POST(request(undefined, undefined, [], 'private-lab'));
+    expect(response.status).toBe(422);
+    expect(fetchTurn).not.toHaveBeenCalled();
+  });
+
+  it('returns the completed teaching and board state after a later director failure', async () => {
+    propose({ type: 'call_agent', agentId: 'default-1', instruction: '介绍量杯。' });
+    propose([
+      { type: 'text', content: '把量杯保持水平。' },
+      { type: 'action', name: 'wb_draw_text', params: { content: '水平读数', x: 10, y: 20 } },
+    ]);
+    propose({ type: 'cue_user', prompt: '继续。', unknown: 'PRIVATE_FIXTURE_SENTINEL' });
+
+    const received = await events(await POST(request()));
+    expect(received.some(event => event.type === 'error')).toBe(false);
+    expect(received.find(event => event.type === 'cue_user')?.data).toMatchObject({
+      prompt: '本轮课堂对话提前结束，你可以继续提问。',
+    });
+    expect(received.at(-1)).toMatchObject({
+      type: 'done',
+      data: {
+        cueUserReceived: true,
+        directorState: {
+          agentResponses: [{ contentPreview: '把量杯保持水平。' }],
+          whiteboardLedger: [{ actionName: 'wb_draw_text', params: { content: '水平读数' } }],
+        },
+        directorToolTrace: [{ toolName: 'call_agent' }],
+      },
+    });
+    expect(JSON.stringify(received)).not.toContain('PRIVATE_FIXTURE_SENTINEL');
+    expect(fetchTurn).toHaveBeenCalledTimes(3);
   });
 
   it('ends the request on a failed child turn without spending another director attempt', async () => {

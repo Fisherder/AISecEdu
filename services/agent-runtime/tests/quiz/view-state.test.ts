@@ -134,7 +134,7 @@ describe('quiz view runtime hydration', () => {
     await Promise.resolve();
 
     expect(calls).toEqual([
-      { ...base, phase: 'submitted' },
+      { ...base, phase: 'submitted', allowBlankShortAnswers: true },
       { ...base, phase: 'reviewed', results: [], requireCurrentSubmission: true },
     ]);
     expect(settled).toBe(false);

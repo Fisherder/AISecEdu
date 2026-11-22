@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST as postAgent } from '@/app/api/student/agent/route';
-import { GET as getClassroom } from '@/app/api/classroom/route';
+import { GET as getClassroom, POST as postClassroom } from '@/app/api/classroom/route';
 import { POST as postReview } from '@/app/api/student/review/route';
 import { buildLearnerInsight } from '@/lib/security/learning-analytics';
 
@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   runTurn: vi.fn(),
   recordHarnessUsage: vi.fn(),
   publishLesson: vi.fn(),
+  persistClassroom: vi.fn(),
   storeLesson: vi.fn(),
   readClassroom: vi.fn(),
 }));
@@ -45,6 +46,7 @@ vi.mock('@/lib/server/lesson-publish', () => ({ publishLesson: mocks.publishLess
 vi.mock('@/lib/server/classroom-storage', () => ({
   buildRequestOrigin: () => 'http://runtime.test',
   readClassroom: mocks.readClassroom,
+  persistClassroom: mocks.persistClassroom,
   isValidClassroomId: () => true,
 }));
 
@@ -178,6 +180,80 @@ describe('student teaching model routes', () => {
     );
   });
 
+  it.each([
+    '请生成一个学习包，不要生成任何东西。',
+    '请生成一个学习包，不用生成任何内容。',
+    '生成学习包算了。',
+    '生成学习包取消。',
+    "Please create a study package, don't generate anything.",
+  ])('does not send or save a cancelled student request', async (message) => {
+    const result = await postAgent(request('agent', { message }));
+    expect(result.status).toBe(422);
+    expect(mocks.query).not.toHaveBeenCalled();
+    expect(mocks.runTurn).not.toHaveBeenCalled();
+    expect(mocks.publishLesson).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('does not save an aborted provider turn, including for a new thread', async (existing) => {
+    const abort = new DOMException('Cancelled', 'AbortError');
+    mocks.runTurn.mockRejectedValueOnce(abort);
+    await expect(postAgent(request('agent', {
+      ...(existing ? { threadId: 'own-thread' } : {}),
+      message: '请给我一些学习建议。',
+    }))).rejects.toBe(abort);
+    expect(mocks.runTurn).toHaveBeenCalledOnce();
+    expect(mocks.query.mock.calls.every(([sql]) => sql.trimStart().startsWith('SELECT'))).toBe(true);
+    expect(mocks.saveStudentLearningProfile).not.toHaveBeenCalled();
+    expect(mocks.createStudentLearningPlan).not.toHaveBeenCalled();
+    expect(mocks.publishLesson).not.toHaveBeenCalled();
+  });
+
+  it('does not persist either the student turn or package when the second model step aborts', async () => {
+    const abort = new DOMException('Cancelled', 'AbortError');
+    mocks.runTurn.mockResolvedValueOnce({
+      model: 'model', usage, text: JSON.stringify({
+        action: 'generate_package',
+        reply: '准备学习包。',
+        packageRequest: { goal: '学习植物观察' },
+      }),
+    }).mockRejectedValueOnce(abort);
+    await expect(postAgent(request('agent', {
+      threadId: 'own-thread', message: '请生成一个植物观察学习包。',
+    }))).rejects.toBe(abort);
+    expect(mocks.runTurn).toHaveBeenCalledTimes(2);
+    expect(mocks.recordHarnessUsage).toHaveBeenCalledTimes(1);
+    expect(mocks.query.mock.calls.every(([sql]) => sql.trimStart().startsWith('SELECT'))).toBe(true);
+    expect(mocks.publishLesson).not.toHaveBeenCalled();
+    expect(mocks.storeLesson).not.toHaveBeenCalled();
+  });
+
+  it('records usage but does not persist a successful model reply after the request aborts', async () => {
+    const controller = new AbortController();
+    const abort = new DOMException('Cancelled', 'AbortError');
+    mocks.runTurn.mockImplementationOnce(async () => {
+      controller.abort(abort);
+      return { model: 'model', text: '{"action":"answer","reply":"复习建议"}', usage };
+    });
+    await expect(postAgent(new NextRequest('http://runtime.test/api/student/agent', {
+      method: 'POST',
+      body: JSON.stringify({ threadId: 'own-thread', message: '请给我一些学习建议。' }),
+      signal: controller.signal,
+    }))).rejects.toBe(abort);
+    expect(mocks.recordHarnessUsage).toHaveBeenCalledOnce();
+    expect(mocks.query.mock.calls.every(([sql]) => sql.trimStart().startsWith('SELECT'))).toBe(true);
+  });
+
+  it.each([['personal_study_fixture'], { id: 'personal_study_fixture' }])(
+    'rejects non-string classroom IDs before persistence',
+    async (id) => {
+      const response = await postClassroom(new NextRequest('http://runtime.test/api/classroom', {
+        method: 'POST', body: JSON.stringify({ stage: { id }, scenes: [] }),
+      }));
+      expect(response.status).toBe(400);
+      expect(mocks.persistClassroom).not.toHaveBeenCalled();
+    },
+  );
+
   it('denies another learner’s thread before loading state or invoking the model', async () => {
     mocks.query.mockResolvedValue({ rows: [] });
     const response = await postAgent(
@@ -253,11 +329,13 @@ describe('student teaching model routes', () => {
     '不需要生成幻灯片。请生成一个学习包。',
     '请生成一个学习包。别生成幻灯片。',
     '请生成一个学习包。不要概念自检。',
+    '请参考“不要生成学习包”这段课堂资料生成概念自检。',
     "Don't make a slide deck. Please generate a learning package.",
     'Create a 30-minute, beginner-friendly learning package.',
     '不要生成学习包。改主意了，请生成一个学习包。',
   ])('routes %s and forwards the exact request to the package turn', async (message) => {
     const withoutQuiz = message === '请生成一个学习包。不要概念自检。';
+    const quizOnly = message === '请参考“不要生成学习包”这段课堂资料生成概念自检。';
     const withoutSlides = [
       '不需要生成幻灯片。请生成一个学习包。',
       '请生成一个学习包。别生成幻灯片。',
@@ -272,7 +350,7 @@ describe('student teaching model routes', () => {
         model: 'router-model',
         text: JSON.stringify({
           action: 'generate_package',
-          reply: '准备学习包',
+          reply: '每天同一时间观察，比较结果会更容易。',
           packageRequest: { goal: '学习植物观察', preference: 'practice' },
         }),
         usage,
@@ -284,7 +362,7 @@ describe('student teaching model routes', () => {
           title: '植物观察',
           summary: '学习如何记录叶片变化。',
           objectives: ['持续记录'],
-          sections: [
+          sections: quizOnly ? [] : [
             {
               title: '观察法',
               explanation: '在每天同一时间观察。',
@@ -310,6 +388,10 @@ describe('student teaching model routes', () => {
     );
     expect(result.status).toBe(201);
     const payload = await result.json();
+    expect(payload.assistantMessage.content).toContain('每天同一时间观察，比较结果会更容易。');
+    expect(mocks.query.mock.calls.some(([sql, args]) =>
+      String(sql).includes("'assistant','result'") && args[3] === payload.assistantMessage.content,
+    )).toBe(true);
     expect(JSON.parse(mocks.runTurn.mock.calls[1][0][1].content)).toMatchObject({
       originalRequest: message,
     });
@@ -324,6 +406,7 @@ describe('student teaching model routes', () => {
       expect(mocks.storeLesson).not.toHaveBeenCalled();
       return;
     }
+    expect(payload.assistantMessage.content).toContain('《植物观察》已生成。');
     expect(payload).toMatchObject({
       assistantMessage: {
         metadata: {
@@ -336,14 +419,16 @@ describe('student teaching model routes', () => {
     });
     const [lesson, , owner, options] = mocks.publishLesson.mock.calls[0];
     expect(lesson.artifacts.map((artifact: { type: string }) => artifact.type)).toEqual(
-      withoutQuiz ? ['slide'] : ['slide', 'quiz'],
+      quizOnly ? ['quiz'] : withoutQuiz ? ['slide'] : ['slide', 'quiz'],
     );
     if (!withoutQuiz) {
-      expect(lesson.artifacts[1].content.questions[0]).toMatchObject({
+      expect(lesson.artifacts.find((artifact: { type: string }) => artifact.type === 'quiz').content.questions[0]).toMatchObject({
         answer: ['0'],
         type: 'single',
       });
     }
+    if (quizOnly) expect(payload.assistantMessage.content).toMatch(/^概念自检《/);
+    if (withoutQuiz) expect(payload.assistantMessage.content).toMatch(/^学习讲义《/);
     expect(owner).toBe('acct:own-learner');
     expect(options).toEqual({ personalStudy: true });
     expect(mocks.storeLesson).toHaveBeenCalledTimes(2);
@@ -354,6 +439,24 @@ describe('student teaching model routes', () => {
       ),
     ).toBe(true);
   });
+
+  it.each(['学习包已经生成，可以打开。', '请打开 https://unverified.invalid/学习包。'])(
+    'reports delivery failure without publishing an unverified router message',
+    async (reply) => {
+      mocks.runTurn
+        .mockResolvedValueOnce({ model: 'router-model', text: JSON.stringify({
+          action: 'generate_package', reply, packageRequest: { goal: '学习植物观察' },
+        }) })
+        .mockResolvedValueOnce({ model: 'package-model', text: '{"status":"unsupported"}' });
+      const result = await postAgent(request('agent', { threadId: 'own-thread', message: '请生成植物观察学习包。' }));
+      expect(result.status).toBe(201);
+      const { assistantMessage } = await result.json();
+      expect(assistantMessage.content).toContain('本次个人学习包没有生成');
+      expect(assistantMessage.content).not.toContain(reply);
+      expect(assistantMessage.metadata.generatedPackage).toBeUndefined();
+      expect(mocks.publishLesson).not.toHaveBeenCalled();
+    },
+  );
 
   it('does not return a native personal classroom for another learner', async () => {
     const target = new NextRequest('http://runtime.test/api/classroom?id=personal_study_fixture');

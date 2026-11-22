@@ -467,7 +467,7 @@ describe('transport and approximate rendering evidence', () => {
       {target:marker.id,property:'opacity',easing:'smooth',keyframes:[{at:0,value:0},{at:20,value:0},{at:60,value:1}]},
     );
     scene.chapters[2].kind='summary';
-    scene.connections.push({id:'flow-path',from:body.id,to:'hero',color:'#4fc3d9',particles:0,speed:.1,radius:.02,label:'介质流向'});
+    scene.connections.push({id:'flow-path',from:body.id,to:'hero',via:[],color:'#4fc3d9',particles:0,speed:.1,radius:.02,label:'介质流向'});
     const normalized=normalizeCinematicHardware(scene),result=normalized.scene;
     expect(result.nodes.find(node=>node.id===body.id)?.opacity).toBe(.62);
     const channels=result.nodes.filter(node=>node.parent===body.id&&node.kind==='tube');

@@ -1,8 +1,12 @@
+import ast
+import datetime
 import importlib.util
+import math
 import pathlib
 import re
 import secrets
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -618,3 +622,103 @@ def test_open_answer_model_grade_maps_bounded_item_index_when_id_drifts():
             "confidence": 0.9,
         }
     }
+
+
+def test_open_grading_preserves_valid_rows_and_existing_bounds():
+    leaf = SimpleNamespace(id="leaf", points=5)
+    water = SimpleNamespace(id="water", points=8)
+    assert GRADING.map_open_grade_rows([
+        {"itemId": "leaf", "score": -1, "confidence": 0},
+        {"itemId": "unknown", "itemIndex": "2", "score": "9", "confidence": 2},
+    ], [leaf, water]) == {
+        "leaf": {"score": 0, "feedback": "", "confidence": 0},
+        "water": {"score": 8, "feedback": "", "confidence": 1},
+    }
+    assert GRADING.map_open_grade_rows([{"score": 2.5}], [leaf]) == {
+        "leaf": {"score": 2.5, "feedback": "", "confidence": 0.7},
+    }
+    assert GRADING.map_open_grade_rows([{"itemIndex": True, "score": 3}], [leaf]) == {}
+    assert GRADING.map_open_grade_rows([{"itemIndex": 1.5, "score": 3}], [leaf]) == {}
+
+
+@pytest.mark.parametrize("invalid_grade", [
+    {"itemId": "leaf", "score": float("nan")},
+    {"itemId": "leaf", "score": "Infinity"},
+    {"itemId": "leaf"},
+    {"itemId": "leaf", "score": True},
+    {"itemId": "leaf", "score": 4, "confidence": "NaN"},
+    {"itemIndex": True, "score": 3},
+    {"itemIndex": 1.5, "score": 3},
+    {"itemId": "leaf", "itemIndex": 2, "score": 3},
+])
+def test_assignment_work_routes_invalid_open_grade_to_review(invalid_grade):
+    from flask import Flask, request
+
+    source = GRADING_PATH.parents[1]
+    leaf, water = [SimpleNamespace(
+        id=item_id, item_type="SHORT_ANSWER", title=title, prompt=prompt,
+        points=5, position=index, config={"keywords": keywords}, required=True, challenge_id=None,
+    ) for index, (item_id, title, prompt, keywords) in enumerate([
+        ("leaf", "叶片", "叶片怎样吸收光？", ["光", "叶绿素"]),
+        ("water", "蒸发", "什么现象表示水在蒸发？", ["液面"]),
+    ])]
+    assignment = SimpleNamespace(
+        id="science-assignment", status="PUBLISHED", available_from=None, due_at=None,
+        settings={}, items=[leaf, water], dojo_id=2,
+    )
+    learner = SimpleNamespace(id=3)
+    now = datetime.datetime(2026, 1, 2)
+    submission = SimpleNamespace(id="submission", assignment=assignment, student_id=learner.id,
+                                 updated=now, status="IN_PROGRESS", answers={})
+    submissions = MagicMock()
+    submissions.query.filter_by.return_value.first.return_value = submission
+    submissions.query.filter_by.return_value.with_for_update.return_value.first.return_value = submission
+    solves = MagicMock()
+    solves.query.filter.return_value.all.return_value = []
+    session = MagicMock()
+    model = MagicMock(return_value={"grades": [
+        invalid_grade,
+        {"itemId": "water", "itemIndex": 2, "score": 4, "confidence": 0, "feedback": "观察了液面。"},
+    ]})
+    namespace = {
+        "math": math, "re": re, "request": request, "utcnow": lambda: now,
+        "db": SimpleNamespace(session=session), "Solves": solves, "model_json": model,
+        "DOJO_AI_GRADER_MODEL": "synthetic-grader", "LearningAuditEvents": SimpleNamespace,
+        "TeachingAssignmentSubmissions": submissions, "ScopeError": type("ScopeError", (ValueError,), {}),
+        "build_open_grade_questions": GRADING.build_open_grade_questions,
+        "map_open_grade_rows": GRADING.map_open_grade_rows,
+        "assignment_for_student": lambda *_args, **_kwargs: assignment, "_user": lambda: learner,
+        "timestamp": lambda value: value.isoformat(),
+        "assignment_view": lambda *_args, **_kwargs: {"itemResults": submission.item_results},
+    }
+    coursework = source / "coursework.py"
+    names = {"save_submission", "grade_submission", "_ai_open_grades", "_fallback_open_grade", "_normalize_answer"}
+    nodes = [node for node in ast.parse(coursework.read_text()).body if getattr(node, "name", None) in names]
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(coursework), "exec"), namespace)
+    api = source / "api/v1/coursework.py"
+    api_nodes = ast.parse(api.read_text()).body
+    work = next(node for node in api_nodes if getattr(node, "name", None) == "AssignmentWork")
+    post = next(node for node in work.body if getattr(node, "name", None) == "post")
+    post.decorator_list = []
+    nodes = [node for node in api_nodes if getattr(node, "name", None) in {"_ok", "_body"}]
+    exec(compile(ast.Module(body=[*nodes, post], type_ignores=[]), str(api), "exec"), namespace)
+
+    app = Flask(__name__)
+    app.add_url_rule("/coursework/assignments/<assignment_id>/work", methods=["POST"],
+                     view_func=lambda assignment_id: namespace["post"](None, assignment_id))
+    response = app.test_client().post(f"/coursework/assignments/{assignment.id}/work", json={
+        "action": "submit", "answers": {"leaf": "叶片能吸收光。", "water": "液面逐渐下降。"},
+        "expectedUpdated": now.isoformat(),
+    })
+
+    assert response.status_code == 201
+    model.assert_called_once()
+    session.commit.assert_called_once()
+    assert submission.status == "GRADED"
+    assert submission.trust_score == 0.225
+    assert response.json["data"]["assignment"]["itemResults"] == [
+        {"itemId": "leaf", "score": 3.38, "maxScore": 5, "feedback": "已覆盖 1/2 个关键评分点。",
+         "source": "FALLBACK", "needsReview": True},
+        {"itemId": "water", "score": 4, "maxScore": 5, "feedback": "观察了液面。",
+         "source": "AI", "needsReview": False},
+    ]

@@ -28,7 +28,7 @@ const prepared = { sessionId, artifactId: 'published-plant-deck', artifactRevisi
 const ordinary = { id: originThread, dojoId: -11, moduleIndex: 0, status: 'ACTIVE', title: '植物课堂准备' };
 const other = { id: otherThread, dojoId: -12, moduleIndex: 1, status: 'ACTIVE', title: '其他独立会话' };
 const deck = {
-  id: 'synthetic-math-deck', type: 'slide-deck', title: '三角形的内角', status: 'READY',
+  id: 'synthetic-math-deck', type: 'slide-deck', title: '三角形的内角', status: 'PUBLISHED',
   currentRevision: 2, capabilities: { edit: true }, revision: { content: { note: 'PRIVATE-CANVAS-SELECTION' } },
 };
 const fixture = { writes: [], decision: null, receipt: null, rejectPrepare: true, pauseDecision: null };
@@ -215,6 +215,31 @@ async function main() {
     await submit.click();
     await posted;
     assert.deepEqual(fixture.writes.at(-1).body, { instruction, expectedRevision: 2 });
+    await page.waitForFunction(() => document.querySelector('#cocreation-workbench').shadowRoot
+      .querySelector('[aria-label="成品局部修改要求"]').value === '');
+    const polish = '请缩短第2页的讲稿';
+    const consent = page.getByRole('checkbox', { name: /将指定页的原讲稿用于本次润色/ });
+    await editor.fill(polish);
+    assert.equal(await consent.isChecked(), false);
+    await consent.check();
+    const postedWithConsent = page.waitForResponse(response => response.url().endsWith('/' + deck.id + '/revise'));
+    await submit.click();
+    await postedWithConsent;
+    assert.deepEqual(fixture.writes.at(-1).body, {
+      instruction: polish, expectedRevision: 2, useOriginalSpeakerNotes: true,
+    });
+    await page.waitForFunction(() => document.querySelector('#cocreation-workbench').shadowRoot
+      .querySelector('[aria-label="成品局部修改要求"]').value === '');
+    await editor.fill(polish);
+    assert.equal(await consent.isChecked(), false);
+    await consent.check();
+    const rewrite = '请重写第2页的讲稿：用生活化的例子讲解';
+    await editor.fill(rewrite);
+    assert.equal(await consent.isChecked(), false);
+    const postedWithoutConsent = page.waitForResponse(response => response.url().endsWith('/' + deck.id + '/revise'));
+    await submit.click();
+    await postedWithoutConsent;
+    assert.deepEqual(fixture.writes.at(-1).body, { instruction: rewrite, expectedRevision: 2 });
 
     await load();
     const composer = page.getByRole('textbox', { name: '输入教学要求', exact: true });

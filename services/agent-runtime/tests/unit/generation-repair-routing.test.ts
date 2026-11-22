@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { AICallFn } from '@/lib/generation/pipeline-types';
 import { diagnoseGenerationRepair, validateGenerationRepairRouting } from '@/lib/generation/repair-routing';
 
 const context = {
@@ -47,12 +48,7 @@ describe('generation repair routing', () => {
   });
 
   it('uses the direct review model policy for repair diagnosis', async () => {
-    const aiCall = async (
-      _system: string,
-      _input: string,
-      _images?: Array<{id: string; src: string}>,
-      options?: {stage?: 'cinematic-review'},
-    ) => {
+    const aiCall: AICallFn = async (_system, _input, _images, options) => {
       expect(options).toEqual({stage: 'cinematic-review'});
       return JSON.stringify({
         version: 'generation-repair-routing-v1',
@@ -116,20 +112,31 @@ describe('generation repair routing', () => {
     ]));
   });
 
-  it('conservatively sends every omitted review issue back to scene repair', () => {
-    const expanded={...context,issues:[...context.issues,'场景缺少第二项可见证据']};
-    const routing=validateGenerationRepairRouting(expanded,{
-      version:'generation-repair-routing-v1',
-      findings:[{
-        issueIndices:[0],target:'copy',fields:['chapters.0.explanation'],
-        reason:'第一项只是讲解遗漏传播条件，可在原说明字段内准确修复。',
-        evidence:[{source:'candidate',path:'chapters.0.explanation',quote:'彼此传播故障'}],
-      }],
-    });
+  it('requests a complete review when a concrete issue was omitted', async () => {
+    const expanded = {...context, issues: [...context.issues, '场景缺少第二项可见证据']};
+    const copy = {
+      issueIndices: [0], target: 'copy', fields: ['chapters.0.explanation'],
+      reason: '第一项只是讲解遗漏传播条件，可在原说明字段内准确修复。',
+      evidence: [{source: 'candidate', path: 'chapters.0.explanation', quote: '彼此传播故障'}],
+    };
+    const scene = {
+      issueIndices: [1], target: 'scene', fields: [],
+      reason: '第二项需要在场景中展示证据并支持教师要求的交互。',
+      evidence: [
+        {source: 'learningRequest', path: 'teacherRequest', quote: '实际操作范围控件'},
+        {source: 'scene', path: 'connections.0.from', quote: 'drive'},
+      ],
+    };
+    const report = (findings: typeof copy[]) => JSON.stringify({version: 'generation-repair-routing-v1', findings});
+    const aiCall = vi.fn<AICallFn>()
+      .mockResolvedValueOnce(report([copy]))
+      .mockResolvedValueOnce(report([copy, scene]));
 
-    expect(routing.findings).toHaveLength(2);
-    expect(routing.findings[1]).toMatchObject({issueIndices:[1],target:'scene',fields:[]});
-    expect(routing.findings[1].evidence.map(reference=>reference.source).sort()).toEqual(['learningRequest','scene']);
+    const routing = await diagnoseGenerationRepair(expanded, aiCall);
+    expect(aiCall).toHaveBeenCalledTimes(2);
+    const secondInput = JSON.parse(aiCall.mock.calls[1][1]);
+    expect(secondInput.stageRepair.failures).toEqual([{attempt: 1, issues: ['Repair routing omitted issue indices: 1']}]);
+    expect(routing.findings).toMatchObject([copy, scene]);
   });
 
   it('drops an undefined optional scene citation while retaining the required editable evidence', () => {

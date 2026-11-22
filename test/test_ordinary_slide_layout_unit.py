@@ -285,9 +285,12 @@ def test_revision_conflict_uses_lock_refreshed_artifact_before_creating_row(case
 
 def test_teacher_whole_deck_request_dispatches_pinned_saved_revision(case):
     ns, jobs, job, user, artifact, revision = case
+    notes_namespace = dict(ns)
+    source("ordinary_slide_notes", notes_namespace)
     instruction = "请把这份植物生长课件扩成 8 页"
     enqueue = MagicMock(return_value=(job, True))
     api = {
+        "ordinary_slide_notes": SimpleNamespace(**notes_namespace),
         "artifact_for_user": lambda *_: artifact,
         "_supplied_idempotency": lambda *_: "revise-once",
         "TeachingJobs": SimpleNamespace(query=MagicMock()),

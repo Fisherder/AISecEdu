@@ -68,6 +68,7 @@ describe('browser-safe additive cinematic contract', () => {
     const schema = readFileSync(resolve('lib/cinematic/schema.ts'), 'utf8');
     const definitions = readFileSync(resolve('lib/cinematic/asset-definitions.ts'), 'utf8');
     const limits = readFileSync(resolve('lib/cinematic/limits.ts'), 'utf8');
+    const processSchema = readFileSync(resolve('lib/process/schema.ts'), 'utf8');
     expect([...schema.matchAll(/from ['"]([^'"]+)['"]/g)].map((match) => match[1])).toEqual([
       'zod',
       './limits',
@@ -75,12 +76,14 @@ describe('browser-safe additive cinematic contract', () => {
       './presentation',
       './asset-definitions',
       './curves',
+      '../process/schema',
     ]);
+    expect([...processSchema.matchAll(/from ['"]([^'"]+)['"]/g)].map((match) => match[1])).toEqual(['zod']);
     expect([...definitions.matchAll(/from ['"]([^'"]+)['"]/g)].map((match) => match[1])).toEqual([
       './asset-definitions.json',
     ]);
     expect(limits).not.toMatch(/\bimport\b|\brequire\b/);
-    expect(schema + definitions + limits).not.toMatch(
+    expect(schema + definitions + limits + processSchema).not.toMatch(
       /asset-catalog|node:vm|models\.js|import\(|require\(/,
     );
   });
@@ -145,8 +148,10 @@ describe('deterministic geometry-based assembly', () => {
     const explode=normalized.scene.tracks.find(track=>track.target==='dna_molecule'&&track.property==='explode');
     expect(normalized.scene.nodes[0].params).toMatchObject({separation:'local',speed:0});
     expect(explode?.keyframes).toEqual([{at:0,value:0},{at:40,value:.72},{at:60,value:0}]);
-    expect(normalized.scene.coverage.interactions[0]).toMatchObject({targets:['dna_molecule'],properties:['explode']});
-    expect(normalized.scene.coverage.objects).toContainEqual({name:requiredObject,nodes:['dna_molecule']});
+    const coverage = normalized.scene.coverage;
+    if (!coverage) throw new Error('Expected the normalized scene to retain coverage');
+    expect(coverage.interactions[0]).toMatchObject({targets:['dna_molecule'],properties:['explode']});
+    expect(coverage.objects).toContainEqual({name:requiredObject,nodes:['dna_molecule']});
     const report=checkCinematicQuality(normalized.scene,options);
     expect(report.metrics).toMatchObject({teachingNodes:3,detailedModels:1,relations:2});
     expect(report.issues.map(issue=>issue.code)).not.toContain('composition-assembly');
@@ -179,8 +184,10 @@ describe('deterministic geometry-based assembly', () => {
     const rungs=normalized.scene.nodes.filter(node=>node.id.startsWith('base_rungs-pair-'));
     expect(rungs).toHaveLength(4);
     expect(rungs.every(node=>node.kind==='box'&&node.role==='support')).toBe(true);
-    expect(normalized.scene.coverage.objects[0].nodes).toEqual(rungs.map(node=>node.id));
-    expect(normalized.scene.coverage.interactions[0].targets).toEqual(rungs.map(node=>node.id));
+    const coverage = normalized.scene.coverage;
+    if (!coverage) throw new Error('Expected the normalized scene to retain coverage');
+    expect(coverage.objects[0].nodes).toEqual(rungs.map(node=>node.id));
+    expect(coverage.interactions[0].targets).toEqual(rungs.map(node=>node.id));
     expect(normalized.scene.tracks.filter(track=>track.property==='opacity').map(track=>track.target)).toEqual(rungs.map(node=>node.id));
     const codes=checkCinematicQuality(normalized.scene,options).issues.map(issue=>issue.code);
     expect(codes).not.toContain('request-object-missing');

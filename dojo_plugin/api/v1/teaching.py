@@ -182,7 +182,7 @@ from ...agent_runtime.model_journal import ModelJournalError, record_model_event
 from ...agent_runtime.project_collection import project_collection_view
 from ...agent_runtime.reliability import public_recovery
 from ...agent_runtime.teacher_documents import requests_lesson_plan_candidates
-from ...agent_runtime import ordinary_material_turn
+from ...agent_runtime import ordinary_material_turn, ordinary_slide_notes
 from ...agent_runtime.upstream_turn import ordinary_teaching_course, ordinary_teaching_image_allowed, upstream_enabled
 from ...agent_runtime.scope import (
     ScopeError,
@@ -9231,10 +9231,18 @@ def revise_teacher_artifact(user, artifact_id, body, request_key=None):
         artifact = artifact_for_user(artifact_id, user)
         if artifact.owner_id != user.id:
             raise ScopeError("Only the artifact owner may revise it")
+        consent = body.get(ordinary_slide_notes.CONSENT, False)
+        if type(consent) is not bool:
+            raise ordinary_slide_notes.OrdinarySlideNotesError("原讲稿许可必须是本次请求中的布尔选项。")
+        if consent and (type(body.get("expectedRevision")) is not int or body["expectedRevision"] < 1):
+            raise ordinary_slide_notes.OrdinarySlideNotesError("请打开当前课件版本后，再单独确认使用原讲稿。")
         operation_key = _supplied_idempotency(user.id, "artifact-revise", request_key)
         existing = TeachingJobs.query.filter_by(owner_id=user.id, idempotency_key=operation_key).first()
         if existing is not None:
-            if (existing.payload or {}).get("artifactId") != artifact.id or (existing.payload or {}).get("instruction") != str(body.get("instruction") or "").strip():
+            prior = existing.payload or {}
+            if (prior.get("artifactId") != artifact.id or prior.get("instruction") != str(body.get("instruction") or "").strip()
+                    or prior.get(ordinary_slide_notes.CONSENT, False) is not consent
+                    or (consent and prior.get("expectedRevision") != body["expectedRevision"])):
                 return _error("这次操作的编号已用于不同的修改要求。", 409, code="REVISION_CONFLICT")
             return _ok({"job": job_view(existing), "deduplicated": True}, 202)
         instruction = str(body.get("instruction") or "").strip()
@@ -9251,14 +9259,17 @@ def revise_teacher_artifact(user, artifact_id, body, request_key=None):
         source_issue = artifact_revision_source_issue(artifact.artifact_type, current_content)
         if source_issue:
             return _error(source_issue, 409, code="REVISION_SOURCE_NOT_READY")
-        payload = ordinary_slide_layout.admit(user, artifact, {
+        payload = ordinary_slide_notes.admit(user, artifact, {
             "artifactId": artifact.id,
             "expectedRevision": expected,
             "instruction": instruction,
             "currentContent": current_content,
             "artifactType": artifact.artifact_type,
             "allowDegraded": bool(body.get("allowDegraded")),
+            **({ordinary_slide_notes.CONSENT: True} if consent else {}),
         })
+        if not ordinary_slide_notes.pinned(payload):
+            payload = ordinary_slide_layout.admit(user, artifact, payload)
         job, _ = enqueue_job(
             owner_id=user.id,
             kind="artifact.revise",
@@ -9268,7 +9279,7 @@ def revise_teacher_artifact(user, artifact_id, body, request_key=None):
             module_index=artifact.module_index,
         )
         return _ok({"job": job_view(job)}, 202)
-    except ordinary_slide_layout.OrdinarySlideLayoutError as exc:
+    except (ordinary_slide_layout.OrdinarySlideLayoutError, ordinary_slide_notes.OrdinarySlideNotesError) as exc:
         db.session.rollback()
         return _error(exc, 409, code="ORDINARY_SLIDE_REVISION_CONFLICT")
     except ScopeError as exc:
