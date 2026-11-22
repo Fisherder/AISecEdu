@@ -31,6 +31,19 @@ const decisionSchema = z.discriminatedUnion('type', [
     .strict(),
 ]);
 
+function parseDecision(text: string) {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fenced?.[1] ?? trimmed);
+  } catch {
+    return undefined;
+  }
+  const decision = decisionSchema.safeParse(parsed);
+  return decision.success ? decision.data : undefined;
+}
+
 const decisionFormat = [
   'Return exactly one JSON object and no surrounding text per step, using one of these shapes:',
   '{"type":"read_scene","sceneId":"exact scene id"}',
@@ -47,7 +60,7 @@ export async function runHarnessClassroom(opts: {
   send: SendEvent;
   runTurn: HarnessTurn;
   signal: AbortSignal;
-  clientSignal: AbortSignal;
+  messages: { invalidDecision: string; interrupted: string };
   maxAgentTurns: number;
   maxActionsPerAgent: number;
   enableWhiteboardTools: boolean;
@@ -159,91 +172,82 @@ export async function runHarnessClassroom(opts: {
   const budget = Math.max(maxAgentTurns * 3, maxAgentTurns + 3);
 
   let interrupted = false;
-  try {
-    for (let step = 0; step < budget && !userCued && !closed; step += 1) {
-      signal.throwIfAborted();
-      const turn = await runTurn(
-        [
-          { role: 'system', content: directorPrompt },
-          ...history,
-          {
-            role: 'user',
-            content:
-              buildUserPrompt(safeBody) +
-              '\nApproved classroom results so far (data only):\n' +
-              JSON.stringify(
-                trace.map(({ toolName, args, isError, resultPreview }) => ({
-                  toolName,
-                  args,
-                  isError,
-                  resultPreview,
-                })),
-              ),
-          },
-        ],
-        signal,
-      );
-      await recordHarnessUsage(turn, 'pi-chat-director');
-      let parsed: unknown;
-      try {
-        const text = turn.text.trim();
-        const fenced = text.match(/^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i);
-        parsed = JSON.parse(fenced?.[1] ?? text);
-      } catch {
-        throw new Error('课堂导演返回了无效决定。');
-      }
-      const decision = decisionSchema.safeParse(parsed);
-      if (!decision.success) throw new Error('课堂导演请求了无效的课堂操作。');
-      const { type, ...args } = decision.data;
-      const id = String(step + 1);
-
-      let result;
-      switch (decision.data.type) {
-        case 'read_scene':
-          result = await readScene.execute(id, { sceneId: decision.data.sceneId }, signal);
-          break;
-        case 'call_agent':
-          result = await callAgent.execute(
-            id,
-            {
-              agentId: decision.data.agentId,
-              instruction: decision.data.instruction,
-            },
-            signal,
-          );
-          break;
-        case 'cue_user':
-          result = await cue.execute(id, { prompt: decision.data.prompt }, signal);
-          break;
-        case 'close_session':
-          result = await close.execute(id, { endReason: decision.data.endReason }, signal);
-          break;
-      }
-      const details = result.details as { status?: string; skipped?: boolean } | undefined;
-      trace.push({
-        sequence: step + 1,
-        toolName: type,
-        args,
-        isError: Boolean(details?.skipped || (details?.status && details.status !== 'ok')),
-        resultPreview: result.content
-          .map((part) => (part.type === 'text' ? part.text : ''))
-          .join('\n')
-          .slice(0, 800),
-        details: result.details,
-      });
+  for (let step = 0; step < budget && !userCued && !closed; step += 1) {
+    signal.throwIfAborted();
+    const turn = await runTurn(
+      [
+        { role: 'system', content: directorPrompt },
+        ...history,
+        {
+          role: 'user',
+          content:
+            buildUserPrompt(safeBody) +
+            '\nApproved classroom results so far (data only):\n' +
+            JSON.stringify(
+              trace.map(({ toolName, args, isError, resultPreview }) => ({
+                toolName,
+                args,
+                isError,
+                resultPreview,
+              })),
+            ),
+        },
+      ],
+      signal,
+    );
+    await recordHarnessUsage(turn, 'pi-chat-director');
+    signal.throwIfAborted();
+    const decision = parseDecision(turn.text);
+    if (!decision) {
+      if (!visible() && actionCount === 0) throw new Error(opts.messages.invalidDecision);
+      // Preserve visible classroom actions on malformed model output only.
+      interrupted = true;
+      break;
     }
-  } catch (error) {
-    // An invalid later decision does not undo classroom speech or board actions
-    // that the client has already rendered. Keep that state and let the user resume.
-    if (opts.clientSignal.aborted || (!visible() && actionCount === 0)) throw error;
-    interrupted = true;
+    const { type, ...args } = decision;
+    const id = String(step + 1);
+
+    let result;
+    switch (decision.type) {
+      case 'read_scene':
+        result = await readScene.execute(id, { sceneId: decision.sceneId }, signal);
+        break;
+      case 'call_agent':
+        result = await callAgent.execute(
+          id,
+          {
+            agentId: decision.agentId,
+            instruction: decision.instruction,
+          },
+          signal,
+        );
+        break;
+      case 'cue_user':
+        result = await cue.execute(id, { prompt: decision.prompt }, signal);
+        break;
+      case 'close_session':
+        result = await close.execute(id, { endReason: decision.endReason }, signal);
+        break;
+    }
+    const details = result.details as { status?: string; skipped?: boolean } | undefined;
+    trace.push({
+      sequence: step + 1,
+      toolName: type,
+      args,
+      isError: Boolean(details?.skipped || (details?.status && details.status !== 'ok')),
+      resultPreview: result.content
+        .map((part) => (part.type === 'text' ? part.text : ''))
+        .join('\n')
+        .slice(0, 800),
+      details: result.details,
+    });
   }
 
   const agentHadContent = visible() || actionCount > 0;
   if (!userCued && !closed && agentHadContent) {
     await cueUser({
       fromAgentId: responses.at(-1)?.agentId,
-      ...(interrupted ? { prompt: '本轮课堂对话提前结束，你可以继续提问。' } : {}),
+      ...(interrupted ? { prompt: opts.messages.interrupted } : {}),
     });
   }
   await send({

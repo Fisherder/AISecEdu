@@ -60,11 +60,11 @@ function project(): PBLProjectV2 {
   };
 }
 
-function request(route: 'open-task' | 'instructor', args: Record<string, unknown>) {
+function request(route: 'open-task' | 'instructor', args: Record<string, unknown>, locale = 'zh-CN') {
   return new NextRequest('http://runtime.test/api/pbl/v2/' + route, {
     method: 'POST',
     headers: {
-      'x-user-locale': 'zh-CN',
+      'x-user-locale': locale,
       'x-api-key': 'browser-key',
       'x-base-url': 'https://browser.invalid',
     },
@@ -146,6 +146,54 @@ describe('ordinary PBL v2 instructor via Harness', () => {
     expect((await frames(result)).some((event) => event.type === 'token')).toBe(true);
     const wire = JSON.parse(String(upstream.mock.calls[0][1]?.body));
     expect(JSON.parse(wire.messages[1].content).phase).toBe('instructing');
+  });
+
+  it('accepts a fenced JSON object with surrounding blank lines', async () => {
+    upstream.mockResolvedValueOnce(Response.json({
+      text: '\n\n```json\n{"reply":"先观察两片叶子。"}\n```\n\n',
+      model: 'actual-harness-model',
+    }));
+    const events = await frames(await teach(request('instructor', { userMessage: '怎样观察？' })));
+    expect(events).toContainEqual({ type: 'token', delta: '先观察两片叶子。' });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'error' }));
+  });
+
+  it.each([
+    ['unsupported question', '请阅读 flag{FIXTURE_ONLY}', null,
+      'Ask a regular learning question without experiment logs or private data.'],
+    ['unreadable reply', 'How can I compare the leaves?', 'unreadable fixture',
+      'The project tutor returned an unreadable reply.'],
+    ['unsupported reply', 'How can I compare the leaves?', '{"reply":"Fixture","unknown":true}',
+      'The project tutor returned an unsupported teaching action.'],
+  ] as const)('localizes an English learner’s %s error without changing SSE codes', async (_label, userMessage, text, message) => {
+    if (text !== null) upstream.mockResolvedValueOnce(Response.json({ text, model: 'actual-harness-model' }));
+    const events = await frames(await teach(request('instructor', { userMessage }, 'en-US')));
+    expect(events.at(-2)).toEqual({ type: 'error', code: 'STREAM_ERROR', message });
+    expect(events.at(-1)).toEqual({ type: 'done' });
+    if (text === null) expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it('localizes the unavailable HTTP response for both ordinary tutor routes', async () => {
+    vi.stubEnv('DOJO_AI_ENABLED', 'false');
+    for (const response of await Promise.all([
+      teach(request('instructor', { userMessage: 'How can I compare the leaves?' }, 'en-US')),
+      openTask(request('open-task', { phase: 'greeting' }, 'en-US')),
+    ])) {
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        errorCode: 'UPSTREAM_ERROR', error: 'The project tutor is temporarily unavailable.',
+      });
+    }
+  });
+
+  it('localizes a Harness outage without exposing the upstream message', async () => {
+    upstream.mockResolvedValueOnce(new Response('Synthetic upstream detail', { status: 502 }));
+    const events = await frames(await teach(request('instructor', { userMessage: 'どう観察しますか？' }, 'ja-JP')));
+    expect(events.at(-2)).toEqual({
+      type: 'error', code: 'STREAM_ERROR', message: 'プロジェクト講師は一時的に利用できません。',
+    });
+    expect(events.at(-1)).toEqual({ type: 'done' });
+    expect(JSON.stringify(events)).not.toContain('Synthetic upstream detail');
   });
 
   it('applies only bounded observation and quoted learner difficulty before committing the reply', async () => {

@@ -1,7 +1,8 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import * as integration from '@/lib/server/aisecedu-integration';
 import {
   isJobReportedUsageSource,
   recordUsage,
@@ -44,6 +45,22 @@ describe('recordUsage — LLM', () => {
     expect(isJobReportedUsageSource('generate-classroom')).toBe(true);
     expect(isJobReportedUsageSource('revise-simulation')).toBe(true);
     expect(isJobReportedUsageSource('scene-content')).toBe(false);
+  });
+
+  it.each([503, 429])('awaits platform usage reporting without leaking HTTP %s into the teaching response', async (status) => {
+    vi.stubEnv('AISECEDU_INTEGRATED', 'true');
+    const send = vi.spyOn(integration, 'aiseceduRequest')
+      .mockRejectedValueOnce(Object.assign(new Error('Synthetic platform usage response'), { status }));
+    try {
+      await expect(recordUsage(llmInput, { baseDir: tmpDir })).resolves.toBeUndefined();
+      expect(send).toHaveBeenCalledOnce();
+      expect(send).toHaveBeenCalledWith('/pwncollege_api/v1/teaching/runtime/usage', expect.objectContaining({
+        method: 'POST', body: expect.stringContaining('"inputTokens":100'),
+      }));
+    } finally {
+      send.mockRestore();
+      vi.unstubAllEnvs();
+    }
   });
 
   it('appends a jsonl line with token counts and no cost fields', async () => {

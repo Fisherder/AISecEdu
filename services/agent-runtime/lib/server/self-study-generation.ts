@@ -29,6 +29,7 @@ export class SelfStudyGenerationError extends Error {
   constructor(
     message: string,
     readonly publicMessage: string,
+    readonly status: 400 | 502 = 502,
   ) {
     super(message);
   }
@@ -37,12 +38,12 @@ export class SelfStudyGenerationError extends Error {
 export function normalizeSelfStudyRequest(body: Record<string, unknown>): SelfStudyRequest {
   const suppliedGoal = typeof body.goal === 'string' ? body.goal : '';
   if (suppliedGoal.length > 2000) {
-    throw new SelfStudyGenerationError('Learning goal is too long', '学习目标过长，请缩短后重试');
+    throw new SelfStudyGenerationError('Learning goal is too long', '学习目标过长，请缩短后重试', 400);
   }
   requireSelfStudyRequestText(suppliedGoal);
   const goal = suppliedGoal.trim().slice(0, 500);
   if (goal.length < 4)
-    throw new SelfStudyGenerationError('Learning goal is too short', '请描述至少 4 个字的学习目标');
+    throw new SelfStudyGenerationError('Learning goal is too short', '请描述至少 4 个字的学习目标', 400);
   const level = LEVELS.has(body.level as SelfStudyRequest['level'])
     ? (body.level as SelfStudyRequest['level'])
     : 'beginner';
@@ -54,7 +55,12 @@ export function normalizeSelfStudyRequest(body: Record<string, unknown>): SelfSt
   const durationMinutes = Number.isFinite(rawDuration)
     ? Math.max(10, Math.min(90, Math.round(rawDuration)))
     : 30;
-  return { goal, level, durationMinutes, preference };
+  const product = body.product;
+  if (product === undefined) return { goal, level, durationMinutes, preference };
+  if (product !== 'package' && product !== 'handout' && product !== 'self_check') {
+    throw new SelfStudyGenerationError('Unknown learning product', '请选择支持的学习内容类型', 400);
+  }
+  return { goal, level, durationMinutes, preference, product };
 }
 
 export function isSelfStudyText(value: string): boolean {
@@ -283,8 +289,12 @@ export async function createStudentSelfStudyPackage(
   let initialized = false;
 
   try {
-    const context = await loadStudentLearningContext(principal.learnerKey, db);
-    const planningInput = buildSelfStudyPlanningInput(request, context.insight);
+    const { insight } = await loadStudentLearningContext(principal.learnerKey, db);
+    const capability = insight.weakestCapability;
+    const weakestCapability = capability?.label.trim() && isSelfStudyText(capability.label)
+      ? capability
+      : null;
+    const planningInput = buildSelfStudyPlanningInput(request, { ...insight, weakestCapability });
     requireSelfStudyRequestText(planningInput.description ?? '');
     req.signal.throwIfAborted();
     const runTurn = createHarnessTurn();
@@ -353,10 +363,10 @@ export async function createStudentSelfStudyPackage(
       failedArtifactCount: 0,
       modelUsage: { model: turn.model, usage: turn.usage },
       learnerContext: {
-        state: context.insight.state,
-        completionRate: context.insight.completionRate,
-        averageQuizScore: context.insight.averageQuizScore,
-        weakestCapability: context.insight.weakestCapability?.label ?? null,
+        state: insight.state,
+        completionRate: insight.completionRate,
+        averageQuizScore: insight.averageQuizScore,
+        weakestCapability: weakestCapability?.label ?? null,
       },
     };
     await db.query(

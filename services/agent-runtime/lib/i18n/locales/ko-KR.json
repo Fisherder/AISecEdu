@@ -118,7 +118,9 @@
     "softClosing": "토론 계속하기",
     "error": {
       "emptyAgentResponses": "에이전트가 빈 응답을 반환하여 토론이 중단되었습니다. 다시 시도하거나 모델 설정을 확인하세요.",
-      "streamInterrupted": "스트림이 예기치 않게 종료되어 토론이 완료되지 않았습니다. 다시 시도해 주세요."
+      "streamInterrupted": "스트림이 예기치 않게 종료되어 토론이 완료되지 않았습니다. 다시 시도해 주세요.",
+      "invalidDirectorDecision": "수업 진행자가 잘못된 결정을 반환했습니다.",
+      "directorInterrupted": "이번 수업 대화가 일찍 종료되었습니다. 계속 질문할 수 있습니다."
     },
     "tabs": {
       "lecture": "노트",
@@ -647,6 +649,12 @@
       }
     },
     "v2": {
+      "instructorErrors": {
+        "unsupportedQuestion": "일반 학습 질문을 입력해 주세요. 실험 기록이나 개인 정보는 첨부하지 마세요.",
+        "unreadableReply": "프로젝트 튜터의 응답을 읽을 수 없습니다.",
+        "unsupportedReply": "프로젝트 튜터가 지원되지 않는 학습 동작을 반환했습니다.",
+        "unavailable": "프로젝트 튜터를 일시적으로 이용할 수 없습니다."
+      },
       "hero": {
         "title": "Project-Based Learning",
         "stage": "Stages",

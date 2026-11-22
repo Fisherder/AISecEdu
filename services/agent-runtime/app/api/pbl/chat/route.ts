@@ -22,13 +22,12 @@ interface PBLChatRequest {
 }
 
 export async function POST(req: NextRequest) {
-  let agentName: string | undefined;
-  let resolvedAgentType: string | undefined;
+  const cancelled = () => new Response(null, { status: 499 });
+  if (req.signal.aborted) return cancelled();
   try {
     const body = (await req.json()) as PBLChatRequest;
+    if (req.signal.aborted) return cancelled();
     const { message, agent, currentIssue, recentMessages, userRole, agentType } = body;
-    agentName = agent?.name;
-    resolvedAgentType = agentType;
 
     if (!message || !agent) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Message and agent are required');
@@ -90,19 +89,20 @@ export async function POST(req: NextRequest) {
         req.signal,
       );
       await recordHarnessUsage(result, 'pbl-chat');
+      if (req.signal.aborted) return cancelled();
       return apiSuccess({ message: result.text, agentName: agent.name });
     } catch {
+      if (req.signal.aborted) return cancelled();
+      log.error('PBL chat turn failed', { operation: isJudge ? 'judge' : 'question' });
       return apiError(
         'INTERNAL_ERROR',
         isJudge ? 500 : 503,
         isJudge ? '教学判评服务暂时不可用。' : '教学答疑服务暂时不可用。',
       );
     }
-  } catch (error) {
-    log.error(
-      `PBL chat failed [agent="${agentName ?? 'unknown'}", type=${resolvedAgentType ?? 'question'}]:`,
-      error,
-    );
-    return apiError('INTERNAL_ERROR', 500, error instanceof Error ? error.message : String(error));
+  } catch {
+    if (req.signal.aborted) return cancelled();
+    log.error('PBL chat request failed');
+    return apiError('INTERNAL_ERROR', 500, '教学对话服务暂时不可用。');
   }
 }

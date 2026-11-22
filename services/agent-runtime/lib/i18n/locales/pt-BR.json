@@ -118,7 +118,9 @@
     "softClosing": "Continuar discussão",
     "error": {
       "emptyAgentResponses": "Os agentes retornaram respostas vazias; a discussão foi interrompida. Tente novamente ou verifique as configurações do modelo.",
-      "streamInterrupted": "O fluxo de dados terminou inesperadamente; a discussão não foi concluída. Por favor, tente novamente."
+      "streamInterrupted": "O fluxo de dados terminou inesperadamente; a discussão não foi concluída. Por favor, tente novamente.",
+      "invalidDirectorDecision": "O diretor da sala de aula retornou uma decisão inválida.",
+      "directorInterrupted": "Esta rodada da aula terminou antes do previsto. Você pode continuar fazendo perguntas."
     },
     "tabs": {
       "lecture": "Anotações",
@@ -647,6 +649,12 @@
       }
     },
     "v2": {
+      "instructorErrors": {
+        "unsupportedQuestion": "Faça uma pergunta sobre o conteúdo sem anexar registros de experimentos ou dados privados.",
+        "unreadableReply": "Não foi possível ler a resposta do tutor do projeto.",
+        "unsupportedReply": "O tutor do projeto retornou uma ação didática não compatível.",
+        "unavailable": "O tutor do projeto está temporariamente indisponível."
+      },
       "hero": {
         "title": "Project-Based Learning",
         "stage": "Stages",

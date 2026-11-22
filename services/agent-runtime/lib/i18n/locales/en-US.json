@@ -118,7 +118,9 @@
     "softClosing": "Continue discussion",
     "error": {
       "emptyAgentResponses": "Agents returned empty responses; discussion stopped. Try again or check your model settings.",
-      "streamInterrupted": "Stream ended unexpectedly; discussion didn't complete. Please try again."
+      "streamInterrupted": "Stream ended unexpectedly; discussion didn't complete. Please try again.",
+      "invalidDirectorDecision": "The classroom director returned an invalid decision.",
+      "directorInterrupted": "This classroom turn ended early. You can keep asking questions."
     },
     "tabs": {
       "lecture": "Notes",
@@ -647,6 +649,12 @@
       }
     },
     "v2": {
+      "instructorErrors": {
+        "unsupportedQuestion": "Ask a regular learning question without experiment logs or private data.",
+        "unreadableReply": "The project tutor returned an unreadable reply.",
+        "unsupportedReply": "The project tutor returned an unsupported teaching action.",
+        "unavailable": "The project tutor is temporarily unavailable."
+      },
       "hero": {
         "title": "Project-Based Learning",
         "stage": "Stages",

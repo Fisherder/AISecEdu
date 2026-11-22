@@ -118,7 +118,9 @@
     "softClosing": "Continuar debate",
     "error": {
       "emptyAgentResponses": "Los agentes devolvieron respuestas vacías; el debate se detuvo. Inténtalo de nuevo o revisa la configuración de tu modelo.",
-      "streamInterrupted": "El streaming terminó inesperadamente; el debate no se completó. Inténtalo de nuevo."
+      "streamInterrupted": "El streaming terminó inesperadamente; el debate no se completó. Inténtalo de nuevo.",
+      "invalidDirectorDecision": "El director del aula devolvió una decisión no válida.",
+      "directorInterrupted": "Este turno de clase terminó antes de tiempo. Puedes seguir haciendo preguntas."
     },
     "tabs": {
       "lecture": "Notas",
@@ -647,6 +649,12 @@
       }
     },
     "v2": {
+      "instructorErrors": {
+        "unsupportedQuestion": "Haz una pregunta sobre el tema sin adjuntar registros de experimentos ni datos privados.",
+        "unreadableReply": "No se pudo leer la respuesta del tutor del proyecto.",
+        "unsupportedReply": "El tutor del proyecto devolvió una acción didáctica no compatible.",
+        "unavailable": "El tutor del proyecto no está disponible por el momento."
+      },
       "hero": {
         "title": "Aprendizaje basado en proyectos",
         "stage": "Etapas",

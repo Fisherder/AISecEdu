@@ -243,13 +243,20 @@ describe('student teaching model routes', () => {
     expect(mocks.query.mock.calls.every(([sql]) => sql.trimStart().startsWith('SELECT'))).toBe(true);
   });
 
-  it.each([['personal_study_fixture'], { id: 'personal_study_fixture' }])(
-    'rejects non-string classroom IDs before persistence',
-    async (id) => {
+  it.each([
+    { kind: 'array', id: ['personal_study_fixture'] },
+    { kind: 'object', id: { id: 'personal_study_fixture' } },
+  ])(
+    'rejects a classroom ID supplied as $kind before persistence',
+    async ({ id }) => {
       const response = await postClassroom(new NextRequest('http://runtime.test/api/classroom', {
         method: 'POST', body: JSON.stringify({ stage: { id }, scenes: [] }),
       }));
       expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        errorCode: 'INVALID_REQUEST',
+        error: 'Classroom identifier must be text',
+      });
       expect(mocks.persistClassroom).not.toHaveBeenCalled();
     },
   );

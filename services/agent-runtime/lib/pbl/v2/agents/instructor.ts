@@ -35,6 +35,7 @@ import type {
   PBLProficiency,
 } from '../types';
 import type { PBLSSEEvent } from '../api/sse';
+import { instructorErrorMessage, type InstructorErrorKey } from '../api/locale';
 import {
   RecordObservationArgs,
   AdjustDifficultyArgs,
@@ -1305,6 +1306,12 @@ function teachingText(text: string | undefined, limit: number): string | undefin
   return text.trim().slice(0, limit) || undefined;
 }
 
+class OrdinaryInstructorError extends Error {
+  constructor(readonly key: InstructorErrorKey) {
+    super(key);
+  }
+}
+
 async function ordinaryInstructorTurn(
   runTurn: HarnessTurn,
   args: {
@@ -1320,7 +1327,7 @@ async function ordinaryInstructorTurn(
 ) {
   const { project, milestone, microtask, instructor, phase, opener, history, signal } = args;
   const currentMessage = teachingText(opener, 6000);
-  if (!currentMessage) throw new Error('请提供普通学习问题，请勿附带实验现场或私人数据。');
+  if (!currentMessage) throw new OrdinaryInstructorError('unsupportedQuestion');
   const priorHistory =
     phase === 'instructing' && history.at(-1)?.content === opener ? history.slice(0, -1) : history;
   const conversation = priorHistory
@@ -1396,15 +1403,15 @@ async function ordinaryInstructorTurn(
     signal,
   );
   await recordHarnessUsage(result, 'pbl-v2-instructor');
-  const json = result.text.replace(/^```(?:json)?\s*|\s*```$/gi, '');
+  const json = result.text.trim().replace(/^```(?:json)?\s*|\s*```$/gi, '');
   let raw: unknown;
   try {
     raw = JSON.parse(json);
   } catch {
-    throw new Error('项目导师返回了不可读取的答复。');
+    throw new OrdinaryInstructorError('unreadableReply');
   }
   const parsed = ordinaryInstructorReply.safeParse(raw);
-  if (!parsed.success) throw new Error('项目导师返回了不受支持的教学操作。');
+  if (!parsed.success) throw new OrdinaryInstructorError('unsupportedReply');
   return parsed.data;
 }
 
@@ -1753,14 +1760,17 @@ export async function* runInstructorTurn(
         }
       }
     } else {
-      throw new Error('项目导师暂时不可用。');
+      throw new OrdinaryInstructorError('unavailable');
     }
   } catch (err) {
     log.warn(`Instructor turn threw: ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof OrdinaryInstructorError || harnessTurn
+      ? await instructorErrorMessage(project, err instanceof OrdinaryInstructorError ? err.key : 'unavailable')
+      : err instanceof Error ? err.message : String(err);
     yield {
       type: 'error',
       code: 'STREAM_ERROR',
-      message: err instanceof Error ? err.message : String(err),
+      message,
     };
     yield { type: 'done' };
     return;

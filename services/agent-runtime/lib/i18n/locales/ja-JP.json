@@ -118,7 +118,9 @@
     "softClosing": "話し合いを続ける",
     "error": {
       "emptyAgentResponses": "エージェントが空の応答を返したため、ディスカッションを停止しました。再試行するかモデル設定をご確認ください。",
-      "streamInterrupted": "ストリームが予期せず終了し、ディスカッションが完了しませんでした。再度お試しください。"
+      "streamInterrupted": "ストリームが予期せず終了し、ディスカッションが完了しませんでした。再度お試しください。",
+      "invalidDirectorDecision": "授業の進行役が無効な判断を返しました。",
+      "directorInterrupted": "授業のやり取りが途中で終了しました。引き続き質問できます。"
     },
     "tabs": {
       "lecture": "ノート",
@@ -647,6 +649,12 @@
       }
     },
     "v2": {
+      "instructorErrors": {
+        "unsupportedQuestion": "通常の学習に関する質問を入力してください。実験ログや個人情報は添付しないでください。",
+        "unreadableReply": "プロジェクト講師の回答を読み取れませんでした。",
+        "unsupportedReply": "プロジェクト講師が未対応の学習操作を返しました。",
+        "unavailable": "プロジェクト講師は一時的に利用できません。"
+      },
       "hero": {
         "title": "プロジェクトベースドラーニング",
         "stage": "ステージ",

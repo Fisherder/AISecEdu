@@ -174,11 +174,13 @@ def test_disabled_tutor_keeps_an_unverified_chain_local(tutor):
 
 
 def test_online_tutor_omits_observations_from_an_unverified_chain(tutor):
-    tutor.verify_evidence_chain.return_value = {"valid": False}
+    unverified_note = "UNCHECKED_CLASS_OBSERVATION"
+    tutor.verify_evidence_chain.return_value = {"valid": False, "observations": [unverified_note]}
     result = tutor.call("如何确定下一步学习目标？")
     packet = tutor.invoke_turn.call_args.args[0]
     public_context = json.loads(packet["messages"][-1]["content"])
     assert public_context["verifiedObservations"] == []
+    assert unverified_note not in json.dumps(packet)
     assert result["context"]["evidenceEvents"] == 0
     assert RAW_ENVIRONMENT not in json.dumps(packet)
 

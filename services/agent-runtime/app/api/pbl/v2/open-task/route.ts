@@ -19,7 +19,7 @@ import { apiError } from '@/lib/server/api-response';
 import { resolveInstructorRuntime } from '@/lib/pbl/v2/api/instructor-runtime';
 
 import { createSSEResponse } from '@/lib/pbl/v2/api/sse';
-import { applyRequestLocaleToProject } from '@/lib/pbl/v2/api/locale';
+import { applyRequestLocaleToProject, instructorErrorMessage } from '@/lib/pbl/v2/api/locale';
 import { runInstructorTurn } from '@/lib/pbl/v2/agents/instructor';
 import { applyQuizSignalsToProject } from '@/lib/pbl/v2/operations/quiz-snapshot';
 import type { PBLProjectV2, PriorQuizResult } from '@/lib/pbl/v2/types';
@@ -60,8 +60,8 @@ export async function POST(req: NextRequest) {
     return apiError('INVALID_REQUEST', 400, err instanceof Error ? err.message : String(err));
   }
 
-  if (!runtime) return apiError('UPSTREAM_ERROR', 503, '项目导师暂时不可用。');
   applyRequestLocaleToProject(req, body.project);
+  if (!runtime) return apiError('UPSTREAM_ERROR', 503, await instructorErrorMessage(body.project, 'unavailable'));
 
   // Stage 2 (pre-play) recalibration: fold prior-quiz accuracy into
   // the adaptive engine before the Instructor turn runs. Only fires

@@ -337,12 +337,13 @@ export async function runPiSingleRequest(
   storeDirectorState: (sessionId: string, directorState?: DirectorState) => void,
   onStopSessionRef: { current?: ((payload: SessionCleanupPayload) => void) | undefined },
   t: (key: string) => string,
+  locale: string,
   onResponseAccepted?: () => void,
 ): Promise<void> {
   const consumer = createConsumer(sessionId, controller, sessionType);
   const response = await fetch('/api/chat/pi', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-User-Locale': locale },
     body: JSON.stringify(requestTemplate),
     signal: controller.signal,
   });
@@ -444,7 +445,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
     options.onSegmentSealed,
     options.shouldHoldAfterReveal,
   ]);
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   // Track current stageId for data isolation
   const stageId = useStageStore((s) => s.stage?.id);
@@ -1162,6 +1163,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
           storeDirectorState,
           onStopSessionRef,
           t,
+          locale,
           firstRequestContext
             ? () => {
                 consumePiSessionBoundaryContext(
@@ -1246,6 +1248,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       markSessionCompleted,
       storeDirectorState,
       t,
+      locale,
       getFirstPiRequestContext,
     ],
   );

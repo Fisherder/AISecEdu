@@ -64,6 +64,7 @@ describe('ordinary teaching worker service routes', () => {
   });
 
   it('summarizes the authorized extracted text without executing it and retains grounded chunk coverage', async () => {
+    const analysis = { ...materialAnalysis, summary: '比较 1 < 3 > 2 中的三个数。' };
     const fetch = vi.fn(async (url, init) => {
       if (String(url).startsWith('http://ctfd/')) {
         expect(init.headers['X-AISecEdu-Service-Token']).toBe('integration-secret');
@@ -74,7 +75,7 @@ describe('ordinary teaching worker service routes', () => {
       expect(rest).toEqual({});
       expect(messages[0].content).toContain('不得提取执行步骤');
       expect(messages[1].content).toContain(handout);
-      return modelResponse({analysis: materialAnalysis});
+      return modelResponse({analysis});
     });
     vi.stubGlobal('fetch', fetch);
     const {POST} = await import('@/app/api/integration/jobs/execute/route');
@@ -88,9 +89,11 @@ describe('ordinary teaching worker service routes', () => {
       complete: true, analysisVersion: 'complete-map-reduce-v1', analyzedCharacters: handout.length,
     });
     expect(output.result.analysis.chapterCandidates).toEqual(materialAnalysis.chapterCandidates);
+    expect(output.result.analysis.summary).toBe(analysis.summary);
     expect(output.result.chunks[0].content).toBe(handout);
     expect(mocks.resolveModel).not.toHaveBeenCalled();
     expect(() => ordinaryMaterialAnalysis(materialAnalysis, 0, 2)).toThrow('outside the supplied text');
+    expect(() => ordinaryMaterialAnalysis({ ...analysis, summary: '<strong>课堂记录</strong>' }, 0, handout.length)).toThrow();
   }, 15_000);
 
   it('routes lesson plan candidates through blueprint and schema checks and returns the existing persistence shape', async () => {
