@@ -784,8 +784,9 @@ def test_gate_failure_before_outputs_recovers_pr_from_event_and_revokes_approval
     assert any(path == '/check-runs' and data.get('conclusion') == 'failure' for path, data, _ in calls)
 
 
-def test_review_format_recovery_only_removes_null_extras_without_changing_findings():
-    for kind in ('null-extra', 'trigger', 'substantive-extra', 'priority-reason', 'missing', 'wrong-type'):
+def test_review_format_recovery_preserves_named_details_and_rejects_unknown_decisions():
+    for kind in ('null-extra', 'trigger', 'both-details', 'substantive-extra', 'priority-reason',
+                 'nested-reason', 'empty-message', 'overlong', 'top-reason', 'missing', 'wrong-type'):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             value = report()
@@ -801,6 +802,16 @@ def test_review_format_recovery_only_removes_null_extras_without_changing_findin
                 value['findings'][0]['unexpected_decision'] = 'different judgment'
             elif kind == 'priority-reason':
                 value['findings'][0]['priority_reason'] = '额外理由'
+            elif kind == 'both-details':
+                value['findings'][0].update(trigger='保留原触发条件', priority_reason='额外理由')
+            elif kind == 'nested-reason':
+                value['findings'][0]['priority_reason'] = {'priority': 0}
+            elif kind == 'empty-message':
+                value['findings'][0].update(message='', priority_reason='额外理由')
+            elif kind == 'overlong':
+                value['findings'][0]['priority_reason'] = '字' * 4000
+            elif kind == 'top-reason':
+                value['priority_reason'] = '额外理由'
             elif kind == 'missing':
                 value['findings'][0].pop('priority')
             else:
@@ -808,15 +819,17 @@ def test_review_format_recovery_only_removes_null_extras_without_changing_findin
             path = folder / 'initial-review.json'
             original = json.dumps(value, ensure_ascii=False)
             path.write_text(original)
-            if kind not in ('null-extra', 'trigger'):
+            if kind not in ('null-extra', 'trigger', 'priority-reason', 'both-details'):
                 rejects(lambda: ai.check_report(folder))
                 assert path.read_text() == original
             else:
                 ai.check_report(folder)
                 recovered = ai.validate_report(json.loads(path.read_text()))
                 expected = dict(finding)
-                if kind == 'trigger':
+                if kind in ('trigger', 'both-details'):
                     expected['message'] += '\n触发条件：保留原触发条件'
+                if kind in ('priority-reason', 'both-details'):
+                    expected['message'] += '\n优先级理由：额外理由'
                 assert recovered['findings'] == [expected]
                 assert recovered['requires_human'] is True and recovered['human_reason'] == value['human_reason']
                 assert (folder / 'initial-review.raw.json').read_text() == original

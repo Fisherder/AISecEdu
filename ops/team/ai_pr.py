@@ -731,14 +731,20 @@ def check_report(folder, filename='initial-review.json'):
             if not isinstance(row, dict) or not names.issubset(row):
                 raise ValueError('Review has missing fields or unexpected substantive data')
             extra = {key: item for key, item in row.items() if key not in names}
-            trigger = extra.pop('trigger', None) if 'message' in names else None
-            if any(item is not None for item in extra.values()) or (trigger is not None and not isinstance(trigger, str)):
-                raise ValueError('Review has unexpected substantive data')
             cleaned = {key: row[key] for key in names}
-            if trigger:
-                if not isinstance(cleaned['message'], str):
-                    raise ValueError('Invalid finding message')
-                cleaned['message'] += '\n触发条件：' + trigger
+            if 'message' in names:
+                for key, label in (('trigger', '触发条件'), ('priority_reason', '优先级理由')):
+                    detail = extra.pop(key, None)
+                    if detail is None:
+                        continue
+                    if not isinstance(detail, str):
+                        raise ValueError('Invalid finding detail')
+                    if not isinstance(cleaned['message'], str) or not cleaned['message']:
+                        raise ValueError('Invalid finding message')
+                    if detail:
+                        cleaned['message'] += f'\n{label}：{detail}'
+            if any(item is not None for item in extra.values()):
+                raise ValueError('Review has unexpected substantive data')
             return cleaned
         cleaned = required_fields(value, {'summary', 'requires_human', 'human_reason', 'findings'})
         if not isinstance(cleaned['findings'], list):
