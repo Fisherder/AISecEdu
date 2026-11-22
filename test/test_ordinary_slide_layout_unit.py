@@ -78,6 +78,133 @@ def test_explicit_page_or_whole_deck_instruction(case, instruction, target):
     assert ns["layout_request"]("改写介绍并保留原有布局。") is None
 
 
+@pytest.mark.parametrize(("instruction", "direction", "size", "old_deck_request"), [
+    ("请把第 2 页的标题字号调大一点", "increase", 46, True),
+    ("请把第 2 页的标题字号调整得大一点", "increase", 46, False),
+    ("仅将第2页标题字号减小一些。", "decrease", 42, True),
+])
+def test_title_font_command_pins_only_one_page_and_validates_actual_change(
+    case, instruction, direction, size, old_deck_request,
+):
+    ns, jobs, job, user, artifact, revision = case
+    selected = revision.content["lesson"]["artifacts"][1]
+    selected["content"]["studio"]["page"]["layout"]["title"]["fontSize"] = 44
+    selected["content"]["elements"].append({
+        "id": "page-title", "type": "text",
+        "content": '<p style="font-family:fixture;font-size:44px;font-weight:750">观察</p>',
+    })
+    revision.content_hash = ns["content_hash"](revision.content)
+    assert ns["_LAYOUT_REQUEST"].fullmatch(instruction) is None
+    assert ns["_ordinary_deck_request"](instruction) is old_deck_request
+    job.payload = ns["admit"](user, artifact, {
+        **job.payload, "instruction": instruction, "currentContent": revision.content,
+    })
+    prepared = jobs["_runtime_payload"](job)
+    route = ns["route_model"](job.kind, payload=prepared)
+    body = jobs["_runtime_request_body"](job, route, prepared)
+    assert route["actual_model"] == "pinned-fixture"
+    assert body["payload"]["pageSelection"] == [2]
+    assert body["payload"]["titleFontDirection"] == direction
+
+    response = reply(revision.content, changed=1)
+    output = response["result"]["content"]
+    metadata = output["revisionMetadata"]
+    metadata["pageIds"] = ["two"]
+    metadata["renderEvidence"] = metadata["renderEvidence"][1:]
+    title = output["lesson"]["artifacts"][1]["content"]["studio"]["page"]["layout"]["title"]
+    title.update(left=50, fontSize=size)
+    elements = output["lesson"]["artifacts"][1]["content"]["elements"]
+    elements[1]["content"] = elements[1]["content"].replace("44px", f"{size}px")
+    ns["validate_receipt"](route, prepared, response)
+
+    title["left"] = 51
+    with pytest.raises(ns["OrdinarySlideLayoutError"], match="标题字号"):
+        ns["validate_receipt"](route, prepared, response)
+    title.update(left=50, fontSize=44 - (size - 44))
+    with pytest.raises(ns["OrdinarySlideLayoutError"], match="标题字号"):
+        ns["validate_receipt"](route, prepared, response)
+    title.update(fontSize=size)
+    elements[0]["content"] = "<p>其他区域</p>"
+    with pytest.raises(ns["OrdinarySlideLayoutError"], match="标题字号"):
+        ns["validate_receipt"](route, prepared, response)
+
+
+@pytest.mark.parametrize(("instruction", "deck"), [
+    ("请把第2页的标题字号调大一点，再改配色", False),
+    ("不要把第2页的标题字号调大一点", True),
+    ("请把第2页的正文字号调大一点", True),
+    ("请把第2、3页的标题字号调大一点", True),
+])
+def test_title_font_alias_keeps_other_requests_on_existing_dispatch(case, instruction, deck):
+    ns, _, job, user, artifact, revision = case
+    payload = {**job.payload, "currentContent": revision.content, "instruction": instruction}
+    admitted = ns["admit"](user, artifact, payload)
+    if deck:
+        assert ns["deck_pinned"](admitted)
+    else:
+        assert admitted is payload
+
+
+def test_new_title_font_request_migrates_old_saved_canvas_without_rewriting_the_deck(case):
+    ns, jobs, job, user, artifact, revision = case
+    old = revision.content["lesson"]["artifacts"][1]
+    old["content"]["studio"]["page"].pop("layout")
+    revision.content_hash = ns["content_hash"](revision.content)
+    payload = {**job.payload, "currentContent": revision.content,
+               "instruction": "请把第2页的标题字号调整得大一点"}
+    assert not ns["pinned"](payload)
+    with pytest.raises(ns["OrdinarySlideLayoutError"], match="无法核验"):
+        ns["admit"](user, artifact, payload)
+
+    old["content"]["elements"].append({
+        "id": "page-title", "type": "text",
+        "content": '<p style="font-family:fixture;font-size:44px;font-weight:750">观察</p>',
+    })
+    revision.content_hash = ns["content_hash"](revision.content)
+    job.payload = ns["admit"](user, artifact, payload)
+    prepared = jobs["_runtime_payload"](job)
+    route = ns["route_model"](job.kind, payload=prepared)
+    assert prepared["titleFontDirection"] == "increase"
+    assert prepared["pageSelection"] == [2]
+
+    placeholder = copy.deepcopy(revision.content)
+    placeholder["lesson"]["artifacts"][1]["content"]["studio"]["page"]["layout"] = {"title": {"left": 50}}
+    response = reply(placeholder, changed=1)
+    output = response["result"]["content"]
+    metadata = output["revisionMetadata"]
+    metadata["pageIds"] = ["two"]
+    metadata["renderEvidence"] = metadata["renderEvidence"][1:]
+    target = output["lesson"]["artifacts"][1]["content"]
+    target["studio"]["page"]["layout"]["title"]["fontSize"] = 46
+    target["studio"]["page"]["legacyCompositionTypography"] = True
+    title = target["elements"][1]
+    title["content"] = title["content"].replace("44px", "46px")
+    ns["validate_receipt"](route, prepared, response)
+
+
+@pytest.mark.parametrize("page", [0, 4, 121])
+def test_title_font_request_rejects_out_of_range_pages(case, page):
+    ns, _, job, user, artifact, revision = case
+    payload = {**job.payload, "currentContent": revision.content,
+               "instruction": f"请把第{page}页的标题字号调大一点"}
+    with pytest.raises(ns["OrdinarySlideLayoutError"], match="页码"):
+        ns["admit"](user, artifact, payload)
+
+
+def test_title_font_alias_rejects_source_selection_at_admission(case):
+    ns, _, job, user, artifact, revision = case
+    slide = revision.content["lesson"]["artifacts"][1]
+    slide["content"]["studio"]["page"]["layout"]["title"]["fontSize"] = 44
+    slide["content"]["elements"].append({
+        "id": "page-title", "type": "text",
+        "content": '<p style="font-family:fixture;font-size:44px;font-weight:750">观察</p>',
+    })
+    payload = {**job.payload, "currentContent": revision.content,
+               "instruction": "请把第2页的标题字号调整得大一点" + SOURCE_SELECTION}
+    with pytest.raises(ns["OrdinarySlideLayoutError"], match="取消源码选区"):
+        ns["admit"](user, artifact, payload)
+
+
 def test_actual_worker_projects_trusted_saved_content_and_exact_scope(case):
     ns, jobs, job, user, artifact, revision = case
     job.payload = ns["admit"](user, artifact, job.payload)

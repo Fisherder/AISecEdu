@@ -24,6 +24,10 @@ _LAYOUT_REQUEST = re.compile(
     r"(?:请\s*)?(?:只|仅)?\s*(?:调整|修改|更改|优化|统一|重新设计)\s*"
     r"(?P<target>[^：:\n]*?)\s*(?:版式|布局|排版)\s*[：:]\s*(?P<intent>[\s\S]*)"
 )
+_TITLE_FONT_REQUEST = re.compile(
+    r"(?:请 *)?(?:只|仅)? *(?:把|将) *第 *([0-9]{1,3}) *页 *(?:的 *)?标题 *字号 *"
+    r"((?:调(?:整得?)?[大小]|增大|减小))(?:一点|一些)?[。！!]?"
+)
 _SELECTION_SUFFIX = re.compile(r"\n\s*仅修改当前版本\s*V[^\n]{0,40}?中所选范围\s*[（(]", re.I)
 _INVALID_INTENT = re.compile(
     r"[\r\n\u2028\u2029\x00-\x1f<>`]|(?:https?|ftp|file|data|javascript):|源码第|所选范围|原始源码"
@@ -66,6 +70,7 @@ _PALETTE_REQUEST = re.compile(
 )
 _PALETTE_FIELDS = ("background", "foreground", "muted", "accent", "secondary", "surface")
 _PALETTE_HEX = re.compile(r"#[a-fA-F0-9]{6}")
+_RENDERED_TITLE_SIZE = re.compile(r'(\A<p style="[^"]*?;font-size:)([0-9]+(?:\.[0-9]+)?)px;')
 _PALETTE_TEXT_STYLE = re.compile(r'\A<p style="[^"]*?;color:(#[a-fA-F0-9]{6});[^"]*">')
 
 
@@ -79,6 +84,13 @@ def split_source_selection(instruction):
     return (value, False) if match is None else (value[:match.start()].rstrip(), True)
 
 
+def _title_font_request(instruction):
+    match = _TITLE_FONT_REQUEST.fullmatch(instruction)
+    if match is None or _INVALID_INTENT.search(instruction):
+        return None
+    return int(match[1]), "increase" if match[2].endswith("大") else "decrease"
+
+
 def reject_source_selection(instruction, *, include_wording=True):
     original, attached = split_source_selection(instruction)
     if attached and (_LAYOUT_REQUEST.fullmatch(original)
@@ -87,10 +99,18 @@ def reject_source_selection(instruction, *, include_wording=True):
 
 
 def layout_request(instruction):
-    original, _ = split_source_selection(instruction)
+    original, attached = split_source_selection(instruction)
     match = _LAYOUT_REQUEST.fullmatch(original)
     if match is None:
-        return None
+        font = _title_font_request(original)
+        if font is None:
+            return None
+        if attached:
+            raise OrdinarySlideLayoutError("请先取消源码选区，再修改指定页面的标题字号。")
+        page, direction = font
+        if not 1 <= page <= 120:
+            raise OrdinarySlideLayoutError("版式修订需要有效且不重复的页码。")
+        return ("增大标题字号" if direction == "increase" else "减小标题字号"), [page]
     reject_source_selection(instruction)
     target = match["target"].strip().removesuffix("的").strip()
     intent = match["intent"].strip()
@@ -199,7 +219,10 @@ def admit(user, artifact, payload):
     reject_source_selection(payload.get("instruction"), include_wording=enabled_course)
     if not enabled_course:
         return payload
-    command = layout_request(payload.get("instruction"))
+    instruction = payload.get("instruction")
+    original, _ = split_source_selection(instruction)
+    font = _title_font_request(original)
+    command = layout_request(instruction)
     is_deck = command is None
     palette_pages = _palette_request(payload.get("instruction")) if is_deck else None
     is_palette = palette_pages is not None
@@ -217,6 +240,8 @@ def admit(user, artifact, payload):
         raise OrdinarySlideLayoutError("当前课程未配置普通课件修订服务。")
     pages = (palette_pages or "all") if is_deck else command[1]
     revision, lesson = _source(artifact, payload["expectedRevision"], pages)
+    if font:
+        _require_title_font_source(lesson, font[0])
     if is_palette and not _palette_source(revision.content, lesson):
         return payload
     return {
@@ -270,6 +295,7 @@ def prepare(job, payload, *, lock=False):
     if command is None or pin.get("instructionSha256") != content_hash(instruction):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
     intent, pages = command
+    font = _title_font_request(str(instruction or "").strip()) if not is_deck else None
     operation = pin.get("operation")
     if "operation" in pin or "pageSelection" in pin:
         palette_pages = _palette_request(instruction)
@@ -282,10 +308,13 @@ def prepare(job, payload, *, lock=False):
     if ((revision.id, revision.content_hash) != (pin.get("revisionId"), pin.get("revisionSha256"))
             or (operation == "palette" and not _palette_source(revision.content, lesson))):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
+    if font:
+        _require_title_font_source(lesson, font[0])
     return {
         pin_key: pin, "revisionBackend": backend, "artifactType": "slide-deck",
         "artifactId": artifact.id, "expectedRevision": revision.revision,
         "instruction": intent, "currentContent": revision.content,
+        **({"titleFontDirection": font[1]} if font else {}),
         **({"deckOperation": operation} if operation == "palette" else {}),
         **({"pageSelection": pages} if not is_deck or isinstance(pages, list) else {}),
     }
@@ -336,6 +365,59 @@ def _page_id(slide):
     return slide["content"]["studio"]["page"]["id"]
 
 
+def _title_layout(slide):
+    layout = slide["content"]["studio"]["page"].get("layout")
+    title = layout.get("title") if isinstance(layout, dict) else None
+    size = title.get("fontSize") if isinstance(title, dict) else None
+    return layout if type(size) in (int, float) and 0 < size <= 1000 else None
+
+
+def _title_font_canvas(slide):
+    elements = slide["content"].get("elements")
+    if not isinstance(elements, list):
+        return None
+    normalized = []
+    size = None
+    for element in elements:
+        if isinstance(element, dict) and element.get("id") == "page-title":
+            html = element.get("content")
+            match = _RENDERED_TITLE_SIZE.match(html) if isinstance(html, str) else None
+            if match is None or size is not None:
+                return None
+            size = float(match[2])
+            if not math.isfinite(size) or size <= 0:
+                return None
+            html = html[:match.start(2)] + html[match.end(2):]
+            normalized.append({**element, "content": html})
+        else:
+            normalized.append(element)
+    return (size, normalized) if size is not None else None
+
+
+def _require_title_font_source(lesson, page):
+    slide = _displayed_pages(lesson["artifacts"])[page - 1]
+    canvas = _title_font_canvas(slide)
+    layout = _title_layout(slide)
+    saved = slide["content"]["studio"]["page"]
+    if canvas is None or ("layout" in saved and (layout is None or layout["title"]["fontSize"] != canvas[0])):
+        raise OrdinarySlideLayoutError("所选页面的原始标题字号无法核验。当前版本已保留。")
+
+
+def _validate_title_font(old, new, direction):
+    before, after = _title_layout(old), _title_layout(new)
+    before_canvas, after_canvas = _title_font_canvas(old), _title_font_canvas(new)
+    if before_canvas is not None and after_canvas is not None and after is not None:
+        previous, original_elements = before_canvas
+        current, revised_elements = after_canvas
+        correct_direction = current > previous if direction == "increase" else current < previous
+        original_geometry = {**after, "title": {**after["title"], "fontSize": previous}}
+        unchanged_layout = _legacy_migration(old, new) if before is None else original_geometry == before
+        if (correct_direction and current == after["title"]["fontSize"]
+                and unchanged_layout and original_elements == revised_elements):
+            return
+    raise OrdinarySlideLayoutError("修订必须只按指定方向改变所选页面的标题字号。")
+
+
 def validate_receipt(route, payload, response):
     meta = response.get("model") or {}
     result = response.get("result") or {}
@@ -368,7 +450,10 @@ def validate_receipt(route, payload, response):
     if (revision.get("pageIds") != selected or not changed or revision.get("changedPageIds") != changed
             or not set(changed).issubset(selected)):
         raise OrdinarySlideLayoutError("版式修订修改了未选择的页面，或未生成可保存的变更。")
+    font_direction = payload.get("titleFontDirection")
     for old, new in zip(source, output):
+        if font_direction and _page_id(old) in selected:
+            _validate_title_font(old, new, font_direction)
         legacy_migration = _legacy_migration(old, new)
         if _slide_semantics(old, legacy_migration=legacy_migration) != _slide_semantics(new, legacy_migration=legacy_migration):
             raise OrdinarySlideLayoutError("版式修订改变了教学文字、素材或其他页面信息。")

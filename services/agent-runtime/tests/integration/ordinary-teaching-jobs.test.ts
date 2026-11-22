@@ -478,10 +478,11 @@ describe('ordinary teaching worker service routes', () => {
   }
 
   const layoutJob = (artifacts: ReturnType<typeof mathLayoutDeck>, pageSelection: number[] | 'all',
-    instruction = '将标题放到右上角', endpoint = 'ordinary-slide-layout', token = 'integration-secret') =>
+    instruction = '将标题放到右上角', endpoint = 'ordinary-slide-layout', token = 'integration-secret',
+    titleFontDirection?: 'increase' | 'decrease') =>
     request('artifact.revise', 'slide-layout', {
       artifactType: 'slide-deck', revisionBackend: 'ordinary-slide-layout', artifactId: 'math-deck', expectedRevision: 4,
-      pageSelection, instruction, currentContent: {lesson: {title: '分数课', artifacts}},
+      pageSelection, instruction, titleFontDirection, currentContent: {lesson: {title: '分数课', artifacts}},
     }, token, 'official-model', 'official-model', endpoint);
 
   function deckRevisionRequest(artifacts: unknown[], instruction: string,
@@ -901,6 +902,68 @@ describe('ordinary teaching worker service routes', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(mocks.inspectRendered).toHaveBeenCalledTimes(2);
     expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['correct', 1, 200],
+    ['opposite direction', -1, 422],
+    ['unrelated geometry change', 1, 422],
+  ] as const)('validates a scoped title font adjustment (%s)', async (proposal, delta, status) => {
+    const deck = mathLayoutDeck();
+    const fetch = layoutTurn((layout) => {
+      layout.title.fontSize += delta;
+      if (proposal === 'unrelated geometry change') layout.title.box.left += 1;
+    });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
+    const response = await POST(layoutJob(deck, [2], '增大标题字号',
+      'ordinary-slide-layout', 'integration-secret', 'increase'));
+    const output = await response.json();
+    expect(response.status, JSON.stringify(output)).toBe(status);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    if (status === 200) {
+      const revised = output.result.content.lesson.artifacts;
+      expect(revised[0]).toEqual(deck[0]);
+      expect(revised[1].content.studio.page.layout.title.fontSize)
+        .toBe(deck[1].content.studio.page.layout!.title.fontSize + delta);
+      expect(revised[2]).toEqual(deck[2]);
+    } else {
+      expect(mocks.inspectRendered).not.toHaveBeenCalled();
+    }
+  });
+
+  it('changes only the rendered title font on a canonical legacy page', async () => {
+    const deck = mathLayoutDeck(true);
+    const original = deck[0].content.elements.find(item => item.id === 'page-title')!;
+    const fetch = layoutTurn((layout) => { layout.title.fontSize += 1; });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
+    const response = await POST(layoutJob(deck, [1], '增大标题字号',
+      'ordinary-slide-layout', 'integration-secret', 'increase'));
+    const output = await response.json();
+    expect(response.status, JSON.stringify(output)).toBe(200);
+    const revised = output.result.content.lesson.artifacts;
+    expect(revised[0].content.studio.page.legacyCompositionTypography).toBe(true);
+    expect(revised[0].content.elements).toEqual(deck[0].content.elements.map(element =>
+      element.id === 'page-title' && original.type === 'text' ? {...original,
+        content: original.content.replace(/font-size:(\d+)px;/, (_, size) => `font-size:${Number(size) + 1}px;`),
+      } : element));
+    expect(revised.slice(1)).toEqual(deck.slice(1));
+  });
+
+  it('preserves a manually positioned title during a scoped font adjustment', async () => {
+    const deck = mathLayoutDeck();
+    const title = deck[0].content.elements.find(item => item.id === 'page-title')!;
+    title.left += 20;
+    const fetch = layoutTurn((layout) => { layout.title.fontSize += 1; });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-slide-layout/route');
+    const response = await POST(layoutJob(deck, [1], '增大标题字号',
+      'ordinary-slide-layout', 'integration-secret', 'increase'));
+    expect(response.status).toBe(409);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.inspectRendered).not.toHaveBeenCalled();
   });
 
   it('revises the entire static deck including a legacy page with exact compiler geometry and original typography', async () => {

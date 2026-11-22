@@ -36,6 +36,7 @@ const requestFields = z.object({
     .pipe(z.string().min(1)),
   expectedRevision: z.number().int().positive(),
   artifactId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+  titleFontDirection: z.enum(['increase', 'decrease']).optional(),
   pageSelection: z.union([
     z.literal('all'),
     z.array(z.number().int().positive()).min(1).max(COURSEWARE_MAX_PAGES),
@@ -116,7 +117,10 @@ function explicitOriginalLayout(original: Studio) {
 export function ordinarySlideLayoutTarget(payload: RecordValue) {
   const fields = requestFields.safeParse(payload);
   if (!fields.success) throw invalid('请提供单行版式要求、当前版本和要调整的页码。');
-  const { instruction, pageSelection } = fields.data;
+  const { pageSelection, titleFontDirection } = fields.data;
+  if (titleFontDirection && (pageSelection === 'all' || pageSelection.length !== 1)) {
+    throw invalid('标题字号修订需要指定一页。');
+  }
   const content = record(payload.currentContent);
   const lesson = record(content?.lesson);
   const artifacts: unknown[] = Array.isArray(lesson?.artifacts) ? lesson.artifacts : [];
@@ -174,14 +178,15 @@ export function ordinarySlideLayoutTarget(payload: RecordValue) {
         `第 ${pageNumber} 页有无法安全合并的画布修改或布局。当前版本已保留。`,
       );
     }
-    return {
-      ...page,
-      studio,
-      layout: studio.page.layout,
-      pageNumber,
-      position,
-      locked: lockedRegions(baseline.page.layout, studio.page.layout),
-    };
+    const locked = lockedRegions(baseline.page.layout, studio.page.layout);
+    if (titleFontDirection && locked.includes('title')) {
+      throw new OrdinaryLayoutError(
+        409,
+        'ORDINARY_SLIDE_LAYOUT_CANVAS_CONFLICT',
+        `第 ${pageNumber} 页的标题有手工排版。当前版本已保留。`,
+      );
+    }
+    return { ...page, studio, layout: studio.page.layout, pageNumber, position, locked };
   });
   return { ...fields.data, content, lesson, artifacts, targets };
 }
@@ -223,7 +228,8 @@ export async function reviseOrdinarySlideLayout(
       artifactId: target.artifactId,
       revision: target.expectedRevision,
       model: model.modelId,
-      requestHash: hash(target.instruction),
+      requestHash: hash(target.titleFontDirection
+        ? [target.instruction, target.titleFontDirection] : target.instruction),
       deckHash: hash(target.artifacts),
       pages: target.targets.map((page) => ({
         number: page.pageNumber,
@@ -253,7 +259,9 @@ export async function reviseOrdinarySlideLayout(
       });
       const response = await model.turn(
         [
-          { role: 'system', content: system },
+          { role: 'system', content: target.titleFontDirection
+            ? system + '\n只修改标题的 fontSize，按本轮要求增大或减小。其他字段必须原样保留。'
+            : system },
           { role: 'user', content: user },
         ],
         signal,
@@ -281,6 +289,15 @@ export async function reviseOrdinarySlideLayout(
     }
 
     const nextLayout = entry.layout;
+    if (target.titleFontDirection) {
+      const previous = page.layout.title.fontSize;
+      const current = nextLayout.title.fontSize;
+      const correctDirection = target.titleFontDirection === 'increase' ? current > previous : current < previous;
+      const restored = { ...nextLayout, title: { ...nextLayout.title, fontSize: previous } };
+      if (!correctDirection || !isEqual(page.layout, restored)) {
+        throw invalid(`第 ${page.pageNumber} 页必须只按指定方向改变标题字号。`);
+      }
+    }
     const changesLocked = page.locked.some((region) =>
       region === 'title'
         ? !isEqual(page.layout.title, nextLayout.title)
