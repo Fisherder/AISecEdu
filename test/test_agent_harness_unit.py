@@ -1114,11 +1114,13 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
     assert all("storageKey" not in file for file in public_files)
 
     tree = ast.parse((ROOT / "dojo_plugin/api/v1/teaching.py").read_text())
-    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_job_for_user"
-                 or isinstance(node, ast.ClassDef) and node.name == "TeachingJobFile"]
-    endpoint = tree.body[-1]
+    helper = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_job_for_user")
+    endpoint = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TeachingJobFile")
+    method = next(node for node in endpoint.body if isinstance(node, ast.FunctionDef) and node.name == "get")
     endpoint.decorator_list = []
-    endpoint.body[0].decorator_list = []
+    method.decorator_list = []
+    endpoint.body = [method]
+    tree.body = [helper, endpoint]
     route_namespace = {
         "Resource": object, "TeachingJobs": Job, "ScopeError": ScopeError,
         "_current_user": lambda: SimpleNamespace(id=int(request.headers["Fixture-User"])),

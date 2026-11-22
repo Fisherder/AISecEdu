@@ -171,7 +171,9 @@ def test_real_image_boundary_rejects_expired_signed_token(image_boundary):
 
 def test_real_image_boundary_rechecks_course_membership_and_token_signature(image_boundary):
     token = image_boundary.mint_session()
-    bad_signature = token[:-1] + ("1" if token.endswith("0") else "0")
-    assert_inactive(image_boundary.introspect(bad_signature))
+    payload, signature = token.rsplit(".", 1)
+    wrong_first_digit = "1" if signature.startswith("0") else "0"
+    invalid_token = f"{payload}.{wrong_first_digit}{signature[1:]}"
+    assert_inactive(image_boundary.introspect(invalid_token))
     image_boundary.memberships.clear()
     assert_inactive(image_boundary.introspect(token))
