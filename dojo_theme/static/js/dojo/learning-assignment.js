@@ -6,8 +6,9 @@
   if (!root || !api) return;
 
   const assignmentId = root.dataset.assignmentId;
-  const storageKey = `aisecedu:assignment:${assignmentId}:draft:v2`;
+  const workPath = `/coursework/assignments/${encodeURIComponent(assignmentId)}/work`;
   const state = {
+    viewerId: null,
     assignment: null,
     answers: {},
     currentIndex: 0,
@@ -26,6 +27,45 @@
       throw new Error(api.errorMessage(payload, "请求失败。"));
     }
     return payload.data || {};
+  }
+
+  function viewerScope() {
+    return `aisecedu:assignment:${encodeURIComponent(assignmentId)}:viewer:${state.viewerId}`;
+  }
+
+  function clearViewer() {
+    state.viewerId = null;
+    state.assignment = null;
+    state.answers = {};
+    state.dirty = false;
+    window.clearTimeout(state.saveTimer);
+    state.channel?.close();
+    state.channel = null;
+    document.getElementById("learning-assignment-content").hidden = true;
+    document.getElementById("la-form").textContent = "";
+    document.getElementById("la-score").textContent = "";
+    document.getElementById("la-feedback").textContent = "";
+  }
+
+  function requireBoundViewer(data) {
+    if (state.viewerId !== null && data.viewerId === state.viewerId && Array.isArray(data.assignment?.items)) return;
+    clearViewer();
+    throw new Error("无法验证当前登录账号，请重新载入作业。");
+  }
+
+  function clearViewerIfUnauthorized(error) {
+    if ([401, 403, 404].includes(error.status) || error.payload?.code === "VIEWER_MISMATCH") {
+      clearViewer();
+    }
+  }
+
+  async function readWork() {
+    try {
+      return unwrap(await api.request(workPath, {headers: {"Cache-Control": "no-cache"}}));
+    } catch (error) {
+      clearViewerIfUnauthorized(error);
+      throw error;
+    }
   }
 
   function showNotice(message, kind) {
@@ -53,6 +93,7 @@
   }
 
   function resultFor(item) {
+    if (state.assignment.assessmentState !== "READY") return undefined;
     return item.result || (
       (state.assignment.submission && state.assignment.submission.itemResults || [])
         .find(row => String(row.itemId) === String(item.id))
@@ -102,7 +143,8 @@
         ? "陈述立场、证据以及对可能反驳的回应…"
         : "用自己的语言作答，并给出可复核依据…"
     );
-    return `<textarea name="${name}" placeholder="${api.escapeHtml(placeholder)}" ${disabled ? "disabled" : ""}>${api.escapeHtml(answer || "")}</textarea>`;
+    const text = Array.isArray(answer) ? answer.filter(value => String(value).trim()).join(",") : answer;
+    return `<textarea name="${name}" placeholder="${api.escapeHtml(placeholder)}" ${disabled ? "disabled" : ""}>${api.escapeHtml(text)}</textarea>`;
   }
 
   function resultMarkup(item) {
@@ -115,8 +157,10 @@
         ? config.correctAnswer
         : config.referenceAnswer
       : null;
-    const feedback = result.feedback || (result.score > 0 ? "已达到本题要求。" : "先检查本题反馈，再尝试说明你的判断依据。");
-    return `<div class="la-result ${result.needsReview ? "is-review" : result.score > 0 ? "is-correct" : "is-wrong"}" role="status"><strong>${result.score} / ${result.maxScore} 分</strong><span>${api.escapeHtml(feedback)}</span>${reference !== null && reference !== "" ? `<span><strong>参考答案：</strong>${api.escapeHtml(Array.isArray(reference) ? reference.join("、") : reference)}</span>` : ""}${result.needsReview ? "<span>教师将进一步复核这道题。</span>" : ""}</div>`;
+    const resultClass = result.needsReview ? "is-review"
+      : Number(result.score) === 0 ? "is-wrong"
+        : Number(result.score) === Number(result.maxScore) ? "is-correct" : "";
+    return `<div class="la-result ${resultClass}" role="status"><strong>${result.score} / ${result.maxScore} 分</strong>${result.feedback ? `<span>${api.escapeHtml(result.feedback)}</span>` : ""}${reference != null && reference !== "" ? `<span><strong>参考答案：</strong>${api.escapeHtml(Array.isArray(reference) ? reference.join("、") : reference)}</span>` : ""}${result.needsReview ? "<span>教师将进一步复核这道题。</span>" : ""}</div>`;
   }
 
   function renderQuestion(item, index, disabled) {
@@ -133,7 +177,7 @@
     }
     const value = state.answers[item.id];
     return Array.isArray(value)
-      ? value.length > 0
+      ? value.some(entry => String(entry).trim() !== "")
       : value !== undefined && value !== null && String(value).trim() !== "";
   }
 
@@ -171,6 +215,7 @@
   }
 
   function setCurrentQuestion(index, focus) {
+    if (!state.assignment) return;
     const items = state.assignment.items || [];
     state.currentIndex = Math.max(0, Math.min(index, Math.max(0, items.length - 1)));
     document.querySelectorAll(".la-question").forEach((element, elementIndex) => {
@@ -207,8 +252,9 @@
   }
 
   function persistLocal() {
+    if (state.viewerId === null) return;
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify({
+      window.localStorage.setItem(`${viewerScope()}:draft:v3`, JSON.stringify({
         answers: state.answers,
         serverUpdated: state.serverUpdated,
         savedAt: new Date().toISOString(),
@@ -219,9 +265,11 @@
   }
 
   function localDraft() {
+    if (state.viewerId === null) return null;
     try {
-      const value = JSON.parse(window.localStorage.getItem(storageKey) || "null");
-      return value && typeof value.answers === "object" ? value : null;
+      const value = JSON.parse(window.localStorage.getItem(`${viewerScope()}:draft:v3`) || "null");
+      const answers = value?.answers;
+      return answers && typeof answers === "object" && !Array.isArray(answers) ? value : null;
     } catch (error) {
       return null;
     }
@@ -272,7 +320,12 @@
     const score = document.getElementById("la-score");
     score.hidden = !graded;
     if (graded) {
-      score.innerHTML = `<strong>${submission.score}</strong><small>/ ${submission.maxScore} 分 · ${submission.percent}%</small>`;
+      const needsReview = (submission.itemResults || []).some(result => result.needsReview);
+      const teacherOverride = submission.grading && submission.grading.teacherOverride;
+      const reviewLabel = needsReview
+        ? teacherOverride ? " · 教师总分 · 部分题目待复核" : " · 初评分 · 待教师复核"
+        : "";
+      score.innerHTML = `<strong>${submission.score}</strong><small>/ ${submission.maxScore} 分 · ${submission.percent}%${reviewLabel}</small>`;
     }
     const feedback = document.getElementById("la-feedback");
     feedback.hidden = !graded || !submission.feedback;
@@ -289,6 +342,7 @@
   }
 
   function scheduleSave() {
+    if (!state.assignment) return;
     collectAnswers();
     state.dirty = true;
     persistLocal();
@@ -300,6 +354,7 @@
   }
 
   async function save(submit) {
+    if (!state.assignment) return;
     if (state.saving) {
       state.submitQueued = state.submitQueued || submit;
       state.saveQueued = state.saveQueued || !submit;
@@ -318,12 +373,14 @@
     submitButton.disabled = true;
     document.getElementById("la-save-status").textContent = submit ? "正在提交…" : "正在保存…";
     try {
-      const payload = await api.json("POST", `/coursework/assignments/${encodeURIComponent(assignmentId)}/work`, {
+      const payload = await api.json("POST", workPath, {
         action: submit ? "submit" : "save",
         answers: state.answers,
         expectedUpdated: state.serverUpdated,
+        expectedViewerId: state.viewerId,
       });
       const data = unwrap(payload);
+      requireBoundViewer(data);
       state.assignment = data.assignment;
       state.answers = {...(state.assignment.submission && state.assignment.submission.answers || {})};
       state.serverUpdated = state.assignment.submission && state.assignment.submission.updated;
@@ -334,7 +391,8 @@
       if (submit) showNotice("提交成功，评分结果和教师复核状态已更新。", "success");
       render();
     } catch (error) {
-      if (error.status === 409 || error.payload && error.payload.code === "REVISION_CONFLICT") {
+      clearViewerIfUnauthorized(error);
+      if (error.payload?.code === "REVISION_CONFLICT") {
         showNotice("另一窗口保存了更新答案。本页没有覆盖它，请重新载入最新版本后继续。", "warning");
       }
       throw error;
@@ -359,9 +417,13 @@
     return (state.assignment.items || []).filter(item => item.required && !hasAnswer(item));
   }
 
-  async function refreshChallengeProgress() {
-    if (!state.assignment || state.saving || !state.assignment.items.some(item => item.type === "CHALLENGE")) return;
-    const data = unwrap(await api.request(`/coursework/assignments/${encodeURIComponent(assignmentId)}/work`));
+  async function refreshChallengeProgress(verifyViewer = false) {
+    if (!state.assignment || state.saving || (verifyViewer && !navigator.onLine)) return;
+    const hasChallenges = state.assignment.items.some(item => item.type === "CHALLENGE");
+    if (!hasChallenges && !verifyViewer) return;
+    const data = await readWork();
+    requireBoundViewer(data);
+    if (!hasChallenges) return;
     const latest = new Map((data.assignment.items || []).map(item => [item.id, item]));
     state.assignment.items.forEach(item => {
       if (item.type !== "CHALLENGE" || !latest.has(item.id)) return;
@@ -373,6 +435,7 @@
   }
 
   async function submit() {
+    if (!state.assignment) return;
     collectAnswers();
     await refreshChallengeProgress();
     const missing = missingRequired();
@@ -396,7 +459,11 @@
       document.getElementById("la-loading-copy").textContent = "正在同步课程任务、服务器草稿和实验结果，请稍候…";
     }, 8000);
     try {
-      const data = unwrap(await api.request(`/coursework/assignments/${encodeURIComponent(assignmentId)}/work`));
+      const data = await readWork();
+      if (!Number.isSafeInteger(data.viewerId) || data.viewerId <= 0 || !Array.isArray(data.assignment?.items)) {
+        throw new Error("无法验证当前登录账号，请重新载入作业。");
+      }
+      state.viewerId = data.viewerId;
       state.assignment = data.assignment;
       state.answers = {...(state.assignment.submission && state.assignment.submission.answers || {})};
       state.serverUpdated = state.assignment.submission && state.assignment.submission.updated;
@@ -408,7 +475,7 @@
         showNotice("已恢复这台设备上尚未同步的草稿。", "success");
       }
       if ("BroadcastChannel" in window) {
-        state.channel = new BroadcastChannel(`aisecedu-assignment-${assignmentId}`);
+        state.channel = new BroadcastChannel(`${viewerScope()}:sync`);
         state.channel.addEventListener("message", event => {
           if (event.data && event.data.serverUpdated && event.data.serverUpdated !== state.serverUpdated) {
             showNotice("同一任务已在另一窗口更新。提交前请重新载入，避免覆盖新答案。", "warning");
@@ -417,6 +484,7 @@
       }
       render();
     } catch (error) {
+      clearViewer();
       document.getElementById("learning-assignment-loading").hidden = true;
       showError(error);
     } finally {
@@ -435,10 +503,12 @@
     if (state.dirty) save(false).catch(showError);
   });
   window.addEventListener("offline", () => showNotice("网络已断开，继续作答会保存在本机。", "warning"));
-  window.addEventListener("beforeunload", persistLocal);
-  window.addEventListener("focus", () => refreshChallengeProgress().catch(showError));
+  window.addEventListener("beforeunload", () => {
+    if (state.dirty) persistLocal();
+  });
+  window.addEventListener("focus", () => refreshChallengeProgress(true).catch(showError));
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") refreshChallengeProgress().catch(showError);
+    if (document.visibilityState === "visible") refreshChallengeProgress(true).catch(showError);
   });
   boot();
 })();

@@ -47,6 +47,7 @@ def _error(error, status=400, code="INVALID_REQUEST"):
     recovery = {
         "NOT_FOUND": ("查看我的任务", "/student"),
         "REVISION_CONFLICT": ("重新载入最新草稿", request.path),
+        "VIEWER_MISMATCH": ("返回任务列表", "/student"),
         "INVALID_REQUEST": ("返回修改", request.path),
     }.get(code, ("返回今天", "/student"))
     payload = error_contract(
@@ -219,16 +220,28 @@ class AssignmentWork(Resource):
         user = _user()
         try:
             assignment = assignment_for_student(assignment_id, user)
-            return _ok({"assignment": assignment_view(assignment, user=user)})
+            payload, status = _ok({
+                "assignment": assignment_view(assignment, user=user),
+                "viewerId": user.id,
+            })
+            return payload, status, {"Cache-Control": "no-store"}
         except ScopeError as exc:
             return _error(exc, 404, "NOT_FOUND")
 
     @authed_only
     def post(self, assignment_id):
         user = _user()
+        body = _body()
+        if "expectedViewerId" in body and (
+            type(body["expectedViewerId"]) is not int or body["expectedViewerId"] != user.id
+        ):
+            return _error(
+                "当前登录账号已变更，请重新载入作业。",
+                409,
+                "VIEWER_MISMATCH",
+            )
         try:
             assignment = assignment_for_student(assignment_id, user, lock=True)
-            body = _body()
             action = str(body.get("action") or "save").lower()
             if action not in {"save", "submit"}:
                 raise ValueError("action must be save or submit")
@@ -257,6 +270,7 @@ class AssignmentWork(Resource):
                 {
                     "assignment": assignment_view(assignment, user=user),
                     "submissionId": submission.id,
+                    "viewerId": user.id,
                 },
                 201 if action == "submit" else 200,
             )
