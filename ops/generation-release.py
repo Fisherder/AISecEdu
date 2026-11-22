@@ -109,21 +109,30 @@ def installed_ids(container):
     return result
 
 
+def verified_image_pair(revision, references, docker):
+    images = {}
+    for service in SERVICES:
+        info, = json.loads(output([*docker, 'image', 'inspect', '--', references[service]]))
+        image_revision = (info['Config'].get('Labels') or {}).get('org.opencontainers.image.revision')
+        if image_revision != revision or (info['Os'], info['Architecture']) != ('linux', 'amd64'):
+            raise ValueError(f'{service} is not a linux/amd64 image for {revision}')
+        image_id = info.get('Id', '')
+        if not isinstance(image_id, str) or not re.fullmatch(r'sha256:[a-f0-9]{64}', image_id):
+            raise ValueError(f'{service} does not have a full image ID')
+        images[service] = image_id
+    if len(set(images.values())) != len(SERVICES):
+        raise ValueError('The classroom and inspector must use distinct images')
+    return images
+
+
 def package_tested(args):
     if not re.fullmatch(r'[a-f0-9]{40}', args.commit):
         raise ValueError('Supply the full tested commit')
     bundle = args.bundle.absolute()
     if bundle.exists() or bundle.is_symlink():
         raise ValueError('Choose a new release directory')
-    images = {}
-    for service, reference in zip(SERVICES, (args.runtime_image, args.inspector_image)):
-        info, = json.loads(output(['docker', 'image', 'inspect', '--', reference]))
-        revision = (info['Config'].get('Labels') or {}).get('org.opencontainers.image.revision')
-        if revision != args.commit or (info['Os'], info['Architecture']) != ('linux', 'amd64'):
-            raise ValueError(f'{service} is not a linux/amd64 image for {args.commit}')
-        images[service] = info['Id']
-    if len(set(images.values())) != len(SERVICES):
-        raise ValueError('The classroom and inspector must use distinct images')
+    references = dict(zip(SERVICES, (args.runtime_image, args.inspector_image)))
+    images = verified_image_pair(args.commit, references, ['docker'])
     bundle.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.generation-release-', dir=bundle.parent) as temp:
         stage = Path(temp) / 'bundle'
@@ -147,9 +156,11 @@ def export_running(args):
     revision = output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'])
     if output(['git', '-C', str(ROOT), 'status', '--porcelain']):
         raise ValueError('Commit the verified source before exporting its running image pair')
+    images = installed_ids(args.container)
+    if verified_image_pair(revision, images, engine(args.container)) != images:
+        raise ValueError('Image inspection did not return the running image IDs')
     bundle = args.bundle.resolve()
     bundle.mkdir(parents=True, exist_ok=False)
-    images = installed_ids(args.container)
     try:
         with open(bundle / 'images.tar', 'wb') as archive:
             command(engine(args.container, 'save', *images.values()), stdout=archive)

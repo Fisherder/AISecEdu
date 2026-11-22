@@ -13,6 +13,13 @@ release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 
 
+def image_inspection(image_id, revision, operating_system='linux', architecture='amd64'):
+    labels = {'org.opencontainers.image.revision': revision} if revision else None
+    return json.dumps([{
+        'Id': image_id, 'Os': operating_system, 'Architecture': architecture, 'Config': {'Labels': labels},
+    }])
+
+
 class GenerationReleaseTests(unittest.TestCase):
     def test_package_tested_pins_source_platform_and_exact_exported_ids(self):
         import subprocess
@@ -114,17 +121,60 @@ class GenerationReleaseTests(unittest.TestCase):
                     self.assertEqual(saved['services']['agent-runtime']['environment']['AISECEDU_TEACHING_DEMO_ENGINE'], '')
 
     def test_export_keeps_the_verified_running_images_without_building(self):
-        from argparse import Namespace
         with tempfile.TemporaryDirectory() as folder:
             bundle = Path(folder) / 'release'
-            images = {name: 'sha256:' + 'a' * 64 for name in release.SERVICES}
+            revision = 'b' * 40
+            ids = ['sha256:' + char * 64 for char in '12']
+            images = dict(zip(release.SERVICES, ids))
+
             def execute(args, **kwargs):
                 kwargs['stdout'].write(b'exact running images')
-            with patch.object(release, 'output', side_effect=['b' * 40, '']), patch.object(release, 'installed_ids', return_value=images), patch.object(release, 'command', side_effect=execute) as command:
+
+            receipts = [revision, '', *ids, *(image_inspection(image_id, revision) for image_id in ids)]
+            with patch.object(release, 'output', side_effect=receipts) as output, \
+                    patch.object(release, 'command', side_effect=execute) as command:
                 release.export_running(Namespace(bundle=bundle, container='development'))
                 manifest = release.validate_manifest(bundle)
+                self.assertEqual(manifest['commit'], revision)
+                self.assertEqual(manifest['platform'], 'linux/amd64')
                 self.assertEqual(manifest['images'], images)
-                self.assertEqual(command.call_args.args[0][:5], ['docker', 'exec', 'development', 'docker', 'save'])
+                self.assertEqual(manifest['sourceContainer'], 'development')
+                docker = ['docker', 'exec', 'development', 'docker']
+                self.assertEqual([call.args[0] for call in output.call_args_list[2:]], [
+                    *[docker + ['inspect', '--format', '{{.Image}}', name] for name in release.SERVICES],
+                    *[docker + ['image', 'inspect', '--', image_id] for image_id in ids],
+                ])
+                command.assert_called_once()
+                self.assertEqual(command.call_args.args[0], docker + ['save', *ids])
+
+    def test_export_rejects_unverified_running_images_before_creating_the_bundle(self):
+        revision = 'b' * 40
+        ids = ['sha256:' + char * 64 for char in '12']
+        cases = (
+            (0, {'revision': None}, f'agent-runtime is not a linux/amd64 image for {revision}'),
+            (1, {'revision': 'a' * 40}, f'courseware-inspector is not a linux/amd64 image for {revision}'),
+            (0, {'operating_system': 'windows'}, f'agent-runtime is not a linux/amd64 image for {revision}'),
+            (1, {'architecture': 'arm64'}, f'courseware-inspector is not a linux/amd64 image for {revision}'),
+            (1, {'image_id': 'latest'}, 'courseware-inspector does not have a full image ID'),
+            (1, {'image_id': ids[0]}, 'The classroom and inspector must use distinct images'),
+            (1, {'image_id': 'sha256:' + '3' * 64}, 'Image inspection did not return the running image IDs'),
+        )
+        for index, overrides, error in cases:
+            with self.subTest(index=index, overrides=overrides), tempfile.TemporaryDirectory() as folder:
+                bundle = Path(folder) / 'new-release'
+                previous = Path(folder) / 'previous-release'
+                previous.mkdir()
+                (previous / 'images.tar').write_bytes(b'preserved previous image pair')
+                metadata = [{'image_id': image_id, 'revision': revision} for image_id in ids]
+                metadata[index].update(overrides)
+                receipts = [revision, '', *ids, *(image_inspection(**info) for info in metadata)]
+                with patch.object(release, 'output', side_effect=receipts), \
+                        patch.object(release, 'command') as command:
+                    with self.assertRaisesRegex(ValueError, error):
+                        release.export_running(Namespace(bundle=bundle, container='development'))
+                command.assert_not_called()
+                self.assertFalse(bundle.exists())
+                self.assertEqual((previous / 'images.tar').read_bytes(), b'preserved previous image pair')
 
     def test_default_deploy_is_read_only(self):
         from argparse import Namespace

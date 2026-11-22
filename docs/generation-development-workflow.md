@@ -35,7 +35,7 @@
 make generation-export RELEASE=/srv/aisecedu-development-control/releases/<version> CONTAINER=aisecedu-development
 ```
 
-该命令直接导出正在运行的两个镜像，不再构建。包内记录源码 commit、两个镜像 ID 和归档 SHA-256，不包含数据库、私有配置或 API Key。也可用 `generation-release` 先构建包，再应用到开发环境验收。
+该命令直接导出正在运行的两个镜像。两个镜像都须为 `linux/amd64`，并通过 `org.opencontainers.image.revision` 标注当前干净检出的完整 commit。缺少标注、版本不同或平台不符时，命令会在创建发布目录前报错，已有回退包可继续保留。若运行中的镜像标注的是另一个已验收的 commit，从该 commit 的干净检出运行导出。清单记录源码 commit、平台、镜像 ID 和归档 SHA-256。也可用 `generation-release` 先构建包，再应用到开发环境验收。
 
 应用默认只显示计划。指定生产容器并显式执行时才更新生产：
 
