@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/chat/route';
+import * as directorPrompt from '@/lib/orchestration/director-prompt';
 import type { ClassroomTurnMessage } from '@/lib/server/agent-harness/classroom-turn';
 import type { StatelessEvent } from '@/lib/types/chat';
 import { recordUsage } from '@/lib/server/usage-storage';
@@ -174,6 +175,29 @@ describe('ordinary classroom chat through Harness', () => {
       '[老师]: [{"type":"text","content":"老师之前的解释"}]',
       '现在的问题',
     ]);
+  });
+
+  it('honors a terminal director decision even when a speaker ID is present', async () => {
+    const parseDecision = vi.spyOn(directorPrompt, 'parseDirectorDecision').mockReturnValueOnce({
+      shouldEnd: true,
+      nextAgentId: 'default-2',
+    });
+    fetchTurn.mockResolvedValueOnce(
+      Response.json({ text: '{"next_agent":"END"}', model: 'fixture' }),
+    );
+
+    try {
+      const events = await readEvents(await POST(makeRequest()));
+      expect(parseDecision).toHaveBeenCalledTimes(1);
+      expect(fetchTurn).toHaveBeenCalledTimes(1);
+      expect(events.map(({ type }) => type)).toEqual(['thinking', 'done']);
+      expect(events.at(-1)?.data).toMatchObject({
+        totalAgents: 0,
+        directorState: { turnCount: 0 },
+      });
+    } finally {
+      parseDecision.mockRestore();
+    }
   });
 
   it('fails closed when the server credential is missing', async () => {

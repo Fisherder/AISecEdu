@@ -412,6 +412,13 @@ describe('Evaluator API teaching image boundary', () => {
       expect(textInit?.body).toContain('叶片增加两片');
       expect(textInit?.body).not.toContain('browser-storage.invalid');
       expect(textInit?.body).not.toContain(png);
+      expect(new Set(fetchTurn.mock.calls.map(([destination]) => String(destination)))).toEqual(
+        new Set([
+          'http://platform.invalid/pwncollege_api/v1/teaching/runtime/introspect',
+          'http://harness.invalid:3081/v1/teaching-image-turn',
+          'http://harness.invalid:3081/v1/turn',
+        ]),
+      );
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();

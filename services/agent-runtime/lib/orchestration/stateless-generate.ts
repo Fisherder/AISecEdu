@@ -435,6 +435,7 @@ async function* selectSpeaker(
     'chat-adapter',
   );
   const decision = parseDirectorDecision(answer);
+  if (decision.shouldEnd) return undefined;
   if (decision.nextAgentId === 'USER') {
     yield { type: 'cue_user', data: {} };
     return undefined;

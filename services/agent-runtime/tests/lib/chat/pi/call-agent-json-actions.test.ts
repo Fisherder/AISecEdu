@@ -188,6 +188,21 @@ describe('Pi call_agent JSON action output', () => {
     mocks.buildAgent.mockReset();
   });
 
+  it('fails before starting a child when neither classroom model is available', async () => {
+    const { buildCallAgentTool } = await import('@/lib/chat/pi/tools/call-agent');
+    const events: StatelessEvent[] = [];
+    const opts = baseToolOpts(events);
+    const takeSceneEvidence = vi.fn();
+    const tool = buildCallAgentTool({ ...opts, languageModel: undefined, takeSceneEvidence });
+
+    await expect(
+      tool.execute('missing-model', { agentId: teacher.id, instruction: 'Explain the example.' }),
+    ).rejects.toThrow('Classroom role model is unavailable');
+    expect(events).toEqual([]);
+    expect(opts.onAgentDone).not.toHaveBeenCalled();
+    expect(takeSceneEvidence).not.toHaveBeenCalled();
+  });
+
   it('parses child JSON actions, executes all action events, and does not leak raw JSON speech', async () => {
     const jsonOutput = JSON.stringify([
       { type: 'action', name: 'wb_open', params: {} },

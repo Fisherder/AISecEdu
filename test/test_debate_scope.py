@@ -8,7 +8,7 @@ from types import SimpleNamespace
 def load_policy():
     path = pathlib.Path(__file__).resolve().parents[1] / 'dojo_plugin/api/v1/debate.py'
     tree = ast.parse(path.read_text())
-    selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {'_access', '_view', '_request_key', '_phase_index'}]
+    selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {'_access', '_view', '_request_key', '_phase_index', '_reported_model'}]
     namespace = {'time': time, 'ScopeError': PermissionError, 're': __import__('re')}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(path), 'exec'), namespace)
     return namespace
@@ -64,6 +64,13 @@ class DebateScopeTests(unittest.TestCase):
         self.assertEqual(self.policy['_view'](attempt, True)['studentName'], 'student')
         attempt.pending['expires'] = 0
         self.assertFalse(self.policy['_view'](attempt)['pending'])
+
+    def test_model_receipts_use_canonical_provider_and_model_parts(self):
+        reported_model = self.policy['_reported_model']
+        self.assertEqual(reported_model(' deepseek : example:version '), ('deepseek', 'example:version'))
+        for malformed in (None, 'model-only', ' :model', 'deepseek: ', 'p' * 81 + ':model', 'p:' + 'm' * 161):
+            with self.assertRaises(ValueError):
+                reported_model(malformed)
 
     def test_request_key_validation_rejects_missing_or_invalid_ids(self):
         for key in (None, '', 'short', '../outside', 'a'*65, 123):

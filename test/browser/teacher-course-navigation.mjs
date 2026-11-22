@@ -98,7 +98,9 @@ try {
       finish('alpha:code', {code: 'ALPHA-CODE'});
       await new Promise(resolve => setTimeout(resolve, 0));
     });
-    assert.match(await page.evaluate(() => document.querySelector('#cs-material-list').textContent), /Course Beta material/);
+    const visibleMaterials = await page.text('#cs-material-list');
+    assert.match(visibleMaterials, /Course Beta material/);
+    assert.doesNotMatch(visibleMaterials, /Late Alpha material/);
     assert.equal(await page.evaluate(() => document.querySelector('#cs-question-result-count').textContent.includes('99')), false);
     assert.equal(await page.text('#cs-course-code'), 'BETA-CODE');
     assert.equal(await page.evaluate(() => document.querySelector('#cs-material-list').hasAttribute('aria-busy')), false);

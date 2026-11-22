@@ -5,9 +5,10 @@ import { test } from 'node:test';
 import { createEngine } from './engine.mjs';
 import { createService, validateProviderURL } from './server.mjs';
 
-test('requires HTTPS for providers outside explicit loopback fixtures', () => {
+test('validates provider protocols, credentials, queries and fragments', () => {
   assert.equal(validateProviderURL(), 'https://api.deepseek.com/anthropic');
   assert.equal(validateProviderURL('https://provider.invalid/anthropic/'), 'https://provider.invalid/anthropic');
+  assert.equal(validateProviderURL('https://provider.invalid/%3F%23'), 'https://provider.invalid/%3F%23');
   for (const host of ['127.0.0.1', '[::1]', 'localhost']) {
     assert.equal(validateProviderURL(`http://${host}:3082/anthropic`), `http://${host}:3082/anthropic`);
   }
@@ -15,6 +16,7 @@ test('requires HTTPS for providers outside explicit loopback fixtures', () => {
     'http://provider.invalid', 'http://127.0.0.2', 'http://127.1', 'http://127.0.0.1.provider.invalid',
     'http://localhost@provider.invalid', 'ftp://localhost', 'https://user:secret@provider.invalid',
     'https://provider.invalid/?target=messages', 'https://provider.invalid/path#fragment',
+    'https://provider.invalid/anthropic/?', 'http://localhost:3082/anthropic#',
   ]) {
     assert.throws(() => validateProviderURL(url), /Provider URL must use HTTPS/);
   }
@@ -121,7 +123,7 @@ test('HTTP requests drive the official restricted agent loop and Messages adapte
       { role: 'assistant', content: '上次答复' },
       { role: 'user', content: '甲' },
     ]),
-    sendTurn(url, [{ role: 'system', content: '乙' }, { role: 'user', content: '乙' }]),
+    sendTurn(url, [{ role: 'system', content: '乙的系统提示' }, { role: 'user', content: '乙' }]),
   ]);
   assert.equal(a.status, 200, JSON.stringify(received));
   assert.equal(b.status, 200, JSON.stringify(received));
@@ -147,7 +149,9 @@ test('HTTP requests drive the official restricted agent loop and Messages adapte
   ]);
   assert.deepEqual(wireB.messages.map(({ role, content }) => [role, content[0].text]), [['user', '乙']]);
   assert.equal(wireA.system, '甲 {{model}}');
-  assert.equal(wireB.system, '乙');
+  assert.equal(wireB.system, '乙的系统提示');
+  assert.equal(JSON.stringify(wireA).split('甲 {{model}}').length - 1, 1);
+  assert.equal(JSON.stringify(wireB).split('乙的系统提示').length - 1, 1);
 
   const rejected = await sendTurn(url, [{ role: 'user', content: 'blocked' }]);
   assert.equal(rejected.status, 502);
