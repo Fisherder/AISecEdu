@@ -820,8 +820,9 @@ def _normalize_answer(value):
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, list):
-        return sorted(str(item).strip().casefold() for item in value)
-    return str(value or "").strip().casefold()
+        normalized = sorted(str(item).strip().casefold() for item in value)
+        return normalized if any(normalized) else ""
+    return "" if value is None else str(value).strip().casefold()
 
 
 def _fallback_open_grade(item, answer):
@@ -906,10 +907,18 @@ def grade_submission(submission, *, grader_id=None):
             score = float(item.points) if solved else 0.0
             feedback = "已通过真实 Dojo 判题。" if solved else "尚未通过对应 Dojo 题目。"
         elif item.item_type in {"MULTIPLE_CHOICE", "TRUE_FALSE"}:
-            correct = (item.config or {}).get("correctAnswer")
-            is_correct = _normalize_answer(answer) == _normalize_answer(correct)
-            score = float(item.points) if is_correct else 0.0
-            feedback = (item.config or {}).get("explanation") or ("回答正确。" if is_correct else "回答不正确，请复习相关知识点。")
+            config = item.config or {}
+            correct = _normalize_answer(config.get("correctAnswer"))
+            submitted = _normalize_answer(answer)
+            if not correct:
+                feedback = "此题缺少有效的正确答案，等待教师复核。"
+                needs_review = True
+            elif not submitted:
+                feedback = "未作答。"
+            else:
+                is_correct = submitted == correct
+                score = float(item.points) if is_correct else 0.0
+                feedback = config.get("explanation") or ("回答正确。" if is_correct else "回答不正确，请复习相关知识点。")
         elif item.item_type in {"SHORT_ANSWER", "DEBATE"}:
             source = "AI"
             ai_grade = ai_grades.get(item.id)
@@ -1011,13 +1020,7 @@ def save_submission(assignment, user, answers, *, submit=False):
         for item in assignment.items:
             if not item.required or item.item_type == "CHALLENGE":
                 continue
-            value = normalized_answers.get(item.id)
-            empty = (
-                value is None
-                or value == []
-                or (isinstance(value, str) and not value.strip())
-            )
-            if empty:
+            if not _normalize_answer(normalized_answers.get(item.id)):
                 missing.append(item.position + 1)
         if missing:
             joined = "、".join(str(value) for value in missing[:12])

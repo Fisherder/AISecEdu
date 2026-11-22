@@ -722,3 +722,72 @@ def test_assignment_work_routes_invalid_open_grade_to_review(invalid_grade):
         {"itemId": "water", "score": 4, "maxScore": 5, "feedback": "观察了液面。",
          "source": "AI", "needsReview": False},
     ]
+
+
+@pytest.mark.parametrize(("item_type", "config", "answers", "score", "review", "required"), [
+    ("MULTIPLE_CHOICE", {}, {}, 0, True, False),
+    ("TRUE_FALSE", {}, {"item": False}, 0, True, False),
+    ("TRUE_FALSE", {"correctAnswer": None}, {}, 0, True, False),
+    ("MULTIPLE_CHOICE", {"correctAnswer": "  "}, {"item": " "}, 0, True, False),
+    ("MULTIPLE_CHOICE", {"correctAnswer": []}, {"item": []}, 0, True, False),
+    ("MULTIPLE_CHOICE", {"correctAnswer": [" "]}, {"item": [" "]}, 0, True, False),
+    ("MULTIPLE_CHOICE", {"correctAnswer": 0, "explanation": "评分解释"}, {}, 0, False, False),
+    ("MULTIPLE_CHOICE", {"correctAnswer": ["Blue"]}, {"item": [" "]}, 0, False, False),
+    ("TRUE_FALSE", {"correctAnswer": False}, {"item": 0}, 0, False, False),
+    ("MULTIPLE_CHOICE", {"correctAnswer": "0"}, {"item": 0}, 5, False, False),
+    ("MULTIPLE_CHOICE", {"correctAnswer": 0}, {"item": " 0 "}, 5, False, False),
+    ("TRUE_FALSE", {"correctAnswer": False}, {"item": False}, 5, False, False),
+    ("TRUE_FALSE", {"correctAnswer": False}, {"item": " FALSE "}, 5, False, False),
+    ("TRUE_FALSE", {"correctAnswer": False}, {}, 0, False, False),
+    ("MULTIPLE_CHOICE", {"correctAnswer": "Blue"}, {"item": "  blue "}, 5, False, False),
+    ("MULTIPLE_CHOICE", {"correctAnswer": ["Blue", "Green"]}, {"item": [" GREEN ", "blue"]}, 5, False, False),
+    ("MULTIPLE_CHOICE", {"correctAnswer": ["Blue"]}, {"item": ["  ", "\t"]}, None, False, True),
+    ("MULTIPLE_CHOICE", {"correctAnswer": ["Blue"]}, {"item": []}, None, False, True),
+    ("TRUE_FALSE", {"correctAnswer": False}, {"item": False}, 5, False, True),
+    ("MULTIPLE_CHOICE", {"correctAnswer": "0"}, {"item": 0}, 5, False, True),
+    ("MULTIPLE_CHOICE", {"correctAnswer": ["Blue"]}, {"item": ["Blue"]}, 5, False, True),
+])
+def test_save_submission_grades_legacy_objective_answers(item_type, config, answers, score, review, required):
+    item = SimpleNamespace(
+        id="item", item_type=item_type, points=5, position=0, config=config,
+        required=required, challenge_id=None,
+    )
+    assignment = SimpleNamespace(
+        id="assignment", status="PUBLISHED", available_from=None, due_at=None,
+        settings={}, items=[item], dojo_id=2,
+    )
+    learner = SimpleNamespace(id=3)
+    submission = SimpleNamespace(id="submission", assignment=assignment, student_id=learner.id, status="IN_PROGRESS")
+    submissions = MagicMock()
+    submissions.query.filter_by.return_value.with_for_update.return_value.first.return_value = submission
+    solves = MagicMock()
+    solves.query.filter.return_value.all.return_value = []
+    model = MagicMock()
+    namespace = {
+        "math": math, "utcnow": lambda: datetime.datetime(2026, 1, 2),
+        "db": SimpleNamespace(session=MagicMock()), "Solves": solves, "model_json": model,
+        "TeachingAssignmentSubmissions": submissions, "LearningAuditEvents": SimpleNamespace,
+    }
+    coursework = GRADING_PATH.parents[1] / "coursework.py"
+    names = {"save_submission", "grade_submission", "_ai_open_grades", "_normalize_answer"}
+    tree = ast.parse(coursework.read_text())
+    tree.body = [node for node in tree.body if getattr(node, "name", None) in names]
+    exec(compile(tree, str(coursework), "exec"), namespace)
+
+    if score is None:
+        with pytest.raises(ValueError, match=r"请先完成必答题：第 1 题"):
+            namespace["save_submission"](assignment, learner, answers, submit=True)
+        assert submission.status == "IN_PROGRESS"
+        model.assert_not_called()
+        return
+
+    result = namespace["save_submission"](assignment, learner, answers, submit=True)
+    assert result is submission and result.status == "GRADED"
+    assert result.objective_score == result.total_score == score
+    outcome, = result.item_results
+    assert (outcome["score"], outcome["needsReview"], outcome["source"]) == (score, review, "DETERMINISTIC")
+    if review:
+        assert "教师复核" in outcome["feedback"]
+    elif not answers or answers["item"] == [" "]:
+        assert outcome["feedback"] == "未作答。"
+    model.assert_not_called()
