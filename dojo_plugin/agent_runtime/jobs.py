@@ -62,11 +62,11 @@ from .artifacts import (
 )
 from .files import persist_agent_deliverables, public_agent_file
 from .model_router import (
-    UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE,
+    UPSTREAM_DEBATE_ROUTE, UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE,
     UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_SLIDE_NOTES_ROUTE, UPSTREAM_TEACHER_ROUTE,
     route_model, validate_actual_model,
 )
-from . import ordinary_lesson_plan, ordinary_material_turn, ordinary_slide_layout, ordinary_slide_notes
+from . import ordinary_debate, ordinary_lesson_plan, ordinary_material_turn, ordinary_slide_layout, ordinary_slide_notes
 from .model_journal import close_canceled_model_calls
 from .model_inputs import ModelInputError, accepted_input, freeze_input, freeze_prepared, prepared_input, request_payload, restore_input_cache
 from .conversation import turn_wait_state, execution_chain
@@ -1597,6 +1597,10 @@ def enqueue_job(
 
     if kind == "candidate.generate":
         payload = ordinary_lesson_plan.admit_generation(payload, owner_id, dojo_id, module_index, thread_id)
+    if kind in {"artifact.materialize", "artifact.revise"} and (
+        payload.get("artifactType") == "debate" or "ordinaryDebate" in payload or "debateAuthoringBackend" in payload
+    ):
+        payload = ordinary_debate.admit(kind, payload, owner_id, dojo_id, module_index, thread_id)
     if kind == "artifact.materialize":
         payload = ordinary_lesson_plan.admit(payload, owner_id, dojo_id, module_index, thread_id)
 
@@ -2250,6 +2254,8 @@ def retry_job(job, user_id, idempotency_token):
 
 
 def _retry_payload(job, user_id):
+    if "ordinaryDebate" in (job.payload or {}):
+        ordinary_debate.prepare(job, job.payload)
     payload = {**(job.payload or {}), "manualRetry": True}
     for key in (
         "retryOfJobId",
@@ -2645,6 +2651,8 @@ def _runtime_payload(job):
         # The selected references and their redacted excerpts are already frozen.
         # Never expand to fresh course material or load conversation history.
         return payload
+    if "ordinaryDebate" in payload:
+        return ordinary_debate.prepare(job, payload)
     if job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload):
         return ordinary_lesson_plan.prepare(job, payload)
     if job.kind == "artifact.revise":
@@ -2914,6 +2922,13 @@ def _ordinary_teaching_job_scope(job, payload):
 
 
 def _runtime_request_body(job, route, payload):
+    if "ordinaryDebate" in payload:
+        return {
+            "jobId": job.id, "kind": job.kind,
+            "scope": {"ownerId": job.owner_id, "dojoId": job.dojo_id, "moduleIndex": job.module_index,
+                      "ordinaryTeaching": ordinary_debate.SCOPE},
+            "payload": ordinary_debate.wire_payload(payload), "modelRoute": route,
+        }
     if job.kind == "artifact.revise" and ordinary_slide_layout.pinned(payload):
         return {
             "jobId": job.id, "kind": job.kind,
@@ -3479,7 +3494,9 @@ def _invoke_agent_runtime(job, route, payload=None):
             "usage": response["usage"],
         }}
     endpoint = "execute"
-    if job.kind == "artifact.revise" and ordinary_slide_layout.pinned(payload):
+    if "ordinaryDebate" in payload:
+        endpoint = "ordinary-debate"
+    elif job.kind == "artifact.revise" and ordinary_slide_layout.pinned(payload):
         endpoint = "ordinary-deck-revision" if ordinary_slide_layout.deck_pinned(payload) else "ordinary-slide-layout"
     elif ((job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload))
             or (job.kind == "candidate.generate" and ordinary_lesson_plan.explicit_generation(payload))):
@@ -3493,7 +3510,7 @@ def _invoke_agent_runtime(job, route, payload=None):
         },
         "timeout": (10, _runtime_read_timeout(job, payload)),
     }
-    if endpoint in {"ordinary-slide-layout", "ordinary-deck-revision"}:
+    if endpoint in {"ordinary-slide-layout", "ordinary-deck-revision", "ordinary-debate"}:
         request_kwargs["allow_redirects"] = False
     if job.kind == "agent.chat" and job.thread_id:
         encoded = _runtime_json_bytes(body)
@@ -3990,7 +4007,11 @@ def _persist_result(job, result):
         pinned_layout = ordinary_slide_layout.pinned(job.payload or {})
         pinned_notes = ("ordinarySlideNotes" in (job.payload or {})
                         or (job.payload or {}).get("revisionBackend") == "ordinary-slide-notes")
-        if pinned_notes:
+        pinned_debate = "ordinaryDebate" in (job.payload or {})
+        if pinned_debate:
+            revision_content = ordinary_debate.content_for_save(job, result)
+            revision = None
+        elif pinned_notes:
             source, slide, page, _, original, operation = ordinary_slide_notes.prepare(job, job.payload, lock=True)
             revision_content = ordinary_slide_notes.revised_content(
                 source, slide, page, result.get("speakerNotes"), original, operation,
@@ -4013,13 +4034,15 @@ def _persist_result(job, result):
                 expected_revision=expected_revision,
                 instruction=str(job.payload.get("instruction") or ""),
                 content=revision_content,
-                **({"commit": False} if pinned_layout or pinned_notes else {}),
+                **({"commit": False} if pinned_layout or pinned_notes or pinned_debate else {}),
             )
         invocation = (
             ModelInvocations.query.filter_by(job_id=job.id, status="SUCCEEDED")
             .order_by(ModelInvocations.created.desc())
             .first()
         )
+        if pinned_debate:
+            ordinary_debate.require_invocation(job, invocation)
         if pinned_layout or pinned_notes:
             if pinned_notes:
                 expected_route = UPSTREAM_SLIDE_NOTES_ROUTE
@@ -4058,6 +4081,8 @@ def _persist_result(job, result):
             artifact_id=artifact.id,
             instruction=instruction,
         ).first()
+        pinned_debate = "ordinaryDebate" in (job.payload or {})
+        content = ordinary_debate.content_for_save(job, result) if pinned_debate else result.get("content")
         if existing:
             return {
                 "artifactId": artifact.id,
@@ -4072,8 +4097,8 @@ def _persist_result(job, result):
             user,
             expected_revision=int(job.payload.get("expectedRevision")),
             instruction=instruction,
-            content=result.get("content"),
-            commit=not scoped,
+            content=content,
+            commit=not (scoped or pinned_debate),
         )
         artifact = TeachingArtifacts.query.filter_by(id=artifact.id).first()
         artifact.status = "READY"
@@ -4082,6 +4107,8 @@ def _persist_result(job, result):
             .order_by(ModelInvocations.created.desc())
             .first()
         )
+        if pinned_debate:
+            ordinary_debate.require_invocation(job, invocation)
         if invocation:
             invocation.artifact_revision_id = revision.id
         revision.validation = {
@@ -4891,11 +4918,13 @@ def process_job(job_id, *, worker_id=None):
                     )
                 if route.get("route") in {
                     UPSTREAM_TEACHER_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE,
-                    UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_DECK_REVISION_ROUTE,
+                    UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_DEBATE_ROUTE,
                 }:
                     # A mismatched receipt still represents a measured model invocation.
                     failed_model_meta = model_meta
-                if route.get("route") == UPSTREAM_LESSON_PLAN_ROUTE:
+                if route.get("route") == UPSTREAM_DEBATE_ROUTE:
+                    ordinary_debate.validate_receipt(route, response)
+                elif route.get("route") == UPSTREAM_LESSON_PLAN_ROUTE:
                     ordinary_lesson_plan.validate_receipt(route, response)
                 elif route.get("route") == UPSTREAM_LESSON_CANDIDATE_ROUTE:
                     ordinary_lesson_plan.validate_generation_receipt(route, response)
@@ -4914,7 +4943,10 @@ def process_job(job_id, *, worker_id=None):
                 }
                 db.session.commit()
 
-            if route.get("route") == UPSTREAM_LESSON_PLAN_ROUTE:
+            if route.get("route") == UPSTREAM_DEBATE_ROUTE:
+                ordinary_debate.validate_receipt(route, response)
+                ordinary_debate.prepare(job, job.payload)
+            elif route.get("route") == UPSTREAM_LESSON_PLAN_ROUTE:
                 # Renewed jobs and recovered checkpoints must pass the live source and model checks too.
                 ordinary_lesson_plan.validate_receipt(route, response)
                 ordinary_lesson_plan.prepare(job, runtime_payload)
@@ -4929,7 +4961,9 @@ def process_job(job_id, *, worker_id=None):
             if (job.kind == "artifact.revise" and runtime_payload.get("revisionBackend") == "ordinary-slide-wording"
                     and model_mode != "ordinary-slide-wording"):
                 raise PermanentJobError("课件文字修订未取得指定教学服务的回执。")
-            if model_mode.startswith("ordinary-") and route.get("route") not in {UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_DECK_REVISION_ROUTE}:
+            if model_mode.startswith("ordinary-") and route.get("route") not in {
+                UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_DEBATE_ROUTE,
+            }:
                 authorized_scope = _ordinary_teaching_job_scope(job, runtime_payload)
                 if not authorized_scope or model_mode != f"ordinary-{authorized_scope}":
                     raise PermanentJobError("普通教学作业的课程或资料授权已变化，请重新发起。")

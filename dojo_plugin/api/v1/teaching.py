@@ -112,6 +112,7 @@ from ...models import (
     TeachingSessionEvents,
     TeachingSessions,
 )
+from ...agent_runtime.ordinary_debate import OrdinaryDebateError
 from ...agent_runtime.ordinary_lesson_plan import GENERATION_REASON as ORDINARY_PLAN_REASON, OrdinaryLessonPlanError
 from ...agent_runtime import ordinary_slide_layout
 from ...agent_runtime.artifacts import (
@@ -8245,6 +8246,9 @@ class CandidateMaterialize(Resource):
                 },
                 202,
             )
+        except OrdinaryDebateError as exc:
+            db.session.rollback()
+            return _error(exc, 409, code="ORDINARY_DEBATE_CONFLICT")
         except OrdinaryLessonPlanError as exc:
             db.session.rollback()
             return _error(exc, 409, code="ORDINARY_LESSON_PLAN_CANDIDATE_REQUIRED")
@@ -9329,6 +9333,9 @@ def revise_teacher_artifact(user, artifact_id, body, request_key=None):
             module_index=artifact.module_index,
         )
         return _ok({"job": job_view(job)}, 202)
+    except OrdinaryDebateError as exc:
+        db.session.rollback()
+        return _error(exc, 409, code="ORDINARY_DEBATE_CONFLICT")
     except (ordinary_slide_layout.OrdinarySlideLayoutError, ordinary_slide_notes.OrdinarySlideNotesError) as exc:
         db.session.rollback()
         return _error(exc, 409, code="ORDINARY_SLIDE_REVISION_CONFLICT")

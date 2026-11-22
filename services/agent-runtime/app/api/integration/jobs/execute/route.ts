@@ -11,6 +11,7 @@ import { deckText, inspectOrdinaryDeckPage, inspectOrdinaryDeckTextPage, ordinar
 } from '@/lib/server/agent-harness/ordinary-deck-revision';
 import { createHarnessTurn, recordHarnessUsage } from '@/lib/server/agent-harness/classroom-turn';
 import { persistDurableModelEvent } from '@/lib/server/durable-model-events';
+import { executeOrdinaryDebateJob, ORDINARY_DEBATE_SCOPE } from '@/lib/server/agent-harness/ordinary-debate';
 import { openDebateCheckpoint } from '@/lib/debate/checkpoint';
 import type { DebateRevisionEntry } from '@/lib/debate/patch';
 import { generateDebate, reviseDebate, debateLesson } from '@/lib/server/debate-generation';
@@ -127,7 +128,7 @@ type CinematicModelCall = (
 type JobRequest = {
   jobId?: string;
   kind?: string;
-  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean; ordinaryTeaching?: 'material-summary' | 'candidate-plan' | 'slide-wording' | 'lesson-plan-materialize' | 'slide-layout' | 'deck-revision' };
+  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean; ordinaryTeaching?: 'material-summary' | 'candidate-plan' | 'slide-wording' | 'lesson-plan-materialize' | 'slide-layout' | 'deck-revision' | typeof ORDINARY_DEBATE_SCOPE };
   payload?: Record<string, unknown>;
   modelRoute?: {
     route?: string;
@@ -3333,7 +3334,9 @@ export async function POST(req: NextRequest) {
   const ordinaryLayoutEndpoint = pathname === ordinaryLayoutPath || pathname === basePath + ordinaryLayoutPath;
   const ordinaryDeckPath = '/api/integration/jobs/ordinary-deck-revision';
   const ordinaryDeckEndpoint = pathname === ordinaryDeckPath || pathname === basePath + ordinaryDeckPath;
-  const jsonOnly = ordinaryLessonEndpoint || ordinaryLayoutEndpoint || ordinaryDeckEndpoint;
+  const debatePath = '/api/integration/jobs/ordinary-debate';
+  const debateEndpoint = pathname === debatePath || pathname === basePath + debatePath;
+  const jsonOnly = ordinaryLessonEndpoint || ordinaryLayoutEndpoint || ordinaryDeckEndpoint || debateEndpoint;
   if (!jsonOnly && req.headers.get('accept')?.includes('application/x-ndjson')) {
     const bodyText = await req.text();
     let submitted: JobRequest = {};
@@ -3427,6 +3430,10 @@ export async function POST(req: NextRequest) {
     auditKind = kind || 'unknown';
     const payload = body.payload && typeof body.payload === 'object' ? body.payload : {};
     const ordinaryScope = body.scope?.ordinaryTeaching;
+    if (debateEndpoint || ordinaryScope === ORDINARY_DEBATE_SCOPE || Object.hasOwn(payload, 'debateAuthoringBackend')) {
+      const result = await executeOrdinaryDebateJob(body, payload, req.signal, started, debateEndpoint);
+      return reply(result.body, result.status);
+    }
     const pinnedLessonCandidate = payload.generationReason === 'teacher_requested_ordinary_lesson_plan' ||
       Object.hasOwn(payload, 'ordinaryCandidateModel');
     if (ordinaryLessonEndpoint) {
