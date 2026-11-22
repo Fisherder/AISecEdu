@@ -643,6 +643,18 @@ def test_open_grading_preserves_valid_rows_and_existing_bounds():
     assert GRADING.map_open_grade_rows([{"itemId": "leaf", "itemIndex": None, "score": 3}], [leaf])["leaf"]["score"] == 3
 
 
+@pytest.mark.parametrize("second_score", [1, None])
+def test_repeated_grade_rows_require_review_regardless_of_response_order(second_score):
+    items = [SimpleNamespace(id=name, points=5) for name in ("leaf", "water", "soil")]
+    first = {"itemId": "leaf", "score": 5}
+    second = {"itemIndex": 1, "score": second_score}
+    other = {"itemId": "water", "score": 2, "feedback": "观察到液面下降。"}
+    expected = {"water": {"score": 2, "confidence": 0.7, "feedback": "观察到液面下降。"}}
+
+    for rows in ([first, second, other], [second, other, first], [other, second, first]):
+        assert GRADING.map_open_grade_rows(rows, items) == expected
+
+
 @pytest.mark.parametrize("provider_available", [True, False])
 def test_optional_open_answers_only_grade_submitted_content(provider_available):
     def question(identifier, kind):

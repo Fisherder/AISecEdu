@@ -41,6 +41,7 @@ def map_open_grade_rows(rows, items):
     """
 
     by_id = {}
+    seen = set()
     points = {item.id: float(item.points) for item in items}
     ordered_ids = [item.id for item in items]
     for row in rows:
@@ -65,8 +66,13 @@ def map_open_grade_rows(rows, items):
             and len(ordered_ids) == 1 and len(rows) == 1
         ):
             item_id = ordered_ids[0]
-        if item_id not in points or item_id in by_id:
+        if item_id not in points:
             continue
+        if item_id in seen:
+            # Competing rows cannot choose a student's grade by response order.
+            by_id.pop(item_id, None)
+            continue
+        seen.add(item_id)
         raw_score = row.get("score")
         raw_confidence = row.get("confidence", 0.7)
         if isinstance(raw_score, bool) or isinstance(raw_confidence, bool):
