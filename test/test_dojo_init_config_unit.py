@@ -90,6 +90,43 @@ def test_unsafe_source_lists_are_rejected_before_loading_or_replacing_saved_conf
             assert (folder / "config.env").read_text() == original
 
 
+def test_ordinary_grading_grants_private_credentials_only_to_ctfd():
+    settings = {
+        "DOJO_ORDINARY_GRADING_MODE": "private-harness",
+        "DOJO_ORDINARY_GRADING_HARNESS_URL": "https://grading.school.invalid:3081",
+        "DOJO_ORDINARY_GRADING_HARNESS_TOKEN": "synthetic-grading-secret",
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        first = initialize(folder)
+        assert first.returncode == 0, first.stderr
+        config = folder / "config.env"
+        for name in settings:
+            assert f"{name}=\n" in config.read_text()
+        for overrides in (settings, {}):
+            initialized = initialize(folder, **overrides)
+            assert initialized.returncode == 0, initialized.stderr
+            for name, value in settings.items():
+                assert f"{name}={value}\n" in config.read_text()
+
+        if not shutil.which("docker") or subprocess.run(
+            ["docker", "compose", "version"], capture_output=True,
+        ).returncode:
+            raise unittest.SkipTest("Docker Compose is unavailable")
+        result = subprocess.run(
+            ["docker", "compose", "--env-file", str(config), "-f", str(ROOT / "docker-compose.yml"),
+             "--profile", "main", "--profile", "workspace", "config", "--format", "json"],
+            cwd=ROOT, capture_output=True, text=True, env={"PATH": os.environ["PATH"]},
+        )
+        assert result.returncode == 0, result.stderr
+        services = json.loads(result.stdout)["services"]
+        ctfd_env = services["ctfd"]["environment"]
+        assert {key: ctfd_env.get(key) for key in settings} == settings
+        for name, service in services.items():
+            if name != "ctfd":
+                assert not (settings.keys() & service.get("environment", {}).keys()), name
+
+
 def test_generated_source_list_round_trips_through_docker_compose_when_available():
     if not shutil.which("docker") or subprocess.run(
         ["docker", "compose", "version"], capture_output=True,

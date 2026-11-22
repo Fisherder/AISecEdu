@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from urllib.parse import urlsplit
 
 import requests
 
@@ -69,6 +70,50 @@ def invoke_turn(body, *, encoded=None):
     return _send_turn(body, "/v1/turn", 1024 * 1024, encoded)
 
 
+def ordinary_grading_connection(base_url, token):
+    enabled = (os.environ.get("DOJO_AI_ENABLED") or "auto").strip().lower()
+    if enabled not in {"auto", "1", "true", "yes"} or not re.fullmatch(r"[A-Za-z0-9._~+/-]+=*", token):
+        return None
+    if token in {os.environ.get(name) for name in (
+        "HARNESS_SERVICE_SECRET", "DEEPSEEK_API_KEY", "DOJO_AI_API_KEY",
+    )}:
+        return None
+
+    base_url = base_url.strip()
+    if re.search(r"[\s\x00-\x1f\x7f\\?#%]", base_url):
+        return None
+    try:
+        url = urlsplit(base_url)
+        shared_hosts = {"deepseek-harness", "api.deepseek.com"}
+        for setting in ("HARNESS_INTERNAL_URL", "DOJO_AI_BASE_URL"):
+            shared_host = urlsplit(os.environ.get(setting, "").strip()).hostname
+            if shared_host:
+                shared_hosts.add(shared_host.rstrip("."))
+        port = url.port
+    except ValueError:
+        return None
+    if (
+        url.scheme not in {"http", "https"}
+        or not re.fullmatch(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(?::[0-9]+)?", url.netloc)
+        or url.path not in {"", "/"} or port == 0
+        or url.hostname.rstrip(".") in shared_hosts
+        or (url.scheme == "http" and url.hostname not in {"localhost", "127.0.0.1", "::1"})
+    ):
+        return None
+    return base_url.rstrip("/"), token
+
+
+def invoke_ordinary_grading_turn(system_prompt, context, *, connection):
+    if connection is None:
+        raise UpstreamTurnError("校内评分服务尚未配置", category="permanent")
+    with requests.Session() as session:
+        session.trust_env = False
+        return _send_turn(
+            request_body(system_prompt, context), "/v1/turn", 1024 * 1024,
+            connection=connection, post=session.post,
+        )
+
+
 MATERIAL_TURN_PATH = "/v1/teaching-material-turn"
 _USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
 
@@ -115,9 +160,15 @@ def invoke_teaching_image_turn(body, image):
     return _send_turn({**body, "images": [image]}, "/v1/teaching-image-turn", 4 * 1024 * 1024)
 
 
-def _send_turn(body, path, limit, encoded=None):
-    base_url = os.environ.get("HARNESS_INTERNAL_URL", "").strip().rstrip("/")
-    secret = os.environ.get("HARNESS_SERVICE_SECRET", "")
+def _send_turn(body, path, limit, encoded=None, *, connection=None, post=None):
+    if connection is None:
+        connection = (
+            os.environ.get("HARNESS_INTERNAL_URL", "").strip().rstrip("/"),
+            os.environ.get("HARNESS_SERVICE_SECRET", ""),
+        )
+    base_url, secret = connection
+    if post is None:
+        post = requests.post
     if not base_url or not secret:
         raise UpstreamTurnError("教学对话服务尚未配置", category="permanent")
     if encoded is None:
@@ -125,7 +176,7 @@ def _send_turn(body, path, limit, encoded=None):
     if len(encoded) > limit:
         raise UpstreamTurnError("教学对话资料超出服务容量，请减少本轮引用的资料", category="permanent")
     try:
-        with requests.post(
+        with post(
             f"{base_url}{path}",
             headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/json"},
             data=encoded,

@@ -1,5 +1,6 @@
 """Exercise the real Python client and Node service with a loopback Messages provider."""
 import base64
+import importlib
 import importlib.util
 import json
 import os
@@ -7,11 +8,13 @@ from pathlib import Path
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 import unittest
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import requests
@@ -50,6 +53,12 @@ class ModelFixture(BaseHTTPRequestHandler):
             reply = json.dumps({"answer": "请确认", "proposal": {
                 "tool": "classroom.prepare", "arguments": {"artifactId": deck["artifactId"]},
             }}, ensure_ascii=False)
+        elif '"questions"' in payload["messages"][0]["content"][0].get("text", ""):
+            questions = json.loads(payload["messages"][0]["content"][0]["text"])["questions"]
+            reply = json.dumps({"grades": [
+                {"itemIndex": q["itemIndex"], "score": q["itemIndex"], "feedback": "已观察到变化。"}
+                for q in reversed(questions)
+            ]}, ensure_ascii=False)
         events = [
             ("message_start", {"message": {"id": "fixture", "model": "fixture", "usage": {"input_tokens": 5}}}),
             ("content_block_start", {"index": 0, "content_block": {"type": "text", "text": ""}}),
@@ -153,12 +162,50 @@ class HarnessClientContract(unittest.TestCase):
                 self.assertEqual(len(model.requests), 4)
                 with self.subTest("only the requested excerpt crosses the provider boundary"):
                     self.check_material_read(url, model.requests)
+                with self.subTest("private coursework grades return to the correct items"):
+                    self.check_private_grades(url, model.requests)
             finally:
                 service.terminate()
                 try:
                     service.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     service.kill()
+
+    def check_private_grades(self, url, requests_seen):
+        # Load the real plugin leaves without initializing the CTFd application or database.
+        packages = {}
+        for suffix in ("", ".learning", ".agent_runtime"):
+            name = "isolated_coursework" + suffix
+            package = ModuleType(name)
+            package.__path__ = [str(ROOT / "dojo_plugin" / suffix.lstrip("."))]
+            packages[name] = package
+        with patch.dict(sys.modules, packages):
+            grading = importlib.import_module("isolated_coursework.learning.private_grading")
+        items = [
+            SimpleNamespace(id=key, title=title, prompt=title, points=5,
+                            config={"rubric": "描述观察现象", "referenceAnswer": "液面下降"})
+            for key, title in (("private-item-a", "第一次观察"), ("private-item-b", "第二次观察"))
+        ]
+        answers = {items[0].id: "水位下降", items[1].id: "记录了液面"}
+        start = len(requests_seen)
+        with patch.dict(os.environ, DOJO_AI_ENABLED="true", HARNESS_INTERNAL_URL="http://shared.invalid",
+                        HARNESS_SERVICE_SECRET="other-role", HTTP_PROXY="http://127.0.0.1:1", NO_PROXY=""):
+            connection = client.ordinary_grading_connection(url, "fixture-service")
+            grades, receipt = grading.grade_with_private_harness(items, answers, connection)
+        self.assertEqual({key: row["score"] for key, row in grades.items()},
+                         {items[0].id: 1, items[1].id: 2})
+        self.assertEqual(receipt["model"], "fixture")
+        self.assertEqual(receipt["usage"]["total_tokens"], 8)
+        self.assertEqual(len(requests_seen), start + 1)
+        path, key, payload = requests_seen[-1]
+        self.assertEqual((path, key), ("/v1/messages", "fixture-provider"))
+        wire = json.dumps(payload, ensure_ascii=False)
+        for item in items:
+            self.assertNotIn(item.id, wire)
+        questions = json.loads(payload["messages"][0]["content"][0]["text"])["questions"]
+        self.assertEqual([(q["itemIndex"], q["answer"], q["rubric"]) for q in questions],
+                         [(1, "水位下降", "描述观察现象"), (2, "记录了液面", "描述观察现象")])
+        self.assertTrue(all("itemId" not in q for q in questions))
 
     def check_material_read(self, url, requests_seen):
         first = "第一组样本有九片叶子。"

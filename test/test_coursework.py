@@ -677,6 +677,7 @@ def test_optional_open_answers_only_grade_submitted_content(provider_available):
         "build_open_grade_questions": GRADING.build_open_grade_questions,
     }
     coursework = GRADING_PATH.parents[1] / "coursework.py"
+    namespace["DOJO_ORDINARY_GRADING_MODE"] = ""
     names = {"grade_submission", "_ai_open_grades", "_normalize_answer", "_fallback_open_grade"}
     tree = ast.parse(coursework.read_text())
     tree.body = [node for node in tree.body if getattr(node, "name", None) in names]
@@ -757,6 +758,7 @@ def test_assignment_work_routes_invalid_open_grade_to_review(invalid_grade):
         "assignment_view": lambda *_args, **_kwargs: {"itemResults": submission.item_results},
     }
     coursework = source / "coursework.py"
+    namespace["DOJO_ORDINARY_GRADING_MODE"] = ""
     names = {"save_submission", "grade_submission", "_ai_open_grades", "_fallback_open_grade", "_normalize_answer"}
     nodes = [node for node in ast.parse(coursework.read_text()).body if getattr(node, "name", None) in names]
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(coursework), "exec"), namespace)
@@ -834,6 +836,7 @@ def test_save_submission_grades_legacy_objective_answers(item_type, config, answ
         "TeachingAssignmentSubmissions": submissions, "LearningAuditEvents": SimpleNamespace,
     }
     coursework = GRADING_PATH.parents[1] / "coursework.py"
+    namespace["DOJO_ORDINARY_GRADING_MODE"] = ""
     names = {"save_submission", "grade_submission", "_ai_open_grades", "_normalize_answer"}
     tree = ast.parse(coursework.read_text())
     tree.body = [node for node in tree.body if getattr(node, "name", None) in names]

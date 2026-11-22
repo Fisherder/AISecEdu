@@ -184,6 +184,9 @@ services:
         hard: 1048576
     environment:
       <<: *ctfd-env
+      DOJO_ORDINARY_GRADING_MODE: ${DOJO_ORDINARY_GRADING_MODE:-}
+      DOJO_ORDINARY_GRADING_HARNESS_URL: ${DOJO_ORDINARY_GRADING_HARNESS_URL:-}
+      DOJO_ORDINARY_GRADING_HARNESS_TOKEN: ${DOJO_ORDINARY_GRADING_HARNESS_TOKEN:-}
       UPLOAD_FOLDER: /var/uploads
       # Page rendering is CPU-bound under classroom-wide bursts.  The target
       # host has 64 cores; 32 workers leave capacity for PostgreSQL, nginx and

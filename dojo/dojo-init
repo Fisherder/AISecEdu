@@ -104,6 +104,9 @@ define DOJO_WINDOWS2000_RUNTIME_IMAGE aisecedu/windows2000-runtime:1
 define DOJO_AI_TUTOR_MODEL deepseek-v4-flash
 define DOJO_AI_GUIDE_MODEL deepseek-v4-flash
 define DOJO_AI_GRADER_MODEL deepseek-v4-flash
+define DOJO_ORDINARY_GRADING_MODE
+define DOJO_ORDINARY_GRADING_HARNESS_URL
+define DOJO_ORDINARY_GRADING_HARNESS_TOKEN
 define DOJO_AI_SOLUTION_MODEL deepseek-v4-flash
 define DOJO_AI_AUTHORING_PLAN_MODEL deepseek-v4-flash
 define DOJO_AI_AUTHORING_BUILD_MODEL deepseek-v4-flash

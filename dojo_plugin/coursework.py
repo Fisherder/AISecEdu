@@ -4,9 +4,17 @@ import re
 
 from CTFd.models import Solves, db
 
-from .config import DOJO_AI_AUTHORING_PLAN_MODEL, DOJO_AI_GRADER_MODEL
+from .config import (
+    DOJO_AI_AUTHORING_PLAN_MODEL,
+    DOJO_AI_GRADER_MODEL,
+    DOJO_ORDINARY_GRADING_HARNESS_TOKEN,
+    DOJO_ORDINARY_GRADING_HARNESS_URL,
+    DOJO_ORDINARY_GRADING_MODE,
+)
+from .agent_runtime.upstream_turn import ordinary_grading_connection
 from .learning.intelligence import model_json
 from .learning.grading import build_open_grade_questions, map_open_grade_rows
+from .learning.private_grading import grade_with_private_harness
 from .models import (
     DojoAdmins,
     DojoChallenges,
@@ -899,8 +907,14 @@ def _fallback_open_grade(item, answer):
 
 
 def _ai_open_grades(items, answers):
-    if not items:
+    mode = DOJO_ORDINARY_GRADING_MODE
+    if not items or mode not in {"", "private-harness"}:
         return {}, None
+    if mode == "private-harness":
+        connection = ordinary_grading_connection(
+            DOJO_ORDINARY_GRADING_HARNESS_URL, DOJO_ORDINARY_GRADING_HARNESS_TOKEN,
+        )
+        return grade_with_private_harness(items, answers, connection)
     payload = {
         "questions": build_open_grade_questions(items, answers)
     }
