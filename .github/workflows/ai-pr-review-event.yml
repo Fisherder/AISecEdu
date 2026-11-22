@@ -1,0 +1,18 @@
+name: DeepSeek PR Review Event
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created, edited]
+permissions: {}
+jobs:
+  record-event:
+    if: >-
+      vars.AI_AUTOPILOT_ENABLED == 'true' &&
+      github.event.pull_request.base.ref == 'develop' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(fromJSON('["Fisherder", "yunie666", "hunry-1-code"]'), github.actor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: 'true'

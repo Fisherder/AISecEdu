@@ -77,6 +77,85 @@ def test_irreversible_model_execution_uses_one_action_per_fresh_job_and_no_publi
     assert 'needs: [analyze, repair, final_review, large_review]' in jobs['publish']
 
 
+def test_review_events_relay_to_develop_without_using_pr_code():
+    workflows = ROOT / '.github/workflows'
+    listener = (workflows / 'ai-pr-review-event.yml').read_text()
+    assert 'pull_request_review:' in listener and 'pull_request_review_comment:' in listener
+    assert 'permissions: {}' in listener
+    assert all(key not in listener for key in ('uses:', 'environment:', 'secrets.', 'github.token'))
+
+    source = (workflows / 'ai-pr-autopilot.yml').read_text()
+    triggers, jobs = source.split('jobs:', 1)
+    assert 'DeepSeek PR Review Event]' in triggers
+    assert 'pull_request_review:' not in triggers and 'pull_request_review_comment:' not in triggers
+    relay = jobs.split('  dispatch-review:', 1)[1].split('  gate:', 1)[0]
+    assert "github.ref == 'refs/heads/develop'" in relay
+    assert 'ref: ${{ github.sha }}' in relay and 'persist-credentials: false' in relay
+    assert 'actions: write' in relay and 'dispatch-review --folder' in relay
+    assert all(key not in relay for key in ('contents: write', 'pull-requests: write', 'environment:', 'secrets.'))
+    assert "github.event.workflow_run.name != 'DeepSeek PR Review Event'" in jobs.split('  analyze:', 1)[0]
+
+
+def test_review_event_dispatch_uses_a_unique_live_eligible_pr_and_fixed_ref():
+    pr = codex_app_pr()
+    candidate = {'number': pr['number'], 'base': {'ref': 'develop', 'repo': {'id': 7}},
+                 'head': {'ref': pr['head']['ref'], 'repo': {'id': 7}, 'sha': 'b' * 40}}
+    assert candidate['head']['sha'] != pr['head']['sha']
+    run = {'path': '.github/workflows/ai-pr-review-event.yml', 'event': 'pull_request_review',
+           'head_repository': {'id': 7}, 'head_branch': pr['head']['ref'],
+           'actor': {'login': 'Fisherder'}, 'conclusion': 'success', 'run_attempt': 1,
+           'pull_requests': [candidate]}
+    dispatch = {'ref': 'develop',
+                'inputs': {'pr': str(pr['number']), 'head_branch': pr['head']['ref'], 'retry': 'false'}}
+    with tempfile.TemporaryDirectory() as directory, patch.object(ai, 'GitHub') as github:
+        event = Path(directory) / 'event.json'
+        client = github.return_value
+        client.repo = pr['head']['repo']['full_name']
+        client.repo_api.return_value = pr
+        with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event)}):
+            for kind in ('pull_request_review', 'pull_request_review_comment'):
+                event.write_text(json.dumps({'workflow_run': {**run, 'event': kind}, 'repository': {'id': 7}}))
+                ai.dispatch_review()
+                assert [call.args for call in client.repo_api.call_args_list] == [
+                    (f'/pulls/{pr["number"]}',),
+                    ('/actions/workflows/ai-pr-autopilot.yml/dispatches', dispatch, 'POST'),
+                ]
+                client.repo_api.reset_mock()
+
+            for changes in ({'actor': {'login': 'untrusted'}}, {'head_repository': {'id': 8}},
+                            {'event': 'workflow_dispatch'}, {'run_attempt': 2}, {'conclusion': 'failure'},
+                            {'path': '.github/workflows/other.yml'}, {'pull_requests': []},
+                            {'pull_requests': [candidate, candidate]}, {'head_branch': 'feat/other'},
+                            {'pull_requests': [{**candidate, 'base': {'ref': 'other', 'repo': {'id': 7}}}]}):
+                event.write_text(json.dumps({'workflow_run': {**run, **changes}, 'repository': {'id': 7}}))
+                ai.dispatch_review()
+                client.repo_api.assert_not_called()
+
+            event.write_text(json.dumps({'workflow_run': run, 'repository': {'id': 7}}))
+            for changes in ({'state': 'closed'}, {'draft': True}, {'head': {**pr['head'], 'ref': 'feat/renamed'}},
+                            {'head': {**pr['head'], 'repo': {'full_name': 'example/fork'}}}):
+                client.repo_api.return_value = {**pr, **changes}
+                ai.dispatch_review()
+                client.repo_api.assert_called_once_with(f'/pulls/{pr["number"]}')
+                client.repo_api.reset_mock()
+
+
+def test_dispatched_review_skips_if_the_pr_head_branch_changed():
+    pr = codex_app_pr()
+    with tempfile.TemporaryDirectory() as directory, patch.object(ai, 'GitHub') as github:
+        folder = Path(directory)
+        event = folder / 'event.json'
+        event.write_text(json.dumps({'inputs': {'pr': str(pr['number']), 'head_branch': 'feat/old'}}))
+        client = github.return_value
+        client.repo = pr['head']['repo']['full_name']
+        client.repo_api.return_value = pr
+        with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event)}), patch.object(ai, 'set_outputs') as outputs:
+            ai.prepare(folder, gate_only=True)
+        client.repo_api.assert_called_once_with(f'/pulls/{pr["number"]}')
+        assert outputs.call_args.kwargs == {'mode': 'skip'}
+        assert not (folder / 'context.json').exists()
+
+
 def test_only_latest_required_check_results_affect_failure_context():
     checks = [
         {'name': 'audit', 'id': 1, 'conclusion': 'failure'},
@@ -634,7 +713,7 @@ def test_gate_failure_before_outputs_recovers_pr_from_event_and_revokes_approval
 
 
 def test_review_format_recovery_only_removes_null_extras_without_changing_findings():
-    for kind in ('null-extra', 'trigger', 'substantive-extra', 'missing', 'wrong-type'):
+    for kind in ('null-extra', 'trigger', 'substantive-extra', 'priority-reason', 'missing', 'wrong-type'):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             value = report()
@@ -648,6 +727,8 @@ def test_review_format_recovery_only_removes_null_extras_without_changing_findin
                 value['findings'][0]['trigger'] = '保留原触发条件'
             elif kind == 'substantive-extra':
                 value['findings'][0]['unexpected_decision'] = 'different judgment'
+            elif kind == 'priority-reason':
+                value['findings'][0]['priority_reason'] = '额外理由'
             elif kind == 'missing':
                 value['findings'][0].pop('priority')
             else:
@@ -1153,7 +1234,10 @@ def test_small_codex_app_pr_uses_read_only_review_and_publication():
         assert (folder / 'diff-chunks/0.patch').read_bytes() == diff
 
         ai.large_prompt(folder, 0)
-        assert (folder / 'review.txt').read_text().endswith(diff.decode())
+        prompt = (folder / 'review.txt').read_text()
+        assert prompt.endswith(diff.decode())
+        assert '每条 finding 只能包含 priority、file、line 和 message' in prompt
+        assert '优先级理由和触发条件写在 message 中，不添加 priority_reason' in prompt
         (folder / 'initial-review.json').write_text(json.dumps(report()))
         ai.package_large_report(folder, 0)
         report_path = folder / 'segment-reports/deepseek-segment-0/segment-report.json'
