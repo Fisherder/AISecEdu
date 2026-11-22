@@ -311,7 +311,7 @@ def validate_report(report):
             raise ValueError('Invalid finding severity or location')
         if not isinstance(item['file'], str) or not item['file'] or item['file'].startswith('/') or '..' in Path(item['file']).parts:
             raise ValueError('Invalid finding path')
-        if not isinstance(item['message'], str) or not item['message'] or len(item['message']) > 4000:
+        if not isinstance(item['message'], str) or not item['message'].strip() or len(item['message']) > 4000:
             raise ValueError('Invalid finding message')
     return report
 
@@ -723,7 +723,13 @@ def aggregate_large_review(folder, context):
 def check_report(folder, filename='initial-review.json'):
     report_path = folder / filename
     raw = report_path.read_text()
-    value = json.loads(raw)
+    def unique_fields(pairs):
+        fields = dict(pairs)
+        if len(fields) != len(pairs):
+            raise ValueError('Duplicate review field')
+        return fields
+
+    value = json.loads(raw, object_pairs_hook=unique_fields)
     try:
         validate_report(value)
     except ValueError:
@@ -739,7 +745,7 @@ def check_report(folder, filename='initial-review.json'):
                         continue
                     if not isinstance(detail, str):
                         raise ValueError('Invalid finding detail')
-                    if not isinstance(cleaned['message'], str) or not cleaned['message']:
+                    if not isinstance(cleaned['message'], str) or not cleaned['message'].strip():
                         raise ValueError('Invalid finding message')
                     if detail:
                         cleaned['message'] += f'\n{label}：{detail}'

@@ -807,7 +807,7 @@ def test_review_format_recovery_preserves_named_details_and_rejects_unknown_deci
             elif kind == 'nested-reason':
                 value['findings'][0]['priority_reason'] = {'priority': 0}
             elif kind == 'empty-message':
-                value['findings'][0].update(message='', priority_reason='额外理由')
+                value['findings'][0].update(message='  ', priority_reason='额外理由')
             elif kind == 'overlong':
                 value['findings'][0]['priority_reason'] = '字' * 4000
             elif kind == 'top-reason':
@@ -833,6 +833,25 @@ def test_review_format_recovery_preserves_named_details_and_rejects_unknown_deci
                 assert recovered['findings'] == [expected]
                 assert recovered['requires_human'] is True and recovered['human_reason'] == value['human_reason']
                 assert (folder / 'initial-review.raw.json').read_text() == original
+
+
+def test_report_rejects_duplicate_findings_or_severity_details_before_normalization():
+    value = report()
+    value['findings'] = [{'priority': 1, 'file': 'dojo_plugin/example.py', 'line': 1,
+                          'message': '正文', 'priority_reason': 'original reason'}]
+    encoded = json.dumps(value)
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / 'initial-review.json'
+        for field, replacement in (
+            ('"findings":', '"findings": [], "findings":'),
+            ('"priority_reason":', '"priority_reason": "other reason", "priority_reason":'),
+        ):
+            raw = encoded.replace(field, replacement)
+            assert raw != encoded
+            path.write_text(raw)
+            rejects(lambda: ai.check_report(path.parent))
+            assert path.read_text() == raw
+            assert not path.with_suffix('.raw.json').exists()
 
 
 def test_base_merge_conflict_finishes_the_check_and_preserves_the_task_branch():
