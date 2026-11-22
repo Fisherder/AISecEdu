@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
         : '内容生成暂时失败，请稍后重试';
     return apiError(
       API_ERROR_CODES.GENERATION_FAILED,
-      error instanceof SelfStudyGenerationError && /至少 4 个字|学习目标过长/.test(message) ? 400 : 502,
+      error instanceof SelfStudyGenerationError ? error.status : 502,
       'Self-study package generation failed',
       message,
     );

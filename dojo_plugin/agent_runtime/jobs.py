@@ -3292,9 +3292,11 @@ def _upstream_teacher_result(payload, text):
     formats = requested_document_formats(payload)
     if formats:
         document = response.get("document")
-        if document is None and (mode == "execute" or "document" not in response):
-            raise RuntimeJobError("教学文档回合未返回文档结构，请重试。", category="quality")
-        if document is not None:
+        if document is None:
+            if mode == "execute" or "document" not in response:
+                raise RuntimeJobError("教学文档回合未返回文档结构，请重试。", category="quality")
+            result["answer"] = "本轮未生成可下载的教学文档。\n\n" + result["answer"]
+        else:
             try:
                 deliverables = document_deliverables(document, formats)
             except ValueError as error:

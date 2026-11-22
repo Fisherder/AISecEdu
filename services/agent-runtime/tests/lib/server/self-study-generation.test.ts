@@ -1,4 +1,5 @@
-import type { NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
+import { POST } from '@/app/api/student/self-study/route';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Principal } from '@/lib/server/auth/session';
 import {
@@ -8,12 +9,15 @@ import {
 
 const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
+  principal: vi.fn(),
+  learningContext: vi.fn(),
   query: vi.fn(),
   turn: vi.fn(),
   usage: vi.fn(),
   write: vi.fn(),
   publish: vi.fn(),
 }));
+vi.mock('@/lib/server/auth/session', () => ({ resolvePrincipal: mocks.principal }));
 vi.mock('@/lib/server/db', () => ({ getDb: mocks.getDb }));
 vi.mock('@/lib/server/schema', () => ({ ensureAppSchema: vi.fn() }));
 vi.mock('@/lib/server/aisecedu-integration', () => ({ isAISecEduIntegrated: () => false }));
@@ -25,9 +29,7 @@ vi.mock('@/lib/server/stores/pg-lesson-store', () => ({
   },
 }));
 vi.mock('@/lib/server/student-learning-context', () => ({
-  loadStudentLearningContext: async () => ({
-    insight: { completionRate: 0, averageQuizScore: null, weakestCapability: null },
-  }),
+  loadStudentLearningContext: mocks.learningContext,
 }));
 vi.mock('@/lib/server/agent-harness/classroom-turn', () => ({
   createHarnessTurn: () => mocks.turn,
@@ -36,6 +38,11 @@ vi.mock('@/lib/server/agent-harness/classroom-turn', () => ({
 
 const request = { signal: new AbortController().signal } as NextRequest;
 const principal = { learnerKey: 'fixture-learner' } as Principal;
+const insight = { completionRate: 0, averageQuizScore: null, weakestCapability: null };
+const httpRequest = (fields: Record<string, unknown> = {}) => new NextRequest(
+  'http://classroom.invalid/api/student/self-study',
+  { method: 'POST', body: JSON.stringify({ goal: '学习分数比较', ...fields }) },
+);
 const study = normalizeSelfStudyRequest({ goal: '学习分数比较' });
 const content = {
   status: 'ready',
@@ -49,8 +56,62 @@ const content = {
 describe('standalone ordinary self-study generation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.principal.mockResolvedValue({ ...principal, role: 'student' });
+    mocks.learningContext.mockResolvedValue({ insight });
     mocks.getDb.mockResolvedValue({ query: mocks.query });
     mocks.publish.mockResolvedValue({ classroomId: 'fixture-classroom', url: '/classroom/fixture-classroom' });
+  });
+
+
+  it.each([
+    [undefined, ['slide', 'quiz']],
+    ['package', ['slide', 'quiz']],
+    ['handout', ['slide']],
+    ['self_check', ['quiz']],
+  ] as const)('honors the %s product through the student HTTP handler', async (product, artifacts) => {
+    mocks.turn.mockResolvedValue({ model: 'fixture', text: JSON.stringify({
+      ...content,
+      sections: product === 'self_check' ? [] : content.sections,
+      concepts: product === 'handout' ? [] : content.concepts,
+    }) });
+    const response = await POST(httpRequest({ product }));
+    expect(response.status).toBe(201);
+    expect(mocks.turn.mock.calls[0][0][0].content).toContain(
+      product === 'handout' ? 'concepts 必须为空数组'
+        : product === 'self_check' ? 'sections 必须为空数组'
+        : '个人学习包须包含',
+    );
+    expect(mocks.publish.mock.calls[0][0].artifacts.map((artifact: { type: string }) => artifact.type))
+      .toEqual(artifacts);
+  });
+
+  it('rejects an unknown product through HTTP before provider or storage', async () => {
+    const response = await POST(httpRequest({ product: 'other' }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ success: false, errorCode: 'GENERATION_FAILED' });
+    expect(mocks.getDb).not.toHaveBeenCalled();
+    expect(mocks.turn).not.toHaveBeenCalled();
+  });
+
+  it('keeps product selection behind the existing student role gate', async () => {
+    mocks.principal.mockResolvedValue({ ...principal, role: 'teacher' });
+    expect((await POST(httpRequest({ product: 'handout' }))).status).toBe(403);
+    expect(mocks.getDb).not.toHaveBeenCalled();
+    expect(mocks.turn).not.toHaveBeenCalled();
+  });
+
+  it('omits an unsuitable optional capability label without losing a safe learning request', async () => {
+    const label = '> 标记一项观察';
+    mocks.learningContext.mockResolvedValue({
+      insight: { ...insight, weakestCapability: { label, score: 10 } },
+    });
+    mocks.turn.mockResolvedValue({ model: 'fixture', text: JSON.stringify(content) });
+    const response = await POST(httpRequest());
+    expect(response.status).toBe(201);
+    const packet = mocks.turn.mock.calls[0][0];
+    expect(packet[1].content).toContain('学习分数比较');
+    expect(packet[1].content).not.toContain(label);
+    expect(JSON.stringify(mocks.query.mock.calls)).not.toContain(label);
   });
 
   it('rejects restricted goals and the separate original request before storage or Harness', async () => {

@@ -118,7 +118,9 @@
     "softClosing": "繼續討論",
     "error": {
       "emptyAgentResponses": "智能體連續無回應,討論已停止。請重新嘗試或檢查模型設定。",
-      "streamInterrupted": "資料串流意外中斷,討論未能完成。請重新嘗試。"
+      "streamInterrupted": "資料串流意外中斷,討論未能完成。請重新嘗試。",
+      "invalidDirectorDecision": "課堂導演傳回了無效決定。",
+      "directorInterrupted": "本輪課堂對話提前結束，你可以繼續提問。"
     },
     "tabs": {
       "lecture": "筆記",
@@ -632,6 +634,12 @@
       }
     },
     "v2": {
+      "instructorErrors": {
+        "unsupportedQuestion": "請提出一般學習問題，請勿附上實驗紀錄或私人資料。",
+        "unreadableReply": "無法讀取專案導師的回覆。",
+        "unsupportedReply": "專案導師回傳了不支援的教學操作。",
+        "unavailable": "專案導師暫時無法使用。"
+      },
       "hero": {
         "title": "專案實戰 · Project-Based Learning",
         "stage": "階段",

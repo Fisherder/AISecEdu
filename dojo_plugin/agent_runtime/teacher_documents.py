@@ -26,12 +26,21 @@ _DELIVERY_VERB = rf"(?:生成|制作|创建|写|做|撰写|编写|起草|导出|
 _DOCUMENT_AMOUNT = r"(?:\s*任何)?(?:\s*(?:一份|一个|一篇))?(?:\s*可下载的?)?"
 _SENTENCE_BREAK = re.compile(r"([。！？!?；;\n]+|(?<=\S)\.(?=\s))")
 _QUESTION_CONTINUATION = re.compile(
-    r"[，,]|(?:并且|并请|然后|再请|另外请)|\b(?:and then|then|but please)\b", re.I,
+    r"[，,]|(?:并且|并请|然后|再请|另外请)|并(?=写|生成|制作|提供|起草|导出|给我)"
+    r"|\b(?:and then|then|but please)\b", re.I,
 )
+_SOURCE_PREFIX = r"(?:(?:根据|依据|结合|按照|参考|基于)[^，。；！？,;!?\n]{0,40}?(?:资料|材料|教材|课文|讲义|笔记|记录)\s*)?"
+_DOCUMENT_ADVICE = re.compile(
+    rf"^\s*(?:(?:请(?:你)?|帮我|为我|先)\s*)*{_SOURCE_PREFIX}"
+    r"(?:(?:给我|提供|输出|返回)\s*(?:一些|几条|几点)?\s*)?"
+    r"(?:讲解|分析|解释|解读|点评|评析|评价|评估|说明(?!性)|总结|概括"
+    r"|(?:对|关于|这份|这篇|该|此|教案|教学文档|教学讲义|课堂讲义)"
+    r"[^，。；！？,;!?\n]{0,60}?(?:建议|意见|点评|分析|解读|说明)(?=$|[\s，。；！？,;!?]))",
+)
+
 _INDEPENDENT_DELIVERY = re.compile(
     r"^\s*(?:(?:然后|另外|最后|再|并|请)\s*)*(?:(?:帮我|为我)\s*)?"
-    r"(?:(?:根据|依据|结合|按照|参考|基于)[^，。；！？,;!?\n]{0,40}?(?:资料|材料|教材|课文|讲义|笔记|记录)\s*)?"
-    rf"(?:(?P<draft_zh>生成|制作|创建|写|做|撰写|编写|起草|导出|交付|{_FORMAT_CHANGE_VERB})|给我|提供|下载|输出)"
+    rf"{_SOURCE_PREFIX}(?:(?P<draft_zh>生成|制作|创建|写|做|撰写|编写|起草|导出|交付|{_FORMAT_CHANGE_VERB})|给我|提供|下载|输出)"
     r"|^\s*(?:(?:and|but|also|then|please)\s+)*"
     r"(?:(?P<draft_en>generate|write|draft|make|create|export|deliver)|provide|give\s+me|download)\b",
     re.I,
@@ -47,9 +56,11 @@ _FORMAT_USE_VERB = r"(?:使用|采用|用)"
 _ENGLISH_AMOUNT = r"(?:(?:an?|any)\s+)?(?:downloadable\s+)?"
 NO_DOCUMENT = re.compile(
     rf"{_REFUSAL}(?:\s*{_DELIVERY_VERB})?{_DOCUMENT_AMOUNT}\s*(?:教学|课堂)?(?:文件|文档|教案|讲义)"
-    rf"|{_ENGLISH_REFUSAL}\s+(?:{_ENGLISH_DELIVERY}\s+)?{_ENGLISH_AMOUNT}(?:files?|documents?|lesson plans?|handouts?)\b"
-    r"|只(?:在|用)聊天回答", re.I,
+    rf"|{_ENGLISH_REFUSAL}\s+(?:{_ENGLISH_DELIVERY}\s+)?{_ENGLISH_AMOUNT}(?:files?|documents?|lesson plans?|handouts?)\b",
+    re.I,
 )
+_CHAT_ONLY = re.compile(rf"(?P<negated>(?:{_REFUSAL}|不是|并非|不能|不希望)\s*)?(?:只|仅)(?:在|用)聊天(?:里|中)?回答")
+
 _NEGATED_FORMAT_CHANGE = re.compile(
     rf"{_REFUSAL}\s*(?:(?:把|将)[^，。；！？,;!?\n]{{1,40}}?)?{_FORMAT_CHANGE_VERB}"
 )
@@ -80,6 +91,8 @@ _QUOTED_TEXT = re.compile(
     r'|(?<!`)`([^`\n]*)`(?!`)'
 )
 _FORMAT_USE_PREFIX = re.compile(r"(?:请用|改用|采用|使用|只要|仅需|请以|另给我)\s*$")
+_FORMAT_BARE_USE_PREFIX = re.compile(r"(?:^|[，。；！？,;!?\n])\s*(?:(?:请|帮我|为我|只|仅)\s*)*用\s*$")
+_FORMAT_SOURCE_SUFFIX = re.compile(r"\s*(?:格式\s*)?(?:的\s*)?(?:资料|材料|教材|笔记|课文|源文件|文件)")
 _FORMAT_TOKEN = rf"(?:{WORD_FORMAT.pattern}|{MARKDOWN_FORMAT.pattern}|{UNSUPPORTED_FORMAT.pattern})"
 _FORMAT_ITEM = re.compile(rf"“{_FORMAT_TOKEN}”|{_FORMAT_TOKEN}", re.I)
 _FORMAT_LIST = re.compile(
@@ -121,6 +134,8 @@ def _unquoted_request(prompt):
 
 
 def _independent_document_delivery(clause):
+    if _DOCUMENT_ADVICE.match(clause):
+        return False
     delivery = _INDEPENDENT_DELIVERY.match(clause)
     return delivery and (
         delivery.group("draft_zh") or delivery.group("draft_en") or _DOWNLOAD_REQUEST.search(clause)
@@ -133,7 +148,7 @@ def _document_delivery_text(prompt):
     portions = _SENTENCE_BREAK.split(prompt)
     for index in range(0, len(portions), 2):
         sentence = portions[index]
-        if DOCUMENT_QUESTION.match(sentence):
+        if DOCUMENT_QUESTION.match(sentence) or _DOCUMENT_ADVICE.match(sentence):
             # Keep only an independent file request after a question, never its format mentions.
             portions[index] = next(
                 (sentence[boundary.end():] for boundary in _QUESTION_CONTINUATION.finditer(sentence)
@@ -146,10 +161,14 @@ def _document_delivery_text(prompt):
 def _format_requests(prompt):
     for formats in _FORMAT_LIST.finditer(prompt):
         negated = bool(NO_FORMAT.search(prompt, 0, formats.start()))
+        bare_use = _FORMAT_BARE_USE_PREFIX.search(prompt, 0, formats.start())
+        if bare_use and _FORMAT_SOURCE_SUFFIX.match(prompt, formats.end()):
+            continue
         suffix = _FORMAT_DELIVERY_SUFFIX.match(prompt, formats.end())
         explicit = (
             negated or _FORMAT_DELIVERY_PREFIX.search(prompt, 0, formats.start())
             or _FORMAT_USE_PREFIX.search(prompt, 0, formats.start())
+            or bare_use
             or (suffix and _FORMAT_CLAUSE_PREFIX.search(prompt, 0, formats.start()))
         )
         # One verb, format suffix, or negation governs the coordinated objects.
@@ -192,6 +211,7 @@ def requested_document_formats(payload):
             or (DOCUMENT_SUBJECT.search(request) and _DOWNLOAD_REQUEST.search(prompt))
         )
         or NO_DOCUMENT.search(prompt)
+        or any(not match["negated"] for match in _CHAT_ONLY.finditer(prompt))
     ):
         return ()
     if any(formats.get(active) for active in _ACTIVE_FORMATS):

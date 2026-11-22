@@ -13,9 +13,10 @@ vi.mock('@/lib/server/agent-harness/classroom-turn', () => ({
   recordHarnessUsage,
 }));
 
-function request(agentType: 'question' | 'judge' = 'question') {
+function request(agentType: 'question' | 'judge' = 'question', signal?: AbortSignal) {
   return new NextRequest('http://runtime.test/api/pbl/chat', {
     method: 'POST',
+    signal,
     body: JSON.stringify({
       message: '怎样澄清项目目标？',
       agent: { name: '课堂助教', system_prompt: '鼓励学生比较替代方案。' },
@@ -95,6 +96,56 @@ describe('PBL ordinary questioning', () => {
       expect.objectContaining({ model: 'judge-model' }),
       'pbl-chat',
     );
+  });
+
+  it('returns an empty cancellation response if the request aborts during the turn', async () => {
+    const controller = new AbortController();
+    runTurn.mockImplementation((_messages, signal: AbortSignal) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      controller.abort();
+    }));
+    const response = await POST(request('question', controller.signal));
+    expect(response.status).toBe(499);
+    expect(await response.text()).toBe('');
+    expect(recordHarnessUsage).not.toHaveBeenCalled();
+  });
+
+  it('skips an already cancelled request before dispatch', async () => {
+    const controller = new AbortController();
+    controller.abort('synthetic cancellation detail');
+    const response = await POST(request('judge', controller.signal));
+    expect(response.status).toBe(499);
+    expect(await response.text()).toBe('');
+    expect(createHarnessTurn).not.toHaveBeenCalled();
+  });
+
+  it('records an already received measurement even if the client cancels the reply', async () => {
+    const controller = new AbortController();
+    const receipt = { text: '合成课堂回复', model: 'measured', usage: { total_tokens: 26 } };
+    runTurn.mockImplementation(() => {
+      controller.abort();
+      return receipt;
+    });
+    const response = await POST(request('question', controller.signal));
+    expect(response.status).toBe(499);
+    expect(await response.text()).toBe('');
+    expect(recordHarnessUsage).toHaveBeenCalledExactlyOnceWith(receipt, 'pbl-chat');
+  });
+
+  it('observes provider failures through only a fixed route message', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      runTurn.mockRejectedValue(new Error('fixture-only provider detail'));
+      const response = await POST(request());
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toContain('fixture-only');
+      expect(log).toHaveBeenCalledOnce();
+      const logged = String(log.mock.calls[0][0]);
+      expect(logged).toContain('PBL chat turn failed');
+      expect(logged).not.toMatch(/fixture-only|怎样澄清项目目标|课堂助教/);
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('preserves the existing judge error status without falling back to another model', async () => {

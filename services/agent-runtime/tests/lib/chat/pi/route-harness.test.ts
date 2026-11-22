@@ -13,9 +13,11 @@ function request(
   directorState?: DirectorState,
   whiteboard: unknown[] = [],
   currentSceneId = 'public-slide',
+  language?: string,
 ) {
   return new NextRequest('http://localhost/api/chat/pi', {
     method: 'POST',
+    headers: language ? { 'X-User-Locale': language, 'Accept-Language': 'zh-CN' } : undefined,
     body: JSON.stringify({
       messages: [
         { id: 'first', role: 'user', parts: [{ type: 'text', text: '请讲盆栽需要多少水。' }] },
@@ -264,6 +266,55 @@ describe('Pi classroom through Harness', () => {
     expect(JSON.stringify(received)).not.toContain('PRIVATE_FIXTURE_SENTINEL');
     expect(fetchTurn).toHaveBeenCalledTimes(3);
   });
+
+  it('localizes malformed decisions without changing the teacher’s speech', async () => {
+    propose({ type: 'call_agent', agentId: 'default-1', instruction: '介绍量杯。' });
+    propose([{ type: 'text', content: '把量杯保持水平。' }]);
+    propose({ type: 'invalid' });
+
+    const received = await events(await POST(request(undefined, undefined, [], undefined, 'en-US')));
+    expect(received.find(event => event.type === 'text_delta')?.data).toMatchObject({
+      content: '把量杯保持水平。',
+    });
+    expect(received.find(event => event.type === 'cue_user')?.data).toMatchObject({
+      prompt: 'This classroom turn ended early. You can keep asking questions.',
+    });
+  });
+
+  it.each(['director transport', 'director usage recording', 'child usage recording'])(
+    'surfaces a later %s failure after visible classroom output',
+    async (failure) => {
+      propose({ type: 'call_agent', agentId: 'default-1', instruction: '介绍量杯。' });
+      propose([
+        { type: 'text', content: '把量杯保持水平。' },
+        { type: 'action', name: 'wb_draw_text', params: { content: '水平读数', x: 10, y: 20 } },
+      ]);
+
+      if (failure === 'director transport') {
+        fetchTurn.mockRejectedValueOnce(new TypeError('network unavailable'));
+      } else {
+        vi.mocked(recordUsage).mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+        if (failure === 'child usage recording') {
+          propose({ type: 'call_agent', agentId: 'default-2', instruction: '补充量杯知识。' });
+          propose([{ type: 'text', content: '量杯有刻度。' }]);
+          vi.mocked(recordUsage).mockResolvedValueOnce(undefined);
+        } else {
+          propose({ type: 'cue_user' });
+        }
+        vi.mocked(recordUsage).mockRejectedValueOnce(new Error('usage recording unavailable'));
+      }
+
+      const received = await events(await POST(request()));
+      expect(received.some(event => event.type === 'text_delta')).toBe(true);
+      expect(JSON.stringify(received)).toContain('水平读数');
+      expect(received.some(event => event.type === 'done' || event.type === 'cue_user')).toBe(false);
+      expect(received.at(-1)).toMatchObject({
+        type: 'error',
+        data: { message: failure === 'director transport' ? '对话服务暂时不可用。' : 'usage recording unavailable' },
+      });
+      expect(fetchTurn).toHaveBeenCalledTimes(failure === 'child usage recording' ? 4 : 3);
+    },
+  );
 
   it('ends the request on a failed child turn without spending another director attempt', async () => {
     propose({ type: 'call_agent', agentId: 'default-1', instruction: '介绍量杯。' });

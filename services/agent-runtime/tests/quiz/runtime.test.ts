@@ -10,7 +10,7 @@ import {
   recordQuizAttempt,
   type QuizAttemptRuntimeDeps,
 } from '@/lib/quiz/runtime';
-import { persistQuizReview, persistQuizSubmission } from '@/lib/quiz/view-state';
+import { persistQuizReview, persistQuizRetry, persistQuizSubmission } from '@/lib/quiz/view-state';
 import type { QuestionResult } from '@/lib/quiz/grading';
 
 const results: QuestionResult[] = [
@@ -74,6 +74,28 @@ describe('quiz attempt runtime persistence', () => {
       state: { phase: 'reviewed', answers: base.answers, results },
     });
     expect(await store.listSessions(stageId, deps.learnerKey!)).toHaveLength(1);
+  });
+
+  it('opens a new attempt from an incomplete saved review without overwriting it', async () => {
+    const { store, deps } = makeHarness();
+    const stageId = 'stage-quiz';
+    const sceneId = 'quiz';
+    const attemptId = quizAttemptId(stageId, sceneId, deps.learnerKey!);
+    const base = { stageId, sceneId, attemptId };
+    const answers = { q1: 'A', q2: 'B' };
+    await recordQuizAttempt({ ...base, answers, phase: 'submitted' }, deps);
+    await recordQuizAttempt({ ...base, answers, phase: 'reviewed', results }, deps);
+
+    const writer = createQuizAttemptWriter({ write: (input) => recordQuizAttempt(input, deps) });
+    await persistQuizRetry(base, writer);
+    await expect(loadQuizAttemptState(base, deps)).resolves.toMatchObject({
+      attemptId: `${attemptId}:retry:1`,
+      state: { phase: 'draft', answers: {} },
+    });
+    expect(await store.listSessions(stageId, deps.learnerKey!)).toHaveLength(2);
+    expect((await store.listRecords(attemptId)).at(-1)).toMatchObject({
+      payload: { phase: 'reviewed', results },
+    });
   });
 
   it('coalesces rapid draft changes into one latest snapshot', async () => {

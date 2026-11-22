@@ -819,7 +819,19 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     assert not eligible(SimpleNamespace(**job), {**payload, "artifactType": "simulation"})
     namespace["DojoAdmins"] = table(dojo_id=2, user_id=9)
     assert not eligible(SimpleNamespace(**job), payload)
-    namespace["DojoAdmins"] = table(dojo_id=2, user_id=7)
+    scope = ast.parse((ROOT / "dojo_plugin/agent_runtime/scope.py").read_text())
+    scope.body = [node for node in scope.body if getattr(node, "name", None) in {
+        "ScopeError", "_is_platform_admin", "dojo_for_user",
+    }]
+    exec(compile(scope, "scope.py", "exec"), namespace)
+    namespace["Dojos"] = table(dojo_id=2)
+    admin = SimpleNamespace(id=7, type="admin")
+    assert namespace["dojo_for_user"](admin, 2, teacher=True).dojo_id == 2
+    namespace["Users"] = table(id=admin.id, type=admin.type)
+    assert eligible(SimpleNamespace(**job), payload)
+    namespace["TeachingArtifacts"] = table(id="artifact", owner_id=9, dojo_id=2,
+                                           artifact_type="slide-deck", self_workspace_id=None)
+    assert not eligible(SimpleNamespace(**job), payload)
     namespace["TeachingArtifacts"] = table(id="artifact", owner_id=7, dojo_id=2,
                                            artifact_type="slide-deck", self_workspace_id="student-workspace")
     assert not eligible(SimpleNamespace(**job), payload)
@@ -874,6 +886,24 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     ("我想知道怎样制作教案", "execute", ()),
     ("Can you tell me how to write a lesson plan?", "auto", ()),
     ("请告诉我如何写教案，提供编写教案的建议", "auto", ()),
+    ("给我讲解一下这份教案", "auto", ()),
+    ("给我分析这份教案", "auto", ()),
+    ("请提供这份教案的修改建议", "auto", ()),
+    ("请给我一些关于这份教案的意见", "auto", ()),
+    ("请给我一份说明性教案", "auto", ("docx",)),
+    ("提供对这份教案的意见", "auto", ()),
+    ("请输出对这份教案的点评", "auto", ()),
+    ("请返回这份教案的分析", "auto", ()),
+    ("根据课程资料给我解读这份 Markdown 教案", "auto", ()),
+    ("请先分析这份教案，然后帮我写一份教案", "auto", ("docx",)),
+    ("请讲解一下这份教案，并给我一份可下载的文档", "auto", ("docx",)),
+    ("用md写一份教案", "auto", ("md",)),
+    ("请帮我用 md 写一份教案", "execute", ("md",)),
+    ("用 md 格式的资料写一份教案", "auto", ("docx",)),
+    ("不要只在聊天回答，请生成一份教案", "auto", ("docx",)),
+    ("不用仅在聊天中回答，请用 Markdown 写一份教案", "auto", ("md",)),
+    ("只在聊天回答，请生成一份教案", "auto", ()),
+    ("不要只在聊天回答；但这次只用聊天回答，请生成一份教案", "auto", ()),
     ("请告诉我如何写 Markdown 教案，再帮我生成 DOCX 教案", "auto", ("docx",)),
     ("请告诉我如何写一份教案，再给我一份可下载的文件", "auto", ("docx",)),
     ("Can you tell me how to write a lesson plan? Then give me a downloadable file.", "auto", ("docx",)),
@@ -1045,16 +1075,28 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
     exec(compile(tree, "jobs.py", "exec"), job_namespace)
 
     reply = "请补充这份教案适合的年级。"
-    clarification = json.dumps({"answer": reply, "document": None}, ensure_ascii=False)
+    clarification = json.dumps({
+        "answer": reply, "document": None,
+        "proposal": {"tool": "course.update", "arguments": {"name": "不会作为审批提案"}},
+    }, ensure_ascii=False)
     teacher_result = job_namespace["_upstream_teacher_result"]
     with pytest.raises(reliability.RuntimeJobError, match="未返回文档结构") as error:
         teacher_result({**payload, "executionMode": "execute"}, clarification)
     assert error.value.category == "quality"
-    for mode in ("auto", "ask"):
-        clarification_result = teacher_result({**payload, "executionMode": mode}, clarification)
-        assert clarification_result["answer"] == reply
-        assert "deliverables" not in clarification_result
-    assert teacher_result({**payload, "executionMode": "auto"}, clarification)["executionMode"] == "ask"
+    with pytest.raises(reliability.RuntimeJobError, match="未返回文档结构") as error:
+        teacher_result(payload, json.dumps({"answer": reply}, ensure_ascii=False))
+    assert error.value.category == "quality"
+    ask_result = teacher_result({**payload, "executionMode": "ask"}, clarification)
+    assert ask_result["answer"] == reply
+    assert "deliverables" not in ask_result
+    clarification_result = teacher_result(payload, clarification)
+    assert clarification_result["executionMode"] == "ask"
+    assert "deliverables" not in clarification_result
+    stored_clarification = job_namespace["_persist_result"](job, clarification_result)
+    assert stored_clarification["answer"] == f"本轮未生成可下载的教学文档。\n\n{reply}"
+    assert stored_clarification["files"] == existing_message.metadata_json["files"] == []
+    assert stored_clarification["toolProposals"] == []
+    assert existing_message.content == stored_clarification["answer"]
 
     result = job_namespace["_invoke_agent_runtime"](job, {}, payload)
     assert result["model"]["usage"]["completion_tokens"] == 11
@@ -1230,3 +1272,12 @@ def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_target
     assert scope(create, candidate) is None
     with pytest.raises(RuntimeError, match="课程权限"):
         body(job, {}, job.payload)
+    namespace["Users"] = table(id=7, type="admin")
+    assert scope(create, candidate) == "candidate-plan"
+    assert scope(enrich, material) == "material-summary"
+    assert scope(revise, slide) == "slide-wording"
+    assert scope(enrich, {**material, "revisionId": "another-material-revision"}) is None
+    monkeypatch.setenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "3")
+    assert scope(create, candidate) is None
+    assert scope(enrich, material) is None
+    assert scope(revise, slide) is None

@@ -148,6 +148,11 @@ def test_personal_study_package_rejects_executable_fields_before_materialization
     "生成学习包算了",
     "生成学习包取消",
     "生成学习包，取消",
+    "请生成学习包，不用",
+    "请生成学习包；不需要",
+    "请生成学习包。不要。",
+    "请生成学习包，停止",
+    "请生成学习包，先不用",
     "Create a study package, don't generate anything.",
     "Create a study package, cancel.",
     "请生成自学包。不要学习包。",
@@ -201,6 +206,8 @@ def test_denied_package_requests_do_not_create_a_workspace_or_call_the_model(pro
     "参考“不要生成任何东西”这句课堂范例，请生成学习包。",
     "请生成学习包，取消。改主意了。请生成一个学习包。",
     "Please create a study package from my notes.",
+    "不用。改主意了。请生成学习包。",
+    "请生成学习包。停止讨论前一题。",
 
 ])
 def test_explicit_package_requests_keep_other_clauses_separate(prompt):
@@ -324,3 +331,27 @@ def test_http_package_savepoint_does_not_leave_partial_rows(failure):
 
     with Session(engine) as fresh_session:
         assert fresh_session.scalars(select(Row.kind)).all() == ["guide-message"]
+
+
+@pytest.mark.parametrize("content", [
+    "`分数`",
+    "~~~\n分数\n~~~",
+    "[课程资料](/help)",
+    "[课程资料](//example.invalid/)",
+    "[教学联系](mailto:teacher@example.invalid)",
+    "[课程资料][课程]",
+])
+def test_plain_study_package_rejects_nonplain_provider_text(content):
+    ns = fixture()
+    ns["result_object"].return_value["summary"] = content
+    with pytest.raises(ValueError, match="文字不符合格式"):
+        ns["create_personal_study_package"](
+            types.SimpleNamespace(id=17), types.SimpleNamespace(id="own", user_id=17),
+            "请生成一个学习包。",
+        )
+    ns["create_candidate_set"].assert_not_called()
+    ns["materialize_candidate"].assert_not_called()
+
+
+def test_plain_study_text_accepts_ordinary_math():
+    assert fixture()["_plain_study_text"]("比较 1 < 2 和 2 > 1。", 90) == "比较 1 < 2 和 2 > 1。"

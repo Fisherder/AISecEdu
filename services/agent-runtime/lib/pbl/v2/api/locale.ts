@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
 import { supportedLocales } from '@/lib/i18n/locales';
+import { defaultLocale } from '@/lib/i18n/types';
 import type { PBLProjectV2 } from '../types';
 
 const supportedLocaleCodes = new Set<string>(supportedLocales.map((locale) => locale.code));
@@ -18,4 +19,13 @@ export function applyRequestLocaleToProject(req: NextRequest, project: PBLProjec
   const locale = req.headers.get('x-user-locale')?.trim();
   if (!locale || !supportedLocaleCodes.has(locale)) return;
   project.language = locale;
+}
+
+export type InstructorErrorKey = 'unsupportedQuestion' | 'unreadableReply' | 'unsupportedReply' | 'unavailable';
+
+export async function instructorErrorMessage(project: PBLProjectV2, key: InstructorErrorKey): Promise<string> {
+  const locale = supportedLocaleCodes.has(project.language) ? project.language : defaultLocale;
+  const { default: i18n } = await import('@/lib/i18n/config');
+  await i18n.loadLanguages(locale);
+  return i18n.t(`pbl.v2.instructorErrors.${key}`, { lng: locale });
 }

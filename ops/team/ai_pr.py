@@ -922,7 +922,8 @@ def publish(folder, candidate, *, expected):
             dispatch_pr(client, current)
             return
         outcome = '等待维护者人工审批；分支仍须满足 GitHub CI 与保护规则。'
-        if review_key and not report['requires_human']:
+        # The key certifies the verified review inputs, including reviews that remain blocking.
+        if review_key:
             post_comment(client, context, report, outcome)
             record_check(client, context, 'completed', title, report['summary'], conclusion, external_id=review_key)
         else:
