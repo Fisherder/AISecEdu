@@ -621,8 +621,7 @@ def personal_study_package_requested(question):
         flags=re.I,
     )
     decline = (
-        r"(?:不需要|不想|不必|不要|不用|无需|无须|别|停止|取消)\s*"
-        r"(?:(?:你|再|先|现在|直接|帮我|为我|替我|任何|一个|一份)\s*)*$"
+        r"(?:不需要|不想|不必|不要|不用|无需|无须|(?:^|请|先|也)别(?!忘)|停止|取消)"
         r"|\b(?:do\s+not|don['’]t|never|no\s+need|stop|cancel)\b(?!\s+forget\b).{0,35}$"
         r"|\b(?:no|not)\s*$"
     )
@@ -632,10 +631,17 @@ def personal_study_package_requested(question):
         r"(?:is\s+not|isn['’]t)\s+(?:needed|required|wanted)\b"
     )
     create = (
-        r"生成|创建|制作|设计|构建|准备|整理成|做|给我(?!\s*(?:解释|分析|讲讲|说明))|要一"
-        r"|\b(?:create|make|generate|prepare|build|give\s+me)\b"
+        r"生成|创建|制作|设计|构建|准备|整理成|做|给我(?=\s*(?:[一两]?[份套个]|(?:个人)?(?:学习|自学|概念自检)))|(?:我想要|我需要|我要|想要|要)一"
+        r"|\b(?:create|make|generate|prepare|build|give\s+me(?=\s+(?:(?:a|an|my|the)\s+)?(?:study|learning)\s+pack))\b"
     )
-    information_request = r"(?:如何|怎么|怎样)\s*$|\bhow\s+(?:to|(?:do|can)\s+i)\s*$"
+    request_lead = (
+        r"(?:(?:请你?|麻烦你?|帮我|为我|替我|给我|我想要?|我要|我需要|我希望你?|"
+        r"你能(?:不能)?|能否|可以|先|再|直接|现在|自动|别忘(?:了|记)?|记得)\s*)*"
+        r"(?:(?:根据|结合|按照|参考|针对|围绕)[^，,。！？；;!?]{1,60}?(?:帮我|为我|替我|请你?))?"
+        r"|(?:(?:please|help\s+me|(?:can|could|would|will)\s+you|i(?:['’]d\s+like|\s+(?:want|need|would\s+like))\s+you\s+to"
+        r"|(?:do\s+not|don['’]t)\s+forget\s+to)\s+)*"
+    )
+    question_after_name = r"^\s*(?:是什么意思|有什么用|有何用途|有什么意义|的(?:意义|用途|方法|步骤)是什么)"
     create_package = rf"(?:{create}).{{0,50}}(?:{package_name})"
     for part in reversed(clauses):
         clause = part.strip()
@@ -646,7 +652,8 @@ def personal_study_package_requested(question):
         intent_prefix = clause[:(action or package_ref).start()]
         if re.search(decline, intent_prefix, re.I) or re.search(decline_package, clause, re.I):
             return False
-        if action and not re.search(information_request, intent_prefix, re.I):
+        if (action and re.fullmatch(request_lead, intent_prefix, re.I)
+                and not re.search(question_after_name, clause[package_ref.end():])):
             return True
     return False
 
