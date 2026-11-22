@@ -280,3 +280,76 @@ def test_disabling_resubmission_blocks_existing_resubmission_draft(classroom):
     assert classroom.submission.status == "IN_PROGRESS"
     assert classroom.submission.answers == {"item": "重交草稿"}
     classroom.ns["grade_submission"].assert_not_called()
+
+
+@pytest.mark.parametrize("save_first", [False, True], ids=["direct-submit", "save-then-submit"])
+def test_first_submit_persists_identity_before_grading_and_audit(classroom, save_first):
+    from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, create_engine
+    from sqlalchemy.orm import Session, declarative_base, relationship
+
+    base = declarative_base()
+
+    class Assignment(base):
+        __tablename__ = "assignments"
+        id = Column(String, primary_key=True)
+
+    class Submission(base):
+        __tablename__ = "submissions"
+        id = Column(String, primary_key=True, default=lambda: "generated-submission-id")
+        assignment_id = Column(ForeignKey("assignments.id"), nullable=False)
+        student_id = Column(Integer, nullable=False)
+        status = Column(String, nullable=False)
+        answers = Column(JSON, nullable=False)
+        submitted_at = Column(DateTime)
+        assignment = relationship(Assignment)
+
+    class Audit(base):
+        __tablename__ = "audit"
+        id = Column(Integer, primary_key=True)
+        actor_id = Column(Integer, nullable=False)
+        action = Column(String, nullable=False)
+        resource_type = Column(String, nullable=False)
+        resource_id = Column(String, nullable=False)
+        outcome = Column(String, nullable=False)
+        details = Column(JSON, nullable=False)
+
+    engine = create_engine("sqlite:///:memory:")
+    base.metadata.create_all(engine)
+    with Session(engine) as session:
+        assignment = Assignment(id=classroom.assignment.id)
+        for name in ("status", "available_from", "due_at", "settings", "items", "dojo_id"):
+            setattr(assignment, name, getattr(classroom.assignment, name))
+        assignment.settings["allowResubmit"] = False
+        session.add(assignment)
+        session.commit()
+
+        def grade(submission):
+            assert submission.assignment is assignment
+            assert submission.id
+            submission.status = "GRADED"
+
+        Submission.query = session.query(Submission)
+        classroom.ns.update(
+            TeachingAssignmentSubmissions=Submission, db=SimpleNamespace(session=session),
+            LearningAuditEvents=Audit, grade_submission=grade,
+        )
+        save = classroom.ns["save_submission"]
+        answers = {"item": "正式交卷"}
+        if save_first:
+            draft = save(assignment, classroom.student, {"item": "先存草稿"})
+            session.commit()
+            assert draft.status == "IN_PROGRESS"
+            assert draft.submitted_at is None
+            assert session.query(Audit).count() == 0
+        submitted = save(assignment, classroom.student, answers, submit=True)
+        session.commit()
+
+        assert submitted.status == "GRADED"
+        assert submitted.submitted_at == NOW
+        assert submitted.answers == answers
+        assert session.query(Submission).one().id == submitted.id
+        audit = session.query(Audit).one()
+        assert (audit.action, audit.resource_id) == ("assignment.submit", submitted.id)
+        with pytest.raises(ValueError, match="不允许重新提交"):
+            save(assignment, classroom.student, answers, submit=True)
+        assert session.query(Audit).count() == 1

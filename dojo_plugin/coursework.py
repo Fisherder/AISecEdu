@@ -1084,6 +1084,8 @@ def save_submission(assignment, user, answers, *, submit=False):
     submission.status = "SUBMITTED" if submit else "IN_PROGRESS"
     if submit:
         submission.submitted_at = now
+        if submission.id is None:
+            db.session.flush()
         grade_submission(submission)
         db.session.add(
             LearningAuditEvents(
