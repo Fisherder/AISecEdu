@@ -160,13 +160,23 @@ def test_private_answer_filter_stays_local_and_rejects_the_provider_output(tutor
     tutor.settle_model_dispatch.assert_called_once()
 
 
-def test_disabled_or_unverified_tutor_does_not_publish_unvalidated_observations(tutor):
+def test_disabled_tutor_keeps_an_unverified_chain_local(tutor):
     tutor.upstream_enabled.return_value = False
     tutor.verify_evidence_chain.return_value = {"valid": False}
     result = tutor.call("如何确定下一步学习目标？")
     assert result["provider"] == "DETERMINISTIC"
     assert result["context"]["evidenceEvents"] == 0
     tutor.invoke_turn.assert_not_called()
+
+
+def test_online_tutor_omits_observations_from_an_unverified_chain(tutor):
+    tutor.verify_evidence_chain.return_value = {"valid": False}
+    result = tutor.call("如何确定下一步学习目标？")
+    packet = tutor.invoke_turn.call_args.args[0]
+    public_context = json.loads(packet["messages"][-1]["content"])
+    assert public_context["verifiedObservations"] == []
+    assert result["context"]["evidenceEvents"] == 0
+    assert RAW_ENVIRONMENT not in json.dumps(packet)
 
 
 def test_tutor_http_route_binds_the_authenticated_learner_to_their_active_attempt():

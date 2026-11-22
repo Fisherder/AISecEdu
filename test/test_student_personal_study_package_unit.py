@@ -115,3 +115,62 @@ def test_personal_study_package_rejects_executable_fields_before_materialization
         )
     ns["create_candidate_set"].assert_not_called()
     ns["materialize_candidate"].assert_not_called()
+
+
+@pytest.mark.parametrize("prompt", [
+    "请给我解释如何生成学习包。",
+    "How do I generate a learning package?",
+    "不需要生成学习包。请解释归纳。",
+    "别给我生成学习包。",
+    "请不要替我自动生成学习包，只解释术语。",
+    "请解释为什么要生成学习包。",
+    "老师昨天说会生成学习包。",
+    "请生成一个学习包。后来我改主意了，不要替我自动生成学习包。",
+    "生成学习包有什么用？",
+    "Why should I create a study package?",
+    "My teacher said they would create a study package.",
+    "I don't want to generate a learning package. Just explain induction.",
+    "No need to generate a study package.",
+    "请生成一份复习计划。不要学习包。",
+    "请生成学习包。不要给我学习包。",
+])
+def test_denied_package_requests_do_not_create_a_workspace_or_call_the_model(prompt):
+    ns = fixture()
+    assert not ns["personal_study_package_requested"](prompt)
+    with pytest.raises(ScopeError):
+        ns["create_personal_study_package"](
+            types.SimpleNamespace(id=17), types.SimpleNamespace(id="own", user_id=17), prompt,
+        )
+    ns["_create_workspace"].assert_not_called()
+    ns["invoke_turn"].assert_not_called()
+
+
+@pytest.mark.parametrize("prompt", [
+    "帮我生成一份关于怎样用证据支持结论的个人学习包。",
+    "帮我生成一个 30 分钟、可直接进入学习的个人学习包，并结合我的薄弱点安排内容。",
+    "请制作一个关于同时观察两种植物的学习包。",
+    "请根据上节课内容帮我创建一份学习包。",
+    "请自动生成一个概率论学习包。",
+    "请设计概率论的学习包。",
+    "Can you create a study package for me?",
+    "我要一份概率论学习包。",
+    "Help me create a study package.",
+    "别忘了根据上节课内容帮我生成学习包。",
+    "请解释盆栽观察。再生成一份学习包。",
+    "不需要生成幻灯片。请生成一个学习包。",
+    "请生成一个学习包。别生成幻灯片。",
+    "请生成一个学习包。不要概念自检。",
+    "请制作一份关于盆栽观察的学习讲义。",
+    "Don't make a slide deck. Please generate a learning package.",
+    "Create a 30-minute, beginner-friendly learning package.",
+    "不要生成学习包。改主意了，请生成一个学习包。",
+])
+def test_explicit_package_requests_keep_other_clauses_separate(prompt):
+    ns = fixture()
+    assert ns["personal_study_package_requested"](prompt)
+    ns["create_personal_study_package"](
+        types.SimpleNamespace(id=17), types.SimpleNamespace(id="own", user_id=17), prompt,
+    )
+    ns["_create_workspace"].assert_called_once()
+    assert ns["_create_workspace"].call_args.kwargs == {"personal_study_package": True}
+    ns["invoke_turn"].assert_called_once()

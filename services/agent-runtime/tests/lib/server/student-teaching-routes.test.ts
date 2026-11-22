@@ -200,7 +200,24 @@ describe('student teaching model routes', () => {
     expect(mocks.createStudentLearningPlan).not.toHaveBeenCalled();
   });
 
-  it('ignores a model-supplied content-generation action', async () => {
+  it.each([
+    '请解释归纳',
+    '请给我解释如何生成学习包。',
+    'How do I generate a learning package?',
+    '不需要生成学习包。请解释归纳。',
+    '别给我生成学习包。',
+    '请不要替我自动生成学习包，只解释术语。',
+    '请解释为什么要生成学习包。',
+    '老师昨天说会生成学习包。',
+    '请生成一个学习包。后来我改主意了，不要替我自动生成学习包。',
+    '生成学习包有什么用？',
+    'Why should I create a study package?',
+    'My teacher said they would create a study package.',
+    "I don't want to generate a learning package. Just explain induction.",
+    'No need to generate a study package.',
+    '请生成一份复习计划。不要学习包。',
+    '请生成学习包。不要给我学习包。',
+  ])('ignores a model-supplied content-generation action for %s', async (message) => {
     mocks.runTurn.mockResolvedValue({
       model: 'actual-model',
       text: JSON.stringify({
@@ -210,17 +227,36 @@ describe('student teaching model routes', () => {
       }),
       usage,
     });
-    const result = await postAgent(
-      request('agent', { threadId: 'own-thread', message: '请解释归纳' }),
-    );
+    const result = await postAgent(request('agent', { threadId: 'own-thread', message }));
     const { assistantMessage } = await result.json();
     expect(assistantMessage.metadata.action).toBe('answer');
     expect(assistantMessage.content).not.toContain('已启动一个实验');
     expect(assistantMessage.metadata.generatedPackage).toBeUndefined();
     expect(mocks.createStudentLearningPlan).not.toHaveBeenCalled();
+    expect(mocks.runTurn).toHaveBeenCalledOnce();
+    expect(mocks.storeLesson).not.toHaveBeenCalled();
+    expect(mocks.publishLesson).not.toHaveBeenCalled();
   });
 
-  it('opens a published native classroom after an explicit ordinary pack request', async () => {
+  it.each([
+    '请生成一个学习包，学习植物观察。',
+    '帮我生成一个 30 分钟、可直接进入学习的个人学习包，并结合我的薄弱点安排内容。',
+    '请制作一个关于同时观察两种植物的学习包。',
+    '请根据上节课内容帮我创建一份学习包。',
+    '请自动生成一个概率论学习包。',
+    '请设计概率论的学习包。',
+    'Can you create a study package for me?',
+    '我要一份概率论学习包。',
+    'Help me create a study package.',
+    '别忘了根据上节课内容帮我生成学习包。',
+    '请解释盆栽观察。再生成一份学习包。',
+    '不需要生成幻灯片。请生成一个学习包。',
+    '请生成一个学习包。别生成幻灯片。',
+    '请生成一个学习包。不要概念自检。',
+    "Don't make a slide deck. Please generate a learning package.",
+    'Create a 30-minute, beginner-friendly learning package.',
+    '不要生成学习包。改主意了，请生成一个学习包。',
+  ])('publishes a classroom for %s', async (message) => {
     mocks.publishLesson.mockResolvedValue({
       classroomId: 'personal_study_fixture',
       url: 'http://runtime.test/classroom/personal_study_fixture',
@@ -263,7 +299,7 @@ describe('student teaching model routes', () => {
     const result = await postAgent(
       request('agent', {
         threadId: 'own-thread',
-        message: '请生成一个学习包，学习植物观察。',
+        message,
       }),
     );
     expect(result.status).toBe(201);

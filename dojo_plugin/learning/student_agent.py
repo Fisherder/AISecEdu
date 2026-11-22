@@ -529,8 +529,13 @@ def _implicit_workspace_scope(user, question):
     raise ScopeError("无法确定当前课程，请先进入课程或明确选择课程后再创建工作区")
 
 
-def _create_workspace(user, thread, question, arguments):
-    if not _explicit_creation_request(question):
+def _create_workspace(user, thread, question, arguments, *, personal_study_package=False):
+    requested = (
+        personal_study_package_requested(question)
+        if personal_study_package
+        else _explicit_creation_request(question)
+    )
+    if not requested:
         raise ScopeError("创建个人工作区需要学生在本轮消息中明确提出")
     mode = str(arguments.get("mode") or "learning-path").strip()
     if mode not in WORKSPACE_MODES:
@@ -604,9 +609,53 @@ def _create_workspace(user, thread, question, arguments):
 
 
 def personal_study_package_requested(question):
-    return _explicit_creation_request(question) and bool(
-        re.search(r"学习包|自学包|学习讲义|概念自检|(?:study|learning) (?:pack|package)", question, re.I)
+    message = str(question or "")
+    package_name = r"学习包|自学包|\b(?:study|learning)\s+pack(?:age)?\b"
+    if not re.search(package_name, message, re.I):
+        package_name = r"学习讲义|概念自检"
+    clauses = re.split(
+        r"[。！？.!?；;\n]+|(?:[，,]|然后|接着|同时|并且?|以及|而是|但是|\b(?:but|(?:and\s+)?then)\b)"
+        r"(?=\s*(?:请|帮我|给我|生成|创建|制作|准备|先|再|我|别|不|取消|解释|分析|讲讲"
+        r"|(?:please|actually|i|do|don['’]t|no|create|make|generate|how|what|explain)\b))",
+        message,
+        flags=re.I,
     )
+    decline = (
+        r"(?:不需要|不想|不必|不要|不用|无需|无须|(?:^|请|先|也)别(?!忘)|停止|取消)"
+        r"|\b(?:do\s+not|don['’]t|never|no\s+need|stop|cancel)\b(?!\s+forget\b).{0,35}$"
+        r"|\b(?:no|not)\s*$"
+    )
+    decline_package = (
+        r"^(?:个人)?(?:学习包|自学包|学习讲义|概念自检)\s*(?:不需要|不必|不要|不用|无需|无须|别)"
+        r"|^(?:(?:the|a|my)\s+)?(?:study|learning)\s+pack(?:age)?\s+"
+        r"(?:is\s+not|isn['’]t)\s+(?:needed|required|wanted)\b"
+    )
+    create = (
+        r"生成|创建|制作|设计|构建|准备|整理成|做|给我(?=\s*(?:[一两]?[份套个]|(?:个人)?(?:学习|自学|概念自检)))|(?:我想要|我需要|我要|想要|要)一"
+        r"|\b(?:create|make|generate|prepare|build|give\s+me(?=\s+(?:(?:a|an|my|the)\s+)?(?:study|learning)\s+pack))\b"
+    )
+    request_lead = (
+        r"(?:(?:请你?|麻烦你?|帮我|为我|替我|给我|我想要?|我要|我需要|我希望你?|"
+        r"你能(?:不能)?|能否|可以|先|再|直接|现在|自动|别忘(?:了|记)?|记得)\s*)*"
+        r"(?:(?:根据|结合|按照|参考|针对|围绕)[^，,。！？；;!?]{1,60}?(?:帮我|为我|替我|请你?))?"
+        r"|(?:(?:please|help\s+me|(?:can|could|would|will)\s+you|i(?:['’]d\s+like|\s+(?:want|need|would\s+like))\s+you\s+to"
+        r"|(?:do\s+not|don['’]t)\s+forget\s+to)\s+)*"
+    )
+    question_after_name = r"^\s*(?:是什么意思|有什么用|有何用途|有什么意义|的(?:意义|用途|方法|步骤)是什么)"
+    create_package = rf"(?:{create}).{{0,50}}(?:{package_name})"
+    for part in reversed(clauses):
+        clause = part.strip()
+        package_ref = re.search(package_name, clause, re.I)
+        if not package_ref:
+            continue
+        action = re.search(create_package, clause, re.I)
+        intent_prefix = clause[:(action or package_ref).start()]
+        if re.search(decline, intent_prefix, re.I) or re.search(decline_package, clause, re.I):
+            return False
+        if (action and re.fullmatch(request_lead, intent_prefix, re.I)
+                and not re.search(question_after_name, clause[package_ref.end():])):
+            return True
+    return False
 
 
 def _plain_study_text(value, limit):
@@ -703,10 +752,13 @@ def create_personal_study_package(user, thread, question):
         raise ValueError("请使用普通学习目标，不要附带实验现场、账号或私有数据")
     if not upstream_enabled():
         raise UpstreamTurnError("个人学习包服务尚未配置")
-    workspace_action = _create_workspace(user, thread, question, {
-        "mode": "learning-path",
-        "goal": teaching_request,
-    })
+    workspace_action = _create_workspace(
+        user,
+        thread,
+        question,
+        {"mode": "learning-path", "goal": teaching_request},
+        personal_study_package=True,
+    )
     workspace = SelfLearningWorkspaces.query.filter_by(
         id=workspace_action["id"], student_id=user.id,
     ).one()

@@ -803,11 +803,26 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     ("制作蒸发教案，给我DOCX和Markdown文件", "execute", ("docx", "md")),
     ("帮我写一份古诗教学教案", "auto", ("docx",)),
     ("请制作教案，不要 DOCX，只要 Markdown", "auto", ("md",)),
+    ("不要生成 docx、只要 Markdown", "auto", ("md",)),
+    ("请制作教案，不用导出为 .docx，只要 Markdown", "execute", ("md",)),
+    ("请制作教案，不必输出 Markdown，只要 Word", "auto", ("docx",)),
+    ("请制作教案，不要只生成 DOCX，也生成 Markdown", "auto", ("docx", "md")),
     ("如何制作一份 Word 教案？", "auto", ()),
     ("请制作 Markdown 教案", "ask", ()),
     ("请制作 Markdown 教案", "plan", ()),
     ("不要制作教案，请解释评估方法", "auto", ()),
     ("请把教学文档输出为 HTML", "auto", ()),
+    ("不要帮我生成一份教案", "auto", ()),
+    ("无需帮我写 一篇 教学讲义，只解释怎么写", "execute", ()),
+    ("不要帮我生成 docx", "execute", ()),
+    ("请给我一份教案，不要帮我导出为 .docx，只要 Markdown", "auto", ("md",)),
+    ("请把这份教案导出为 PDF", "auto", ()),
+    ("帮我写一份 PDF 教案", "execute", ()),
+    ("请导出这份教案为 PDF", "auto", ()),
+    ("请写一份教案，PDF 格式", "auto", ()),
+    ("请导出这份教案为 PDF，也给我 Markdown", "execute", ("md",)),
+    ("请根据我提供的 PDF 资料写一份教案", "auto", ("docx",)),
+    ("请写一份教案，不用导出为 PDF", "auto", ("docx",)),
 ])
 def test_teacher_document_requires_an_explicit_supported_request(prompt, mode, expected):
     documents = load("dojo_plugin/agent_runtime/teacher_documents.py", {})
@@ -923,6 +938,18 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
         "ConversationCards": SimpleNamespace(query=SimpleNamespace(filter_by=lambda **_: SimpleNamespace(all=lambda: []))),
     }
     exec(compile(tree, "jobs.py", "exec"), job_namespace)
+
+    reply = "请补充这份教案适合的年级。"
+    clarification = json.dumps({"answer": reply, "document": None}, ensure_ascii=False)
+    teacher_result = job_namespace["_upstream_teacher_result"]
+    with pytest.raises(reliability.RuntimeJobError, match="未返回文档结构") as error:
+        teacher_result({**payload, "executionMode": "execute"}, clarification)
+    assert error.value.category == "quality"
+    for mode in ("auto", "ask"):
+        clarification_result = teacher_result({**payload, "executionMode": mode}, clarification)
+        assert clarification_result["answer"] == reply
+        assert "deliverables" not in clarification_result
+    assert teacher_result({**payload, "executionMode": "auto"}, clarification)["executionMode"] == "ask"
 
     result = job_namespace["_invoke_agent_runtime"](job, {}, payload)
     assert result["model"]["usage"]["completion_tokens"] == 11

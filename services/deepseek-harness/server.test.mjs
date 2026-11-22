@@ -22,6 +22,7 @@ test('requires HTTPS for providers outside explicit loopback fixtures', () => {
 
 const secret = 'local-fixture-secret';
 const model = 'local-messages-fixture';
+const providerReportedModel = 'local-messages-fixture-version';
 
 async function listen(server) {
   server.listen(0, '127.0.0.1');
@@ -47,7 +48,11 @@ function eventStream(response, data, blocked) {
   const events = [
     {
       type: 'message_start',
-      message: { id: 'fixture', model, usage: { input_tokens: 4, output_tokens: 0, cache_read_input_tokens: 2 } },
+      message: {
+        id: 'fixture',
+        model: providerReportedModel,
+        usage: { input_tokens: 4, output_tokens: 0, cache_read_input_tokens: 2 },
+      },
     },
     { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
     { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
@@ -120,6 +125,7 @@ test('HTTP requests drive the official restricted agent loop and Messages adapte
   ]);
   assert.equal(a.status, 200, JSON.stringify(received));
   assert.equal(b.status, 200, JSON.stringify(received));
+  // The compatibility receipt identifies the requested model, not the provider's alias resolution.
   assert.deepEqual(await a.json(), {
     text: '答复 甲',
     model,

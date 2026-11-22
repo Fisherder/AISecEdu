@@ -408,16 +408,10 @@ export async function decideStudentAgentMessage(
       input.message,
       input.state.profile,
     );
-    const explicitlyRequestedPackage =
-      /(?:生成|创建|制作|准备|做|给我|要一)[^。！？\n]{0,50}(?:学习包|自学包)|(?:create|make|generate|prepare|build|give me)\b[^.!?\n]{0,50}\b(?:study|learning) (?:pack|package)\b/i.test(
-        input.message,
-      ) &&
-      !/(?:不要|不用|无需|不想|别)\s*(?:生成|创建|制作|准备|做)|\b(?:do not|don't)\s+(?:create|make|generate|prepare|build)\b/i.test(
-        input.message,
-      );
     if (
       normalized?.action === 'generate_package' &&
-      (!explicitlyRequestedPackage || normalized.packageRequest?.preference === 'challenge')
+      (!personalStudyPackageRequested(input.message) ||
+        normalized.packageRequest?.preference === 'challenge')
     ) {
       return {
         action: 'answer',
@@ -437,4 +431,39 @@ export async function decideStudentAgentMessage(
     return buildFallbackDecision(input.message, input.state);
   }
   return buildFallbackDecision(input.message, input.state);
+}
+
+function personalStudyPackageRequested(message: string): boolean {
+  const clauses = message.split(
+    /[。！？.!?；;\n]+|(?:[，,]|然后|接着|同时|并且?|以及|而是|但是|\b(?:but|(?:and\s+)?then)\b)(?=\s*(?:请|帮我|给我|生成|创建|制作|准备|先|再|我|别|不|取消|解释|分析|讲讲|(?:please|actually|i|do|don['’]t|no|create|make|generate|how|what|explain)\b))/i,
+  );
+  const packageName = /学习包|自学包|\b(?:study|learning)\s+pack(?:age)?\b/i;
+  const decline =
+    /(?:不需要|不想|不必|不要|不用|无需|无须|(?:^|请|先|也)别(?!忘)|停止|取消)|\b(?:do\s+not|don['’]t|never|no\s+need|stop|cancel)\b(?!\s+forget\b).{0,35}$|\b(?:no|not)\s*$/i;
+  const declinePackage =
+    /^(?:个人)?(?:学习包|自学包)\s*(?:不需要|不必|不要|不用|无需|无须|别)|^(?:(?:the|a|my)\s+)?(?:study|learning)\s+pack(?:age)?\s+(?:is\s+not|isn['’]t)\s+(?:needed|required|wanted)\b/i;
+  const create =
+    /(?:生成|创建|制作|设计|构建|准备|整理成|做|给我(?=\s*(?:[一两]?[份套个]|(?:个人)?(?:学习|自学|概念自检)))|(?:我想要|我需要|我要|想要|要)一)|\b(?:create|make|generate|prepare|build|give\s+me(?=\s+(?:(?:a|an|my|the)\s+)?(?:study|learning)\s+pack))\b/i;
+  const chineseRequestLead =
+    /^(?:(?:请你?|麻烦你?|帮我|为我|替我|给我|我想要?|我要|我需要|我希望你?|你能(?:不能)?|能否|可以|先|再|直接|现在|自动|别忘(?:了|记)?|记得)\s*)*(?:(?:根据|结合|按照|参考|针对|围绕)[^，,。！？；;!?]{1,60}?(?:帮我|为我|替我|请你?))?$/;
+  const englishRequestLead =
+    /^(?:(?:please|help\s+me|(?:can|could|would|will)\s+you|i(?:['’]d\s+like|\s+(?:want|need|would\s+like))\s+you\s+to|(?:do\s+not|don['’]t)\s+forget\s+to)\s+)*$/i;
+  const questionAfterName = /^\s*(?:是什么意思|有什么用|有何用途|有什么意义|的(?:意义|用途|方法|步骤)是什么)/;
+  const createPackage = new RegExp(`(?:${create.source}).{0,50}(?:${packageName.source})`, 'i');
+  for (const part of clauses.reverse()) {
+    const clause = part.trim();
+    const packageRef = packageName.exec(clause);
+    if (!packageRef) continue;
+    const action = createPackage.exec(clause);
+    const intentPrefix = clause.slice(0, action?.index ?? packageRef.index);
+    if (decline.test(intentPrefix) || declinePackage.test(clause)) return false;
+    if (
+      action &&
+      (chineseRequestLead.test(intentPrefix) || englishRequestLead.test(intentPrefix)) &&
+      !questionAfterName.test(clause.slice(packageRef.index + packageRef[0].length))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

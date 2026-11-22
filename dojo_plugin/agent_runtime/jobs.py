@@ -3277,9 +3277,12 @@ def _upstream_teacher_result(payload, text):
     if not isinstance(answer, str) or not answer.strip():
         raise RuntimeJobError("教学对话服务返回空白答复", category="service")
     result = {"answer": redact_text(answer, limit=48000)}
+    mode = payload.get("executionMode") or "auto"
     formats = requested_document_formats(payload)
     if formats:
         document = response.get("document")
+        if document is None and (mode == "execute" or "document" not in response):
+            raise RuntimeJobError("教学文档回合未返回文档结构，请重试。", category="quality")
         if document is not None:
             try:
                 deliverables = document_deliverables(document, formats)
@@ -3294,9 +3297,6 @@ def _upstream_teacher_result(payload, text):
                     "clarification": {"state": "confirmed"},
                 },
             }
-        if "document" not in response:
-            raise RuntimeJobError("教学文档回合未返回文档结构，请重试。", category="quality")
-    mode = payload.get("executionMode") or "auto"
     observations = ((payload.get("context") or {}).get("agentLoop") or {}).get("trace")
     proposal = response.get("proposal")
     if (

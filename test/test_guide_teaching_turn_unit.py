@@ -243,7 +243,9 @@ def test_unbounded_reference_lookup_requires_current_visibility_and_counts_own_v
     }]}
     options = namespace["guide_reference_options"]
     summaries = namespace["guide_reference_summaries"]
-    items = options(user, profile, [saved_reference])
+    items = options(
+        user, profile, [None, [], {}, saved_reference, reference, saved_reference],
+    )
     assert [item["id"] for item in items] == [reference, saved_reference]
     assert items[0]["recentAttempts"] == 1
     summary = summaries(user, profile, [reference])[0]

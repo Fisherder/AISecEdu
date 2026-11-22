@@ -1081,9 +1081,10 @@ def guide_reference_options(user, profile, saved_reference_ids=()):
     known = {item["id"] for item in visible}
     recent = guide_reference_catalog(profile)
     historical = {item["id"]: item for item in recent if item["id"] not in known}
-    for reference_id in dict.fromkeys([*historical, *saved_reference_ids]):
-        if reference_id in known or not isinstance(reference_id, str):
+    for reference_id in [*historical, *saved_reference_ids]:
+        if not isinstance(reference_id, str) or reference_id in known:
             continue
+        known.add(reference_id)
         challenge = _visible_guide_challenge(user, reference_id)
         if challenge is not None:
             visible.append(_guide_reference_option(challenge, historical.get(reference_id)))
