@@ -162,7 +162,13 @@ CHROME_BIN=/path/to/chrome node test/browser/teacher-course-navigation.mjs
 
 发布前记录现有 Web、Worker 和课堂镜像，并确认上次数据库备份可读。部署时保持 Web 和 Worker 使用相同版本，以合成教师验证只读咨询与一次审批操作，以合成学生验证导学、课堂问答、跨班访问和关闭 AI 时的提示。需紧急停止外送时，关闭开发实例的 AI 开关并重新加载受影响服务。需要恢复上一版行为时，恢复这一组镜像及其配置；先处理升级后尚未完成的作业，避免由旧 worker 重复领取。恢复服务版本无需还原业务数据库。数据库灾备演练应在独立库进行。
 
-共享开发站使用宿主 Compose 项目 `aisecedu-develop`，配置位于 `/srv/aisecedu-develop-instance/compose.json`。2026-11-19 核实该配置启动了 app、db、cache 和 edge。app、db 和 cache 只接内部网络，edge 对课堂入口返回 HTTP 503。Tutor 插图仍由本分支的合成验收覆盖，尚未部署到共享开发站。仓库中的常规部署示例与此实例不同。为这个实例发布时，需要在同一份经审核的宿主配置中加入配套的教学 Worker、课堂、DSH 和所需的课件检查服务，单独配置 DSH 到指定模型端点的出口，并连同原有代理规则验证切换与回退。当前运行提交可查看[开发站版本页](http://10.92.35.7:28081/_aisecedu/version.json)。
+共享开发站使用宿主 Compose 项目 `aisecedu-develop`，配置位于 `/srv/aisecedu-develop-instance/compose.json`。2026-11-19 核实该配置启动了 app、db、cache 和 edge。app、db 和 cache 只接内部网络，edge 对课堂入口返回 HTTP 503。Tutor 插图仍由本分支的合成验收覆盖，尚未部署到共享开发站。仓库中的常规部署示例与此实例不同。为这个实例发布时，需要在同一份经审核的宿主配置中加入配套的教学 Worker、课堂、DSH 和所需的课件检查服务，单独配置 DSH 到指定模型端点的出口，并连同原有代理规则验证切换与回退。可直连开发网时，运行提交可查看[开发站版本页](http://10.92.35.7:28081/_aisecedu/version.json)。本机无法直连 28081 时，请用自己的服务器账号建立 SSH 转发，然后在浏览器打开开发站。保持该终端开启。
+
+```bash
+ssh -N -L 127.0.0.1:28081:127.0.0.1:28081 你的服务器账号@10.92.35.7
+```
+
+[通过转发打开教师工作台](http://127.0.0.1:28081/teacher) · [通过转发查看运行版本和启用的服务](http://127.0.0.1:28081/_aisecedu/version.json)
 
 ### 在共享宿主上发布 DSH 服务
 
