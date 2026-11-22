@@ -383,13 +383,14 @@ def review_feedback(client, number, comments=None, *, reviews=None):
     comments = client.pages(f'/issues/{number}/comments') if comments is None else comments
     reviews = client.pages(f'/pulls/{number}/reviews') if reviews is None else reviews
     inline = client.pages(f'/pulls/{number}/comments')
-    return [
-        {'id': row['id'], 'updated': row.get('updated_at', row.get('submitted_at', '')),
+    feedback = [
+        {'id': row['id'], 'updated': row.get('updated_at') or row.get('submitted_at') or row.get('created_at') or '',
          'author': row['user']['login'], 'body': (row.get('body') or '')[:4000],
          'body_sha256': hashlib.sha256(row['body'].encode()).hexdigest(),
          'commit': row.get('commit_id'), 'path': row.get('path'), 'line': row.get('line')}
         for row in [*comments, *reviews, *inline] if row['user']['login'] in POLICY['trusted_authors'] and row.get('body')
-    ][-20:]
+    ]
+    return sorted(feedback, key=lambda row: (row['updated'], row['id']))[-20:]
 
 
 def state_signature(pr, failures, feedback):

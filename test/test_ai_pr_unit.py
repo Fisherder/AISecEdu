@@ -455,6 +455,24 @@ def test_new_feedback_or_ci_failure_requeues_without_publishing_old_approval():
         assert len(requests) == 1 and requests[0]['ref'] == 'develop'
 
 
+def test_recent_feedback_from_each_source_survives_the_twenty_item_limit():
+    def comment(number, **timestamps):
+        return {'id': number, 'user': {'login': 'Fisherder'}, 'body': f'feedback {number}', **timestamps}
+
+    inline = [comment(number, updated_at=f'2026-11-20T00:00:{number:02d}Z') for number in range(21)]
+    edited = comment(50, created_at='2026-10-01T00:00:00Z', updated_at='2026-11-22T01:00:00Z')
+    review = comment(51, submitted_at='2026-11-22T02:00:00Z')
+    with patch.object(ai, 'GitHub') as github:
+        client = github.return_value
+        client.pages.return_value = inline
+        before = ai.review_feedback(client, 9, comments=[], reviews=[])
+        after = ai.review_feedback(client, 9, comments=[edited], reviews=[review])
+    assert len(after) == 20
+    assert [row['id'] for row in after] == [*range(3, 21), 50, 51]
+    pr = {'head': {'sha': 'a' * 40}, 'base': {'sha': 'b' * 40}}
+    assert ai.state_signature(pr, [], before) != ai.state_signature(pr, [], after)
+
+
 def test_signature_detects_comment_edits_within_the_same_timestamp():
     pr = {'head': {'sha': 'a' * 40}, 'base': {'sha': 'b' * 40}}
     first = [{'id': 1, 'updated': 'same-second', 'body_sha256': 'first'}]
