@@ -162,6 +162,8 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
         const { message, usage } = assistant;
         const text = message.content.filter(block => block.type === 'text').map(block => block.text).join('');
         if (!text.trim()) throw new Error('Model returned no text');
+        // The official loop records the requested model in source, even when the
+        // provider returns a different model identifier for an alias.
         return { text, model: message.source.model, usage: formatUsage(usage) };
       } finally {
         signal.removeEventListener('abort', cancel);
