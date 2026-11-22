@@ -17,18 +17,14 @@ on:
         description: Retry after independent review
         default: 'false'
   workflow_run:
-    workflows: [Team quick checks, Repository hygiene, DOJO CI]
+    workflows: [Team quick checks, Repository hygiene, DOJO CI, DeepSeek PR Review Event]
     types: [completed]
   issue_comment:
-    types: [created, edited]
-  pull_request_review:
-    types: [submitted]
-  pull_request_review_comment:
     types: [created, edited]
 permissions:
   contents: read
 concurrency:
-  group: deepseek-pr-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_branch || github.ref }}
+  group: deepseek-pr-${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'DeepSeek PR Review Event' && github.event.workflow_run.id || github.event.pull_request.number || github.event.issue.number || inputs.pr || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: false
 jobs:
   dispatch-updates:
@@ -47,14 +43,35 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: python3 ops/team/ai_pr.py dispatch --folder "$RUNNER_TEMP/ai-result"
+  dispatch-review:
+    if: >-
+      vars.AI_AUTOPILOT_ENABLED == 'true' && github.event_name == 'workflow_run' &&
+      github.ref == 'refs/heads/develop' &&
+      github.event.workflow_run.name == 'DeepSeek PR Review Event' &&
+      github.event.workflow_run.path == '.github/workflows/ai-pr-review-event.yml' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ops/team/ai_pr.py dispatch-review --folder "$RUNNER_TEMP/ai-result"
   gate:
     if: >-
       vars.AI_AUTOPILOT_ENABLED == 'true' &&
       github.event_name != 'push' &&
       (github.event_name != 'issue_comment' || contains(fromJSON('["Fisherder", "yunie666", "hunry-1-code"]'), github.event.comment.user.login)) &&
-      (github.event_name != 'pull_request_review_comment' || contains(fromJSON('["Fisherder", "yunie666", "hunry-1-code"]'), github.event.comment.user.login)) &&
-      (github.event_name != 'pull_request_review' || contains(fromJSON('["Fisherder", "yunie666", "hunry-1-code"]'), github.event.review.user.login)) &&
-      (github.event_name != 'workflow_run' || contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)) &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.name != 'DeepSeek PR Review Event' &&
+        contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion))) &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.head.sha == vars.AI_AUTOPILOT_BOOTSTRAP_HEAD &&
         github.event.pull_request.user.login == 'Fisherder'))
@@ -216,7 +233,7 @@ jobs:
           printf '[features]\nmulti_agent = false\n' > "$RUNNER_TEMP/ai-codex-review/config.toml"
           python3 policy/ops/team/ai_pr.py large-prompt --folder "$RUNNER_TEMP/ai-result" --chunk "$AI_CHUNK"
       - name: Review the complete assigned segment
-        timeout-minutes: ${{ github.event_name == 'pull_request' && 24 || 12 }}
+        timeout-minutes: 24
         uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
         with:
           openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}

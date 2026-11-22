@@ -1,6 +1,6 @@
 # 开发版智能体迁移与平台审查
 
-平台审查从 `develop` 的 `e32fa59a` 开始，集成分支已同步到 `develop` 的 `409055b4`。完整官方 Harness 与第一批教学入口已通过 PR #9 提交审查，普通课堂、课件和 Tutor 的后续改动在 `feat/codex/ordinary-studio-quiz` 联调。运行版本以开发实例的版本端点为准。[当前集成 PR](https://github.com/Fisherder/AISecEdu/pull/9) · [普通课堂分支](https://github.com/Fisherder/AISecEdu/tree/feat/codex/ordinary-studio-quiz) · [早期审查记录](https://github.com/Fisherder/AISecEdu/pull/7)
+平台审查从 `develop` 的 `e32fa59a` 开始，集成分支已同步到 `develop` 的 `85d745f5`，其中已包含 PR 评审事件的自动调度。完整官方 Harness 与第一批教学入口已通过 PR #9 提交审查，普通课堂、课件和 Tutor 的后续改动在 `feat/codex/ordinary-studio-quiz` 联调。运行版本以开发实例的版本端点为准。[当前集成 PR](https://github.com/Fisherder/AISecEdu/pull/9) · [普通课堂分支](https://github.com/Fisherder/AISecEdu/tree/feat/codex/ordinary-studio-quiz) · [早期审查记录](https://github.com/Fisherder/AISecEdu/pull/7)
 
 ## 源码与运行边界
 
