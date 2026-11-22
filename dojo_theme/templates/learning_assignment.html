@@ -32,8 +32,8 @@
         <div class="la-summary-row"><span>保存状态</span><strong id="la-save-status" role="status" aria-live="polite" aria-atomic="true">正在读取</strong></div>
         <div class="la-summary-row"><span>答案反馈</span><strong id="la-answer-policy">提交后公布</strong></div>
         <div id="la-feedback" class="la-result" hidden></div>
-        <div class="la-summary-actions"><button id="la-save" type="button" class="cs-btn">保存草稿</button><button id="la-submit" type="button" class="cs-btn cs-btn-primary">提交并智能批改</button></div>
-        <p class="la-policy">实验题读取真实 Dojo 判题；客观题确定性评分；主观题依据教师量规智能批改，教师可以复核。</p>
+        <div class="la-summary-actions"><button id="la-save" type="button" class="cs-btn">保存草稿</button><button id="la-submit" type="button" class="cs-btn cs-btn-primary">提交作业</button></div>
+        <p class="la-policy">实验题按平台判题记录计分，客观题按标准答案计分。标有“待教师复核”的题目显示初评分。</p>
       </aside>
     </div>
     <div class="la-mobile-actions" aria-label="移动端题目操作">
@@ -50,5 +50,5 @@
 {% block scripts %}
 <script defer src="{{ url_for('views.themes', path='js/dojo/learning-common.js', v='frontend-restored-20261001-1') }}"></script>
 <script defer src="{{ url_for('views.themes', path='js/dojo/assignment-text.js', v='frontend-restored-20261001-1') }}"></script>
-<script defer src="{{ url_for('views.themes', path='js/dojo/learning-assignment.js', v='assignment-review-20261123-1') }}"></script>
+<script defer src="{{ url_for('views.themes', path='js/dojo/learning-assignment.js', v='assignment-review-20261123-2') }}"></script>
 {% endblock %}

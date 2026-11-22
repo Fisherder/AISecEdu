@@ -29,7 +29,7 @@ function browser() {
     [key(1), draft("Leaves need light for photosynthesis.")],
   ]);
   const channels = [];
-  const open = (viewerId, {status: initialStatus = 200} = {}) => {
+  const open = (viewerId, {status: initialStatus = 200, assignmentFields = {}} = {}) => {
     const requests = [];
     const reads = [];
     const writes = [];
@@ -68,7 +68,7 @@ function browser() {
         const body = options.body && JSON.parse(options.body);
         requests.push({url, headers: options.headers, method: options.method, body});
         const payload = status === 200
-          ? {success: true, data: {viewerId, assignment: assignment()}}
+          ? {success: true, data: {viewerId, assignment: {...assignment(), ...assignmentFields}}}
           : {success: false, code: "VIEWER_MISMATCH", message: "Reload the assignment"};
         if (options.method === "POST" && status === 200) {
           payload.data.assignment.submission = {answers: body.answers, updated: "2026-01-02T10:01:00Z"};
@@ -197,4 +197,27 @@ test("an unverified or changed viewer cannot open another scope or write drafts"
   assert.deepEqual(rejected.writes, []);
   assert.equal(rejected.element("learning-assignment-content").hidden, true);
   assert.equal(channels[1].closed, true);
+});
+
+
+test("submission policy applies to desktop, mobile and changes saved after reopening", async () => {
+  const {open} = browser();
+  for (const [fields, editable] of [
+    [{submission: {status: "IN_PROGRESS", submittedAt: null}, settings: {allowResubmit: false}}, true],
+    [{submission: {status: "IN_PROGRESS", submittedAt: "2026-01-01"}, settings: {allowResubmit: false}}, false],
+    [{submission: {status: "GRADED", submittedAt: "2026-01-01"}, assessmentState: "READY"}, true],
+    [{status: "CLOSED"}, false],
+  ]) {
+    const page = open(1, {assignmentFields: fields});
+    await flush();
+    assert.equal(page.element("la-submit").hidden, !editable);
+    assert.equal(page.element("la-save").hidden, !editable);
+    assert.equal(page.element("la-mobile-next").disabled, !editable);
+    if (!editable) {
+      assert.doesNotMatch(page.element("la-form").innerHTML, /photosynthesis/);
+      for (const id of ["la-mobile-next", "la-submit", "la-save"]) page.click(id);
+      await flush();
+      assert.equal(page.requests.filter(r => r.method === "POST").length, 0);
+    }
+  }
 });

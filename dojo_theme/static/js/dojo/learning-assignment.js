@@ -199,6 +199,16 @@
     });
   }
 
+  function allowsResubmission(assignment) {
+    return Boolean(assignment.settings?.allowResubmit ?? true);
+  }
+
+  function canEdit(assignment) {
+    if (!assignment || assignment.status !== "PUBLISHED") return false;
+    const previouslySubmitted = assignment.submission?.submittedAt || assignment.assessmentState === "READY";
+    return !previouslySubmitted || allowsResubmission(assignment);
+  }
+
   function updateProgress() {
     const items = state.assignment.items || [];
     document.getElementById("la-answered").textContent = `${answeredCount()} / ${state.assignment.itemCount}`;
@@ -206,11 +216,15 @@
     document.getElementById("la-mobile-previous").disabled = state.currentIndex <= 0;
     const next = document.getElementById("la-mobile-next");
     const atLastQuestion = state.currentIndex >= items.length - 1;
-    next.disabled = false;
+    next.disabled = atLastQuestion && !canEdit(state.assignment);
     next.dataset.action = atLastQuestion ? "submit" : "next";
-    next.innerHTML = atLastQuestion
-      ? '提交作业<i class="fas fa-paper-plane" aria-hidden="true"></i>'
-      : '下一题<i class="fas fa-arrow-right" aria-hidden="true"></i>';
+    if (next.disabled) {
+      next.textContent = "最后一题";
+    } else {
+      next.innerHTML = atLastQuestion
+        ? '提交作业<i class="fas fa-paper-plane" aria-hidden="true"></i>'
+        : '下一题<i class="fas fa-arrow-right" aria-hidden="true"></i>';
+    }
     renderQuestionNav();
   }
 
@@ -285,8 +299,8 @@
     const assignment = state.assignment;
     const submission = assignment.submission;
     const graded = assignment.assessmentState === "READY";
-    const mayResubmit = Boolean(assignment.settings && assignment.settings.allowResubmit);
-    const disabled = assignment.status !== "PUBLISHED" || graded && !mayResubmit;
+    const mayResubmit = allowsResubmission(assignment);
+    const disabled = !canEdit(assignment);
     const practiceOnly = (assignment.items || []).length > 0 && assignment.items.every(item => item.type === "CHALLENGE");
     document.getElementById("la-title").textContent = assignment.title;
     document.getElementById("la-meta").textContent = `${assignment.courseName} · ${assignment.itemCount} 道题 · ${assignment.maxScore} 分`;
@@ -308,9 +322,11 @@
       : state.dirty
         ? "仅保存在本机"
         : "尚未修改";
+    if (!graded && submission?.submittedAt && !mayResubmit) {
+      document.getElementById("la-save-status").textContent = "已交卷，教师已关闭重交";
+    }
     document.getElementById("la-save").hidden = disabled;
     document.getElementById("la-submit").hidden = disabled;
-    document.getElementById("la-submit").textContent = practiceOnly ? "提交作业" : "提交并智能批改";
     document.getElementById("la-progress-label").textContent = practiceOnly ? "实验已通过" : "已作答";
     if (practiceOnly) {
       document.getElementById("la-save").hidden = true;
@@ -354,7 +370,7 @@
   }
 
   async function save(submit) {
-    if (!state.assignment) return;
+    if (!canEdit(state.assignment)) return;
     if (state.saving) {
       state.submitQueued = state.submitQueued || submit;
       state.saveQueued = state.saveQueued || !submit;
@@ -435,7 +451,7 @@
   }
 
   async function submit() {
-    if (!state.assignment) return;
+    if (!canEdit(state.assignment)) return;
     collectAnswers();
     await refreshChallengeProgress();
     const missing = missingRequired();
@@ -468,7 +484,7 @@
       state.answers = {...(state.assignment.submission && state.assignment.submission.answers || {})};
       state.serverUpdated = state.assignment.submission && state.assignment.submission.updated;
       prioritizeResults();
-      const draft = localDraft();
+      const draft = canEdit(state.assignment) ? localDraft() : null;
       if (draft && Object.keys(draft.answers).length && state.assignment.items.some(item => item.type !== "CHALLENGE") && (!state.serverUpdated || new Date(draft.savedAt || 0) > new Date(state.serverUpdated))) {
         state.answers = {...state.answers, ...draft.answers};
         state.dirty = true;
