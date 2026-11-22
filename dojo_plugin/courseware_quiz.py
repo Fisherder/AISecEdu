@@ -61,6 +61,10 @@ def _stem_key(value):
             index += 2
             continue
         char, index = text[index], index + 1
+        if char == ".":
+            if index >= 2 and index < len(text) and text[index - 2].isalnum() and text[index].isalnum():
+                kept.append(char)
+            continue
         if char.isalnum() or char in "$%&*+-/<=>^|~_" or unicodedata.category(char) in ("Sm", "Sc"):
             kept.append(char)
     return "".join(kept)
