@@ -96,6 +96,15 @@ def test_review_events_relay_to_develop_without_using_pr_code():
     assert "github.event.workflow_run.name != 'DeepSeek PR Review Event'" in jobs.split('  analyze:', 1)[0]
 
 
+def test_segment_review_budget_is_the_same_for_all_trusted_event_routes():
+    workflow = (ROOT / '.github/workflows/ai-pr-autopilot.yml').read_text()
+    matrix = workflow.split('  large_review:', 1)[1].split('  repair:', 1)[0]
+    review = matrix.split('      - name: Review the complete assigned segment', 1)[1].split('      - name:', 1)[0]
+    assert '    timeout-minutes: 30\n' in matrix
+    assert '        timeout-minutes: 24\n' in review
+    assert 'github.event_name' not in review
+
+
 def test_review_event_dispatch_uses_a_unique_live_eligible_pr_and_fixed_ref():
     pr = codex_app_pr()
     candidate = {'number': pr['number'], 'base': {'ref': 'develop', 'repo': {'id': 7}},

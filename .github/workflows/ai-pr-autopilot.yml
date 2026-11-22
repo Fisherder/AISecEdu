@@ -233,7 +233,7 @@ jobs:
           printf '[features]\nmulti_agent = false\n' > "$RUNNER_TEMP/ai-codex-review/config.toml"
           python3 policy/ops/team/ai_pr.py large-prompt --folder "$RUNNER_TEMP/ai-result" --chunk "$AI_CHUNK"
       - name: Review the complete assigned segment
-        timeout-minutes: ${{ github.event_name == 'pull_request' && 24 || 12 }}
+        timeout-minutes: 24
         uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675
         with:
           openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
