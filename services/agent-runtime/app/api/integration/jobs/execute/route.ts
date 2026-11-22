@@ -11,8 +11,7 @@ import { deckText, inspectOrdinaryDeckPage, inspectOrdinaryDeckTextPage, ordinar
 } from '@/lib/server/agent-harness/ordinary-deck-revision';
 import { createHarnessTurn, recordHarnessUsage } from '@/lib/server/agent-harness/classroom-turn';
 import { persistDurableModelEvent } from '@/lib/server/durable-model-events';
-import { executeOrdinaryDebateJob, ORDINARY_DEBATE_SCOPE } from '@/lib/server/agent-harness/ordinary-debate';
-import { DebateCandidateCheckpointError, replayOrdinaryDebateCandidates } from '@/lib/server/agent-harness/ordinary-debate-candidate-checkpoint';
+import { invalidOrdinaryDebateCandidateJob, isOrdinaryDebateCandidateJob } from '@/lib/server/agent-harness/ordinary-debate-candidate';
 import { openDebateCheckpoint } from '@/lib/debate/checkpoint';
 import type { DebateRevisionEntry } from '@/lib/debate/patch';
 import { generateDebate, reviseDebate, debateLesson } from '@/lib/server/debate-generation';
@@ -129,7 +128,7 @@ type CinematicModelCall = (
 type JobRequest = {
   jobId?: string;
   kind?: string;
-  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean; ordinaryTeaching?: 'material-summary' | 'candidate-plan' | 'slide-wording' | 'lesson-plan-materialize' | 'slide-layout' | 'deck-revision' | typeof ORDINARY_DEBATE_SCOPE };
+  scope?: { ownerId?: number; dojoId?: number | null; moduleIndex?: number | null; teacherCourseware?: boolean; ordinaryTeaching?: 'material-summary' | 'candidate-plan' | 'slide-wording' | 'lesson-plan-materialize' | 'slide-layout' | 'deck-revision' | 'debate-authoring' | 'ordinary-lesson-plan-revise' };
   payload?: Record<string, unknown>;
   modelRoute?: {
     route?: string;
@@ -1106,21 +1105,11 @@ async function generateCandidatesWithPipeline(
     }
   };
   const prompt = ordinaryProposal?.request ?? String(payload.prompt || '').trim();
-  const debate = ordinary && artifactType === 'debate';
-  const aliases = new Map<string, string>();
-  const proposalContext = debate && ordinaryProposal ? {
-    ...ordinaryProposal,
-    sources: ordinaryProposal.sources.map((source, index) => {
-      const alias = `material-${index + 1}`;
-      aliases.set(alias, source.materialId);
-      return {...source, materialId: alias};
-    }),
-  } : ordinaryProposal;
-  const materialIds = proposalContext ? proposalContext.sources.map(source => source.materialId)
+  const materialIds = ordinaryProposal ? ordinaryProposal.sources.map(source => source.materialId)
     : Array.isArray(recordValue(payload.materialContext)?.materialIds)
     ? (recordValue(payload.materialContext)?.materialIds as unknown[]).map(String).filter(Boolean)
     : [];
-  const context = ordinaryProposal ? JSON.stringify(proposalContext) : (ordinary ? completeJsonForPrompt : jsonForPrompt)(
+  const context = ordinaryProposal ? JSON.stringify(ordinaryProposal) : (ordinary ? completeJsonForPrompt : jsonForPrompt)(
     {
       prompt,
       artifactType,
@@ -1150,7 +1139,7 @@ async function generateCandidatesWithPipeline(
       : new Map(candidateSourceGrounding(payload).map(row => [row.materialId, row.sourceLocators]));
     return {candidate: {...validated.candidate, content: {...plan,
       sourceGrounding: plan.sourceGrounding.map(row => ({
-        ...row, materialId: aliases.get(row.materialId) ?? row.materialId,
+        ...row,
         sourceLocators: locators.get(row.materialId) || [],
       })),
     }}};
@@ -1186,13 +1175,9 @@ async function generateCandidatesWithPipeline(
   };
   const makeBlueprint = async (ordinal: number) => {
     return observed('workflow', `构思第 ${ordinal}/${expectedCount} 个教学蓝图`, async () => {
-    const debateFocus = ['论点与反驳', '证据取舍', '不同角色的立场', '讨论规则和组织方式'][ordinal - 1];
-    const debateGuidance = debate
-      ? `构思课堂辩论方案，围绕议题比较各方观点及举证方式。${expectedCount > 1 ? `本方案优先考虑${debateFocus}。` : ''}`
-      : '';
     const response = await callTeachingJobJson(resolved,
       {
-        system: ordinary ? `${ordinaryTeachingRules} ${debateGuidance}输出第 ${ordinal}/${expectedCount} 个教学蓝图，路径与同批其他候选不同。
+        system: ordinary ? `${ordinaryTeachingRules} 输出第 ${ordinal}/${expectedCount} 个教学蓝图，路径与同批其他候选不同。
 只返回 {"blueprint":{"title":"...","summary":"...","strategy":"...","variant":"...","objectives":["..."],"outline":[{"title":"...","purpose":"..."}],"assessment":["..."],"safety":["..."]}}。` : candidateBlueprintSystem(
           artifactType,
           ordinal,
@@ -1265,16 +1250,16 @@ async function generateCandidatesWithPipeline(
     assessment: ['目标完成', '过程证据', '安全边界'],
     safety: ['仅限授权隔离环境', '不生成真实凭据或公网攻击步骤'],
   });
-  const expansionSystem = ordinary ? `${ordinaryTeachingRules} ${debate ? '只提供候选辩论方案的议题、组织方式、举证环节和评价依据。' : ''}生成 ${artifactType} 候选，仅返回 {"candidate":{"title":"...","summary":"...","strategy":"...","differences":["..."],"recommendation":"...","content":{"type":"${artifactType}","objectives":["..."],"outline":[{"title":"...","description":"...","keyPoints":["..."]${debate ? '' : ',"layout":"concept","visualBrief":"...","speakerNotes":"..."'}}],"activities":[{"title":"...","instruction":"..."}],"assessment":{"criteria":["..."]},"sourceGrounding":[{"materialId":"...","uses":["..."]}]}}}。
+  const expansionSystem = ordinary ? `${ordinaryTeachingRules} 生成 ${artifactType} 候选，仅返回 {"candidate":{"title":"...","summary":"...","strategy":"...","differences":["..."],"recommendation":"...","content":{"type":"${artifactType}","objectives":["..."],"outline":[{"title":"...","description":"...","keyPoints":["..."],"layout":"concept","visualBrief":"...","speakerNotes":"..."}],"activities":[{"title":"...","instruction":"..."}],"assessment":{"criteria":["..."]},"sourceGrounding":[{"materialId":"...","uses":["..."]}]}}}。
 sourceGrounding 必须准确覆盖授权资料 ${JSON.stringify(materialIds)}。${artifactType === 'slide-deck' ? slideDeckPageInstruction(pageRequirement) : ''}
-${ordinaryProposal ? (debate ? '方案' : '教案') + '标题最多160字，大纲最多30节，每节题目最多80字、说明最多800字、要点各最多200字。目标和评价准则各最多300字；活动题目最多100字、活动说明最多800字。' : ''}`
+${ordinaryProposal ? '教案标题最多160字，大纲最多30节，每节题目最多80字、说明最多800字、要点各最多200字。目标和评价准则各最多300字；活动题目最多100字、活动说明最多800字。' : ''}`
     : candidateExpansionSystem(artifactType, pageRequirement, materialIds);
   const makeCandidate = async (blueprint: CandidateBlueprint, ordinal: number) => {
     return observed('workflow', `扩展第 ${ordinal}/${expectedCount} 个候选方案`, async () => {
     const response = await callTeachingJobJson(resolved,
       {
         system: expansionSystem,
-        prompt: ordinaryProposal ? JSON.stringify({...proposalContext, ordinal, blueprint: ordinaryLessonCandidateBlueprint.parse(blueprint)})
+        prompt: ordinaryProposal ? JSON.stringify({...ordinaryProposal, ordinal, blueprint: ordinaryLessonCandidateBlueprint.parse(blueprint)})
           : `教学需求：${prompt}\n候选序号：${ordinal}/${expectedCount}\n蓝图：${jsonForPrompt(blueprint, 18_000)}\n课程上下文：${context}`,
         output: resilientJsonOutput(),
         maxOutputTokens: Math.min(resolved.modelInfo?.outputWindow || 16_000, 20_000),
@@ -1309,7 +1294,7 @@ ${ordinaryProposal ? (debate ? '方案' : '教案') + '标题最多160字，大�
       {
         system: ordinaryProposal ? `${expansionSystem}\n请依据本轮要求和已确认的教学蓝图重新生成。`
           : `${expansionSystem}\n这是第 ${repairAttempt} 次定向修复。只修复列出的缺陷，保留蓝图目标和已有有效内容。`,
-        prompt: ordinaryProposal ? JSON.stringify({...proposalContext, ordinal, blueprint: ordinaryLessonCandidateBlueprint.parse(blueprint)}) : `缺陷：${jsonForPrompt(issues, 8_000)}\n蓝图：${jsonForPrompt(blueprint, 18_000)}\n当前候选：${jsonForPrompt(candidate, 70_000)}\n上下文：${context}`,
+        prompt: ordinaryProposal ? JSON.stringify({...ordinaryProposal, ordinal, blueprint: ordinaryLessonCandidateBlueprint.parse(blueprint)}) : `缺陷：${jsonForPrompt(issues, 8_000)}\n蓝图：${jsonForPrompt(blueprint, 18_000)}\n当前候选：${jsonForPrompt(candidate, 70_000)}\n上下文：${context}`,
         output: resilientJsonOutput(),
         maxOutputTokens: Math.min(resolved.modelInfo?.outputWindow || 20_000, 24_000),
       },
@@ -3352,12 +3337,7 @@ export async function POST(req: NextRequest) {
   const ordinaryLayoutEndpoint = pathname === ordinaryLayoutPath || pathname === basePath + ordinaryLayoutPath;
   const ordinaryDeckPath = '/api/integration/jobs/ordinary-deck-revision';
   const ordinaryDeckEndpoint = pathname === ordinaryDeckPath || pathname === basePath + ordinaryDeckPath;
-  const debatePath = '/api/integration/jobs/ordinary-debate';
-  const debateEndpoint = pathname === debatePath || pathname === basePath + debatePath;
-  const debateCandidatePath = '/api/integration/jobs/ordinary-debate-candidate';
-  const debateCandidateEndpoint = pathname === debateCandidatePath || pathname === basePath + debateCandidatePath;
-  const jsonOnly = ordinaryLessonEndpoint || ordinaryLayoutEndpoint || ordinaryDeckEndpoint || debateEndpoint ||
-    debateCandidateEndpoint;
+  const jsonOnly = ordinaryLessonEndpoint || ordinaryLayoutEndpoint || ordinaryDeckEndpoint;
   if (!jsonOnly && req.headers.get('accept')?.includes('application/x-ndjson')) {
     const bodyText = await req.text();
     let submitted: JobRequest = {};
@@ -3451,40 +3431,29 @@ export async function POST(req: NextRequest) {
     auditKind = kind || 'unknown';
     const payload = body.payload && typeof body.payload === 'object' ? body.payload : {};
     const ordinaryScope = body.scope?.ordinaryTeaching;
-    const debateCandidateReason = 'teacher_requested_ordinary_debate';
-    const debateCandidateRoute = 'upstream-ordinary-debate-candidate';
-    const debateCandidateMarked = payload.generationReason === debateCandidateReason ||
-      body.modelRoute?.route === debateCandidateRoute ||
-      (ordinaryScope === 'candidate-plan' && payload.artifactType === 'debate');
-    const debateCandidateInvalid = () => reply({
-      success: false, error: '普通辩论方案需要教师课程及有效的生成任务。',
-      errorCode: 'INVALID_ORDINARY_DEBATE_CANDIDATE_JOB', failureCategory: 'permanent',
-    }, 422);
-    if (debateCandidateEndpoint || debateCandidateMarked) {
-      const count = payload.candidateCount;
-      const modeMatches = payload.generationMode === 'single' ? count === 1
-        : payload.generationMode === 'multiple' && typeof count === 'number' &&
-          Number.isInteger(count) && count >= 2 && count <= 4;
-      if (!debateCandidateEndpoint || typeof body.jobId !== 'string' || !jobId.trim() || kind !== 'candidate.generate' ||
-          ordinaryScope !== 'candidate-plan' || payload.artifactType !== 'debate' ||
-          payload.generationReason !== debateCandidateReason || !modeMatches ||
-          typeof payload.candidateSetId !== 'string' || !payload.candidateSetId.trim() ||
-          payload.workspaceId != null || !Number.isSafeInteger(body.scope?.ownerId) ||
-          (body.scope?.ownerId ?? 0) <= 0 || !Number.isSafeInteger(body.scope?.dojoId) ||
-          (body.scope?.moduleIndex != null && !Number.isSafeInteger(body.scope.moduleIndex)) ||
-          Object.hasOwn(payload, 'debateAuthoringBackend')) return debateCandidateInvalid();
+    if (ordinaryScope === 'ordinary-lesson-plan-revise' ||
+        Object.hasOwn(payload, 'ordinaryLessonPlanRevisionModel') ||
+        Object.hasOwn(payload, 'ordinaryLessonPlanRevision') ||
+        payload.revisionBackend === 'ordinary-lesson-plan-revise' ||
+        body.modelRoute?.route === 'upstream-ordinary-lesson-plan-revise') {
+      return reply({
+        success: false, error: '请使用锁定的普通教案修订地址。',
+        errorCode: 'INVALID_ORDINARY_LESSON_PLAN_REVISION_JOB', failureCategory: 'permanent',
+      }, 422);
     }
-    if (debateEndpoint || ordinaryScope === ORDINARY_DEBATE_SCOPE || Object.hasOwn(payload, 'debateAuthoringBackend')) {
-      const result = await executeOrdinaryDebateJob(body, payload, req.signal, started, debateEndpoint);
-      return reply(result.body, result.status);
+    if (isOrdinaryDebateCandidateJob(body)) {
+      return reply(invalidOrdinaryDebateCandidateJob.body, invalidOrdinaryDebateCandidateJob.status);
     }
-    const pinnedLessonCandidate = !debateCandidateEndpoint &&
-      (payload.generationReason === 'teacher_requested_ordinary_lesson_plan' ||
-        Object.hasOwn(payload, 'ordinaryCandidateModel'));
-    const pinnedCandidate = pinnedLessonCandidate || debateCandidateEndpoint;
+    if (ordinaryScope === 'debate-authoring' || Object.hasOwn(payload, 'debateAuthoringBackend') ||
+        body.modelRoute?.route === 'ordinary-debate-harness') {
+      return reply({success: false, error: '普通课堂辩论任务需要使用专用教学接口。',
+        errorCode: 'INVALID_ORDINARY_DEBATE_JOB', failureCategory: 'permanent'}, 422);
+    }
+    const pinnedCandidate = payload.generationReason === 'teacher_requested_ordinary_lesson_plan' ||
+      Object.hasOwn(payload, 'ordinaryCandidateModel');
     if (ordinaryLessonEndpoint) {
       const materialize = kind === 'artifact.materialize' && ordinaryScope === 'lesson-plan-materialize' &&
-        !pinnedLessonCandidate;
+        !pinnedCandidate;
       const candidate = kind === 'candidate.generate' && ordinaryScope === 'candidate-plan' &&
         payload.generationReason === 'teacher_requested_ordinary_lesson_plan' &&
         typeof payload.ordinaryCandidateModel === 'string' && Boolean(payload.ordinaryCandidateModel.trim());
@@ -3534,7 +3503,7 @@ export async function POST(req: NextRequest) {
     );
     const traceId = auditTraceId;
     const requestedModel = String(body.modelRoute?.actual_model || '');
-    if (!jobId || !kind || (!requestedModel && !debateCandidateEndpoint)) {
+    if (!jobId || !kind || !requestedModel) {
       return reply({ success: false, error: 'jobId, kind and modelRoute are required' }, 400);
     }
     const journalEnabled = kind === 'agent.chat' &&
@@ -3654,12 +3623,10 @@ export async function POST(req: NextRequest) {
       }
     }
     const ordinaryCandidateUnavailable = () => reply({
-      success: false, error: debateCandidateEndpoint ? '普通辩论方案服务暂不可用，请重新发起生成。'
-        : '普通教案方案服务暂不可用，请重新发起生成。',
-      errorCode: debateCandidateEndpoint ? 'ORDINARY_DEBATE_CANDIDATE_UNAVAILABLE'
-        : 'ORDINARY_LESSON_PLAN_CANDIDATE_UNAVAILABLE', failureCategory: 'service',
+      success: false, error: '普通教案方案服务暂不可用，请重新发起生成。',
+      errorCode: 'ORDINARY_LESSON_PLAN_CANDIDATE_UNAVAILABLE', failureCategory: 'service',
     }, 503);
-    if (pinnedLessonCandidate && (
+    if (pinnedCandidate && (
       kind !== 'candidate.generate' || ordinaryScope !== 'candidate-plan' || artifactType !== 'lesson-plan' ||
       payload.workspaceId != null || typeof body.scope?.ownerId !== 'number' ||
       !Number.isSafeInteger(body.scope.ownerId) || body.scope.ownerId <= 0 ||
@@ -3671,7 +3638,7 @@ export async function POST(req: NextRequest) {
         errorCode: 'INVALID_ORDINARY_LESSON_PLAN_CANDIDATE', failureCategory: 'permanent',
       }, 422);
     }
-    if (pinnedLessonCandidate && typeof payload.prompt === 'string' &&
+    if (pinnedCandidate && typeof payload.prompt === 'string' &&
         payload.prompt.trim().length > ORDINARY_LESSON_REQUEST_LIMIT) {
       return reply({
         success: false, error: `请把本轮教案要求缩短到 ${ORDINARY_LESSON_REQUEST_LIMIT} 字以内后重试。`,
@@ -3737,10 +3704,7 @@ export async function POST(req: NextRequest) {
     const harnessModel = process.env.HARNESS_DEEPSEEK_MODEL?.trim();
     if (pinnedCandidate && (!harnessModel || payload.ordinaryCandidateModel !== harnessModel ||
         body.modelRoute?.provider !== 'deepseek' || requestedModel !== harnessModel ||
-        requiredModel !== harnessModel || (debateCandidateEndpoint && (
-          body.modelRoute.route !== debateCandidateRoute || body.modelRoute.actual_model !== harnessModel ||
-          body.modelRoute.allow_degraded !== false
-        )))) return ordinaryCandidateUnavailable();
+        requiredModel !== harnessModel)) return ordinaryCandidateUnavailable();
     const coursewareTurn = kind === 'artifact.materialize' && body.modelRoute?.provider === 'deepseek' &&
       body.scope?.teacherCourseware === true && body.scope.dojoId != null && !payload.workspaceId &&
       payload.artifactType === 'slide-deck' && typeof payload.artifactId === 'string' && payload.artifactId &&
@@ -3782,7 +3746,7 @@ export async function POST(req: NextRequest) {
     }
 
     const ordinaryCandidateJob = ordinaryScope === 'candidate-plan' && kind === 'candidate.generate' &&
-      (artifactType === 'slide-deck' || artifactType === 'lesson-plan' || debateCandidateEndpoint);
+      (artifactType === 'slide-deck' || artifactType === 'lesson-plan');
     const ordinaryMaterialJob = ordinaryScope === 'material-summary' && kind === 'material.enrich' &&
       typeof payload.materialId === 'string' && typeof payload.revisionId === 'string';
     const ordinaryModelMatches = body.scope?.dojoId != null && !payload.workspaceId &&
@@ -3808,7 +3772,6 @@ export async function POST(req: NextRequest) {
         try {
           selected = ordinaryLessonCandidateInput(payload, artifactType);
         } catch {
-          if (debateCandidateEndpoint) return debateCandidateInvalid();
           return reply({
             success: false, error: '普通教案方案需要本轮教学要求及对应的完整教材摘要。',
             errorCode: 'INVALID_ORDINARY_LESSON_PLAN_CANDIDATE', failureCategory: 'permanent',
@@ -3822,12 +3785,7 @@ export async function POST(req: NextRequest) {
             invalidReceipt = true;
             throw error;
           });
-          if (response.model !== harnessModel || !hasMeasuredLessonUsage(response) ||
-              (debateCandidateEndpoint && (
-                response.usage.prompt_tokens <= 0 || response.usage.completion_tokens <= 0 ||
-                (response.usage.total_tokens != null &&
-                  response.usage.total_tokens !== response.usage.prompt_tokens + response.usage.completion_tokens)
-              ))) {
+          if (response.model !== harnessModel || !hasMeasuredLessonUsage(response)) {
             invalidReceipt = true;
             await recordHarnessUsage(response, 'aisecedu-integration-job');
             throw new Error('The pinned candidate turn did not return a model and measured usage');
@@ -3842,26 +3800,9 @@ export async function POST(req: NextRequest) {
           return {result: {candidates: output.candidates, generationReport: output.report}, usage: output.usage};
         };
         try {
-          ({result, usage} = debateCandidateEndpoint ? await replayOrdinaryDebateCandidates({
-            jobId, scope: {
-              ownerId: body.scope!.ownerId!, dojoId: body.scope!.dojoId!,
-              moduleIndex: body.scope!.moduleIndex ?? null,
-            },
-            candidateSetId: payload.candidateSetId as string, candidateCount: expectedCandidateCount,
-            generationMode: payload.generationMode, prompt: payload.prompt, selected,
-            sourceRefs: ((payload.sourceRefs ?? []) as Record<string, unknown>[]).map(
-              ({id, revisionId, sha256}) => ({id, revisionId, sha256}),
-            ),
-            model: harnessModel,
-          }, req.signal, generate, generated => candidateGenerationIssue(
-            generated, expectedCandidateCount, artifactType, slidePageRequirement, payload.materialContext,
-          )) : await generate());
+          ({result, usage} = await generate());
         } catch (error) {
-          if (invalidReceipt || error instanceof DebateCandidateCheckpointError) return ordinaryCandidateUnavailable();
-          if (debateCandidateEndpoint) return reply({
-            success: false, error: '辩论方案未通过普通教学内容校验，请重试。',
-            errorCode: 'INVALID_ORDINARY_DEBATE_CANDIDATE_RESPONSE', failureCategory: 'quality',
-          }, 422);
+          if (invalidReceipt) return ordinaryCandidateUnavailable();
           throw error;
         }
       } else if (ordinaryCandidateJob) {

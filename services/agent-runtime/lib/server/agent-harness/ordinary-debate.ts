@@ -85,14 +85,12 @@ const revisionSchema = z.object({
 });
 
 export async function executeOrdinaryDebateJob(
-  body: {jobId?: string; kind?: string; scope?: unknown; modelRoute?: {
-    route?: string; provider?: string; actual_model?: string; required_model?: string | null; allow_degraded?: boolean;
-  }},
-  payload: Record<string, unknown>,
+  body: Record<string, unknown>,
   signal: AbortSignal,
   started: number,
-  debateEndpoint: boolean,
 ) {
+  const payload = body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload)
+    ? body.payload as Record<string, unknown> : {};
   const invalid = () => ({status: 422, body: {
     success: false, error: '辩论任务缺少已核验的普通课程、活动版本或完整资料摘要。',
     errorCode: 'INVALID_ORDINARY_DEBATE_JOB', failureCategory: 'permanent',
@@ -102,7 +100,10 @@ export async function executeOrdinaryDebateJob(
     errorCode: 'ORDINARY_DEBATE_UNAVAILABLE', failureCategory: 'service',
   }});
   const request = requestSchema.safeParse({...body, payload});
-  if (!debateEndpoint || !request.success) return invalid();
+  if (!request.success || payload.generationReason === 'teacher_requested_ordinary_debate' ||
+      Object.hasOwn(payload, 'ordinaryCandidateModel') || Object.hasOwn(payload, 'ordinaryLessonPlanRevisionModel')) {
+    return invalid();
+  }
   const {kind, jobId, scope, payload: {artifactId, expectedRevision}} = request.data;
   let input;
   try {
@@ -120,7 +121,8 @@ export async function executeOrdinaryDebateJob(
     return invalid();
   }
   const modelId = process.env.HARNESS_DEEPSEEK_MODEL?.trim();
-  const route = body.modelRoute;
+  const route = body.modelRoute && typeof body.modelRoute === 'object'
+    ? body.modelRoute as Record<string, unknown> : undefined;
   if (!modelId || route?.route !== modelRoute || route.provider !== 'deepseek' ||
       route.actual_model !== modelId || route.required_model !== modelId || route.allow_degraded !== false) return unavailable();
 

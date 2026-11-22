@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {NextRequest} from 'next/server';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {POST} from '@/app/api/integration/jobs/ordinary-debate/route';
+import { POST as postMixedJob } from '@/app/api/integration/jobs/execute/route';
 import { ordinaryLessonCandidateInput } from '@/lib/server/agent-harness/ordinary-lesson-plan';
 import {POST as postCandidate} from '@/app/api/integration/jobs/ordinary-debate-candidate/route';
 import {generationFingerprint} from '@/lib/generation/durable-stage';
@@ -142,10 +143,11 @@ describe('ordinary integrated debate authoring', () => {
 
   it('requires the private debate proposal endpoint, teacher scope, complete material revisions and exclusive model pin', async () => {
     expect((await postCandidate(requestCandidate(candidateJob, 'bad-token'))).status).toBe(401);
-    expect((await postCandidate(requestCandidate(candidateJob, undefined, 'execute'))).status).toBe(422);
+    expect((await postMixedJob(requestCandidate(candidateJob, undefined, 'execute'))).status).toBe(422);
     for (const payload of [
       {...candidateJob.payload, artifactType: 'lesson-plan'}, {...candidateJob.payload, generationMode: 'multiple'},
       {...candidateJob.payload, candidateCount: '1'}, {...candidateJob.payload, generationReason: undefined},
+      {...candidateJob.payload, ordinaryLessonPlanRevisionModel: 'official'},
       {...candidateJob.payload, sourceRefs: [{...candidateSource, revisionId: 'other-revision'}]},
       {...candidateJob.payload, prompt: '图'.repeat(16_001)}, {...candidateJob.payload, workspaceId: 'self'},
     ]) {
@@ -345,6 +347,8 @@ describe('ordinary integrated debate authoring', () => {
       {...designJob, payload: unpinnedPayload}, {...designJob, scope: unscoped},
       {...designJob, payload: {...designJob.payload, workspaceId: 'self'}},
       {...designJob, payload: {...designJob.payload, expectedRevision: 0}},
+      {...designJob, payload: {...designJob.payload, generationReason: 'teacher_requested_ordinary_debate'}},
+      {...designJob, payload: {...designJob.payload, ordinaryLessonPlanRevisionModel: 'official'}},
       {...designJob, payload: {...designJob.payload, materialContext: {...designJob.payload.materialContext, complete: false}}},
     ]) {
       expect(await (await POST(request(job))).json()).toMatchObject({errorCode: 'INVALID_ORDINARY_DEBATE_JOB'});
@@ -362,8 +366,8 @@ describe('ordinary integrated debate authoring', () => {
     const {ordinaryTeaching: _scope, ...scope} = designJob.scope;
     mocks.resolveModel.mockRejectedValueOnce(new Error('legacy model fixture'));
     expect((await POST(request({...designJob, payload, scope}))).status).toBe(422);
-    expect((await POST(request(designJob, 'integration-secret', 'execute'))).status).toBe(422);
-    await POST(request({...designJob, payload, scope}, 'integration-secret', 'execute'));
+    expect((await postMixedJob(request(designJob, 'integration-secret', 'execute'))).status).toBe(422);
+    await postMixedJob(request({...designJob, payload, scope, modelRoute: {...designJob.modelRoute, route: 'teaching-default'}}, 'integration-secret', 'execute'));
     expect(mocks.resolveModel).toHaveBeenCalledWith({modelString: 'deepseek:official'});
     expect(harness).not.toHaveBeenCalled();
   });

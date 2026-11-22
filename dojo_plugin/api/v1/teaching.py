@@ -186,7 +186,7 @@ from ...agent_runtime.model_journal import ModelJournalError, record_model_event
 from ...agent_runtime.project_collection import project_collection_view
 from ...agent_runtime.reliability import public_recovery
 from ...agent_runtime.teacher_documents import requests_debate_candidates, requests_lesson_plan_candidates
-from ...agent_runtime import ordinary_material_turn, ordinary_slide_notes
+from ...agent_runtime import ordinary_lesson_plan_revision, ordinary_material_turn, ordinary_slide_notes
 from ...agent_runtime.upstream_turn import ordinary_teaching_course, ordinary_teaching_image_allowed, upstream_enabled
 from ...agent_runtime.scope import (
     ScopeError,
@@ -9378,6 +9378,11 @@ def revise_teacher_artifact(user, artifact_id, body, request_key=None):
         existing = TeachingJobs.query.filter_by(owner_id=user.id, idempotency_key=operation_key).first()
         if existing is not None:
             prior = existing.payload or {}
+            if "ordinaryLessonPlanRevisionModel" in prior and (
+                ("expectedRevision" in body and body["expectedRevision"] != prior.get("expectedRevision"))
+                or (existing.status != "SUCCEEDED" and artifact.current_revision != prior.get("expectedRevision"))
+            ):
+                return _error("教案版本已变化，请重新打开当前教案。", 409, code="REVISION_CONFLICT")
             if (prior.get("artifactId") != artifact.id or prior.get("instruction") != str(body.get("instruction") or "").strip()
                     or prior.get(ordinary_slide_notes.CONSENT, False) is not consent
                     or (consent and prior.get("expectedRevision") != body["expectedRevision"])):
@@ -9408,6 +9413,12 @@ def revise_teacher_artifact(user, artifact_id, body, request_key=None):
         })
         if not ordinary_slide_notes.pinned(payload):
             payload = ordinary_slide_layout.admit(user, artifact, payload)
+        if artifact.artifact_type == "lesson-plan":
+            try:
+                payload = ordinary_lesson_plan_revision.admit(artifact, payload)
+            except (ordinary_lesson_plan_revision.OrdinaryLessonPlanRevisionError, OrdinaryLessonPlanError) as exc:
+                db.session.rollback()
+                return _error(exc, 409, code="ORDINARY_LESSON_PLAN_REVISION_CONFLICT")
         job, _ = enqueue_job(
             owner_id=user.id,
             kind="artifact.revise",
