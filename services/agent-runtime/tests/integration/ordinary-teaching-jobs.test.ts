@@ -455,7 +455,8 @@ describe('ordinary teaching worker service routes', () => {
     }, token, 'official-model', 'official-model', endpoint);
 
   function deckRevisionRequest(artifacts: unknown[], instruction: string,
-    endpoint = 'ordinary-deck-revision', deckOperation?: string, extraContent?: Record<string, unknown>) {
+    endpoint = 'ordinary-deck-revision', deckOperation?: string, extraContent?: Record<string, unknown>,
+    pageSelection?: unknown) {
     return new NextRequest(`http://localhost/api/integration/jobs/${endpoint}`, {
       method: 'POST',
       headers: {'X-AISecEdu-Service-Token': 'integration-secret', 'Content-Type': 'application/json'},
@@ -463,7 +464,7 @@ describe('ordinary teaching worker service routes', () => {
         scope: {...job.scope, ordinaryTeaching: 'deck-revision'},
         modelRoute: {provider: 'deepseek', actual_model: 'official-model', required_model: 'official-model', allow_degraded: false},
         payload: {artifactType: 'slide-deck', revisionBackend: 'ordinary-deck-revision', artifactId: 'math-deck',
-          instruction, expectedRevision: 4, deckOperation, currentContent: {...extraContent, lesson: {id: 'lesson-a', title: '分数课', artifacts}},
+          instruction, expectedRevision: 4, deckOperation, pageSelection, currentContent: {...extraContent, lesson: {id: 'lesson-a', title: '分数课', artifacts}},
           sourceSnippet: 'PRIVATE SOURCE SELECTION'},
       }),
     });
@@ -475,7 +476,7 @@ describe('ordinary teaching worker service routes', () => {
     accent: '#51ebc3', secondary: '#85aaff', surface: '#255248',
   };
 
-  function paletteDeck() {
+  function paletteDeck(themeByStorageIndex: Record<number, Partial<typeof palette>> = {}) {
     const deck = mathLayoutDeck();
     return deck.map((fixture, index) => {
       const {content} = fixture;
@@ -489,6 +490,7 @@ describe('ordinary teaching worker service routes', () => {
       } : studio.page.visual;
       const source = coursewareSlideDataSchema.parse({
         ...studio, assets: index === 2 ? studio.assets : [], page: {...studio.page, visual},
+        theme: {...studio.theme, ...themeByStorageIndex[index]},
       });
       const canvas = index === 0 ? coursewareSlideDataSchema.parse({...source, page: {
         ...source.page, layout: {...source.page.layout!,
@@ -565,6 +567,101 @@ describe('ordinary teaching worker service routes', () => {
     });
     expect(element(2, 'verified-image')).toEqual(deck[2].content.elements.find(item => item.id === 'verified-image'));
     expect(element(2, 'image-label-backdrop-0')).toMatchObject({fill: palette.surface});
+  });
+
+  it('recolors only selected displayed pages and checks each with matching browser evidence', async () => {
+    const deck = paletteDeck({2: {background: '#f4fff0'}});
+    const instruction = '请将第3、1页换成蓝绿色主题';
+    const coursewareDesign = {theme: deck[2].content.studio.theme, title: '分数课', pages: []};
+    const fetch = vi.fn(async (url, init) => {
+      expect(String(url)).toBe(harness);
+      expect(init.body).not.toMatch(/PRIVATE|data:image|份数|分数课|plant-|3,6/);
+      const {messages, ...rest} = JSON.parse(init.body);
+      expect(rest).toEqual({});
+      const {name: _name, ...selectedColors} = deck[1].content.studio.theme;
+      expect(JSON.parse(messages[1].content)).toEqual({
+        instruction,
+        currentPalettes: [selectedColors],
+      });
+      return modelResponse({palette});
+    });
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const response = await POST(deckRevisionRequest(
+      deck, instruction, undefined, 'palette', {coursewareDesign}, [3, 1],
+    ));
+    const output = await response.json();
+    expect(response.status, JSON.stringify(output)).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+    const {content} = output.result;
+    const artifacts: typeof deck = content.lesson.artifacts;
+    expect(content.coursewareDesign).toEqual(coursewareDesign);
+    expect(artifacts.map(({id}) => id)).toEqual(deck.map(({id}) => id));
+    expect(artifacts[2]).toEqual(deck[2]);
+    for (const index of [0, 1]) {
+      expect(artifacts[index].content.studio).toEqual({
+        ...deck[index].content.studio, theme: {...deck[index].content.studio.theme, ...palette},
+      });
+    }
+    expect(artifacts[0].content.elements.find(({id}) => id === 'page-title')).toMatchObject({
+      left: 60, defaultColor: palette.foreground,
+    });
+    const evidence = mocks.inspectRendered.mock.calls.map(([studio]) => ({
+      pageId: studio.page.id,
+      sourceSha256: createHash('sha256').update(JSON.stringify(studio)).digest('hex'),
+      frames: [{step: -1, screenshotSha256: 'b'.repeat(64)}],
+    }));
+    expect(mocks.inspectRendered).toHaveBeenCalledTimes(2);
+    expect(evidence.map(({pageId}) => pageId)).toEqual(['plant-2', 'plant-1']);
+    expect(content.revisionMetadata).toMatchObject({
+      operation: 'palette', recomposed: false, pageIds: ['plant-2', 'plant-1'],
+      renderEvidence: evidence,
+    });
+  });
+
+  it('keeps the global theme even when a scoped palette explicitly lists every page', async () => {
+    const deck = paletteDeck();
+    const coursewareDesign = {theme: deck[0].content.studio.theme, pages: []};
+    const fetch = vi.fn(async () => modelResponse({palette}));
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const response = await POST(deckRevisionRequest(
+      deck, '请将第1、2、3页换成蓝绿色主题', undefined, 'palette', {coursewareDesign}, [1, 2, 3],
+    ));
+    expect(response.status).toBe(200);
+    const {result} = await response.json();
+    expect(result.content.coursewareDesign).toEqual(coursewareDesign);
+    expect(result.content.revisionMetadata.pageIds).toEqual(['plant-2', 'plant-3', 'plant-1']);
+    expect(mocks.inspectRendered).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(
+    [null, [], 'all', [0], [1, 1], [1.5], ['2'], [4]].map((pageSelection) => ({pageSelection})),
+  )(
+    'rejects invalid displayed page selection $pageSelection before any provider call',
+    async ({pageSelection}) => {
+      const fetch = vi.fn();
+      vi.stubGlobal('fetch', fetch);
+      const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+      const response = await POST(deckRevisionRequest(
+        paletteDeck(), '请将第2页换成蓝绿色主题', undefined, 'palette', undefined, pageSelection,
+      ));
+      expect(response.status).toBe(422);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(mocks.inspectRendered).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a page selection on the same route without a pinned palette operation', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+    const response = await POST(deckRevisionRequest(
+      paletteDeck(), '请把整套课件的文字改得更清楚', undefined, undefined, undefined, [1],
+    ));
+    expect(response.status).toBe(422);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -55,9 +55,11 @@ _PALETTE_STYLE = (
 )
 _PALETTE_REQUEST = re.compile(
     rf"(?:请\s*)?(?:只|仅)?\s*(?:"
-    rf"(?:把|将)?{_PALETTE_DECK}(?:的)?(?:配色|色调|颜色|色彩|主题)?\s*"
+    rf"(?:把|将)?\s*(?P<direct_target>{_PALETTE_DECK}|{_PAGE_NUMBERS.pattern})"
+    r"\s*(?:的)?(?:配色|色调|颜色|色彩|主题)?\s*"
     rf"(?:改成|改为|换成|换为|调整为|统一成|统一为|使用|采用)\s*{_PALETTE_STYLE}(?:配色|色调|主题)?"
-    rf"|(?:调整|修改|更换|统一|切换){_PALETTE_DECK}(?:的)?(?:配色|色调|颜色|色彩|主题)"
+    rf"|(?:调整|修改|更换|统一|切换)\s*(?P<other_target>{_PALETTE_DECK}|{_PAGE_NUMBERS.pattern})"
+    r"\s*(?:的)?(?:配色|色调|颜色|色彩|主题)"
     rf"\s*(?:：|:|为|成)\s*{_PALETTE_STYLE}(?:配色|色调|主题)?"
     r")[。！!]?",
     re.I,
@@ -140,8 +142,20 @@ def _ordinary_deck_request(instruction):
 
 
 def _palette_request(instruction):
+    """Return the explicitly requested display pages, or the whole-deck marker."""
     original, _ = split_source_selection(instruction)
-    return _PALETTE_REQUEST.fullmatch(original) is not None
+    match = _PALETTE_REQUEST.fullmatch(original)
+    if match is None:
+        return None
+    target = match["direct_target"] or match["other_target"]
+    if not target.startswith("第"):
+        return "all"
+    if not target.endswith("页"):
+        raise OrdinarySlideLayoutError("请完整指定要调整配色的显示页码，例如“第1、2页”。")
+    pages = sorted(int(value) for value in re.findall(r"[0-9]+", target))
+    if not all(1 <= page <= 120 for page in pages) or len(pages) != len(set(pages)):
+        raise OrdinarySlideLayoutError("按页配色需要有效且不重复的显示页码。")
+    return pages
 
 
 def _palette_colors(theme):
@@ -187,7 +201,8 @@ def admit(user, artifact, payload):
         return payload
     command = layout_request(payload.get("instruction"))
     is_deck = command is None
-    is_palette = is_deck and _palette_request(payload.get("instruction"))
+    palette_pages = _palette_request(payload.get("instruction")) if is_deck else None
+    is_palette = palette_pages is not None
     if is_deck:
         if (ordinary_slide_wording_request(payload.get("instruction"))
                 or not (is_palette or _ordinary_deck_request(payload.get("instruction")))):
@@ -200,7 +215,8 @@ def admit(user, artifact, payload):
     _scope(user, artifact)
     if not config.HARNESS_DEEPSEEK_MODEL or not upstream_enabled():
         raise OrdinarySlideLayoutError("当前课程未配置普通课件修订服务。")
-    revision, lesson = _source(artifact, payload["expectedRevision"], "all" if is_deck else command[1])
+    pages = (palette_pages or "all") if is_deck else command[1]
+    revision, lesson = _source(artifact, payload["expectedRevision"], pages)
     if is_palette and not _palette_source(revision.content, lesson):
         return payload
     return {
@@ -211,6 +227,7 @@ def admit(user, artifact, payload):
             "instructionSha256": content_hash(payload["instruction"]),
             "model": config.HARNESS_DEEPSEEK_MODEL,
             **({"operation": "palette"} if is_palette else {}),
+            **({"pageSelection": palette_pages} if isinstance(palette_pages, list) else {}),
         },
     }
 
@@ -253,21 +270,24 @@ def prepare(job, payload, *, lock=False):
     if command is None or pin.get("instructionSha256") != content_hash(instruction):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
     intent, pages = command
-    revision, lesson = _source(artifact, payload.get("expectedRevision"), pages)
-    if (revision.id, revision.content_hash) != (pin.get("revisionId"), pin.get("revisionSha256")):
-        raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
     operation = pin.get("operation")
-    if "operation" in pin and (
-        not is_deck or operation != "palette" or not _palette_request(instruction)
-        or not _palette_source(revision.content, lesson)
-    ):
+    if "operation" in pin or "pageSelection" in pin:
+        palette_pages = _palette_request(instruction)
+        if (not is_deck or operation != "palette" or palette_pages is None
+                or ("pageSelection" in pin) != isinstance(palette_pages, list)
+                or not _palette_equal(palette_pages, pin.get("pageSelection", "all"))):
+            raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
+        pages = palette_pages
+    revision, lesson = _source(artifact, payload.get("expectedRevision"), pages)
+    if ((revision.id, revision.content_hash) != (pin.get("revisionId"), pin.get("revisionSha256"))
+            or (operation == "palette" and not _palette_source(revision.content, lesson))):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
     return {
         pin_key: pin, "revisionBackend": backend, "artifactType": "slide-deck",
         "artifactId": artifact.id, "expectedRevision": revision.revision,
         "instruction": intent, "currentContent": revision.content,
         **({"deckOperation": operation} if operation == "palette" else {}),
-        **({} if is_deck else {"pageSelection": pages}),
+        **({"pageSelection": pages} if not is_deck or isinstance(pages, list) else {}),
     }
 
 
@@ -386,8 +406,18 @@ def _validate_deck_receipt(route, payload, meta, content):
         or before is None or after is None or before.get("id") != after.get("id")
     ):
         raise OrdinarySlideLayoutError("整套课件修订缺少指定模型或静态课件的有效回执。")
-    if (payload[DECK_PIN].get("operation") if isinstance(payload.get(DECK_PIN), dict) else None) == "palette":
-        _validate_palette_receipt(payload["currentContent"], content, before, after, revision)
+    pin = payload.get(DECK_PIN)
+    if isinstance(pin, dict) and pin.get("operation") == "palette":
+        if (
+            not isinstance(pin.get("model"), str) or not pin["model"] or route.get("required_model") != pin["model"]
+            or content_hash(payload["currentContent"]) != pin.get("revisionSha256")
+            or ("pageSelection" in pin) != ("pageSelection" in payload)
+            or not _palette_equal(pin.get("pageSelection"), payload.get("pageSelection"))
+        ):
+            raise OrdinarySlideLayoutError("配色修订回执与已锁定的课件和页码不一致。")
+        _validate_palette_receipt(
+            payload["currentContent"], content, before, after, revision, pin.get("pageSelection", "all"),
+        )
         return
     if revision.get("operation") == "palette":
         raise OrdinarySlideLayoutError("课件修订回执与已锁定的请求不一致。")
@@ -486,31 +516,47 @@ def _palette_slide_matches(before, after, palette):
     )
 
 
-def _validate_palette_receipt(source, result, before, after, revision):
+def _validate_palette_receipt(source, result, before, after, revision, pages):
     old, new = before["artifacts"], after["artifacts"]
     displayed = [_page_id(slide) for slide in _displayed_pages(old)]
-    palette = _palette_colors(new[0]["content"]["studio"].get("theme"))
+    if pages == "all":
+        selected = displayed
+    elif (
+        not isinstance(pages, list) or not pages
+        or any(type(page) is not int or not 1 <= page <= len(displayed) for page in pages)
+        or pages != sorted(set(pages))
+    ):
+        raise OrdinarySlideLayoutError("配色修订回执缺少有效的显示页码。")
+    else:
+        selected = [displayed[page - 1] for page in pages]
+    selected_ids = set(selected)
+    returned = {_page_id(slide): slide for slide in new}
+    first = returned.get(selected[0])
+    palette = _palette_colors(first["content"]["studio"].get("theme")) if first else None
     if (
         set(revision) != {"mode", "operation", "recomposed", "pageIds", "renderEvidence"}
         or revision.get("operation") != "palette" or revision.get("recomposed") is not False
-        or revision.get("pageIds") != displayed or palette is None or not _palette_source(source, before)
+        or revision.get("pageIds") != selected or palette is None or not _palette_source(source, before)
         or not _palette_equal(_except_fields(source, "lesson", "revisionMetadata", "coursewareDesign"),
                               _except_fields(result, "lesson", "revisionMetadata", "coursewareDesign"))
         or not _palette_equal(_except_fields(before, "artifacts", "updatedAt"), _except_fields(after, "artifacts", "updatedAt"))
         or type(after.get("updatedAt")) is not int or after["updatedAt"] < 0
         or len(old) != len(new)
-        or not all(_palette_slide_matches(left, right, palette) for left, right in zip(old, new))
+        or not all(
+            _palette_slide_matches(left, right, palette) if _page_id(left) in selected_ids else _palette_equal(left, right)
+            for left, right in zip(old, new)
+        )
     ):
-        raise OrdinarySlideLayoutError("整套配色修订改变了颜色以外的课件内容，或未覆盖全部页面。")
+        raise OrdinarySlideLayoutError("配色修订改变了颜色以外的课件内容，或未覆盖指定页面。")
 
     old_design, new_design = source.get("coursewareDesign"), result.get("coursewareDesign")
-    if isinstance(old_design, dict) and "theme" in old_design:
+    if pages == "all" and isinstance(old_design, dict) and "theme" in old_design:
         old_design = {**old_design, "theme": {**old_design["theme"], **palette}}
     if ("coursewareDesign" in source) != ("coursewareDesign" in result) or not _palette_equal(old_design, new_design):
         raise OrdinarySlideLayoutError("整套配色修订改变了颜色以外的设计信息。")
     if not any(
         any(slide["content"]["studio"]["theme"][key].lower() != color.lower() for key, color in palette.items())
-        for slide in old
+        for slide in old if _page_id(slide) in selected_ids
     ):
-        raise OrdinarySlideLayoutError("整套配色修订没有可保存的颜色变化。")
-    _validate_render_evidence(revision, displayed)
+        raise OrdinarySlideLayoutError("所选页面没有可保存的颜色变化。")
+    _validate_render_evidence(revision, selected)

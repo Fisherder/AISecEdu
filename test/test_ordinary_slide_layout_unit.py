@@ -443,11 +443,16 @@ def palette_source(case):
     return content
 
 
-def palette_response(source):
+def palette_response(source, selection="all"):
     output = copy.deepcopy(source)
-    output["coursewareDesign"]["theme"].update(NEW_PALETTE)
+    displayed = ["three", "two", "one"]
+    ids = displayed if selection == "all" else [displayed[page - 1] for page in selection]
+    if selection == "all":
+        output["coursewareDesign"]["theme"].update(NEW_PALETTE)
     for page in output["lesson"]["artifacts"]:
         native = page["content"]
+        if native["studio"]["page"]["id"] not in ids:
+            continue
         native["studio"]["theme"].update(NEW_PALETTE)
         native["background"]["color"] = NEW_PALETTE["background"]
         text, chart = native["elements"]
@@ -457,7 +462,6 @@ def palette_response(source):
         chart["textColor"] = NEW_PALETTE["foreground"]
         chart["lineColor"] = NEW_PALETTE["surface"]
     output["lesson"]["updatedAt"] = 1
-    ids = ["three", "two", "one"]
     output["revisionMetadata"] = {
         "mode": "ordinary-deck-revision", "operation": "palette", "recomposed": False, "pageIds": ids,
         "renderEvidence": [
@@ -498,7 +502,7 @@ def test_palette_is_pinned_to_current_teacher_revision_and_resources(case):
     "不要将整个课件换成蓝绿色主题",
     "请将整个课件换成蓝绿色主题，然后润色所有标题",
     "请增补两页并把整套课件改为暖色",
-    "请把第2页的主题换成暖色",
+    "请把第1至2页的主题换成暖色",
     "请把整套课件做成海报式风格",
 ])
 def test_palette_does_not_admit_negated_mixed_scoped_or_unknown_style(case, instruction):
@@ -563,3 +567,123 @@ def test_palette_receipt_rejects_tampering(case, mutation):
         metadata["recomposed"] = True
     with pytest.raises(ns["OrdinarySlideLayoutError"]):
         ns["validate_receipt"](route, prepared, response)
+
+
+@pytest.mark.parametrize(("instruction", "selection", "selected_ids"), [
+    ("请将第2页换成蓝绿色主题", [2], ["two"]),
+    ("请将第3、1页换成蓝绿色主题", [1, 3], ["three", "one"]),
+    ("请把第2页的主题换成暖色", [2], ["two"]),
+    ("请将第3、1、2页换成蓝绿色主题", [1, 2, 3], ["three", "two", "one"]),
+])
+def test_page_palette_pins_original_display_order_and_preserves_deck_theme(case, instruction, selection, selected_ids):
+    ns, jobs, job, user, artifact, revision = case
+    source = palette_source(case)
+    job.payload = ns["admit"](user, artifact, {
+        **job.payload, "currentContent": source, "instruction": instruction, "pageSelection": [99],
+    })
+    pin = job.payload[ns["DECK_PIN"]]
+    assert pin["operation"] == "palette"
+    assert pin["pageSelection"] == selection
+    assert pin["revisionId"] == revision.id and pin["revisionSha256"] == revision.content_hash
+    assert pin["instructionSha256"] == ns["content_hash"](instruction)
+    prepared = jobs["_runtime_payload"](job)
+    route = ns["route_model"](job.kind, payload=prepared, allow_degraded=True)
+    request = jobs["_runtime_request_body"](job, route, prepared)
+    assert request["scope"]["ordinaryTeaching"] == "deck-revision"
+    assert request["payload"]["deckOperation"] == "palette"
+    assert request["payload"]["pageSelection"] == selection
+    assert ns["DECK_PIN"] not in request["payload"]
+    assert route["required_model"] == "pinned-fixture" and route["allow_degraded"] is False
+    response = palette_response(source, selection)
+    metadata = response["result"]["content"]["revisionMetadata"]
+    assert metadata["pageIds"] == selected_ids
+    ns["validate_receipt"](route, prepared, response)
+    assert response["result"]["content"]["coursewareDesign"] == source["coursewareDesign"]
+
+    # Losing the scope cannot turn a pinned page operation into a whole-deck revision.
+    del pin["pageSelection"]
+    with pytest.raises(ns["OrdinarySlideLayoutError"]):
+        jobs["_runtime_payload"](job)
+
+
+@pytest.mark.parametrize("instruction", [
+    "请将第0页换成蓝绿色主题",
+    "请将第1、1页换成蓝绿色主题",
+    "请将第4页换成蓝绿色主题",
+    "请将第121页换成蓝绿色主题",
+])
+def test_page_palette_rejects_invalid_or_out_of_range_display_pages(case, instruction):
+    ns, _, job, user, artifact, _ = case
+    source = palette_source(case)
+    with pytest.raises(ns["OrdinarySlideLayoutError"], match="页码"):
+        ns["admit"](user, artifact, {**job.payload, "currentContent": source, "instruction": instruction})
+
+
+@pytest.mark.parametrize("mutation", ["design", "unselected", "page_ids", "evidence", "wire_selection", "model", "source"])
+def test_page_palette_receipt_rejects_selection_escape(case, mutation):
+    ns, jobs, job, user, artifact, _ = case
+    source = palette_source(case)
+    selection = [1, 3]
+    job.payload = ns["admit"](user, artifact, {
+        **job.payload, "currentContent": source, "instruction": "请将第3、1页换成蓝绿色主题",
+    })
+    prepared = jobs["_runtime_payload"](job)
+    route = ns["route_model"](job.kind, payload=prepared)
+    response = palette_response(source, selection)
+    output = response["result"]["content"]
+    metadata = output["revisionMetadata"]
+    if mutation == "design":
+        output["coursewareDesign"]["theme"].update(NEW_PALETTE)
+    elif mutation == "unselected":
+        output["lesson"]["artifacts"][1]["content"]["studio"]["theme"].update(NEW_PALETTE)
+    elif mutation == "page_ids":
+        metadata["pageIds"].reverse()
+    elif mutation == "evidence":
+        metadata["renderEvidence"][0]["pageId"] = "two"
+    elif mutation == "wire_selection":
+        prepared["pageSelection"] = [1, 2]
+    elif mutation == "model":
+        route["required_model"] = response["model"]["actualModel"] = "different-model"
+    else:
+        prepared["currentContent"] = {**source, "unexpected": True}
+    with pytest.raises(ns["OrdinarySlideLayoutError"]):
+        ns["validate_receipt"](route, prepared, response)
+
+
+def test_whole_palette_historical_pin_generates_no_page_selection(case):
+    ns, jobs, job, user, artifact, _ = case
+    source = palette_source(case)
+    job.payload = ns["admit"](user, artifact, {**job.payload, "currentContent": source, "instruction": PALETTE_REQUEST})
+    assert "pageSelection" not in job.payload[ns["DECK_PIN"]]
+    prepared = jobs["_runtime_payload"](job)
+    assert "pageSelection" not in prepared
+    route = ns["route_model"](job.kind, payload=prepared)
+    ns["validate_receipt"](route, prepared, palette_response(source))
+
+
+
+def test_page_palette_rechecks_display_order_after_receipt_before_saving(case):
+    ns, jobs, job, user, artifact, revision = case
+    source = palette_source(case)
+    job.payload = ns["admit"](user, artifact, {
+        **job.payload, "currentContent": source, "instruction": "请将第3、1页换成蓝绿色主题",
+    })
+    prepared = jobs["_runtime_payload"](job)
+    route = ns["route_model"](job.kind, payload=prepared)
+    response = palette_response(source, [1, 3])
+    ns["validate_receipt"](route, prepared, response)
+
+    artifact_query = ns["TeachingArtifacts"].query.filter_by.return_value
+    artifact_query.first.return_value = artifact
+    artifact_query.with_for_update.return_value.populate_existing.return_value.first.return_value = artifact
+    ns["Users"].query.filter_by.return_value.first.return_value = user
+    create_revision = MagicMock()
+    jobs.update(TeachingArtifacts=ns["TeachingArtifacts"], Users=ns["Users"], create_revision=create_revision)
+    revision.content = copy.deepcopy(source)
+    revision.content["lesson"]["artifacts"][1]["order"] = 0
+    revision.content_hash = ns["content_hash"](revision.content)
+
+    with pytest.raises(ns["OrdinarySlideLayoutError"], match="课件版本"):
+        jobs["_persist_result"](job, response["result"])
+    artifact_query.with_for_update.assert_called_once()
+    create_revision.assert_not_called()

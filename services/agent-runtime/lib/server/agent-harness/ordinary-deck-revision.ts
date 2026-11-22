@@ -66,10 +66,17 @@ export function ordinaryDeckTarget(payload: Record<string, unknown>) {
       'INVALID_ORDINARY_DECK',
       '请提交普通静态课件的单行修订要求，勿附源码或链接。',
     );
+  const { pageSelection } = payload;
+  if (
+    pageSelection !== undefined &&
+    (payload.deckOperation !== 'palette' || !Array.isArray(pageSelection))
+  ) {
+    throw invalidPalette('局部配色需要明确指定课件页码。');
+  }
   const target = ordinarySlideLayoutTarget({
     ...payload,
     instruction: '确认静态原稿',
-    pageSelection: 'all',
+    pageSelection: pageSelection ?? 'all',
   });
   if (
     typeof target.lesson.title !== 'string' ||
@@ -267,7 +274,8 @@ export async function reviseOrdinaryDeckPalette(
   target: ReturnType<typeof ordinaryDeckTarget>,
   model: OrdinaryTeachingModel,
 ) {
-  const design = record(target.content.coursewareDesign);
+  const wholeDeck = target.pageSelection === 'all';
+  const design = wholeDeck ? record(target.content.coursewareDesign) : undefined;
   const designTheme = record(design?.theme);
   if (
     target.targets.some(({ studio }) => {
@@ -290,7 +298,10 @@ export async function reviseOrdinaryDeckPalette(
       {
         role: 'system',
         content:
-          '仅按教师要求调整整套普通静态课件的主题颜色。只返回 JSON，顶层为 palette，' +
+          (wholeDeck
+            ? '仅按教师要求调整整套普通静态课件的主题颜色。'
+            : '仅按教师要求调整选中的普通静态课件页面的主题颜色。') +
+          '只返回 JSON，顶层为 palette，' +
           '包含 background、foreground、muted、accent、secondary、surface 六种 #RRGGBB 颜色。' +
           '未要求调整的颜色尽量保留，只有为保持对比度时才调整关联色。' +
           '前景与背景对比度至少 7:1，次要文字与背景至少 4.5:1，前景与面板至少 4.5:1，强调色与背景至少 3:1。',
