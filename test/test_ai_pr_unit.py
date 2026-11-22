@@ -1202,11 +1202,12 @@ def test_large_publication_binds_every_report_and_cannot_repair_or_auto_approve(
                 assert not path.endswith('/files')
                 return []
 
-        def add(index, value=None):
+        def add(index, value=None, review=None):
             target = reports / f'deepseek-segment-{index}' / 'segment-report.json'
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(json.dumps({'head': head, 'base': base, 'signature': context['signature'],
-                                          'chunk': chunks[index] if value is None else value, 'report': report()}))
+                                          'chunk': chunks[index] if value is None else value,
+                                          'report': report() if review is None else review}))
             return target
 
         with (patch.object(ai, 'GitHub', Client),
@@ -1226,6 +1227,19 @@ def test_large_publication_binds_every_report_and_cannot_repair_or_auto_approve(
             assert '等待人工审批' in record.call_args.args[3]
             assert record.call_args.kwargs['external_id'] == context['large_review_key']
             comment.assert_called_once()
+
+            add(1, review={**report(), 'requires_human': True, 'human_reason': '合成课堂仍需人工验收。'})
+            record.reset_mock()
+            comment.reset_mock()
+            publish()
+            assert record.call_args.args[2:4] == ('completed', ai.LARGE_REVIEW_TITLES['failure'])
+            assert record.call_args.args[-1] == 'failure'
+            assert record.call_args.kwargs['external_id'] == context['large_review_key']
+            comment.assert_called_once()
+            published = comment.call_args.args[2]
+            assert published['requires_human'] is True
+            assert '需要人工核对的分段：2' in published['human_reason']
+
             (folder / 'repair.patch').write_text('malicious artifact')
             rejects(publish)
             git.assert_not_called()
@@ -1472,14 +1486,17 @@ def test_large_review_gate_retains_only_current_complete_github_checks():
     other_author = {'login': 'Fisherder', 'id': 1, 'type': 'User'}
     cases = (
         ('same input', {}, True),
-        ('completed review with findings', {'check': {**check, 'conclusion': 'failure',
-                                                       'output': {'title': ai.LARGE_REVIEW_TITLES['failure']}}}, True),
+        ('completed review requires human follow-up', {'check': {**check, 'conclusion': 'failure',
+            'output': {'title': ai.LARGE_REVIEW_TITLES['failure'], 'summary': '部分分段需要人工补审。'}}}, True),
         ('explicit retry', {'retry': 'true'}, False),
         ('in-progress check', {'check': {**check, 'status': 'in_progress'}}, False),
         ('failed execution', {'check': {**check, 'conclusion': 'failure', 'output': {'title': 'AI 执行失败'}}}, False),
         ('expired', {'check': {**check, 'completed_at': (now - ai.timedelta(days=2)).isoformat()}}, False),
         ('missing date', {'check': {**check, 'completed_at': None}}, False),
         ('missing check', {'check': None}, False),
+        ('forged comment is not a large review cache', {'check': None, 'comments': [
+            {'id': 99, 'user': {'login': 'untrusted-bot[bot]'}, 'body': f'{ai.MARKER}\n{external_id}'},
+        ]}, False),
         ('missing reuse marker', {'check': {**check, 'external_id': ''}}, False),
         ('another check app', {'check': {**check, 'app': {'slug': 'another-check-app'}}}, False),
         ('another pull request', {'pr': {**pr, 'number': 2}}, False),
