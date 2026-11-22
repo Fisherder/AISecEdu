@@ -1030,9 +1030,17 @@ def dispatch_review():
     repo_id = event['repository']['id']
     if (run.get('head_repository') or {}).get('id') != repo_id:
         return
-    candidates = [row for row in run.get('pull_requests', [])
-                  if row['base']['repo']['id'] == repo_id and row['head']['repo']['id'] == repo_id
-                  and row['base']['ref'] == POLICY['base_branch'] and row['head']['ref'] == run['head_branch']]
+    associated = run.get('pull_requests')
+    if not associated:
+        # GitHub can omit PR metadata on a review run, even for an open same-repository PR.
+        head_sha = run.get('head_sha')
+        if not isinstance(head_sha, str) or not re.fullmatch(r'[0-9a-f]{40}', head_sha):
+            return
+        associated = client.pages(f'/commits/{head_sha}/pulls')
+    candidates = [row for row in associated
+                  if (row['base'].get('repo') or {}).get('id') == repo_id
+                  and (row['head'].get('repo') or {}).get('id') == repo_id
+                  and row['base']['ref'] == POLICY['base_branch'] and row['head']['ref'] == run.get('head_branch')]
     if len(candidates) != 1:
         return
     candidate = candidates[0]

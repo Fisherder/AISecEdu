@@ -140,6 +140,51 @@ def test_review_event_dispatch_uses_a_unique_live_eligible_pr_and_fixed_ref():
                 client.repo_api.reset_mock()
 
 
+def test_review_event_fallback_checks_all_associated_prs_before_dispatch():
+    pr = codex_app_pr()
+    head_sha = 'a' * 40
+    candidate = {'number': pr['number'], 'base': {'ref': 'develop', 'repo': {'id': 7}},
+                 'head': {'ref': pr['head']['ref'], 'repo': {'id': 7}}}
+    excluded = [
+        {**candidate, 'base': {**candidate['base'], 'repo': None}},
+        {**candidate, 'head': {**candidate['head'], 'repo': None}},
+        {**candidate, 'head': {**candidate['head'], 'repo': {'id': 8}}},
+        {**candidate, 'head': {**candidate['head'], 'ref': 'feat/other'}},
+        {**candidate, 'base': {**candidate['base'], 'ref': 'other'}},
+    ]
+    run = {'path': '.github/workflows/ai-pr-review-event.yml', 'event': 'pull_request_review',
+           'head_repository': {'id': 7}, 'head_branch': pr['head']['ref'], 'head_sha': head_sha,
+           'actor': {'login': 'Fisherder'}, 'conclusion': 'success', 'run_attempt': 1, 'pull_requests': []}
+    path = f'/commits/{head_sha}/pulls'
+    dispatch = {'ref': 'develop',
+                'inputs': {'pr': str(pr['number']), 'head_branch': pr['head']['ref'], 'retry': 'false'}}
+    with tempfile.TemporaryDirectory() as directory, patch.object(ai.GitHub, '__init__', return_value=None):
+        event = Path(directory) / 'event.json'
+        event.write_text(json.dumps({'workflow_run': run, 'repository': {'id': 7}}))
+        with patch.dict(os.environ, {'GITHUB_EVENT_PATH': str(event)}), patch.object(
+            ai.GitHub, 'repo', pr['head']['repo']['full_name'], create=True
+        ), patch.object(ai.GitHub, 'repo_api') as repo_api:
+            first_page = excluded * 20
+            for last_page, expected in (
+                ([candidate], [(f'/pulls/{pr["number"]}',),
+                               ('/actions/workflows/ai-pr-autopilot.yml/dispatches', dispatch, 'POST')]),
+                ([candidate, {**candidate, 'number': pr['number'] + 1}], []),
+                ([], []),
+            ):
+                repo_api.side_effect = [first_page, last_page, pr, None]
+                ai.dispatch_review()
+                assert [call.args for call in repo_api.call_args_list] == [
+                    (f'{path}?per_page=100&page=1',), (f'{path}?per_page=100&page=2',), *expected,
+                ]
+                repo_api.reset_mock()
+
+            for bad_sha in ('bad', None):
+                event.write_text(json.dumps({'workflow_run': {**run, 'head_sha': bad_sha},
+                                             'repository': {'id': 7}}))
+                ai.dispatch_review()
+                repo_api.assert_not_called()
+
+
 def test_dispatched_review_skips_if_the_pr_head_branch_changed():
     pr = codex_app_pr()
     with tempfile.TemporaryDirectory() as directory, patch.object(ai, 'GitHub') as github:
