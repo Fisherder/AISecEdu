@@ -164,6 +164,8 @@ jobs:
             test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py test/test_ordinary_material_turn_unit.py \
             test/test_ordinary_lesson_plan_unit.py test/test_ordinary_slide_layout_unit.py \
             test/test_studio_agent_policy_unit.py
+      - name: Verify the offline development Compose rehearsal
+        run: python3 -m unittest discover -s test -p test_teaching_rehearsal_unit.py -v
       - name: Verify cross-course navigation in desktop and mobile viewports
         run: CHROME_BIN="$(command -v google-chrome)" node test/browser/teacher-course-navigation.mjs
       - name: Courseware editor browser component checks
