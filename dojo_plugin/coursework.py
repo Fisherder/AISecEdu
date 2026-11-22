@@ -194,12 +194,19 @@ def _item_view(
     return view
 
 
+def _submission_status(status, *, submitted):
+    if status in {"SUBMITTED", "GRADED"} and not submitted:
+        return "IN_PROGRESS"
+    return status
+
+
 def _submission_view(submission, *, include_answers=False, teacher=False, expose_answer=False):
     if submission is None:
         return None
-    normalized_activity = activity_state(submission.status)
+    status = _submission_status(submission.status, submitted=submission.submitted_at is not None)
+    normalized_activity = activity_state(status)
     normalized_assessment = assessment_state(
-        "READY" if submission.status == "GRADED" else None,
+        "READY" if status == "GRADED" else None,
         activity=normalized_activity,
     )
     score_ready = normalized_assessment == "READY"
@@ -214,11 +221,11 @@ def _submission_view(submission, *, include_answers=False, teacher=False, expose
         "id": submission.id,
         "studentId": submission.student_id,
         "studentName": submission.student.name if submission.student else str(submission.student_id),
-        "status": submission.status,
+        "status": status,
         "activityState": normalized_activity,
         "assessmentState": normalized_assessment,
-        "objectiveScore": float(submission.objective_score),
-        "aiScore": float(submission.ai_score),
+        "objectiveScore": float(submission.objective_score) if teacher or score_ready else 0.0,
+        "aiScore": float(submission.ai_score) if teacher or score_ready else 0.0,
         "score": float(submission.total_score) if score_ready else None,
         "maxScore": float(submission.max_score),
         "percent": (
@@ -226,10 +233,10 @@ def _submission_view(submission, *, include_answers=False, teacher=False, expose
             if score_ready and submission.max_score
             else None
         ),
-        "trustScore": float(submission.trust_score),
+        "trustScore": float(submission.trust_score) if teacher or score_ready else 1.0,
         "feedback": feedback,
         "submittedAt": timestamp(submission.submitted_at),
-        "gradedAt": timestamp(submission.graded_at),
+        "gradedAt": timestamp(submission.graded_at) if teacher or score_ready else None,
         "started": timestamp(submission.started),
         "updated": timestamp(submission.updated),
     }
@@ -245,11 +252,11 @@ def _submission_view(submission, *, include_answers=False, teacher=False, expose
                     **{key: row[key] for key in ("itemId", "score", "maxScore", "source", "needsReview") if key in row},
                     "feedback": row.get("feedback", "") if show_item_feedback else "",
                 }
-                for row in item_results if isinstance(row, dict)
+                for row in item_results if score_ready and isinstance(row, dict)
             ]
             result["grading"] = {
                 "teacherOverride": {key: override[key] for key in ("score", "at") if key in override},
-            } if override else {}
+            } if score_ready and override else {}
     return result
 
 
@@ -263,16 +270,20 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
         ).first()
     counts = {}
     if teacher:
+        has_submitted_at = TeachingAssignmentSubmissions.submitted_at.isnot(None)
         rows = (
             db.session.query(
                 TeachingAssignmentSubmissions.status,
+                has_submitted_at,
                 db.func.count(TeachingAssignmentSubmissions.id),
             )
             .filter_by(assignment_id=assignment.id)
-            .group_by(TeachingAssignmentSubmissions.status)
+            .group_by(TeachingAssignmentSubmissions.status, has_submitted_at)
             .all()
         )
-        counts = {status: int(count) for status, count in rows}
+        for status, submitted, count in rows:
+            status = _submission_status(status, submitted=submitted)
+            counts[status] = counts.get(status, 0) + int(count)
         roster = DojoUsers.query.filter(
             DojoUsers.dojo_id == assignment.dojo_id,
             DojoUsers.type != "admin",
@@ -280,6 +291,10 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
         started = sum(counts.values())
         counts["TOTAL"] = roster
         counts["NOT_STARTED"] = max(0, roster - started)
+    submission_status = (
+        _submission_status(submission.status, submitted=submission.submitted_at is not None)
+        if submission else None
+    )
     settings = assignment.settings or {}
     answer_policy = str(settings.get("answerPolicy") or "AFTER_SUBMISSION").upper()
     if answer_policy not in {"NEVER", "AFTER_SUBMISSION", "AFTER_DUE", "IMMEDIATE"}:
@@ -288,8 +303,7 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
         teacher
         or answer_policy == "IMMEDIATE"
         or answer_policy == "AFTER_SUBMISSION"
-        and submission is not None
-        and submission.status in {"SUBMITTED", "GRADED"}
+        and submission_status in {"SUBMITTED", "GRADED"}
         or answer_policy == "AFTER_DUE"
         and assignment.due_at is not None
         and assignment.due_at <= now
@@ -349,8 +363,8 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
         "isAvailable": assignment.available_from is None or assignment.available_from <= now,
         "isOverdue": bool(assignment.due_at and assignment.due_at < now),
         "activityState": activity_state(
-            submission.status if submission else None,
-            completed=bool(submission and submission.status == "GRADED"),
+            submission_status,
+            completed=submission_status == "GRADED",
         ),
         "assessmentState": (
             submission_view.get("assessmentState")
@@ -371,7 +385,7 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
                 assignment,
                 item,
                 teacher=teacher,
-                result=result_by_item.get(item.id) if submission and submission.status == "GRADED" else None,
+                result=result_by_item.get(item.id) if submission_status == "GRADED" else None,
                 expose_answer=expose_answer,
                 challenge_solved_at=challenge_solves.get(item.challenge_id),
             )
@@ -1034,7 +1048,7 @@ def save_submission(assignment, user, answers, *, submit=False):
             status="IN_PROGRESS",
         )
         db.session.add(submission)
-    elif submission.status == "GRADED" and not settings.get("allowResubmit", True):
+    elif not settings.get("allowResubmit", True) and submission.submitted_at is not None:
         raise ValueError("这项任务不允许重新提交。")
     items_by_id = {item.id: item for item in assignment.items}
     normalized_answers = {}
@@ -1091,6 +1105,8 @@ def override_submission_grade(assignment, submission_id, user, score, feedback=N
     ).with_for_update().first()
     if submission is None:
         raise ScopeError("Submission not found")
+    if submission.status not in {"SUBMITTED", "GRADED"} or submission.submitted_at is None:
+        raise ValueError("学生交卷后才能改分。")
     try:
         numeric_score = float(score)
     except (TypeError, ValueError) as exc:
@@ -1141,12 +1157,13 @@ def roster_submissions(assignment):
         DojoUsers.dojo_id == assignment.dojo_id,
         DojoUsers.type != "admin",
     ).order_by(DojoUsers.user_id).all()
-    return [
-        {
+    rows = []
+    for member in members:
+        submission_view = _submission_view(submissions.get(member.user_id), include_answers=True, teacher=True)
+        rows.append({
             "studentId": member.user_id,
             "studentName": member.user.name if member.user else str(member.user_id),
-            "status": submissions[member.user_id].status if member.user_id in submissions else "NOT_STARTED",
-            "submission": _submission_view(submissions.get(member.user_id), include_answers=True, teacher=True),
-        }
-        for member in members
-    ]
+            "status": submission_view["status"] if submission_view else "NOT_STARTED",
+            "submission": submission_view,
+        })
+    return rows

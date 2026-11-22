@@ -3,6 +3,7 @@
 import ast
 import datetime
 import math
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -58,21 +59,33 @@ def classroom():
         "TeachingAssignmentSubmissions": submissions,
         "utcnow": lambda: NOW, "db": MagicMock(), "DojoUsers": MagicMock(),
         "timestamp": lambda value: value.isoformat() if value else None,
-        "activity_state": lambda *args, **kwargs: "COMPLETED",
-        "assessment_state": lambda state, **kwargs: state,
-        "math": math, "ScopeError": ValueError, "_challenge_link": lambda *args: None,
+        "math": math, "_challenge_link": lambda *args: None,
         "_user": lambda: student, "assignment_for_student": lambda *args, **kwargs: assignment,
-        "LearningAuditEvents": SimpleNamespace, "request": request,
+        "LearningAuditEvents": SimpleNamespace, "request": request, "uuid": uuid,
+        "safe_return_path": lambda href: href,
     }
     load_functions(ns, ROOT / "dojo_plugin" / "coursework.py", {
         "_bounded_text", "_item_view", "_submission_view", "assignment_view",
-        "override_submission_grade", "generate_assignment_payload",
+        "override_submission_grade", "generate_assignment_payload", "save_submission", "_normalize_answer",
+        "_submission_status",
+    })
+    load_functions(ns, ROOT / "dojo_plugin" / "learning" / "student_experience.py", {
+        "activity_state", "assessment_state", "error_contract",
     })
     path = ROOT / "dojo_plugin" / "api" / "v1" / "coursework.py"
-    work = next(node for node in ast.parse(path.read_text()).body if getattr(node, "name", None) == "AssignmentWork")
+    classes = {node.name: node for node in ast.parse(path.read_text()).body if isinstance(node, ast.ClassDef)}
+    work = classes["AssignmentWork"]
     get = next(node for node in work.body if getattr(node, "name", None) == "get")
     get.decorator_list = []
-    load_functions(ns, path, {"_ok"}, [get])
+    detail = classes["AssignmentSubmissionDetail"]
+    patch = next(node for node in detail.body if getattr(node, "name", None) == "patch")
+    patch.decorator_list = []
+    ns.update(
+        ScopeError=type("ScopeError", (Exception,), {}),
+        assignment_for_teacher=lambda *args, **kwargs: assignment,
+        roster_submissions=lambda assignment: [],
+    )
+    load_functions(ns, path, {"_ok", "_body", "_error"}, [get, patch])
     app = Flask(__name__)
     app.add_url_rule("/assignments/<assignment_id>/work", view_func=lambda assignment_id: ns["get"](None, assignment_id))
 
@@ -81,7 +94,24 @@ def classroom():
         assert response.status_code == 200
         return response.get_json()["data"]["assignment"]
 
-    return SimpleNamespace(student_view=read_student, ns=ns, assignment=assignment, submission=submission, teacher=teacher)
+    def override_from_teacher(score, feedback):
+        ns["_user"] = lambda: teacher
+        try:
+            return app.test_client().patch(
+                "/assignments/fractions/submissions/submission", json={"score": score, "feedback": feedback},
+            )
+        finally:
+            ns["_user"] = lambda: student
+
+    app.add_url_rule(
+        "/assignments/<assignment_id>/submissions/<submission_id>", endpoint="override", methods=["PATCH"],
+        view_func=lambda assignment_id, submission_id: ns["patch"](None, assignment_id, submission_id),
+    )
+    ns["grade_submission"] = MagicMock()
+    return SimpleNamespace(
+        student_view=read_student, ns=ns, assignment=assignment, submission=submission, teacher=teacher,
+        student=student, teacher_override=override_from_teacher,
+    )
 
 
 @pytest.mark.parametrize("policy,due_at,visible", [
@@ -113,10 +143,12 @@ def test_student_result_endpoints_follow_answer_release(classroom, policy, due_a
 
 
 def test_full_teacher_grading_is_preserved(classroom):
-    classroom.ns["db"].session.query.return_value.filter_by.return_value.group_by.return_value.all.return_value = []
-    classroom.ns["DojoUsers"].query.filter.return_value.count.return_value = 1
+    groups = classroom.ns["db"].session.query.return_value.filter_by.return_value.group_by.return_value
+    groups.all.return_value = [("GRADED", True, 1), ("GRADED", False, 1), ("IN_PROGRESS", False, 1)]
+    classroom.ns["DojoUsers"].query.filter.return_value.count.return_value = 4
     teacher_view = classroom.ns["assignment_view"](classroom.assignment, teacher=True)
     assert teacher_view["settings"]["generation"]["prompt"] == PRIVATE
+    assert teacher_view["submissionCounts"] == {"GRADED": 1, "IN_PROGRESS": 2, "TOTAL": 4, "NOT_STARTED": 1}
     actual = classroom.ns["_submission_view"](classroom.submission, include_answers=True, teacher=True)
     assert actual["feedback"] == PRIVATE
     assert actual["itemResults"][0]["internal"] == PRIVATE
@@ -187,10 +219,64 @@ def test_resubmission_draft_keeps_own_answers_without_prior_grading_text(classro
     classroom.ns["override_submission_grade"](
         classroom.assignment, classroom.submission.id, classroom.teacher, 3, FEEDBACK,
     )
-    classroom.submission.status = "IN_PROGRESS"
-    classroom.submission.answers = {"item": "我正在修改对分数的解释。"}
+    classroom.ns["save_submission"](
+        classroom.assignment, classroom.student, {"item": "我正在修改对分数的解释。"},
+    )
     view = classroom.student_view()
     assert view["submission"]["answers"] == classroom.submission.answers
     assert view["submission"]["feedback"] == ""
-    assert view["submission"]["itemResults"][0]["feedback"] == ""
+    assert view["submission"]["itemResults"] == []
+    assert view["submission"]["grading"] == {}
+    assert view["submission"]["gradedAt"] is None
+    assert view["submission"]["score"] is None
     assert "result" not in view["items"][0]
+    assert classroom.teacher_override(2, FEEDBACK).status_code == 400
+
+
+def test_teacher_cannot_grade_an_unsubmitted_draft(classroom):
+    classroom.assignment.settings.update(answerPolicy="AFTER_SUBMISSION", allowResubmit=False)
+    classroom.submission.status = "IN_PROGRESS"
+    classroom.submission.submitted_at = None
+    classroom.ns["save_submission"](classroom.assignment, classroom.student, {"item": "草稿"})
+    before = vars(classroom.submission).copy()
+
+    response = classroom.teacher_override(3, FEEDBACK)
+
+    assert response.status_code == 400
+    assert response.json["code"] == "INVALID_REQUEST"
+    assert vars(classroom.submission) == before
+    classroom.ns["db"].session.add.assert_not_called()
+    classroom.ns["db"].session.commit.assert_not_called()
+    classroom.ns["db"].session.rollback.assert_called_once()
+    view = classroom.student_view()
+    assert view["submission"]["status"] == "IN_PROGRESS"
+    assert view["submission"]["score"] is None
+    assert not view["answerPolicy"]["answersVisible"]
+
+
+def test_legacy_grade_without_submission_does_not_block_first_submit(classroom):
+    classroom.assignment.settings.update(answerPolicy="AFTER_SUBMISSION", allowResubmit=False)
+    classroom.submission.submitted_at = None
+    view = classroom.student_view()
+    assert view["submission"]["status"] == "IN_PROGRESS"
+    assert view["submission"]["score"] is None
+    assert not view["answerPolicy"]["answersVisible"]
+    assert classroom.teacher_override(2, FEEDBACK).status_code == 400
+
+    classroom.ns["save_submission"](classroom.assignment, classroom.student, {"item": "正式交卷"}, submit=True)
+
+    assert classroom.submission.submitted_at == NOW
+    classroom.ns["grade_submission"].assert_called_once_with(classroom.submission)
+
+
+def test_disabling_resubmission_blocks_existing_resubmission_draft(classroom):
+    save = classroom.ns["save_submission"]
+    save(classroom.assignment, classroom.student, {"item": "重交草稿"})
+    classroom.assignment.settings["allowResubmit"] = False
+
+    with pytest.raises(ValueError, match="不允许重新提交"):
+        save(classroom.assignment, classroom.student, {"item": "试图交卷"}, submit=True)
+
+    assert classroom.submission.status == "IN_PROGRESS"
+    assert classroom.submission.answers == {"item": "重交草稿"}
+    classroom.ns["grade_submission"].assert_not_called()
