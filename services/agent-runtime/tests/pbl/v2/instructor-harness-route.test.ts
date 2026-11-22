@@ -230,6 +230,25 @@ describe('ordinary PBL v2 instructor via Harness', () => {
     expect(events[1].code).toBe('STREAM_ERROR');
   });
 
+  it.each(['flag{FIXTURE_ONLY}', '<strong>FIXTURE_ONLY</strong>', '```\nFIXTURE_ONLY\n```'])(
+    'rejects restricted model text before streaming or applying model operations',
+    async (reply) => {
+      receive({ reply, observations: [{ kind: 'question', signature: 'fixture_observation' }] });
+      const events = await frames(await teach(request('instructor', { userMessage: '怎样记录？' })));
+      expect(events.map((event) => event.type)).toEqual(['project_patch', 'error', 'done']);
+      expect(events[0].patch).toMatchObject({ kind: 'engagement_event', eventKind: 'learner_turn' });
+      expect(events[1].code).toBe('STREAM_ERROR');
+      expect(JSON.stringify(events)).not.toContain('FIXTURE_ONLY');
+      expect(recordUsage).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('does not send a learner message containing a restricted marker to Harness', async () => {
+    const events = await frames(await teach(request('instructor', { userMessage: '观察 flag{FIXTURE_ONLY}' })));
+    expect(events.some((event) => event.code === 'STREAM_ERROR')).toBe(true);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
   it('fails closed for unsupported operations and missing configuration', async () => {
     receive({ reply: '不要显示这条。', operations: [{ type: 'external_lookup' }] });
     const events = await frames(await teach(request('instructor', { userMessage: '怎样记录？' })));

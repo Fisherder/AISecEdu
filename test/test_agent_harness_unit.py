@@ -1,3 +1,4 @@
+from xml.etree import ElementTree
 import ast
 import datetime
 import hashlib
@@ -796,6 +797,10 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     assert not eligible(SimpleNamespace(**job), {**payload, "artifactType": "simulation"})
     namespace["DojoAdmins"] = table(dojo_id=2, user_id=9)
     assert not eligible(SimpleNamespace(**job), payload)
+    namespace["DojoAdmins"] = table(dojo_id=2, user_id=7)
+    namespace["TeachingArtifacts"] = table(id="artifact", owner_id=7, dojo_id=2,
+                                           artifact_type="slide-deck", self_workspace_id="student-workspace")
+    assert not eligible(SimpleNamespace(**job), payload)
 
 
 @pytest.mark.parametrize("prompt, mode, expected", [
@@ -858,6 +863,18 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     ("参考资料“不要生成任何一份教学文档”，帮我写一份特别教案", "auto", ("docx",)),
     ("参考《请告诉我如何写教案》，帮我写一份特别教案", "auto", ("docx",)),
     ("帮我写一份特别教案", "auto", ("docx",)),
+    ("请根据材料写教案", "auto", ("docx",)),
+    ("结合材料做教案", "execute", ("docx",)),
+    ("请根据材料解释如何写教案", "auto", ()),
+    ("不要生成 docx 和 md", "auto", ()),
+    ("不要生成 docx 和 Markdown", "auto", ()),
+    ("请写教案，不要生成 docx 或 md，只给建议", "auto", ()),
+    ("请写教案，不要生成 docx 或 Markdown；改用 Word", "auto", ("docx",)),
+    ("Do not make DOCX or Markdown handouts, just explain the method.", "auto", ()),
+    ("请写教案，请用“docx”和“md”格式", "auto", ("docx", "md")),
+    ("请制作教案，请用“DOCX”和“Markdown”格式", "auto", ("docx", "md")),
+    ("请参考名为“DOCX”和“Markdown”的资料，然后生成教案", "auto", ("docx",)),
+    ("请根据“Markdown”格式的材料写教案", "auto", ("docx",)),
 ])
 def test_teacher_document_requires_an_explicit_supported_request(prompt, mode, expected):
     documents = load("dojo_plugin/agent_runtime/teacher_documents.py", {})
@@ -931,6 +948,8 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
 
     wire_requests = []
     document_title = "蒸发／冷水/温水\\比较\u202e Pokémon"
+    display_title = document_title.replace("\u202e", "")
+    paragraph = "HTML 字符示例 <b>是文本</b>。原样保留：العربية \u2067示例\u2069"
     download_stem = "蒸发-冷水-温水-比较 Pokémon"
 
     def invoke_turn(body, *, encoded):
@@ -947,7 +966,7 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
                 "answer": "模型声称的链接不作为交付地址 https://example.invalid/file",
                 "document": {"title": document_title, "sections": [{
                     "heading": "观察目标",
-                    "paragraphs": ["记录同样大小的碟子中温水与冷水的变化。", "HTML 字符示例 <b>是文本</b>。"],
+                    "paragraphs": ["记录同样大小的碟子中温水与冷水的变化。", paragraph],
                 }]},
                 "proposal": {"tool": "course.create", "arguments": {"name": "不会自动执行"}},
             }, ensure_ascii=False),
@@ -1028,18 +1047,36 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
         disposition, params = parse_options_header(owner_download.headers["Content-Disposition"])
         assert disposition == "attachment"
         assert params["filename"] == public["filename"] == f"{download_stem}.{public['format']}"
-        assert public["title"] == document_title
+        assert public["title"] == display_title
         assert browser.get(public["downloadUrl"], headers={"Fixture-User": "8"}).status_code == 404
         if public["format"] == "docx":
             with zipfile.ZipFile(io.BytesIO(owner_download.data)) as archive:
                 docx_text = archive.read("word/document.xml").decode()
-                assert "观察目标" in docx_text
-                assert document_title in docx_text
+                text_nodes = ElementTree.fromstring(docx_text).findall(".//{*}t")
+                assert [node.text for node in text_nodes] == [
+                    display_title, "观察目标", "记录同样大小的碟子中温水与冷水的变化。", paragraph,
+                ]
+                assert "&lt;b&gt;是文本&lt;/b&gt;" in docx_text
+                core = ElementTree.fromstring(archive.read("docProps/core.xml"))
+                assert core.find("{http://purl.org/dc/elements/1.1/}title").text == display_title
                 assert not any("vba" in name.lower() for name in archive.namelist())
         else:
             assert "## 观察目标" in owner_download.text
-            assert document_title.replace("\\", "\\\\") in owner_download.text
+            assert display_title.replace("\\", "\\\\") in owner_download.text
             assert "&lt;b&gt;是文本&lt;/b&gt;" in owner_download.text
+            assert "العربية \u2067示例\u2069" in owner_download.text
+
+    # Historical metadata can contain overrides. Download naming is independent of stored bytes and digest.
+    original = stored["files"][0]
+    legacy = {**original, "filename": "蒸发\u202e.docx", "title": document_title}
+    assert files.public_agent_file(legacy)["title"] == display_title
+    job.result = {**stored, "files": [legacy, *stored["files"][1:]]}
+    session.commit()
+    legacy_response = browser.get(public_files[0]["downloadUrl"], headers={"Fixture-User": "7"})
+    assert legacy_response.status_code == 200
+    _, params = parse_options_header(legacy_response.headers["Content-Disposition"])
+    assert params["filename"] == "蒸发.docx"
+    assert legacy_response.data == files.agent_file_path(original).read_bytes()
 
     allowed_ids.clear()
     with pytest.raises(PermanentJobError, match="引用资料权限或版本"):

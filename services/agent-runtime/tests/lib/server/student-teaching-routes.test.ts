@@ -256,7 +256,13 @@ describe('student teaching model routes', () => {
     "Don't make a slide deck. Please generate a learning package.",
     'Create a 30-minute, beginner-friendly learning package.',
     '不要生成学习包。改主意了，请生成一个学习包。',
-  ])('publishes a classroom for %s', async (message) => {
+  ])('routes %s and forwards the exact request to the package turn', async (message) => {
+    const withoutQuiz = message === '请生成一个学习包。不要概念自检。';
+    const withoutSlides = [
+      '不需要生成幻灯片。请生成一个学习包。',
+      '请生成一个学习包。别生成幻灯片。',
+      "Don't make a slide deck. Please generate a learning package.",
+    ].includes(message);
     mocks.publishLesson.mockResolvedValue({
       classroomId: 'personal_study_fixture',
       url: 'http://runtime.test/classroom/personal_study_fixture',
@@ -273,7 +279,7 @@ describe('student teaching model routes', () => {
       })
       .mockResolvedValueOnce({
         model: 'package-model',
-        text: JSON.stringify({
+        text: JSON.stringify(withoutSlides ? { status: 'unsupported' } : {
           status: 'ready',
           title: '植物观察',
           summary: '学习如何记录叶片变化。',
@@ -285,7 +291,7 @@ describe('student teaching model routes', () => {
               points: ['记录时间', '比较变化'],
             },
           ],
-          concepts: [
+          concepts: withoutQuiz ? [] : [
             {
               question: '什么时候观察？',
               options: ['固定时间', '任何时候', '不需要观察'],
@@ -303,7 +309,22 @@ describe('student teaching model routes', () => {
       }),
     );
     expect(result.status).toBe(201);
-    expect(await result.json()).toMatchObject({
+    const payload = await result.json();
+    expect(JSON.parse(mocks.runTurn.mock.calls[1][0][1].content)).toMatchObject({
+      originalRequest: message,
+    });
+    expect(JSON.stringify(mocks.runTurn.mock.calls[1][0])).not.toContain(personalSentinel);
+    expect(mocks.recordHarnessUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'package-model', usage }),
+      'student-self-study',
+    );
+    if (withoutSlides) {
+      expect(payload.assistantMessage.content).toContain('本次个人学习包没有生成');
+      expect(mocks.publishLesson).not.toHaveBeenCalled();
+      expect(mocks.storeLesson).not.toHaveBeenCalled();
+      return;
+    }
+    expect(payload).toMatchObject({
       assistantMessage: {
         metadata: {
           generatedPackage: { title: '植物观察', classroomId: 'personal_study_fixture' },
@@ -314,14 +335,15 @@ describe('student teaching model routes', () => {
       },
     });
     const [lesson, , owner, options] = mocks.publishLesson.mock.calls[0];
-    expect(lesson.artifacts.map((artifact: { type: string }) => artifact.type)).toEqual([
-      'slide',
-      'quiz',
-    ]);
-    expect(lesson.artifacts[1].content.questions[0]).toMatchObject({
-      answer: ['0'],
-      type: 'single',
-    });
+    expect(lesson.artifacts.map((artifact: { type: string }) => artifact.type)).toEqual(
+      withoutQuiz ? ['slide'] : ['slide', 'quiz'],
+    );
+    if (!withoutQuiz) {
+      expect(lesson.artifacts[1].content.questions[0]).toMatchObject({
+        answer: ['0'],
+        type: 'single',
+      });
+    }
     expect(owner).toBe('acct:own-learner');
     expect(options).toEqual({ personalStudy: true });
     expect(mocks.storeLesson).toHaveBeenCalledTimes(2);
@@ -331,11 +353,6 @@ describe('student teaching model routes', () => {
           sql.includes('classroom_enrollments') && values[1] === 'acct:own-learner',
       ),
     ).toBe(true);
-    expect(JSON.stringify(mocks.runTurn.mock.calls[1][0])).not.toContain(personalSentinel);
-    expect(mocks.recordHarnessUsage).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'package-model', usage }),
-      'student-self-study',
-    );
   });
 
   it('does not return a native personal classroom for another learner', async () => {

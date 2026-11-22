@@ -135,6 +135,7 @@ case "$ACTION" in
 
     # HELP: backup: does a dojo db backup into the `/data/backups` directory.
     "backup")
+        set -e
         mkdir -p /data/backups
         backup_timestamp=$(date -Iseconds)
         staged_backup=$(mktemp "/data/backups/.db-${backup_timestamp}.XXXXXX")

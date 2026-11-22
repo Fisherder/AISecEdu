@@ -8,7 +8,11 @@ vi.mock('@/lib/server/usage-storage', () => ({ recordUsage: vi.fn() }));
 
 const fetchTurn = vi.fn<typeof fetch>();
 
-function request(agentIds: unknown = ['default-1', 'default-2'], directorState?: DirectorState) {
+function request(
+  agentIds: unknown = ['default-1', 'default-2'],
+  directorState?: DirectorState,
+  whiteboard: unknown[] = [],
+) {
   return new NextRequest('http://localhost/api/chat/pi', {
     method: 'POST',
     body: JSON.stringify({
@@ -16,7 +20,7 @@ function request(agentIds: unknown = ['default-1', 'default-2'], directorState?:
         { id: 'first', role: 'user', parts: [{ type: 'text', text: '请讲盆栽需要多少水。' }] },
       ],
       storeState: {
-        stage: { id: 'lesson', name: '家庭园艺', whiteboard: [] },
+        stage: { id: 'lesson', name: '家庭园艺', whiteboard },
         currentSceneId: 'public-slide',
         mode: 'autonomous',
         whiteboardOpen: false,
@@ -185,6 +189,30 @@ describe('Pi classroom through Harness', () => {
         agentResponses: [previous, { contentPreview: '把量杯放平再读数。' }],
       },
     });
+  });
+
+  it('uses the current board snapshot without replaying stale client ledger text', async () => {
+    const state: DirectorState = {
+      turnCount: 1,
+      agentResponses: [],
+      whiteboardLedger: [{
+        actionName: 'wb_draw_text',
+        agentId: 'default-1',
+        agentName: '老师',
+        params: { content: 'flag{STALE_BOARD_FIXTURE}', x: 5, y: 5 },
+      }],
+    };
+    propose({ type: 'call_agent', agentId: 'default-1', instruction: '回顾目前板书。' });
+    propose([{ type: 'text', content: '观察一下现有记录。' }]);
+    propose({ type: 'cue_user' });
+
+    const received = await events(await POST(request(undefined, state, [{
+      elements: [{ id: 'visible', type: 'text', content: '已画板书示例', left: 0, top: 0 }],
+    }])));
+    expect(fetchTurn.mock.calls[1][1]?.body).toContain('已画板书示例');
+    expect(JSON.stringify(fetchTurn.mock.calls)).not.toContain('STALE_BOARD_FIXTURE');
+    expect(JSON.stringify(received)).not.toContain('STALE_BOARD_FIXTURE');
+    expect(received.at(-1)?.data).toMatchObject({ directorState: { whiteboardLedger: [] } });
   });
 
   it('ends the request on a failed child turn without spending another director attempt', async () => {

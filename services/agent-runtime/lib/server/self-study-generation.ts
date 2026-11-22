@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import { parseJsonResponse } from '@/lib/generation/json-repair';
+import { isOrdinaryTeachingProse } from '@/lib/teaching/ordinary-text';
 import { createHarnessTurn, recordHarnessUsage } from '@/lib/server/agent-harness/classroom-turn';
 import type { NextRequest } from 'next/server';
 import type { Principal } from '@/lib/server/auth/session';
@@ -33,7 +33,9 @@ export class SelfStudyGenerationError extends Error {
 }
 
 export function normalizeSelfStudyRequest(body: Record<string, unknown>): SelfStudyRequest {
-  const goal = typeof body.goal === 'string' ? body.goal.trim().slice(0, 500) : '';
+  const suppliedGoal = typeof body.goal === 'string' ? body.goal : '';
+  requireSelfStudyRequestText(suppliedGoal);
+  const goal = suppliedGoal.trim().slice(0, 500);
   if (goal.length < 4)
     throw new SelfStudyGenerationError('Learning goal is too short', '请描述至少 4 个字的学习目标');
   const level = LEVELS.has(body.level as SelfStudyRequest['level'])
@@ -50,7 +52,20 @@ export function normalizeSelfStudyRequest(body: Record<string, unknown>): SelfSt
   return { goal, level, durationMinutes, preference };
 }
 
-const learningText = (max: number) => z.string().trim().min(1).max(max);
+function isSelfStudyText(value: string): boolean {
+  return isOrdinaryTeachingProse(value) && !/\b(?:https?:\/\/|www\.)|\]\s*\(|`|(?:^|\n)\s*(?:#{1,6}\s|>\s)/iu.test(value);
+}
+
+function requireSelfStudyRequestText(...values: string[]) {
+  if (values.some((value) => !isSelfStudyText(value))) {
+    throw new SelfStudyGenerationError(
+      'Unsupported learning package text',
+      '个人学习包仅支持普通概念和文字自检，请勿附带私人数据或实验材料',
+    );
+  }
+}
+
+const learningText = (max: number) => z.string().trim().min(1).max(max).refine(isSelfStudyText);
 const selfStudyContent = z.discriminatedUnion('status', [
   z.object({ status: z.literal('unsupported') }).strict(),
   z
@@ -217,6 +232,7 @@ export async function createStudentSelfStudyPackage(
       '个人学习包仅支持概念讲解和文字自检',
     );
   }
+  requireSelfStudyRequestText(request.goal, originalRequest);
   const db = await getDb();
   await ensureAppSchema(db);
   const id = `study_${nanoid(12)}`;
@@ -241,6 +257,7 @@ export async function createStudentSelfStudyPackage(
   try {
     const context = await loadStudentLearningContext(principal.learnerKey, db);
     const planningInput = buildSelfStudyPlanningInput(request, context.insight);
+    requireSelfStudyRequestText(planningInput.description ?? '');
     const runTurn = createHarnessTurn();
     if (!runTurn) throw new Error('Self-study Harness is unavailable');
     const turn = await runTurn(
@@ -257,7 +274,17 @@ export async function createStudentSelfStudyPackage(
       req.signal,
     );
     await recordHarnessUsage(turn, 'student-self-study');
-    const content = selfStudyContent.parse(parseJsonResponse<unknown>(turn.text));
+    const raw = turn.text.trim();
+    const fenced = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(fenced?.[1] ?? raw);
+    } catch {
+      throw new Error('Unreadable self-study package response');
+    }
+    const parsed = selfStudyContent.safeParse(decoded);
+    if (!parsed.success) throw new Error('Unsupported self-study package response');
+    const content = parsed.data;
     if (content.status === 'unsupported') {
       throw new SelfStudyGenerationError(
         'Unsupported learning package request',

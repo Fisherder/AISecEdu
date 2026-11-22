@@ -330,6 +330,7 @@ describe('Evaluator API teaching image boundary', () => {
       modelQuota: { available: true },
     };
     let enabled = true;
+    let visionAvailable = false;
     const introspect = vi.fn((init?: RequestInit) => {
       const bearer = new Headers(init?.headers).get('Authorization');
       if (bearer === 'Bearer student-one') {
@@ -347,6 +348,9 @@ describe('Evaluator API teaching image boundary', () => {
     });
     const fetchTurn = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
       if (String(url).startsWith('http://platform.invalid/')) return introspect(init);
+      if (init?.method !== 'POST' && String(url).endsWith('/v1/teaching-image-turn')) {
+        return Response.json({ allowed: visionAvailable });
+      }
       return Response.json({
         model: 'fixture-model',
         text: JSON.stringify({ feedback: '观察记录清楚。', score: 88 }),
@@ -374,14 +378,24 @@ describe('Evaluator API teaching image boundary', () => {
         }),
       });
     const image = { newTeachingImage: { consent: true, dataUrl, caption: '本轮上传的标注' } };
-    const harnessCalls = () => fetchTurn.mock.calls.filter(([url]) =>
-      String(url).startsWith('http://harness.invalid:3081/'));
+    const harnessCalls = () => fetchTurn.mock.calls.filter(([url, init]) =>
+      init?.method === 'POST' && String(url).startsWith('http://harness.invalid:3081/'));
     try {
       expect((await middleware(request(image, ''))).status).toBe(401);
       expect((await postEvaluation(request(image, ''))).status).toBe(403);
       expect((await middleware(request())).status).toBe(200);
+      expect(await (await getEvaluationCapability(request())).json()).toEqual({ allowed: false });
+      expect(fetchTurn.mock.calls.at(-1)).toEqual([
+        new URL('http://harness.invalid:3081/v1/teaching-image-turn'),
+        expect.objectContaining({
+          headers: { Authorization: 'Bearer fixture-auth' },
+          redirect: 'error',
+        }),
+      ]);
+      visionAvailable = true;
       expect(await (await getEvaluationCapability(request())).json()).toEqual({ allowed: true });
       expect(await (await getEvaluationCapability(request(undefined, 'student-two'))).json()).toEqual({ allowed: false });
+      expect(String(fetchTurn.mock.calls.at(-1)?.[0])).toBe('http://platform.invalid/pwncollege_api/v1/teaching/runtime/introspect');
       expect((await postEvaluation(request({ ...image, dojoId: -9, userId: 21 }, 'student-two'))).status).toBe(403);
       expect((await postEvaluation(request({}))).status).toBe(415);
       expect((await postEvaluation(request({

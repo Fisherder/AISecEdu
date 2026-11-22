@@ -24,14 +24,19 @@ MIME_TYPES = {
 }
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MIN_HTML_BODY_CHARS = 24
+_BIDI_CONTROLS = str.maketrans("", "", "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
 
 
 def _text(value, limit=200000):
     return str(value or "").replace("\x00", "")[:limit]
 
 
+def _display_title(value, limit):
+    return str(value or "").replace("\x00", "").translate(_BIDI_CONTROLS)[:limit].strip()
+
+
 def _clean_filename(value, file_format):
-    filename = pathlib.PurePath(_text(value, 240)).name
+    filename = pathlib.PurePath(_display_title(value, 240)).name
     filename = re.sub(r"[\\/:*?\"<>|\x00-\x1f\x7f]+", "-", filename)
     filename = re.sub(r"\s+", " ", filename).strip(" .-")[:220]
     if not filename:
@@ -477,7 +482,11 @@ def render_deliverable(deliverable, *, created_at=None):
     if file_format not in SUPPORTED_FORMATS:
         raise ValueError("Unsupported deliverable format")
     filename = _clean_filename(deliverable.get("filename"), file_format)
+    title = _display_title(deliverable.get("title"), 500)
     document = _document(deliverable.get("document"))
+    if file_format in {"docx", "md", "txt", "html"} and "title" in document:
+        document = {**document, "title": _display_title(document["title"], 500)}
+    deliverable = {**deliverable, "title": title, "document": document}
     content = deliverable.get("content")
     data = deliverable.get("data")
     if file_format == "docx":
@@ -494,7 +503,7 @@ def render_deliverable(deliverable, *, created_at=None):
         ).encode("utf-8")
     elif file_format == "html":
         html_source = (
-            _normalize_html_content(content, deliverable.get("title") or filename)
+            _normalize_html_content(content, title or filename)
             if isinstance(content, str) and content.strip()
             else document_to_html(document)
         )
@@ -516,7 +525,7 @@ def render_deliverable(deliverable, *, created_at=None):
         "format": file_format,
         "mime_type": MIME_TYPES[file_format],
         "content": rendered,
-        "title": _text(deliverable.get("title") or filename, 240).strip() or filename,
+        "title": title[:240].strip() or filename,
     }
 
 
@@ -614,11 +623,12 @@ def public_agent_file(value):
         return None
     if size <= 0 or size > MAX_FILE_BYTES:
         return None
+    filename = filename.translate(_BIDI_CONTROLS).strip() or f"教学文件.{file_format}"
     return {
         "id": file_id,
         "jobId": job_id,
         "filename": filename,
-        "title": str(value.get("title") or filename)[:240],
+        "title": _display_title(value.get("title"), 240) or filename,
         "format": file_format,
         "mimeType": MIME_TYPES[file_format],
         "size": size,

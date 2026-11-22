@@ -346,6 +346,46 @@ docker() {
         assert sorted(backup_folder.iterdir()) == dumps
 
 
+def test_database_backup_stops_on_dump_or_link_failure_with_either_invocation():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        backups = folder / "backups"
+        backups.mkdir()
+        previous = backups / "previous.dump"
+        previous.write_text("previous archive")
+        script = folder / "dojo"
+        script.write_text(database_action_script())
+        script.chmod(0o700)
+        mocks = folder / "bin"
+        mocks.mkdir()
+        docker = mocks / "docker"
+        docker.write_text("#!/bin/bash\nprintf 'synthetic archive'\nexit \"$DUMP_STATUS\"\n")
+        link = mocks / "ln"
+        link.write_text(
+            "#!/bin/bash\ntouch link-called\n"
+            "[ \"$LINK_STATUS\" -eq 0 ] || exit \"$LINK_STATUS\"\nexec /bin/ln \"$@\"\n"
+        )
+        for command in (docker, link):
+            command.chmod(0o700)
+
+        for invocation in ([str(script)], ["/bin/bash", str(script)]):
+            for dump_status, link_status in ((7, 0), (0, 8)):
+                marker = folder / "link-called"
+                marker.unlink(missing_ok=True)
+                result = subprocess.run(
+                    [*invocation, "backup"], cwd=folder, capture_output=True, text=True, timeout=10,
+                    env={
+                        "PATH": os.pathsep.join((str(mocks), os.defpath)), "DB_NAME": "test_database",
+                        "DUMP_STATUS": str(dump_status), "LINK_STATUS": str(link_status),
+                    },
+                )
+                assert result.returncode == (dump_status or link_status), result
+                assert "Created backup" not in result.stdout
+                assert marker.exists() == (dump_status == 0)
+                assert list(backups.iterdir()) == [previous]
+                assert previous.read_text() == "previous archive"
+
+
 def test_cloud_backup_skips_unpublished_dumps():
     with tempfile.TemporaryDirectory() as directory:
         folder = Path(directory)

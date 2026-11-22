@@ -4,7 +4,7 @@ import unicodedata
 
 
 WORD_FORMAT = re.compile(r"(?<![a-z\d_])(?:docx|word)(?![a-z\d_])", re.I)
-MARKDOWN_FORMAT = re.compile(r"(?<![a-z\d_])markdown(?![a-z\d_])|\.md(?![a-z\d_])", re.I)
+MARKDOWN_FORMAT = re.compile(r"(?<![a-z\d_])(?:markdown|\.?md)(?![a-z\d_])", re.I)
 DOCUMENT_SUBJECT = re.compile(r"教案|教学文档|教学讲义|课堂讲义|\b(?:lesson\s+plan|handout)\b", re.I)
 DOCUMENT_REQUEST = re.compile(
     r"制作|帮我(?:写|做)|撰写|编写|写(?:一份|一个|个)|做(?:一份|个|一篇)|生成|整理|起草|设计|拟(?:一份|个)|导出|输出|返回|交付|提供|给我|修改|调整|修订|改写|改成"
@@ -29,6 +29,7 @@ _QUESTION_CONTINUATION = re.compile(
 )
 _INDEPENDENT_DELIVERY = re.compile(
     r"^\s*(?:(?:然后|另外|最后|再|并|请)\s*)*(?:(?:帮我|为我)\s*)?"
+    r"(?:(?:根据|依据|结合|按照|参考|基于)[^，。；！？,;!?\n]{0,40}?(?:资料|材料|教材|课文|讲义|笔记|记录)\s*)?"
     r"(?:(?P<draft_zh>生成|制作|创建|写|做|撰写|编写|起草|导出|交付)|给我|提供|下载|输出)"
     r"|^\s*(?:(?:and|but|also|then|please)\s+)*"
     r"(?:(?P<draft_en>generate|write|draft|make|create|export|deliver)|provide|give\s+me|download)\b",
@@ -70,8 +71,11 @@ _QUOTED_TEXT = re.compile(
     r'“([^”]*)”|「([^」]*)」|『([^』]*)』|《([^》]*)》|"([^"\n]*)"|［([^］]*)］'
     r'|(?<!`)`([^`\n]*)`(?!`)'
 )
-_FORMAT_JOIN_PREFIX = re.compile(
-    r'(?:docx|word|markdown|\.md|pdf|html?|pptx?|odt)[”」』》"］`]?\s*(?:和|及|或|、|\band\b|\bor\b)\s*$',
+_FORMAT_USE_PREFIX = re.compile(r"(?:请用|改用|采用|使用|只要|仅需|请以|另给我)\s*$")
+_FORMAT_TOKEN = rf"(?:{WORD_FORMAT.pattern}|{MARKDOWN_FORMAT.pattern}|{UNSUPPORTED_FORMAT.pattern})"
+_FORMAT_ITEM = re.compile(rf"“{_FORMAT_TOKEN}”|{_FORMAT_TOKEN}", re.I)
+_FORMAT_LIST = re.compile(
+    rf"(?:{_FORMAT_ITEM.pattern})(?:\s*(?:[、]|(?:以及|和|或|与|及)|\b(?:and|or)\b)\s*(?:{_FORMAT_ITEM.pattern}))*",
     re.I,
 )
 _UNSAFE_FILENAME_CHARS = frozenset('\\/:*?"<>|／＼∕⁄⧸⧹')
@@ -98,15 +102,10 @@ def requests_lesson_plan_candidates(prompt):
 def _unquoted_request(prompt):
     def mask(match):
         text = next(group for group in match.groups() if group is not None).strip()
-        # Teachers can quote a format token. Quoted titles and examples are only reference data.
+        if re.fullmatch(_FORMAT_TOKEN, text, re.I):
+            # Keep the quote marker until we can classify the whole format list.
+            return f"“{text}”"
         delivery = _FORMAT_DELIVERY_PREFIX.search(prompt, 0, match.start())
-        if (
-            any(pattern.fullmatch(text) for _, pattern in FORMATS) or UNSUPPORTED_FORMAT.fullmatch(text)
-        ) and (
-            delivery or _FORMAT_JOIN_PREFIX.search(prompt, 0, match.start())
-            or _FORMAT_DELIVERY_SUFFIX.match(prompt, match.end())
-        ):
-            return f" {text} "
         is_document_title = (delivery or match.group().startswith("《")) and DOCUMENT_SUBJECT.search(text)
         return " 教案 " if is_document_title else " "
 
@@ -136,15 +135,27 @@ def _document_delivery_text(prompt):
     return "".join(portions)
 
 
-def _unsupported_outputs(prompt):
-    for match in UNSUPPORTED_FORMAT.finditer(prompt):
-        if NO_FORMAT.search(prompt, 0, match.start()):
-            continue
-        if _FORMAT_DELIVERY_PREFIX.search(prompt, 0, match.start()) or (
-            _FORMAT_DELIVERY_SUFFIX.match(prompt, match.end())
-            and _FORMAT_CLAUSE_PREFIX.search(prompt, 0, match.start())
-        ):
-            yield match.group().lower().lstrip(".")
+def _format_requests(prompt):
+    for formats in _FORMAT_LIST.finditer(prompt):
+        negated = bool(NO_FORMAT.search(prompt, 0, formats.start()))
+        suffix = _FORMAT_DELIVERY_SUFFIX.match(prompt, formats.end())
+        explicit = (
+            negated or _FORMAT_DELIVERY_PREFIX.search(prompt, 0, formats.start())
+            or _FORMAT_USE_PREFIX.search(prompt, 0, formats.start())
+            or (suffix and _FORMAT_CLAUSE_PREFIX.search(prompt, 0, formats.start()))
+        )
+        # One verb, format suffix, or negation governs the coordinated objects.
+        for item in _FORMAT_ITEM.finditer(formats.group()):
+            raw = item.group()
+            value = raw.strip("“”")
+            if (raw.startswith("“") or value.lower() == "md") and not explicit:
+                continue
+            if WORD_FORMAT.fullmatch(value):
+                yield "docx", not negated
+            elif MARKDOWN_FORMAT.fullmatch(value):
+                yield "md", not negated
+            elif explicit:
+                yield value.lower().lstrip("."), not negated
 
 
 def requested_document_formats(payload):
@@ -157,29 +168,23 @@ def requested_document_formats(payload):
         return ()
     request = _unquoted_request(str(payload.get("prompt") or "").strip())
     prompt = _document_delivery_text(request)
+    formats = dict(_format_requests(prompt))
+    requested = tuple(file_format for file_format, _ in FORMATS if formats.get(file_format))
+    format_named = any(file_format in formats for file_format, _ in FORMATS)
     if (
         not (DOCUMENT_REQUEST.search(prompt)
              or any(_independent_document_delivery(sentence) for sentence in _SENTENCE_BREAK.split(prompt)[::2]))
         or not (
-            DOCUMENT_SUBJECT.search(prompt) or any(pattern.search(prompt) for _, pattern in FORMATS)
+            DOCUMENT_SUBJECT.search(prompt) or format_named or any(formats.values())
             or (DOCUMENT_SUBJECT.search(request) and _DOWNLOAD_REQUEST.search(prompt))
         )
         or NO_DOCUMENT.search(prompt)
     ):
         return ()
-    unsupported = set(_unsupported_outputs(prompt))
-    if unsupported & _ACTIVE_FORMATS:
+    if any(formats.get(active) for active in _ACTIVE_FORMATS):
         return ()
-    formats = []
-    for file_format, pattern in FORMATS:
-        for match in pattern.finditer(prompt):
-            if not NO_FORMAT.search(prompt, 0, match.start()):
-                formats.append(file_format)
-                break
-    if formats:
-        return tuple(formats)
-    if unsupported or any(pattern.search(prompt) for _, pattern in FORMATS):
-        return ()
+    if format_named or any(formats.values()):
+        return requested
     return ("docx",)
 
 
