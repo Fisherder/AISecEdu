@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { debateSpecSchema, debateFromLesson, type DebateSpec } from '@/lib/debate/schema';
+import { debateSpecSchema, debateFromLesson, type DebateSpec, type DebateV2Spec } from '@/lib/debate/schema';
 import { debateLesson, generateDebate, reviseDebate } from '@/lib/server/debate-generation';
 import { debateDialogue } from '@/lib/server/debate-dialogue';
 import { lessonToScenes } from '@/lib/server/lesson-publish';
+import { upgradeDebate } from '@/lib/debate/session';
 
 export const spec: DebateSpec = {
   schema: 'debate-v1', title: '校园AI工具听证会', motion: '是否允许学生使用AI完成课后作业？',
@@ -19,6 +20,12 @@ export const spec: DebateSpec = {
     {id: 'response', title: '回应与边界', description: '回应反例并指出条件'}],
   reflectionPrompts: ['什么证据改变了你的判断？', '哪些问题还需要查证？'],
 };
+const migrated = upgradeDebate(spec);
+const current: DebateV2Spec = {...migrated,
+  format: {kind: 'hearing', label: '校园听证会', description: '听取学生代表的意见。'},
+  rules: {...migrated.rules, durationMinutes: 24, allowEarlyFinish: false},
+  rounds: migrated.rounds.map(round => ({...round, exchanges: 2, speakers: ['pro-speaker', 'con-speaker']})),
+};
 const reply = {acknowledgement: '你提出有条件开放的主张。', argument: '过程披露是否能确保独立理解？',
   question: '如何核验学生自己的推理？', evidenceIds: ['e2'], coaching: {quote: '应当允许', feedback: '补充一项可核验条件。'}};
 const message = '我认为应当允许使用AI，但必须提交自己的解释。';
@@ -34,20 +41,47 @@ describe('structured AI debate', () => {
     expect(stage.generatedAgentConfigs).toBeUndefined();
   });
   it('repairs invalid generated contracts with concrete feedback', async () => {
-    const call = vi.fn().mockResolvedValueOnce(JSON.stringify({...spec, rounds: []})).mockResolvedValueOnce(JSON.stringify(spec));
-    expect(await generateDebate({request: '学生与AI对练'}, call)).toEqual(spec);
+    const call = vi.fn().mockResolvedValueOnce(JSON.stringify({...current, rounds: []})).mockResolvedValueOnce(JSON.stringify(current));
+    expect(await generateDebate({request: '学生与AI对练'}, call)).toEqual(current);
     expect(call).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(call.mock.calls[1][1]).repair.failures[0].issues.length).toBeGreaterThan(0);
+    const repair = JSON.parse(call.mock.calls[1][1]).repair;
+    expect(repair.failures[0].issues).toEqual(expect.arrayContaining([expect.stringMatching(/rounds/i)]));
+  });
+  it('upgrades v1 model output while preserving authored content', async () => {
+    const generated = await generateDebate({request: '学生与AI对练'}, async () => JSON.stringify(spec));
+    expect(debateSpecSchema.parse(generated)).toEqual(generated);
+    const {schema, format, rules, roles, rounds, ...content} = generated;
+    expect({...content, schema: 'debate-v1', rounds: rounds.map(({id, title, task}) => ({id, title, task}))}).toEqual(spec);
+    expect(schema).toBe('debate-v2');
+    expect(format.kind).toBe('dialogue');
+    expect(rules.maxExchanges).toBeGreaterThanOrEqual(rounds.length);
+    expect(roles.map(({side, stance}) => ({side, stance}))).toEqual([
+      {side: 'pro', stance: spec.positions.pro}, {side: 'con', stance: spec.positions.con},
+    ]);
   });
   it('rejects duplicate evidence IDs and identical opposing positions', () => {
     expect(debateSpecSchema.safeParse({...spec, evidence: [spec.evidence[0], spec.evidence[0]]}).success).toBe(false);
     expect(debateSpecSchema.safeParse({...spec, positions: {pro: '一样', con: '一样'}}).success).toBe(false);
   });
   it('changes only the requested field while preserving the rest exactly', async () => {
-    const result = await reviseDebate(spec, '只把学生身份改成家长代表', async () => JSON.stringify({changes: [{field: 'studentRole', value: '家长代表'}]}));
+    const result = await reviseDebate(current, '只把学生身份改成家长代表', async () =>
+      JSON.stringify({summary: '调整学生身份', operations: [
+        {op: 'set', path: '/studentRole', value: '家长代表'},
+        {op: 'set', path: '/rules/durationMinutes', value: 15},
+      ]}));
     expect(result.changedFields).toEqual(['studentRole']);
-    expect(result.spec).toEqual({...spec, studentRole: '家长代表'});
-    expect(spec.studentRole).toBe('学生代表');
+    expect(result.changedPaths).toEqual(['/studentRole']);
+    expect(result.spec).toEqual({...current, studentRole: '家长代表'});
+    expect(current.studentRole).toBe('学生代表');
+  });
+  it('upgrades a saved v1 activity on revision and leaves its archived version intact', async () => {
+    const archive = debateLesson(spec, 'artifact_debate');
+    const saved = debateFromLesson(archive)!;
+    const result = await reviseDebate(saved, '只把学生身份改成家长代表', async () =>
+      JSON.stringify({changes: [{field: 'studentRole', value: '家长代表'}]}));
+    expect(result.spec).toEqual({...migrated, schema: 'debate-v2', studentRole: '家长代表'});
+    expect(result.changes).toEqual([{path: '/studentRole', before: '学生代表', after: '家长代表'}]);
+    expect(debateFromLesson(archive)).toEqual(spec);
   });
   it('rejects unknown patch fields rather than replacing the activity', async () => {
     await expect(reviseDebate(spec, '修改细节', async () => JSON.stringify({changes: [{field: '__proto__', value: {}}]}))).rejects.toThrow();
