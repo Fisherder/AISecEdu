@@ -235,7 +235,8 @@ class DebateActivity(Resource):
                 provider=provider, actual_model=actual_model, model_version=f"{provider}:{actual_model}"[:80],
                 parameters={"artifactId": artifact.id, "attemptId": attempt.id, "action": action,
                             "workspaceId": artifact.self_workspace_id},
-                usage={k: max(0, int(usage.get(k) or 0)) for k in ("inputTokens", "outputTokens")},
+                usage={k: usage[k] for k in ("inputTokens", "outputTokens")
+                       if type(usage.get(k)) is int and usage[k] >= 0},
                 request_hash=hashlib.sha256(f"{attempt.id}:{key}".encode()).hexdigest(),
                 status="SUCCEEDED", degraded=False))
             db.session.commit()

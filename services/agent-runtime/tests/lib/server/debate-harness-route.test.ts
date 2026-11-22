@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DebateSpec } from '@/lib/debate/schema';
@@ -72,13 +72,13 @@ describe('authenticated debate API through Harness', () => {
       }),
     );
     vi.stubGlobal('fetch', fetchTurn);
-    const makeRequest = (value: string) =>
+    const makeRequest = (value: string, requestIdentity = 'fixture-attempt:turn-1') =>
       new NextRequest('http://localhost/api/integration/debate/respond', {
         method: 'POST',
         headers: { 'X-AISecEdu-Service-Token': value },
         body: JSON.stringify({
           input: { spec, side: 'pro', turns: [], action: 'turn', message },
-          requestIdentity: 'fixture-attempt:turn-1',
+          requestIdentity,
           model: 'ignored-model',
         }),
       });
@@ -87,21 +87,67 @@ describe('authenticated debate API through Harness', () => {
       expect(fetchTurn).not.toHaveBeenCalled();
       const first = await respondToDebate(makeRequest(token));
       expect(first.status).toBe(200);
-      expect(await first.json()).toEqual({
+      // Discard the response body as if CTFd lost the reply before committing.
+      await first.body?.cancel();
+      const retry = await respondToDebate(makeRequest(token));
+      expect(retry.status).toBe(200);
+      expect(await retry.json()).toEqual({
         success: true,
         result: reply,
         model: 'deepseek:fixture-model',
         usage: { inputTokens: 20, outputTokens: 8 },
       });
-      const retry = await respondToDebate(makeRequest(token));
-      expect(retry.status).toBe(200);
-      expect(await retry.json()).toMatchObject({ result: reply, model: 'deepseek:fixture-model' });
       expect(fetchTurn).toHaveBeenCalledTimes(1);
       const [url, request] = fetchTurn.mock.calls[0];
       expect(String(url)).toBe('http://harness.invalid:3081/v1/turn');
       expect(request?.headers).toMatchObject({ Authorization: 'Bearer harness-token' });
       expect(request?.body).not.toContain('ignored-model');
       expect(request?.body).toContain(message);
+
+      const [checkpoint] = await readdir(directory);
+      const file = join(directory, checkpoint);
+      const legacy = JSON.parse(await readFile(file, 'utf8'));
+      delete legacy.stages['workflow-debate-turn'].dialogueUsage;
+      await writeFile(file, JSON.stringify(legacy));
+      const replay = await respondToDebate(makeRequest(token));
+      expect(replay.status).toBe(200);
+      expect(await replay.json()).toEqual({
+        success: true,
+        result: reply,
+        model: 'deepseek:fixture-model',
+      });
+      expect(fetchTurn).toHaveBeenCalledTimes(1);
+
+      fetchTurn.mockResolvedValueOnce(
+        Response.json({
+          text: JSON.stringify(reply),
+          model: 'fixture-model',
+          usage: { prompt_tokens: 30, completion_tokens: 9 },
+        }),
+      );
+      const concurrent = await Promise.all([
+        respondToDebate(makeRequest(token, 'fixture-attempt:another-turn')),
+        respondToDebate(makeRequest(token, 'fixture-attempt:another-turn')),
+      ]);
+      for (const response of concurrent) {
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          usage: { inputTokens: 30, outputTokens: 9 },
+        });
+      }
+      expect(fetchTurn).toHaveBeenCalledTimes(2);
+
+      fetchTurn.mockResolvedValueOnce(Response.json({
+        text: '{}', model: 'fixture-model', usage: { prompt_tokens: 5 },
+      })).mockResolvedValueOnce(Response.json({
+        text: JSON.stringify(reply), model: 'fixture-model', usage: { prompt_tokens: 10, completion_tokens: 2 },
+      }));
+      const repaired = await respondToDebate(makeRequest(token, 'fixture-attempt:repaired-turn'));
+      expect(repaired.status).toBe(200);
+      expect((await repaired.json()).usage).toEqual({ inputTokens: 15 });
+      const recovered = await respondToDebate(makeRequest(token, 'fixture-attempt:repaired-turn'));
+      expect((await recovered.json()).usage).toEqual({ inputTokens: 15 });
+      expect(fetchTurn).toHaveBeenCalledTimes(4);
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();

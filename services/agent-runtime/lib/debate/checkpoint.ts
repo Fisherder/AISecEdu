@@ -32,3 +32,57 @@ export async function openDebateCheckpoint(identity: unknown,
     },
   };
 }
+
+type DebateUsage = { inputTokens?: number; outputTokens?: number };
+
+const pendingResponses = new Map<string, Promise<void>>();
+
+export async function withDebateResponseLock<T>(identity: unknown, respond: () => Promise<T>): Promise<T> {
+  const key = generationFingerprint(identity);
+  const previous = pendingResponses.get(key);
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  pendingResponses.set(key, current);
+  try {
+    await previous;
+    return await respond();
+  } finally {
+    release();
+    if (pendingResponses.get(key) === current) pendingResponses.delete(key);
+  }
+}
+
+export function withDebateUsage(checkpoint: GenerationStateStore) {
+  let usage: DebateUsage | undefined;
+  const state: GenerationStateStore = {
+    read(name) {
+      const stage = checkpoint.read(name) as { dialogueUsage?: DebateUsage } | undefined;
+      usage = stage?.dialogueUsage;
+      return stage;
+    },
+    write(name, value) {
+      // The result and its usage commit in the same checkpoint write.
+      return checkpoint.write(name, usage ? { ...(value as object), dialogueUsage: usage } : value);
+    },
+  };
+  return {
+    state,
+    add(inputTokens?: number, outputTokens?: number) {
+      const current = { inputTokens, outputTokens };
+      const total: DebateUsage = {};
+      for (const key of ['inputTokens', 'outputTokens'] as const) {
+        const count = current[key];
+        const previous = usage === undefined ? 0 : usage[key];
+        if (count !== undefined && previous !== undefined && Number.isSafeInteger(previous + count)) {
+          total[key] = previous + count;
+        }
+      }
+      usage = total;
+    },
+    get usage() {
+      return usage;
+    },
+  };
+}

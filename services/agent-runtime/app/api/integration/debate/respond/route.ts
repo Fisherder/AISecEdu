@@ -1,4 +1,4 @@
-import { openDebateCheckpoint } from '@/lib/debate/checkpoint';
+import { openDebateCheckpoint, withDebateResponseLock, withDebateUsage } from '@/lib/debate/checkpoint';
 import { timingSafeEqual } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import {
@@ -31,33 +31,33 @@ export async function POST(req: NextRequest) {
 
     const model = 'deepseek:' + expectedModel;
     const signal = AbortSignal.any([req.signal, AbortSignal.timeout(140_000)]);
-    const usage = { inputTokens: 0, outputTokens: 0 };
-    const state = await openDebateCheckpoint({
-      kind: 'dialogue',
-      request: body.requestIdentity,
-      input: input.data,
-      model,
+    const identity = { kind: 'dialogue', request: body.requestIdentity, input: input.data, model };
+    // CTFd also serializes requests for each attempt with its database lease.
+    // Queued same-request HTTP calls reopen the checkpoint after the first write.
+    return await withDebateResponseLock(identity, async () => {
+      signal.throwIfAborted();
+      const checkpoint = await openDebateCheckpoint(identity);
+      const accounting = withDebateUsage(checkpoint);
+      const result = await debateDialogue(
+        input.data,
+        async (system, prompt) => {
+          const turn = await runTurn(
+            [
+              { role: 'system', content: system },
+              { role: 'user', content: prompt },
+            ],
+            signal,
+          );
+          if (turn.model !== expectedModel)
+            throw new Error('Harness model does not match the checkpoint');
+          accounting.add(turn.usage?.prompt_tokens, turn.usage?.completion_tokens);
+          await recordHarnessUsage(turn, 'debate-dialogue');
+          return turn.text;
+        },
+        accounting.state,
+      );
+      return NextResponse.json({ success: true, result, usage: accounting.usage, model });
     });
-    const result = await debateDialogue(
-      input.data,
-      async (system, prompt) => {
-        const turn = await runTurn(
-          [
-            { role: 'system', content: system },
-            { role: 'user', content: prompt },
-          ],
-          signal,
-        );
-        if (turn.model !== expectedModel)
-          throw new Error('Harness model does not match the checkpoint');
-        await recordHarnessUsage(turn, 'debate-dialogue');
-        usage.inputTokens += turn.usage?.prompt_tokens ?? 0;
-        usage.outputTokens += turn.usage?.completion_tokens ?? 0;
-        return turn.text;
-      },
-      state,
-    );
-    return NextResponse.json({ success: true, result, usage, model });
   } catch {
     return NextResponse.json(
       {
