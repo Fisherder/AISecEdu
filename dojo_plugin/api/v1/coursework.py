@@ -132,7 +132,10 @@ class CourseAssignmentGeneration(Resource):
         user = _user()
         try:
             dojo = dojo_for_user(user, dojo_id, teacher=True)
+            selected_course_id = dojo.dojo_id
             payload = generate_assignment_payload(_body(), dojo)
+            db.session.expire_all()
+            dojo = dojo_for_user(user, selected_course_id, teacher=True)
             assignment = create_assignment(user, dojo, payload)
             db.session.commit()
             return _ok({"assignment": assignment_view(assignment, user=user, teacher=True)}, 201)

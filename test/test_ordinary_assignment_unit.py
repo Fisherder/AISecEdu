@@ -211,7 +211,7 @@ def test_teacher_http_route_checks_course_before_model_and_keeps_failed_draft_un
     resolve_course = Mock(side_effect=scope_error("Dojo not found"))
     ns = {
         **g.ns, "request": request, "db": Mock(), "create_assignment": create, "dojo_for_user": resolve_course,
-        "_user": lambda: actor,
+        "_user": lambda: actor, "assignment_view": lambda row, **kwargs: {"id": "fixture-draft"},
         "_error": lambda error, status, code: ({"error": str(error), "code": code}, status),
     }
     load_functions(ns, api_path, {"_body", "_ok"}, [post])
@@ -233,6 +233,14 @@ def test_teacher_http_route_checks_course_before_model_and_keeps_failed_draft_un
     response = browser.post(url, json=g.body)
     assert response.status_code == 400
     assert "请求超时" in response.get_json()["error"]
+    create.assert_not_called()
+    ns["db"].session.commit.assert_not_called()
+
+    resolve_course.side_effect = [g.dojo, scope_error("Dojo not found")]
+    g.post.side_effect = [g.reply(g.draft, "draft-model"), g.reply({"issues": [], "replacements": []}, "review-model")]
+    response = browser.post(url, json=g.body)
+    assert response.status_code == 404
+    assert resolve_course.call_args.args == (actor, g.dojo.dojo_id)
     create.assert_not_called()
     ns["db"].session.commit.assert_not_called()
 
