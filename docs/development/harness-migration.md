@@ -1,6 +1,6 @@
 # 开发版智能体迁移与平台审查
 
-平台审查从 `develop` 的 `e32fa59a` 开始，集成分支已同步到 `develop` 的 `85d745f5`，其中已包含 PR 评审事件的自动调度。完整官方 Harness 与第一批教学入口已通过 PR #9 提交审查，普通课堂、课件和 Tutor 的后续改动在 `feat/codex/ordinary-studio-quiz` 联调。运行版本以开发实例的版本端点为准。[当前集成 PR](https://github.com/Fisherder/AISecEdu/pull/9) · [普通课堂分支](https://github.com/Fisherder/AISecEdu/tree/feat/codex/ordinary-studio-quiz) · [早期审查记录](https://github.com/Fisherder/AISecEdu/pull/7)
+平台审查从 `develop` 的 `e32fa59a` 开始，集成分支已同步到 `develop` 的 `8a91fa66`。PR #11 接入正式评审事件，PR #12 修复分段报告的格式校验。完整官方 Harness 与第一批教学入口已通过 PR #9 提交审查，普通课堂、课件和 Tutor 的后续改动在 `feat/codex/ordinary-studio-quiz` 联调。运行版本以开发实例的版本端点为准。[当前集成 PR](https://github.com/Fisherder/AISecEdu/pull/9) · [普通课堂分支](https://github.com/Fisherder/AISecEdu/tree/feat/codex/ordinary-studio-quiz) · [早期审查记录](https://github.com/Fisherder/AISecEdu/pull/7)
 
 ## 源码与运行边界
 
@@ -13,6 +13,7 @@ flowchart LR
     Classroom[嵌入式课堂与 PBL] --> Node[课堂服务与能力校验]
     Python -->|本轮有权使用的资料| Harness[官方 Agent Loop]
     Node -->|课堂文本与当前发言| Harness
+    Harness <-->|本轮选材问答| Reader[只读教学材料工具]
     Harness -->|Messages API| Model[配置的 DeepSeek 提供商]
     Harness -->|答复与用量| Python
     Harness -->|答复与用量| Node
@@ -21,6 +22,12 @@ flowchart LR
 ```
 
 一次内部 `POST /v1/turn` 对应一个独立的内存会话。上游负责 Agent、会话事件、模型调用和终态判定。平台负责账号、课程成员、作业审批和持久业务记录。模型只能返回文字或教学草案；课程变更要经过平台的权限与审批接口。容器没有宿主目录、Docker socket、数据库口令或宿主监听端口。运行组合没有注册命令执行、文件、网页搜索、远程插件或实验环境操作工具。开发分支可以检出上游完整源码，服务启动时仅加载本文列出的能力。
+
+### 教师选定资料后使用「仅问答」
+
+教师在工作台选择 1 到 4 份普通课程资料，输入问题后点击「仅问答」。本轮只读取明确选择的材料。平台在入队、发送和保存答案时核对教师权限、课程、资料版本及文本摘要。已选材料更新、权限撤回或课程未开放时，界面提示教师重新选择。普通发送和历史任务保留原有流程。
+
+`POST /v1/teaching-material-turn` 为本轮建立独立 DSH 会话。模型先收到当前问题和可读序号，再通过官方工具执行器调用 `read_teaching_material`。每次调用只能读取一个序号，工具结果随后进入同一个会话。回执记录实际读取顺序和各次模型调用的用量，平台将序号写入教师回答的元数据。此入口只提供选材问答；课程变更走教师审批。
 
 ### 运行版本与验收记录
 
@@ -31,6 +38,7 @@ flowchart LR
 | 开发主机复验，2026-11-22 | PR #9 提交 `5ba07075` 在断外网的 Linux 容器中通过两项教学适配测试。Node 为 24.22.3，官方 CLI、源码树及文件数与上表一致。后续提交 `8e373800` 的 `services/deepseek-harness` 和 `vendor/deepseek-harness` 两个目录与这次验收逐字节相同 |
 | 课件配色，2026-11-22 | 在 `930e0b5e` 以三页合成课件请求蓝绿色主题。官方 Messages 接口一次调用返回六个颜色值及 2,146 个 token 的用量。Chromium 逐页渲染图表、配图及手工排版比较页，Python 保存前校验通过。另改动图表数值、移动标题或移除页面回执 ID，三份对照结果均被拒绝 |
 | 本机真实 Chromium，2026-11-22 | 在 `d3ba1463` 的普通课件修订代码上，合成比较页 `plant-1` 通过文字修订和整套重排两条检查路径。浏览器返回一帧，服务端核对原始页面的 SHA-256 后绑定页面 ID。Python 保存前校验接受两个回执，也拒绝缺失及篡改页面 ID 的对照样本。另用合成分数图表核实，单独改变一个数值会改变实际渲染截图 |
+| 原生资料工具，2026-11-23 | 在 `ce1773a3` 以两份合成植物观察记录调用官方 `deepseek-flash`。首轮请求只含问题、序号和工具说明。模型选择序号 2，第二次请求只携带该工具读回的摘录。回答正确给出 23 片叶子；两次调用合计输入 933、输出 57 个 token |
 | 共享开发实例，2026-11-23 | 北京时间 00:10，服务器 `28081/_aisecedu/version.json` 与成员源码镜像均核实为 `85d745f5`。切换到该提交前逐一比对 726 个插件、主题与技能文件，备份开发库并验证备份目录。两个合成身份正常登录；教师访问教师页返回 200，学生访问同一页返回 403，两者均可进入学习页。验收后清理了测试课程和身份。课堂服务、外部 AI 与后台 Worker 仍待后续发布 |
 | 原版 Web，2026-11-18 | 在隔离容器中验证匿名访问被拒绝，经启动链接换取登录 cookie 后，原版首页及 JavaScript 可正常加载 |
 
@@ -143,6 +151,7 @@ python -m pytest -q \
   test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_tutor_illustrations_unit.py \
   test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py \
   test/test_course_catalog_unit.py test/test_ordinary_classroom_preparation_unit.py \
+  test/test_teaching_image_auth_unit.py test/test_ordinary_material_turn_unit.py \
   test/test_ordinary_lesson_plan_unit.py test/test_ordinary_slide_layout_unit.py \
   test/test_studio_agent_policy_unit.py
 npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev

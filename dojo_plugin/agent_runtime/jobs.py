@@ -66,7 +66,7 @@ from .model_router import (
     UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_TEACHER_ROUTE,
     route_model, validate_actual_model,
 )
-from . import ordinary_lesson_plan, ordinary_slide_layout
+from . import ordinary_lesson_plan, ordinary_material_turn, ordinary_slide_layout
 from .model_journal import close_canceled_model_calls
 from .model_inputs import ModelInputError, accepted_input, freeze_input, freeze_prepared, prepared_input, request_payload, restore_input_cache
 from .conversation import turn_wait_state, execution_chain
@@ -78,8 +78,8 @@ from .classroom_requests import (
     classroom_proposal_result, classroom_request_body, current_classroom_pin, pin_classroom_request,
 )
 from .upstream_turn import (
-    UpstreamTurnError, invoke_turn, ordinary_slide_wording_request,
-    ordinary_teaching_course, request_body, result_object, upstream_enabled,
+    UpstreamTurnError, invoke_teaching_material_turn, invoke_turn, ordinary_slide_wording_request,
+    ordinary_teaching_course, request_body, result_object, upstream_enabled, valid_material_reads,
 )
 from .commands import COMMAND_JOB_KINDS, execute_command, finish_command_job, reopen_command_job, recover_command_job
 from .local_extract import index_verified_local_source, locally_extractable
@@ -2641,6 +2641,10 @@ def _prepare_model_request(job):
 def _runtime_payload(job):
     admitted = accepted_input(job) if job.kind == "agent.chat" and job.thread_id else None
     payload = dict(admitted["payload"] if admitted else (job.payload or {}))
+    if job.kind == "agent.chat" and "ordinaryMaterialQuestion" in payload:
+        # The selected references and their redacted excerpts are already frozen.
+        # Never expand to fresh course material or load conversation history.
+        return payload
     if job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload):
         return ordinary_lesson_plan.prepare(job, payload)
     if job.kind == "artifact.revise":
@@ -2930,6 +2934,8 @@ def _runtime_request_body(job, route, payload):
             "modelRoute": route,
         }
     upstream_chat = job.kind == "agent.chat" and payload.get("chatBackend") == "upstream"
+    if upstream_chat and "ordinaryMaterialQuestion" in payload:
+        return ordinary_material_turn.dispatch_descriptor(payload)
     if upstream_chat and "classroomPreparation" in payload:
         return classroom_request_body(payload["classroomPreparation"], request_body)
     formats = requested_document_formats(payload) if upstream_chat else ()
@@ -3056,8 +3062,8 @@ def _recover_runtime_response(job, route, payload):
     return None
 
 
-def _record_runtime_dispatch(job, body, encoded):
-    """Commit the exact outbound JSON body before the external request."""
+def _record_runtime_dispatch(job, body, encoded, *, wire_digest=None):
+    """Commit the JSON request or the protected material descriptor before dispatch."""
 
     assert_job_lease(job)
     if encoded != _runtime_json_bytes(body):
@@ -3070,7 +3076,7 @@ def _record_runtime_dispatch(job, body, encoded):
     event = _runtime_event_row(job, "runtime.dispatched", request_id=request_id)
     if event is not None:
         recorded = event.payload or {}
-        if recorded.get("requestSha256") != digest:
+        if recorded.get("requestSha256") != digest or recorded.get("wireSha256") != wire_digest:
             raise PermanentJobError("One runtime attempt changed its request body")
         db.session.commit()
         return digest
@@ -3087,6 +3093,7 @@ def _record_runtime_dispatch(job, body, encoded):
             "traceId": job.trace_id,
             "requestSha256": digest,
             "body": body,
+            **({"wireSha256": wire_digest} if wire_digest else {}),
         },
     ))
     db.session.commit()
@@ -3333,13 +3340,18 @@ def _require_upstream_teacher_scope(job, payload):
     thread = TeachingAgentThreads.query.filter_by(id=job.thread_id, user_id=job.owner_id).first()
     if owner is None or thread is None or thread.status != "ACTIVE":
         raise PermanentJobError("教学对话已归档或不可用")
-    if "classroomPreparation" in payload and (thread.dojo_id, thread.module_index) != (job.dojo_id, job.module_index):
-        raise PermanentJobError("准备课堂的课程或章节已变化，请重新选择课件。")
+    if (thread.dojo_id, thread.module_index) != (job.dojo_id, job.module_index):
+        if "classroomPreparation" in payload:
+            raise PermanentJobError("准备课堂的课程或章节已变化，请重新选择课件。")
+        if "ordinaryMaterialQuestion" in payload:
+            raise PermanentJobError("普通资料问答的课程或章节已变化，请重新选择资料。")
     _require_teacher(owner)
     if thread.dojo_id is not None:
         build_scope(owner, role="teacher", dojo_id=thread.dojo_id, module_index=thread.module_index)
     if job.dojo_id is not None:
         build_scope(owner, role="teacher", dojo_id=job.dojo_id, module_index=job.module_index)
+    if "ordinaryMaterialQuestion" in payload:
+        return
     facts = (payload.get("context") or {}).get("platformFacts") or {}
     scope = facts.get("scope") or {}
     if (scope.get("dojoId"), scope.get("moduleIndex")) != (job.dojo_id, job.module_index):
@@ -3369,8 +3381,47 @@ def _require_teacher_document_sources(job, payload):
         raise PermanentJobError("教学文档的引用资料权限或版本已变化，请重新选择。")
 
 
+def _require_ordinary_material_question(job, payload):
+    _require_upstream_teacher_scope(job, payload)
+    try:
+        return ordinary_material_turn.require_current(job, payload)
+    except ValueError as error:
+        raise PermanentJobError(str(error)) from None
+
+
+def _invoke_ordinary_material_question(job, route, payload):
+    materials = _require_ordinary_material_question(job, payload)
+    body = ordinary_material_turn.request_body(payload, materials)
+    encoded = _runtime_json_bytes(body)
+    descriptor = ordinary_material_turn.dispatch_descriptor(payload)
+    _record_runtime_dispatch(job, descriptor, _runtime_json_bytes(descriptor), wire_digest=hashlib.sha256(encoded).hexdigest())
+    try:
+        response = invoke_teaching_material_turn(body, encoded=encoded)
+    except UpstreamTurnError as error:
+        failure = RuntimeJobError(str(error), category=error.category, retry_after=error.retry_after)
+        if error.model == route.get("required_model") and error.usage:
+            failure.model_meta = {"actualModel": error.model, "usage": error.usage}
+        raise failure from None
+    if response["model"] != route.get("required_model"):
+        raise PermanentJobError("普通资料问答未使用指定的 Harness 模型。")
+    model_meta = {"actualModel": response["model"], "usage": response["usage"]}
+    try:
+        answer = ordinary_material_turn.answer_text(response["text"])
+    except ValueError:
+        failure = PermanentJobError("资料问答的模型答复未通过普通教学文本校验。")
+        failure.model_meta = model_meta
+        raise failure from None
+    return {
+        "success": True,
+        "result": {"answer": answer, "executionMode": "ask", "materialReads": response["materialReads"]},
+        "model": model_meta,
+    }
+
+
 def _invoke_agent_runtime(job, route, payload=None):
     payload = dict(payload or job.payload or {})
+    if job.kind == "agent.chat" and "ordinaryMaterialQuestion" in payload:
+        return _invoke_ordinary_material_question(job, route, payload)
     body = _runtime_request_body(job, route, payload)
     if job.kind == "agent.chat" and payload.get("chatBackend") == "upstream":
         if not upstream_enabled():
@@ -3614,6 +3665,12 @@ def _persist_result(job, result):
         restore_input_cache(job, bootstrap=True)
         from .workbench import execution_mode, project_mode_result
         result = project_mode_result(job.payload or {}, result)
+        material_reads = {}
+        if "ordinaryMaterialQuestion" in (job.payload or {}):
+            reads = result.get("materialReads")
+            if not valid_material_reads(reads, len(job.payload.get("sourceRefs") or [])):
+                raise PermanentJobError("普通资料问答缺少可核验的资料读取记录。")
+            material_reads = {"materialReads": reads}
         mode = execution_mode(result) if execution_mode(job.payload or {}) == "auto" else execution_mode(job.payload or {})
         context = (job.payload or {}).get("context")
         context = context if isinstance(context, dict) else {}
@@ -3705,6 +3762,7 @@ def _persist_result(job, result):
                 "promptManifest": result.get("promptManifest") or [],
                 "files": public_files,
                 **({"materialModelCoverage": coverage} if coverage is not None else {}),
+                **material_reads,
                 "requiresAction": bool(
                     result.get("requiresAction") or tool_proposals or generation_options
                 ),
@@ -3743,6 +3801,7 @@ def _persist_result(job, result):
         return {
             "answer": answer,
             **({"materialModelCoverage": coverage} if coverage is not None else {}),
+            **material_reads,
             "executionMode": mode,
             "intentDecision": result.get("intentDecision"),
             "suggestions": result.get("suggestions") or [],
@@ -4734,6 +4793,8 @@ def process_job(job_id, *, worker_id=None):
                 and isinstance(checkpoint.get("result"), dict)
                 and isinstance(checkpoint.get("model"), dict)
             ):
+                if "ordinaryMaterialQuestion" in runtime_payload:
+                    _require_ordinary_material_question(job, runtime_payload)
                 response = {
                     "result": checkpoint["result"],
                     "model": checkpoint["model"],
@@ -4775,6 +4836,9 @@ def process_job(job_id, *, worker_id=None):
                         )
                 job = _owned_job_attempt(job_id, identity)
                 model_meta = response.get("model") or {}
+                if "ordinaryMaterialQuestion" in runtime_payload:
+                    failed_model_meta = model_meta
+                    _require_ordinary_material_question(job, runtime_payload)
                 if started is not None:
                     model_meta.setdefault(
                         "latencyMs", int((time.monotonic() - started) * 1000)
@@ -5004,7 +5068,7 @@ def process_job(job_id, *, worker_id=None):
         _sync_native_authoring_batch_action(job)
         if route is not None:
             try:
-                _record_invocation(job, route, failed_model_meta, status="FAILED", error=exc)
+                _record_invocation(job, route, getattr(exc, "model_meta", failed_model_meta), status="FAILED", error=exc)
             except Exception:
                 logger.debug("Could not record failed model invocation", exc_info=True)
         db.session.commit()

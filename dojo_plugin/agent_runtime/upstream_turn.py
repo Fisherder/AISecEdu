@@ -6,10 +6,12 @@ import requests
 
 
 class UpstreamTurnError(ValueError):
-    def __init__(self, message, *, category="service", retry_after=0):
+    def __init__(self, message, *, category="service", retry_after=0, model=None, usage=None):
         super().__init__(message)
         self.category = category
         self.retry_after = retry_after
+        self.model = model
+        self.usage = usage
 
 
 def upstream_enabled():
@@ -67,6 +69,40 @@ def invoke_turn(body, *, encoded=None):
     return _send_turn(body, "/v1/turn", 1024 * 1024, encoded)
 
 
+MATERIAL_TURN_PATH = "/v1/teaching-material-turn"
+_USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
+
+
+def _usage_counts(result):
+    usage = result.get("usage")
+    return {
+        key: usage[key] for key in _USAGE_FIELDS
+        if isinstance(usage, dict) and type(usage.get(key)) is int and usage[key] >= 0
+    }
+
+
+def valid_material_reads(reads, count):
+    return (
+        isinstance(reads, list) and 1 <= len(reads) <= count
+        and all(type(index) is int and 1 <= index <= count for index in reads)
+        and len(reads) == len(set(reads))
+    )
+
+
+def _material_failure_receipt(response):
+    try:
+        result = response.json()
+    except ValueError:
+        return None, None
+    if not isinstance(result, dict) or not isinstance(result.get("model"), str):
+        return None, None
+    return result["model"], _usage_counts(result)
+
+
+def invoke_teaching_material_turn(body, *, encoded=None):
+    return _send_turn(body, MATERIAL_TURN_PATH, 128 * 1024, encoded)
+
+
 def invoke_teaching_image_turn(body, image):
     # The caller resolves a single authorized, displayed illustration immediately before this call.
     if not teaching_image_enabled():
@@ -99,10 +135,14 @@ def _send_turn(body, path, limit, encoded=None):
             status = response.status_code
             if not 200 <= status < 300:
                 transient = status in {408, 425, 429} or 500 <= status < 600
+                model, usage = _material_failure_receipt(response) if (
+                    path == MATERIAL_TURN_PATH and status in {502, 504}
+                ) else (None, None)
                 raise UpstreamTurnError(
                     f"教学对话服务返回 HTTP {status}",
                     category="service" if transient else "permanent",
                     retry_after=response.headers.get("Retry-After", 0) if transient else 0,
+                    model=model, usage=usage,
                 )
             result = response.json()
     except requests.Timeout:
@@ -116,16 +156,24 @@ def _send_turn(body, path, limit, encoded=None):
     text, model = result.get("text"), result.get("model")
     if not isinstance(text, str) or not text.strip() or not isinstance(model, str) or not model.strip():
         raise UpstreamTurnError("教学对话服务未返回完整答复")
-    usage = result.get("usage")
-    return {
-        "text": text.strip(),
-        "model": model.strip(),
-        "usage": {
-            key: usage[key]
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens")
-            if isinstance(usage, dict) and type(usage.get(key)) is int and usage[key] >= 0
-        },
-    }
+    turn = {"text": text.strip(), "model": model.strip(), "usage": _usage_counts(result)}
+    if path == MATERIAL_TURN_PATH:
+        reads = result.get("materialReads")
+        count = len(body.get("materials") or [])
+        usage = turn["usage"]
+        measured = (
+            set(usage) == set(_USAGE_FIELDS) and usage["prompt_tokens"] > 0
+            and usage["completion_tokens"] > 0
+            and usage["total_tokens"] == usage["prompt_tokens"] + usage["completion_tokens"]
+        )
+        if (set(result) != {"text", "model", "usage", "materialReads"} or not measured
+                or not valid_material_reads(reads, count)):
+            raise UpstreamTurnError(
+                "普通资料问答服务未返回完整的引用与用量回执",
+                model=turn["model"], usage=usage if measured else None,
+            )
+        turn["materialReads"] = reads
+    return turn
 
 
 def result_object(text):

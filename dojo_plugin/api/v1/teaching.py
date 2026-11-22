@@ -182,6 +182,7 @@ from ...agent_runtime.model_journal import ModelJournalError, record_model_event
 from ...agent_runtime.project_collection import project_collection_view
 from ...agent_runtime.reliability import public_recovery
 from ...agent_runtime.teacher_documents import requests_lesson_plan_candidates
+from ...agent_runtime import ordinary_material_turn
 from ...agent_runtime.upstream_turn import ordinary_teaching_course, ordinary_teaching_image_allowed, upstream_enabled
 from ...agent_runtime.scope import (
     ScopeError,
@@ -6647,6 +6648,7 @@ class TeachingThreadMessages(Resource):
 def submit_teacher_message(user, thread_id, body, request_key=None):
     try:
         from ...agent_runtime.workbench import execution_mode, require_execution_mode
+        readonly_material_turn = ordinary_material_turn.requested(body)
         mode = execution_mode(body)
         _require_teacher(user)
         thread = _thread_for_owner(thread_id, user)
@@ -6657,6 +6659,16 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 409,
                 code="THREAD_ARCHIVED",
             )
+        if readonly_material_turn:
+            course_id = body.get("dojoId") if body.get("dojoId") is not None else thread.dojo_id
+            module_index = body.get("moduleIndex") if body.get("dojoId") is not None else thread.module_index
+            if course_id is None:
+                raise ValueError("请先选择已开通普通资料问答的课程。")
+            try:
+                course_scope = build_scope(user, role="teacher", dojo_id=course_id, module_index=module_index)
+            except ScopeError:
+                raise ScopeError("所选课程或章节不在当前教师授权范围。") from None
+            ordinary_material_turn.require_course(course_scope.dojo_id)
         requested_action = str(body.get("action") or "").strip().lower()
         continuation = body.get("agentContinuation") is True
         if continuation and mode in {"ask", "plan"}:
@@ -6826,7 +6838,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if thread.title in DEFAULT_THREAD_TITLES:
                 thread.title = _thread_title_from_message(content)
 
-        if not ordinary_plan:
+        if not ordinary_plan and not readonly_material_turn:
             if session_history_replayable(thread.id):
                 # New conversations derive the model-visible history from the
                 # same durable message events used to reconstruct the page.
@@ -6849,8 +6861,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if pattern_id not in ("", "process-inquiry"):
                 raise ValueError("请选择有效的学习模式。")
             thread.context = {**(thread.context or {}), "learningPattern": inquiry_pattern_catalog() if pattern_id else None}
-        platform_context = None if ordinary_plan else _teacher_agent_context(user, thread)
-
+        platform_context = None if ordinary_plan or readonly_material_turn else _teacher_agent_context(user, thread)
         generate = ordinary_plan or (continuation and requested_action == "generate")
         if continuation_context is not None:
             constraints = continuation_context["constraints"]
@@ -6868,9 +6879,15 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 "trace": [],
             }
         else:
-            constraints, source_refs = _agent_request_context(
-                body, user, thread, include_thread_attachments=not ordinary_plan,
-            )
+            try:
+                constraints, source_refs = _agent_request_context(
+                    body, user, thread,
+                    include_thread_attachments=not (ordinary_plan or readonly_material_turn),
+                )
+            except ScopeError:
+                if readonly_material_turn:
+                    raise ScopeError("本轮选择的资料不存在或不在当前课程授权范围。") from None
+                raise
             allow_degraded = bool(body.get("allowDegraded"))
             agent_loop = {
                 "depth": 0,
@@ -7003,6 +7020,15 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                     else "正在按你的要求制作这项教学内容，完成后会在当前对话中直接给出可预览、可继续修改的结果。"
                 )
             )
+        elif readonly_material_turn:
+            pin = ordinary_material_turn.admit(user.id, thread.dojo_id, source_refs, content)
+            payload = {
+                "prompt": content, "executionMode": "ask", "chatBackend": "upstream",
+                "sourceRefs": pin["refs"], ordinary_material_turn.PIN: pin,
+                "allowDegraded": False,
+            }
+            job_kind = "agent.chat"
+            assistant_text = "正在准备资料问答…"
         else:
             payload = {
                 "prompt": content,
@@ -9684,6 +9710,11 @@ class TeachingPendingInput(Resource):
             body = _body()
             payload = request_payload(job)
             content, revision = validated_pending_input(payload, job.status, body.get("content"), body.get("revision"), MAX_MESSAGE_CHARS)
+            if ordinary_material_turn.PIN in payload:
+                try:
+                    ordinary_material_turn.validate_question(content)
+                except ValueError as error:
+                    raise ConversationConflict(str(error)) from None
             message = TeachingAgentMessages.query.filter_by(id=payload.get("userMessageId"), user_id=user.id, thread_id=thread.id, role="user").first()
             if message is None:
                 raise ConversationConflict("原始输入已不存在，未修改任务。")

@@ -324,3 +324,41 @@ def test_only_current_ordinary_course_session_can_send_a_new_teaching_image(monk
     monkeypatch.setenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "-9")
     monkeypatch.setenv("DOJO_AI_ENABLED", "false")
     assert not allowed()
+
+
+@pytest.mark.parametrize("edits", [
+    {}, {"materialReads": []}, {"materialReads": [True]}, {"materialReads": [1, 1]},
+    {"materialReads": [2]}, {"usage": {"prompt_tokens": 5}},
+    {"usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 23}},
+    {"proposal": {"tool": "course.create"}},
+])
+def test_material_turn_http_contract_requires_actual_reads_and_cumulative_usage(service, edits):
+    post, response = service
+    body = {"messages": [{"role": "user", "content": "说明蒸发。"}], "materials": [{"text": "水由液态变为气态。"}]}
+    response.json.return_value = {
+        "text": "资料 1 解释了物态变化。", "model": "fixture",
+        "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}, "materialReads": [1],
+        **edits,
+    }
+    if edits:
+        with pytest.raises(turn.UpstreamTurnError, match="引用与用量回执") as failure:
+            turn.invoke_teaching_material_turn(body)
+        assert failure.value.usage == (response.json.return_value["usage"] if "usage" not in edits else None)
+    else:
+        assert turn.invoke_teaching_material_turn(body) == response.json.return_value
+    assert post.call_args.args == ("http://harness.test/v1/teaching-material-turn",)
+    assert json.loads(post.call_args.kwargs["data"]) == body
+
+
+@pytest.mark.parametrize("status", [502, 504])
+def test_material_failure_only_reports_measured_numbers(service, status):
+    _, response = service
+    response.status_code = status
+    response.json.return_value = {
+        "error": "fixture failed", "model": "fixture",
+        "usage": {"prompt_tokens": 5, "completion_tokens": False, "total_tokens": 5},
+    }
+    with pytest.raises(turn.UpstreamTurnError) as failure:
+        turn.invoke_teaching_material_turn({"messages": [], "materials": []})
+    assert failure.value.model == "fixture"
+    assert failure.value.usage == {"prompt_tokens": 5, "total_tokens": 5}

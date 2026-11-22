@@ -32,6 +32,13 @@ const deck = {
   currentRevision: 2, capabilities: { edit: true }, revision: { content: { note: 'PRIVATE-CANVAS-SELECTION' } },
 };
 const fixture = { writes: [], decision: null, receipt: null, rejectPrepare: true, pauseDecision: null };
+const materials = [
+  { id: 'course-plant-observations', title: '植物观察记录', status: 'READY' },
+  { id: 'course-water-table', title: '浇水对照表', status: 'READY' },
+];
+const submissions = [];
+let pauseSubmission;
+let activeJob;
 const message = () => ({
   id: 21, role: 'assistant', content: '请核对植物观察课件。',
   metadata: {
@@ -70,6 +77,7 @@ const server = createServer(async (request, response) => {
   const path = url.pathname.slice(prefix.length);
   if (path === '/context') return ok(response, { teacherDojos: [] });
   if (path === '/threads') return ok(response, { threads: [ordinary, other] });
+  if (path === '/materials') return ok(response, { materials });
   if (path === '/artifacts') return ok(response, { artifacts: [deck] });
   if (path === '/artifacts/' + deck.id) return ok(response, { artifact: deck });
   if (path === '/artifacts/' + deck.id + '/revise' && request.method === 'POST') {
@@ -78,10 +86,20 @@ const server = createServer(async (request, response) => {
     fixture.writes.push({ path, body: JSON.parse(raw) });
     return ok(response, {});
   }
-  if (path === '/jobs') return ok(response, { jobs: [] });
+  if (path === '/jobs') return ok(response, { jobs: activeJob ? [activeJob] : [] });
   if (/\/events$/.test(path)) return ok(response, { events: [], nextCursor: 0 });
   if (path === '/threads/' + originThread) return ok(response, { thread: { ...ordinary, messages: [message()] } });
   if (path === '/threads/' + otherThread) return ok(response, { thread: { ...other, messages: [] } });
+  if (path === '/threads/' + originThread + '/messages' && request.method === 'POST') {
+    let raw = '';
+    for await (const chunk of request) raw += chunk;
+    submissions.push({ body: JSON.parse(raw), key: request.headers['idempotency-key'] });
+    if (pauseSubmission) {
+      pauseSubmission.started();
+      await pauseSubmission.wait;
+    }
+    return ok(response, { thread: { ...ordinary, messages: [message()] } });
+  }
 
   const base = `/threads/${originThread}/messages/21/tool-proposals/0`;
   if (request.method === 'POST' && [base + '/decision', base + '/prepare-classroom'].includes(path)) {
@@ -197,8 +215,75 @@ async function main() {
     await submit.click();
     await posted;
     assert.deepEqual(fixture.writes.at(-1).body, { instruction, expectedRevision: 2 });
+
+    await load();
+    const composer = page.getByRole('textbox', { name: '输入教学要求', exact: true });
+    const ask = page.getByRole('button', { name: '仅问答', exact: true });
+    const emptyPrompt = () => page.waitForFunction(
+      () => document.querySelector('#cocreation-workbench').shadowRoot.querySelector('#workbench-prompt').value === '',
+    );
+    const selectMaterials = async (selected) => {
+      await page.getByRole('button', { name: '添加上下文', exact: true }).click();
+      await page.locator('.composer-menu').getByRole('button', { name: '引用资料库', exact: true }).click();
+      const catalog = page.getByRole('dialog', { name: '引用资料库', exact: true });
+      for (const material of selected) {
+        await catalog.getByRole('button', { name: new RegExp(material.title) }).click();
+      }
+      await catalog.getByRole('button', { name: '关闭', exact: true }).click();
+    };
+    await composer.fill('解释观察与推测的区别。');
+    assert.equal(await ask.count(), 0);
+    await composer.press('Enter');
+    await emptyPrompt();
+    assert.equal(submissions[0].body.executionMode, 'auto');
+    assert.equal(Object.hasOwn(submissions[0].body, 'materialQuestion'), false);
+    assert.deepEqual(submissions[0].body.sourceRefs, []);
+
+    await selectMaterials([materials[0]]);
+    await composer.fill('根据资料准备一份课堂提纲。');
+    await page.getByRole('button', { name: '发送要求', exact: true }).click();
+    await emptyPrompt();
+    assert.equal(submissions[1].body.executionMode, 'auto');
+    assert.equal(Object.hasOwn(submissions[1].body, 'materialQuestion'), false);
+    assert.deepEqual(submissions[1].body.sourceRefs, [{ type: 'material', id: materials[0].id }]);
+
+    activeJob = { id: 'running-fixture-job', kind: 'agent.chat', status: 'RUNNING', threadId: originThread };
+    await page.setViewportSize({ width: 390, height: 844 });
+    await load();
+    await selectMaterials(materials);
+    await page.getByRole('button', { name: '移除引用 ' + materials[0].title, exact: true }).click();
+    await page.getByRole('combobox', { name: '学习模式', exact: true }).selectOption('process-inquiry');
+    await page.getByRole('combobox', { name: '发送时机', exact: true }).selectOption('next-step');
+    const question = '对照表中两组植物用了多少水？';
+    await composer.fill(question);
+    let releaseSubmission;
+    let signalSubmission;
+    const submissionStarted = new Promise(resolve => { signalSubmission = resolve; });
+    pauseSubmission = { started: signalSubmission, wait: new Promise(resolve => { releaseSubmission = resolve; }) };
+    await ask.evaluate(button => { button.click(); button.click(); });
+    await submissionStarted;
+    try {
+      await page.getByRole('button', { name: '正在提交', exact: true }).waitFor();
+      assert.equal(await ask.isDisabled(), true);
+      assert.equal(submissions.length, 3);
+      assert.ok(submissions[2].key);
+      assert.deepEqual(submissions[2].body, {
+        content: question,
+        sourceRefs: [{ type: 'material', id: materials[1].id }],
+        delivery: 'after-current',
+        expectedJobId: activeJob.id,
+        executionMode: 'ask',
+        materialQuestion: true,
+      });
+    } finally {
+      releaseSubmission();
+      pauseSubmission = null;
+    }
+    await emptyPrompt();
+    assert.equal(await ask.count(), 0);
+    assert.equal(submissions.length, 3);
     assert.deepEqual(errors, []);
-    console.log('Teacher workbench classroom preparation and slide revision checks passed', assetPath[2]);
+    console.log('Teacher workbench classroom preparation, slide revision, and material question checks passed', assetPath[2]);
   } finally {
     if (browser) await browser.close();
     server.closeAllConnections();

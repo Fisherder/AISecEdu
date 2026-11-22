@@ -2,6 +2,9 @@ import { timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { TextDecoder } from 'node:util';
 import { createEngine } from './engine.mjs';
+import {
+  materialTurnPath, maxMaterialTurnBytes, validateMaterialTurn, TeachingMaterialTurnError,
+} from './teaching-material.mjs';
 
 const maxBodyBytes = 1024 * 1024;
 const maxMessages = 128;
@@ -56,16 +59,17 @@ function validate(value, withImages) {
   return { messages, images };
 }
 
-async function readMessages(request, withImages) {
+async function readMessages(request, withImages, withMaterials) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers['content-type'] ?? '')) {
     throw new RequestError(415, 'Expected application/json');
   }
 
+  const maxBytes = withMaterials ? maxMaterialTurnBytes : withImages ? 7 * maxBodyBytes : maxBodyBytes;
   const chunks = [];
   let size = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
-    if (size > (withImages ? 7 * maxBodyBytes : maxBodyBytes)) throw new RequestError(413, 'Request body is too large');
+    if (size > maxBytes) throw new RequestError(413, 'Request body is too large');
     chunks.push(chunk);
   }
 
@@ -75,7 +79,10 @@ async function readMessages(request, withImages) {
   } catch {
     throw new RequestError(400, 'Invalid JSON');
   }
-  return validate(payload, withImages);
+  if (!withMaterials) return validate(payload, withImages);
+  const validated = validateMaterialTurn(payload);
+  if (!validated) throw new RequestError(400, 'Expected a bounded teaching question and material excerpts');
+  return validated;
 }
 
 export function createService({ secret, engine, allowImages = true, timeoutMs = turnTimeout }) {
@@ -90,7 +97,8 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
     }
     const withImages = request.url === '/v1/teaching-image-turn';
     const imageCapability = withImages && request.method === 'GET';
-    if (!imageCapability && (request.method !== 'POST' || (!withImages && request.url !== '/v1/turn'))) {
+    const withMaterials = request.url === materialTurnPath;
+    if (!imageCapability && (request.method !== 'POST' || (!withImages && !withMaterials && request.url !== '/v1/turn'))) {
       json(response, 404, { error: 'Not found' });
       return;
     }
@@ -120,9 +128,12 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
     response.once('close', abort);
     const deadline = AbortSignal.timeout(timeoutMs);
     try {
-      const { messages, images } = await readMessages(request, withImages);
+      const { messages, images, question, materials } = await readMessages(request, withImages, withMaterials);
       const signal = AbortSignal.any([disconnect.signal, deadline]);
-      const result = withImages ? await engine.imageTurn(messages, signal, images) : await engine.turn(messages, signal);
+      let result;
+      if (withMaterials) result = await engine.materialTurn(question, materials, signal);
+      else if (withImages) result = await engine.imageTurn(messages, signal, images);
+      else result = await engine.turn(messages, signal);
       if (!response.destroyed) json(response, 200, result);
     } catch (error) {
       if (response.destroyed) return;
@@ -131,6 +142,11 @@ export function createService({ secret, engine, allowImages = true, timeoutMs = 
         json(response, error.status, { error: error.message });
       } else if (error?.name === 'AttachmentError') {
         json(response, 400, { error: 'Teaching image could not be read within the configured limits' });
+      } else if (withMaterials && error instanceof TeachingMaterialTurnError) {
+        json(response, deadline.aborted ? 504 : 502, {
+          error: deadline.aborted ? 'Model turn timed out' : 'Teaching material turn failed',
+          ...error.receipt,
+        });
       } else if (deadline.aborted) {
         json(response, 504, { error: 'Model turn timed out' });
       } else {

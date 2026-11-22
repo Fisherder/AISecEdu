@@ -3,6 +3,7 @@ import { blankDraft, WorkspaceStorage } from './storage';
 import { mergeEvents } from './events';
 import { classroomPreparation, classroomSessionId, matchingClassroomDecision } from './classroom-preparation';
 import {
+  hasOnlyMaterialSources,
   terminal,
   type Artifact,
   type Data,
@@ -358,17 +359,24 @@ export class WorkbenchController {
     this.setPanel('activity');
     void this.loadEvents(jobId).catch(this.error);
   }
-  async send(extra: Data = {}) {
+  async send(extra: Data = {}, mode: 'auto' | 'ask' = 'auto') {
     await this.run(async () => {
       if (this.state.uploads.length) throw new Error('请等待文件上传完成，或移除失败的上传。');
       const draft = this.state.draft;
       const composerSubmission = extra.content === undefined;
       const content = extra.content ?? draft.text.trim();
+      if (mode === 'ask' && (!composerSubmission || !hasOnlyMaterialSources(draft.sources))) return;
       if (!content) return;
       const thread = await this.ensureThread();
       const epoch = this.epoch;
       const active = this.state.jobs.find((job) => job.threadId === thread.id && !terminal(job));
-      const signature = JSON.stringify([thread.id, content, draft, extra]);
+      const sourceRefs = draft.sources.map(({ type, id }) => ({ type, id }));
+      const signature = JSON.stringify(mode === 'ask'
+        ? [thread.id, content, sourceRefs, mode]
+        : [thread.id, content, draft, extra]);
+      const delivery = active
+        ? { delivery: mode === 'ask' ? 'after-current' : draft.delivery, expectedJobId: active.id }
+        : {};
       const persisted = this.storage.value<typeof this.pendingSubmit>('pending-submit', null);
       if (this.pendingSubmit?.signature !== signature)
         this.pendingSubmit =
@@ -377,17 +385,19 @@ export class WorkbenchController {
             : {
                 signature,
                 key: key(),
-                body: {
-                  content: [...draft.skills.map((skill) => '/' + skill), content].join('\n'),
-                  learningPattern: draft.learningPattern,
-                  sourceRefs: draft.sources.map((source) => ({ type: source.type, id: source.id })),
-                  artifactType: draft.artifactType,
-                  candidateMode: 'auto',
-                  candidateCount: 3,
-                  ...(active ? { delivery: draft.delivery, expectedJobId: active.id } : {}),
-                  ...extra,
-                  executionMode: 'auto',
-                },
+                body: mode === 'ask'
+                  ? { content, sourceRefs, ...delivery, executionMode: mode, materialQuestion: true }
+                  : {
+                      content: [...draft.skills.map((skill) => '/' + skill), content].join('\n'),
+                      learningPattern: draft.learningPattern,
+                      sourceRefs,
+                      artifactType: draft.artifactType,
+                      candidateMode: 'auto',
+                      candidateCount: 3,
+                      ...delivery,
+                      ...extra,
+                      executionMode: mode,
+                    },
               };
       this.storage.set('pending-submit', this.pendingSubmit);
       const data = await this.mutateMessage(thread.id, this.pendingSubmit!);

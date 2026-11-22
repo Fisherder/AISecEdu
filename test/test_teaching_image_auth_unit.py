@@ -72,7 +72,8 @@ def image_boundary(monkeypatch):
                SimpleNamespace(dojo_id=allowed_dojo, is_public_or_official=False),
                SimpleNamespace(dojo_id=other_dojo, is_public_or_official=True),
            ]),
-           DojoUsers=model(memberships), DojoAdmins=model([]), SelfLearningWorkspaces=model([]))
+           DojoModules=model([]), DojoUsers=model(memberships), DojoAdmins=model([]),
+           SelfLearningWorkspaces=model([]))
     module("CTFd.models", Users=model([user]), db=db)
     module(package + ".config",
            AGENT_RUNTIME_SERVICE_SECRET=SERVICE_SECRET,
