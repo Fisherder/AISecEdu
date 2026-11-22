@@ -14,6 +14,7 @@ import time
 import unicodedata
 import uuid
 import zipfile
+from collections import defaultdict
 from urllib.parse import quote, urlencode
 
 import requests
@@ -21,7 +22,7 @@ from flask import request, send_file
 from flask_restx import Namespace, Resource
 from sqlalchemy import case, func, or_, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import load_only, selectinload
+from sqlalchemy.orm import joinedload, load_only, selectinload
 from werkzeug.utils import secure_filename
 
 from CTFd.cache import cache, clear_challenges, clear_standings
@@ -1055,22 +1056,7 @@ def _question_course_order(item):
     )
 
 
-def _course_question_list_views(dojo):
-    modules = {module.module_index: module for module in dojo.modules}
-    challenges = DojoChallenges.query.filter_by(dojo_id=dojo.dojo_id).all()
-    challenge_index = {(row.module_index, row.id): row for row in challenges}
-    published = [
-        challenge
-        for challenge in challenges
-        if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT"
-    ]
-    drafts = (
-        LearningDrafts.query.filter_by(dojo_id=dojo.dojo_id)
-        .filter(~LearningDrafts.status.in_(("DELETED", "ARCHIVED")))
-        .filter(LearningDrafts.published_challenge_id.is_(None))
-        .all()
-    )
-    published_ids = [challenge.challenge_id for challenge in published]
+def _course_question_people(published_ids, drafts):
     profiles = (
         {
             row.challenge_id: row
@@ -1096,6 +1082,66 @@ def _course_question_list_views(dojo):
         if owner_ids
         else {}
     )
+    return profiles, owner_names
+
+
+def _course_question_list_inputs(dojos, drafts_by_dojo):
+    # Only courses with legacy runtime references use the richer question view.
+    dojo_ids = [dojo.dojo_id for dojo in dojos if any(
+        draft.published_challenge_id is None and is_runtime_reference(draft)
+        for draft in drafts_by_dojo[dojo.dojo_id]
+    )]
+    if not dojo_ids:
+        return {}
+
+    modules_by_dojo = defaultdict(dict)
+    for module in DojoModules.query.filter(DojoModules.dojo_id.in_(dojo_ids)).all():
+        modules_by_dojo[module.dojo_id][module.module_index] = module
+    challenges_by_dojo = defaultdict(list)
+    published_ids = []
+    for challenge in DojoChallenges.query.filter(
+        DojoChallenges.dojo_id.in_(dojo_ids)
+    ).options(joinedload(DojoChallenges.module)).all():
+        challenges_by_dojo[challenge.dojo_id].append(challenge)
+        if _course_question_published(challenge):
+            published_ids.append(challenge.challenge_id)
+    unpublished_by_dojo = {
+        dojo_id: [draft for draft in drafts_by_dojo[dojo_id] if draft.published_challenge_id is None]
+        for dojo_id in dojo_ids
+    }
+    profiles, owner_names = _course_question_people(
+        published_ids, [draft for drafts in unpublished_by_dojo.values() for draft in drafts],
+    )
+    return {
+        dojo_id: (
+            modules_by_dojo[dojo_id], challenges_by_dojo[dojo_id],
+            unpublished_by_dojo[dojo_id], profiles, owner_names,
+        )
+        for dojo_id in dojo_ids
+    }
+
+
+def _course_question_published(challenge):
+    return is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT"
+
+
+def _course_question_list_views(dojo, *, inputs=None):
+    if inputs is None:
+        modules = {module.module_index: module for module in dojo.modules}
+        challenges = DojoChallenges.query.filter_by(dojo_id=dojo.dojo_id).all()
+        drafts = (
+            LearningDrafts.query.filter_by(dojo_id=dojo.dojo_id)
+            .filter(~LearningDrafts.status.in_(("DELETED", "ARCHIVED")))
+            .filter(LearningDrafts.published_challenge_id.is_(None))
+            .all()
+        )
+    else:
+        modules, challenges, drafts, profiles, owner_names = inputs
+    challenge_index = {(row.module_index, row.id): row for row in challenges}
+    published = [challenge for challenge in challenges if _course_question_published(challenge)]
+    published_ids = [challenge.challenge_id for challenge in published]
+    if inputs is None:
+        profiles, owner_names = _course_question_people(published_ids, drafts)
     rows = []
     for challenge in published:
         module = modules.get(challenge.module_index)
@@ -1193,6 +1239,7 @@ def _course_content_snapshot(
     artifacts=None,
     batches=None,
     batch_count=None,
+    question_inputs=None,
 ):
     as_of = as_of or datetime.datetime.utcnow()
     if published_questions is None:
@@ -1258,7 +1305,7 @@ def _course_content_snapshot(
                 "nextAction": "retry_validation" if item["needsAttention"] else "open",
                 "href": item["href"],
             }
-            for item in _course_question_list_views(dojo)
+            for item in _course_question_list_views(dojo, inputs=question_inputs)
         ]
 
     if artifacts is None:
@@ -1464,7 +1511,7 @@ def _dojo_summary_views(dojos):
         )
     ).all()
     for challenge in challenge_rows:
-        if is_supported_exercise(challenge) and (challenge.data or {}).get("publication_state") != "DRAFT":
+        if _course_question_published(challenge):
             published_by_dojo[challenge.dojo_id].append(challenge)
     draft_by_dojo = {dojo_id: [] for dojo_id in dojo_ids}
     for draft in LearningDrafts.query.filter(
@@ -1485,6 +1532,7 @@ def _dojo_summary_views(dojos):
             LearningDrafts.validation,
             LearningDrafts.revision,
             LearningDrafts.published_challenge_id,
+            LearningDrafts.created,
             LearningDrafts.updated,
         )
     ).all():
@@ -1532,6 +1580,7 @@ def _dojo_summary_views(dojos):
         .group_by(TeachingGenerationBatches.dojo_id)
         .all()
     )
+    question_inputs = _course_question_list_inputs(dojos, draft_by_dojo)
     as_of = datetime.datetime.utcnow()
     summaries = []
     for dojo in dojos:
@@ -1544,6 +1593,7 @@ def _dojo_summary_views(dojos):
             artifacts=artifact_by_dojo[dojo.dojo_id],
             batches=batch_by_dojo[dojo.dojo_id],
             batch_count=batch_counts.get(dojo.dojo_id, 0),
+            question_inputs=question_inputs.get(dojo.dojo_id),
         )
         summaries.append(
             {
