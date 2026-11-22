@@ -21,7 +21,8 @@ import { api, id, key, safeLink } from '../core/api';
 import { projectActivity, streamedAnswer } from '../core/events';
 import { classroomDashboardLink, classroomPreparation } from '../core/classroom-preparation';
 import { dateLabel, terminal, type Message, type Data } from '../core/types';
-import { Button, IconButton, Status, Code, Dialog } from './ui';
+import { Button, IconButton, Status, Code } from './ui';
+import { CandidateSet } from './CandidateSet';
 import { Composer } from './Composer';
 import { GenerationConfirmation } from './GenerationConfirmation';
 import { readLocal, writeLocal } from '../core/storage';
@@ -304,61 +305,6 @@ function Approvals({ message }: { message: Message }) {
         );
       })}
     </>
-  );
-}
-function CandidateSet({ candidateSetId, close }: { candidateSetId: string; close: () => void }) {
-  const { state, controller: c } = useWorkbench();
-  const [data, setData] = useState<Data | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void api(`/candidate-sets/${id(candidateSetId)}`)
-      .then((result) => {
-        if (alive) setData(result.candidateSet);
-      })
-      .catch(c.error);
-    return () => {
-      alive = false;
-    };
-  }, [candidateSetId, c]);
-  return (
-    <Dialog title="审阅生成成品" onClose={close} wide>
-      <div className="dialog-body">
-        {!data ? (
-          <p>正在读取…</p>
-        ) : (
-          (data.candidates || []).map((candidate: Data) => (
-            <section key={candidate.id} className="candidate">
-              <h3>{candidate.title || candidate.content?.title || '生成成品'}</h3>
-              <p>{candidate.summary || candidate.content?.summary}</p>
-              {candidate.validation?.status && <Status status={candidate.validation.status} />}
-              <details>
-                <summary>检查生成内容</summary>
-                <Code value={candidate.content} />
-              </details>
-              <Button
-                className="primary"
-                disabled={state.busy}
-                onClick={() =>
-                  void c.run(async () => {
-                    const result = await api(`/candidates/${id(candidate.id)}/materialize`, {
-                      method: 'POST',
-                      body: {},
-                    });
-                    await c.loadArtifacts();
-                    if (result.artifact?.id) {
-                      await c.openArtifact(result.artifact.id);
-                      close();
-                    }
-                  })
-                }
-              >
-                打开成品工作区
-              </Button>
-            </section>
-          ))
-        )}
-      </div>
-    </Dialog>
   );
 }
 function MessageView({ message }: { message: Message }) {

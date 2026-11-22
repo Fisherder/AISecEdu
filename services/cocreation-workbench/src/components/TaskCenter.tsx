@@ -10,12 +10,14 @@ import {
 } from 'lucide-react';
 import { useWorkbench } from '../core/context';
 import { dateLabel, terminal, typeLabels } from '../core/types';
+import { CandidateSet } from './CandidateSet';
 import { Button, Empty, IconButton, Status } from './ui';
 
 export function TaskCenter() {
   const { state, controller: c } = useWorkbench();
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
+  const [candidateSetId, setCandidateSetId] = useState<string | null>(null);
   const rows = state.jobs.filter(
     (job) =>
       (!query ||
@@ -80,6 +82,12 @@ export function TaskCenter() {
             </div>
             <Status status={job.status} />
             <div className="task-actions">
+              {job.status === 'SUCCEEDED' && job.kind === 'candidate.generate' && job.artifactType === 'debate' &&
+                job.resultTarget?.kind === 'candidate' && job.resultTarget.candidateSetId && (
+                  <Button onClick={() => setCandidateSetId(job.resultTarget.candidateSetId)}>
+                    查看辩论候选
+                  </Button>
+                )}
               <IconButton label="查看执行过程" onClick={() => c.selectJob(job.id)}>
                 <Activity size={15} />
               </IconButton>
@@ -116,6 +124,7 @@ export function TaskCenter() {
         )}
       </div>
       <p className="quiet task-limit">显示最近 {state.jobs.length} 项任务</p>
+      {candidateSetId && <CandidateSet key={candidateSetId} candidateSetId={candidateSetId} close={() => setCandidateSetId(null)} />}
     </section>
   );
 }

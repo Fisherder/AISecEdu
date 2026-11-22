@@ -324,6 +324,15 @@ export class WorkbenchController {
       ]);
     }
   }
+  async deriveDebateCandidates(
+    candidateSetId: string,
+    request: { candidateIds: string[]; instruction: string; candidateCount: number },
+  ): Promise<Job> {
+    const result = await this.mutate(`/candidate-sets/${id(candidateSetId)}/derive`, request);
+    const job: Job = result.job;
+    this.patch({ jobs: [job, ...this.state.jobs.filter((item) => item.id !== job.id)] });
+    return job;
+  }
   async loadEvents(jobId: string) {
     if (this.activeJobReads.has(jobId)) return;
     this.activeJobReads.add(jobId);

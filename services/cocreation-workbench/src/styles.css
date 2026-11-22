@@ -2046,6 +2046,33 @@ kbd {
 .candidate details {
   margin: 12px 0;
 }
+.candidate-derive form {
+  margin-top: 14px;
+}
+.candidate-derive fieldset {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.candidate-derive legend {
+  padding: 0 4px;
+}
+.candidate-derive-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.candidate-derive-option input {
+  align-self: center;
+}
+.candidate-derive textarea {
+  color: var(--ink);
+}
+.candidate-derive .candidate-derive-result {
+  margin-top: 12px;
+}
 .fatal-error {
   padding: 80px 30px;
   color: var(--ink);
