@@ -274,3 +274,32 @@ def test_guide_blocks_model_answers_outside_the_selected_course_scope(guide):
     assert result["message"]["metadata"]["scopeValidation"]["status"] == "BLOCKED"
     assert result["contextCoverage"]["referencedEvidenceEvents"] == 2
     assert "另一个课程的结论" not in result["message"]["content"]
+
+
+def test_real_guide_summary_provides_zero_counts_and_navigation_title():
+    attempts = Mock()
+    attempts.count.return_value = 0
+    attempts.order_by.return_value.limit.return_value.all.return_value = []
+    challenge = SimpleNamespace(
+        reference_id=REFERENCE, dojo_id=7, module_index=0, challenge_index=1, challenge_id=11,
+        id="observation", dojo=SimpleNamespace(reference_id="science", name="科学"),
+        module=SimpleNamespace(id="intro", name="导论"), name="观察", exercise_mode="READ",
+    )
+    section = {
+        "guide_reference_catalog": lambda _: [],
+        "_visible_guide_challenge": lambda *_: challenge,
+        "LearningAttempts": SimpleNamespace(
+            query=Mock(filter_by=Mock(return_value=attempts)), started=Mock(),
+        ),
+        "LearningChallengeProfiles": SimpleNamespace(query=Mock(get=Mock(return_value=None))),
+    }
+    load_definitions("dojo_plugin/learning/context.py", section, {
+        "_guide_reference_option", "_guide_evidence_count", "guide_reference_summaries",
+    })
+    load_definitions("dojo_plugin/learning/intelligence.py", section, {"_guide_navigation_options"})
+    rows = section["guide_reference_summaries"](SimpleNamespace(id=17), {}, [REFERENCE])
+    assert len(rows) == 1
+    assert rows[0]["attemptCount"] == rows[0]["verifiedEvidenceCount"] == 0
+    assert section["_guide_navigation_options"]({}, rows) == {
+        "course-option-1": {"title": "观察", "url": f"/{REFERENCE}"},
+    }

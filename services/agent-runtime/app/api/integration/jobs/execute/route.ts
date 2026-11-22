@@ -3165,8 +3165,8 @@ async function reviseOrdinarySlide(
     aiCall: async (system, prompt, images) => {
       if (images?.length) throw new Error('An ordinary slide wording edit accepts text only');
       const result = await ordinaryTeachingText(model, ordinaryTeachingRules + '\n' + system, prompt, 'generate-classroom');
-      ordinarySlidePatch(parseJson(result.text));
       usage = mergeUsage(usage, result.usage);
+      ordinarySlidePatch(parseJson(result.text));
       return result.text;
     },
   });

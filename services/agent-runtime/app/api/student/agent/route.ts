@@ -1,15 +1,19 @@
+import { studyProductLabels } from '@/lib/server/self-study';
 import { nanoid } from 'nanoid';
 import { NextRequest, type NextResponse } from 'next/server';
 import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { rethrowStudentTurnAbort } from '@/lib/server/student-request-abort';
 import { resolvePrincipal, type Principal } from '@/lib/server/auth/session';
 import { getDb } from '@/lib/server/db';
 import { ensureAppSchema } from '@/lib/server/schema';
 import {
   createStudentSelfStudyPackage,
+  isSelfStudyText,
   SelfStudyGenerationError,
 } from '@/lib/server/self-study-generation';
 import {
   decideStudentAgentMessage,
+  studentRequestCancelled,
   type StudentAgentHistoryMessage,
 } from '@/lib/server/student-agent';
 import {
@@ -110,6 +114,12 @@ function linksForState(state: StudentAgentLearningState) {
   return links.slice(0, 4);
 }
 
+function studyPackageReply(status: string, explanation: string, request: string) {
+  const claimsOutcome = /(?:已(?:经)?|刚刚|成功)\s*(?:生成|创建|制作|完成|发布|启动|保存)|(?:生成|创建|制作|发布|启动|保存)(?:成功|完成|失败|完毕)/u;
+  if (!isSelfStudyText(request) || !isSelfStudyText(explanation) || claimsOutcome.test(explanation)) return status;
+  return `${status}\n\n${explanation}`;
+}
+
 async function requireStudent(
   req: NextRequest,
 ): Promise<{ response: NextResponse } | { principal: Principal }> {
@@ -164,11 +174,16 @@ export async function POST(req: NextRequest) {
   if (!message) {
     return apiError(API_ERROR_CODES.MISSING_REQUIRED_FIELD, 400, '请输入学习要求');
   }
+  if (studentRequestCancelled(message)) {
+    return apiError(API_ERROR_CODES.INVALID_REQUEST, 422, '已取消本次学习请求。');
+  }
+  req.signal.throwIfAborted();
   const db = await getDb();
   await ensureAppSchema(db);
   const learnerKey = access.principal.learnerKey;
   let threadId = typeof body.threadId === 'string' ? body.threadId.slice(0, 80) : '';
   let threadRow: Record<string, unknown> | undefined;
+  const newThread = !threadId;
   if (threadId) {
     const result = await db.query(
       `SELECT * FROM student_agent_threads
@@ -181,12 +196,6 @@ export async function POST(req: NextRequest) {
   } else {
     threadId = `student_thread_${nanoid(12)}`;
     const now = Date.now();
-    await db.query(
-      `INSERT INTO student_agent_threads
-       (id, learner_key, title, active_context, status, created_at, updated_at)
-       VALUES ($1,$2,'新学习对话',$3,'active',$4,$4)`,
-      [threadId, learnerKey, JSON.stringify({}), now],
-    );
     threadRow = {
       id: threadId,
       title: '新学习对话',
@@ -199,7 +208,7 @@ export async function POST(req: NextRequest) {
 
   const requestedContext = contextValue(body.context ?? threadRow.active_context);
   const state = await loadStudentAgentLearningState(learnerKey, requestedContext, db);
-  const historyResult = await db.query(
+  const historyResult = newThread ? { rows: [] } : await db.query(
     `SELECT role, content FROM student_agent_messages
      WHERE thread_id = $1 AND learner_key = $2 ORDER BY created_at DESC LIMIT 16`,
     [threadId, learnerKey],
@@ -213,6 +222,55 @@ export async function POST(req: NextRequest) {
     );
   const now = Date.now();
   const userMessageId = `student_message_${nanoid(12)}`;
+  const decision = await decideStudentAgentMessage(
+    {
+      message,
+      history,
+      state,
+      context: state.activeContext,
+    },
+    { signal: req.signal },
+  );
+  let generatedPackage:
+    | { id: string; title: string; classroomId: string; classroomUrl: string }
+    | undefined;
+  let reply = decision.reply;
+  req.signal.throwIfAborted();
+  const trace = [...decision.trace];
+  if (decision.action === 'generate_package' && decision.packageRequest) {
+    const product = studyProductLabels[decision.packageRequest.product ?? 'package'];
+    try {
+      const { id, title, classroomId, classroomUrl } = await createStudentSelfStudyPackage(
+        req,
+        access.principal,
+        decision.packageRequest,
+        message,
+      );
+      generatedPackage = { id, title, classroomId, classroomUrl };
+      trace.push({
+        label: `创建${product}`,
+        detail: `《${title}》已生成，可以打开学习。`,
+        status: 'completed',
+      });
+      reply = studyPackageReply(`${product}《${title}》已生成。请从下方打开课堂。`, decision.reply, message);
+    } catch (error) {
+      rethrowStudentTurnAbort(req.signal, error);
+      const reason =
+        error instanceof SelfStudyGenerationError
+          ? error.publicMessage
+          : '内容生成暂时失败，请稍后重试';
+      reply = studyPackageReply(`本次${product}没有生成。学习目标已保留。${reason}。`, decision.reply, message);
+    }
+  }
+  req.signal.throwIfAborted();
+  if (newThread) {
+    await db.query(
+      `INSERT INTO student_agent_threads
+       (id, learner_key, title, active_context, status, created_at, updated_at)
+       VALUES ($1,$2,'新学习对话',$3,'active',$4,$4)`,
+      [threadId, learnerKey, JSON.stringify({}), threadRow.created_at],
+    );
+  }
   await db.query(
     `INSERT INTO student_agent_messages
        (id, thread_id, learner_key, role, kind, content, metadata, created_at)
@@ -227,15 +285,6 @@ export async function POST(req: NextRequest) {
     ],
   );
 
-  const decision = await decideStudentAgentMessage(
-    {
-      message,
-      history,
-      state,
-      context: state.activeContext,
-    },
-    { signal: req.signal },
-  );
   if (Object.keys(decision.profileUpdates).length > 0 || decision.memoryFacts.length > 0) {
     await saveStudentLearningProfile(learnerKey, decision.profileUpdates, decision.memoryFacts, db);
   }
@@ -247,34 +296,6 @@ export async function POST(req: NextRequest) {
         db,
       )
     : undefined;
-  let generatedPackage:
-    | { id: string; title: string; classroomId: string; classroomUrl: string }
-    | undefined;
-  let reply = decision.reply;
-  const trace = [...decision.trace];
-  if (decision.action === 'generate_package' && decision.packageRequest) {
-    try {
-      const { id, title, classroomId, classroomUrl } = await createStudentSelfStudyPackage(
-        req,
-        access.principal,
-        decision.packageRequest,
-        message,
-      );
-      generatedPackage = { id, title, classroomId, classroomUrl };
-      trace.push({
-        label: '创建个人学习包',
-        detail: `《${title}》已生成，可以打开学习。`,
-        status: 'completed',
-      });
-      reply = `个人学习包《${title}》已生成。请从下方打开课堂。`;
-    } catch (error) {
-      const reason =
-        error instanceof SelfStudyGenerationError
-          ? error.publicMessage
-          : '内容生成暂时失败，请稍后重试';
-      reply = `本次个人学习包没有生成。学习目标已保留。${reason}。`;
-    }
-  }
   const refreshedState = await loadStudentAgentLearningState(learnerKey, state.activeContext, db);
   const metadata = {
     action: decision.action,

@@ -139,6 +139,15 @@ describe('ordinary PBL v2 instructor via Harness', () => {
     },
   );
 
+  it('treats an explicit null phase as instructing', async () => {
+    receive({ reply: '先观察一片叶子。' });
+    const result = await teach(request('instructor', { phase: null, userMessage: '怎样观察？' }));
+    expect(result.status).toBe(200);
+    expect((await frames(result)).some((event) => event.type === 'token')).toBe(true);
+    const wire = JSON.parse(String(upstream.mock.calls[0][1]?.body));
+    expect(JSON.parse(wire.messages[1].content).phase).toBe('instructing');
+  });
+
   it('applies only bounded observation and quoted learner difficulty before committing the reply', async () => {
     receive({
       reply: '先只观察一片叶子，并记录数量。',

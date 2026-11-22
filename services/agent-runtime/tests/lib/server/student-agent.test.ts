@@ -119,6 +119,11 @@ describe('student learning agent', () => {
     ['我需要学习包。', true],
     ['可以帮我生成学习包吗？', true],
     ['请问可以帮我生成学习包吗？', true],
+    ['帮我生成学习包吗？', true],
+    ['麻烦生成学习包吗？', true],
+    ['给我生成学习包吗？', true],
+    ['生成学习包不需要解释。', true],
+    ['生成学习包不需要实验。', true],
     ['帮我生成“个人学习包”。', true],
     ['Please create a "personal study pack".', true],
     ['请生成学习包。不要概念自检。', true],
@@ -128,8 +133,12 @@ describe('student learning agent', () => {
     ['请问生成学习包了吗？', false],
     ['你能帮我生成学习包了吗？', false],
     ['我想知道可以生成学习包吗？', false],
+    ['麻烦问一下生成学习包了吗？', false],
+    ['请生成学习包。学习包不用再生成了，谢谢。', false],
     ['请生成学习包。后来我不想要学习包。', false],
     ['请参考“个人学习包”的定义，说明它有什么用。', false],
+    ['不要概念自检。', false],
+    ['请生成学习包，只要概念自检，不要概念自检。', false],
     ['生成学习包已完成。', false],
     ['请生成学习包之前先讲讲概念。', false],
     ['请生成学习包。请取消刚才的请求。', false],
@@ -158,6 +167,28 @@ describe('student learning agent', () => {
     );
     expect(decision.action).toBe(allowed ? 'generate_package' : 'answer');
     expect(Boolean(decision.packageRequest)).toBe(allowed);
+  });
+
+  it.each([
+    ['请参考“不要生成学习包”这段课堂资料生成概念自检。', 'self_check'],
+    ['请生成学习包，只要“概念自检”。', 'self_check'],
+    ['请只生成概念自检。', 'self_check'],
+    ['请生成学习包，但只生成概念自检。', 'self_check'],
+    ['请生成学习包，但不要概念自检。', 'handout'],
+    ['请生成学习讲义。不要概念自检。', 'handout'],
+    ['请生成学习包，不要概念自检。', 'handout'],
+    ['请生成学习讲义和概念自检。', undefined],
+  ] as const)('pins the requested output scope for %s', async (message, product) => {
+    const decision = await decideStudentAgentMessage(
+      { message, history: [], state, context: state.activeContext },
+      { aiCall: async () => JSON.stringify({
+        action: 'generate_package',
+        reply: '准备文字学习内容。',
+        packageRequest: { goal: '观察分数', product: 'package' },
+      }) },
+    );
+    expect(decision.action).toBe('generate_package');
+    expect(decision.packageRequest?.product).toBe(product);
   });
 
   it('normalizes a trackable plan while ignoring malformed steps', () => {

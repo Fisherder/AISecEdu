@@ -60,12 +60,21 @@ describe('concept short-answer grading', () => {
     '{"score":null,"comment":"Feedback"}',
     '{"score":1e999,"comment":"Feedback"}',
     '{"score":7,"comment":"Feedback"}',
-    '{"score":3,"comment":"Answer key: hidden text"}',
-  ])('keeps an invalid or unsafe provider response pending', async (text) => {
+  ])('keeps an invalid provider response pending', async (text) => {
     harness.runTurn.mockResolvedValue({ ...response, text });
     const result = await POST(request({ question, userAnswer, points }));
     expect(result.status).toBe(503);
     expect(await result.json()).not.toHaveProperty('score');
+    expect(harness.recordHarnessUsage).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a restricted model comment without returning feedback or giving a score', async () => {
+    harness.runTurn.mockResolvedValue({ ...response, text: '{"score":3,"comment":"Answer key: FIXTURE_ONLY"}' });
+    const result = await POST(request({ question, userAnswer, points }));
+    expect(result.status).toBe(422);
+    const payload = await result.json();
+    expect(payload).not.toHaveProperty('score');
+    expect(JSON.stringify(payload)).not.toContain('FIXTURE_ONLY');
     expect(harness.recordHarnessUsage).toHaveBeenCalledOnce();
   });
 
@@ -161,6 +170,24 @@ describe('learner short-answer submit and retry', () => {
       expect(config.headers).toEqual({ 'Content-Type': 'application/json' });
     }
     expect(readShortAnswerGrade({ score: NaN, comment: feedback }, points)).toBeNull();
+  });
+
+  it.each([undefined, '', '   '])('grades a blank concept answer locally as zero without blocking a choice', async (blank) => {
+    const questions: QuizQuestion[] = [
+      { id: 'choice', type: 'single', question: 'Pick A', answer: ['A'], points: 1 },
+      { id: 'short', type: 'short_answer', question, points },
+    ];
+    const answers = { choice: 'A', ...(blank === undefined ? {} : { short: blank }) };
+    const grader = vi.fn();
+    vi.stubGlobal('fetch', grader);
+    expect(await gradeQuizForReview(questions, answers, 'en-US', undefined, { allowBlankShortAnswers: true })).toEqual({
+      status: 'graded',
+      results: [
+        { questionId: 'choice', correct: true, status: 'correct', earned: 1 },
+        { questionId: 'short', correct: false, status: 'incorrect', earned: 0 },
+      ],
+    });
+    expect(grader).not.toHaveBeenCalled();
   });
 
   it('keeps ineligible submissions saved and skips grading on submit and hydration', async () => {

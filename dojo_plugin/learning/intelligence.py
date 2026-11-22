@@ -809,6 +809,17 @@ TUTOR_TEACHING_PROMPT = (
 )
 
 
+def _short_tutor_answer(answer, limit=120):
+    if len(answer) <= limit:
+        return answer
+    boundary = max(
+        (match.end() for match in re.finditer(r'[。！？!?；;]+[”’」』）)]*|\.(?=\s|$)', answer)
+         if match.end() <= limit),
+        default=0,
+    )
+    return answer[:boundary].rstrip()
+
+
 @track_attempt_ai("实验操作指导")
 def tutor_reply(attempt, user, question, challenge_profile=None):
     question = redact_text(question, limit=4000).strip()
@@ -834,7 +845,6 @@ def tutor_reply(attempt, user, question, challenge_profile=None):
     provider = "DETERMINISTIC"
     model = None
     error = None
-    blocked_reason = None
     usage = {}
     text_fields = [context["question"], context["course"], context["unit"], context["exercise"],
                    *context["objectives"], *context["publicHints"]]
@@ -842,6 +852,7 @@ def tutor_reply(attempt, user, question, challenge_profile=None):
         RESTRICTED_TUTOR_REQUEST.search(value) or _safe_tutor_text(value, "", safety_reference)[1]
         for value in text_fields if value
     )
+    blocked_reason = "RESTRICTED_CONTEXT" if context_blocked else None
     if upstream_enabled() and not context_blocked:
         dispatch_id = record_model_dispatch(DOJO_AI_TUTOR_MODEL)
         response = None
@@ -856,9 +867,11 @@ def tutor_reply(attempt, user, question, challenge_profile=None):
             answer, blocked, blocked_reason = _safe_tutor_text(draft, fallback, safety_reference)
             if not blocked and (RESTRICTED_TUTOR_REQUEST.search(answer) or "```" in answer):
                 answer, blocked, blocked_reason = fallback, True, "RESTRICTED_GUIDANCE"
-            provider = "MODEL_BLOCKED" if blocked else "MODEL"
             if not blocked:
-                answer = answer[:120]
+                answer = _short_tutor_answer(answer)
+                if not answer:
+                    answer, blocked, blocked_reason = fallback, True, "OVERLONG_HINT"
+            provider = "MODEL_BLOCKED" if blocked else "MODEL"
         except (ValueError, TypeError, KeyError) as exception:
             error = str(exception)[:500]
             provider = "MODEL_UNAVAILABLE"
@@ -889,7 +902,8 @@ def tutor_reply(attempt, user, question, challenge_profile=None):
     append_evidence(attempt, "tutor.chat.user", {"characters": len(question)}, source="TUTOR", trust_level=2)
     append_evidence(
         attempt, "tutor.chat.assistant",
-        {"provider": provider, "model": model, "contextDigest": context_hash, "liveContext": False, **version},
+        {"provider": provider, "model": model, "contextDigest": context_hash, "liveContext": False,
+         **({"safetyBlockReason": blocked_reason} if blocked_reason else {}), **version},
         source="TUTOR", trust_level=2,
     )
     return {

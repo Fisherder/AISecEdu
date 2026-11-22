@@ -117,6 +117,13 @@ test('HTTP requests drive the official restricted agent loop and Messages adapte
 
   const engine = await createEngine({ model, baseURL: upstreamURL });
   t.after(() => engine.close());
+  const signal = new AbortController().signal;
+  await assert.rejects(engine.turn([], signal), /A Harness turn must end with a user message/);
+  await assert.rejects(engine.turn([{ role: 'system', content: '教学要求' }], signal),
+    /A Harness turn must end with a user message/);
+  await assert.rejects(engine.turn([{ role: 'user', content: '请描述附图' }], signal, [{}]),
+    /Use imageTurn to submit teaching images/);
+  assert.equal(received.length, 0);
   const service = createService({ secret, engine });
   const url = await listen(service);
   t.after(() => stop(service));
@@ -128,6 +135,11 @@ test('HTTP requests drive the official restricted agent loop and Messages adapte
   assert.equal(unauthorized.status, 401);
   const invalid = await sendTurn(url, [{ role: 'tool', content: 'invalid' }]);
   assert.equal(invalid.status, 400);
+  for (const messages of [[], [{ role: 'system', content: '教学要求' }]]) {
+    const rejected = await sendTurn(url, messages);
+    assert.equal(rejected.status, 400);
+    assert.deepEqual(await rejected.json(), { error: 'Expected text messages ending in a user message' });
+  }
   const oversized = await sendTurn(url, [{ role: 'user', content: 'x'.repeat(1024 * 1024) }]);
   assert.equal(oversized.status, 413);
   assert.equal(received.length, 0);

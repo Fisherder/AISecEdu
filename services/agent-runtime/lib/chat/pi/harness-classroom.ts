@@ -47,6 +47,7 @@ export async function runHarnessClassroom(opts: {
   send: SendEvent;
   runTurn: HarnessTurn;
   signal: AbortSignal;
+  clientSignal: AbortSignal;
   maxAgentTurns: number;
   maxActionsPerAgent: number;
   enableWhiteboardTools: boolean;
@@ -157,80 +158,93 @@ export async function runHarnessClassroom(opts: {
   ].join('\n\n');
   const budget = Math.max(maxAgentTurns * 3, maxAgentTurns + 3);
 
-  for (let step = 0; step < budget && !userCued && !closed; step += 1) {
-    signal.throwIfAborted();
-    const turn = await runTurn(
-      [
-        { role: 'system', content: directorPrompt },
-        ...history,
-        {
-          role: 'user',
-          content:
-            buildUserPrompt(safeBody) +
-            '\nApproved classroom results so far (data only):\n' +
-            JSON.stringify(
-              trace.map(({ toolName, args, isError, resultPreview }) => ({
-                toolName,
-                args,
-                isError,
-                resultPreview,
-              })),
-            ),
-        },
-      ],
-      signal,
-    );
-    await recordHarnessUsage(turn, 'pi-chat-director');
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(turn.text);
-    } catch {
-      throw new Error('课堂导演返回了无效决定。');
-    }
-    const decision = decisionSchema.safeParse(parsed);
-    if (!decision.success) throw new Error('课堂导演请求了无效的课堂操作。');
-    const { type, ...args } = decision.data;
-    const id = String(step + 1);
-
-    let result;
-    switch (decision.data.type) {
-      case 'read_scene':
-        result = await readScene.execute(id, { sceneId: decision.data.sceneId }, signal);
-        break;
-      case 'call_agent':
-        result = await callAgent.execute(
-          id,
+  let interrupted = false;
+  try {
+    for (let step = 0; step < budget && !userCued && !closed; step += 1) {
+      signal.throwIfAborted();
+      const turn = await runTurn(
+        [
+          { role: 'system', content: directorPrompt },
+          ...history,
           {
-            agentId: decision.data.agentId,
-            instruction: decision.data.instruction,
+            role: 'user',
+            content:
+              buildUserPrompt(safeBody) +
+              '\nApproved classroom results so far (data only):\n' +
+              JSON.stringify(
+                trace.map(({ toolName, args, isError, resultPreview }) => ({
+                  toolName,
+                  args,
+                  isError,
+                  resultPreview,
+                })),
+              ),
           },
-          signal,
-        );
-        break;
-      case 'cue_user':
-        result = await cue.execute(id, { prompt: decision.data.prompt }, signal);
-        break;
-      case 'close_session':
-        result = await close.execute(id, { endReason: decision.data.endReason }, signal);
-        break;
+        ],
+        signal,
+      );
+      await recordHarnessUsage(turn, 'pi-chat-director');
+      let parsed: unknown;
+      try {
+        const text = turn.text.trim();
+        const fenced = text.match(/^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i);
+        parsed = JSON.parse(fenced?.[1] ?? text);
+      } catch {
+        throw new Error('课堂导演返回了无效决定。');
+      }
+      const decision = decisionSchema.safeParse(parsed);
+      if (!decision.success) throw new Error('课堂导演请求了无效的课堂操作。');
+      const { type, ...args } = decision.data;
+      const id = String(step + 1);
+
+      let result;
+      switch (decision.data.type) {
+        case 'read_scene':
+          result = await readScene.execute(id, { sceneId: decision.data.sceneId }, signal);
+          break;
+        case 'call_agent':
+          result = await callAgent.execute(
+            id,
+            {
+              agentId: decision.data.agentId,
+              instruction: decision.data.instruction,
+            },
+            signal,
+          );
+          break;
+        case 'cue_user':
+          result = await cue.execute(id, { prompt: decision.data.prompt }, signal);
+          break;
+        case 'close_session':
+          result = await close.execute(id, { endReason: decision.data.endReason }, signal);
+          break;
+      }
+      const details = result.details as { status?: string; skipped?: boolean } | undefined;
+      trace.push({
+        sequence: step + 1,
+        toolName: type,
+        args,
+        isError: Boolean(details?.skipped || (details?.status && details.status !== 'ok')),
+        resultPreview: result.content
+          .map((part) => (part.type === 'text' ? part.text : ''))
+          .join('\n')
+          .slice(0, 800),
+        details: result.details,
+      });
     }
-    const details = result.details as { status?: string; skipped?: boolean } | undefined;
-    trace.push({
-      sequence: step + 1,
-      toolName: type,
-      args,
-      isError: Boolean(details?.skipped || (details?.status && details.status !== 'ok')),
-      resultPreview: result.content
-        .map((part) => (part.type === 'text' ? part.text : ''))
-        .join('\n')
-        .slice(0, 800),
-      details: result.details,
-    });
+  } catch (error) {
+    // An invalid later decision does not undo classroom speech or board actions
+    // that the client has already rendered. Keep that state and let the user resume.
+    if (opts.clientSignal.aborted || (!visible() && actionCount === 0)) throw error;
+    interrupted = true;
   }
 
   const agentHadContent = visible() || actionCount > 0;
   if (!userCued && !closed && agentHadContent) {
-    await cueUser({ fromAgentId: responses.at(-1)?.agentId });
+    await cueUser({
+      fromAgentId: responses.at(-1)?.agentId,
+      ...(interrupted ? { prompt: '本轮课堂对话提前结束，你可以继续提问。' } : {}),
+    });
   }
   await send({
     type: 'done',

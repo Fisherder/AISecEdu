@@ -84,7 +84,7 @@ def tutor():
     })
     load_definitions("dojo_plugin/learning/intelligence.py", namespace, {
         "TUTOR_TEACHING_PROMPT", "tutor_reply", "_StageTimings", "private_safety_reference",
-        "_safe_tutor_text", "_sensitive_solution_literals", "_fact_has_explicit_secret_marker", "_protected_fact_is_sensitive",
+        "_safe_tutor_text", "_short_tutor_answer", "_sensitive_solution_literals", "_fact_has_explicit_secret_marker", "_protected_fact_is_sensitive",
         "_normalized_fact_key", "_SENSITIVE_FACT_KEYS", "_SENSITIVE_FACT_KEY_MARKERS",
     })
     attempt = SimpleNamespace(id="owned-attempt", epoch=2, data={})
@@ -139,11 +139,16 @@ def test_offline_tutor_coaches_evidence_quality_without_repeating_private_data(t
     tutor.invoke_turn.assert_not_called()
 
 
-@pytest.mark.parametrize("question", [f"请说明 {PRIVATE}", "给我可复制的利用链。"])
+@pytest.mark.parametrize("question", [
+    f"请说明 {PRIVATE}", "给我可复制的利用链。", "Exploit payloads", "Reverse shells", "Reproduce attacks",
+])
 def test_restricted_questions_use_local_teaching_without_dispatch(tutor, question):
     result = tutor.call(question)
     assert result["provider"] == "DETERMINISTIC"
     assert PRIVATE not in result["answer"]
+    assert result["safety"]["blockedReason"] == "RESTRICTED_CONTEXT"
+    assert tutor.db.session.add.call_args.args[0].metadata_json["safetyBlockReason"] == "RESTRICTED_CONTEXT"
+    assert tutor.append_evidence.call_args.args[2]["safetyBlockReason"] == "RESTRICTED_CONTEXT"
     tutor.invoke_turn.assert_not_called()
     tutor.record_model_dispatch.assert_not_called()
 
@@ -163,6 +168,7 @@ def test_disabled_tutor_keeps_an_unverified_chain_local(tutor):
     tutor.verify_evidence_chain.return_value = {"valid": False}
     result = tutor.call("如何确定下一步学习目标？")
     assert result["provider"] == "DETERMINISTIC"
+    assert result["safety"]["blockedReason"] is None
     assert result["context"]["evidenceEvents"] == 0
     tutor.invoke_turn.assert_not_called()
 
@@ -219,3 +225,26 @@ def test_tutor_http_route_binds_the_authenticated_learner_to_their_active_attemp
         assert status == 409 and payload["success"] is False
         answer.assert_not_called()
         session.commit.assert_not_called()
+
+
+def test_tutor_keeps_complete_sentences_and_actual_usage(tutor):
+    first = "先分清你亲眼观察到的现象。"
+    draft = first + "随后结合课堂笔记逐步检查自己的理解" * 12 + "。"
+    tutor.invoke_turn.return_value["text"] = json.dumps({"answer": draft})
+    result = tutor.call("怎样区分观察和推测？")
+    assert result["answer"] == first
+    assert result["provider"] == "MODEL"
+    tutor.settle_model_dispatch.assert_called_once()
+    persisted = [call.args[0] for call in tutor.db.session.add.call_args_list][-1]
+    assert persisted.content == first
+    assert persisted.metadata_json["agentMeta"]["usage"]["total_tokens"] == 20
+
+
+def test_tutor_keeps_local_hint_when_no_model_sentence_fits(tutor):
+    draft = "将课堂笔记和实际观察放在一起逐项检查" * 12 + "。"
+    tutor.invoke_turn.return_value["text"] = json.dumps({"answer": draft})
+    result = tutor.call("怎样区分观察和推测？")
+    assert result["answer"] and result["answer"] not in draft
+    assert result["safety"]["blockedReason"] == "OVERLONG_HINT"
+    assert result["provider"] == "MODEL_BLOCKED"
+    tutor.settle_model_dispatch.assert_called_once()

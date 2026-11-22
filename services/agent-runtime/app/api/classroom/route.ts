@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { stage, scenes } = body;
-    stageId = stage?.id;
+    stageId = typeof stage?.id === 'string' ? stage.id : undefined;
     sceneCount = scenes?.length;
 
     if (!stage || !scenes) {
@@ -32,8 +32,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const id = stage.id || randomUUID();
-    if (typeof id === 'string' && id.startsWith(personalStudyPrefix)) {
+    if (stage.id != null && typeof stage.id !== 'string') {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, 'Classroom identifier must be text');
+    }
+    const id = stageId || randomUUID();
+    if (id.startsWith(personalStudyPrefix)) {
       return apiError(API_ERROR_CODES.FORBIDDEN, 403, 'Personal classroom cannot be overwritten');
     }
     const baseUrl = buildRequestOrigin(request);

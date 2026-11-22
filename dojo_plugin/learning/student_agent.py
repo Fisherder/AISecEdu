@@ -609,6 +609,10 @@ def _create_workspace(user, thread, question, arguments, *, personal_study_packa
 
 
 def personal_study_package_requested(question):
+    return personal_study_product_requested(question) is not None
+
+
+def personal_study_product_requested(question):
     request = str(question or "")
     aliases = {
         "package": r"学习包|自学包|\b(?:study|learning)\s+pack(?:age)?\b",
@@ -618,7 +622,7 @@ def personal_study_package_requested(question):
     package_name = "|".join(f"(?P<{kind}>{pattern})" for kind, pattern in aliases.items())
     plain_alias = rf"(?:(?:个人|personal\s+)\s*)?(?:{package_name})"
     quoted_alias_prefix = (
-        r"(?:生成|创建|制作|设计|构建|准备|整理成|做|给我|我想要|我要|我需要|想要|不需要|不要|不用|取消|撤回)"
+        r"(?:生成|创建|制作|设计|构建|准备|整理成|做|只要|仅要|只需要|仅需要|只给我|仅给我|给我|我想要|我要|我需要|想要|不需要|不要|不用|取消|撤回)"
         r"\s*(?:[一两]?[份套个])?\s*(?:个人)?\s*$"
         r"|\b(?:create|make|generate|prepare|build|give\s+me|no|cancel)\s*(?:(?:a|an|the|my)\s+)?$"
     )
@@ -635,9 +639,9 @@ def personal_study_package_requested(question):
         mask_quote, request,
     )
     clauses = re.split(
-        r"[。！？.!?；;\n]+|(?:[，,]|然后|接着|同时|并且?|以及|而是|但是|\b(?:but|(?:and\s+)?then)\b)"
-        r"(?=\s*(?:请|帮我|给我|生成|创建|制作|准备|先|再|我|别|不|取消|撤回|算了|解释|分析|讲讲"
-        r"|(?:please|actually|i|do|don['’]t|no|create|make|generate|how|what|explain)\b))",
+        r"[。！？.!?；;\n]+|(?:[，,]|然后|接着|同时|并且?|以及|而是|但(?:是)?|和(?=\s*(?:请)?(?:不|别))|\b(?:but|(?:and\s+)?then)\b)"
+        r"(?=\s*(?:请|帮我|给我|生成|创建|制作|准备|先|再|我|别|不|只|仅|取消|撤回|算了|解释|分析|讲讲"
+        r"|(?:please|actually|i|do|don['’]t|no|create|make|generate|cancel|withdraw|how|what|explain)\b))",
         message,
         flags=re.I,
     )
@@ -652,18 +656,20 @@ def personal_study_package_requested(question):
     )
     cancel_turn = (
         r"(?:(?:我)?改主意了[，,\s]*)?(?:算了|不用了|不需要了|不要了|"
-        r"(?:请)?(?:取消|撤回)(?:刚才|前面|上面|之前|本次)(?:的)?(?:请求|要求|操作))"
-        r"|(?:please\s+)?(?:cancel|withdraw)\s+(?:that|the\s+previous)\s+request"
+        r"(?:请)?(?:取消|撤回)(?:(?:刚才|前面|上面|之前|本次)(?:的)?(?:请求|要求|操作))?"
+        r"|(?:请)?(?:不要|不用|别)\s*(?:生成|创建|制作)\s*任何(?:东西|内容))"
+        r"|(?:please\s+)?(?:cancel|withdraw)(?:\s+(?:that|the\s+previous)\s+request)?"
+        r"|(?:please\s+)?(?:do\s+not|don['’]t|never)\s+(?:generate|create|make)\s+anything"
     )
     create = (
         r"生成|创建|制作|设计|构建|准备|整理成|做"
-        r"|(?:给我|我想要|我需要|我要|想要|要)(?=\s*(?:[一两]?[份套个]|(?:个人)?(?:学习包|自学包|学习讲义|概念自检)))"
+        r"|(?:只要|仅要|只需要|仅需要|只给我|仅给我|给我|我想要|我需要|我要|想要|要)(?=\s*(?:[一两]?[份套个]|(?:个人)?(?:学习包|自学包|学习讲义|概念自检)))"
         r"|\b(?:create|make|generate|prepare|build|give\s+me(?=\s+(?:(?:a|an|my|the)\s+)?(?:study|learning)\s+pack))\b"
     )
     request_modal = r"(?:你)?(?:能(?:不能)?|能否|可以|可不可以)"
     request_lead = (
         rf"(?:(?:请(?:你|问)?|麻烦你?|帮我|为我|替我|给我|我想要?|我要|我需要|我希望你?|{request_modal}"
-        r"|先|再|直接|现在|自动|(?:别|不要)忘(?:了|记)?|记得)\s*)*"
+        r"|先|再|只|仅|直接|现在|自动|(?:别|不要)忘(?:了|记)?|记得)\s*)*"
         r"(?:(?:根据|结合|按照|参考|针对|围绕)(?:[^，,。！？；;!?]{1,60}?(?:帮我|为我|替我|请你?)"
         r"|[^，,。！？；;!?]{0,50}?(?:资料|讲义|笔记|教材|材料|上节课|这节课|内容|知识点|错题|薄弱点|记录)))?\s*"
         r"|(?:(?:please|help\s+me|(?:can|could|would|will)\s+you|i(?:['’]d\s+like|\s+(?:want|need|would\s+like))\s+you\s+to"
@@ -677,10 +683,11 @@ def personal_study_package_requested(question):
     )
     create_package = rf"(?:{create}).{{0,50}}?(?:{package_name})"
     blocked = set()
+    products = set()
     for part in reversed(clauses):
         clause = part.strip()
         if re.fullmatch(cancel_turn, clause, re.I):
-            return False
+            break
         package_ref = re.search(package_name, clause, re.I)
         if not package_ref:
             continue
@@ -690,13 +697,33 @@ def personal_study_package_requested(question):
                 or re.match(decline_package, clause[package_ref.end():], re.I)):
             blocked.update(match.lastgroup for match in re.finditer(package_name, clause, re.I))
             continue
-        if action is None or action.lastgroup in blocked or not re.fullmatch(request_lead, intent_prefix, re.I):
+        if action is None or not re.fullmatch(request_lead, intent_prefix, re.I):
+            continue
+        exclusive = (
+            re.search(r"(?:只|仅)\s*$", intent_prefix)
+            or re.match(r"只要|仅要|只需要|仅需要|只给我|仅给我", action.group())
+        )
+        if action.lastgroup in blocked:
+            if exclusive:
+                break
             continue
         tail = clause[action.end():]
+        if re.fullmatch(cancel_turn, tail.strip(), re.I):
+            break
         polite_request = tail.strip() == "吗" and re.match(rf"(?:请(?:你|问)?\s*)?{request_modal}", intent_prefix)
         if polite_request or not re.search(question_after_name, tail, re.I):
-            return True
-    return False
+            if action.lastgroup == "package":
+                products.update({"handout", "self_check"} - blocked)
+            else:
+                products.add(action.lastgroup)
+            paired = re.match(rf"^\s*(?:以及|和|及|与|、)\s*{plain_alias}", tail, re.I)
+            if paired and paired.lastgroup in {"handout", "self_check"} - blocked:
+                products.add(paired.lastgroup)
+            if exclusive:
+                break
+    if products == {"handout", "self_check"}:
+        return "package"
+    return next(iter(products), None)
 
 
 def _plain_study_text(value, limit):
@@ -715,7 +742,7 @@ def _study_values(value, minimum, maximum):
     return value
 
 
-def _plain_study_package(raw):
+def _plain_study_package(raw, product="package"):
     if raw.get("status") == "unsupported":
         raise ValueError("个人学习包仅支持概念讲解和文字自检")
     if raw.get("status") != "ready" or raw.keys() != {
@@ -727,7 +754,9 @@ def _plain_study_package(raw):
     objectives = [_plain_study_text(item, 90) for item in _study_values(raw["objectives"], 1, 4)]
     outline = []
     criteria = []
-    for section in _study_values(raw["sections"], 1, 3):
+    section_bounds = (0, 0) if product == "self_check" else (1, 3)
+    concept_bounds = (1, 4) if product == "self_check" else ((0, 0) if product == "handout" else (0, 4))
+    for section in _study_values(raw["sections"], *section_bounds):
         if not isinstance(section, dict) or section.keys() != {"title", "explanation", "points"}:
             raise ValueError("个人学习包的讲解小节无效")
         outline.append({
@@ -736,7 +765,7 @@ def _plain_study_package(raw):
             "description": _plain_study_text(section["explanation"], 250),
             "keyPoints": [_plain_study_text(point, 90) for point in _study_values(section["points"], 2, 4)],
         })
-    for index, concept in enumerate(_study_values(raw["concepts"], 0, 4), 1):
+    for index, concept in enumerate(_study_values(raw["concepts"], *concept_bounds), 1):
         if not isinstance(concept, dict) or concept.keys() != {
             "question", "options", "correctIndex", "explanation",
         }:
@@ -757,7 +786,7 @@ def _plain_study_package(raw):
     return {
         "title": title,
         "summary": summary,
-        "strategy": "普通概念讲解与文字自检",
+        "strategy": {"package": "普通概念讲解与文字自检", "handout": "普通学习讲义", "self_check": "文字概念自检"}[product],
         "content": {
             "type": "learning-path",
             "objectives": objectives,
@@ -779,12 +808,13 @@ _STUDY_PACKAGE_SYSTEM = (
     '"sections":[{"title":"小节","explanation":"讲解","points":["要点一","要点二"]}],'
     '"concepts":[{"question":"概念题","options":["选项一","选项二","选项三"],'
     '"correctIndex":0,"explanation":"反馈"}]}。'
-    "含 1 至 3 个小节，每节 2 至 4 个要点，概念题最多四道，选项必须不同。"
+    "每节 2 至 4 个要点，概念题最多四道，选项必须不同。"
 )
 
 
 def create_personal_study_package(user, thread, question):
-    if thread is None or thread.user_id != user.id or not personal_study_package_requested(question):
+    product = personal_study_product_requested(question)
+    if thread is None or thread.user_id != user.id or product is None:
         raise ScopeError("仅可在本人对话中明确创建普通个人学习包")
     if re.search(r"攻击复现|利用载荷|漏洞利用步骤|搭建.{0,8}(?:靶场|实验)|(?:写|生成).{0,8}(?:代码|脚本|payload)", question, re.I):
         raise ValueError("个人学习包仅支持概念讲解和文字自检")
@@ -803,8 +833,13 @@ def create_personal_study_package(user, thread, question):
     workspace = SelfLearningWorkspaces.query.filter_by(
         id=workspace_action["id"], student_id=user.id,
     ).one()
-    result = invoke_turn(request_body(_STUDY_PACKAGE_SYSTEM, {"request": teaching_request}))
-    candidate = _plain_study_package(result_object(result["text"]))
+    product_rule = {
+        "package": "学习包须含 1 至 3 个讲解小节，可附概念自检。",
+        "handout": "只交付学习讲义，含 1 至 3 个讲解小节。concepts 必须为空数组。",
+        "self_check": "只交付概念自检，含 1 至 4 道题和简短作答反馈。sections 必须为空数组。",
+    }[product]
+    result = invoke_turn(request_body(f"{_STUDY_PACKAGE_SYSTEM}\n{product_rule}", {"request": teaching_request}))
+    candidate = _plain_study_package(result_object(result["text"]), product)
     workspace.title = candidate["title"]
     candidate_set = create_candidate_set(
         owner_id=user.id,
@@ -845,7 +880,8 @@ def create_personal_study_package(user, thread, question):
         "type": "artifact",
         "id": artifact.id,
         "title": artifact.title,
-        "description": "概念讲解与文字自检，个人草稿仅你可见。",
+        "description": f"{candidate['strategy']}，个人草稿仅你可见。",
+        "studyProduct": product,
         "url": f"/learning/artifacts/{quote(artifact.id)}?returnTo=/learning/extend",
         "resourceRef": {"objectType": "artifact", "objectId": artifact.id},
     }

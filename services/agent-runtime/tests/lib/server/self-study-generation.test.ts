@@ -82,6 +82,29 @@ describe('standalone ordinary self-study generation', () => {
     },
   );
 
+  it('bounds the raw goal before validating its contents', () => {
+    expect(() => normalizeSelfStudyRequest({ goal: '学'.repeat(2001) }))
+      .toThrow('Learning goal is too long');
+  });
+
+  it('does not send or save an explicitly cancelled package request', async () => {
+    await expect(createStudentSelfStudyPackage(
+      request, principal, study, '请生成学习包，不用生成任何东西。',
+    )).rejects.toThrow('Cancelled learning package request');
+    expect(mocks.getDb).not.toHaveBeenCalled();
+    expect(mocks.turn).not.toHaveBeenCalled();
+  });
+
+  it('does not save a failed package or publish anything when the provider aborts', async () => {
+    const abort = new DOMException('Cancelled', 'AbortError');
+    mocks.turn.mockRejectedValueOnce(abort);
+    await expect(createStudentSelfStudyPackage(request, principal, study)).rejects.toBe(abort);
+    expect(mocks.turn).toHaveBeenCalledOnce();
+    expect(mocks.query).not.toHaveBeenCalled();
+    expect(mocks.write).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
   it('keeps malformed model text out of persisted and thrown errors', async () => {
     mocks.turn.mockResolvedValue({ text: 'flag{FIXTURE_ONLY}' });
     await expect(createStudentSelfStudyPackage(request, principal, study))
@@ -98,4 +121,29 @@ describe('standalone ordinary self-study generation', () => {
     expect(mocks.publish).toHaveBeenCalledOnce();
     expect(mocks.write.mock.calls[0][1].artifacts.map((artifact: { type: string }) => artifact.type)).toEqual(['slide', 'quiz']);
   });
+  it.each([
+    ['self_check', ['quiz']],
+    ['handout', ['slide']],
+  ] as const)('publishes only the requested %s artifacts', async (product, expected) => {
+    const limited = { ...content,
+      sections: product === 'self_check' ? [] : content.sections,
+      concepts: product === 'handout' ? [] : content.concepts,
+    };
+    mocks.turn.mockResolvedValue({ text: JSON.stringify(limited), model: 'fixture', usage: {} });
+    await expect(createStudentSelfStudyPackage(request, principal, { ...study, product }))
+      .resolves.toMatchObject({ status: 'ready' });
+    expect(mocks.write.mock.calls[0][1].artifacts.map((artifact: { type: string }) => artifact.type)).toEqual(expected);
+    expect(mocks.publish.mock.calls[0][0].artifacts.map((artifact: { type: string }) => artifact.type)).toEqual(expected);
+    expect(mocks.turn.mock.calls[0][0][0].content).toContain(product === 'self_check'
+      ? 'sections 必须为空数组' : 'concepts 必须为空数组');
+  });
+
+  it.each(['self_check', 'handout'] as const)('rejects provider output beyond %s', async (product) => {
+    mocks.turn.mockResolvedValue({ text: JSON.stringify(content), model: 'fixture', usage: {} });
+    await expect(createStudentSelfStudyPackage(request, principal, { ...study, product }))
+      .rejects.toThrow('did not match the requested content');
+    expect(mocks.write).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
 });

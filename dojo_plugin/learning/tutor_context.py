@@ -7,7 +7,7 @@ RESTRICTED_TUTOR_REQUEST = re.compile(
     r"利用链|可复制.{0,5}(?:命令|载荷)|复现.{0,8}(?:漏洞|攻击)|(?:漏洞|攻击).{0,8}复现|"
     r"生成.{0,8}(?:利用|载荷|攻击脚本)|(?:绕过|规避).{0,8}(?:检测|拦截|鉴权)|"
     r"(?:给我|写出|告诉我).{0,8}(?:命令|最终答案|验证答案|私有解法)|"
-    r"\b(?:exploit payload|exploit chain|reproduce (?:the )?(?:exploit|attack)|reverse shell)\b",
+    r"\b(?:exploit (?:payloads?|chains?)|reproduce (?:the )?(?:exploits?|attacks?)|reverse shells?)\b",
     re.IGNORECASE,
 )
 SAFE_OBSERVATIONS = {

@@ -77,7 +77,7 @@ class HarnessClientContract(unittest.TestCase):
                     try:
                         if requests.get(url + "/health", timeout=.25).ok:
                             break
-                    except requests.ConnectionError:
+                    except (requests.ConnectionError, requests.Timeout):
                         pass
                     time.sleep(.05)
                 else:

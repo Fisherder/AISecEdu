@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { apiError, apiSuccess, API_ERROR_CODES } from '@/lib/server/api-response';
+import { rethrowStudentTurnAbort } from '@/lib/server/student-request-abort';
 import { resolvePrincipal } from '@/lib/server/auth/session';
 import { getDb } from '@/lib/server/db';
 import { progressRowToSnapshot, readClassroomForAnalytics } from '@/lib/server/learning-dashboard';
@@ -101,13 +102,14 @@ export async function POST(req: NextRequest) {
     const session = await createStudentSelfStudyPackage(req, principal, request);
     return apiSuccess({ session }, 201);
   } catch (error) {
+    rethrowStudentTurnAbort(req.signal, error);
     const message =
       error instanceof SelfStudyGenerationError
         ? error.publicMessage
         : '内容生成暂时失败，请稍后重试';
     return apiError(
       API_ERROR_CODES.GENERATION_FAILED,
-      error instanceof SelfStudyGenerationError && /至少 4 个字/.test(message) ? 400 : 502,
+      error instanceof SelfStudyGenerationError && /至少 4 个字|学习目标过长/.test(message) ? 400 : 502,
       'Self-study package generation failed',
       message,
     );

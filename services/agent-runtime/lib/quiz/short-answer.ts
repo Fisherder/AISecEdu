@@ -16,15 +16,16 @@ export function redactQuizText(value: string): string {
   return value.replace(PROTECTED_TEXT, '[redacted]');
 }
 
+function preparePublicShortAnswerText(value: string): string | null {
+  if (containsRestrictedQuizText(value)) return null;
+  const redacted = redactQuizText(value.trim());
+  return redacted.replaceAll('[redacted]', '').trim() ? redacted : null;
+}
+
 export function prepareShortAnswerText(question: string, answer: string) {
-  if (containsRestrictedQuizText(question) || containsRestrictedQuizText(answer)) return null;
-  const prepared = {
-    question: redactQuizText(question.trim()),
-    userAnswer: redactQuizText(answer.trim()),
-  };
-  return Object.values(prepared).some((value) => !value.replaceAll('[redacted]', '').trim())
-    ? null
-    : prepared;
+  const publicQuestion = preparePublicShortAnswerText(question);
+  const userAnswer = preparePublicShortAnswerText(answer);
+  return publicQuestion && userAnswer ? { question: publicQuestion, userAnswer } : null;
 }
 
 export interface ShortAnswerGrade {
@@ -67,6 +68,7 @@ type GradingFailure = { status: 'unsupported' | 'unavailable' };
 function prepareQuizShortAnswers(
   questions: QuizQuestion[],
   answers: Record<string, string | string[]>,
+  allowBlankShortAnswers: boolean,
 ) {
   const maxima = questions.map((question) => question.points ?? 1);
   if (
@@ -76,7 +78,8 @@ function prepareQuizShortAnswers(
     return null;
   const shortAnswers: ShortAnswerInput[] = [];
   for (const question of questions.filter(isShortAnswer)) {
-    const answer = answers[question.id];
+    const savedAnswer = answers[question.id];
+    const answer = savedAnswer === undefined ? '' : savedAnswer;
     if (
       typeof answer !== 'string' ||
       typeof question.question !== 'string' ||
@@ -84,6 +87,14 @@ function prepareQuizShortAnswers(
       answer.length > MAX_SHORT_ANSWER_TEXT_LENGTH
     )
       return null;
+    if (!answer.trim()) {
+      if (!allowBlankShortAnswers) return null;
+      // A blank answer needs no provider grading, but the question itself
+      // must still pass the existing eligibility and privacy checks.
+      const publicQuestion = preparePublicShortAnswerText(question.question);
+      if (!publicQuestion || publicQuestion.length > MAX_SHORT_ANSWER_TEXT_LENGTH) return null;
+      continue;
+    }
     const text = prepareShortAnswerText(question.question, answer);
     if (!text || Object.values(text).some((value) => value.length > MAX_SHORT_ANSWER_TEXT_LENGTH))
       return null;
@@ -95,8 +106,9 @@ function prepareQuizShortAnswers(
 export function isQuizGradingUnsupported(
   questions: QuizQuestion[],
   answers: Record<string, string | string[]>,
+  allowBlankShortAnswers = false,
 ) {
-  return prepareQuizShortAnswers(questions, answers) === null;
+  return prepareQuizShortAnswers(questions, answers, allowBlankShortAnswers) === null;
 }
 
 async function gradeShortAnswer(
@@ -137,8 +149,9 @@ export async function gradeQuizForReview(
   answers: Record<string, string | string[]>,
   language: string,
   signal?: AbortSignal,
+  { allowBlankShortAnswers = false }: { allowBlankShortAnswers?: boolean } = {},
 ): Promise<{ status: 'graded'; results: QuestionResult[] } | GradingFailure> {
-  const shortAnswers = prepareQuizShortAnswers(questions, answers);
+  const shortAnswers = prepareQuizShortAnswers(questions, answers, allowBlankShortAnswers);
   if (!shortAnswers) return { status: 'unsupported' };
   const results = new Map(
     gradeChoiceQuestions(questions, answers).map((result) => [result.questionId, result]),
@@ -151,5 +164,13 @@ export async function gradeQuizForReview(
     if (grade.status !== 'graded') return grade;
     results.set(grade.result.questionId, grade.result);
   }
-  return { status: 'graded', results: questions.map((question) => results.get(question.id)!) };
+  return {
+    status: 'graded',
+    results: questions.map(({ id }) => results.get(id) ?? {
+      questionId: id,
+      correct: false,
+      status: 'incorrect',
+      earned: 0,
+    }),
+  };
 }

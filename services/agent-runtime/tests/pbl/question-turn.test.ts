@@ -101,7 +101,9 @@ describe('PBL ordinary questioning', () => {
     runTurn.mockRejectedValue(new Error('provider-private detail'));
     const response = await POST(request('judge'));
     expect(response.status).toBe(500);
-    expect(await response.json()).toMatchObject({ success: false, errorCode: 'INTERNAL_ERROR' });
+    expect(await response.json()).toEqual({
+      success: false, errorCode: 'INTERNAL_ERROR', error: '教学判评服务暂时不可用。',
+    });
     expect(recordHarnessUsage).not.toHaveBeenCalled();
   });
 });

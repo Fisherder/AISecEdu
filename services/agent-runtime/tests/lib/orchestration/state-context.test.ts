@@ -153,7 +153,7 @@ it('can retain learner quiz feedback without forwarding the answer key or grader
       },
     ],
   };
-  const text = buildStateContext(state, { includeAnswerKeys: false });
+  const text = buildStateContext(state);
   expect(text).toContain('learner choice');
   expect(text).toContain('INCORRECT (0/1 pts)');
   expect(text).not.toMatch(/private answer|private analysis|private grader note/);

@@ -32,7 +32,7 @@ interface InstructorRequest {
   project: PBLProjectV2;
   userMessage: string;
   /** Optional override; defaults to 'instructing'. */
-  phase?: InstructorPhase;
+  phase?: InstructorPhase | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     return apiError('MISSING_REQUIRED_FIELD', 400, '`userMessage` is required.');
   }
 
-  if (body.phase !== undefined && !['greeting', 'setup', 'instructing'].includes(body.phase)) {
+  if (body.phase != null && !['greeting', 'setup', 'instructing'].includes(body.phase)) {
     return apiError('INVALID_REQUEST', 400, 'Invalid instructor phase.');
   }
 

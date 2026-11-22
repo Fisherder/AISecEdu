@@ -181,11 +181,14 @@ describe('ordinary teaching worker service routes', () => {
     });
     const artifacts = [{id: 'artifact-1', title: studio.page.title, type: 'slide', content: {studio}}];
     const patch = {changes: [{op: 'set', path: ['takeaway'], value: '水温影响蒸发速度'}]};
-    const fetch = vi.fn(async () => modelResponse(patch));
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(modelResponse({ changes: [] }))
+      .mockResolvedValueOnce(modelResponse(patch));
     vi.stubGlobal('fetch', fetch);
     mocks.revise.mockImplementation(async options => {
       expect(options.onlyPageIds).toEqual(['page-1']);
       expect(options.textOnlyPageIds).toEqual(['page-1']);
+      await expect(options.aiCall('当前页文字修订', '普通课件资料')).rejects.toThrow();
       const typedPatch = JSON.parse(await options.aiCall('当前页文字修订', '普通课件资料'));
       const page = applyCoursewarePagePatch(studio.page, typedPatch, true);
       return {artifacts: [{...artifacts[0], content: {studio: {...studio, page}}}],
@@ -199,6 +202,8 @@ describe('ordinary teaching worker service routes', () => {
     const output = await response.json();
     expect(response.status, JSON.stringify(output)).toBe(200);
     expect(output.model.executionMode).toBe('ordinary-slide-wording');
+    expect(output.model.usage).toMatchObject({ inputTokens: 20, outputTokens: 10, totalTokens: 30 });
+    expect(mocks.usage).toHaveBeenCalledTimes(2);
     expect(output.result.content.lesson.artifacts[0].content.studio.page).toMatchObject({
       id: 'page-1', takeaway: '水温影响蒸发速度', visual: studio.page.visual,
     });

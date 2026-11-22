@@ -650,6 +650,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
   const [runtimeGate, setRuntimeGate] = useState<QuizRuntimeGate>({ status: 'loading' });
   const [hydrationVersion, setHydrationVersion] = useState(0);
   const [retrying, setRetrying] = useState(false);
+  const [allowBlankShortAnswers, setAllowBlankShortAnswers] = useState(false);
   const viewLifetimeRef = useRef<QuizViewLifetime | null>(null);
   viewLifetimeRef.current ??= createQuizViewLifetime();
   const viewLifetime = viewLifetimeRef.current;
@@ -676,6 +677,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
         setPhase(next.phase);
         setAnswers(next.answers);
         setResults(next.results);
+        setAllowBlankShortAnswers(next.allowBlankShortAnswers === true);
         setRuntimeGate({ status: 'ready', attemptId: nextAttemptId });
       })
       .catch((error) => {
@@ -696,8 +698,9 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     [questions],
   );
 
-  const allAnswered = useMemo(() => {
+  const canSubmit = useMemo(() => {
     return questions.every((q) => {
+      if (q.type === 'short_answer') return true;
       const a = answers[q.id];
       if (!a) return false;
       if (Array.isArray(a)) return a.length > 0;
@@ -730,7 +733,10 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     await runQuizPersistenceTransition(
       () => persistQuizSubmission({ stageId, sceneId, attemptId, answers }, runtimeWriter),
       viewLifetime,
-      () => setPhase('grading'),
+      () => {
+        setAllowBlankShortAnswers(true);
+        setPhase('grading');
+      },
       (error) => {
         log.warn('Failed to persist quiz submission:', error);
         setRuntimeGate({ status: 'error' });
@@ -744,7 +750,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     let cancelled = false;
 
     (async () => {
-      const grading = await gradeQuizForReview(questions, answers, locale, controller.signal);
+      const grading = await gradeQuizForReview(questions, answers, locale, controller.signal, { allowBlankShortAnswers });
       if (cancelled) return;
       if (grading.status !== 'graded') {
         setPhase(grading.status === 'unsupported' ? 'grading_unsupported' : 'grading_pending');
@@ -791,7 +797,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
       cancelled = true;
       controller.abort();
     };
-  }, [phase, questions, answers, locale, sceneId, stageId, attemptId, runtimeWriter]);
+  }, [allowBlankShortAnswers, phase, questions, answers, locale, sceneId, stageId, attemptId, runtimeWriter]);
 
   const handleRetry = useCallback(async () => {
     if (!attemptId || retrying) return;
@@ -903,10 +909,10 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
               <button
                 type="button"
                 onClick={() => void handleSubmit()}
-                disabled={!allAnswered}
+                disabled={!canSubmit}
                 className={cn(
                   'px-4 py-1.5 rounded-lg text-xs font-medium transition-all',
-                  allAnswered
+                  canSubmit
                     ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white shadow-sm hover:shadow-md hover:shadow-violet-200/50 dark:hover:shadow-violet-900/50 active:scale-[0.97]'
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed',
                 )}

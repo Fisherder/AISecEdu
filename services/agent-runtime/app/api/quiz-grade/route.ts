@@ -66,7 +66,10 @@ export async function POST(req: NextRequest) {
       return apiError('CONTENT_SENSITIVE', 422, 'This submission is ineligible for automatic grading.');
     }
     const grade = readShortAnswerGrade(output, points);
-    if (!grade || containsRestrictedQuizText(grade.comment)) return gradingUnavailable();
+    if (!grade) return gradingUnavailable();
+    if (containsRestrictedQuizText(grade.comment)) {
+      return apiError('CONTENT_SENSITIVE', 422, 'This submission is ineligible for automatic grading.');
+    }
     return apiSuccess({ ...grade, comment: redactQuizText(grade.comment) });
   } catch {
     return gradingUnavailable();

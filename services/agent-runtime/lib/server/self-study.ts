@@ -5,11 +5,20 @@ import type {
   TeachingPlanItem,
 } from '@/lib/types/teaching-plan';
 
+export type StudyProduct = 'package' | 'handout' | 'self_check';
+
+export const studyProductLabels: Record<StudyProduct, string> = {
+  package: '个人学习包',
+  handout: '学习讲义',
+  self_check: '概念自检',
+};
+
 export interface SelfStudyRequest {
   goal: string;
   level: 'beginner' | 'intermediate' | 'advanced';
   durationMinutes: number;
   preference: 'auto' | 'explain' | 'practice' | 'challenge';
+  product?: StudyProduct;
 }
 
 export function buildSelfStudyPlanningInput(
@@ -32,7 +41,9 @@ export function buildSelfStudyPlanningInput(
       '这是学生自主学习包，不是教师整门课程。',
       `学习者自报基础：${levelLabel}。可用时间：${request.durationMinutes}分钟。偏好：${preferenceLabel}。`,
       `系统已有证据：总进度${Math.round(insight.completionRate * 100)}%，测验均分${insight.averageQuizScore ?? '暂无'}，优先关注${weak}。`,
-      '自主选择2到3项最有价值的内容并按学习顺序组织；不要机械包含所有类型，也不要超过可用时间。',
+      request.product === 'self_check' ? '只提供文字自检和作答反馈。'
+        : request.product === 'handout' ? '只提供学习讲义。'
+        : '自主选择2到3项最有价值的内容并按学习顺序组织；不要机械包含所有类型，也不要超过可用时间。',
       '内容必须可在浏览器课堂中独立学习，并包含清晰目标、反馈或自检方式。',
     ].join('\n'),
   };
