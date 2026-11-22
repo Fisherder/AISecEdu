@@ -34,7 +34,7 @@ export const ordinaryBlueprint = z.strictObject({ blueprint: z.strictObject({
   outline: z.array(z.strictObject({title: plain, purpose: plain})).min(1).max(30),
   assessment: textItems, safety: textItems,
 }) });
-const candidate = z.strictObject({ candidate: z.strictObject({
+const candidateOutput = z.strictObject({
   title: plain, summary: plain, strategy: plain, differences: textItems, recommendation: plain,
   content: z.strictObject({
     type: z.enum(['lesson-plan', 'slide-deck']), objectives: textItems.min(1), outline: z.array(outline).min(1).max(120),
@@ -42,10 +42,17 @@ const candidate = z.strictObject({ candidate: z.strictObject({
     assessment: z.strictObject({criteria: textItems.min(1)}),
     sourceGrounding: z.array(z.strictObject({materialId: plain, uses: textItems.min(1)})).max(80),
   }),
-}) });
+});
+const candidate = z.strictObject({candidate: candidateOutput});
+const debateCandidate = z.strictObject({candidate: candidateOutput.extend({
+  content: candidateOutput.shape.content.extend({
+    type: z.literal('debate'),
+    outline: z.array(outline.omit({layout: true, visualBrief: true, speakerNotes: true})).min(1).max(30),
+  }),
+})});
 
 export function ordinaryCandidate(value: unknown, artifactType: string, materialIds: string[]) {
-  const normalized = candidate.parse(value);
+  const normalized = (artifactType === 'debate' ? debateCandidate : candidate).parse(value);
   const { content } = normalized.candidate;
   const ids = content.sourceGrounding.map(row => row.materialId);
   if (content.type !== artifactType || new Set(ids).size !== materialIds.length ||

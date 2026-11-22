@@ -192,6 +192,33 @@ def _material_refs(materials, revisions):
     return refs
 
 
+def freeze_selected_material_refs(owner_id, dojo_id, source_refs):
+    """Resolve only the selected attachments, preserving their order and any pinned versions."""
+    if not isinstance(source_refs, list) or len(source_refs) > 80:
+        raise MaterialContextError("请选择最多 80 份教学资料。")
+    if not source_refs:
+        return []
+    selected = {}
+    for ref in source_refs:
+        if (not isinstance(ref, dict) or ref.get("type") != "material" or not isinstance(ref.get("id"), str)
+                or not ref["id"] or ref["id"] in selected):
+            raise MaterialContextError("所选资料引用无效，请重新选择。")
+        selected[ref["id"]] = ref
+    materials = TeachingMaterials.query.filter(
+        TeachingMaterials.id.in_(selected), TeachingMaterials.owner_id == owner_id,
+        or_(TeachingMaterials.dojo_id == dojo_id, TeachingMaterials.dojo_id.is_(None)),
+        or_(TeachingMaterials.status != "ARCHIVED", TeachingMaterials.status.is_(None)),
+    ).all()
+    by_id = {material.id: material for material in materials}
+    if set(by_id) != set(selected):
+        raise MaterialContextError("所选教学资料已移除或不属于当前教师和课程。")
+    latest, versions = _latest_revisions(list(selected))
+    revisions = {key: _requested_revision(ref, by_id[key], latest, versions) for key, ref in selected.items()}
+    if any(row is None or not re.fullmatch(r"[a-f0-9]{64}", row.sha256 or "") for row in revisions.values()):
+        raise MaterialContextError("所选教学资料版本不可用，请重新选择。")
+    return _material_refs([by_id[key] for key in selected], revisions)
+
+
 def build_course_material_context(
     *,
     owner_id,

@@ -120,6 +120,15 @@ def requests_lesson_plan_candidates(prompt):
     )
 
 
+def requests_debate_candidates(prompt):
+    command = (
+        r"(?:请\s*)?(?:生成|设计|制作)\s*(?:三(?:份|套|种)\s*)?"
+        r"(?:普通课堂|普通|课堂)辩论(?:候选(?:方案)?|方案)\s*[:：]\s*\S[\s\S]*"
+    )
+    return bool(re.fullmatch(command, prompt.strip())
+                and not requested_document_formats({"prompt": prompt, "executionMode": "auto"}))
+
+
 def _unquoted_request(prompt):
     def mask(match):
         text = next(group for group in match.groups() if group is not None).strip()

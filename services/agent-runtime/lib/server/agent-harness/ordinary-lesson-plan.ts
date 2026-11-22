@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { coursewareText } from '@/lib/courseware/compiler';
 import { parseJsonResponse } from '@/lib/generation/json-repair';
+import { isOrdinaryTeachingProse } from '@/lib/teaching/ordinary-text';
 import type { Lesson } from '@/lib/types/lesson';
 import { recordHarnessUsage } from './classroom-turn';
 import { ordinaryTeachingRules, type OrdinaryTeachingModel } from './ordinary-teaching';
@@ -43,11 +44,16 @@ const coverage = z.object({
   materialIds: z.array(identity).max(80),
 });
 export const ORDINARY_LESSON_REQUEST_LIMIT = 4000;
+const debateRequest = prose(16_000);
 const lessonRequest = prose(ORDINARY_LESSON_REQUEST_LIMIT);
 const lessonDraft = z.object({
   title: prose(160),
   requestPrompt: lessonRequest.optional(),
   plan: planSchema,
+});
+const debateDraft = lessonDraft.extend({
+  requestPrompt: debateRequest,
+  plan: planSchema.extend({type: z.literal('debate')}),
 });
 const candidateCoverage = coverage.extend({ materialIds: coverage.shape.materialIds.default([]) });
 const candidatePacket = z.object({
@@ -73,8 +79,9 @@ const candidatePacket = z.object({
   sourceRefs: z.array(z.unknown()).default([]),
 });
 
-export function ordinaryLessonCandidateInput(payload: Record<string, unknown>) {
-  const input = candidatePacket.parse(payload);
+export function ordinaryLessonCandidateInput(payload: Record<string, unknown>, artifactType = 'lesson-plan') {
+  const packet = artifactType === 'debate' ? candidatePacket.extend({prompt: debateRequest}) : candidatePacket;
+  const input = packet.parse(payload);
   const { materialIds, expectedMaterialCount } = input.materialContext;
   const materials = input.materialDossier?.materials ?? [];
   const referenceSchema = z.object({
@@ -93,6 +100,7 @@ export function ordinaryLessonCandidateInput(payload: Record<string, unknown>) {
     ids.every((id) => materialIds.includes(id));
   if (
     !matches(materialIds) ||
+    (artifactType === 'debate' && refs.length !== input.sourceRefs.length) ||
     !matches(materials.map((item) => item.id)) ||
     !matches(refs.map((item) => item.id)) ||
     (input.materialDossier &&
@@ -109,11 +117,19 @@ export function ordinaryLessonCandidateInput(payload: Record<string, unknown>) {
     )
   )
     throw new Error('The selected material revisions and dossier coverage must agree');
-  const sources = materials.map(({ id, title, analysis }) => ({
+  // Historical dossiers may be ordered by upload time. Debate prompts refer to
+  // materials by their position in the teacher's frozen selection.
+  const byId = new Map(materials.map(material => [material.id, material]));
+  const ordered = artifactType === 'debate' ? refs.map(ref => byId.get(ref.id)!) : materials;
+  const sources = ordered.map(({ id, title, analysis }) => ({
     materialId: id,
     title,
     summary: analysis.summary,
   }));
+  if (artifactType === 'debate' && ![input.prompt, ...sources.flatMap(({title, summary}) => [title, summary])]
+      .every(isOrdinaryTeachingProse)) {
+    throw new Error('Debate proposal inputs must contain ordinary teaching prose');
+  }
   if (Buffer.byteLength(JSON.stringify({ request: input.prompt, sources }), 'utf8') > 80_000) {
     throw new Error('Ordinary candidate materials exceed the teaching context limit');
   }
@@ -167,7 +183,7 @@ const responseSchema = z.strictObject({
 
 type LessonSource = { materialId: string; title: string; summary: string };
 
-function lessonPrompt(draft: z.infer<typeof lessonDraft>, sources: LessonSource[]) {
+function lessonPrompt(draft: z.infer<typeof lessonDraft> | z.infer<typeof debateDraft>, sources: LessonSource[]) {
   const { title, requestPrompt, plan } = draft;
   const prompt = JSON.stringify({ title, requestPrompt, plan, sources });
   if (Buffer.byteLength(prompt, 'utf8') > 120_000) {
@@ -179,8 +195,14 @@ function lessonPrompt(draft: z.infer<typeof lessonDraft>, sources: LessonSource[
 export function ordinaryLessonCandidateDraft(
   candidate: Record<string, unknown>,
   selected: ReturnType<typeof ordinaryLessonCandidateInput>,
+  artifactType = 'lesson-plan',
 ) {
-  const draft = lessonDraft.parse({
+  const schema = artifactType === 'debate' ? debateDraft : lessonDraft;
+  if (artifactType === 'debate') {
+    z.object({summary: prose(800), strategy: prose(300), differences: list(300), recommendation: prose(800)})
+      .parse(candidate);
+  }
+  const draft = schema.parse({
     title: candidate.title,
     plan: candidate.content,
     requestPrompt: selected.request,

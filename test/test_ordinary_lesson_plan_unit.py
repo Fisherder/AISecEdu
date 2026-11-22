@@ -43,6 +43,7 @@ def test_older_runtime_is_rejected_without_sending_to_legacy_route(flow, kind, p
     http.post.return_value.status_code = 404
     jobs.update(
         requests=http, time=time, AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS=(),
+        UPSTREAM_DEBATE_CANDIDATE_ROUTE="upstream-ordinary-debate-candidate",
         config=SimpleNamespace(AGENT_RUNTIME_INTERNAL_URL="http://runtime.test", AGENT_RUNTIME_SERVICE_SECRET="fixture"),
         _runtime_request_body=lambda *args: {"kind": kind}, _runtime_read_timeout=lambda *args: 2,
     )
@@ -270,6 +271,7 @@ def test_pinned_candidate_passes_complete_empty_material_projection(flow):
                    "generationReason": ns["GENERATION_REASON"], "ordinaryCandidateModel": "fixture-model",
                    "prompt": "设计植物科学教案", "sourceRefs": []}
     jobs.update(
+        ordinary_debate_candidate=SimpleNamespace(prepare=lambda *_: None),
         _teacher_learning_request=lambda *_: None,
         _job_material_grounding_required=lambda *_: False,
         singular_material_reference_requested=lambda _: False,

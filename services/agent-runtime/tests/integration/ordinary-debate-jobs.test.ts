@@ -1,9 +1,12 @@
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {NextRequest} from 'next/server';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {POST} from '@/app/api/integration/jobs/ordinary-debate/route';
+import { ordinaryLessonCandidateInput } from '@/lib/server/agent-harness/ordinary-lesson-plan';
+import {POST as postCandidate} from '@/app/api/integration/jobs/ordinary-debate-candidate/route';
+import {generationFingerprint} from '@/lib/generation/durable-stage';
 
 const mocks = vi.hoisted(() => ({resolveModel: vi.fn(), usage: vi.fn()}));
 vi.mock('@/lib/server/resolve-model', () => ({resolveModel: mocks.resolveModel}));
@@ -57,6 +60,35 @@ function receipt(value: unknown, model = 'official', usage: unknown = {prompt_to
   return Response.json({text: JSON.stringify(value), model, usage});
 }
 
+const candidateCoverage = {complete: true, expectedMaterialCount: 1, materialIds: ['source-private-id']};
+const candidateSource = {type: 'material', id: 'source-private-id', revisionId: 'revision-private-id', sha256: 'a'.repeat(64)};
+const candidateJob = {
+  ...designJob, kind: 'candidate.generate',
+  scope: {...designJob.scope, ordinaryTeaching: 'candidate-plan'},
+  modelRoute: {...designJob.modelRoute, route: 'upstream-ordinary-debate-candidate'},
+  payload: {artifactType: 'debate', candidateSetId: 'candidate-private-id', candidateCount: 1, generationMode: 'single',
+    generationReason: 'teacher_requested_ordinary_debate', ordinaryCandidateModel: 'official', prompt: designJob.payload.requestPrompt,
+    materialContext: candidateCoverage, sourceRefs: [candidateSource], materialDossier: {
+      coverage: candidateCoverage, materials: [{...candidateSource, title: '来访记录',
+        analysis: {summary: '放学后学生更常来借书。'}, coverage: {complete: true}, excerpts: ['private-excerpt']}],
+    }, conversation: ['private-history']},
+};
+const candidateBlueprint = {blueprint: {title: '图书馆开放时间', summary: '权衡开放时间与用人安排。',
+  strategy: '从来访时间审视需求', variant: '证据比较', objectives: ['依据记录比较方案'],
+  outline: [{title: '解释记录', purpose: '根据记录陈述需求。'}], assessment: ['引用记录'], safety: []}};
+function candidateProposal(index: number) {
+  const focus = ['来访需求', '用人安排', '开放时间', '学生反馈'][index - 1];
+  return {candidate: {title: `讨论${focus}`, summary: `比较${focus}的不同意见。`, strategy: `以${focus}为比较重点`,
+    differences: [`从${focus}切入`], recommendation: '适合小组讨论。', content: {type: 'debate',
+      objectives: [`说明${focus}对各方的影响。`],
+      outline: [{title: '提出观点', description: '用来访记录支持观点。', keyPoints: ['说明证据与观点的关系']}],
+      activities: [{title: '质询', instruction: '选一个对方理由提出问题。'}], assessment: {criteria: ['解释证据']},
+      sourceGrounding: [{materialId: 'material-1', uses: ['用统计记录对比来访时间']}],
+    }}};
+}
+const requestCandidate = (job: unknown, token?: string, endpoint = 'ordinary-debate-candidate') =>
+  request(job, token, endpoint);
+
 describe('ordinary integrated debate authoring', () => {
   let checkpoint: string;
   const harness = vi.fn();
@@ -75,6 +107,177 @@ describe('ordinary integrated debate authoring', () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     await rm(checkpoint, {recursive: true, force: true});
+  });
+
+  it.each([1, 2, 4])('generates exactly %i ordinary debate proposals from a bounded brief', async count => {
+    const prompt = '请比较图书馆的开放时间。'.repeat(400);
+    harness.mockImplementation(async (url, options) => {
+      expect(String(url)).toBe('http://synthetic-debate.invalid/v1/turn');
+      const {messages, ...extra} = JSON.parse(options.body);
+      expect(extra).toEqual({});
+      expect(messages.map((message: {role: string}) => message.role)).toEqual(['system', 'user']);
+      expect(messages[0].content).toContain('只提供普通教学目标');
+      expect(options.body).not.toMatch(/private-id|private-excerpt|private-history/);
+      const context = JSON.parse(messages[1].content);
+      expect(context).toMatchObject({request: prompt, sources: [
+        {materialId: 'material-1', title: '来访记录', summary: '放学后学生更常来借书。'},
+      ]});
+      return receipt(context.ordinal ? candidateProposal(context.ordinal) : candidateBlueprint);
+    });
+    const payload = {...candidateJob.payload, prompt, candidateCount: count, generationMode: count === 1 ? 'single' : 'multiple'};
+    const response = await postCandidate(requestCandidate({...candidateJob, payload}));
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body.model).toMatchObject({provider: 'deepseek', actualModel: 'official', degraded: false,
+      executionMode: 'ordinary-candidate-plan', usage: {inputTokens: 46 * count, outputTokens: 34 * count, totalTokens: 80 * count}});
+    expect(body.result.candidates).toHaveLength(count);
+    for (const {content} of body.result.candidates) {
+      expect(content).toMatchObject({type: 'debate', experience: {mode: 'ordinary-teaching-plan'},
+        sourceGrounding: [{materialId: candidateSource.id, uses: ['用统计记录对比来访时间']}]});
+      expect(content).not.toHaveProperty('debate');
+    }
+    expect(harness).toHaveBeenCalledTimes(2 * count);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('requires the private debate proposal endpoint, teacher scope, complete material revisions and exclusive model pin', async () => {
+    expect((await postCandidate(requestCandidate(candidateJob, 'bad-token'))).status).toBe(401);
+    expect((await postCandidate(requestCandidate(candidateJob, undefined, 'execute'))).status).toBe(422);
+    for (const payload of [
+      {...candidateJob.payload, artifactType: 'lesson-plan'}, {...candidateJob.payload, generationMode: 'multiple'},
+      {...candidateJob.payload, candidateCount: '1'}, {...candidateJob.payload, generationReason: undefined},
+      {...candidateJob.payload, sourceRefs: [{...candidateSource, revisionId: 'other-revision'}]},
+      {...candidateJob.payload, prompt: '图'.repeat(16_001)}, {...candidateJob.payload, workspaceId: 'self'},
+    ]) {
+      expect((await postCandidate(requestCandidate({...candidateJob, payload}))).status).toBe(422);
+    }
+    for (const modelRoute of [
+      undefined, {...candidateJob.modelRoute, route: 'execute'}, {...candidateJob.modelRoute, provider: 'other'},
+      {...candidateJob.modelRoute, allow_degraded: true}, {...candidateJob.modelRoute, allow_degraded: undefined},
+      {...candidateJob.modelRoute, actual_model: 'different'}, {...candidateJob.modelRoute, required_model: 'different'},
+    ]) {
+      expect((await postCandidate(requestCandidate({...candidateJob, modelRoute}))).status).toBe(503);
+    }
+    expect((await postCandidate(requestCandidate({...candidateJob, payload: {...candidateJob.payload, ordinaryCandidateModel: undefined}}))).status).toBe(503);
+    expect(harness).not.toHaveBeenCalled();
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['different', {prompt_tokens: 23, completion_tokens: 17}],
+    ['official', {prompt_tokens: 23, completion_tokens: 0}],
+    ['official', {prompt_tokens: 23}],
+  ])('withholds proposals after a mismatched or unmeasured turn', async (model, usage) => {
+    harness.mockResolvedValueOnce(receipt(candidateBlueprint, model, usage));
+    const response = await postCandidate(requestCandidate(candidateJob));
+    expect(response.status).toBe(503);
+    expect(await response.json()).not.toHaveProperty('result');
+    expect(harness).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('rejects generated proposals that include executable instructions or change the cited sources', async () => {
+    const {candidate} = candidateProposal(1);
+    const outsideScope = {...candidate, content: {...candidate.content,
+      sourceGrounding: [{materialId: 'unapproved-source', uses: ['引用来访次数']}]},
+    };
+    const unsafe = {...candidate, content: {...candidate.content,
+      activities: [{title: '评论', instruction: '<script>sample</script>'}]},
+    };
+    harness.mockResolvedValueOnce(receipt(candidateBlueprint)).mockResolvedValueOnce(receipt({candidate: outsideScope}))
+      .mockResolvedValueOnce(receipt({candidate: unsafe}));
+    const response = await postCandidate(requestCandidate(candidateJob));
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({errorCode: 'INVALID_ORDINARY_DEBATE_CANDIDATE_RESPONSE'});
+    expect(mocks.resolveModel).not.toHaveBeenCalled();
+  });
+
+  it('serializes identical candidate requests and replays the exact result after reloading the route', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    harness.mockImplementationOnce(async () => {
+      await gate;
+      return receipt(candidateBlueprint);
+    }).mockResolvedValueOnce(receipt(candidateProposal(1)));
+    const first = postCandidate(requestCandidate(candidateJob));
+    await vi.waitFor(() => expect(harness).toHaveBeenCalledTimes(1));
+    const second = postCandidate(requestCandidate(candidateJob));
+    release();
+    const replies = await Promise.all([first, second]);
+    expect(replies.map(response => response.status)).toEqual([200, 200]);
+    const [generated, concurrent] = await Promise.all(replies.map(response => response.json()));
+    expect(concurrent.result).toEqual(generated.result);
+    expect(concurrent.model.usage).toEqual(generated.model.usage);
+    expect(concurrent.model.responseHash).toBe(generated.model.responseHash);
+    expect(harness).toHaveBeenCalledTimes(2);
+    expect(mocks.usage).toHaveBeenCalledTimes(2);
+    expect(await readdir(checkpoint)).toHaveLength(1);
+
+    vi.resetModules();
+    const {POST: restarted} = await import('@/app/api/integration/jobs/ordinary-debate-candidate/route');
+    harness.mockRejectedValue(new Error('Harness is offline'));
+    const response = await restarted(requestCandidate(candidateJob));
+    expect(response.status).toBe(200);
+    const replay = await response.json();
+    expect(replay.result).toEqual(generated.result);
+    expect(replay.model.usage).toEqual(generated.model.usage);
+    expect(replay.model.responseHash).toBe(generated.model.responseHash);
+    expect(harness).toHaveBeenCalledTimes(2);
+    expect(mocks.usage).toHaveBeenCalledTimes(2);
+  });
+
+  it('separates completions by job, teacher scope, candidate set, exact brief, and material revision', async () => {
+    const newVersion = {...candidateSource, revisionId: 'new-revision', sha256: 'b'.repeat(64)};
+    const dossier = candidateJob.payload.materialDossier;
+    const variants = [
+      candidateJob,
+      {...candidateJob, jobId: 'different-job'},
+      {...candidateJob, scope: {...candidateJob.scope, ownerId: 12}},
+      {...candidateJob, scope: {...candidateJob.scope, dojoId: 41}},
+      {...candidateJob, scope: {...candidateJob.scope, moduleIndex: 2}},
+      {...candidateJob, payload: {...candidateJob.payload, candidateSetId: 'different-set'}},
+      {...candidateJob, payload: {...candidateJob.payload, prompt: '比较周末图书馆的开放时间'}},
+      {...candidateJob, payload: {...candidateJob.payload, sourceRefs: [newVersion], materialDossier: {
+        ...dossier, materials: [{...dossier.materials[0], ...newVersion}],
+      }}},
+      {...candidateJob, payload: {...candidateJob.payload, materialDossier: {
+        ...dossier, materials: [{...dossier.materials[0], analysis: {summary: '学生周末早上来借书。'}}],
+      }}},
+    ];
+    harness.mockImplementation(async (_url, {body}) => {
+      const context = JSON.parse(JSON.parse(body).messages[1].content);
+      return receipt(context.ordinal ? candidateProposal(context.ordinal) : candidateBlueprint);
+    });
+    for (const variant of variants) expect((await postCandidate(requestCandidate(variant))).status).toBe(200);
+    expect(await readdir(checkpoint)).toHaveLength(variants.length);
+    expect(harness).toHaveBeenCalledTimes(2 * variants.length);
+    expect((await postCandidate(requestCandidate(candidateJob))).status).toBe(200);
+    expect(harness).toHaveBeenCalledTimes(2 * variants.length);
+  });
+
+  it.each(['invalid-json', 'usage', 'content', 'result-digest'])('fails closed for a malformed %s checkpoint', async change => {
+    harness.mockResolvedValueOnce(receipt(candidateBlueprint)).mockResolvedValueOnce(receipt(candidateProposal(1)));
+    expect((await postCandidate(requestCandidate(candidateJob))).status).toBe(200);
+    const [file] = await readdir(checkpoint);
+    const path = join(checkpoint, file);
+    const saved = JSON.parse(await readFile(path, 'utf8'));
+    const entry = saved.stages['workflow-debate-candidate-response'];
+    if (change === 'usage') {
+      entry.completion.usage.totalTokens += 1;
+      entry.digest = generationFingerprint(entry.completion);
+    } else if (change === 'content') {
+      entry.completion.result.candidates[0].content.sourceGrounding[0].materialId = 'unselected-source';
+      entry.digest = generationFingerprint(entry.completion);
+    } else if (change === 'result-digest') {
+      entry.completion.usage.totalTokens += 100;
+      entry.completion.usage.outputTokens += 100;
+    }
+    await writeFile(path, change === 'invalid-json' ? '{' : JSON.stringify(saved));
+    const replay = await postCandidate(requestCandidate(candidateJob));
+    expect(replay.status).toBe(503);
+    expect(await replay.json()).toMatchObject({errorCode: 'ORDINARY_DEBATE_CANDIDATE_UNAVAILABLE'});
+    expect(harness).toHaveBeenCalledTimes(2);
+    expect(mocks.usage).toHaveBeenCalledTimes(2);
   });
 
   it('generates ordinary text with measured usage and replays the validated checkpoint', async () => {
@@ -176,4 +379,15 @@ describe('ordinary integrated debate authoring', () => {
     expect(await response.json()).toMatchObject({errorCode: 'ORDINARY_DEBATE_REJECTED'});
     expect(mocks.resolveModel).not.toHaveBeenCalled();
   });
+});
+
+it('assigns debate citations in the teacher-selected order even when the dossier is sorted differently', () => {
+  const refs = ['second', 'first'].map(id => ({type: 'material', id, revisionId: id + '-rev', sha256: 'a'.repeat(64)}));
+  const coverage = {complete: true, expectedMaterialCount: 2, materialIds: ['second', 'first']};
+  const materials = [...refs].reverse().map(ref => ({...ref, title: '校园观察',
+    analysis: {summary: '记录活动室每日使用情况。'}, coverage: {complete: true}}));
+  const packet = {prompt: '比较两份记录。', sourceRefs: refs, materialContext: coverage,
+    materialDossier: {coverage, materials}};
+  expect(ordinaryLessonCandidateInput(packet, 'debate').sources.map(row => row.materialId)).toEqual(['second', 'first']);
+  expect(() => ordinaryLessonCandidateInput({...packet, sourceRefs: [...refs, {type: 'candidate'}]}, 'debate')).toThrow();
 });

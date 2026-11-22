@@ -62,11 +62,15 @@ from .artifacts import (
 )
 from .files import persist_agent_deliverables, public_agent_file
 from .model_router import (
-    UPSTREAM_DEBATE_ROUTE, UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE,
+    UPSTREAM_DEBATE_CANDIDATE_ROUTE, UPSTREAM_DEBATE_ROUTE, UPSTREAM_DECK_REVISION_ROUTE,
+    UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE,
     UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_SLIDE_NOTES_ROUTE, UPSTREAM_TEACHER_ROUTE,
     route_model, validate_actual_model,
 )
-from . import ordinary_debate, ordinary_lesson_plan, ordinary_material_turn, ordinary_slide_layout, ordinary_slide_notes
+from . import (
+    ordinary_debate, ordinary_debate_candidate, ordinary_lesson_plan, ordinary_material_turn,
+    ordinary_slide_layout, ordinary_slide_notes,
+)
 from .model_journal import close_canceled_model_calls
 from .model_inputs import ModelInputError, accepted_input, freeze_input, freeze_prepared, prepared_input, request_payload, restore_input_cache
 from .conversation import turn_wait_state, execution_chain
@@ -1596,7 +1600,9 @@ def enqueue_job(
         payload = pin_classroom_request(payload, owner_id, dojo_id, module_index)
 
     if kind == "candidate.generate":
-        payload = ordinary_lesson_plan.admit_generation(payload, owner_id, dojo_id, module_index, thread_id)
+        payload = ordinary_debate_candidate.admit(payload, owner_id, dojo_id, module_index, thread_id)
+        if not ordinary_debate_candidate.explicit(payload):
+            payload = ordinary_lesson_plan.admit_generation(payload, owner_id, dojo_id, module_index, thread_id)
     if kind in {"artifact.materialize", "artifact.revise"} and (
         payload.get("artifactType") == "debate" or "ordinaryDebate" in payload or "debateAuthoringBackend" in payload
     ):
@@ -2254,6 +2260,8 @@ def retry_job(job, user_id, idempotency_token):
 
 
 def _retry_payload(job, user_id):
+    if job.kind == "candidate.generate":
+        ordinary_debate_candidate.prepare(job)
     if "ordinaryDebate" in (job.payload or {}):
         ordinary_debate.prepare(job, job.payload)
     payload = {**(job.payload or {}), "manualRetry": True}
@@ -2632,7 +2640,7 @@ def _prepare_model_request(job):
         restore_input_cache(job)
         return saved["payload"], saved["modelRoute"]
     payload = _runtime_payload(job)
-    if job.kind == "candidate.generate":
+    if job.kind == "candidate.generate" and not ordinary_debate_candidate.explicit(payload):
         ordinary_lesson_plan.generation_model(job, payload, _ordinary_teaching_job_scope(job, payload))
     route = route_model(job.kind, prompt=str(payload.get("prompt") or payload.get("instruction") or ""),
                         payload=payload, allow_degraded=bool(payload.get("allowDegraded")))
@@ -2651,6 +2659,10 @@ def _runtime_payload(job):
         # The selected references and their redacted excerpts are already frozen.
         # Never expand to fresh course material or load conversation history.
         return payload
+    if job.kind == "candidate.generate":
+        candidate = ordinary_debate_candidate.prepare(job, payload)
+        if candidate is not None:
+            return candidate
     if "ordinaryDebate" in payload:
         return ordinary_debate.prepare(job, payload)
     if job.kind == "artifact.materialize" and ordinary_lesson_plan.pinned(payload):
@@ -2922,6 +2934,18 @@ def _ordinary_teaching_job_scope(job, payload):
 
 
 def _runtime_request_body(job, route, payload):
+    if job.kind == "candidate.generate" and route.get("route") == UPSTREAM_DEBATE_CANDIDATE_ROUTE:
+        ordinary_debate_candidate.require_current(job, payload)
+        return {
+            "jobId": job.id, "kind": job.kind,
+            "scope": {
+                "ownerId": job.owner_id, "dojoId": job.dojo_id, "moduleIndex": job.module_index,
+                "ordinaryTeaching": ordinary_debate_candidate.SCOPE,
+            },
+            "payload": ordinary_debate_candidate.wire_payload(payload), "modelRoute": route,
+        }
+    if job.kind == "candidate.generate" and ordinary_debate_candidate.explicit(payload):
+        raise PermanentJobError("普通辩论候选作业必须使用指定的教学服务。")
     if "ordinaryDebate" in payload:
         return {
             "jobId": job.id, "kind": job.kind,
@@ -3494,7 +3518,9 @@ def _invoke_agent_runtime(job, route, payload=None):
             "usage": response["usage"],
         }}
     endpoint = "execute"
-    if "ordinaryDebate" in payload:
+    if job.kind == "candidate.generate" and route.get("route") == UPSTREAM_DEBATE_CANDIDATE_ROUTE:
+        endpoint = "ordinary-debate-candidate"
+    elif "ordinaryDebate" in payload:
         endpoint = "ordinary-debate"
     elif job.kind == "artifact.revise" and ordinary_slide_layout.pinned(payload):
         endpoint = "ordinary-deck-revision" if ordinary_slide_layout.deck_pinned(payload) else "ordinary-slide-layout"
@@ -3510,7 +3536,7 @@ def _invoke_agent_runtime(job, route, payload=None):
         },
         "timeout": (10, _runtime_read_timeout(job, payload)),
     }
-    if endpoint in {"ordinary-slide-layout", "ordinary-deck-revision", "ordinary-debate"}:
+    if endpoint in {"ordinary-slide-layout", "ordinary-deck-revision", "ordinary-debate", "ordinary-debate-candidate"}:
         request_kwargs["allow_redirects"] = False
     if job.kind == "agent.chat" and job.thread_id:
         encoded = _runtime_json_bytes(body)
@@ -3525,6 +3551,8 @@ def _invoke_agent_runtime(job, route, payload=None):
     retry_delays = AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS
     execution_deadline = time.monotonic() + request_kwargs["timeout"][1]
     for attempt in range(len(retry_delays) + 1):
+        if attempt and endpoint == "ordinary-debate-candidate":
+            ordinary_debate_candidate.require_current(job, payload)
         try:
             response = requests.post(url, **request_kwargs)
         except requests.exceptions.ConnectionError as exc:
@@ -3560,6 +3588,9 @@ def _invoke_agent_runtime(job, route, payload=None):
         if endpoint == "ordinary-debate" and (response.status_code == 404 or 300 <= response.status_code < 400):
             raise RuntimeJobError("课堂服务尚未提供普通辩论接口，请核对部署版本。",
                                   category="service", code="ORDINARY_DEBATE_ROUTE_UNAVAILABLE", retry_after=30)
+        if endpoint == "ordinary-debate-candidate" and (response.status_code == 404 or 300 <= response.status_code < 400):
+            raise RuntimeJobError("课堂服务尚未提供普通辩论候选接口，请核对部署版本。",
+                                  category="service", code="ORDINARY_DEBATE_CANDIDATE_ROUTE_UNAVAILABLE", retry_after=30)
         if endpoint == "ordinary-lesson-plan" and response.status_code == 404:
             raise RuntimeJobError("课堂服务尚未提供普通教案接口，请核对部署版本。",
                                   category="service", code="ORDINARY_LESSON_PLAN_ROUTE_UNAVAILABLE", retry_after=30)
@@ -3712,7 +3743,7 @@ def _bind_generation_scope(job, generation_options):
     return True
 
 
-def _persist_result(job, result):
+def _persist_result(job, result, *, prepared=None):
     if job.kind == "agent.chat":
 
         restore_input_cache(job, bootstrap=True)
@@ -3873,13 +3904,17 @@ def _persist_result(job, result):
         }
 
     if job.kind in {"candidate.generate", "self.candidate.generate"}:
+        debate_request = ordinary_debate_candidate.prepare(job, lock=True) if job.kind == "candidate.generate" else None
+        if debate_request is not None:
+            if debate_request != prepared:
+                raise PermanentJobError("普通辩论候选的资料版本已变化，请重新发起。")
+            ordinary_debate_candidate.validate_result(debate_request, result)
         candidate_set = TeachingCandidateSets.query.filter_by(
             id=job.payload.get("candidateSetId"),
             owner_id=job.owner_id,
         ).first()
         if candidate_set is None:
             raise PermanentJobError("Candidate set no longer exists")
-        rows = replace_generated_candidates(candidate_set, result.get("candidates"))
         generation_report = result.get("generationReport")
         if isinstance(generation_report, dict):
             candidate_set.request_json = {
@@ -3891,6 +3926,9 @@ def _persist_result(job, result):
             .order_by(ModelInvocations.created.desc())
             .first()
         )
+        if debate_request is not None:
+            ordinary_debate_candidate.require_invocation(job, debate_request, invocation)
+        rows = replace_generated_candidates(candidate_set, result.get("candidates"))
         cards = ConversationCards.query.filter_by(
             object_type="candidate_set", object_id=candidate_set.id
         ).all()
@@ -4858,17 +4896,21 @@ def process_job(job_id, *, worker_id=None):
             compact_result = _execute_local_job(job)
         else:
             runtime_payload, route = _prepare_model_request(job)
+            debate_candidate = job.kind == "candidate.generate" and route.get("route") == UPSTREAM_DEBATE_CANDIDATE_ROUTE
             checkpoint = (
                 (job.result or {}).get("_generationCheckpoint")
                 if isinstance(job.result, dict)
                 else None
             )
-            if (
+            checkpoint_matches = (
                 isinstance(checkpoint, dict)
                 and checkpoint.get("requestHash") == route["request_hash"]
                 and isinstance(checkpoint.get("result"), dict)
                 and isinstance(checkpoint.get("model"), dict)
-            ):
+            )
+            if debate_candidate and checkpoint is not None and not checkpoint_matches:
+                raise PermanentJobError("普通辩论候选的模型请求已变化，请重新发起。")
+            if checkpoint_matches:
                 if "ordinaryMaterialQuestion" in runtime_payload:
                     _require_ordinary_material_question(job, runtime_payload)
                 response = {
@@ -4919,13 +4961,18 @@ def process_job(job_id, *, worker_id=None):
                     model_meta.setdefault(
                         "latencyMs", int((time.monotonic() - started) * 1000)
                     )
-                if route.get("route") in {
+                if debate_candidate:
+                    failed_model_meta = model_meta
+                elif route.get("route") in {
                     UPSTREAM_TEACHER_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE,
                     UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_DEBATE_ROUTE,
                 }:
                     # A mismatched receipt still represents a measured model invocation.
                     failed_model_meta = model_meta
-                if route.get("route") == UPSTREAM_DEBATE_ROUTE:
+                if debate_candidate:
+                    ordinary_debate_candidate.require_current(job, runtime_payload)
+                    ordinary_debate_candidate.validate_receipt(route, runtime_payload, response)
+                elif route.get("route") == UPSTREAM_DEBATE_ROUTE:
                     ordinary_debate.validate_receipt(route, response)
                 elif route.get("route") == UPSTREAM_LESSON_PLAN_ROUTE:
                     ordinary_lesson_plan.validate_receipt(route, response)
@@ -4946,7 +4993,10 @@ def process_job(job_id, *, worker_id=None):
                 }
                 db.session.commit()
 
-            if route.get("route") == UPSTREAM_DEBATE_ROUTE:
+            if debate_candidate:
+                ordinary_debate_candidate.require_current(job, runtime_payload)
+                ordinary_debate_candidate.validate_receipt(route, runtime_payload, response)
+            elif route.get("route") == UPSTREAM_DEBATE_ROUTE:
                 ordinary_debate.validate_receipt(route, response)
                 ordinary_debate.prepare(job, job.payload)
             elif route.get("route") == UPSTREAM_LESSON_PLAN_ROUTE:
@@ -4964,9 +5014,9 @@ def process_job(job_id, *, worker_id=None):
             if (job.kind == "artifact.revise" and runtime_payload.get("revisionBackend") == "ordinary-slide-wording"
                     and model_mode != "ordinary-slide-wording"):
                 raise PermanentJobError("课件文字修订未取得指定教学服务的回执。")
-            if model_mode.startswith("ordinary-") and route.get("route") not in {
+            if (model_mode.startswith("ordinary-") and route.get("route") not in {
                 UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_DEBATE_ROUTE,
-            }:
+            } and not debate_candidate):
                 authorized_scope = _ordinary_teaching_job_scope(job, runtime_payload)
                 if not authorized_scope or model_mode != f"ordinary-{authorized_scope}":
                     raise PermanentJobError("普通教学作业的课程或资料授权已变化，请重新发起。")
@@ -4980,7 +5030,10 @@ def process_job(job_id, *, worker_id=None):
                     else "保存候选与 revision"
                 ),
             )
-            compact_result = _persist_result(job, response["result"])
+            if debate_candidate:
+                compact_result = _persist_result(job, response["result"], prepared=runtime_payload)
+            else:
+                compact_result = _persist_result(job, response["result"])
         job = _owned_job_attempt(job_id, identity)
         if _job_cancellation_requested(job):
             raise JobCanceled("Task canceled before persistence completion")

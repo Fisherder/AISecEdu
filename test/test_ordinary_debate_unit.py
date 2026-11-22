@@ -99,7 +99,12 @@ class TeachingCandidateSets(Base):
 
 class TeachingArtifactCandidates(Base):
     __tablename__ = "teaching_artifact_candidates"
-    id = Column(String, primary_key=True)
+    id = Column(String, primary_key=True, default=lambda: uuid.uuid4().hex)
+    ordinal = Column(Integer)
+    summary = Column(String)
+    strategy = Column(String)
+    differences = Column(JSON)
+    recommendation = Column(String)
     candidate_set_id = Column(String)
     materialized_artifact_id = Column(String)
     title = Column(String)
@@ -549,3 +554,232 @@ def test_older_or_redirecting_classroom_cannot_reroute_debate(flow, status):
     assert post.call_args.args == ("http://classroom/api/integration/jobs/ordinary-debate",)
     assert post.call_args.kwargs["allow_redirects"] is False
     response.close.assert_called_once()
+
+
+@pytest.fixture
+def candidate_flow(flow):
+    namespace = {**vars(flow), "_plan": flow._plan}
+    load_source("materials", namespace, {"course_material_grounding_requested", "singular_material_reference_requested"})
+    load_source("ordinary_debate_candidate", namespace)
+    policy = SimpleNamespace(**namespace)
+    refs = [{"type": "material", "id": "handout", "revisionId": "chosen", "sha256": "a" * 64}]
+    payload = {
+        "artifactType": "debate", "candidateSetId": "new-set", "prompt": "设计三种校园花园辩论方案",
+        "candidateCount": 3, "generationMode": "multiple", "generationReason": policy.REASON,
+        "ordinaryCandidateModel": "fixture-model", "allowDegraded": False, "sourceRefs": refs,
+        "context": {"secret": "AMBIENT-CONTEXT"}, "sourceCandidates": [{"notes": "PRIVATE-CANDIDATE"}],
+    }
+    candidate_set = TeachingCandidateSets(
+        id="new-set", owner_id=3, dojo_id=19, module_index=0, thread_id="thread",
+        kind="debate", status="GENERATING", source_refs=copy.deepcopy(refs),
+        request_json={key: payload[key] for key in ("prompt", "candidateCount", "generationMode", "generationReason")},
+    )
+    materials = [{
+        "filename": "school.txt", "id": "handout", "title": "校园园艺",
+        "analysis": {"summary": "班级正在讨论种植计划。", "notes": "PRIVATE-ANALYSIS"},
+        "excerpts": [{"text": "PRIVATE-EXCERPT"}],
+    }]
+    calls = []
+
+    def materials_context(**kwargs):
+        calls.append(kwargs)
+        return {"sourceRefs": refs, "sourceMaterials": materials, "coverage": {"complete": True}}
+
+    namespace["build_course_material_context"] = materials_context
+    flow.session.add(candidate_set)
+    flow.session.commit()
+
+    def admit(body=None):
+        return policy.admit(body if body is not None else payload, 3, 19, 0, "thread")
+
+    return SimpleNamespace(flow=flow, policy=policy, admit=admit, payload=payload, refs=refs,
+                           candidate_set=candidate_set, materials=materials, calls=calls)
+
+
+def test_candidate_job_pins_frozen_teacher_request_and_sends_summary_only(candidate_flow):
+    case = candidate_flow
+    payload = case.admit()
+    job = case.flow.new_job("candidate.generate", payload)
+    prepared = case.policy.prepare(job)
+    route = case.flow.route_model(job.kind, prompt=prepared["prompt"], payload=prepared, allow_degraded=True)
+    assert route["route"] == case.flow.UPSTREAM_DEBATE_CANDIDATE_ROUTE
+    assert route["allow_degraded"] is False
+    namespace = dict(vars(case.flow), ordinary_debate_candidate=case.policy)
+    load_source("jobs", namespace, {"_runtime_payload", "_runtime_request_body"})
+    assert namespace["_runtime_payload"](job) == prepared
+    body = namespace["_runtime_request_body"](job, route, prepared)
+    assert body["scope"]["ordinaryTeaching"] == "candidate-plan"
+    assert body["payload"]["sourceRefs"] == case.refs
+    assert body["payload"]["materialDossier"]["materials"][0]["analysis"] == {"summary": "班级正在讨论种植计划。"}
+    assert all(call["source_refs"] == case.refs and call["require_complete"] for call in case.calls)
+    encoded = json.dumps(body)
+    assert "PRIVATE-" not in encoded and "AMBIENT-" not in encoded
+    assert case.policy._PIN not in encoded and "allowDegraded" not in body["payload"]
+
+
+@pytest.mark.parametrize("change", [
+    {"candidateCount": True},
+    {"candidateCount": "3"},
+    {"generationMode": "single"},
+    {"generationReason": "model_planned"},
+    {"allowDegraded": True},
+    {"sourceRefs": [{"type": "material", "id": "handout"}]},
+    {"workspaceId": "student-workspace"},
+    {"ordinaryCandidateModel": "fallback-model"},
+])
+def test_candidate_admission_rejects_invalid_teacher_packets(candidate_flow, change):
+    with pytest.raises(ValueError):
+        candidate_flow.admit({**candidate_flow.payload, **change})
+
+
+@pytest.mark.parametrize("change", ["model", "grant", "thread", "prompt", "removed-markers", "material"])
+def test_candidate_replay_fails_closed_when_scope_or_source_changes(candidate_flow, monkeypatch, change):
+    case = candidate_flow
+    job = case.flow.new_job("candidate.generate", case.admit())
+    prepared = case.policy.prepare(job)
+    if change == "model":
+        monkeypatch.setattr(case.flow.config, "HARNESS_DEEPSEEK_MODEL", "changed")
+    elif change == "grant":
+        case.flow.session.delete(case.flow.grant)
+    elif change == "thread":
+        case.flow.thread.status = "ARCHIVED"
+    elif change == "prompt":
+        case.candidate_set.request_json = {**case.candidate_set.request_json, "prompt": "不同辩论"}
+    elif change == "removed-markers":
+        job.payload = {key: value for key, value in job.payload.items()
+                       if key not in {"generationReason", "ordinaryCandidateModel", case.policy._PIN}}
+    else:
+        case.refs[0] = {**case.refs[0], "revisionId": "different"}
+    case.flow.session.commit()
+    with pytest.raises(ValueError):
+        case.policy.require_current(job, prepared)
+
+
+def test_candidate_with_no_selected_materials_does_not_read_course_files(candidate_flow):
+    case = candidate_flow
+    case.payload["sourceRefs"] = []
+    case.candidate_set.source_refs = []
+    job = case.flow.new_job("candidate.generate", case.admit())
+    assert case.policy.prepare(job)["materialDossier"] == {
+        "coverage": {"complete": True, "expectedMaterialCount": 0, "materialIds": []}, "materials": [],
+    }
+    assert case.calls == []
+
+
+def test_candidate_with_unresolved_attachment_request_fails_without_discovery(candidate_flow):
+    case = candidate_flow
+    prompt = "请把这份课件做成课堂辩论方案"
+    case.payload.update(prompt=prompt, sourceRefs=[])
+    case.candidate_set.source_refs = []
+    case.candidate_set.request_json = {**case.candidate_set.request_json, "prompt": prompt}
+    with pytest.raises(ValueError):
+        case.admit()
+    assert case.calls == []
+
+
+def test_candidate_derivation_checks_parent_scope_and_candidate_hash(candidate_flow):
+    case = candidate_flow
+    case.flow.candidate_set.source_refs = [{"type": "material", "id": "handout"}]
+    case.candidate_set.request_json = {
+        **case.candidate_set.request_json, "parentSetId": case.flow.candidate_set.id,
+        "selectedCandidateHashes": {case.flow.candidate.id: case.flow.content_hash(case.flow.candidate.content)},
+    }
+    job = case.flow.new_job("candidate.generate", case.admit())
+    assert case.policy.prepare(job)["candidateCount"] == 3
+    case.flow.candidate.content = {"type": "debate", "summary": "不同的候选"}
+    case.flow.session.commit()
+    with pytest.raises(ValueError):
+        case.policy.prepare(job)
+
+
+@pytest.mark.parametrize("status", [404, 302, 307, 308])
+def test_candidate_dispatch_rejects_redirect_and_does_not_use_generic_endpoint(candidate_flow, status):
+    from time import monotonic
+    from unittest.mock import Mock
+
+    case = candidate_flow
+    job = case.flow.new_job("candidate.generate", case.admit())
+    prepared = case.policy.prepare(job)
+    route = case.flow.route_model(job.kind, prompt=prepared["prompt"], payload=prepared)
+    response = Mock(status_code=status)
+    post = Mock(return_value=response)
+    namespace = dict(vars(case.flow), ordinary_debate_candidate=case.policy, time=SimpleNamespace(monotonic=monotonic),
+                     config=SimpleNamespace(AGENT_RUNTIME_INTERNAL_URL="http://classroom", AGENT_RUNTIME_SERVICE_SECRET="fixture"),
+                     requests=SimpleNamespace(post=post), AGENT_RUNTIME_CONNECT_RETRY_DELAYS_SECONDS=(),
+                     _runtime_read_timeout=lambda *_: 30, RuntimeJobError=lambda _, **kw: RuntimeError(kw["code"]))
+    load_source("jobs", namespace, {"_runtime_request_body", "_invoke_agent_runtime"})
+    with pytest.raises(RuntimeError, match="ORDINARY_DEBATE_CANDIDATE_ROUTE_UNAVAILABLE"):
+        namespace["_invoke_agent_runtime"](job, route, prepared)
+    post.assert_called_once()
+    assert post.call_args.args == ("http://classroom/api/integration/jobs/ordinary-debate-candidate",)
+    assert post.call_args.kwargs["allow_redirects"] is False
+    response.close.assert_called_once()
+
+
+def test_candidate_receipt_requires_exact_count_real_usage_and_selected_citations(candidate_flow):
+    case = candidate_flow
+    job = case.flow.new_job("candidate.generate", case.admit())
+    prepared = case.policy.prepare(job)
+    route = case.flow.route_model(job.kind, prompt=prepared["prompt"], payload=prepared)
+    model = {"executionMode": "ordinary-candidate-plan", "provider": "deepseek", "actualModel": "fixture-model",
+             "degraded": False, "usage": {"inputTokens": 20, "outputTokens": 10, "totalTokens": 30}}
+    rows = [
+        {"title": f"校园花园 {index}", "strategy": f"策略 {index}", "content": {
+            "type": "debate", "sourceGrounding": [{"materialId": "handout", "uses": ["讨论校园规划。"]}],
+        }} for index in range(3)
+    ]
+    case.policy.validate_receipt(route, prepared, {"result": {"candidates": rows}, "model": model})
+    for changed in ({"provider": "elsewhere"}, {"actualModel": "fallback"}, {"degraded": True},
+                    {"executionMode": "fallback"}, {"usage": {}}, {"usage": {"totalTokens": 30}}):
+        with pytest.raises(ValueError):
+            case.policy.validate_receipt(route, prepared, {"result": {"candidates": rows}, "model": {**model, **changed}})
+    with pytest.raises(ValueError):
+        case.policy.validate_receipt(route, prepared, {"result": {"candidates": rows[:2]}, "model": model})
+    rows[0]["content"]["sourceGrounding"][0]["materialId"] = "unselected"
+    with pytest.raises(ValueError):
+        case.policy.validate_receipt(route, prepared, {"result": {"candidates": rows}, "model": model})
+
+
+def test_candidate_persistence_requires_bound_invocation_and_current_materials(candidate_flow):
+    from unittest.mock import Mock
+
+    case = candidate_flow
+    job = case.flow.new_job("candidate.generate", case.admit())
+    prepared = case.policy.prepare(job)
+    route = case.flow.route_model(job.kind, prompt=prepared["prompt"], payload=prepared)
+    meta = {"executionMode": case.policy.MODE, "provider": "deepseek", "actualModel": "fixture-model",
+            "degraded": False, "usage": {"inputTokens": 20, "outputTokens": 10, "totalTokens": 30}}
+    records = [
+        {"title": f"校园花园 {index}", "strategy": f"策略 {index}", "content": {
+            "type": "debate", "objectives": [f"目标 {index}"],
+            "outline": [{"title": "开场", "description": f"讨论要点 {index}"}],
+            "activities": [{"title": "小组交流", "instruction": "比较规划理由"}],
+            "assessment": {"criteria": ["说明自己的理由"]},
+            "experience": {"mode": "ordinary-teaching-plan"},
+            "sourceGrounding": [{"materialId": "handout", "uses": ["讨论校园规划"]}],
+        }} for index in range(3)
+    ]
+    result = {"candidates": records}
+    cards = Mock()
+    cards.query.filter_by.return_value.all.return_value = []
+    namespace = dict(vars(case.flow), ordinary_debate_candidate=case.policy, ConversationCards=cards,
+                     PermanentJobError=ValueError)
+    load_source("artifacts", namespace, {"replace_generated_candidates"})
+    load_source("jobs", namespace, {"_persist_result", "_record_invocation", "_retry_payload"})
+    persist = namespace["_persist_result"]
+    with pytest.raises(ValueError):
+        persist(job, result, prepared=prepared)
+    assert TeachingArtifactCandidates.query.filter_by(candidate_set_id=case.candidate_set.id).count() == 0
+
+    invocation = namespace["_record_invocation"](job, route, meta, status="SUCCEEDED")
+    case.flow.session.commit()
+    assert invocation.usage == meta["usage"]
+    assert persist(job, result, prepared=prepared)["candidateCount"] == 3
+    case.flow.session.commit()
+    assert TeachingArtifactCandidates.query.filter_by(candidate_set_id=case.candidate_set.id).count() == 3
+
+    case.refs[0] = {**case.refs[0], "sha256": "b" * 64}
+    with pytest.raises(ValueError):
+        persist(job, result, prepared=prepared)
+    with pytest.raises(ValueError):
+        namespace["_retry_payload"](job, job.owner_id)

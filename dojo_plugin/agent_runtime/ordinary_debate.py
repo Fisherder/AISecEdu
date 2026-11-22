@@ -2,6 +2,7 @@
 
 import copy
 import datetime
+import json
 import re
 
 from CTFd.models import Users
@@ -269,3 +270,14 @@ def require_invocation(job, invocation):
              and invocation.route == MODE and invocation.provider == "deepseek" and not invocation.degraded
              and invocation.actual_model == job.payload[_PIN]["model"]
              and (invocation.parameters or {}).get("executionMode") == MODE)
+
+
+def derived_prompt(instruction, candidates, refs):
+    """Quote the selected classroom plans without copying internal candidate or material records."""
+    aliases = {ref["id"]: f"material-{index}" for index, ref in enumerate(refs, 1)}
+    selected = [_plan(row.content, row.title, aliases) for row in candidates]
+    quoted = json.dumps(selected, ensure_ascii=False, separators=(",", ":"))
+    prompt = f"教师的派生要求：{instruction}\n以下是所选辩论方案的教学内容，作为本次改写的参考：\n{quoted}"
+    if len(prompt) > 16000:
+        raise OrdinaryDebateError("所选方案和派生要求合计超过 16000 字符，请减少所选方案或缩短要求。")
+    return prompt

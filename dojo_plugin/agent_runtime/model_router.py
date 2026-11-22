@@ -5,6 +5,7 @@ import re
 from .. import config
 
 
+UPSTREAM_DEBATE_CANDIDATE_ROUTE = "upstream-ordinary-debate-candidate"
 UPSTREAM_DEBATE_ROUTE = "ordinary-debate-harness"
 UPSTREAM_TEACHER_ROUTE = "upstream-teacher-turn"
 UPSTREAM_LESSON_PLAN_ROUTE = "upstream-lesson-plan-materialize"
@@ -148,7 +149,9 @@ def route_model(kind, *, prompt="", payload=None, allow_degraded=False):
         actual_model = required_model = (payload.get("ordinaryDebate") or {}).get("model")
         allow_degraded = False
     elif kind == "candidate.generate" and isinstance(payload, dict) and "ordinaryCandidateModel" in payload:
-        route_name = UPSTREAM_LESSON_CANDIDATE_ROUTE
+        route_name = (UPSTREAM_DEBATE_CANDIDATE_ROUTE
+                      if payload.get("generationReason") == "teacher_requested_ordinary_debate"
+                      else UPSTREAM_LESSON_CANDIDATE_ROUTE)
         actual_model = required_model = payload["ordinaryCandidateModel"]
         allow_degraded = False
     elif kind == "artifact.materialize" and isinstance(payload, dict) and "ordinaryLessonPlan" in payload:
@@ -199,7 +202,7 @@ def validate_actual_model(route, actual_model):
     required = route.get("required_model")
     if route.get("route") in {
         UPSTREAM_TEACHER_ROUTE, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_CANDIDATE_ROUTE, UPSTREAM_SLIDE_LAYOUT_ROUTE,
-        UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_SLIDE_NOTES_ROUTE, UPSTREAM_DEBATE_ROUTE,
+        UPSTREAM_DECK_REVISION_ROUTE, UPSTREAM_SLIDE_NOTES_ROUTE, UPSTREAM_DEBATE_ROUTE, UPSTREAM_DEBATE_CANDIDATE_ROUTE,
     }:
         if not required or actual_model != required:
             raise ValueError("The teaching job did not use the configured Harness model")

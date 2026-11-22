@@ -370,6 +370,7 @@ def test_candidate_lineage_is_preserved_without_implicit_course_files():
 
     namespace = {
         "ordinary_lesson_plan": SimpleNamespace(explicit_generation=policy["explicit_generation"]),
+        "ordinary_debate_candidate": SimpleNamespace(prepare=lambda *_: None),
         "course_material_grounding_requested": lambda prompt: "根据课程资料" in str(prompt),
         "singular_material_reference_requested": lambda prompt: "这份课件" in str(prompt),
         "PermanentJobError": ValueError,

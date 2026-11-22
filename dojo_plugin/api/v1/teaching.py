@@ -112,7 +112,8 @@ from ...models import (
     TeachingSessionEvents,
     TeachingSessions,
 )
-from ...agent_runtime.ordinary_debate import OrdinaryDebateError
+from ...agent_runtime.ordinary_debate import OrdinaryDebateError, derived_prompt as debate_derived_prompt
+from ...agent_runtime.ordinary_debate_candidate import REASON as ORDINARY_DEBATE_REASON
 from ...agent_runtime.ordinary_lesson_plan import GENERATION_REASON as ORDINARY_PLAN_REASON, OrdinaryLessonPlanError
 from ...agent_runtime import ordinary_slide_layout
 from ...agent_runtime.artifacts import (
@@ -177,13 +178,14 @@ from ...agent_runtime.jobs import (
 from ...agent_runtime.materials import (
     build_course_material_context,
     compact_material_grounding,
+    freeze_selected_material_refs,
     course_material_grounding_requested,
     singular_material_reference_requested,
 )
 from ...agent_runtime.model_journal import ModelJournalError, record_model_event
 from ...agent_runtime.project_collection import project_collection_view
 from ...agent_runtime.reliability import public_recovery
-from ...agent_runtime.teacher_documents import requests_lesson_plan_candidates
+from ...agent_runtime.teacher_documents import requests_debate_candidates, requests_lesson_plan_candidates
 from ...agent_runtime import ordinary_material_turn, ordinary_slide_notes
 from ...agent_runtime.upstream_turn import ordinary_teaching_course, ordinary_teaching_image_allowed, upstream_enabled
 from ...agent_runtime.scope import (
@@ -6851,6 +6853,10 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 dojo_id=body.get("dojoId"),
                 module_index=body.get("moduleIndex"),
             )
+            if selected_generation is not None and (
+                scope.dojo_id != thread.dojo_id or scope.module_index != thread.module_index
+            ):
+                raise ConversationConflict("所选方案属于原课程和章节，请回到原对话范围后生成。")
             thread.dojo_id = scope.dojo_id
             thread.module_index = scope.module_index
         if thread.dojo_id is not None:
@@ -6861,10 +6867,19 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 module_index=thread.module_index,
             )
 
-        ordinary_plan = (
-            not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
-            and requests_lesson_plan_candidates(content)
+        direct_candidates = not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
+        ordinary_plan = direct_candidates and requests_lesson_plan_candidates(content)
+        debate_proposals = direct_candidates and requests_debate_candidates(content)
+        ordinary_debate = debate_proposals or bool(
+            selected_generation and selected_generation["bundle"]["artifactType"] == "debate"
+            and ordinary_teaching_course(thread.dojo_id)
         )
+        if debate_proposals and not ordinary_teaching_course(thread.dojo_id):
+            raise ValueError("请先选择已开通普通辩论生成的课程。")
+        if debate_proposals and body.get("delivery") == "next-step" and wait_for_job_ids:
+            raise ConversationConflict("辩论候选需要独立任务，请选择“排队”发送。")
+        if ordinary_debate and (not upstream_enabled() or not config.HARNESS_DEEPSEEK_MODEL):
+            raise ValueError("本课程的辩论生成服务暂未启用。")
         if ordinary_plan:
             if len(content) > 4000:
                 raise ValueError("请将本轮普通教案要求缩减到 4000 字符以内。")
@@ -6889,7 +6904,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if thread.title in DEFAULT_THREAD_TITLES:
                 thread.title = _thread_title_from_message(content)
 
-        if not ordinary_plan and not readonly_material_turn:
+        if not (ordinary_plan or ordinary_debate or readonly_material_turn):
             if session_history_replayable(thread.id):
                 # New conversations derive the model-visible history from the
                 # same durable message events used to reconstruct the page.
@@ -6912,8 +6927,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if pattern_id not in ("", "process-inquiry"):
                 raise ValueError("请选择有效的学习模式。")
             thread.context = {**(thread.context or {}), "learningPattern": inquiry_pattern_catalog() if pattern_id else None}
-        platform_context = None if ordinary_plan or readonly_material_turn else _teacher_agent_context(user, thread)
-        generate = ordinary_plan or (continuation and requested_action == "generate")
+        platform_context = None if ordinary_plan or ordinary_debate or readonly_material_turn else _teacher_agent_context(user, thread)
+        generate = ordinary_plan or debate_proposals or (continuation and requested_action == "generate")
         if continuation_context is not None:
             constraints = continuation_context["constraints"]
             source_refs = continuation_context["sourceRefs"]
@@ -6933,7 +6948,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             try:
                 constraints, source_refs = _agent_request_context(
                     body, user, thread,
-                    include_thread_attachments=not (ordinary_plan or readonly_material_turn),
+                    include_thread_attachments=not (ordinary_plan or ordinary_debate or readonly_material_turn),
                 )
             except ScopeError:
                 if readonly_material_turn:
@@ -6945,6 +6960,12 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 "maxDepth": MAX_AGENT_LOOP_STEPS,
                 "trace": [],
             }
+        if ordinary_debate:
+            selected_refs = (body.get("sourceRefs") or []) if debate_proposals else source_refs
+            source_refs = freeze_selected_material_refs(user.id, thread.dojo_id, selected_refs)
+            if not source_refs and course_material_grounding_requested(content):
+                raise ValueError("请先选择本次辩论所用资料，再生成方案。")
+            constraints = {}
         if user_message is not None:
             if question_context:
                 user_message.metadata_json = {**(user_message.metadata_json or {}), "questionReply": question_context}
@@ -6983,6 +7004,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 if not source_refs and course_material_grounding_requested(content):
                     raise ValueError("请先在“引用资料”中选定本次教案使用的教材。")
                 artifact_type = "lesson-plan"
+            elif debate_proposals:
+                artifact_type = "debate"
             elif selected_generation is not None:
                 artifact_type = selected_generation["bundle"]["artifactType"]
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", artifact_type):
@@ -6991,15 +7014,18 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 )
             if (
                 artifact_type in GENERATION_OPTION_ARTIFACT_TYPES
-                and selected_generation is None
+                and selected_generation is None and not debate_proposals
             ):
                 raise ValueError(
                     "请先在智能体给出的三套候选方案中选择一套，再开始正式生成。"
                 )
             if ordinary_plan:
                 count, generation_reason = 2, ORDINARY_PLAN_REASON
+            elif debate_proposals:
+                count, generation_reason = 3, ORDINARY_DEBATE_REASON
             elif selected_generation is not None:
-                count, generation_reason = 1, "teacher_selected_prompt_option"
+                count = 1
+                generation_reason = ORDINARY_DEBATE_REASON if ordinary_debate else "teacher_selected_prompt_option"
             else:
                 try:
                     count = int(body.get("candidateCount") or 1)
@@ -7051,11 +7077,10 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             }
             if dependency_ids:
                 payload["dependsOnJobIds"] = dependency_ids
-            if ordinary_plan:
-                payload.update(
-                    ordinaryCandidateModel=config.HARNESS_DEEPSEEK_MODEL, constraints={}, allowDegraded=False,
-                    submissionFingerprint=submission_fingerprint(body), userMessageId=user_message.id,
-                )
+            if ordinary_plan or ordinary_debate:
+                payload.update(ordinaryCandidateModel=config.HARNESS_DEEPSEEK_MODEL, constraints={}, allowDegraded=False)
+                if user_message is not None:
+                    payload.update(submissionFingerprint=submission_fingerprint(body), userMessageId=user_message.id)
                 if wait_for_job_ids:
                     payload["waitForJobIds"] = wait_for_job_ids
             else:
@@ -8080,6 +8105,56 @@ class CandidateSet(Resource):
             return _error(exc, 404, code="NOT_FOUND")
 
 
+def _derive_ordinary_debate(user, source, candidate_ids, rows, instruction, count, request_key):
+    build_scope(user, role="teacher", dojo_id=source.dojo_id, module_index=source.module_index)
+    if not ordinary_teaching_course(source.dojo_id) or not upstream_enabled() or not config.HARNESS_DEEPSEEK_MODEL:
+        raise ValueError("本课程的普通辩论生成服务不可用。")
+    by_id = {row.id: row for row in rows}
+    if (not isinstance(candidate_ids, list) or not 1 <= len(candidate_ids) <= 4
+            or any(not isinstance(key, str) or key not in by_id for key in candidate_ids)
+            or len(set(candidate_ids)) != len(candidate_ids)):
+        raise ValueError("请选择当前方案集中的一至四份不同方案。")
+    rows = [by_id[key] for key in candidate_ids]
+    operation = _supplied_idempotency(user.id, "candidate-derive", request_key)
+    fingerprint = content_hash({"parent": source.id, "candidates": candidate_ids, "instruction": instruction, "count": count})
+    if not _lock_agent_tool_request(operation):
+        return _error("同一派生请求正在提交，请稍后重试。", 409, code="DERIVATION_IN_PROGRESS")
+    existing = TeachingJobs.query.filter_by(owner_id=user.id, idempotency_key=operation).first()
+    if existing is not None:
+        prior = existing.payload or {}
+        if (existing.kind != "candidate.generate" or existing.dojo_id != source.dojo_id
+                or existing.thread_id != source.thread_id or prior.get("derivationFingerprint") != fingerprint):
+            return _error("本次请求编号已用于其他派生要求。", 409, code="DERIVATION_CONFLICT")
+        saved = _candidate_set_for_user(prior.get("candidateSetId"), user)
+        return _ok({"candidateSet": candidate_set_view(saved), "job": job_view(existing), "deduplicated": True}, 202)
+    refs = freeze_selected_material_refs(user.id, source.dojo_id, source.source_refs)
+    if not refs and course_material_grounding_requested(instruction):
+        raise ValueError("所选方案未引用教材，请先选择带有这些资料的原方案。")
+    prompt = debate_derived_prompt(instruction, rows, refs)
+    request_data = {
+        "prompt": prompt, "candidateCount": count, "generationMode": "multiple", "generationReason": ORDINARY_DEBATE_REASON,
+        "parentSetId": source.id, "selectedCandidateHashes": {row.id: content_hash(row.content) for row in rows},
+        "instruction": instruction,
+    }
+    derived = create_candidate_set(
+        owner_id=user.id, dojo_id=source.dojo_id, module_index=source.module_index,
+        thread_id=source.thread_id, kind="debate", request_json=request_data, source_refs=refs,
+    )
+    payload = {"artifactType": "debate", "candidateSetId": derived.id, "prompt": prompt,
+               "candidateCount": count, "generationMode": "multiple", "generationReason": ORDINARY_DEBATE_REASON,
+               "ordinaryCandidateModel": config.HARNESS_DEEPSEEK_MODEL, "sourceRefs": refs,
+               "allowDegraded": False, "derivationFingerprint": fingerprint}
+    dependencies = _material_dependency_ids(user.id, refs)
+    if dependencies:
+        payload["dependsOnJobIds"] = dependencies
+    job, _ = enqueue_job(owner_id=user.id, kind="candidate.generate", idempotency_key=operation,
+                         dojo_id=source.dojo_id, module_index=source.module_index, thread_id=source.thread_id,
+                         payload=payload, publish=False, commit=False)
+    db.session.commit()
+    publish_pending_outbox(job_id=job.id)
+    return _ok({"candidateSet": candidate_set_view(derived), "job": job_view(job)}, 202)
+
+
 @teaching_namespace.route("/candidate-sets/<string:candidate_set_id>/derive")
 class CandidateSetDerive(Resource):
     @authed_only
@@ -8092,12 +8167,23 @@ class CandidateSetDerive(Resource):
             if not instruction:
                 return _error("Natural-language instruction is required")
             candidate_ids = body.get("candidateIds") or []
+            if not isinstance(candidate_ids, list) or any(not isinstance(key, str) for key in candidate_ids):
+                return _error("请选择有效的来源方案。")
             rows = TeachingArtifactCandidates.query.filter(
                 TeachingArtifactCandidates.candidate_set_id == source.id,
                 TeachingArtifactCandidates.id.in_(candidate_ids),
             ).all()
             if not rows:
                 return _error("Select at least one source candidate")
+            try:
+                count = max(2, min(4, int(body.get("candidateCount") or 3)))
+            except (ValueError, TypeError, OverflowError):
+                return _error("候选数量须为整数。")
+            if source.kind == "debate" and source.self_workspace_id is None and (
+                ordinary_teaching_course(source.dojo_id) or (source.request_json or {}).get("generationReason") == ORDINARY_DEBATE_REASON
+            ):
+                return _derive_ordinary_debate(user, source, candidate_ids, rows, instruction, count,
+                                               request.headers.get("Idempotency-Key"))
             derived = create_candidate_set(
                 owner_id=user.id,
                 dojo_id=source.dojo_id,
@@ -8128,9 +8214,7 @@ class CandidateSetDerive(Resource):
                     "candidateSetId": derived.id,
                     "prompt": instruction,
                     "artifactType": source.kind,
-                    "candidateCount": max(
-                        2, min(4, int(body.get("candidateCount") or 3))
-                    ),
+                    "candidateCount": count,
                     "sourceCandidates": [
                         {"id": row.id, "title": row.title, "content": row.content}
                         for row in rows
