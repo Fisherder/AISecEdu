@@ -9,6 +9,11 @@ on:
       - '.github/workflows/teaching-runtime-images.yml'
       - 'services/agent-runtime/**'
       - 'services/courseware-inspector/**'
+      - 'services/deepseek-harness/**'
+      - 'vendor/deepseek-harness/**'
+      - 'test/teaching_harness_release_*.mjs'
+      - 'test/fixtures/teaching-harness-offline.compose.yml'
+      - 'ops/staging/harness.compose.yml'
       - 'test/teaching_runtime_release_smoke.mjs'
       - 'ops/generation-release.py'
       - 'ops/staging/classroom.compose.yml'
@@ -29,6 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     env:
+      DSH_IMAGE: aisecedu/deepseek-harness:generation-${{ github.sha }}
       NEXT_IMAGE: aisecedu/agent-runtime:generation-${{ github.sha }}
       INSPECTOR_IMAGE: aisecedu/courseware-inspector:generation-${{ github.sha }}
     steps:
@@ -36,7 +42,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build the exact Linux amd64 production image pair
+      - name: Build the three matching Linux amd64 teaching images
         shell: bash
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
@@ -50,14 +56,17 @@ jobs:
           docker buildx build --platform linux/amd64 --load \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$INSPECTOR_IMAGE" \
             services/courseware-inspector
-          for image in "$NEXT_IMAGE" "$INSPECTOR_IMAGE"; do
+          docker buildx build --platform linux/amd64 --load \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$DSH_IMAGE" \
+            -f services/deepseek-harness/Dockerfile .
+          for image in "$NEXT_IMAGE" "$INSPECTOR_IMAGE" "$DSH_IMAGE"; do
             test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = 'linux/amd64'
             test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")" = "$GITHUB_SHA"
           done
           df -h "$RUNNER_TEMP"
           docker system df
 
-      - name: Verify the production pair on an internal network
+      - name: Verify the classroom, official Harness and Chromium on private networks
         id: pair
         shell: bash
         run: |
@@ -65,32 +74,42 @@ jobs:
           sandbox=$(mktemp -d)
           umask 077
           export AISECEDU_CLASSROOM_IMAGE=$(docker image inspect --format '{{.Id}}' "$NEXT_IMAGE")
+          export AISECEDU_HARNESS_IMAGE=$(docker image inspect --format '{{.Id}}' "$DSH_IMAGE")
+          export AISECEDU_HARNESS_ENV_FILE="$sandbox/harness.env"
           export AISECEDU_INSPECTOR_IMAGE=$(docker image inspect --format '{{.Id}}' "$INSPECTOR_IMAGE")
           export AISECEDU_CLASSROOM_AUTH_FILE="$sandbox/classroom-auth.env"
           export AISECEDU_CLASSROOM_ENV_FILE="$sandbox/classroom-runtime.env"
           export AISECEDU_CLASSROOM_PUBLIC_ORIGIN=http://classroom.invalid
-          export AISECEDU_CLASSROOM_AI_ENABLED=false
-          # A disposable test token, with no model key or data in either service.
+          export AISECEDU_CLASSROOM_AI_ENABLED=true
+          # All credentials below belong to this isolated fixture.
           printf 'AISECEDU_SERVICE_SECRET=synthetic-teaching-runtime-%s-%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$AISECEDU_CLASSROOM_AUTH_FILE"
-          : > "$AISECEDU_CLASSROOM_ENV_FILE"
+          harness_secret="synthetic-dsh-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          printf 'HARNESS_SERVICE_SECRET=%s\nHARNESS_DEEPSEEK_MODEL=teaching-fixture\n' "$harness_secret" > "$AISECEDU_CLASSROOM_ENV_FILE"
+          printf 'HARNESS_SERVICE_SECRET=%s\nDEEPSEEK_MODEL=teaching-fixture\nDEEPSEEK_API_KEY=synthetic-offline-key\n' "$harness_secret" > "$AISECEDU_HARNESS_ENV_FILE"
 
-          compose() { docker compose --project-name "$project" -f ops/staging/classroom.compose.yml "$@"; }
+          compose() {
+            docker compose --project-name "$project" -f ops/staging/classroom.compose.yml \
+              -f ops/staging/harness.compose.yml -f test/fixtures/teaching-harness-offline.compose.yml "$@"
+          }
           cleanup() {
             status=$?
             if [ "$status" -ne 0 ]; then
-              compose logs --tail 100 agent-runtime courseware-inspector 2>&1 || true
+              compose logs --tail 100 agent-runtime courseware-inspector deepseek-harness 2>&1 || true
             fi
             compose down --volumes --remove-orphans >/dev/null 2>&1 || true
-            rm -f "$AISECEDU_CLASSROOM_AUTH_FILE" "$AISECEDU_CLASSROOM_ENV_FILE"
+            rm -f "$AISECEDU_CLASSROOM_AUTH_FILE" "$AISECEDU_CLASSROOM_ENV_FILE" "$AISECEDU_HARNESS_ENV_FILE"
             rmdir "$sandbox"
           }
           trap cleanup EXIT
           compose up -d --no-build --wait --wait-timeout 180
-          for service in agent-runtime courseware-inspector; do
+          for service in agent-runtime courseware-inspector deepseek-harness; do
             container=$(compose ps -q "$service")
             if [ "$service" = agent-runtime ]; then
               image="$AISECEDU_CLASSROOM_IMAGE"
               networks=2
+            elif [ "$service" = deepseek-harness ]; then
+              image="$AISECEDU_HARNESS_IMAGE"
+              networks=1
             else
               image="$AISECEDU_INSPECTOR_IMAGE"
               networks=1
@@ -126,6 +145,28 @@ jobs:
             -e NEXT_RUNTIME_ORIGIN=http://127.0.0.1:3000/agent-runtime \
             -e COURSEWARE_INSPECTOR_ORIGIN=http://courseware-inspector:3015 \
             agent-runtime node --input-type=module < test/teaching_runtime_release_smoke.mjs
+          compose exec -T deepseek-harness sh -c 'cat > /tmp/teaching-fixture.mjs' < test/teaching_harness_release_fixture.mjs
+          compose exec -d -T deepseek-harness node /tmp/teaching-fixture.mjs
+          compose exec -T deepseek-harness node --input-type=module <<'JS'
+          import { setTimeout as delay } from 'node:timers/promises';
+          for (let attempt = 0; attempt < 30; attempt++) {
+            try {
+              const response = await fetch('http://127.0.0.1:3082/counts');
+              const { accepted, rejected } = await response.json();
+              if (accepted !== 0 || rejected !== 0) throw Error('Expected a fresh fixture');
+              break;
+            } catch (error) {
+              if (attempt === 29) throw error;
+              await delay(200);
+            }
+          }
+          JS
+          compose exec -T agent-runtime node --input-type=module < test/teaching_harness_release_smoke.mjs
+          compose exec -T deepseek-harness node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          const response = await fetch('http://127.0.0.1:3082/counts');
+          assert.deepEqual(await response.json(), { accepted: 1, rejected: 0 });
+          JS
           printf 'runtime=%s\ninspector=%s\n' "$AISECEDU_CLASSROOM_IMAGE" "$AISECEDU_INSPECTOR_IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Package the two verified images in generation-release format
