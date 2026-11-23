@@ -99,8 +99,9 @@ def accepted_command(job):
     return accepted
 
 
-def _admit(*, command_id, actor_id, thread_id, action_id, operation, kind, dojo_id, module_index):
+def _admit(*, command_id, actor_id, thread_id, action_id, operation, kind, dojo_id, module_index, scoped_action=None):
     from .jobs import enqueue_job
+    from .ordinary_project_queue import ACTION_PIN
 
     existing = TeachingJobs.query.filter_by(idempotency_key=command_id).populate_existing().first()
     if existing is not None:
@@ -114,7 +115,7 @@ def _admit(*, command_id, actor_id, thread_id, action_id, operation, kind, dojo_
         owner_id=actor_id, thread_id=thread_id, action_id=action_id,
         dojo_id=dojo_id, module_index=module_index, kind=kind,
         idempotency_key=command_id, priority=10, max_attempts=3,
-        payload={'commandId': command_id, 'taskListHidden': True},
+        payload={'commandId': command_id, 'taskListHidden': True, **({ACTION_PIN: scoped_action} if scoped_action else {})},
         commit=False, publish=False,
     )
     if not created:
@@ -130,6 +131,7 @@ def _admit(*, command_id, actor_id, thread_id, action_id, operation, kind, dojo_
 
 def admit_action(action, approver):
     from .approved_actions import prepare_action
+    from . import ordinary_project_queue
 
     envelope = action_request(action)
     reference = require_approved(envelope, request_reference(envelope))
@@ -137,6 +139,10 @@ def admit_action(action, approver):
                  'initialResult': action.result or {}}
     if action.action_type == 'publish-question-artifact':
         operation['validationBinding'] = _question_binding(prepare_action(action, approver)['draft'])
+    scoped_action = None
+    if ordinary_project_queue.configured() and action.action_type in ordinary_project_queue.SCOPED_ACTIONS:
+        ordinary_project_queue.require_approved_action(action, prepare_action(action, approver))
+        scoped_action = action.action_type
     return _admit(
         command_id=f'command:{action.id}', actor_id=approver.id,
         thread_id=action.thread_id, action_id=action.id,
@@ -144,6 +150,7 @@ def admit_action(action, approver):
         kind='agent.command.publish' if action.action_type == 'publish-question-artifact' else 'agent.command',
         dojo_id=(action.request_json or {}).get('dojoId'),
         module_index=(action.request_json or {}).get('moduleIndex'),
+        scoped_action=scoped_action,
     )
 
 
@@ -217,6 +224,7 @@ def action_execution(action):
 def execute_command(job):
     from .jobs import JobCanceled, assert_job_lease
     from .approved_actions import apply_action, prepare_action
+    from . import ordinary_project_queue
 
     job = assert_job_lease(job)
     accepted = accepted_command(job)
@@ -238,6 +246,9 @@ def execute_command(job):
     if actor is None or actor.banned:
         raise ValueError('Command actor no longer exists')
     operation = accepted['operation']
+    scoped_action = (job.payload or {}).get(ordinary_project_queue.ACTION_PIN)
+    if scoped_action and operation['kind'] != 'approved-action':
+        raise ValueError('Scoped command approval is invalid')
     if operation['kind'] == 'teacher-tool':
         from .tool_executor import apply_teacher_tool
         from .scope import dojo_for_user
@@ -306,6 +317,12 @@ def execute_command(job):
         if action_request(action) != operation['request']:
             raise ValueError('Approved command request changed before execution')
         require_approved(operation['request'], operation['approvalRequest'])
+        if scoped_action:
+            if (not ordinary_project_queue.valid(job) or action.action_type != scoped_action
+                    or ((action.request_json or {}).get('dojoId'), (action.request_json or {}).get('moduleIndex'))
+                    != (job.dojo_id, job.module_index)):
+                raise ValueError('Scoped command owner or teaching scope changed before execution')
+            ordinary_project_queue.require_approved_action(action, prepare_action(action, actor))
         if action.action_type == 'publish-question-artifact':
             draft = prepare_action(action, actor, initial_result=operation['initialResult'])['draft']
             if _question_binding(draft) != operation.get('validationBinding'):

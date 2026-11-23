@@ -199,17 +199,23 @@ def _stack_sequence():
 
 def _slide(page, index, style, goal):
     page_id = f"page-{index+1}"
-    if index == 0 and style == "stack-capacity":
-        shapes, beats = _stack_sequence()
+    if style == "slides":
+        visual = {
+            "kind": "comparison", "columns": ["要点", "说明"],
+            "rows": [{"label": f"步骤 {number}", "values": [step["label"], step["detail"]]}
+                     for number, step in enumerate(page["steps"], 1)],
+        }
+        beats = []
     else:
-        shapes, beats = _sequence(page["steps"], style != "slides")
+        shapes, beats = _stack_sequence() if index == 0 and style == "stack-capacity" else _sequence(page["steps"], True)
+        visual = {"kind": "scene", "description": "用分步卡片和图形呈现操作顺序与概念关系。", "objects": shapes}
     studio = {
         "theme": THEME, "assets": [],
         "page": {
             "schema": "courseware-page-v2", "id": page_id, "title": page["title"],
             "objective": goal, "takeaway": page["takeaway"], "role": "explanation",
             "composition": "wide", "speakerNotes": page["notes"], "durationSeconds": 90,
-            "visual": {"kind": "scene", "description": "用课堂可见的分步卡片和图形呈现操作顺序与概念关系。", "objects": shapes},
+            "visual": visual,
             "beats": beats, "layout": {
                 "title": {"box": {"left": 52, "top": 30, "width": 896, "height": 60}, "fontSize": 42},
                 "takeaway": {"box": {"left": 52, "top": 101, "width": 896, "height": 55}, "fontSize": 24},

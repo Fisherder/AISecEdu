@@ -6730,8 +6730,11 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
         selected_course = None
         project_kind = None
         if ordinary_project_queue.configured() and not readonly_material_turn and mode in {"auto", "execute"}:
+            from ...agent_runtime.classroom_requests import requests_classroom_preparation
+
             prompt = body.get("content")
-            project_kind = ordinary_project_queue.requested_kind(prompt)
+            project_kind = ("classroom" if requests_classroom_preparation(prompt)
+                            else ordinary_project_queue.requested_kind(prompt))
             if project_kind:
                 if any(body.get(field) for field in (
                     "sourceRefs", "agentContinuation", "action", "questionReply", "planSourceMessageId",
@@ -6916,7 +6919,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 module_index=thread.module_index,
             )
 
-        direct_candidates = not text_model and not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
+        scoped_classroom = project_kind == "classroom"
+        direct_candidates = not scoped_classroom and not text_model and not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
         native_courseware = direct_candidates and project_kind == "slide-deck"
         ordinary_plan = direct_candidates and (project_kind == "lesson-plan" or requests_lesson_plan_candidates(content))
         debate_proposals = direct_candidates and (project_kind == "debate" or requests_debate_candidates(content))
@@ -6954,7 +6958,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if thread.title in DEFAULT_THREAD_TITLES:
                 thread.title = _thread_title_from_message(content)
 
-        if not (ordinary_plan or ordinary_debate or native_courseware or readonly_material_turn or text_model):
+        minimal_context = ordinary_plan or ordinary_debate or native_courseware or readonly_material_turn or text_model or scoped_classroom
+        if not minimal_context:
             if session_history_replayable(thread.id):
                 # New conversations derive the model-visible history from the
                 # same durable message events used to reconstruct the page.
@@ -6977,7 +6982,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if pattern_id not in ("", "process-inquiry"):
                 raise ValueError("请选择有效的学习模式。")
             thread.context = {**(thread.context or {}), "learningPattern": inquiry_pattern_catalog() if pattern_id else None}
-        platform_context = None if ordinary_plan or ordinary_debate or native_courseware or readonly_material_turn or text_model else _teacher_agent_context(user, thread)
+        platform_context = None if minimal_context else _teacher_agent_context(user, thread)
         generate = ordinary_plan or debate_proposals or native_courseware or (continuation and requested_action == "generate")
         if continuation_context is not None:
             constraints = continuation_context["constraints"]
@@ -7159,6 +7164,18 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                     else "正在按你的要求制作这项教学内容，完成后会在当前对话中直接给出可预览、可继续修改的结果。"
                 )
             )
+        elif scoped_classroom:
+            from ...agent_runtime.classroom_requests import pin_classroom_request
+
+            payload = {
+                "prompt": content, "executionMode": mode, "chatBackend": "upstream",
+                "context": {"platformFacts": {"scope": {"dojoId": thread.dojo_id, "moduleIndex": thread.module_index}}},
+                "allowDegraded": False,
+            }
+            if not pin_classroom_request(payload, user.id, thread.dojo_id, thread.module_index).get("classroomPreparation"):
+                raise ConversationConflict("请使用当前章节已发布的静态课件，并在书名号里填写课件的准确标题或 ID。")
+            job_kind = "agent.chat"
+            assistant_text = "正在准备课堂提案，确认后创建待上课会话。"
         elif readonly_material_turn:
             pin = ordinary_material_turn.admit(user.id, thread.dojo_id, source_refs, content)
             payload = {
@@ -9648,6 +9665,7 @@ class ArtifactPublishRequest(Resource):
             if not question_artifact:
                 artifact.status = "READY_TO_PUBLISH"
                 revision.validation = {
+                    **(revision.validation or {}),
                     "status": "PASS",
                     "mode": "teacher-content-review",
                     "note": "Non-executable teaching artifact; publication still requires explicit approval.",

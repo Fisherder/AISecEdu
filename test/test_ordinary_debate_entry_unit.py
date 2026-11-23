@@ -376,3 +376,17 @@ def test_scoped_worker_admits_revisions_with_no_thread_and_rejects_unserved_jobs
                                payload={queue["PIN"]: "debate"})
     with pytest.raises(queue["WorkerUnavailable"]):
         queue["require_consumer"](unserved, "teacherDshText")
+
+
+def test_scoped_approved_actions_cannot_use_general_command_consumer(monkeypatch):
+    queue = {"ordinary_teaching_course": lambda course: course == 12}
+    load_source("teacher_documents", queue)
+    load_source("ordinary_project_queue", queue)
+    monkeypatch.setenv("AISECEDU_ORDINARY_PROJECTS", "true")
+    job = SimpleNamespace(kind="agent.command", dojo_id=12, thread_id="thread", action_id="action", payload={})
+    with pytest.raises(queue["WorkerUnavailable"]):
+        queue["require_consumer"](job, "teacherDshText")
+    job.payload = queue["admit"]("agent.command", {queue["ACTION_PIN"]: "publish-teaching-artifact"}, 12)
+    queue["require_consumer"](job, "teacherDshText")
+    job.action_id = None
+    assert not queue["valid"](job)

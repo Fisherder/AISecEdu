@@ -1644,7 +1644,7 @@ def enqueue_job(
         payload = ordinary_courseware.admit(job, payload)
         job.payload = ordinary_project_queue.admit(kind, payload, dojo_id)
     if kind in {"candidate.generate", "material.enrich"} and (job.payload or {}).get("scopedOrdinaryProject") != "slide-deck":
-        job.payload = _admit_ordinary_teaching_job(job, payload)
+        job.payload = _admit_ordinary_teaching_job(job, job.payload)
     if ordinary_project_queue.configured():
         ordinary_project_queue.require_consumer(job, teacher_dsh_chat.PIN)
     db.session.add(job)
@@ -2683,6 +2683,8 @@ def _prepare_model_request(job):
 def _runtime_payload(job):
     admitted = accepted_input(job) if job.kind == "agent.chat" and job.thread_id else None
     payload = dict(admitted["payload"] if admitted else (job.payload or {}))
+    if payload.get("scopedOrdinaryProject") == "classroom" and ordinary_project_queue.valid(job):
+        return payload
     if job.kind == "agent.chat" and "ordinaryMaterialQuestion" in payload:
         # The selected references and their redacted excerpts are already frozen.
         # Never expand to fresh course material or load conversation history.
@@ -3603,7 +3605,9 @@ def _invoke_agent_runtime(job, route, payload=None):
         return _invoke_ordinary_material_question(job, route, payload)
     body = _runtime_request_body(job, route, payload)
     if job.kind == "agent.chat" and payload.get("chatBackend") == "upstream":
-        if not upstream_enabled():
+        scoped_classroom = (payload.get("scopedOrdinaryProject") == "classroom"
+                            and ordinary_project_queue.valid(job))
+        if not (upstream_enabled() or scoped_classroom):
             raise PermanentJobError("教学对话服务尚未启用")
         _require_upstream_teacher_scope(job, payload)
         if payload.get("classroomPreparation") and not current_classroom_pin(job, payload):

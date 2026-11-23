@@ -11,6 +11,8 @@ from .upstream_turn import ordinary_teaching_course
 
 
 PIN = "scopedOrdinaryProject"
+ACTION_PIN = "approvedOrdinaryAction"
+SCOPED_ACTIONS = frozenset({"publish-teaching-artifact", "control-teaching-session"})
 COURSEWARE_REASON = "teacher_requested_native_courseware"
 ROUTES = frozenset({
     "upstream-lesson-plan-candidate",
@@ -18,6 +20,7 @@ ROUTES = frozenset({
     "upstream-ordinary-debate-candidate",
     "ordinary-debate-harness",
     "upstream-ordinary-lesson-plan-revise",
+    "upstream-teacher-turn",
 })
 
 
@@ -81,6 +84,10 @@ def unsupported_creation(prompt, artifact_type=None):
 
 
 def classify(kind, payload):
+    if kind == "agent.command" and payload.get(ACTION_PIN) in SCOPED_ACTIONS:
+        return "approved-action"
+    if kind == "agent.chat" and payload.get("chatBackend") == "upstream" and payload.get("classroomPreparation"):
+        return "classroom"
     if payload.get("artifactType") == "slide-deck" and (
         (kind == "candidate.generate" and payload.get("generationReason") == COURSEWARE_REASON)
         or (kind == "artifact.materialize" and payload.get("ordinaryCourseware"))
@@ -114,5 +121,25 @@ def require_inputs(payload):
 
 def valid(job):
     payload = job.payload or {}
-    return (enabled(job.dojo_id) and (job.thread_id or job.kind == "artifact.revise") and not job.action_id
-            and payload.get(PIN) is not None and payload[PIN] == classify(job.kind, payload))
+    project = classify(job.kind, payload)
+    return (enabled(job.dojo_id) and (job.thread_id or job.kind == "artifact.revise")
+            and bool(job.action_id) == (project == "approved-action")
+            and project is not None and payload.get(PIN) == project)
+
+
+def require_approved_action(action, prepared):
+    """Limit the scoped consumer to publish and classroom control in the teaching course."""
+    args = action.request_json or {}
+    if enabled(args.get("dojoId")) and type(args.get("moduleIndex")) is int:
+        if action.action_type == "publish-teaching-artifact":
+            artifact = prepared["artifact"]
+            if (artifact.module_index == args["moduleIndex"] and artifact.self_workspace_id is None
+                    and artifact.artifact_type in {"lesson-plan", "debate", "slide-deck"}):
+                return
+        if action.action_type == "control-teaching-session":
+            session = prepared["session"]
+            if (session.module_index == args["moduleIndex"]
+                    and isinstance((session.state or {}).get("artifactContentHash"), str)
+                    and (session.state or {}).get("renderer") == "agent-runtime-stage"):
+                return
+    raise WorkerUnavailable("开发站仅支持联调课程的教案、课件、辩论发布和已准备课堂的控制操作。")
