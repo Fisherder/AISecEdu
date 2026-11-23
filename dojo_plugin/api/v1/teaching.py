@@ -6727,7 +6727,10 @@ class TeachingThreadReplyFeedback(Resource):
     @authed_only
     def patch(self, thread_id, message_id):
         user = _current_user()
-        _require_teacher(user)
+        try:
+            _require_teacher(user)
+        except ScopeError:
+            return _error("只有教师可以评价教学回复。", 403, code="FORBIDDEN")
         body = _body()
         value = body.get("value")
         if "value" not in body or value not in (None, "positive", "negative"):
