@@ -57,7 +57,7 @@ def handle_assignment_generate(context):
     generated_question_count = sum((1 for item in payload.get('items') or [] if isinstance(item, dict) and item.get('type') != 'CHALLENGE'))
     if requested_question_count < 1 or generated_question_count != requested_question_count:
         raise RuntimeError('Assignment generation did not satisfy the requested question count')
-    assignment = create_assignment(user, dojo, payload)
+    assignment = create_assignment(user, dojo, payload, generated=True)
     db.session.flush()
     outcome.result = {'course': _course_tool_snapshot(dojo), 'assignment': assignment_view(assignment, user=user, teacher=True), 'requestedQuestionCount': requested_question_count, 'questionCount': generated_question_count}
     outcome.href = f'/teacher/courses?dojo={dojo.reference_id}&tab=questions&assignment={assignment.id}'

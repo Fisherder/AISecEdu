@@ -43,6 +43,8 @@ def scoring(monkeypatch):
     entry = {
         "utcnow": datetime.datetime.now, "re": re, "Solves": solves,
         "DOJO_ORDINARY_GRADING_MODE": "private-harness",
+        "DOJO_ORDINARY_GRADING_COURSE_IDS": "",
+        "selected_private_grading_assignment": private.selected_private_grading_assignment,
         "DOJO_ORDINARY_GRADING_HARNESS_URL": ENDPOINT,
         "DOJO_ORDINARY_GRADING_HARNESS_TOKEN": TOKEN,
         "ordinary_grading_connection": turn.ordinary_grading_connection,
@@ -60,19 +62,20 @@ def scoring(monkeypatch):
     try:
         yield entry, turn, private
     finally:
-        for module in (turn, grading, private):
-            sys.modules.pop(module.__name__, None)
+        for name in (turn.__name__, grading.__name__, private.__name__, "scoring_fixture.coursework_ordinary"):
+            sys.modules.pop(name, None)
 
 
 def submission_fixture():
     item = SimpleNamespace(
         id="synthetic-persisted-item-id", title="植物观察", prompt="叶片是什么形状？",
-        points=10, item_type="SHORT_ANSWER", challenge_id=None,
+        points=10, item_type="SHORT_ANSWER", challenge_id=None, artifact_id=None,
         config={"keywords": ["椭圆", "叶尖"], "referenceAnswer": "椭圆，有叶尖。",
                 "rubric": "依据形状和叶尖评分。", "staffNote": "fixture staff-only metadata"},
     )
     return SimpleNamespace(
-        student_id=7531, assignment=SimpleNamespace(id="synthetic-assignment-id", items=[item]),
+        student_id=7531,
+        assignment=SimpleNamespace(id="synthetic-assignment-id", dojo_id=-25, kind="HOMEWORK", items=[item], settings={}),
         answers={item.id: "椭圆形。"},
     )
 
@@ -229,3 +232,185 @@ def test_private_transport_scopes_credentials_and_payload(scoring, monkeypatch, 
     else:
         assert (row["score"], row["source"], row["needsReview"]) == (6.75, "FALLBACK", True)
         assert submission.grading["agent"] == {}
+
+
+@pytest.mark.parametrize("course_ids", ["", " ", "-25,", "-25, bad", "-25, 2147483648", "-2147483649,-25", "1,2"])
+def test_selected_mode_rejects_entire_invalid_list_or_other_course(scoring, monkeypatch, course_ids):
+    entry, turn, _ = scoring
+    entry["DOJO_ORDINARY_GRADING_MODE"] = "private-harness-selected"
+    entry["DOJO_ORDINARY_GRADING_COURSE_IDS"] = course_ids
+    session = MagicMock()
+    monkeypatch.setattr(turn.requests, "Session", session)
+
+    submission = entry["grade_submission"](submission_fixture())
+
+    assert submission.item_results[0]["source"] == "FALLBACK"
+    assert submission.item_results[0]["needsReview"]
+    entry["model_json"].assert_not_called()
+    session.assert_not_called()
+
+
+@pytest.mark.parametrize("linked", [
+    {"item_type": "CHALLENGE"},
+    {"challenge_id": 8},
+    {"item_type": "ARTIFACT"},
+    {"artifact_id": "fixture-artifact"},
+    {"config": {"libraryPracticeDraftId": "fixture-draft"}},
+    {"config": {"libraryArtifactDependency": "fixture-dependency"}},
+])
+def test_selected_mode_checks_every_saved_item_not_just_graded_items(scoring, monkeypatch, linked):
+    entry, turn, _ = scoring
+    entry["DOJO_ORDINARY_GRADING_MODE"] = "private-harness-selected"
+    entry["DOJO_ORDINARY_GRADING_COURSE_IDS"] = "-25"
+    session = MagicMock()
+    monkeypatch.setattr(turn.requests, "Session", session)
+    submission = submission_fixture()
+    attached = copy(submission.assignment.items[0])
+    attached.id = "unanswered-linked-item"
+    vars(attached).update(linked)
+    submission.assignment.items.append(attached)
+
+    entry["grade_submission"](submission)
+
+    assert submission.item_results[0]["source"] == "FALLBACK"
+    entry["model_json"].assert_not_called()
+    session.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["PRACTICE", "LAB", "DEBATE"])
+def test_selected_mode_does_not_route_special_assignment_kinds(scoring, monkeypatch, kind):
+    entry, turn, _ = scoring
+    entry["DOJO_ORDINARY_GRADING_MODE"] = "private-harness-selected"
+    entry["DOJO_ORDINARY_GRADING_COURSE_IDS"] = "-25"
+    session = MagicMock()
+    monkeypatch.setattr(turn.requests, "Session", session)
+    submission = submission_fixture()
+    submission.assignment.kind = kind
+
+    entry["grade_submission"](submission)
+
+    assert submission.item_results[0]["source"] == "FALLBACK"
+    entry["model_json"].assert_not_called()
+    session.assert_not_called()
+
+
+@pytest.mark.parametrize("settings", [
+    {"librarySource": {"kind": "assignment", "id": "fixture-library-source"}},
+    {"sourceRefs": [{"type": "material", "id": "fixture-material"}]},
+    {"generation": {"source": "fixture-specialized-generator"}},
+    {"generation": {"model": "fixture-legacy-generator"}},
+    {"generation": {"source": "official-dsh-text-turn"}},
+    {"generation": {}},
+    {"generation": []},
+    {"generation": ""},
+    {"generation": None},
+    [],
+    "",
+    None,
+])
+def test_selected_mode_rejects_saved_nonordinary_sources(scoring, monkeypatch, settings):
+    entry, turn, _ = scoring
+    entry["DOJO_ORDINARY_GRADING_MODE"] = "private-harness-selected"
+    entry["DOJO_ORDINARY_GRADING_COURSE_IDS"] = "-25"
+    session = MagicMock()
+    monkeypatch.setattr(turn.requests, "Session", session)
+    submission = submission_fixture()
+    submission.assignment.settings = settings
+
+    entry["grade_submission"](submission)
+
+    assert (submission.item_results[0]["source"], submission.item_results[0]["needsReview"]) == ("FALLBACK", True)
+    entry["model_json"].assert_not_called()
+    session.assert_not_called()
+
+
+@pytest.mark.parametrize("config", [[], "", "invalid config", None])
+def test_selected_mode_locally_grades_invalid_item_config(scoring, monkeypatch, config):
+    entry, turn, _ = scoring
+    entry["DOJO_ORDINARY_GRADING_MODE"] = "private-harness-selected"
+    entry["DOJO_ORDINARY_GRADING_COURSE_IDS"] = "-25"
+    session = MagicMock()
+    monkeypatch.setattr(turn.requests, "Session", session)
+    submission = submission_fixture()
+    submission.assignment.items[0].config = config
+
+    entry["grade_submission"](submission)
+
+    assert (submission.item_results[0]["source"], submission.item_results[0]["needsReview"]) == ("FALLBACK", True)
+    entry["model_json"].assert_not_called()
+    session.assert_not_called()
+
+
+@pytest.mark.parametrize("config", [
+    {"referenceAnswer": {"private": "synthetic nested metadata"}},
+    {"rubric": ["private metadata"]},
+    {"keywords": {"private": "synthetic nested metadata"}},
+    {"keywords": [{"private": "synthetic nested metadata"}]},
+    {"keywords": ["x" * 241]},
+    {"keywords": ["x"] * 31},
+])
+def test_selected_mode_does_not_disclose_malformed_rubric_fields(scoring, monkeypatch, config):
+    entry, turn, _ = scoring
+    entry["DOJO_ORDINARY_GRADING_MODE"] = "private-harness-selected"
+    entry["DOJO_ORDINARY_GRADING_COURSE_IDS"] = "-25"
+    session = MagicMock()
+    monkeypatch.setattr(turn.requests, "Session", session)
+    submission = submission_fixture()
+    submission.assignment.items[0].config.update(config)
+
+    entry["grade_submission"](submission)
+
+    assert (submission.item_results[0]["source"], submission.item_results[0]["needsReview"]) == ("FALLBACK", True)
+    entry["model_json"].assert_not_called()
+    session.assert_not_called()
+
+
+def test_generated_assignment_proof_is_bound_to_saved_assignment(scoring, monkeypatch):
+    entry, turn, private = scoring
+    entry["DOJO_ORDINARY_GRADING_MODE"] = "private-harness-selected"
+    entry["DOJO_ORDINARY_GRADING_COURSE_IDS"] = "-25"
+    session = MagicMock()
+    monkeypatch.setattr(turn.requests, "Session", session)
+    monkeypatch.setattr(private, "current_app", SimpleNamespace(secret_key="synthetic-platform-secret"))
+    submission = submission_fixture()
+    assignment = submission.assignment
+    assignment.settings = {
+        "generation": {"source": "official-dsh-text-turn"},
+        private.ORDINARY_GRADING_PROOF: private.ordinary_assignment_grading_proof(assignment),
+    }
+    assignment.id = "different-saved-assignment-id"
+
+    entry["grade_submission"](submission)
+
+    assert (submission.item_results[0]["source"], submission.item_results[0]["needsReview"]) == ("FALLBACK", True)
+    entry["model_json"].assert_not_called()
+    session.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["HOMEWORK", "QUIZ"])
+@pytest.mark.parametrize("source", [None, "official-dsh-text-turn"])
+def test_selected_mode_uses_private_transport_for_admitted_course(scoring, monkeypatch, kind, source):
+    entry, _, private = scoring
+    entry["DOJO_ORDINARY_GRADING_MODE"] = "private-harness-selected"
+    entry["DOJO_ORDINARY_GRADING_COURSE_IDS"] = " -2147483648, -25, 2147483647 "
+    submission = submission_fixture()
+    submission.assignment.kind = kind
+    if source:
+        monkeypatch.setattr(private, "current_app", SimpleNamespace(secret_key="synthetic-platform-secret"))
+        submission.assignment.settings = {
+            "generation": {"source": source},
+            private.ORDINARY_GRADING_PROOF: private.ordinary_assignment_grading_proof(submission.assignment),
+        }
+    service = MagicMock(return_value={
+        "text": '{"grades":[{"itemIndex":1,"score":8}]}', "model": "fixture", "usage": {"total_tokens": 8},
+    })
+    monkeypatch.setattr(private, "invoke_ordinary_grading_turn", service)
+
+    entry["grade_submission"](submission)
+
+    assert submission.item_results[0]["source"] == "AI"
+    assert submission.total_score == 8
+    assert submission.grading["agent"]["usage"] == {"total_tokens": 8}
+    assert service.call_args.args[0].startswith("你是普通课程的作业批改教师。")
+    assert service.call_args.kwargs == {"connection": (ENDPOINT, TOKEN)}
+    entry["model_json"].assert_not_called()

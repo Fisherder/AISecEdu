@@ -38,15 +38,19 @@ define () {
     eval "current=\${${name}-}"
     defined="$(sed -n "s/^${name}=//p" /data/config.env)"
     value="${current:-${defined:-$default}}"
-    if [ "${3:-}" = "source-list" ]; then
+    if [ "${3:-}" = "source-list" ] || [ "${3:-}" = "course-list" ]; then
         case "$value" in
             \"*\") value="${value#\"}"; value="${value%\"}" ;;
         esac
-        # This file is read by both the shell and Compose; CSP sources need literal quoting.
+        # This file is read by both the shell and Compose.
         if [ "$(printf '%s' "$value" | tr -d '\r\n')" != "$value" ] ||
             printf '%s' "$value" | grep -q '["\\$`[:cntrl:]]'; then
-            printf 'Invalid source-list configuration: %s\n' "$name" >&2
-            exit 1
+            if [ "$3" = "course-list" ]; then
+                value=
+            else
+                printf 'Invalid source-list configuration: %s\n' "$name" >&2
+                exit 1
+            fi
         fi
         printf '%s="%s"\n' "$name" "$value" >> /data/.config.env
     else
@@ -105,6 +109,7 @@ define DOJO_AI_TUTOR_MODEL deepseek-v4-flash
 define DOJO_AI_GUIDE_MODEL deepseek-v4-flash
 define DOJO_AI_GRADER_MODEL deepseek-v4-flash
 define DOJO_ORDINARY_GRADING_MODE
+define DOJO_ORDINARY_GRADING_COURSE_IDS "" course-list
 define DOJO_ORDINARY_GRADING_HARNESS_URL
 define DOJO_ORDINARY_GRADING_HARNESS_TOKEN
 define DOJO_AI_SOLUTION_MODEL deepseek-v4-flash

@@ -4,6 +4,7 @@ from .agent_runtime.upstream_turn import invoke_turn, ordinary_teaching_course, 
 LEGACY_ASSIGNMENT_ROUTE = "legacy"
 ORDINARY_ASSIGNMENT_ROUTE = "ordinary-dsh"
 ORDINARY_ASSIGNMENT_SOURCE = "official-dsh-text-turn"
+ORDINARY_ASSIGNMENT_KINDS = {"HOMEWORK", "QUIZ"}
 ITEM_CONFIG_FIELDS = {
     "MULTIPLE_CHOICE": {"choices", "correctAnswer", "explanation"},
     "TRUE_FALSE": {"correctAnswer", "explanation"},
@@ -21,7 +22,7 @@ ORDINARY_DRAFT_ROLE = (
 
 
 def use_ordinary_assignment(dojo_id, kind, challenge_ids):
-    return kind in {"HOMEWORK", "QUIZ"} and (challenge_ids is None or challenge_ids == []) and ordinary_teaching_course(dojo_id)
+    return kind in ORDINARY_ASSIGNMENT_KINDS and (challenge_ids is None or challenge_ids == []) and ordinary_teaching_course(dojo_id)
 
 
 def ordinary_assignment_turn(system, context):

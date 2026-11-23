@@ -7,6 +7,7 @@ from CTFd.models import Solves, db
 from .config import (
     DOJO_AI_AUTHORING_PLAN_MODEL,
     DOJO_AI_GRADER_MODEL,
+    DOJO_ORDINARY_GRADING_COURSE_IDS,
     DOJO_ORDINARY_GRADING_HARNESS_TOKEN,
     DOJO_ORDINARY_GRADING_HARNESS_URL,
     DOJO_ORDINARY_GRADING_MODE,
@@ -14,7 +15,10 @@ from .config import (
 from .agent_runtime.upstream_turn import ordinary_grading_connection
 from .learning.intelligence import model_json
 from .learning.grading import build_open_grade_questions, map_open_grade_rows
-from .learning.private_grading import grade_with_private_harness
+from .learning.private_grading import (
+    ASSIGNMENT_PROVENANCE_FIELDS, ORDINARY_GRADING_PROOF, grade_with_private_harness,
+    ordinary_assignment_grading_proof, selected_private_grading_assignment,
+)
 from .models import (
     DojoAdmins,
     DojoChallenges,
@@ -170,7 +174,7 @@ def _item_view(
     expose_answer=False,
     challenge_solved_at=None,
 ):
-    config = dict(item.config or {})
+    config = item.config if isinstance(item.config, dict) else {}
     public_config = {
         key: config[key]
         for key in ("choices", "allowMultiple", "placeholder", "minLength", "maxLength")
@@ -308,7 +312,7 @@ def assignment_view(assignment, *, user=None, teacher=False, include_items=True)
         _submission_status(submission.status, submitted=submission.submitted_at is not None)
         if submission else None
     )
-    settings = assignment.settings or {}
+    settings = assignment.settings if isinstance(assignment.settings, dict) else {}
     answer_policy = str(settings.get("answerPolicy") or "AFTER_SUBMISSION").upper()
     if answer_policy not in {"NEVER", "AFTER_SUBMISSION", "AFTER_DUE", "IMMEDIATE"}:
         answer_policy = "AFTER_SUBMISSION"
@@ -470,11 +474,13 @@ def replace_items(assignment, raw_items):
     assignment.items.extend(new_items)
 
 
-def create_assignment(user, dojo, body):
+def create_assignment(user, dojo, body, *, generated=False):
     module_index = validate_module(dojo, body.get("moduleIndex"))
-    body = dict(body)
     standards = resolve_standards(course_id=dojo.dojo_id, question_type="quiz" if any(item.get("type") != "CHALLENGE" for item in body.get("items", []) if isinstance(item, dict)) else "practice")
-    body["settings"] = {**(body.get("settings") if isinstance(body.get("settings"), dict) else {}), "authoringStandards": standards}
+    settings = body.get("settings") if isinstance(body.get("settings"), dict) else {}
+    permitted_source_fields = {"generation"} if generated else set()
+    if settings.keys() & (ASSIGNMENT_PROVENANCE_FIELDS - permitted_source_fields):
+        raise ValueError("作业来源由服务端记录。")
     assignment = TeachingAssignments(
         dojo_id=dojo.dojo_id,
         module_index=module_index,
@@ -483,7 +489,7 @@ def create_assignment(user, dojo, body):
         kind=normalize_kind(body.get("kind")),
         description=_bounded_text(body.get("description"), 16000, "description"),
         instructions=_bounded_text(body.get("instructions"), 16000, "instructions"),
-        settings=body.get("settings") if isinstance(body.get("settings"), dict) else {},
+        settings={**settings, "authoringStandards": standards},
         available_from=parse_datetime(body.get("availableFrom"), field="availableFrom"),
         due_at=parse_datetime(body.get("dueAt"), field="dueAt"),
     )
@@ -491,6 +497,11 @@ def create_assignment(user, dojo, body):
         raise ValueError("dueAt must be later than availableFrom")
     db.session.add(assignment)
     db.session.flush()
+    generation = settings.get("generation")
+    if generated and isinstance(generation, dict) and generation.get("source") == ORDINARY_ASSIGNMENT_SOURCE:
+        proof = ordinary_assignment_grading_proof(assignment)
+        if proof:
+            assignment.settings = {**assignment.settings, ORDINARY_GRADING_PROOF: proof}
     replace_items(assignment, body.get("items") or [])
     db.session.add(
         LearningAuditEvents(
@@ -910,9 +921,13 @@ def update_assignment(assignment, body, user):
     if assignment.available_from and assignment.due_at and assignment.available_from >= assignment.due_at:
         raise ValueError("dueAt must be later than availableFrom")
     if "settings" in body:
-        if not isinstance(body.get("settings"), dict):
+        changes = body["settings"]
+        if not isinstance(changes, dict):
             raise ValueError("settings must be an object")
-        assignment.settings = {**(assignment.settings or {}), **body["settings"]}
+        settings = assignment.settings if isinstance(assignment.settings, dict) else {}
+        if any(key not in settings or changes[key] != settings[key] for key in ASSIGNMENT_PROVENANCE_FIELDS & changes.keys()):
+            raise ValueError("作业来源由服务端记录。")
+        assignment.settings = {**settings, **changes}
     if "items" in body:
         if TeachingAssignmentSubmissions.query.filter_by(assignment_id=assignment.id).count():
             raise ValueError("Items cannot be replaced after students have started the assignment")
@@ -941,9 +956,12 @@ def _normalize_answer(value):
 
 
 def _fallback_open_grade(item, answer):
-    config = item.config or {}
+    config = item.config if isinstance(item.config, dict) else {}
     reference = str(config.get("referenceAnswer") or "")
-    keywords = [str(value).strip().casefold() for value in (config.get("keywords") or []) if str(value).strip()]
+    stored_keywords = config.get("keywords")
+    if not isinstance(stored_keywords, (list, dict, str)):
+        stored_keywords = []
+    keywords = [str(value).strip().casefold() for value in stored_keywords if str(value).strip()]
     answer_text = "" if answer is None else str(answer).strip()
     answer_lower = answer_text.casefold()
     if not answer_text:
@@ -963,15 +981,18 @@ def _fallback_open_grade(item, answer):
     return float(item.points) * completeness, "缺少明确评分要点，当前为完整度初评，建议教师复核。", True
 
 
-def _ai_open_grades(items, answers):
+def _ai_open_grades(assignment, items, answers):
     mode = DOJO_ORDINARY_GRADING_MODE
-    if not items or mode not in {"", "private-harness"}:
+    if not items or mode not in {"", "private-harness", "private-harness-selected"}:
         return {}, None
-    if mode == "private-harness":
+    if mode:
+        selected = mode == "private-harness-selected"
+        if selected and not selected_private_grading_assignment(assignment, DOJO_ORDINARY_GRADING_COURSE_IDS):
+            return {}, None
         connection = ordinary_grading_connection(
             DOJO_ORDINARY_GRADING_HARNESS_URL, DOJO_ORDINARY_GRADING_HARNESS_TOKEN,
         )
-        return grade_with_private_harness(items, answers, connection)
+        return grade_with_private_harness(items, answers, connection, ordinary_assignment=selected)
     payload = {
         "questions": build_open_grade_questions(items, answers)
     }
@@ -1007,7 +1028,7 @@ def grade_submission(submission, *, grader_id=None):
         item for item in assignment.items
         if item.item_type in {"SHORT_ANSWER", "DEBATE"} and _normalize_answer(answers.get(item.id))
     ]
-    ai_grades, agent_meta = _ai_open_grades(open_items, answers)
+    ai_grades, agent_meta = _ai_open_grades(assignment, open_items, answers)
     challenge_ids = [item.challenge_id for item in assignment.items if item.challenge_id]
     solved_ids = {
         row.challenge_id
@@ -1031,7 +1052,7 @@ def grade_submission(submission, *, grader_id=None):
             score = float(item.points) if solved else 0.0
             feedback = "已通过真实 Dojo 判题。" if solved else "尚未通过对应 Dojo 题目。"
         elif item.item_type in {"MULTIPLE_CHOICE", "TRUE_FALSE"}:
-            config = item.config or {}
+            config = item.config if isinstance(item.config, dict) else {}
             correct = _normalize_answer(config.get("correctAnswer"))
             submitted = _normalize_answer(answer)
             if not correct:
@@ -1105,7 +1126,7 @@ def save_submission(assignment, user, answers, *, submit=False):
         raise ValueError("这项任务已经关闭，当前答案仍保留在本机。")
     if assignment.available_from and assignment.available_from > now:
         raise ValueError("这项任务尚未开放，请在开放时间后再试。")
-    settings = assignment.settings or {}
+    settings = assignment.settings if isinstance(assignment.settings, dict) else {}
     if assignment.due_at and assignment.due_at < now and not settings.get("allowLate", True):
         raise ValueError("这项任务已经截止，教师未开放迟交。")
     submission = TeachingAssignmentSubmissions.query.filter_by(

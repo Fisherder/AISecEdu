@@ -13,6 +13,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_LIST = "GLOBAL_AGENT_RUNTIME_FRAME_ANCESTORS"
+GRADING_COURSES = "DOJO_ORDINARY_GRADING_COURSE_IDS"
 
 
 def initialize(folder, **overrides):
@@ -92,7 +93,8 @@ def test_unsafe_source_lists_are_rejected_before_loading_or_replacing_saved_conf
 
 def test_ordinary_grading_grants_private_credentials_only_to_ctfd():
     settings = {
-        "DOJO_ORDINARY_GRADING_MODE": "private-harness",
+        "DOJO_ORDINARY_GRADING_MODE": "private-harness-selected",
+        GRADING_COURSES: "-25, 42",
         "DOJO_ORDINARY_GRADING_HARNESS_URL": "https://grading.school.invalid:3081",
         "DOJO_ORDINARY_GRADING_HARNESS_TOKEN": "synthetic-grading-secret",
     }
@@ -101,13 +103,15 @@ def test_ordinary_grading_grants_private_credentials_only_to_ctfd():
         first = initialize(folder)
         assert first.returncode == 0, first.stderr
         config = folder / "config.env"
-        for name in settings:
+        assert f'{GRADING_COURSES}=""\n' in config.read_text()
+        for name in settings.keys() - {GRADING_COURSES}:
             assert f"{name}=\n" in config.read_text()
         for overrides in (settings, {}):
             initialized = initialize(folder, **overrides)
             assert initialized.returncode == 0, initialized.stderr
             for name, value in settings.items():
-                assert f"{name}={value}\n" in config.read_text()
+                saved_value = json.dumps(value) if name == GRADING_COURSES else value
+                assert f"{name}={saved_value}\n" in config.read_text()
 
         if not shutil.which("docker") or subprocess.run(
             ["docker", "compose", "version"], capture_output=True,
@@ -125,6 +129,16 @@ def test_ordinary_grading_grants_private_credentials_only_to_ctfd():
         for name, service in services.items():
             if name != "ctfd":
                 assert not (settings.keys() & service.get("environment", {}).keys()), name
+
+
+def test_ordinary_grading_invalid_allowlist_can_boot_without_evaluating_it():
+    with tempfile.TemporaryDirectory() as directory:
+        folder = Path(directory)
+        marker = folder / "executed"
+        result = initialize(folder, **{GRADING_COURSES: f"-25, $(touch {marker})"})
+        assert result.returncode == 0, result.stderr
+        assert f'{GRADING_COURSES}=""\n' in (folder / "config.env").read_text()
+        assert not marker.exists()
 
 
 def test_generated_source_list_round_trips_through_docker_compose_when_available():
