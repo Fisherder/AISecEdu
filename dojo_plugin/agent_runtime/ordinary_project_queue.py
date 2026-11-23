@@ -11,6 +11,7 @@ from .upstream_turn import ordinary_teaching_course
 
 
 PIN = "scopedOrdinaryProject"
+COURSEWARE_REASON = "teacher_requested_native_courseware"
 ROUTES = frozenset({
     "upstream-lesson-plan-candidate",
     "upstream-lesson-plan-materialize",
@@ -31,8 +32,6 @@ def requested_kind(prompt):
     if not isinstance(prompt, str):
         return None
     prompt = prompt.strip()
-    if requests_explicit_file_delivery(prompt):
-        return None
     if requests_lesson_plan_candidates(prompt):
         return "lesson-plan"
     if requests_debate_candidates(prompt):
@@ -41,6 +40,10 @@ def requested_kind(prompt):
     if not command:
         return None
     subject = command[1]
+    if re.search(r"课件|幻灯片|演示文稿|仿真|动态演示|交互演示|互动演示", subject):
+        return "slide-deck"
+    if requests_explicit_file_delivery(prompt):
+        return None
     if re.search(r"(?:课堂辩论|辩论方案|的辩论|一场辩论)", subject):
         return "debate"
     if "教案" in subject:
@@ -49,6 +52,11 @@ def requested_kind(prompt):
 
 
 def classify(kind, payload):
+    if payload.get("artifactType") == "slide-deck" and (
+        (kind == "candidate.generate" and payload.get("generationReason") == COURSEWARE_REASON)
+        or (kind == "artifact.materialize" and payload.get("ordinaryCourseware"))
+    ):
+        return "slide-deck"
     if kind == "candidate.generate" and payload.get("ordinaryCandidateModel"):
         if payload.get("artifactType") in {"lesson-plan", "debate"}:
             return payload["artifactType"]

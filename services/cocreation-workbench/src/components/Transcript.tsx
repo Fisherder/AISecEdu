@@ -434,7 +434,7 @@ function MessageView({ message }: { message: Message }) {
               <FileText size={23} />
               <span>
                 <small>
-                  {artifactId ? '生成成品' : candidateId ? '生成结果' : card.title || '任务结果'}
+                  {artifactId ? '生成成品' : candidateId ? (card.state?.kind === 'slide-deck' ? '课件方案' : '生成结果') : card.title || '任务结果'}
                 </small>
                 <strong>{card.title || card.state?.title || '查看内容'}</strong>
                 <span>{card.subtitle || card.state?.status || ''}</span>
@@ -515,33 +515,22 @@ export function Welcome() {
     },
   ];
   const scoped = document.getElementById('cocreation-workbench')?.dataset.scopedTeaching === 'true';
-  const starters = scoped
-    ? [
+  const starters = !scoped ? productionStarters : canStartTeachingProject(state)
+    ? teachingProjects.map((item, index) => ({ ...item, type: 'auto', icon: [Layers, SlidersHorizontal, FileText][index] }))
+    : [
         {
-          title: '教案与讲义',
-          subtitle: '生成可下载的 Word 草稿',
-          icon: FileText,
-          type: 'auto',
+          title: '教案与讲义', subtitle: '生成可下载的 Word 草稿', icon: FileText, type: 'auto',
           prompt: '请生成一份 Word 教案，包含教学目标、课堂活动和小结。主题：',
         },
-        ...(canStartTeachingProject(state) ? teachingProjects.map((item, index) => ({
-          ...item, type: 'auto', icon: index === 0 ? Layers : SlidersHorizontal,
-        })) : [{
-          title: '课堂练习',
-          subtitle: '编写题目、答案和讲解',
-          icon: SlidersHorizontal,
-          type: 'auto',
+        {
+          title: '课堂练习', subtitle: '编写题目、答案和讲解', icon: SlidersHorizontal, type: 'auto',
           prompt: '请生成一份 Markdown 课堂练习文档，包含三道题、参考答案和讲解。主题：',
         },
         {
-          title: '课件提纲',
-          subtitle: '组织各页重点和讲授顺序',
-          icon: Layers,
-          type: 'auto',
+          title: '课件提纲', subtitle: '组织各页重点和讲授顺序', icon: Layers, type: 'auto',
           prompt: '请制作一份 Word 教学讲义，按五张幻灯片的顺序编排标题、要点和讲解提示。主题：',
-        }]),
-      ]
-    : productionStarters;
+        },
+      ];
   return (
     <div className="conversation">
       <div className="transcript-scroll">

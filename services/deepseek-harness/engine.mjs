@@ -23,6 +23,8 @@ import {
   classroomDialoguePlugin, dialogueSystemPrompt, validateClassroomDialogue, ClassroomDialogueError,
 } from './classroom-dialogue.mjs';
 
+import { coursewarePlugin, coursewareSystem, validateCoursewareTurn } from './courseware.mjs';
+
 const provider = 'deepseek-official';
 
 function textBlock(text) {
@@ -169,6 +171,14 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
         { role: 'user', content: JSON.stringify(director) },
       ], signal, [], { director });
     },
+    coursewareTurn(input, signal) {
+      const courseware = validateCoursewareTurn(input);
+      if (!courseware) throw new Error('Invalid courseware request');
+      return runTurn([
+        { role: 'system', content: coursewareSystem(courseware) },
+        { role: 'user', content: JSON.stringify(courseware) },
+      ], signal, [], { courseware });
+    },
     classroomDialogue(input, signal, sendSpeech) {
       const dialogue = validateClassroomDialogue(input);
       if (!dialogue) throw new ClassroomDialogueError({});
@@ -179,9 +189,10 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
     },
   };
 
-  async function runTurn(messages, signal, images = [], { materials, director, dialogue, sendSpeech } = {}) {
+  async function runTurn(messages, signal, images = [], { materials, director, dialogue, sendSpeech, courseware } = {}) {
     const materialReads = new Set();
     const decision = {};
+    const submittedCourseware = {};
     const discussion = { speeches: 0, next: undefined };
     const measured = [];
     let modelAttempts = 0;
@@ -218,12 +229,13 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
         sessionId: SessionId(randomUUID()),
         agentOptions: {
           provider, model,
-          ...(dialogue ? { maxTokens: 4096 } : director ? { maxTokens: 512 } : {}),
+          ...(courseware ? { maxTokens: 7800 } : dialogue ? { maxTokens: 4096 } : director ? { maxTokens: 512 } : {}),
         },
         signal,
         async setup(scope, agent) {
           if (materials) await scope.plugin(teachingMaterialPlugin(materials, materialReads));
           if (director) await scope.plugin(classroomDirectorPlugin(director.roles.length, decision));
+          if (courseware) await scope.plugin(coursewarePlugin(courseware, submittedCourseware));
           if (dialogue) {
             await scope.plugin(classroomDialoguePlugin(dialogue.roles.length, discussion, approveStep, speech => {
               const usage = sumMeasuredUsage(measured);
@@ -239,7 +251,7 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
             if (session !== agent.session) return;
             if (event.type === 'assistant/message') assistant = event.data;
             if (event.type === 'turn/end') finish = event.data.reason.kind;
-            if ((materials || director || dialogue) &&
+            if ((materials || director || dialogue || courseware) &&
                 (event.type === 'assistant/message' || event.type === 'assistant/attempt')) {
               modelAttempts += 1;
               const usage = event.data.usage ?? event.data.stream.findLast(record =>
@@ -276,6 +288,15 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
           throw new Error('Classroom dialogue did not finish with measured native actions');
         }
         return { next: discussion.next, model: message.source.model, usage: total };
+      }
+      if (courseware) {
+        const total = sumMeasuredUsage(measured);
+        const stop = stream.findLast(record => record.type === 'chunk' && record.chunk.type === 'finish');
+        if (!submittedCourseware.value || modelAttempts !== 1 || measured.length !== 1 || !total ||
+            stop?.chunk.reason.kind !== 'tool-calls') {
+          throw new Error('Courseware turn did not finish with a measured tool result');
+        }
+        return { submission: submittedCourseware.value, model: message.source.model, usage: total };
       }
       if (director) {
         const total = sumMeasuredUsage(measured);

@@ -187,7 +187,7 @@ from ...agent_runtime.model_journal import ModelJournalError, record_model_event
 from ...agent_runtime.project_collection import project_collection_view
 from ...agent_runtime.reliability import public_recovery
 from ...agent_runtime.teacher_documents import requests_debate_candidates, requests_lesson_plan_candidates
-from ...agent_runtime import ordinary_lesson_plan_revision, ordinary_material_turn, ordinary_project_queue, ordinary_slide_notes
+from ...agent_runtime import ordinary_courseware, ordinary_lesson_plan_revision, ordinary_material_turn, ordinary_project_queue, ordinary_slide_notes
 from ...agent_runtime.upstream_turn import ordinary_teaching_course, ordinary_teaching_image_allowed, upstream_enabled
 from ...agent_runtime.scope import (
     ScopeError,
@@ -6751,7 +6751,10 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 selected_course = build_scope(user, role="teacher", dojo_id=course, module_index=module)
                 if not ordinary_project_queue.enabled(selected_course.dojo_id):
                     raise ValueError("请在上下文中选择已开通普通教学项目的课程。")
-                teacher_dsh_chat.validate_prompt(prompt)
+                if project_kind == "slide-deck":
+                    ordinary_courseware.brief(prompt)
+                else:
+                    teacher_dsh_chat.validate_prompt(prompt)
         text_model = None if readonly_material_turn or project_kind else teacher_dsh_chat.admit(thread, body, mode)
         if text_model:
             mode = "execute" if text_model["formats"] else "ask"
@@ -6911,6 +6914,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             )
 
         direct_candidates = not text_model and not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
+        native_courseware = direct_candidates and project_kind == "slide-deck"
         ordinary_plan = direct_candidates and (project_kind == "lesson-plan" or requests_lesson_plan_candidates(content))
         debate_proposals = direct_candidates and (project_kind == "debate" or requests_debate_candidates(content))
         ordinary_debate = debate_proposals or bool(
@@ -6947,7 +6951,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if thread.title in DEFAULT_THREAD_TITLES:
                 thread.title = _thread_title_from_message(content)
 
-        if not (ordinary_plan or ordinary_debate or readonly_material_turn or text_model):
+        if not (ordinary_plan or ordinary_debate or native_courseware or readonly_material_turn or text_model):
             if session_history_replayable(thread.id):
                 # New conversations derive the model-visible history from the
                 # same durable message events used to reconstruct the page.
@@ -6970,8 +6974,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if pattern_id not in ("", "process-inquiry"):
                 raise ValueError("请选择有效的学习模式。")
             thread.context = {**(thread.context or {}), "learningPattern": inquiry_pattern_catalog() if pattern_id else None}
-        platform_context = None if ordinary_plan or ordinary_debate or readonly_material_turn or text_model else _teacher_agent_context(user, thread)
-        generate = ordinary_plan or debate_proposals or (continuation and requested_action == "generate")
+        platform_context = None if ordinary_plan or ordinary_debate or native_courseware or readonly_material_turn or text_model else _teacher_agent_context(user, thread)
+        generate = ordinary_plan or debate_proposals or native_courseware or (continuation and requested_action == "generate")
         if continuation_context is not None:
             constraints = continuation_context["constraints"]
             source_refs = continuation_context["sourceRefs"]
@@ -7052,6 +7056,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 artifact_type = "lesson-plan"
             elif debate_proposals:
                 artifact_type = "debate"
+            elif native_courseware:
+                artifact_type = "slide-deck"
             elif selected_generation is not None:
                 artifact_type = selected_generation["bundle"]["artifactType"]
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", artifact_type):
@@ -7060,7 +7066,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 )
             if (
                 artifact_type in GENERATION_OPTION_ARTIFACT_TYPES
-                and selected_generation is None and not debate_proposals
+                and selected_generation is None and not (debate_proposals or native_courseware)
             ):
                 raise ValueError(
                     "请先在智能体给出的三套候选方案中选择一套，再开始正式生成。"
@@ -7069,6 +7075,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 count, generation_reason = 2, ORDINARY_PLAN_REASON
             elif debate_proposals:
                 count, generation_reason = 3, ORDINARY_DEBATE_REASON
+            elif native_courseware:
+                count, generation_reason = 2, ordinary_project_queue.COURSEWARE_REASON
             elif selected_generation is not None:
                 count = 1
                 generation_reason = ORDINARY_DEBATE_REASON if ordinary_debate else "teacher_selected_prompt_option"
@@ -7128,6 +7136,12 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 if user_message is not None:
                     payload.update(submissionFingerprint=submission_fingerprint(body), userMessageId=user_message.id)
                 if wait_for_job_ids:
+                    payload["waitForJobIds"] = wait_for_job_ids
+            elif native_courseware:
+                payload["allowDegraded"] = False
+                if wait_for_job_ids:
+                    if body.get("delivery") == "next-step":
+                        raise ConversationConflict("课件方案需要独立任务，请选择“排队”发送。")
                     payload["waitForJobIds"] = wait_for_job_ids
             else:
                 payload.update(conversation=history_context["conversation"], courseContext=platform_context)
@@ -12317,7 +12331,7 @@ class AgentRuntimeLaunch(Resource):
                 resource_id = target.rstrip("/").rsplit("/", 1)[-1]
                 if target.startswith("/prep/"):
                     artifact = artifact_for_user(resource_id, user)
-                    if (artifact.artifact_type not in {"lesson-plan", "debate"} or artifact.self_workspace_id is not None
+                    if (artifact.artifact_type not in {"lesson-plan", "debate", "slide-deck"} or artifact.self_workspace_id is not None
                             or (artifact.dojo_id, artifact.module_index) != (scope.dojo_id, scope.module_index)):
                         raise ScopeError("Artifact not found")
                 else:
@@ -12879,6 +12893,11 @@ class AgentRuntimeCoursewareStudio(Resource):
             artifact = _lesson_artifact(artifact_id, user, scope)
             if artifact.owner_id != user.id or artifact.status == "ARCHIVED":
                 raise ScopeError("Courseware studio not found")
+            if ordinary_project_queue.configured() and (
+                not ordinary_project_queue.enabled(artifact.dojo_id)
+                or artifact.self_workspace_id is not None or scope.module_index != artifact.module_index
+            ):
+                raise ScopeError("Courseware studio not found")
             read_scope = {"ownerId": user.id, "status": artifact.status}
             policy_requested = request.args.get("agentPolicy") == "1"
             current = current_artifact_revision(artifact) if policy_requested else None
@@ -12954,6 +12973,15 @@ class AgentRuntimeLesson(Resource):
             lesson = (
                 body.get("lesson") if isinstance(body.get("lesson"), dict) else body
             )
+            if ordinary_project_queue.configured():
+                current = current_artifact_revision(artifact)
+                if (scope.role != "teacher" or artifact.owner_id != user.id
+                        or not ordinary_project_queue.enabled(artifact.dojo_id)
+                        or artifact.self_workspace_id is not None or scope.module_index != artifact.module_index
+                        or artifact.artifact_type != "slide-deck" or current is None
+                        or (current.content or {}).get(ordinary_courseware.PIN) != ordinary_courseware.CONTRACT):
+                    raise ScopeError("Courseware studio not found")
+
             lesson_size = _lesson_payload_size(lesson)
             if scope.role == "student":
                 workspace = _service_scoped_workspace(user, scope, lock=True)

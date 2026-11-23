@@ -47,3 +47,13 @@ A successful response returns the chosen one-based role slot, `"user"` to hand t
 | 504 | The turn timed out |
 
 A 502 or 504 response may include `model` and the measured `usage` available when the turn stopped.
+
+### Native teaching courseware
+
+The internal authenticated POST route /v1/courseware-turn admits one bounded request
+for either plan or author. Each request-scoped AgentLoop registers only one
+native tool, propose_courseware or compose_courseware. The plugin validates
+tool arguments and returns structured teaching data plus a measured model
+receipt. AISecEdu owns confirmation, artifact persistence, live preview, and
+revision history. The plugin never receives platform credentials and has no
+execution, workspace, file, or networking tools.

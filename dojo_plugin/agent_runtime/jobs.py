@@ -60,7 +60,7 @@ from .artifacts import (
     materialize_candidate,
     replace_generated_candidates,
 )
-from . import ordinary_project_queue, teacher_dsh_chat
+from . import ordinary_courseware, ordinary_project_queue, teacher_dsh_chat
 from .files import persist_agent_deliverables, public_agent_file
 from .model_router import (
     UPSTREAM_DEBATE_CANDIDATE_ROUTE, UPSTREAM_DEBATE_ROUTE, UPSTREAM_DECK_REVISION_ROUTE,
@@ -1610,9 +1610,6 @@ def enqueue_job(
         payload = ordinary_debate.admit(kind, payload, owner_id, dojo_id, module_index, thread_id)
     if kind == "artifact.materialize":
         payload = ordinary_lesson_plan.admit(payload, owner_id, dojo_id, module_index, thread_id)
-    if ordinary_project_queue.configured():
-        payload = ordinary_project_queue.admit(kind, payload, dojo_id)
-
     if (kind == "artifact.revise" and payload.get("artifactType") == "slide-deck"
             and not payload.get("workspaceId") and ordinary_slide_wording_request(payload.get("instruction"))
             and ordinary_teaching_course(dojo_id) and upstream_enabled()):
@@ -1643,7 +1640,10 @@ def enqueue_job(
         payload=payload,
         max_attempts=max_attempts,
     )
-    if kind in {"candidate.generate", "material.enrich"}:
+    if ordinary_project_queue.configured():
+        payload = ordinary_courseware.admit(job, payload)
+        job.payload = ordinary_project_queue.admit(kind, payload, dojo_id)
+    if kind in {"candidate.generate", "material.enrich"} and (job.payload or {}).get("scopedOrdinaryProject") != "slide-deck":
         job.payload = _admit_ordinary_teaching_job(job, payload)
     db.session.add(job)
     db.session.flush()
@@ -4277,7 +4277,7 @@ def _persist_result(job, result, *, prepared=None):
             expected_revision=int(job.payload.get("expectedRevision")),
             instruction=instruction,
             content=content,
-            commit=not (scoped or pinned_debate),
+            commit=not (scoped or pinned_debate or (job.payload or {}).get("scopedOrdinaryProject") == "slide-deck"),
         )
         artifact = TeachingArtifacts.query.filter_by(id=artifact.id).first()
         artifact.status = "READY"
@@ -5052,10 +5052,14 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False, ordinary_pro
                     raise PermanentJobError("教学问答的输入版本已经变化，请重新发起。")
                 db.session.commit()
             else:
-                if ordinary_project_only:
-                    ordinary_project_queue.require_inputs(job.payload or {})
-                runtime_payload, route = _prepare_model_request(job)
-                if ordinary_project_only:
+                scoped_courseware = ordinary_project_only and ordinary_courseware.is_courseware(job)
+                if scoped_courseware:
+                    runtime_payload, route = ordinary_courseware.prepare(job)
+                else:
+                    if ordinary_project_only:
+                        ordinary_project_queue.require_inputs(job.payload or {})
+                    runtime_payload, route = _prepare_model_request(job)
+                if ordinary_project_only and not scoped_courseware:
                     if route["route"] not in ordinary_project_queue.ROUTES or route.get("degraded"):
                         raise PermanentJobError("普通教学项目的指定执行路径不可用。")
                     ordinary_project_queue.require_inputs(runtime_payload)
@@ -5116,6 +5120,8 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False, ordinary_pro
                         body = _runtime_request_body(job, route, runtime_payload)
                         _record_runtime_dispatch(job, body, _runtime_json_bytes(body))
                         response = teacher_dsh_chat.invoke(runtime_payload, route)
+                    elif ordinary_project_only and scoped_courseware:
+                        response = ordinary_courseware.invoke(job, runtime_payload, route)
                     elif job.kind == "material.analyze" and runtime_payload.get("localExtraction"):
                         response = _index_material_on_worker(job, runtime_payload)
                     else:
@@ -5192,6 +5198,8 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False, ordinary_pro
                 )
             if route.get("route") in {UPSTREAM_SLIDE_LAYOUT_ROUTE, UPSTREAM_DECK_REVISION_ROUTE}:
                 ordinary_slide_layout.validate_receipt(route, runtime_payload, response)
+            if ordinary_project_only and scoped_courseware and ordinary_courseware.prepare(job) != (runtime_payload, route):
+                raise PermanentJobError("课件方案或权限已变化，请重新生成。")
             model_mode = str((response.get("model") or {}).get("executionMode") or "")
             if (job.kind == "artifact.revise" and runtime_payload.get("revisionBackend") == "ordinary-slide-wording"
                     and model_mode != "ordinary-slide-wording"):

@@ -7,6 +7,7 @@ import { directorTurnPath, maxDirectorTurnBytes } from './classroom-director.mjs
 import { dialoguePath, maxDialogueBytes } from './classroom-dialogue.mjs';
 import { createEngine } from './engine.mjs';
 import { createService } from './server.mjs';
+import { coursewarePath } from './courseware.mjs';
 
 const input = {
   roles: ['teacher', 'student'],
@@ -388,4 +389,51 @@ test('one stock AgentLoop streams an entire bounded classroom dialogue', { timeo
   await client.cancel();
   await clientAbortReachedProvider;
   assert.equal(interruptedStep, 2);
+});
+
+test('courseware uses only the phase-specific native tool and reports measured content', async t => {
+  const plan = { phase: 'plan', style: 'demo', brief: '分步演示植物怎样运输水分' };
+  const options = [
+    { title: '从观察叶片开始', strategy: '按观察和解释推进', goal: '区分植物根和茎承担的不同作用', topics: ['对比不同叶片', '解释水分运输'] },
+    { title: '跟随水滴的旅程', strategy: '按水分移动顺序展开', goal: '按先后顺序描述植物中的运输过程', topics: ['观察根系吸水', '寻找水分方向'] },
+  ];
+  let reply = messagesResponse([tool({ options }, 'propose_courseware')]);
+  let toolNames;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    toolNames = JSON.parse(options.body).tools.map(item => item.name);
+    return reply;
+  });
+  const saved = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = 'fixture-key';
+  t.after(() => {
+    if (saved === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = saved;
+  });
+  const engine = await createEngine({ model, baseURL: 'https://offline-fixture.invalid' });
+  t.after(() => engine.close());
+  const service = createService({ secret, engine, dialogueTimeoutMs: 2200 });
+  assert.equal((await request(service, { path: coursewarePath, body: plan, authorization: '' })).status, 401);
+  assert.equal((await request(service, { path: coursewarePath, body: { ...plan, brief: '复刻攻击步骤' } })).status, 400);
+  const planned = await request(service, { path: coursewarePath, body: plan });
+  assert.equal(planned.status, 200, JSON.stringify(planned.body));
+  assert.deepEqual(toolNames, ['propose_courseware']);
+  assert.deepEqual(planned.body.submission.options, options);
+  assert.equal(planned.body.usage.total_tokens, 9);
+  const page = title => ({
+    title, takeaway: '水分沿着植物内部逐渐向上运输', notes: '本页用于课堂学习活动。'.repeat(8),
+    steps: [
+      { label: '先看根系', detail: '用示意图观察根系分布' },
+      { label: '比较茎部', detail: '对比根和茎承担的作用' },
+      { label: '用话复述', detail: '请学生按顺序说出变化' },
+    ],
+  });
+  const pages = [page('观察根系吸水'), page('寻找水分方向')];
+  const author = { ...plan, phase: 'author', selection: options[0] };
+  reply = messagesResponse([tool({ pages }, 'compose_courseware')]);
+  const authored = await request(service, { path: coursewarePath, body: author });
+  assert.equal(authored.status, 200, JSON.stringify(authored.body));
+  assert.deepEqual(toolNames, ['compose_courseware']);
+  assert.deepEqual(authored.body.submission.pages, pages);
+  reply = messagesResponse([tool({ pages: [pages[0], { ...pages[1], notes: '<script>bad</script>' }] }, 'compose_courseware')]);
+  assert.equal((await request(service, { path: coursewarePath, body: author })).status, 502);
 });

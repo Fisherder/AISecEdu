@@ -100,10 +100,11 @@ export function CandidateSet({ candidateSetId, close }: { candidateSetId: string
     return () => controller.abort();
   }, [candidateSetId]);
   const candidates: Data[] = data?.candidates || [];
+  const nativeCourseware = data?.request?.generationReason === 'teacher_requested_native_courseware';
   const ordinaryDebate = data?.kind === 'debate' && !data.selfWorkspaceId &&
     data.request?.generationReason === 'teacher_requested_ordinary_debate';
   return (
-    <Dialog title="审阅生成成品" onClose={close} wide>
+    <Dialog title={nativeCourseware ? '选择课件方案' : '审阅生成成品'} onClose={close} wide>
       <div className="dialog-body">
         {loadError ? <p role="alert">{loadError}</p> : !data ? <p>正在读取…</p> : (
           candidates.map((candidate) => (
@@ -132,7 +133,7 @@ export function CandidateSet({ candidateSetId, close }: { candidateSetId: string
                   })
                 }
               >
-                打开成品工作区
+                {nativeCourseware ? "生成课件" : "打开成品工作区"}
               </Button>
             </section>
           ))

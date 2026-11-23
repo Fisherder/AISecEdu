@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useWorkbench } from '../core/context';
 import { api, id } from '../core/api';
+import { isGeneratedCourseware } from '../core/teaching-projects';
 import { dateLabel, type Artifact, type Data, typeLabels } from '../core/types';
 import { Button, IconButton, Empty, Status, Dialog } from '../components/ui';
 
@@ -71,6 +72,7 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
   const [launching, setLaunching] = useState(false);
   const [frameError, setFrameError] = useState(false);
   const source = contentSource(artifact);
+  const nativeCourseware = isGeneratedCourseware(artifact);
   const notesRequest = artifact.type === 'slide-deck' && artifact.status === 'PUBLISHED'
     && notesInstruction.test(instruction);
   const consentKey = JSON.stringify([artifact.id, artifact.currentRevision, instruction]);
@@ -196,7 +198,8 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
               <p>
                 {generating
                   ? '原版本会保留，完成后可以继续审阅。'
-                  : '课件、交互演示与三维场景会在工作区中打开。'}
+                  : nativeCourseware ? '打开课件工作室进行编辑或分步演示。'
+                    : '课件、交互演示与三维场景会在工作区中打开。'}
               </p>
               <Button
                 className="primary"
@@ -292,7 +295,7 @@ function ArtifactWorkspace({ artifact }: { artifact: Artifact }) {
         )}
       </div>
       {artifact.type === 'learning-flow' && <div className="source-hint">教学说明、审核发布和学生证据可在预览内的“内容与审核”中处理。</div>}
-      {artifact.capabilities?.edit && artifact.type !== 'learning-flow' && (
+      {artifact.capabilities?.edit && !nativeCourseware && artifact.type !== 'learning-flow' && (
         <form
           className="revision-composer"
           onSubmit={(event) => {

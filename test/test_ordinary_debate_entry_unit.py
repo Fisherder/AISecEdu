@@ -344,6 +344,8 @@ def test_derive_endpoint_does_not_fall_back_after_ordinary_course_opt_out(entry)
     ("帮我设计一场适合初中生的课堂辩论，主题是延长图书馆开放时间", "debate"),
     ("帮我写一份适合小学四年级的教案，主题是观察叶片", "lesson-plan"),
     ("请生成普通教案候选：设计一堂有小组活动的数学课", "lesson-plan"),
+    ("做个动态仿真，主题是植物吸收水分", "slide-deck"),
+    ("请制作可以分步演示的交互课件：光合作用", "slide-deck"),
     ("请生成一份 Word 教案，主题是认识分数", None),
     ("怎样设计一份有互动的教案？", None),
     ("请帮我评估这份教案。", None),

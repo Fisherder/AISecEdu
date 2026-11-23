@@ -1,7 +1,7 @@
 import { api, request, id, key, ApiError } from './api';
 import { blankDraft, WorkspaceStorage } from './storage';
 import { mergeEvents } from './events';
-import { displayTeachingReply } from './teaching-projects';
+import { displayTeachingReply, isGeneratedCourseware } from './teaching-projects';
 import { classroomPreparation, classroomSessionId, matchingClassroomDecision } from './classroom-preparation';
 import {
   hasOnlyMaterialSources,
@@ -563,7 +563,10 @@ export class WorkbenchController {
       selectedArtifact: artifactId,
     });
     this.setPanel('artifacts');
-    await this.loadArtifact(artifactId);
+    const artifact = await this.loadArtifact(artifactId);
+    if (this.state.selectedArtifact === artifactId && isGeneratedCourseware(artifact) &&
+        ['READY', 'PUBLISHED'].includes(artifact.status) && !this.state.previews[artifactId])
+      await this.launchPreview(artifact);
   }
   closeArtifact(artifactId: string) {
     const open = this.state.openArtifacts.filter((value) => value !== artifactId);

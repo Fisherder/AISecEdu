@@ -12,6 +12,8 @@ import {
   dialoguePath, maxDialogueBytes, validateClassroomDialogue, ClassroomDialogueError,
 } from './classroom-dialogue.mjs';
 
+import { coursewarePath, maxCoursewareBytes, validateCoursewareTurn } from './courseware.mjs';
+
 const maxBodyBytes = 1024 * 1024;
 const maxMessages = 128;
 const maxTurns = 8;
@@ -67,12 +69,12 @@ function validate(value, withImages) {
   return { messages, images };
 }
 
-async function readTurn(request, { withImages, withMaterials, withDirector, withDialogue }) {
+async function readTurn(request, { withImages, withMaterials, withDirector, withDialogue, withCourseware }) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers['content-type'] ?? '')) {
     throw new RequestError(415, 'Expected application/json');
   }
 
-  const maxBytes = withDialogue ? maxDialogueBytes : withDirector ? maxDirectorTurnBytes :
+  const maxBytes = withCourseware ? maxCoursewareBytes : withDialogue ? maxDialogueBytes : withDirector ? maxDirectorTurnBytes :
     withMaterials ? maxMaterialTurnBytes : withImages ? 7 * maxBodyBytes : maxBodyBytes;
   const chunks = [];
   let size = 0;
@@ -87,6 +89,11 @@ async function readTurn(request, { withImages, withMaterials, withDirector, with
     payload = JSON.parse(utf8.decode(Buffer.concat(chunks)));
   } catch {
     throw new RequestError(400, 'Invalid JSON');
+  }
+  if (withCourseware) {
+    const courseware = validateCoursewareTurn(payload);
+    if (!courseware) throw new RequestError(400, 'Expected a bounded courseware request');
+    return { courseware };
   }
   if (withDialogue) {
     const dialogue = validateClassroomDialogue(payload);
@@ -149,8 +156,9 @@ export function createService({
     const withMaterials = request.url === materialTurnPath;
     const withDirector = request.url === directorTurnPath;
     const withDialogue = request.url === dialoguePath;
+    const withCourseware = request.url === coursewarePath;
     if (!imageCapability && (request.method !== 'POST' ||
-        (!withImages && !withMaterials && !withDirector && !withDialogue && request.url !== '/v1/turn'))) {
+        (!withImages && !withMaterials && !withDirector && !withDialogue && !withCourseware && request.url !== '/v1/turn'))) {
       json(response, 404, { error: 'Not found' });
       return;
     }
@@ -178,10 +186,10 @@ export function createService({
     const disconnect = new AbortController();
     const abort = () => disconnect.abort();
     response.once('close', abort);
-    const deadline = AbortSignal.timeout(withDialogue ? dialogueTimeoutMs : timeoutMs);
+    const deadline = AbortSignal.timeout(withDialogue || withCourseware ? dialogueTimeoutMs : timeoutMs);
     try {
-      const { messages, images, question, materials, director, dialogue } = await readTurn(request, {
-        withImages, withMaterials, withDirector, withDialogue,
+      const { messages, images, question, materials, director, dialogue, courseware } = await readTurn(request, {
+        withImages, withMaterials, withDirector, withDialogue, withCourseware,
       });
       const signal = AbortSignal.any([disconnect.signal, deadline]);
       if (withDialogue) {
@@ -189,7 +197,8 @@ export function createService({
         return;
       }
       let result;
-      if (withDirector) result = await engine.directorTurn(director, signal);
+      if (withCourseware) result = await engine.coursewareTurn(courseware, signal);
+      else if (withDirector) result = await engine.directorTurn(director, signal);
       else if (withMaterials) result = await engine.materialTurn(question, materials, signal);
       else if (withImages) result = await engine.imageTurn(messages, signal, images);
       else result = await engine.turn(messages, signal);
