@@ -26,6 +26,10 @@ THEME = {
 }
 
 
+class CoursewareConflict(ValueError):
+    pass
+
+
 def brief(value):
     value = " ".join(teacher_dsh_chat.validate_prompt(value).split())
     if UNSAFE.search(value) or (STACK_EXAMPLE.search(value) and STACK_ACTION.search(value)):
@@ -73,19 +77,25 @@ def selection_pin(job, selected, scope):
     candidate = TeachingArtifactCandidates.query.filter_by(
         id=artifact.candidate_id if artifact else None, candidate_set_id=selected.id,
     ).first()
-    prior = TeachingJobs.query.filter_by(
-        id=job.payload.get("parentGenerationJobId"), thread_id=job.thread_id,
-        kind="candidate.generate", status="SUCCEEDED", **scope,
-    ).first()
-    invocation = prior and ModelInvocations.query.filter_by(
-        job_id=prior.id, route=ROUTES["plan"], status="SUCCEEDED", degraded=False,
-    ).first()
+    generations = TeachingJobs.query.filter_by(
+        thread_id=job.thread_id, kind="candidate.generate", status="SUCCEEDED", **scope,
+    ).filter(
+        TeachingJobs.payload["candidateSetId"].as_string() == selected.id,
+        TeachingJobs.payload[ordinary_project_queue.PIN].as_string() == "slide-deck",
+    ).join(ModelInvocations, ModelInvocations.job_id == TeachingJobs.id).filter(
+        ModelInvocations.route == ROUTES["plan"], ModelInvocations.status == "SUCCEEDED",
+        ModelInvocations.degraded.is_(False),
+    )
+    pinned_source = (job.payload.get(PIN) or {}).get("generationJobId")
+    if pinned_source:
+        generations = generations.filter(TeachingJobs.id == pinned_source)
+    prior = generations.order_by(TeachingJobs.created.desc()).first()
     if (artifact is None or artifact.current_revision != job.payload.get("expectedRevision")
-            or candidate is None or candidate.materialized_artifact_id != artifact.id
-            or invocation is None or (prior.payload or {}).get("candidateSetId") != selected.id
+            or candidate is None or candidate.materialized_artifact_id != artifact.id or prior is None
             or (candidate.content or {}).get("experience", {}).get("mode") != CONTRACT):
-        raise ValueError("课件的已选方案或基线版本已变化，请重新打开方案。")
-    return {"candidateId": candidate.id, "digest": content_hash(candidate.content)}, candidate
+        raise CoursewareConflict("课件的已选方案或基线版本已变化，请重新打开方案。")
+    return {"candidateId": candidate.id, "generationJobId": prior.id,
+            "digest": content_hash(candidate.content)}, candidate
 
 
 def admit(job, payload):

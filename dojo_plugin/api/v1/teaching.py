@@ -8397,6 +8397,9 @@ class CandidateMaterialize(Resource):
                 },
                 202,
             )
+        except ordinary_courseware.CoursewareConflict as exc:
+            db.session.rollback()
+            return _error(exc, 409, code="ORDINARY_COURSEWARE_CONFLICT")
         except OrdinaryDebateError as exc:
             db.session.rollback()
             return _error(exc, 409, code="ORDINARY_DEBATE_CONFLICT")
