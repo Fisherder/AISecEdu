@@ -16,6 +16,25 @@ CONTRACT = "teaching-workshop-v1"
 _MAX_ROUNDS = 2
 _PAGE_COUNT = re.compile(r"(?:共|制作|做|生成|设计|写|要|用|一份|一套|[约为：，, ])?\s*([0-9]{1,3}|十[一二]?|[一二三四五六七八九两])\s*(?:页|张)(?=课件|幻灯片|演示稿|介绍|讲|[，。！？、\s]|$)")
 _PAGE_NUMBERS = {word: n for n, word in enumerate("一二三四五六七八九", 1)} | {"两": 2, "十": 10, "十一": 11, "十二": 12}
+_VISUAL_WORDS = {
+    "chart": r"图表|柱状图|折线图|统计图|条形图",
+    "diagram": r"关系图|流程图|结构图|概念图",
+    "comparison": r"对比表|比较表",
+    "scene": r"逐步动画|分步动画|场景动画",
+}
+
+
+def _requested_visuals(texts):
+    requested = set()
+    for text in texts:
+        for clause in re.split(r"[。！？，、；\n]", text):
+            for kind, pattern in _VISUAL_WORDS.items():
+                if re.search(pattern, clause):
+                    if re.search(r"不(?:要|需要|使用)|无需|去掉|移除", clause):
+                        requested.discard(kind)
+                    else:
+                        requested.add(kind)
+    return sorted(requested)
 
 
 def intake(brief, context=None):
@@ -27,15 +46,21 @@ def intake(brief, context=None):
     questions = [{"question": ordinary_courseware.brief(row["question"])[1][:180],
                   "answer": ordinary_courseware.brief(row["answer"])[1][:750]} for row in answer_rows]
     page_count = 0
+    visual_requirements = []
     if style == "slides":
-        for text in [clean, *(row["answer"] for row in questions)]:
+        texts = [clean, *(row["answer"] for row in questions)]
+        visual_requirements = _requested_visuals(texts)
+        for text in texts:
             for match in _PAGE_COUNT.finditer(text):
                 token = match[1]
                 page_count = int(token) if token.isdecimal() else _PAGE_NUMBERS[token]
                 if not 2 <= page_count <= 12:
                     raise ValueError("请选择 2 至 12 页的课件，可分成多份保存。")
+        if page_count and page_count < len(visual_requirements):
+            raise ValueError("请增加页数，以便每一种指定的图形都有独立的说明页。")
     return {"phase": "intake", "kind": {"slides": "deck", "demo": "simulation", "stack-capacity": "stack"}[style],
-            "brief": clean, "answers": questions, "round": round_number, "pageCount": page_count}
+            "brief": clean, "answers": questions, "round": round_number, "pageCount": page_count,
+            "requiredVisuals": visual_requirements}
 
 
 def _turn(root, secret, model, payload):
@@ -81,7 +106,7 @@ def _visual(page, chosen):
     rows = page["rows"]
     if chosen == "diagram":
         return _ordered_nodes(rows)
-    if chosen == "chart" and len({row["value"] for row in rows}) > 1:
+    if chosen == "chart":
         return {"kind": "chart", "chartType": "column", "labels": [row["label"] for row in rows],
                 "series": [{"name": page["chartUnit"], "values": [row["value"] for row in rows]}],
                 "unit": page["chartUnit"], "basis": "课堂示例，用于观察数值的相对变化。", "illustrative": True}, []
@@ -193,6 +218,8 @@ def invoke(job, payload):
     root, secret, model = teacher_dsh_chat._connection()
     body = payload[PIN]
     expected = intake(payload["prompt"], (payload.get("context") or {}).get("questionReply"))
+    if "requiredVisuals" not in body:
+        expected.pop("requiredVisuals")
     if not model or body != expected:
         raise PermanentJobError("任务要求已变化，请重新发起教学创作。")
     checkpoint = (job.result or {}).get("_workshop")

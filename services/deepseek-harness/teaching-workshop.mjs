@@ -80,6 +80,9 @@ export function validateWorkshop(value) {
   const base = { phase: choice(value.phase), kind: choice('deck', 'simulation', 'stack'),
     brief: string(2, 4000), answers: list(record({ question: string(2, 180), answer: string(1, 750) }), 0, 6),
     round: integer(0, 2), pageCount: integer(0, 12) };
+  if (Object.hasOwn(value, 'requiredVisuals')) {
+    base.requiredVisuals = list(choice('comparison', 'diagram', 'chart', 'scene'), 0, 4);
+  }
   const authoring = value.phase === 'intake' ? {} : { plan: outline,
     ...(value.phase === 'deck-page' ? { page: integer(0, 11) } : {}) };
   if (!valid(record({ ...base, ...authoring }), value) ||
@@ -119,6 +122,9 @@ export function workshopSystem(input) {
     input.phase === 'intake' && input.kind === 'deck'
       ? (input.pageCount ? `课件设计必须恰好有 ${input.pageCount} 页。` :
         '没有给出页数时使用4至6页，至少安排概念建立、实例、活动和收束。')
+      : '',
+    input.phase === 'intake' && input.requiredVisuals?.length
+      ? `页级设计必须包含每一种教师明确指定的 visual 类型：${input.requiredVisuals.join('、')}。`
       : '',
     input.phase === 'deck-page'
       ? '只写 plan.pages[page] 指定的那一页。图表需要真实依据或在讲稿里明确说明数据是示意。关系图应表示明确的顺序。末页给一个能在课堂验证的任务。'
@@ -174,7 +180,10 @@ export function workshopPlugin(input, produced) {
           }
           if (input.phase === 'intake' && input.kind === 'deck' &&
               ((input.pageCount && value.pages.length !== input.pageCount) ||
+               input.requiredVisuals?.some(kind => !value.pages.some(page => page.visual === kind)) ||
                new Set(value.pages.map(page => page.title)).size !== value.pages.length)) throw Error('Invalid page map');
+          if (input.phase === 'deck-page' && input.plan.pages[input.page].visual === 'chart' &&
+              new Set(value.rows.map(row => row.value)).size < 2) throw Error('A chart requires distinct observation values');
           if (input.phase === 'simulation' &&
               (new Set(value.choices).size !== 3 || new Set(value.states.map(item => item.measurement)).size < 2 ||
                value.states.some((item, index) => index > 0 && item.setting <= value.states[index - 1].setting))) {

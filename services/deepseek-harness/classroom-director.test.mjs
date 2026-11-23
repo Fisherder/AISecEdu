@@ -439,7 +439,8 @@ test('courseware uses only the phase-specific native tool and reports measured c
 });
 
 test('workshop uses the official native question tool and resumes from the answer data', async t => {
-  const body = { phase: 'intake', kind: 'deck', brief: '制作三页课件介绍水循环', answers: [], round: 0, pageCount: 3 };
+  const body = { phase: 'intake', kind: 'deck', brief: '制作三页课件介绍水循环，包含示意图表',
+    answers: [], round: 0, pageCount: 3, requiredVisuals: ['chart'] };
   const { workshopPath } = await import('./teaching-workshop.mjs');
   const questions = [{
     id: 'audience', question: '课件主要面向哪个年级？',
@@ -477,4 +478,10 @@ test('workshop uses the official native question tool and resumes from the answe
   assert.equal(next.status, 200, JSON.stringify(next.body));
   assert.deepEqual(next.body.submission.plan, plan);
   assert.ok(JSON.stringify(calls[1].messages).includes('初中'));
+  const mismatched = { ...plan, pages: plan.pages.map(page => ({ ...page, visual: 'comparison' })) };
+  reply = tool(mismatched, 'design_teaching_material');
+  const denied = await request(service, { path: workshopPath,
+    body: { ...body, round: 2, answers: [{ question: questions[0].question, answer: '初中' }] } });
+  assert.equal(denied.status, 502);
+  assert.ok(!denied.body.submission);
 });

@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 import sys
@@ -38,7 +39,7 @@ def workshop_browser_check(monkeypatch, evidence_change=None, issues=None):
     function = next(node for node in ast.parse(source.read_text()).body
                     if getattr(node, "name", None) == "_verify_slide_render")
     namespace = {"__package__": "_workshop_fixture", "os": os, "json": json, "hashlib": hashlib,
-                 "re": __import__("re"), "config": SimpleNamespace(AGENT_RUNTIME_SERVICE_SECRET="fixture"),
+                 "re": re, "config": SimpleNamespace(AGENT_RUNTIME_SERVICE_SECRET="fixture"),
                  "requests": SimpleNamespace(Session=lambda: client, RequestException=RequestException)}
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"), namespace)
     return namespace["_verify_slide_render"], RuntimeJobError
@@ -65,3 +66,14 @@ def test_workshop_rejects_page_when_browser_finds_clipped_text(monkeypatch):
     verify, _ = workshop_browser_check(monkeypatch, issues=["Title lies outside the canvas"])
     with pytest.raises(ValueError, match="第 1 页排版未通过"):
         verify(SLIDE)
+
+
+def test_teacher_can_choose_visual_types_and_revise_the_preference():
+    source = Path(__file__).resolve().parents[1] / "dojo_plugin/agent_runtime/teaching_workshop.py"
+    nodes = [node for node in ast.parse(source.read_text()).body
+             if getattr(node, "name", None) == "_requested_visuals"
+             or (isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "_VISUAL_WORDS")]
+    ns = {"re": re}
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), "exec"), ns)
+    assert ns["_requested_visuals"](["四页课件，放流程关系图、示意数据图表。"]) == ["chart", "diagram"]
+    assert ns["_requested_visuals"](["用对比表和折线图。", "不要图表，改用结构图。"]) == ["comparison", "diagram"]
