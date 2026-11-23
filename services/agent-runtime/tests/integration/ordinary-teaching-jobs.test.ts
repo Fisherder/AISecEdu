@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { POST as postGenericJob } from '@/app/api/integration/jobs/execute/route';
 import { POST as postLessonPlan } from '@/app/api/integration/jobs/ordinary-lesson-plan/route';
 import { coursewareSlideDataSchema } from '@/lib/courseware/schema';
 import { compileCoursewareSlide } from '@/lib/courseware/compiler';
@@ -413,10 +414,9 @@ describe('ordinary teaching worker service routes', () => {
   it('keeps pinned candidates and materialization off the generic executor', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
-    const {POST} = await import('@/app/api/integration/jobs/execute/route');
     for (const dedicatedRequest of [candidateRequest(), materializeRequest()]) {
       const job = await dedicatedRequest.json();
-      const execute = (body: unknown) => POST(new NextRequest(
+      const execute = (body: unknown) => postGenericJob(new NextRequest(
         'http://localhost/api/integration/jobs/execute', {
           method: 'POST', headers: dedicatedRequest.headers, body: JSON.stringify(body),
         },
