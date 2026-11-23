@@ -3869,9 +3869,9 @@ def _workshop_simulation_revision(job):
             raise PermanentJobError("当前版本缺少可修改的教学模拟。")
         return actor, artifact, revision
 
-    _, artifact, revision = target()
+    _, _, revision = target()
     source_hash = revision.content_hash
-    content, usage = teaching_workshop.revise_simulation(job, artifact, revision)
+    content, usage = teaching_workshop.revise_simulation(job, revision)
     job = assert_job_lease(job)
     if _job_cancellation_requested(job):
         raise JobCanceled("教学模拟修改已取消。")

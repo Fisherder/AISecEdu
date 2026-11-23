@@ -53,7 +53,7 @@ export class WorkbenchController {
       draft: this.storage.draft(null),
       uploads: [],
       panel: 'artifacts',
-      panelOpen: window.innerWidth > 720 && this.storage.value('panelOpen', true),
+      panelOpen: window.innerWidth > 720 && this.storage.value('panelOpen', false),
       sidebarOpen: false,
       taskCenter: false,
       modal: null,
@@ -568,7 +568,7 @@ export class WorkbenchController {
     const workshopSimulation = artifact.type === 'simulation' &&
       artifact.revision?.content?.teachingWorkshop === 'teaching-workshop-v1';
     if (this.state.selectedArtifact === artifactId && (isGeneratedCourseware(artifact) || workshopSimulation) &&
-        ['READY', 'PUBLISHED'].includes(artifact.status) && !this.state.previews[artifactId])
+        ['DRAFT', 'READY', 'PUBLISHED'].includes(artifact.status) && !this.state.previews[artifactId])
       await this.launchPreview(artifact);
   }
   closeArtifact(artifactId: string) {

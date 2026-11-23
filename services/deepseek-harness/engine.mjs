@@ -24,7 +24,7 @@ import {
 } from './classroom-dialogue.mjs';
 
 import { coursewarePlugin, coursewareSystem, validateCoursewareTurn } from './courseware.mjs';
-import { NativeQuestions, validateWorkshop, workshopPlugin, workshopSystem } from './teaching-workshop.mjs';
+import { NativeQuestions, validateWorkshop, workshopPlugin, workshopSystem, WorkshopTurnError } from './teaching-workshop.mjs';
 
 const provider = 'deepseek-official';
 
@@ -297,7 +297,7 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
       if (workshop) {
         const total = sumMeasuredUsage(measured);
         const stop = stream.findLast(record => record.type === 'chunk' && record.chunk.type === 'finish');
-        if (!workshopOutput.value || modelAttempts !== 1 || measured.length !== 1 || !total ||
+        if (!workshopOutput.value || modelAttempts < 1 || modelAttempts > 2 || measured.length !== modelAttempts || !total ||
             stop?.chunk.reason.kind !== 'tool-calls') throw Error('Workshop turn did not finish with a measured native action');
         return { submission: workshopOutput.value, model: message.source.model, usage: total };
       }
@@ -339,6 +339,7 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
       }
       return { text, model: message.source.model, usage: total, materialReads: [...materialReads] };
     } catch (error) {
+      if (workshop) throw new WorkshopTurnError(workshopOutput.rejection);
       if (!materials && !director && !dialogue) throw error;
       const usage = sumMeasuredUsage(measured);
       const receipt = usage ? { model, usage } : {};

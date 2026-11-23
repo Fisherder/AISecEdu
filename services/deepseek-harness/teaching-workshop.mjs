@@ -1,10 +1,17 @@
 import NativeQuestions from '@deepseek-ai/dsh-user-questions';
+import { createHash } from 'node:crypto';
 import * as AskUserQuestion from '@deepseek-ai/dsh-tool-ask-user';
 import { NativeToolExecutor } from '@deepseek-ai/dsh-tool-executor-native';
 
 export { NativeQuestions };
 export const workshopPath = '/v1/teaching-workshop';
 export const workshopByteLimit = 48 * 1024;
+export class WorkshopTurnError extends Error {
+  constructor(code) {
+    super('Teaching workshop action failed');
+    this.code = code || 'RUN_INCOMPLETE';
+  }
+}
 const unsafe = /[<>\x00-\x1f\x7f`]|(?:https?|data|javascript|file):|漏洞利用|漏洞复现|真实内存地址|返回地址|覆盖返回|攻击步骤|绕过保护|注入载荷|缓冲区溢出|\b(?:exploit|rop chain|malware|ransomware|payload)\b/i;
 const string = (min, max) => ({ type: 'string', minLength: min, maxLength: max });
 const list = (items, min, max) => ({ type: 'array', items, minItems: min, maxItems: max });
@@ -26,6 +33,7 @@ const deckPage = record({
 });
 const simulation = record({
   title: string(4, 36), objective: string(12, 150),
+  visualization: choice('trend', 'pendulum'),
   parameter: string(2, 24), unit: string(1, 12), measure: string(2, 26), measureUnit: string(1, 12),
   states: list(record({
     setting: number(-1000000, 1000000), measurement: number(0, 1000000),
@@ -115,6 +123,10 @@ export function workshopSystem(input) {
     input.phase === 'deck-page'
       ? '只写 plan.pages[page] 指定的那一页。图表需要真实依据或在讲稿里明确说明数据是示意。关系图应表示明确的顺序。末页给一个能在课堂验证的任务。'
       : '',
+    input.phase === 'simulation'
+      ? '单摆选 pendulum，输入用米或厘米，周期用秒。周期应符合小振幅下的近似关系。其余主题选 trend，横轴为调节量，纵轴为观测量。'
+      : '',
+    '调用提问工具时只提交 questions 数组，页面会保存问题并等待真实回答。',
     '一次只能调用一个工具。用中文。',
   ].filter(Boolean).join('\n');
 }
@@ -126,20 +138,26 @@ export function workshopPlugin(input, produced) {
     name: 'teaching-workshop',
     inject: ['tools', 'userQuestions'],
     async apply(scope) {
+      let attempts = 0;
       if (canAsk) await scope.plugin(AskUserQuestion, { mode: 'timed', timeout: 1 });
       const executor = new NativeToolExecutor(scope, () => 1);
       scope.on('user-questions/request', async request => {
-        const questions = request.questions.map(({ id, question, options }) => ({
-          id, text: question, choices: (options || []).map(option => option.label),
-          descriptions: (options || []).map(option => option.description || ''),
+        const questions = request.questions.map(({ question, options }) => ({
+          id: 'q-' + createHash('sha256').update(question).digest('hex').slice(0, 18), text: question.trim(),
+          choices: (options || []).map(option => option.label.trim()),
+          descriptions: (options || []).map(option => option.description?.trim() || ''),
         }));
-        const question = questions[0];
-        if (questions.length !== 1 || produced.value || !/^[a-zA-Z0-9_-]{1,40}$/.test(question?.id) ||
-            !valid(string(4, 180), question?.text) || !valid(list(string(1, 60), 2, 3), question?.choices) ||
-            new Set(question.choices).size !== question.choices.length ||
-            question.descriptions.some(text => !valid(string(0, 130), text)) ||
-            input.answers.some(previous => previous.question === question.text)) throw Error('Invalid teaching question');
-        produced.value = { question };
+        if (questions.length < 1 || questions.length > 3 || produced.value ||
+            new Set(questions.map(question => question.id)).size !== questions.length ||
+            questions.some(question => !valid(string(4, 180), question.text) ||
+              !valid(list(string(1, 76), 0, 4), question.choices) ||
+              new Set(question.choices).size !== question.choices.length ||
+              question.descriptions.some(text => !valid(string(0, 190), text)) ||
+              input.answers.some(previous => previous.question === question.text))) {
+          produced.rejection = 'QUESTION_SHAPE';
+          throw Error('Invalid teaching question');
+        }
+        produced.value = { questions };
         await new Promise((_, reject) => {
           request.signal.throwIfAborted();
           request.signal.addEventListener('abort', () => reject(request.signal.reason), { once: true });
@@ -150,7 +168,10 @@ export function workshopPlugin(input, produced) {
         output: { schema: nativeSchema(instruction.schema), render: () => [{ type: 'text', text: 'Accepted.' }] },
         async execute(value, context) {
           context.signal.throwIfAborted();
-          if (produced.value || !valid(instruction.schema, value)) throw Error('Invalid workshop output');
+          if (produced.value || !valid(instruction.schema, value)) {
+            produced.rejection = 'OUTPUT_SHAPE';
+            throw Error('Invalid workshop output');
+          }
           if (input.phase === 'intake' && input.kind === 'deck' &&
               ((input.pageCount && value.pages.length !== input.pageCount) ||
                new Set(value.pages.map(page => page.title)).size !== value.pages.length)) throw Error('Invalid page map');
@@ -158,6 +179,20 @@ export function workshopPlugin(input, produced) {
               (new Set(value.choices).size !== 3 || new Set(value.states.map(item => item.measurement)).size < 2 ||
                value.states.some((item, index) => index > 0 && item.setting <= value.states[index - 1].setting))) {
             throw Error('Simulation states must be distinguishable and ordered');
+          }
+          if (input.phase === 'simulation' && /单摆.*周期/.test(input.brief) && value.visualization !== 'pendulum') {
+            produced.rejection = 'MODEL_CONSISTENCY';
+            throw Error('Expected a pendulum visualization for the requested period demonstration');
+          }
+          if (input.phase === 'simulation' && value.visualization === 'pendulum') {
+            const meters = new Map([['米', 1], ['厘米', 0.01], ['m', 1], ['cm', 0.01]]).get(value.unit);
+            if (!meters || !['秒', 's'].includes(value.measureUnit) || value.states.some(({ setting, measurement }) => {
+              const reference = 2 * Math.PI * Math.sqrt(setting * meters / 9.81);
+              return setting <= 0 || Math.abs(measurement - reference) > Math.max(0.05, reference * 0.1);
+            })) {
+              produced.rejection = 'MODEL_CONSISTENCY';
+              throw Error('The pendulum data must satisfy the small-angle period relation');
+            }
           }
           produced.value = { [input.phase === 'intake' ? 'plan' : input.phase === 'deck-page' ? 'page' : 'simulation']: value };
           context.concludeTurn();
@@ -168,15 +203,19 @@ export function workshopPlugin(input, produced) {
         describe: tools => executor.describe(tools),
         async execute(batch) {
           batch.signal.throwIfAborted();
-          if (batch.calls.length !== 1) throw Error('Expected one workshop action');
+          if (++attempts > 2 || batch.calls.length !== 1) throw Error('Expected one workshop action');
           const [call] = batch.calls;
           if (call.name !== instruction.name && !(canAsk && call.name === 'ask_user_question')) throw Error('Unknown workshop action');
           if (call.name === 'ask_user_question') {
-            const input = JSON.parse(call.arguments);
-            if (input.timeout !== undefined && input.timeout !== 1) throw Error('Unexpected question wait duration');
+            const args = JSON.parse(call.arguments);
+            batch = { ...batch, calls: [{ ...call, arguments: JSON.stringify({ questions: args.questions, timeout: 1 }) }] };
           }
           const outcome = await executor.execute(batch);
-          if (outcome.results[0]?.result.isError || !produced.value) throw Error('Workshop action did not complete');
+          if (outcome.results[0]?.result.isError || !produced.value) {
+            produced.rejection ||= 'TOOL_RESULT';
+            if (attempts === 1 && outcome.results[0]?.result.isError) return outcome;
+            throw Error('Workshop action did not complete');
+          }
           return { ...outcome, concluded: true };
         },
       });

@@ -13,7 +13,7 @@ import {
 } from './classroom-dialogue.mjs';
 
 import { coursewarePath, maxCoursewareBytes, validateCoursewareTurn } from './courseware.mjs';
-import { workshopPath, workshopByteLimit, validateWorkshop } from './teaching-workshop.mjs';
+import { workshopPath, workshopByteLimit, validateWorkshop, WorkshopTurnError } from './teaching-workshop.mjs';
 
 const compilerPath = '/v1/courseware-compile';
 const maxBodyBytes = 1024 * 1024;
@@ -248,6 +248,8 @@ export function createService({
           error: deadline.aborted ? 'Model turn timed out' : 'Teaching material turn failed',
           ...error.receipt,
         });
+      } else if (withWorkshop && error instanceof WorkshopTurnError) {
+        json(response, deadline.aborted ? 504 : 502, { error: 'Workshop action failed', errorCode: error.code });
       } else if (deadline.aborted) {
         json(response, 504, { error: 'Model turn timed out' });
       } else {

@@ -350,7 +350,8 @@ function MessageView({ message }: { message: Message }) {
   const waitingForAnswers = Boolean(metadata.questions?.length && !metadata.questionReplyJobId && !pending);
   const content = pending && streamed ? streamed : pending ? '' : message.content;
   const scoped = document.getElementById('cocreation-workbench')?.dataset.scopedTeaching === 'true';
-  const text = scoped && message.role === 'assistant' ? displayTeachingReply(content) : content;
+  const text = metadata.questions?.length && content === '我需要确认一个会影响成品的选择。'
+    ? '' : scoped && message.role === 'assistant' ? displayTeachingReply(content) : content;
   const latest = [...activity]
     .reverse()
     .find((item) => item.kind !== 'message' && item.kind !== 'reasoning');
@@ -395,7 +396,7 @@ function MessageView({ message }: { message: Message }) {
         {job && (pending || waitingForAnswers || job.status === 'FAILED' || job.status === 'CANCELED') && (
           <button className="run-summary" onClick={() => c.selectJob(job.id)}>
             <Status status={waitingForAnswers ? 'WAITING_INPUT' : job.status} />
-            <span>{waitingForAnswers ? '等待你回答需求问题' : latest?.title || job.message || job.stage || '查看执行记录'}</span>
+            {!waitingForAnswers && <span>{latest?.title || job.message || job.stage || '查看执行记录'}</span>}
             <ArrowUpRight size={14} />
           </button>
         )}
@@ -448,10 +449,10 @@ function MessageView({ message }: { message: Message }) {
               <span className="result-glyph" aria-hidden="true">{card.state?.artifactType === 'simulation' ? <Play size={18} /> : <FileText size={19} />}</span>
               <span>
                 <small>
-                  {artifactId ? '生成成品' : candidateId ? (card.state?.kind === 'slide-deck' ? '课件方案' : '生成结果') : card.title || '任务结果'}
+                  {artifactId ? (card.state?.artifactType === 'simulation' ? '动态仿真' : card.state?.artifactType === 'slide-deck' ? '课件' : '生成成品') : candidateId ? (card.state?.kind === 'slide-deck' ? '课件方案' : '生成结果') : card.title || '任务结果'}
                 </small>
                 <strong>{card.title || card.state?.title || '查看内容'}</strong>
-                <span>{card.subtitle || card.state?.status || ''}</span>
+                <span>{card.subtitle || (artifactId && card.state?.status === 'READY' ? '打开预览' : card.state?.status || '')}</span>
               </span>
               <ArrowUpRight size={16} />
             </button>

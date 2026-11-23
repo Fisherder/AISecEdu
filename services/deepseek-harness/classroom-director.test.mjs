@@ -445,7 +445,7 @@ test('workshop uses the official native question tool and resumes from the answe
     id: 'audience', question: '课件主要面向哪个年级？',
     options: [{ label: '小学', description: '从生活观察开始' }, { label: '初中', description: '加入过程和数据' }],
   }];
-  let reply = tool({ questions }, 'ask_user_question');
+  let reply = tool({ questions, timeout: 120 }, 'ask_user_question');
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (_url, options) => {
     calls.push(JSON.parse(options.body));
@@ -461,7 +461,8 @@ test('workshop uses the official native question tool and resumes from the answe
   t.after(() => engine.close());
   const service = createService({ secret, engine });
   const first = await engine.workshopTurn(body, AbortSignal.timeout(2200));
-  assert.deepEqual(first.submission.question, {
+  assert.match(first.submission.questions[0].id, /^q-[0-9a-f]{18}$/);
+  assert.deepEqual({ ...first.submission.questions[0], id: 'audience' }, {
     id: 'audience', text: questions[0].question, choices: ['小学', '初中'],
     descriptions: ['从生活观察开始', '加入过程和数据'],
   });

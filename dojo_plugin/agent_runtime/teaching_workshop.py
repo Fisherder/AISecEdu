@@ -46,6 +46,10 @@ def _turn(root, secret, model, payload):
                                    allow_redirects=False, timeout=(5, 154))
             if response.status_code == 400:
                 raise PermanentJobError("创作要求未通过教学内容校验，请调整要求后重试。")
+            if response.status_code == 502:
+                reason = response.json().get("errorCode")
+                if reason in {"QUESTION_SHAPE", "OUTPUT_SHAPE", "MODEL_CONSISTENCY", "TOOL_RESULT", "RUN_INCOMPLETE"}:
+                    raise RuntimeJobError(f"智能体没有交付有效的教学内容（{reason}）。", category="quality")
             response.raise_for_status()
             receipt = response.json()
     except (requests.RequestException, ValueError):
@@ -124,7 +128,7 @@ def is_simulation(content):
     return isinstance(content, dict) and content.get(PIN) == CONTRACT and content.get("artifactType") == "simulation"
 
 
-def revise_simulation(job, artifact, revision):
+def revise_simulation(job, revision):
     from .jobs import PermanentJobError, heartbeat
 
     root, secret, model = teacher_dsh_chat._connection()
@@ -162,10 +166,9 @@ def invoke(job, payload):
     if not plan:
         job = heartbeat(job, stage="understanding", progress=18, message="理解教学目标与学生要完成的操作")
         result, usage = _turn(root, secret, model, body)
-        if result.get("question"):
-            question = result["question"]
+        if result.get("questions"):
             return {"answer": "我需要确认一个会影响成品的选择。", "executionMode": "ask",
-                    "questions": [question]}, usage
+                    "questions": result["questions"]}, usage
         plan = result.get("plan")
         if not plan:
             raise PermanentJobError("未能形成可执行的教学设计，请补充细节后重试。")
@@ -213,6 +216,9 @@ header p,.muted{color:#53657b}header p{margin-top:6px}.grid{display:grid;grid-te
 section{border:1px solid #ced9e6;background:white;padding:16px;border-radius:12px;min-width:0}
 .readout{color:#214d9a;font-size:25px;font-weight:690}.bar{height:12px;margin:11px 0;background:#e5edf8;border-radius:6px;overflow:hidden}
 #meter{height:100%;background:#2b64bf;width:0;transition:width .22s ease}input{width:100%;accent-color:#285dac}
+.visual{margin:8px 0;background:#f4f7fc;border:1px solid #dbe5f2;border-radius:12px;width:100%;height:145px}
+.visual line{stroke:#a7bad2;stroke-width:2}.visual path{stroke:#2b64bf;stroke-width:3;fill:none}
+.visual circle{fill:#2b64bf}#pendulum line{stroke:#315882;stroke-width:3}
 button{font:inherit;padding:6px 10px;background:#fff;border:1px solid #9db0c6;color:#193a63;border-radius:6px;cursor:pointer}
 button:hover,button[aria-pressed=true]{background:#eaf2ff}button:focus-visible,input:focus-visible{outline:2px solid #2458a6;outline-offset:2px}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.row output{margin-left:auto}
@@ -226,6 +232,13 @@ button:hover,button[aria-pressed=true]{background:#eaf2ff}button:focus-visible,i
 <button type="button" id="reset">重置</button><output id="position" for="setting"></output></div>
 <p class="muted" id="observation"></p><div class="row"><button type="button" id="remember" aria-pressed="false">标记为基准</button></div></section>
 <section><h2 id="measure"></h2><p class="readout" id="measurement"></p><div class="bar" aria-hidden="true"><div id="meter"></div></div>
+<svg class="visual" id="chart" viewBox="0 0 320 160" role="img" aria-label="输入与观测量变化图">
+<line x1="24" y1="133" x2="296" y2="133"></line><line x1="24" y1="133" x2="24" y2="16"></line>
+<path id="trace"></path><circle id="point" r="6"></circle></svg>
+<svg class="visual" id="pendulum" viewBox="0 0 320 160" role="img" aria-label="单摆运动示意" style="display:none">
+<line x1="111" y1="17" x2="209" y2="17"></line><g id="swing"><line id="cord" x1="160" y1="19" x2="160" y2="104"></line>
+<circle id="bob" cx="160" cy="104" r="10"></circle></g><circle cx="160" cy="19" r="4"></circle></svg>
+<button type="button" id="motion" style="display:none" aria-pressed="false">播放摆动</button>
 <h2 id="state-title"></h2><p id="effects"></p><p class="muted" id="comparison" aria-live="polite"></p></section></div>
 <section class="check"><h2>检验你的判断</h2><p id="question"></p><div class="row" id="choices"></div><p id="feedback" role="status"></p></section>
 <footer id="note"></footer></main>
@@ -238,8 +251,42 @@ const slider = get('setting');
 const last = data.states.length - 1;
 const peak = Math.max(1, ...data.states.map(state => state.measurement));
 let baseline;
+let motionStart;
+let animation;
 slider.max = last;
 const fmt = value => new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 3 }).format(value);
+const physics = data.visualization === 'pendulum';
+const x = i => 24 + 272 * (data.states[i].setting - data.states[0].setting) /
+  (data.states[last].setting - data.states[0].setting);
+const y = i => 133 - 105 * data.states[i].measurement / peak;
+const attr = (id, name, value) => get(id).setAttribute(name, value);
+attr('trace', 'd', data.states.map((_, i) => (i ? 'L' : 'M') + x(i) + ' ' + y(i)).join(' '));
+function pause() {
+  if (animation !== undefined) cancelAnimationFrame(animation);
+  animation = undefined;
+  motionStart = undefined;
+  attr('motion', 'aria-pressed', 'false');
+  attr('swing', 'transform', 'rotate(15 160 19)');
+  set('motion', '播放摆动');
+}
+function frame(time) {
+  motionStart ??= time;
+  const period = Math.max(0.2, data.states[Number(slider.value)].measurement);
+  const angle = 15 * Math.cos((time - motionStart) / (1000 * period) * 2 * Math.PI);
+  attr('swing', 'transform', 'rotate(' + angle + ' 160 19)');
+  animation = requestAnimationFrame(frame);
+}
+if (physics) {
+  get('chart').style.display = 'none';
+  get('pendulum').style.display = '';
+  get('motion').style.display = '';
+  get('motion').addEventListener('click', () => {
+    if (animation !== undefined) return pause();
+    attr('motion', 'aria-pressed', 'true');
+    set('motion', '停止摆动');
+    animation = requestAnimationFrame(frame);
+  });
+}
 function update(index) {
   index = Math.max(0, Math.min(last, index));
   slider.value = index;
@@ -253,6 +300,14 @@ function update(index) {
   set('position', (index + 1) + '/' + (last + 1));
   set('comparison', baseline == null ? '' : '与基准的变化 ' + fmt(item.measurement - baseline) + ' ' + data.measureUnit);
   get('meter').style.width = (100 * item.measurement / peak) + '%';
+  attr('point', 'cx', x(index));
+  attr('point', 'cy', y(index));
+  const cord = 44 + 66 * item.setting / data.states[last].setting;
+  if (physics) {
+    attr('cord', 'y2', 19 + cord);
+    attr('bob', 'cy', 19 + cord);
+    motionStart = undefined;
+  }
   get('previous').disabled = index === 0;
   get('next').disabled = index === last;
 }
@@ -266,6 +321,7 @@ slider.addEventListener('input', () => update(Number(slider.value)));
 get('previous').addEventListener('click', () => update(Number(slider.value) - 1));
 get('next').addEventListener('click', () => update(Number(slider.value) + 1));
 get('reset').addEventListener('click', () => {
+  if (physics) pause();
   baseline = undefined;
   get('remember').setAttribute('aria-pressed', 'false');
   document.querySelectorAll('#choices button').forEach(button => button.setAttribute('aria-pressed', 'false'));
@@ -288,5 +344,6 @@ data.choices.forEach((label, index) => {
   });
   get('choices').append(option);
 });
+if (physics) pause();
 update(0);
 </script></body></html>"""
