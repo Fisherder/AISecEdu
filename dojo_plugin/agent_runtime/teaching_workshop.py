@@ -1,11 +1,14 @@
 """Adapter from durable teacher input to the official native workshop tools."""
 
+import hashlib
 import json
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+from .. import config
 from . import ordinary_courseware, teacher_dsh_chat
 
 PIN = "teachingWorkshop"
@@ -110,6 +113,41 @@ def _slide(page, design, index):
             "content": {"studio": studio}}
 
 
+def _verify_slide_render(slide):
+    from .jobs import PermanentJobError, RuntimeJobError
+
+    origin = os.getenv("AISECEDU_TEACHING_WORKSHOP_INSPECTOR_URL", "").rstrip("/")
+    secret = config.AGENT_RUNTIME_SERVICE_SECRET
+    if not origin or not secret:
+        raise RuntimeJobError("课件的浏览器校验服务尚未接入，请稍后重试。", category="service")
+    studio = slide["content"]["studio"]
+    wire = json.dumps(studio, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    try:
+        with requests.Session() as client:
+            client.trust_env = False
+            response = client.post(origin + "/inspect", data=wire, headers={
+                "Content-Type": "application/json",
+                "X-AISecEdu-Service-Token": secret,
+            }, timeout=(5, 85), allow_redirects=False)
+            response.raise_for_status()
+            inspected = response.json()
+    except (requests.RequestException, ValueError):
+        raise RuntimeJobError("浏览器校验未完成，重新执行时会沿用已生成内容。", category="service") from None
+    evidence = inspected.get("evidence") or {}
+    frames = evidence.get("frames")
+    if (not isinstance(inspected.get("issues"), list) or not isinstance(frames, list)
+            or len(frames) != len(studio["page"]["beats"]) + 1
+            or evidence.get("sourceSha256") != hashlib.sha256(wire).hexdigest()
+            or any(not isinstance(frame, dict) or frame.get("step") != index - 1
+                   or not re.fullmatch(r"[a-f0-9]{64}", frame.get("screenshotSha256") or "")
+                   for index, frame in enumerate(frames))):
+        raise RuntimeJobError("课件缺少完整的逐帧校验回执。", category="service")
+    if inspected["issues"]:
+        raise PermanentJobError(f"第 {slide['order'] + 1} 页排版未通过校验，未发布可预览成品。")
+    return {"page": slide["id"], "sourceSha256": evidence["sourceSha256"],
+            "frames": [{key: frame[key] for key in ("step", "screenshotSha256")} for frame in frames]}
+
+
 def _simulation_html(data):
     document = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     return SIMULATION_TEMPLATE.replace("__TEACHING_DATA__", document, 1)
@@ -194,16 +232,21 @@ def invoke(job, payload):
         db.session.commit()
     job = heartbeat(job, stage="validating", progress=88, message="校验播放结构、内容与成品版本")
     artifact_type = "slide-deck" if stage == "deck-page" else "simulation"
+    evidence = []
     if stage == "deck-page":
         slides = [_slide(page, plan, index) for index, page in enumerate(parts)]
         artifacts = ordinary_courseware._compile_slides(root, secret, slides)
+        job = heartbeat(job, stage="render-review", progress=91, message="正在浏览器中逐页检查播放画面")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            evidence = list(pool.map(_verify_slide_render, artifacts))
         title = plan["title"]
     else:
         artifacts = [_simulation_artifact(parts[0])]
         title = parts[0]["title"]
     return {"answer": "成品已生成，可以打开预览和继续修改。", "executionMode": "execute",
             "workshopArtifact": {"type": artifact_type, "title": title, "objective": plan["objective"],
-                                 "artifacts": artifacts, "design": plan, "kind": body["kind"]}}, usage
+                                 "artifacts": artifacts, "design": plan, "kind": body["kind"],
+                                 "renderEvidence": evidence}}, usage
 
 
 SIMULATION_TEMPLATE = """<!doctype html>

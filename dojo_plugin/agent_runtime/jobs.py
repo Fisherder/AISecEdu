@@ -3835,7 +3835,8 @@ def _workshop_result(job):
         artifact_id=artifact.id, revision=1, created_by=job.owner_id, instruction=payload["prompt"],
         content=content, content_hash=content_hash(content), source_refs=[],
         validation={"status": "GENERATED", "modelRoute": invocation.route, "actualModel": model,
-                    "artifactCount": len(design["artifacts"]), "degraded": False},
+                    "artifactCount": len(design["artifacts"]), "degraded": False,
+                    **({"renderEvidence": design["renderEvidence"]} if design["renderEvidence"] else {})},
     )
     db.session.add(revision)
     db.session.flush()
