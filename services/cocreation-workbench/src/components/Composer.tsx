@@ -91,6 +91,7 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
   const [plus, setPlus] = useState(false);
   const [drag, setDrag] = useState(false);
   const draft = state.draft;
+  const scopedTeaching = document.getElementById('cocreation-workbench')?.dataset.scopedTeaching === 'true';
   const active = state.jobs.find((job) => job.threadId === state.thread?.id && !terminal(job));
   const archived = state.thread?.status === 'ARCHIVED';
   const canSend =
@@ -272,6 +273,16 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
                 event.target.value = '';
               }}
             />
+            {!scopedTeaching && (
+              <select
+                aria-label="学习模式"
+                value={draft.learningPattern}
+                onChange={(event) => c.setDraft({ learningPattern: event.target.value as '' | 'process-inquiry' })}
+              >
+                <option value="">通用创作</option>
+                <option value="process-inquiry">流程探究 · AES-128</option>
+              </select>
+            )}
             <div className="push" />
             {active && (
               <select
@@ -295,8 +306,7 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
                 <Square size={14} fill="currentColor" />
               </IconButton>
             )}
-            {document.getElementById('cocreation-workbench')?.dataset.scopedTeaching !== 'true' &&
-              hasOnlyMaterialSources(draft.sources) && (
+            {!scopedTeaching && hasOnlyMaterialSources(draft.sources) && (
               <Button disabled={!canSend} onClick={() => void c.send({}, 'ask')}>
                 仅问答
               </Button>
