@@ -13,16 +13,19 @@ export const coursewarePatchSchema = z.object({
 const roots = new Set(['title', 'objective', 'composition', 'layout', 'takeaway', 'supporting', 'visual', 'beats', 'check', 'speakerNotes', 'durationSeconds', 'evidence']);
 const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
 
-export function applyCoursewarePagePatch(original: CoursewarePage, patch: z.infer<typeof coursewarePatchSchema>, textOnly = false): CoursewarePage {
+export function applyCoursewarePagePatch(original: CoursewarePage, patch: z.infer<typeof coursewarePatchSchema>, textOnly = false, preserveSourceFields = false): CoursewarePage {
   if (JSON.stringify(patch).length > 250000) throw new Error('A targeted correction exceeded the patch size limit');
   const page = structuredClone(original) as unknown as Record<string, any>;
   const proseFields = new Map(coursewareLanguageUnit(original).fields.filter(field => !field.literal).map(field => [field.path, field.text]));
   for (const change of patch.changes) {
+    let value = change.value;
     if (textOnly) {
       const before = proseFields.get(change.path.join('.'));
       if (change.op !== 'set' || before === undefined || typeof change.value !== 'string')
         throw Error('纯文字修订只能set现有教学文字字段，不可修改画面、代码、公式、答案键或数据');
-      if (JSON.stringify(protectedTeachingLiterals(before)) !== JSON.stringify(protectedTeachingLiterals(change.value)))
+      const text = preserveSourceFields ? change.value.trim() : change.value;
+      value = text;
+      if (JSON.stringify(protectedTeachingLiterals(before)) !== JSON.stringify(protectedTeachingLiterals(text)))
         throw Error('纯文字修订不能增删或改变数字、单位、引文代码、公式或链接：' + change.path.join('.'));
     }
     if (!roots.has(String(change.path[0])) || change.path.some(key => forbidden.has(String(key)))) throw new Error('Patch cannot change page identity or prototype properties');
@@ -39,10 +42,12 @@ export function applyCoursewarePagePatch(original: CoursewarePage, patch: z.infe
       if (!Object.hasOwn(parent, key)) throw new Error('Cannot remove a missing field');
       if (Array.isArray(parent)) parent.splice(key as number, 1); else delete parent[key];
     } else {
-      if (change.value === undefined) throw new Error('Set/add patches require a JSON value');
-      if (Array.isArray(parent) && change.op === 'add') parent.splice(key as number, 0, structuredClone(change.value));
-      else parent[key] = structuredClone(change.value);
+      if (value === undefined) throw new Error('Set/add patches require a JSON value');
+      if (Array.isArray(parent) && change.op === 'add') parent.splice(key as number, 0, structuredClone(value));
+      else parent[key] = structuredClone(value);
     }
   }
-  return coursewarePageSchema.parse(textOnly ? page : normalizeCoursewarePageLayout(page));
+  const validated = coursewarePageSchema.parse(textOnly ? page : normalizeCoursewarePageLayout(page));
+  // A locked native source may carry private metadata stripped by schema parsing.
+  return textOnly && preserveSourceFields ? page as CoursewarePage : validated;
 }

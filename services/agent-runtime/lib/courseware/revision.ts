@@ -33,6 +33,8 @@ export async function reviseModernCourseware(input: {
   onlyPageIds?: string[];
   pageInstructions?: Record<string, string>;
   textOnlyPageIds?: string[];
+  titlesOnly?: boolean;
+  preserveWordingCanvas?: boolean;
   inspectRendered: (
     data: CoursewareSlideData,
   ) => Promise<{ issues: string[]; evidence: Record<string, unknown> }>;
@@ -142,7 +144,7 @@ export async function reviseModernCourseware(input: {
     let patchedPage: CoursewarePage | undefined;
     if (edit && input.projectedTextPatch) {
       const editableTextFields = coursewareLanguageUnit(source.page).fields
-        .filter(field => !field.literal && field.path !== 'speakerNotes')
+        .filter(field => !field.literal && field.path !== 'speakerNotes' && (!input.titlesOnly || field.path === 'title'))
         .map(field => ({ path: field.path, text: field.text, protectedLiterals: protectedTeachingLiterals(field.text) }));
       const allowedPaths = new Set(editableTextFields.map(field => field.path));
       const result = await input.projectedTextPatch(edit.instruction, editableTextFields);
@@ -150,7 +152,7 @@ export async function reviseModernCourseware(input: {
       if (new Set(changedPaths).size !== changedPaths.length || changedPaths.some(path => !allowedPaths.has(path))) {
         throw new Error('A projected edit must target distinct visible teaching text fields');
       }
-      const revised = applyCoursewarePagePatch(source.page, result, true);
+      const revised = applyCoursewarePagePatch(source.page, result, true, input.preserveWordingCanvas);
       if ((await inspectPage(revised)).length) {
         throw new Error('The revised teaching text did not pass local layout checks');
       }
@@ -226,6 +228,32 @@ export async function reviseModernCourseware(input: {
       layout: page.role,
       studio,
     };
+    if (input.preserveWordingCanvas && input.projectedTextPatch) {
+      if (!('elements' in native) || native.elements.length !== compiled.elements.length) {
+        throw new Error('A combined wording edit requires the original native elements');
+      }
+      const original = input.artifacts[index];
+      const titleChanged = page.title !== source.page.title;
+      const objectiveChanged = page.objective !== source.page.objective;
+      const keyPointsChanged = page.takeaway !== source.page.takeaway ||
+        page.supporting.some((text, index) => text !== source.page.supporting[index]);
+      artifacts.push({
+        ...original,
+        ...(titleChanged ? {title: page.title} : {}),
+        outline: {
+          ...original.outline,
+          ...(titleChanged ? {title: page.title} : {}),
+          ...(objectiveChanged ? {description: page.objective} : {}),
+          ...(keyPointsChanged ? {keyPoints: [page.takeaway, ...page.supporting]} : {}),
+        },
+        content: {
+          ...native,
+          elements: compiled.elements,
+          studio,
+        },
+      });
+      continue;
+    }
     artifacts.push({
       ...structuredClone(input.artifacts[index]),
       title: page.title,

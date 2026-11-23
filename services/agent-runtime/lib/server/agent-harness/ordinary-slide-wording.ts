@@ -7,7 +7,7 @@ import { parseJsonResponse } from '@/lib/generation/json-repair';
 import type { AICallFn } from '@/lib/generation/pipeline-types';
 import { mergeUsage } from '@/lib/server/teacher-agent';
 import type { LessonArtifact } from '@/lib/types/lesson';
-import { deckText, inspectOrdinaryDeckTextPage } from './ordinary-deck-revision';
+import { deckText, inspectOrdinaryDeckTextPage, verifyOrdinaryDeckRenderEvidence } from './ordinary-deck-revision';
 import { ordinarySlidePatch, ordinaryTeachingRules, ordinaryTeachingText, type OrdinaryTeachingModel } from './ordinary-teaching';
 
 function recordValue(value: unknown): Record<string, unknown> | null {
@@ -91,12 +91,18 @@ export async function reviseOrdinarySlide(
   target: Exclude<ReturnType<typeof ordinarySlideTarget>, {error: string}>,
   model: OrdinaryTeachingModel,
   deckCall?: AICallFn,
+  combined?: {titlesOnly: boolean},
 ) {
   let usage: Record<string, number> = {};
   const revised = await reviseModernCourseware({
     artifacts: target.artifacts, instruction: target.instruction,
-    onlyPageIds: target.pageIds, textOnlyPageIds: target.pageIds,
-    inspectRendered: deckCall ? data => inspectOrdinaryDeckTextPage(data, model.signal) : inspectRenderedCourseware,
+    onlyPageIds: target.pageIds, textOnlyPageIds: target.pageIds, titlesOnly: combined?.titlesOnly,
+    preserveWordingCanvas: combined !== undefined,
+    inspectRendered: deckCall ? async data => {
+      const result = await inspectOrdinaryDeckTextPage(data, model.signal);
+      if (combined && !result.issues.length) verifyOrdinaryDeckRenderEvidence(result.evidence, data);
+      return result;
+    } : inspectRenderedCourseware,
     projectedTextPatch: async (instruction, editableTextFields) => {
       const prompt = JSON.stringify({instruction, editableTextFields});
       if (deckCall) {
@@ -114,9 +120,12 @@ export async function reviseOrdinarySlide(
   });
   const design = recordValue(target.content.coursewareDesign);
   const editedTitles = new Map(
-    revised.artifacts.flatMap(item => {
-      const id = recordValue(recordValue(recordValue(item.content)?.studio)?.page)?.id;
-      return typeof id === 'string' && target.pageIds.includes(id) ? [[id, item.title] as const] : [];
+    revised.artifacts.flatMap((item, index) => {
+      const page = recordValue(recordValue(recordValue(item.content)?.studio)?.page);
+      const id = page?.id;
+      const originalPage = recordValue(recordValue(recordValue(target.artifacts[index].content)?.studio)?.page);
+      return typeof id === 'string' && target.pageIds.includes(id) && (!combined || page?.title !== originalPage?.title)
+        ? [[id, item.title] as const] : [];
     }),
   );
   const storedArtifacts = [...target.storedArtifacts];

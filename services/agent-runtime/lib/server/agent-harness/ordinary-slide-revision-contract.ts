@@ -47,7 +47,8 @@ function hasJobPin(
 export function pinnedOrdinarySlideRevision(body: {scope?: unknown; modelRoute?: unknown; payload?: unknown}) {
   const payload = jobRecord(body.payload) ?? {};
   if (hasJobPin(slideLayoutJob, body, payload)) return slideLayoutJob.invalid;
-  if (hasJobPin(deckRevisionJob, body, payload) || Object.hasOwn(payload, 'deckOperation')) {
+  if (hasJobPin(deckRevisionJob, body, payload) || Object.hasOwn(payload, 'deckOperation') ||
+      Object.hasOwn(payload, 'combinedRevision')) {
     return deckRevisionJob.invalid;
   }
 }
@@ -63,7 +64,9 @@ export function ordinarySlideRevisionInput(body: Record<string, unknown>, job: O
   if (!payload || body.kind !== 'artifact.revise' || scope?.ordinaryTeaching !== job.scope ||
       payload.revisionBackend !== job.backend || payload.artifactType !== 'slide-deck' ||
       payload.workspaceId != null || hasJobPin(otherJob, body, payload) ||
-      (payload.deckOperation !== undefined && (job === slideLayoutJob || payload.deckOperation !== 'palette')) ||
+      (payload.deckOperation !== undefined && (job === slideLayoutJob ||
+        (payload.deckOperation !== 'palette' && payload.deckOperation !== 'palette-wording'))) ||
+      (Object.hasOwn(payload, 'combinedRevision') !== (payload.deckOperation === 'palette-wording')) ||
       typeof ownerId !== 'number' || !Number.isSafeInteger(ownerId) || ownerId <= 0 ||
       typeof dojoId !== 'number' || !Number.isSafeInteger(dojoId) ||
       (moduleIndex != null && (typeof moduleIndex !== 'number' || !Number.isSafeInteger(moduleIndex)))) {

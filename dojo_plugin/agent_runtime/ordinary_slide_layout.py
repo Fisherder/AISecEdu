@@ -178,6 +178,37 @@ def _palette_request(instruction):
     return pages
 
 
+def _combined_request(instruction):
+    original, _ = split_source_selection(instruction)
+    match = re.fullmatch(
+        r"(?:请\s*)?(.+?)\s*[，,；;]?\s*(?:然后|并且|同时|并|再)\s*"
+        r"((?:润色|改写|优化|调整)(?:所有|全部|各页|每页|整套课件的)?"
+        r"(标题|文字|措辞|文案)(?:[：:][^，,；;。！？!?]+)?)[。！!]?",
+        original,
+    )
+    if not match:
+        return None
+    palette, wording, field = match.groups()
+    existing = bool(re.fullmatch(
+        rf"(?:统一\s*{_PALETTE_DECK}\s*(?:的)?\s*(?:(?:原有|现有)\s*)?配色"
+        rf"|统一\s*(?:原有|现有)配色)",
+        palette,
+    ))
+    if not existing and _palette_request(palette) != "all":
+        return None
+    _deck_instruction(instruction)
+    return {"paletteInstruction": palette, "wordingInstruction": wording, "titlesOnly": field == "标题",
+            "reuseOriginalPalette": existing}
+
+
+def _original_palette(content, lesson):
+    design = content.get("coursewareDesign")
+    if isinstance(design, dict) and "theme" in design:
+        return _palette_colors(design["theme"])
+    palettes = [_palette_colors(slide["content"]["studio"].get("theme")) for slide in lesson["artifacts"]]
+    return next((palette for palette in palettes if palette is not None and palettes.count(palette) > len(palettes) // 2), None)
+
+
 def _palette_colors(theme):
     if not isinstance(theme, dict) or not isinstance(theme.get("name"), str) or not theme["name"].strip():
         return None
@@ -226,13 +257,16 @@ def admit(user, artifact, payload):
     is_deck = command is None
     palette_pages = _palette_request(payload.get("instruction")) if is_deck else None
     is_palette = palette_pages is not None
+    combined = _combined_request(instruction) if is_deck else None
     if is_deck:
         if (ordinary_slide_wording_request(payload.get("instruction"))
-                or not (is_palette or _ordinary_deck_request(payload.get("instruction")))):
+                or not (is_palette or combined or _ordinary_deck_request(payload.get("instruction")))):
             return payload
         source = payload.get("currentContent")
         lesson = ordinary_static_lesson(source, allow_missing_layout=True)
-        if lesson is None or (is_palette and not _palette_source(source, lesson)):
+        if lesson is None or ((is_palette or combined) and not _palette_source(source, lesson)):
+            if combined:
+                raise OrdinarySlideLayoutError("组合修订需要可核验的原生静态课件及配色。")
             return payload
         _deck_instruction(payload.get("instruction"))
     _scope(user, artifact)
@@ -242,6 +276,8 @@ def admit(user, artifact, payload):
     revision, lesson = _source(artifact, payload["expectedRevision"], pages)
     if font:
         _require_title_font_source(lesson, font[0])
+    if combined and combined["reuseOriginalPalette"] and _original_palette(revision.content, lesson) is None:
+        raise OrdinarySlideLayoutError("原课件缺少整套主题或多数页面共用的配色。")
     if is_palette and not _palette_source(revision.content, lesson):
         return payload
     return {
@@ -251,7 +287,7 @@ def admit(user, artifact, payload):
             "revisionSha256": revision.content_hash,
             "instructionSha256": content_hash(payload["instruction"]),
             "model": config.HARNESS_DEEPSEEK_MODEL,
-            **({"operation": "palette"} if is_palette else {}),
+            **({"operation": "palette-wording"} if combined else {"operation": "palette"} if is_palette else {}),
             **({"pageSelection": palette_pages} if isinstance(palette_pages, list) else {}),
         },
     }
@@ -297,7 +333,12 @@ def prepare(job, payload, *, lock=False):
     intent, pages = command
     font = _title_font_request(str(instruction or "").strip()) if not is_deck else None
     operation = pin.get("operation")
-    if "operation" in pin or "pageSelection" in pin:
+    combined = None
+    if operation == "palette-wording":
+        combined = _combined_request(instruction)
+        if not is_deck or not combined or "pageSelection" in pin:
+            raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
+    elif "operation" in pin or "pageSelection" in pin:
         palette_pages = _palette_request(instruction)
         if (not is_deck or operation != "palette" or palette_pages is None
                 or ("pageSelection" in pin) != isinstance(palette_pages, list)
@@ -306,16 +347,22 @@ def prepare(job, payload, *, lock=False):
         pages = palette_pages
     revision, lesson = _source(artifact, payload.get("expectedRevision"), pages)
     if ((revision.id, revision.content_hash) != (pin.get("revisionId"), pin.get("revisionSha256"))
-            or (operation == "palette" and not _palette_source(revision.content, lesson))):
+            or (operation in {"palette", "palette-wording"} and not _palette_source(revision.content, lesson))):
         raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
     if font:
         _require_title_font_source(lesson, font[0])
+    if combined and combined.pop("reuseOriginalPalette"):
+        original_palette = _original_palette(revision.content, lesson)
+        if original_palette is None:
+            raise OrdinarySlideLayoutError(_SOURCE_CHANGED)
+        combined["originalPalette"] = original_palette
     return {
         pin_key: pin, "revisionBackend": backend, "artifactType": "slide-deck",
         "artifactId": artifact.id, "expectedRevision": revision.revision,
         "instruction": intent, "currentContent": revision.content,
         **({"titleFontDirection": font[1]} if font else {}),
-        **({"deckOperation": operation} if operation == "palette" else {}),
+        **({"deckOperation": operation} if operation in {"palette", "palette-wording"} else {}),
+        **({"combinedRevision": combined} if combined else {}),
         **({"pageSelection": pages} if not is_deck or isinstance(pages, list) else {}),
     }
 
@@ -423,7 +470,7 @@ def validate_receipt(route, payload, response):
     result = response.get("result") or {}
     content = result.get("content")
     if deck_pinned(payload):
-        _validate_deck_receipt(route, payload, meta, content)
+        _validate_deck_receipt(route, payload, meta, content, result.get("paletteStageContent"))
         return
     before = ordinary_static_lesson(payload["currentContent"], allow_missing_layout=True)
     after = ordinary_static_lesson(content, allow_missing_layout=True)
@@ -476,7 +523,7 @@ def _validate_render_evidence(revision, selected):
         raise OrdinarySlideLayoutError("版式修订的浏览器检查范围与本次选择不一致。")
 
 
-def _validate_deck_receipt(route, payload, meta, content):
+def _validate_deck_receipt(route, payload, meta, content, palette_stage=None):
     before = ordinary_static_lesson(payload["currentContent"], allow_missing_layout=True)
     after = ordinary_static_lesson(content, allow_missing_layout=True)
     revision = content.get("revisionMetadata") if isinstance(content, dict) else None
@@ -492,6 +539,9 @@ def _validate_deck_receipt(route, payload, meta, content):
     ):
         raise OrdinarySlideLayoutError("整套课件修订缺少指定模型或静态课件的有效回执。")
     pin = payload.get(DECK_PIN)
+    if isinstance(pin, dict) and pin.get("operation") == "palette-wording":
+        _validate_combined_receipt(payload, content, before, after, revision, usage, palette_stage)
+        return
     if isinstance(pin, dict) and pin.get("operation") == "palette":
         if (
             not isinstance(pin.get("model"), str) or not pin["model"] or route.get("required_model") != pin["model"]
@@ -504,7 +554,7 @@ def _validate_deck_receipt(route, payload, meta, content):
             payload["currentContent"], content, before, after, revision, pin.get("pageSelection", "all"),
         )
         return
-    if revision.get("operation") == "palette":
+    if revision.get("operation") in {"palette", "palette-wording"}:
         raise OrdinarySlideLayoutError("课件修订回执与已锁定的请求不一致。")
     old, new = before["artifacts"], after["artifacts"]
     output_ids = [_page_id(slide) for slide in new]
@@ -601,7 +651,188 @@ def _palette_slide_matches(before, after, palette):
     )
 
 
-def _validate_palette_receipt(source, result, before, after, revision, pages):
+# Mirrors the non-literal fields in coursewareLanguageUnit for ordinary static pages.
+_WORDING_PATHS = {
+    "chart": re.compile(r"visual\.(?:basis|labels\.[0-9]+|series\.[0-9]+\.name)"),
+    "comparison": re.compile(r"visual\.(?:columns\.[0-9]+|rows\.[0-9]+\.(?:label|values\.[0-9]+))"),
+    "image": re.compile(r"visual\.(?:alt|caption|annotations\.[0-9]+\.label)"),
+}
+_WORDING_TEXT = re.compile(r"title|objective|takeaway|supporting\.[0-9]+")
+_WORDING_LITERAL = re.compile(
+    r"""```[\s\S]*?```|`[^`\n]+`|https?://[^\s<>"“”‘’「」『』（）【】《》，。！？；、]+|"""
+    r"\$\$[\s\S]*?\$\$|\$[^$\n]+\$|(?:0x[0-9a-f]+|[+-]?[0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)"
+    r"(?:\s*(?:%|℃|°C|°|ms|[kMG]?Hz|[kMG]?B|cm|mm|km|kg|m/s(?:²|\^2)?|字节|秒|分钟|小时|米|千克|位|个|轮|倍))?",
+    re.I,
+)
+_WORDING_ESCAPE = str.maketrans({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})
+
+
+def _wording_changes(old, new, visual_paths, titles_only, changes, path=""):
+    if isinstance(old, dict) and isinstance(new, dict):
+        return old.keys() == new.keys() and all(
+            _wording_changes(value, new[key], visual_paths, titles_only, changes, f"{path}.{key}" if path else key)
+            for key, value in old.items()
+        )
+    if isinstance(old, list) and isinstance(new, list):
+        return len(old) == len(new) and all(
+            _wording_changes(left, right, visual_paths, titles_only, changes, f"{path}.{index}")
+            for index, (left, right) in enumerate(zip(old, new))
+        )
+    if _palette_equal(old, new):
+        return True
+    allowed = path == "title" if titles_only else _WORDING_TEXT.fullmatch(path) or visual_paths.fullmatch(path)
+    if (not allowed or not isinstance(old, str) or not old.strip() or not isinstance(new, str) or not new.strip()
+            or sorted(_WORDING_LITERAL.findall(old)) != sorted(_WORDING_LITERAL.findall(new))):
+        return False
+    changes[path] = (old, new)
+    return True
+
+
+def _wording_canvas_text(element_id):
+    # Native ids emitted by compileCoursewareSlide for ordinary text regions.
+    fixed = {"page-title": "title", "page-promise": "takeaway"}
+    if element_id in fixed:
+        return fixed[element_id]
+    for pattern, path in (
+        (r"support-([0-9]+)", "supporting.{}"),
+        (r"column-([0-9]+)", "visual.columns.{}"),
+        (r"criterion-([0-9]+)", "visual.rows.{}.label"),
+        (r"comparison-([0-9]+)-([0-9]+)", "visual.rows.{}.values.{}"),
+        (r"image-label-([0-9]+)", "visual.annotations.{}.label"),
+    ):
+        match = re.fullmatch(pattern, element_id)
+        if match:
+            return path.format(*match.groups())
+    return None
+
+
+def _wording_element_matches(old, new, changes):
+    element_id = old.get("id")
+    if not isinstance(element_id, str):
+        return _palette_equal(old, new)
+    expected = old
+    if old.get("type") == "text" and (change := changes.get(_wording_canvas_text(element_id))):
+        html = old.get("content")
+        match = re.fullmatch(r'(<p style="[^"]+">)([^<>]*)(</p>)', html) if isinstance(html, str) else None
+        if not match or match[2] != change[0].translate(_WORDING_ESCAPE):
+            return False
+        expected = {**old, "content": match[1] + change[1].translate(_WORDING_ESCAPE) + match[3]}
+    if element_id == "verified-image" and "visual.alt" in changes:
+        old_text, new_text = changes["visual.alt"]
+        if old.get("name") != old_text:
+            return False
+        expected = {**old, "name": new_text}
+    if element_id == "evidence-chart":
+        data = old.get("data")
+        if not isinstance(data, dict):
+            return False
+        expected_data = dict(data)
+        for key, path in (("labels", "visual.labels.{}"), ("legends", "visual.series.{}.name")):
+            if not isinstance(data.get(key), list):
+                return False
+            expected_data[key] = []
+            for index, text in enumerate(data[key]):
+                change = changes.get(path.format(index))
+                if change and text != change[0]:
+                    return False
+                expected_data[key].append(change[1] if change else text)
+        expected = {**old, "data": expected_data}
+    return _palette_equal(expected, new)
+
+
+def _wording_slide_matches(before, after, titles_only):
+    old, new = before["content"], after["content"]
+    old_studio, new_studio = old["studio"], new["studio"]
+    old_page, new_page = old_studio["page"], new_studio["page"]
+    changes = {}
+    visual_paths = _WORDING_PATHS[old_page["visual"]["kind"]]
+    if (
+        not _wording_changes(old_page, new_page, visual_paths, titles_only, changes) or not changes
+        or not _palette_equal(_except_fields(old_studio, "page"), _except_fields(new_studio, "page"))
+        or not _palette_equal(_except_fields(old, "studio", "elements"), _except_fields(new, "studio", "elements"))
+        or not _palette_equal(_except_fields(before, "content", "title", "outline"),
+                              _except_fields(after, "content", "title", "outline"))
+    ):
+        return False
+    outline = before.get("outline")
+    if not isinstance(outline, dict):
+        return False
+    expected_outline = dict(outline)
+    if "title" in changes:
+        expected_outline["title"] = new_page["title"]
+    if "objective" in changes:
+        expected_outline["description"] = new_page["objective"]
+    if "takeaway" in changes or any(path.startswith("supporting.") for path in changes):
+        expected_outline["keyPoints"] = [new_page["takeaway"], *new_page["supporting"]]
+    if not _palette_equal(expected_outline, after.get("outline")):
+        return False
+    if "title" in changes:
+        if after.get("title") != new_page["title"]:
+            return False
+    elif ("title" in before) != ("title" in after) or before.get("title") != after.get("title"):
+        return False
+    left, right = old.get("elements"), new.get("elements")
+    return isinstance(left, list) and isinstance(right, list) and len(left) == len(right) and all(
+        _wording_element_matches(original, revised, changes) for original, revised in zip(left, right)
+    )
+
+
+def _validate_combined_receipt(payload, content, before, after, revision, usage, intermediate):
+    source = payload["currentContent"]
+    staged = ordinary_static_lesson(intermediate, allow_missing_layout=True)
+    intent = payload.get("combinedRevision")
+    pin = payload[DECK_PIN]
+    invalid = OrdinarySlideLayoutError("组合修订缺少两阶段有效回执，或修改了指定范围外的内容。")
+    if (
+        not isinstance(intent, dict) or staged is None
+        or pin.get("revisionSha256") != content_hash(source)
+        or set(revision) != {"mode", "operation", "recomposed", "pageIds", "renderEvidence", "stageUsage"}
+        or revision.get("operation") != "palette-wording" or revision.get("recomposed") is not False
+    ):
+        raise invalid
+    stage_usage = revision.get("stageUsage")
+    keys = ("inputTokens", "outputTokens", "totalTokens")
+    if (
+        not isinstance(stage_usage, dict) or set(stage_usage) != {"palette", "wording"}
+        or any(not isinstance(stage, dict) or set(stage) != set(keys)
+               or any(type(stage[key]) is not int or stage[key] < 0 for key in keys)
+               or stage["totalTokens"] != stage["inputTokens"] + stage["outputTokens"]
+               or stage["totalTokens"] <= 0
+               for stage in stage_usage.values())
+        or any(sum(stage[key] for stage in stage_usage.values()) != usage[key] for key in keys)
+    ):
+        raise invalid
+    palette_revision = intermediate.get("revisionMetadata")
+    if not isinstance(palette_revision, dict) or palette_revision.get("mode") != DECK_BACKEND:
+        raise invalid
+    original = intent.get("originalPalette")
+    _validate_palette_receipt(source, intermediate, before, staged, palette_revision, "all", original=original)
+    old, new = staged["artifacts"], after["artifacts"]
+    ids = [_page_id(page) for page in _displayed_pages(old)]
+    if (
+        [_page_id(page) for page in old] != [_page_id(page) for page in new]
+        or revision["pageIds"] != ids
+        or type(after.get("updatedAt")) is not int or after["updatedAt"] < 0
+        or not _palette_equal(_except_fields(intermediate, "lesson", "revisionMetadata", "coursewareDesign"),
+                              _except_fields(content, "lesson", "revisionMetadata", "coursewareDesign"))
+        or not _palette_equal(_except_fields(staged, "artifacts", "updatedAt"), _except_fields(after, "artifacts", "updatedAt"))
+        or not all(_wording_slide_matches(left, right, intent["titlesOnly"]) for left, right in zip(old, new))
+    ):
+        raise invalid
+    old_design, new_design = intermediate.get("coursewareDesign"), content.get("coursewareDesign")
+    if isinstance(old_design, dict) and isinstance(old_design.get("pages"), list):
+        titles = {_page_id(right): right.get("title") for left, right in zip(old, new)
+                  if left["content"]["studio"]["page"].get("title") != right["content"]["studio"]["page"].get("title")}
+        old_design = {**old_design, "pages": [
+            {**page, "title": titles[page["id"]]} if isinstance(page, dict) and page.get("id") in titles else page
+            for page in old_design["pages"]
+        ]}
+    if ("coursewareDesign" in intermediate) != ("coursewareDesign" in content) or not _palette_equal(old_design, new_design):
+        raise invalid
+    _validate_render_evidence(revision, ids)
+
+
+def _validate_palette_receipt(source, result, before, after, revision, pages, *, original=None):
     old, new = before["artifacts"], after["artifacts"]
     displayed = [_page_id(slide) for slide in _displayed_pages(old)]
     if pages == "all":
@@ -639,7 +870,9 @@ def _validate_palette_receipt(source, result, before, after, revision, pages):
         old_design = {**old_design, "theme": {**old_design["theme"], **palette}}
     if ("coursewareDesign" in source) != ("coursewareDesign" in result) or not _palette_equal(old_design, new_design):
         raise OrdinarySlideLayoutError("整套配色修订改变了颜色以外的设计信息。")
-    if not any(
+    if original is not None and not _palette_equal(palette, original):
+        raise OrdinarySlideLayoutError("统一配色必须使用已核验的原有颜色。")
+    if original is None and not any(
         any(slide["content"]["studio"]["theme"][key].lower() != color.lower() for key, color in palette.items())
         for slide in old if _page_id(slide) in selected_ids
     ):

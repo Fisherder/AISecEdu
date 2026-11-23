@@ -196,7 +196,7 @@ export async function selectOrdinaryDeckTextPages(
 
 const paletteSchema = coursewareThemeSchema.omit({ name: true }).strict();
 const paletteResponseSchema = z.strictObject({ palette: paletteSchema });
-const paletteRenderEvidence = z.object({
+const staticRenderEvidence = z.object({
   pageId: z.string(),
   mode: z.literal('headless-chromium-dom-and-pixels'),
   sourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -205,6 +205,17 @@ const paletteRenderEvidence = z.object({
     z.object({ step: z.literal(-1), screenshotSha256: z.string().regex(/^[a-f0-9]{64}$/) }),
   ]),
 });
+
+export function verifyOrdinaryDeckRenderEvidence(
+  evidence: Record<string, unknown>,
+  studio: CoursewareSlideData,
+) {
+  const proof = staticRenderEvidence.safeParse(evidence);
+  if (!proof.success || proof.data.pageId !== studio.page.id ||
+      proof.data.sourceSha256 !== createHash('sha256').update(JSON.stringify(studio)).digest('hex')) {
+    throw new Error('Incomplete browser verification evidence for the static deck revision');
+  }
+}
 
 const paletteElementFields: Partial<Record<string, readonly string[]>> = {
   text: ['defaultColor', 'content'],
@@ -270,9 +281,17 @@ function applyPaletteToCanvas(
   return result;
 }
 
+export const combinedDeckRevisionSchema = z.strictObject({
+  paletteInstruction: deckInstruction,
+  wordingInstruction: deckInstruction,
+  titlesOnly: z.boolean(),
+  originalPalette: coursewareThemeSchema.omit({ name: true }).optional(),
+});
+
 export async function reviseOrdinaryDeckPalette(
   target: ReturnType<typeof ordinaryDeckTarget>,
   model: OrdinaryTeachingModel,
+  originalPalette?: z.infer<typeof combinedDeckRevisionSchema>['originalPalette'],
 ) {
   const wholeDeck = target.pageSelection === 'all';
   const design = wholeDeck ? record(target.content.coursewareDesign) : undefined;
@@ -304,11 +323,12 @@ export async function reviseOrdinaryDeckPalette(
           '只返回 JSON，顶层为 palette，' +
           '包含 background、foreground、muted、accent、secondary、surface 六种 #RRGGBB 颜色。' +
           '未要求调整的颜色尽量保留，只有为保持对比度时才调整关联色。' +
+          (originalPalette ? '必须逐值使用指定的原有配色 originalPalette。' : '') +
           '前景与背景对比度至少 7:1，次要文字与背景至少 4.5:1，前景与面板至少 4.5:1，强调色与背景至少 3:1。',
       },
       {
         role: 'user',
-        content: JSON.stringify({ instruction: target.instruction, currentPalettes }),
+        content: JSON.stringify({ instruction: target.instruction, currentPalettes, originalPalette }),
       },
     ],
     model.signal,
@@ -329,7 +349,10 @@ export async function reviseOrdinaryDeckPalette(
   if (coursewareThemeIssues({ ...target.targets[0].studio.theme, ...palette }).length) {
     throw invalidPalette('新主题的文字或强调色对比度不足。');
   }
-  if (target.targets.every(({ studio }) => isEqual(normalizedPalette(studio.theme), palette))) {
+  if (originalPalette && !isEqual(originalPalette, palette)) {
+    throw invalidPalette('统一配色必须使用已核验的原有颜色。');
+  }
+  if (!originalPalette && target.targets.every(({ studio }) => isEqual(normalizedPalette(studio.theme), palette))) {
     throw invalidPalette('课件颜色没有变化。');
   }
 
@@ -345,14 +368,7 @@ export async function reviseOrdinaryDeckPalette(
     const native = applyPaletteToCanvas(page.studio, studio, page.native);
     const rendered = await inspectOrdinaryDeckTextPage(studio, model.signal);
     if (rendered.issues.length) throw invalidPalette('新主题没有通过浏览器渲染验收。');
-    const proof = paletteRenderEvidence.safeParse(rendered.evidence);
-    if (
-      !proof.success ||
-      proof.data.pageId !== studio.page.id ||
-      proof.data.sourceSha256 !== createHash('sha256').update(JSON.stringify(studio)).digest('hex')
-    ) {
-      throw new Error('Incomplete browser verification evidence for the palette revision');
-    }
+    verifyOrdinaryDeckRenderEvidence(rendered.evidence, studio);
     pageIds.push(studio.page.id);
     renderEvidence.push(rendered.evidence);
     artifacts[page.position] = {

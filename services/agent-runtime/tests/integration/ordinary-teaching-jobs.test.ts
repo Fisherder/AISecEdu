@@ -487,7 +487,7 @@ describe('ordinary teaching worker service routes', () => {
 
   function deckRevisionRequest(artifacts: unknown[], instruction: string,
     endpoint = 'ordinary-deck-revision', deckOperation?: string, extraContent?: Record<string, unknown>,
-    pageSelection?: unknown) {
+    pageSelection?: unknown, combinedRevision?: Record<string, unknown>) {
     return new NextRequest(`http://localhost/api/integration/jobs/${endpoint}`, {
       method: 'POST',
       headers: {'X-AISecEdu-Service-Token': 'integration-secret', 'Content-Type': 'application/json'},
@@ -497,7 +497,7 @@ describe('ordinary teaching worker service routes', () => {
           actual_model: 'official-model', required_model: 'official-model', allow_degraded: false,
           degraded: false, request_hash: 'a'.repeat(64)},
         payload: {artifactType: 'slide-deck', revisionBackend: 'ordinary-deck-revision', artifactId: 'math-deck',
-          instruction, expectedRevision: 4, deckOperation, pageSelection, currentContent: {...extraContent, lesson: {id: 'lesson-a', title: '分数课', artifacts}},
+          instruction, expectedRevision: 4, deckOperation, pageSelection, combinedRevision, currentContent: {...extraContent, lesson: {id: 'lesson-a', title: '分数课', artifacts}},
           sourceSnippet: 'PRIVATE SOURCE SELECTION'},
       }),
     });
@@ -537,6 +537,104 @@ describe('ordinary teaching worker service routes', () => {
       }};
     });
   }
+
+  it.each(['explicit', 'original', 'wording', 'body-escape', 'unmeasured', 'wrong-original'] as const)(
+    'validates the palette and title-only stages together (%s)',
+    async (variant) => {
+      const deck = mathLayoutDeck().map((artifact, index) => {
+        const source = {...artifact.content.studio, assets: []};
+        if (variant !== 'wording' || index !== 1) {
+          return {...artifact, content: {...artifact.content, studio: source}};
+        }
+        const studio = coursewareSlideDataSchema.parse({...source, page: {...source.page, visual: {
+          kind: 'chart', chartType: 'bar', basis: '比较记录的份数', unit: '份', illustrative: true,
+          labels: ['观察前', '观察后'], series: [{name: '观察记录', values: [3, 6]}],
+        }}});
+        return {...artifact, content: {...artifact.content, ...compileCoursewareSlide(studio), studio}};
+      });
+      const {name: _name, ...originalPalette} = deck[0].content.studio.theme;
+      const reusePalette = variant === 'original' || variant === 'wrong-original';
+      const paletteInstruction = reusePalette ? '统一原有配色' : '将整个课件换成蓝绿色主题';
+      const wordingInstruction = variant === 'wording' ? '润色所有措辞' : '润色所有标题';
+      const combinedRevision = {
+        paletteInstruction, wordingInstruction, titlesOnly: variant !== 'wording',
+        ...(reusePalette ? {originalPalette} : {}),
+      };
+      const selected = variant === 'original' ? originalPalette : palette;
+      const fetch = vi.fn(async (url, init) => {
+        expect(String(url)).toBe(harness);
+        const {messages} = JSON.parse(init.body);
+        const prompt = JSON.parse(messages[1].content);
+        if (prompt.currentPalettes) {
+          expect(prompt.instruction).toBe(paletteInstruction);
+          expect(prompt.originalPalette).toEqual(combinedRevision.originalPalette);
+          return modelResponse({palette: selected});
+        }
+        expect(prompt.instruction).toBe(wordingInstruction);
+        const field = variant === 'wording' ? 'objective' : 'title';
+        if (variant !== 'wording') {
+          expect(prompt.editableTextFields.map(({path}: {path: string}) => path)).toEqual(['title']);
+        }
+        const original = prompt.editableTextFields.find(({path}: {path: string}) => path === field);
+        if (variant === 'unmeasured') {
+          return Response.json({text: '{}', model: 'official-model', usage: {prompt_tokens: 0, completion_tokens: 0}});
+        }
+        return modelResponse({changes: [{
+          op: 'set', path: [variant === 'body-escape' ? 'takeaway' : field],
+          value: original.text + '要点',
+        }, ...(prompt.editableTextFields.some(({path}: {path: string}) => path === 'visual.labels.0')
+          ? [{op: 'set', path: ['visual', 'labels', 0], value: '  观察之前  '}] : [])]});
+      });
+      vi.stubGlobal('fetch', fetch);
+      const {POST} = await import('@/app/api/integration/jobs/ordinary-deck-revision/route');
+      const response = await POST(deckRevisionRequest(
+        deck, `请${paletteInstruction}，然后${wordingInstruction}`, undefined, 'palette-wording',
+        {coursewareDesign: {theme: deck[0].content.studio.theme}}, undefined, combinedRevision,
+      ));
+      const output = await response.json();
+      expect(mocks.resolveModel).not.toHaveBeenCalled();
+      if (variant === 'wrong-original') {
+        expect(response.status).toBe(422);
+        expect(output.result).toBeUndefined();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        return;
+      }
+      if (variant === 'body-escape' || variant === 'unmeasured') {
+        expect(response.status).toBe(503);
+        expect(output.result).toBeUndefined();
+        expect(fetch).toHaveBeenCalledTimes(2);
+        return;
+      }
+      expect(response.status, JSON.stringify(output)).toBe(200);
+      expect(fetch).toHaveBeenCalledTimes(4);
+      expect(output.model.usage).toEqual({inputTokens: 40, outputTokens: 20, totalTokens: 60});
+      const final = output.result.content;
+      const staged = output.result.paletteStageContent;
+      expect(final.revisionMetadata.stageUsage).toEqual({
+        palette: {inputTokens: 10, outputTokens: 5, totalTokens: 15},
+        wording: {inputTokens: 30, outputTokens: 15, totalTokens: 45},
+      });
+      for (const [index, artifact] of final.lesson.artifacts.entries()) {
+        const old = staged.lesson.artifacts[index];
+        expect(artifact.content.studio.theme).toMatchObject(selected);
+        if (variant === 'wording') {
+          expect(artifact.title).toBe(deck[index].title);
+          const expected = {...old.content.studio.page, objective: old.content.studio.page.objective + '要点'};
+          if (index === 1) {
+            expected.visual = {...expected.visual, labels: ['观察之前', '观察后']};
+            const chart = artifact.content.elements.find(({id}: {id: string}) => id === 'evidence-chart');
+            expect(chart.data).toEqual({labels: ['观察之前', '观察后'], legends: ['观察记录'], series: [[3, 6]]});
+          }
+          expect(artifact.content.studio.page).toEqual(expected);
+          continue;
+        }
+        expect(artifact.title).toBe(deck[index].title + '要点');
+        expect(artifact.content.studio.page).toEqual({...old.content.studio.page, title: artifact.title});
+        expect(artifact.content.elements.filter((el: {id: string}) => el.id !== 'page-title'))
+          .toEqual(old.content.elements.filter((el: {id: string}) => el.id !== 'page-title'));
+      }
+    },
+  );
 
   it('uses one color-only Harness turn and recolors a comparison, chart and image without changing saved content', async () => {
     const deck = paletteDeck();

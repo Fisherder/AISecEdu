@@ -519,7 +519,6 @@ def test_whole_deck_receipt_requires_official_usage_rendering_and_scope(case):
 
 @pytest.mark.parametrize("instruction", [
     "把整套课件改成暖色主题",
-    "请统一整套课件的配色，然后润色所有标题",
     "请把整套课件的主题改成暖色",
     "Switch the deck to a warm color theme and refine the wording",
     "重新组织课件结构",
@@ -565,7 +564,7 @@ def palette_source(case):
             {"type": "text", "id": "page-title", "left": 36,
              "defaultColor": ORIGINAL_PALETTE["foreground"],
              "content": '<p style="font-size:20px;color:#171717;line-height:1.2">叶片观察 #171717</p>'},
-            {"type": "chart", "id": "evidence-chart", "left": 220, "data": {"series": [[1, 2]]},
+            {"type": "chart", "id": "evidence-chart", "left": 220, "data": {"labels": ["观察前", "观察后"], "legends": ["叶片"], "series": [[1, 2]]},
              "themeColors": [ORIGINAL_PALETTE[role] for role in ("accent", "secondary", "muted")],
              "textColor": ORIGINAL_PALETTE["foreground"], "lineColor": ORIGINAL_PALETTE["surface"]},
         ]
@@ -630,7 +629,6 @@ def test_palette_is_pinned_to_current_teacher_revision_and_resources(case):
 
 @pytest.mark.parametrize("instruction", [
     "不要将整个课件换成蓝绿色主题",
-    "请将整个课件换成蓝绿色主题，然后润色所有标题",
     "请增补两页并把整套课件改为暖色",
     "请把第1至2页的主题换成暖色",
     "请把整套课件做成海报式风格",
@@ -817,3 +815,98 @@ def test_page_palette_rechecks_display_order_after_receipt_before_saving(case):
         jobs["_persist_result"](job, response["result"])
     artifact_query.with_for_update.assert_called_once()
     create_revision.assert_not_called()
+
+
+@pytest.mark.parametrize(("titles_only", "mutation"), [
+    (True, None), (True, "body"), (True, "usage"), (True, "palette"),
+    (False, None), (False, "chart_values"), (False, "chart_label_payload"),
+    (False, "numeric_label"), (False, "layout"), (False, "element_geometry"),
+    (False, "element_private"), (False, "new_notes"), (False, "page_private"),
+    (False, "native_private"), (False, "outline_private"),
+])
+def test_combined_deck_requires_two_validated_stages_and_scoped_wording(case, titles_only, mutation):
+    ns, jobs, job, user, artifact, _ = case
+    source = palette_source(case)
+    for page in source["lesson"]["artifacts"]:
+        page["content"]["studio"]["page"].update(title="叶片观察", visual={
+            "kind": "chart", "labels": ["观察前", "观察后"], "series": [{"name": "叶片", "values": [1, 2]}],
+        })
+        canvas = page["content"]["elements"][0]
+        canvas["content"] = canvas["content"].replace("叶片观察 #171717", "叶片观察")
+    revision = ns["current_artifact_revision"](artifact)
+    revision.content_hash = ns["content_hash"](source)
+    job.payload = ns["admit"](user, artifact, {
+        **job.payload, "currentContent": source,
+        "instruction": "请将整个课件换成蓝绿色主题，然后润色所有" + ("标题" if titles_only else "措辞"),
+    })
+    prepared = jobs["_runtime_payload"](job)
+    assert prepared["deckOperation"] == "palette-wording"
+    assert prepared["combinedRevision"]["titlesOnly"] is titles_only
+    route = ns["route_model"](job.kind, payload=prepared)
+    response = palette_response(source)
+    stage = response["result"]["content"]
+    output = copy.deepcopy(stage)
+    response["result"] = {"content": output, "paletteStageContent": stage}
+    usage = response["model"]["usage"]
+    stages = {"palette": dict(usage), "wording": dict(usage)}
+    response["model"]["usage"] = {key: value * 2 for key, value in usage.items()}
+    output["revisionMetadata"].update(operation="palette-wording", stageUsage=stages)
+    for page in output["lesson"]["artifacts"]:
+        new_title = "观察叶片"
+        page.update(title=new_title, outline={**page["outline"], "title": new_title})
+        page["content"]["studio"]["page"]["title"] = new_title
+        canvas_title = page["content"]["elements"][0]
+        canvas_title["content"] = canvas_title["content"].replace("叶片观察", new_title)
+        if not titles_only:
+            page["content"]["studio"]["page"]["visual"]["labels"][0] = "观察之前"
+            page["content"]["elements"][1]["data"]["labels"][0] = "观察之前"
+
+    native = output["lesson"]["artifacts"][0]["content"]
+    page = native["studio"]["page"]
+    if mutation == "chart_values":
+        page["visual"]["series"][0]["values"][1] = 3
+        native["elements"][1]["data"]["series"][0][1] = 3
+    elif mutation == "chart_label_payload":
+        native["elements"][1]["data"]["labels"][1] = "伪造的标签"
+    elif mutation == "numeric_label":
+        page["visual"]["labels"][0] = "提前 10 分钟"
+        native["elements"][1]["data"]["labels"][0] = "提前 10 分钟"
+    elif mutation == "layout":
+        page["layout"]["title"]["left"] = 100
+    elif mutation == "element_geometry":
+        native["elements"][0]["left"] = 100
+    elif mutation == "element_private":
+        native["elements"][1]["privateData"] = "新增数据"
+    elif mutation == "new_notes":
+        native["remark"] = "新增讲解"
+    elif mutation == "page_private":
+        page["visual"]["series"][0]["privateData"] = "新增数据"
+    elif mutation == "native_private":
+        native["privateData"] = "新增数据"
+    elif mutation == "outline_private":
+        output["lesson"]["artifacts"][0]["outline"]["privateData"] = "新增数据"
+    elif mutation == "body":
+        output["lesson"]["artifacts"][0]["content"]["studio"]["page"]["speakerNotes"] = "越界文字"
+    elif mutation == "usage":
+        stages["wording"]["outputTokens"] = 0
+    elif mutation == "palette":
+        del response["result"]["paletteStageContent"]
+    if mutation:
+        with pytest.raises(ns["OrdinarySlideLayoutError"]):
+            ns["validate_receipt"](route, prepared, response)
+    else:
+        ns["validate_receipt"](route, prepared, response)
+
+
+def test_combined_original_palette_is_pinned_from_the_saved_design(case):
+    ns, jobs, job, user, artifact, _ = case
+    source = palette_source(case)
+    job.payload = ns["admit"](user, artifact, {
+        **job.payload, "currentContent": source,
+        "instruction": "请统一整套课件的配色，然后润色所有标题",
+    })
+    prepared = jobs["_runtime_payload"](job)
+    expected = {"paletteInstruction": "统一整套课件的配色", "wordingInstruction": "润色所有标题",
+                "titlesOnly": True, "originalPalette": ORIGINAL_PALETTE}
+    assert prepared["combinedRevision"] == expected
+    assert not ns["pinned"]({"instruction": job.payload["instruction"]})

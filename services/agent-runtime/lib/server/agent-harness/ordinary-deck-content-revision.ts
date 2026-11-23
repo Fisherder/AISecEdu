@@ -1,9 +1,10 @@
+import type { z } from 'zod';
 import { reviewAndRepairCourseware } from '@/lib/courseware/content-review';
 import { generateModernCourseware } from '@/lib/courseware/generation';
 import type { inspectRenderedCourseware } from '@/lib/courseware/render-client';
 import { slideDeckPageCountIssue } from '@/lib/server/slide-page-policy';
 import type { GeneratedSlideContent } from '@/lib/types/generation';
-import { inspectOrdinaryDeckPage, ordinaryDeckPageRequirement, ordinaryDeckTarget, ordinaryDeckTurn, selectOrdinaryDeckTextPages } from './ordinary-deck-revision';
+import { combinedDeckRevisionSchema, inspectOrdinaryDeckPage, ordinaryDeckPageRequirement, ordinaryDeckTarget, ordinaryDeckTurn, reviseOrdinaryDeckPalette, selectOrdinaryDeckTextPages } from './ordinary-deck-revision';
 import { OrdinaryLayoutError } from './ordinary-slide-layout';
 import { ordinarySlideTarget, reviseOrdinarySlide } from './ordinary-slide-wording';
 import type { OrdinaryTeachingModel } from './ordinary-teaching';
@@ -57,4 +58,48 @@ export async function reviseOrdinaryDeck(target: ReturnType<typeof ordinaryDeckT
   return {usage: turn.usage, result: {content: {...revised.result.content, revisionMetadata: {
     ...revised.result.content.revisionMetadata, mode: 'ordinary-deck-revision', recomposed: false,
   }}}};
+}
+
+export async function reviseOrdinaryDeckPaletteAndWording(
+  target: ReturnType<typeof ordinaryDeckTarget>,
+  model: OrdinaryTeachingModel,
+  intent: z.infer<typeof combinedDeckRevisionSchema>,
+) {
+  const palette = await reviseOrdinaryDeckPalette(
+    { ...target, instruction: intent.paletteInstruction }, model, intent.originalPalette,
+  );
+  const intermediate = palette.result.content;
+  const wordingTurn = ordinaryDeckTurn(target, model);
+  const pageNumbers = target.targets.map(({pageNumber}) => pageNumber);
+  const wording = ordinarySlideTarget({
+    currentContent: intermediate,
+    instruction: `只修改第${pageNumbers.join('、')}页的文字：${intent.wordingInstruction}`,
+  });
+  if (wording.error || !wording.pageIds) {
+    throw new OrdinaryLayoutError(422, 'INVALID_ORDINARY_DECK', wording.error || '课件文字无法安全修订。');
+  }
+  const revised = await reviseOrdinarySlide(wording, model, wordingTurn.aiCall, {titlesOnly: intent.titlesOnly});
+  const revision = revised.result.content.revisionMetadata;
+  const usage = {
+    inputTokens: palette.usage.inputTokens + wordingTurn.usage.inputTokens,
+    outputTokens: palette.usage.outputTokens + wordingTurn.usage.outputTokens,
+    totalTokens: palette.usage.totalTokens + wordingTurn.usage.totalTokens,
+  };
+  return {
+    result: {
+      content: {
+        ...revised.result.content,
+        revisionMetadata: {
+          mode: 'ordinary-deck-revision',
+          operation: 'palette-wording',
+          recomposed: false,
+          pageIds: revision.pageIds,
+          renderEvidence: revision.renderEvidence,
+          stageUsage: { palette: palette.usage, wording: wordingTurn.usage },
+        },
+      },
+      paletteStageContent: intermediate,
+    },
+    usage,
+  };
 }

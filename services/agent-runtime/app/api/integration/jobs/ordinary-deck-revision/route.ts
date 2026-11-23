@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
-import { reviseOrdinaryDeck } from '@/lib/server/agent-harness/ordinary-deck-content-revision';
-import { ordinaryDeckTarget, reviseOrdinaryDeckPalette } from '@/lib/server/agent-harness/ordinary-deck-revision';
+import { reviseOrdinaryDeck, reviseOrdinaryDeckPaletteAndWording } from '@/lib/server/agent-harness/ordinary-deck-content-revision';
+import { combinedDeckRevisionSchema, ordinaryDeckTarget, reviseOrdinaryDeckPalette } from '@/lib/server/agent-harness/ordinary-deck-revision';
 import { runOrdinaryJob } from '@/lib/server/agent-harness/ordinary-job-http';
 import { OrdinaryLayoutError } from '@/lib/server/agent-harness/ordinary-slide-layout';
 import { deckRevisionJob, ordinarySlideRevisionInput } from '@/lib/server/agent-harness/ordinary-slide-revision-contract';
@@ -25,6 +25,12 @@ export function POST(req: NextRequest) {
       const signal = AbortSignal.any([requestSignal, AbortSignal.timeout(30 * 60_000)]);
       const model = pinnedSlideRevisionModel(input.modelRoute, deckRevisionJob, signal);
       if (!model) return unavailable;
+      if (input.payload.deckOperation === 'palette-wording') {
+        const intent = combinedDeckRevisionSchema.safeParse(input.payload.combinedRevision);
+        if (!intent.success) return deckRevisionJob.invalid;
+        const {result, usage} = await reviseOrdinaryDeckPaletteAndWording(target, model, intent.data);
+        return completedSlideRevision(result, usage, model, deckRevisionJob, started);
+      }
       const revise = input.payload.deckOperation === 'palette' ? reviseOrdinaryDeckPalette : reviseOrdinaryDeck;
       const {result, usage} = await revise(target, model);
       return completedSlideRevision(result, usage, model, deckRevisionJob, started);
