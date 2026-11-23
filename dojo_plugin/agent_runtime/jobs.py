@@ -54,13 +54,14 @@ from ..utils.request_logging import (
     set_background_trace_context,
 )
 from .artifacts import (
+    add_card,
     candidate_request_prompt,
     content_hash,
     create_revision,
     materialize_candidate,
     replace_generated_candidates,
 )
-from . import ordinary_courseware, ordinary_project_queue, teacher_dsh_chat
+from . import ordinary_courseware, ordinary_project_queue, teacher_dsh_chat, teaching_workshop
 from .files import persist_agent_deliverables, public_agent_file
 from .model_router import (
     UPSTREAM_DEBATE_CANDIDATE_ROUTE, UPSTREAM_DEBATE_ROUTE, UPSTREAM_DECK_REVISION_ROUTE,
@@ -3796,6 +3797,103 @@ def _record_invocation(job, route, model_meta, *, status, error=None):
     return invocation
 
 
+def _workshop_result(job):
+    payload = request_payload(job)
+    _require_upstream_teacher_scope(job, payload)
+    result, usage = teaching_workshop.invoke(job, payload)
+    job = assert_job_lease(job)
+    if _job_cancellation_requested(job):
+        raise JobCanceled("教学创作已取消。")
+    _require_upstream_teacher_scope(job, payload)
+    design = result.pop("workshopArtifact", None)
+    model = config.HARNESS_DEEPSEEK_MODEL
+    invocation = _record_invocation(
+        job, {"route": "dsh-teaching-workshop", "provider": "deepseek", "actual_model": model,
+              "required_model": model, "request_hash": content_hash(payload[teaching_workshop.PIN]), "degraded": False},
+        {"actualModel": model, "modelVersion": f"deepseek:{model}", "usage": usage,
+         "parameters": {"phase": "authoring" if design else "clarification"}},
+        status="SUCCEEDED",
+    )
+    compact_result = _persist_result(job, result)
+    if design is None:
+        return compact_result
+    artifact_id = "artifact_" + job.id.removeprefix("job_")
+    artifact = TeachingArtifacts(id=artifact_id, owner_id=job.owner_id, dojo_id=job.dojo_id,
+                                 module_index=job.module_index, artifact_type=design["type"],
+                                 title=design["title"], status="READY", current_revision=1)
+    now = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
+    content = {"schema": "aisecedu.global-agent.artifact.v1", "artifactType": design["type"],
+               teaching_workshop.PIN: teaching_workshop.CONTRACT, "renderer": "agent-runtime-stage",
+               "teachingWorkshopKind": design["kind"],
+               **({ordinary_courseware.PIN: ordinary_courseware.CONTRACT} if design["type"] == "slide-deck" else {}),
+               "coursewareDesign": design["design"],
+               "lesson": {"id": artifact.id, "title": artifact.title, "description": design["objective"],
+                          "createdAt": now, "updatedAt": now, "artifacts": design["artifacts"]}}
+    db.session.add(artifact)
+    db.session.flush()
+    revision = TeachingArtifactRevisions(
+        artifact_id=artifact.id, revision=1, created_by=job.owner_id, instruction=payload["prompt"],
+        content=content, content_hash=content_hash(content), source_refs=[],
+        validation={"status": "GENERATED", "modelRoute": invocation.route, "actualModel": model,
+                    "artifactCount": len(design["artifacts"]), "degraded": False},
+    )
+    db.session.add(revision)
+    db.session.flush()
+    invocation.artifact_revision_id = revision.id
+    message = _agent_message_for_job(job)
+    add_card(message, card_type="artifact", object_type="artifact", object_id=artifact.id,
+             revision_id=revision.id, state={"status": "READY", "artifactType": artifact.artifact_type,
+                                            "title": artifact.title, "revision": 1},
+             actions=["open", "revise", "request-publish"])
+    return {**compact_result, "artifactId": artifact.id, "revision": 1, "title": artifact.title}
+
+
+def _workshop_simulation_revision(job):
+    from .scope import build_scope
+
+    def target(lock=False):
+        rows = TeachingArtifacts.query.filter_by(
+            id=job.payload["artifactId"], owner_id=job.owner_id, dojo_id=job.dojo_id,
+            artifact_type="simulation", self_workspace_id=None,
+        ).populate_existing()
+        artifact = (rows.with_for_update() if lock else rows).first()
+        actor = Users.query.filter_by(id=job.owner_id, banned=False).populate_existing().first()
+        if (actor is None or artifact is None or artifact.status in {"ARCHIVED", "DELETED"}
+                or artifact.current_revision != job.payload["expectedRevision"]):
+            raise PermanentJobError("当前模拟版本或创作权限已变化，请刷新后再修改。")
+        build_scope(actor, role="teacher", dojo_id=artifact.dojo_id, module_index=artifact.module_index)
+        revision = TeachingArtifactRevisions.query.filter_by(
+            artifact_id=artifact.id, revision=artifact.current_revision,
+        ).first()
+        if revision is None or not teaching_workshop.is_simulation(revision.content):
+            raise PermanentJobError("当前版本缺少可修改的教学模拟。")
+        return actor, artifact, revision
+
+    _, artifact, revision = target()
+    source_hash = revision.content_hash
+    content, usage = teaching_workshop.revise_simulation(job, artifact, revision)
+    job = assert_job_lease(job)
+    if _job_cancellation_requested(job):
+        raise JobCanceled("教学模拟修改已取消。")
+    actor, artifact, current = target(lock=True)
+    if current.content_hash != source_hash:
+        raise PermanentJobError("当前版本已变化，请刷新后再修改。")
+    saved = create_revision(artifact, actor, expected_revision=current.revision,
+                            instruction=job.payload["instruction"], content=content, commit=False)
+    artifact.title = content["lesson"]["title"]
+    model = config.HARNESS_DEEPSEEK_MODEL
+    invocation = _record_invocation(
+        job, {"route": "dsh-teaching-workshop-revision", "provider": "deepseek", "actual_model": model,
+              "required_model": model, "request_hash": content_hash({"source": source_hash, "instruction": job.payload["instruction"]}),
+              "degraded": False},
+        {"actualModel": model, "modelVersion": f"deepseek:{model}", "usage": usage},
+        status="SUCCEEDED",
+    )
+    invocation.artifact_revision_id = saved.id
+    saved.validation = {"status": "GENERATED", "modelRoute": invocation.route, "actualModel": model, "degraded": False}
+    return {"artifactId": artifact.id, "revisionId": saved.id, "revision": saved.revision, "title": artifact.title}
+
+
 def _agent_message_for_job(job):
     if not job.thread_id:
         return None
@@ -5039,6 +5137,10 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False, ordinary_pro
             compact_result = execute_review(job)
         elif job.kind in COMMAND_JOB_KINDS:
             compact_result = execute_command(job)
+        elif ordinary_project_only and (job.payload or {}).get("scopedOrdinaryProject") == "workshop":
+            compact_result = _workshop_result(job)
+        elif ordinary_project_only and (job.payload or {}).get("scopedOrdinaryProject") == "workshop-revision":
+            compact_result = _workshop_simulation_revision(job)
         elif ordinary_project_only and (job.payload or {}).get("scopedOrdinaryProject") == "classroom":
             from .classroom_requests import classroom_confirmation
 

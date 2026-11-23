@@ -75,57 +75,78 @@ function Questions({ message }: { message: Message }) {
   const { state, controller: c } = useWorkbench();
   const answerKey = `aisecedu:requirements:${state.thread?.id}:${message.id}`;
   const [answers, setAnswers] = useState<Record<string, string>>(() => readLocal(answerKey, {}));
+  const [active, setActive] = useState(0);
+  const [custom, setCustom] = useState(false);
+  const input = useRef<HTMLTextAreaElement>(null);
   const questions: Data[] = message.metadata.questions || [];
   useEffect(() => { writeLocal(answerKey, answers); }, [answerKey, answers]);
-  if (!questions.length || message.metadata.questionReplyJobId || message.metadata.pending)
-    return null;
+  useEffect(() => { if (custom) input.current?.focus(); }, [custom]);
+  if (!questions.length || message.metadata.pending) return null;
+  if (message.metadata.questionReplyJobId) return <span className="question-complete"><Check size={14} />需求已答复</span>;
+  const question = questions[active];
+  if (!question) return null;
+  const choices: string[] = question.choices || [];
+  const selected = answers[question.id] || '';
+  const customOpen = custom || !choices.length || Boolean(selected && !choices.includes(selected));
+  const move = (index: number) => { setActive(index); setCustom(false); };
+  const last = active === questions.length - 1;
   return (
     <form
       className="question-block"
       onSubmit={(event) => {
         event.preventDefault();
+        if (!selected.trim()) return;
+        if (!last) { move(active + 1); return; }
+        const unanswered = questions.findIndex((item) => !answers[item.id]?.trim());
+        if (unanswered >= 0) { move(unanswered); return; }
         void c.send({
-          content: questions
-            .map((question) => `${question.text}：${answers[question.id]}`)
-            .join('\n'),
+          content: questions.map((item) => answers[item.id].trim()).join('\n'),
           questionReply: { sourceMessageId: message.id, answers },
         });
       }}
     >
-      <h3>先明确需求</h3>
-      <p>选择适合的答案，也可以直接填写你的想法。回答后将继续同一项任务。</p>
-      {questions.map((question) => (
-        <fieldset key={question.id}>
-          <legend>{question.text}</legend>
+      <header className="question-header">
+        <strong>确认教学需求</strong>
+        {questions.length > 1 && <span>{active + 1} / {questions.length}</span>}
+      </header>
+      <fieldset key={question.id}>
+        <legend>{question.text}</legend>
+        {choices.length > 0 && (
           <div className="choice-list">
-            {(question.choices || []).map((choice: string) => (
-              <Button
+            {choices.map((choice, index) => (
+              <button
                 key={choice}
-                className={answers[question.id] === choice ? 'selected' : ''}
-                aria-pressed={answers[question.id] === choice}
-                onClick={() => setAnswers({ ...answers, [question.id]: choice })}
+                className={selected === choice ? 'selected' : ''}
+                type="button"
+                aria-pressed={selected === choice}
+                onClick={() => { setAnswers({ ...answers, [question.id]: choice }); setCustom(false); }}
               >
-                {choice}
-              </Button>
+                <span className="choice-indicator" aria-hidden="true">{selected === choice && <Check size={13} />}</span>
+                <span><strong>{choice}</strong>{question.descriptions?.[index] &&
+                  <small>{question.descriptions[index]}</small>}</span>
+              </button>
             ))}
           </div>
+        )}
+        {customOpen ? (
           <textarea
+            ref={input}
             aria-label={question.text}
-            placeholder="选择一个选项，或输入你的回答"
-            value={answers[question.id] || ''}
+            placeholder="填写你的回答"
+            value={choices.includes(selected) ? '' : selected}
             onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
-            maxLength={2000}
+            maxLength={750}
             required
             rows={2}
           />
-        </fieldset>
-      ))}
-      <button
-        className="button primary"
-        disabled={state.busy || questions.some((question) => !answers[question.id]?.trim())}
-      >
-        提交并继续
-      </button>
+        ) : <button type="button" className="question-custom" onClick={() => { setAnswers({ ...answers, [question.id]: '' }); setCustom(true); }}>自己填写</button>}
+      </fieldset>
+      <footer>
+        {active > 0 && <button type="button" className="button" onClick={() => move(active - 1)}>上一个</button>}
+        <button type="submit" className="button primary" disabled={state.busy || !selected.trim()}>
+          {last ? '提交并继续' : '下一个'}
+        </button>
+      </footer>
     </form>
   );
 }
@@ -371,7 +392,7 @@ function MessageView({ message }: { message: Message }) {
             </ol>
           </details>
         )}
-        {job && (
+        {job && (pending || waitingForAnswers || job.status === 'FAILED' || job.status === 'CANCELED') && (
           <button className="run-summary" onClick={() => c.selectJob(job.id)}>
             <Status status={waitingForAnswers ? 'WAITING_INPUT' : job.status} />
             <span>{waitingForAnswers ? '等待你回答需求问题' : latest?.title || job.message || job.stage || '查看执行记录'}</span>
@@ -379,14 +400,7 @@ function MessageView({ message }: { message: Message }) {
           </button>
         )}
         {text && <RichText text={text} />}
-        {pending && !streamed && (
-          <p className="quiet pending-text">
-            {latest?.title ||
-              (job?.status === 'QUEUED'
-                ? '要求已保存，等待执行。'
-                : '正在处理，执行记录会实时更新。')}
-          </p>
-        )}
+        {pending && !job && <p className="quiet pending-text" role="status">正在接收要求…</p>}
         {metadata.executionMode === 'plan' && !pending && !metadata.failed && !metadata.questions?.length && (
           <Button
             className="primary"
@@ -431,7 +445,7 @@ function MessageView({ message }: { message: Message }) {
                       : href && window.open(href, '_blank', 'noopener')
               }
             >
-              <FileText size={23} />
+              <span className="result-glyph" aria-hidden="true">{card.state?.artifactType === 'simulation' ? <Play size={18} /> : <FileText size={19} />}</span>
               <span>
                 <small>
                   {artifactId ? '生成成品' : candidateId ? (card.state?.kind === 'slide-deck' ? '课件方案' : '生成结果') : card.title || '任务结果'}

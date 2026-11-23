@@ -18,7 +18,7 @@ UNSAFE = re.compile(
     re.I,
 )
 STACK_EXAMPLE = re.compile(r"调用栈耗尽|栈溢出|stack overflow|递归过深", re.I)
-DEMONSTRATION = re.compile(r"动态仿真|动态演示|交互演示|互动演示|模拟演示|分步演示|交互课件|仿真")
+DEMONSTRATION = re.compile(r"动态仿真|动态演示|动态模拟|交互动画|交互演示|互动演示|模拟演示|分步演示|交互课件|仿真")
 STACK_ACTION = re.compile(r"利用|攻击|篡改|写入|控制流|执行代码|载荷|字节数|偏移")
 THEME = {
     "name": "玄甲课堂", "background": "#ffffff", "foreground": "#17233b",

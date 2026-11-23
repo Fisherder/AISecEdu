@@ -13,6 +13,7 @@ import {
 } from './classroom-dialogue.mjs';
 
 import { coursewarePath, maxCoursewareBytes, validateCoursewareTurn } from './courseware.mjs';
+import { workshopPath, workshopByteLimit, validateWorkshop } from './teaching-workshop.mjs';
 
 const compilerPath = '/v1/courseware-compile';
 const maxBodyBytes = 1024 * 1024;
@@ -70,12 +71,12 @@ function validate(value, withImages) {
   return { messages, images };
 }
 
-async function readTurn(request, { withImages, withMaterials, withDirector, withDialogue, withCourseware, compiling }) {
+async function readTurn(request, { withImages, withMaterials, withDirector, withDialogue, withCourseware, withWorkshop, compiling }) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers['content-type'] ?? '')) {
     throw new RequestError(415, 'Expected application/json');
   }
 
-  const maxBytes = withCourseware ? maxCoursewareBytes : withDialogue ? maxDialogueBytes : withDirector ? maxDirectorTurnBytes :
+  const maxBytes = withWorkshop ? workshopByteLimit : withCourseware ? maxCoursewareBytes : withDialogue ? maxDialogueBytes : withDirector ? maxDirectorTurnBytes :
     withMaterials ? maxMaterialTurnBytes : withImages ? 7 * maxBodyBytes : maxBodyBytes;
   const chunks = [];
   let size = 0;
@@ -101,6 +102,11 @@ async function readTurn(request, { withImages, withMaterials, withDirector, with
     const courseware = validateCoursewareTurn(payload);
     if (!courseware) throw new RequestError(400, 'Expected a bounded courseware request');
     return { courseware };
+  }
+  if (withWorkshop) {
+    const workshop = validateWorkshop(payload);
+    if (!workshop) throw new RequestError(400, 'Expected a bounded teaching workshop request');
+    return { workshop };
   }
   if (withDialogue) {
     const dialogue = validateClassroomDialogue(payload);
@@ -164,9 +170,10 @@ export function createService({
     const withDirector = request.url === directorTurnPath;
     const withDialogue = request.url === dialoguePath;
     const withCourseware = request.url === coursewarePath;
+    const withWorkshop = request.url === workshopPath;
     const compiling = request.url === compilerPath;
     if (!imageCapability && (request.method !== 'POST' ||
-        (!withImages && !withMaterials && !withDirector && !withDialogue && !withCourseware && !compiling && request.url !== '/v1/turn'))) {
+        (!withImages && !withMaterials && !withDirector && !withDialogue && !withCourseware && !withWorkshop && !compiling && request.url !== '/v1/turn'))) {
       json(response, 404, { error: 'Not found' });
       return;
     }
@@ -194,7 +201,7 @@ export function createService({
     const disconnect = new AbortController();
     const abort = () => disconnect.abort();
     response.once('close', abort);
-    const deadline = AbortSignal.timeout(withDialogue || withCourseware ? dialogueTimeoutMs : timeoutMs);
+    const deadline = AbortSignal.timeout(withDialogue || withCourseware || withWorkshop ? dialogueTimeoutMs : timeoutMs);
     try {
       if (compiling) {
         const { pages } = await readTurn(request, { compiling });
@@ -208,8 +215,8 @@ export function createService({
         json(response, 200, { slides });
         return;
       }
-      const { messages, images, question, materials, director, dialogue, courseware } = await readTurn(request, {
-        withImages, withMaterials, withDirector, withDialogue, withCourseware,
+      const { messages, images, question, materials, director, dialogue, courseware, workshop } = await readTurn(request, {
+        withImages, withMaterials, withDirector, withDialogue, withCourseware, withWorkshop,
       });
       const signal = AbortSignal.any([disconnect.signal, deadline]);
       if (withDialogue) {
@@ -218,6 +225,7 @@ export function createService({
       }
       let result;
       if (withCourseware) result = await engine.coursewareTurn(courseware, signal);
+      else if (withWorkshop) result = await engine.workshopTurn(workshop, signal);
       else if (withDirector) result = await engine.directorTurn(director, signal);
       else if (withMaterials) result = await engine.materialTurn(question, materials, signal);
       else if (withImages) result = await engine.imageTurn(messages, signal, images);

@@ -55,7 +55,7 @@ def requested_kind(prompt):
     subject = creation_subject(prompt)
     if not subject:
         return None
-    if re.search(r"课件|幻灯片|演示文稿|仿真|动态演示|交互演示|互动演示", subject):
+    if re.search(r"课件|幻灯片|演示文稿|PPT|仿真|动态模拟|模拟演示|动态演示|交互动画|交互演示|互动演示", subject, re.I):
         return "slide-deck"
     if requests_explicit_file_delivery(prompt):
         return None
@@ -83,6 +83,10 @@ def unsupported_creation(prompt, artifact_type=None):
 
 
 def classify(kind, payload):
+    if kind == "agent.chat" and payload.get("teachingWorkshop"):
+        return "workshop"
+    if kind == "artifact.revise" and payload.get("teachingWorkshopRevision") is True and payload.get("artifactType") == "simulation":
+        return "workshop-revision"
     if kind == "agent.command" and payload.get(ACTION_PIN) in SCOPED_ACTIONS:
         return "approved-action"
     if kind == "agent.chat" and payload.get("chatBackend") == "upstream" and payload.get("classroomPreparation"):
@@ -133,8 +137,14 @@ def require_approved_action(action, prepared):
         if action.action_type == "publish-teaching-artifact":
             artifact = prepared["artifact"]
             if (artifact.module_index == args["moduleIndex"] and artifact.self_workspace_id is None
-                    and artifact.artifact_type in {"lesson-plan", "debate", "slide-deck"}):
-                return
+                    and artifact.artifact_type in {"lesson-plan", "debate", "slide-deck", "simulation"}):
+                if artifact.artifact_type != "simulation":
+                    return
+                from .artifacts import current_artifact_revision
+                from .teaching_workshop import is_simulation
+                revision = current_artifact_revision(artifact)
+                if revision and not revision.source_refs and is_simulation(revision.content):
+                    return
         if action.action_type == "control-teaching-session":
             session = prepared["session"]
             if (session.module_index == args["moduleIndex"]

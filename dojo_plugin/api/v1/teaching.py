@@ -6729,7 +6729,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
         from ...agent_runtime import teacher_dsh_chat
         selected_course = None
         project_kind = None
-        if ordinary_project_queue.configured() and not readonly_material_turn and mode in {"auto", "execute"}:
+        scoped_reply = ordinary_project_queue.configured() and body.get("questionReply") is not None
+        if ordinary_project_queue.configured() and not readonly_material_turn and not scoped_reply and mode in {"auto", "execute"}:
             from ...agent_runtime.classroom_requests import requests_classroom_preparation
 
             prompt = body.get("content")
@@ -6761,7 +6762,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             elif isinstance(prompt, str) and ordinary_project_queue.unsupported_creation(prompt, body.get("artifactType")):
                 return _error("当前可直接生成平台教案、课堂辩论和交互课件。其他项目请从已开通的课程功能入口创建。",
                               409, code="PROJECT_UNAVAILABLE")
-        text_model = None if readonly_material_turn or project_kind else teacher_dsh_chat.admit(thread, body, mode)
+        workshop = project_kind == "slide-deck"
+        text_model = None if readonly_material_turn or project_kind or scoped_reply else teacher_dsh_chat.admit(thread, body, mode)
         if text_model:
             mode = "execute" if text_model["formats"] else "ask"
         requested_action = str(body.get("action") or "").strip().lower()
@@ -6772,7 +6774,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
         wait_for_job_ids = []
         if not continuation:
             existing, wait_for_job_ids = prepare_turn_submission(db.session, thread, body, submission_key)
-            if (text_model or project_kind) and existing is None and wait_for_job_ids:
+            if (text_model or project_kind or scoped_reply) and existing is None and wait_for_job_ids:
                 # Only work served by this instance can delay a scoped turn.
                 pins = [TeachingJobs.payload[teacher_dsh_chat.PIN].as_string().is_not(None)]
                 if ordinary_project_queue.configured():
@@ -6812,6 +6814,15 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 raise ConversationConflict("问题尚未准备完成，请稍后再试。")
             answers = validated_question_answers(question_meta.get("questions"), reply)
             question_context = question_reply_context(source_job.payload or {}, question_meta["questions"], answers, source_job.result)
+            if scoped_reply:
+                if ((source_job.payload or {}).get("scopedOrdinaryProject") != "workshop"
+                        or not ordinary_project_queue.enabled(thread.dojo_id)
+                        or (source_job.dojo_id, source_job.module_index) != (thread.dojo_id, thread.module_index)
+                        or body.get("sourceRefs") or body.get("delivery") == "next-step"
+                        or (body.get("dojoId") is not None and
+                            (body.get("dojoId"), body.get("moduleIndex")) != (thread.dojo_id, thread.module_index))):
+                    raise ConversationConflict("课程或问题已变化，请在原对话中重新确认。")
+                project_kind, workshop = "slide-deck", True
             mode = "auto" if question_meta.get("intentDecision") else execution_mode(source_job.payload or {})
         selected_generation = None
         if continuation:
@@ -6920,8 +6931,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             )
 
         scoped_classroom = project_kind == "classroom"
-        direct_candidates = not scoped_classroom and not text_model and not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
-        native_courseware = direct_candidates and project_kind == "slide-deck"
+        direct_candidates = not workshop and not scoped_classroom and not text_model and not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
         ordinary_plan = direct_candidates and (project_kind == "lesson-plan" or requests_lesson_plan_candidates(content))
         debate_proposals = direct_candidates and (project_kind == "debate" or requests_debate_candidates(content))
         ordinary_debate = debate_proposals or bool(
@@ -6958,7 +6968,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             if thread.title in DEFAULT_THREAD_TITLES:
                 thread.title = _thread_title_from_message(content)
 
-        minimal_context = ordinary_plan or ordinary_debate or native_courseware or readonly_material_turn or text_model or scoped_classroom
+        minimal_context = ordinary_plan or ordinary_debate or workshop or readonly_material_turn or text_model or scoped_classroom
         if not minimal_context:
             if session_history_replayable(thread.id):
                 # New conversations derive the model-visible history from the
@@ -6983,7 +6993,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 raise ValueError("请选择有效的学习模式。")
             thread.context = {**(thread.context or {}), "learningPattern": inquiry_pattern_catalog() if pattern_id else None}
         platform_context = None if minimal_context else _teacher_agent_context(user, thread)
-        generate = ordinary_plan or debate_proposals or native_courseware or (continuation and requested_action == "generate")
+        generate = ordinary_plan or debate_proposals or (continuation and requested_action == "generate")
         if continuation_context is not None:
             constraints = continuation_context["constraints"]
             source_refs = continuation_context["sourceRefs"]
@@ -7064,8 +7074,6 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 artifact_type = "lesson-plan"
             elif debate_proposals:
                 artifact_type = "debate"
-            elif native_courseware:
-                artifact_type = "slide-deck"
             elif selected_generation is not None:
                 artifact_type = selected_generation["bundle"]["artifactType"]
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,47}", artifact_type):
@@ -7074,7 +7082,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 )
             if (
                 artifact_type in GENERATION_OPTION_ARTIFACT_TYPES
-                and selected_generation is None and not (debate_proposals or native_courseware)
+                and selected_generation is None and not debate_proposals
             ):
                 raise ValueError(
                     "请先在智能体给出的三套候选方案中选择一套，再开始正式生成。"
@@ -7083,8 +7091,6 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 count, generation_reason = 2, ORDINARY_PLAN_REASON
             elif debate_proposals:
                 count, generation_reason = 3, ORDINARY_DEBATE_REASON
-            elif native_courseware:
-                count, generation_reason = 2, ordinary_project_queue.COURSEWARE_REASON
             elif selected_generation is not None:
                 count = 1
                 generation_reason = ORDINARY_DEBATE_REASON if ordinary_debate else "teacher_selected_prompt_option"
@@ -7145,12 +7151,6 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                     payload.update(submissionFingerprint=submission_fingerprint(body), userMessageId=user_message.id)
                 if wait_for_job_ids:
                     payload["waitForJobIds"] = wait_for_job_ids
-            elif native_courseware:
-                payload["allowDegraded"] = False
-                if wait_for_job_ids:
-                    if body.get("delivery") == "next-step":
-                        raise ConversationConflict("课件方案需要独立任务，请选择“排队”发送。")
-                    payload["waitForJobIds"] = wait_for_job_ids
             else:
                 payload.update(conversation=history_context["conversation"], courseContext=platform_context)
             job_kind = "candidate.generate"
@@ -7164,6 +7164,18 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                     else "正在按你的要求制作这项教学内容，完成后会在当前对话中直接给出可预览、可继续修改的结果。"
                 )
             )
+        elif workshop:
+            from ...agent_runtime import teaching_workshop
+
+            if body.get("delivery") == "next-step":
+                raise ConversationConflict("教学创作需要独立任务，请选择“排队”发送。")
+            brief = question_context["originalRequest"] if question_context else content
+            payload = {"prompt": brief, "executionMode": "execute",
+                       teaching_workshop.PIN: teaching_workshop.intake(brief, question_context), "allowDegraded": False,
+                       "context": {"platformFacts": {"scope": {"dojoId": thread.dojo_id, "moduleIndex": thread.module_index}},
+                                   "questionReply": question_context}}
+            job_kind = "agent.chat"
+            assistant_text = "正在理解教学要求。"
         elif scoped_classroom:
             from ...agent_runtime.classroom_requests import pin_classroom_request
 
@@ -7223,7 +7235,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             assistant_text = "正在准备教学对话回复…"
 
         if job_kind == "agent.chat":
-            if not scoped_classroom:
+            if not (scoped_classroom or workshop):
                 payload["harnessVersion"] = HARNESS_VERSION
             if not continuation:
                 payload["submissionFingerprint"] = submission_fingerprint(body)
@@ -9493,7 +9505,13 @@ def revise_teacher_artifact(user, artifact_id, body, request_key=None):
                 code="REVISION_CONFLICT",
             )
         current_content = (artifact_view(artifact).get("revision") or {}).get("content")
-        source_issue = artifact_revision_source_issue(artifact.artifact_type, current_content)
+        workshop_simulation = False
+        if artifact.artifact_type == "simulation" and ordinary_project_queue.configured():
+            from ...agent_runtime import teaching_workshop
+            workshop_simulation = ordinary_project_queue.enabled(artifact.dojo_id) and teaching_workshop.is_simulation(current_content)
+            if workshop_simulation:
+                ordinary_courseware.brief(instruction)
+        source_issue = None if workshop_simulation else artifact_revision_source_issue(artifact.artifact_type, current_content)
         if source_issue:
             return _error(source_issue, 409, code="REVISION_SOURCE_NOT_READY")
         payload = ordinary_slide_notes.admit(user, artifact, {
@@ -9504,7 +9522,10 @@ def revise_teacher_artifact(user, artifact_id, body, request_key=None):
             "artifactType": artifact.artifact_type,
             "allowDegraded": bool(body.get("allowDegraded")),
             **({ordinary_slide_notes.CONSENT: True} if consent else {}),
+            **({"teachingWorkshopRevision": True} if workshop_simulation else {}),
         })
+        if workshop_simulation:
+            payload.pop("currentContent", None)
         if not ordinary_slide_notes.pinned(payload):
             payload = ordinary_slide_layout.admit(user, artifact, payload)
         if artifact.artifact_type == "lesson-plan":
@@ -12359,7 +12380,7 @@ class AgentRuntimeLaunch(Resource):
                 resource_id = target.rstrip("/").rsplit("/", 1)[-1]
                 if role == "student":
                     artifact = artifact_for_viewer(resource_id, user)
-                    if (not target.startswith("/prep/") or artifact.artifact_type not in {"lesson-plan", "debate", "slide-deck"}
+                    if (not target.startswith("/prep/") or artifact.artifact_type not in {"lesson-plan", "debate", "slide-deck", "simulation"}
                             or artifact.status != "PUBLISHED" or artifact.self_workspace_id is not None
                             or not ordinary_project_queue.enabled(artifact.dojo_id)):
                         raise ScopeError("Artifact not found")
@@ -12369,11 +12390,17 @@ class AgentRuntimeLaunch(Resource):
                         raise ScopeError("Teaching previews are not enabled in this course")
                     if target.startswith("/prep/"):
                         artifact = artifact_for_user(resource_id, user)
-                        if (artifact.artifact_type not in {"lesson-plan", "debate", "slide-deck"} or artifact.self_workspace_id is not None
+                        if (artifact.artifact_type not in {"lesson-plan", "debate", "slide-deck", "simulation"} or artifact.self_workspace_id is not None
                                 or (artifact.dojo_id, artifact.module_index) != (scope.dojo_id, scope.module_index)):
                             raise ScopeError("Artifact not found")
                     else:
                         _runtime_viewable_classroom(resource_id, user, scope)
+                if target.startswith("/prep/") and artifact.artifact_type == "simulation":
+                    from ...agent_runtime.teaching_workshop import is_simulation
+
+                    revision = current_artifact_revision(artifact)
+                    if revision is None or revision.source_refs or not is_simulation(revision.content):
+                        raise ScopeError("当前联调站只开放已校验的教学仿真。")
             if role == "teacher":
                 _require_teacher(user)
                 if dojo_id is None:
@@ -12990,6 +13017,13 @@ class AgentRuntimeLesson(Resource):
                 allow_submitted_review=True,
                 allow_published_view=True,
             )
+            if ordinary_project_queue.configured() and artifact.artifact_type == "simulation":
+                from ...agent_runtime.teaching_workshop import is_simulation
+
+                revision = current_artifact_revision(artifact)
+                if (not ordinary_project_queue.enabled(artifact.dojo_id) or revision is None
+                        or revision.source_refs or not is_simulation(revision.content)):
+                    raise ScopeError("当前联调站只开放已校验的教学仿真。")
             lesson = _lesson_payload(
                 artifact,
                 student_safe=scope.role == "student" and not scope.workspace_id,

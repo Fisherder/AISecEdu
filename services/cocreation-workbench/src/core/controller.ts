@@ -385,12 +385,13 @@ export class WorkbenchController {
       const thread = await this.ensureThread();
       const epoch = this.epoch;
       const active = this.state.jobs.find((job) => job.threadId === thread.id && !terminal(job));
-      const sourceRefs = draft.sources.map(({ type, id }) => ({ type, id }));
+      const answering = Boolean(extra.questionReply);
+      const sourceRefs = answering ? [] : draft.sources.map(({ type, id }) => ({ type, id }));
       const signature = JSON.stringify(mode === 'ask'
         ? [thread.id, content, sourceRefs, mode]
         : [thread.id, content, draft, extra]);
       const delivery = active
-        ? { delivery: mode === 'ask' ? 'after-current' : draft.delivery, expectedJobId: active.id }
+        ? { delivery: mode === 'ask' || answering ? 'after-current' : draft.delivery, expectedJobId: active.id }
         : {};
       const persisted = this.storage.value<typeof this.pendingSubmit>('pending-submit', null);
       if (this.pendingSubmit?.signature !== signature)
@@ -403,10 +404,10 @@ export class WorkbenchController {
                 body: mode === 'ask'
                   ? { content, sourceRefs, ...delivery, executionMode: mode, materialQuestion: true }
                   : {
-                      content: [...draft.skills.map((skill) => '/' + skill), content].join('\n'),
-                      learningPattern: draft.learningPattern,
+                      content: answering ? content : [...draft.skills.map((skill) => '/' + skill), content].join('\n'),
+                      learningPattern: answering ? '' : draft.learningPattern,
                       sourceRefs,
-                      artifactType: draft.artifactType,
+                      artifactType: answering ? 'auto' : draft.artifactType,
                       candidateMode: 'auto',
                       candidateCount: 3,
                       ...delivery,
@@ -564,7 +565,9 @@ export class WorkbenchController {
     });
     this.setPanel('artifacts');
     const artifact = await this.loadArtifact(artifactId);
-    if (this.state.selectedArtifact === artifactId && isGeneratedCourseware(artifact) &&
+    const workshopSimulation = artifact.type === 'simulation' &&
+      artifact.revision?.content?.teachingWorkshop === 'teaching-workshop-v1';
+    if (this.state.selectedArtifact === artifactId && (isGeneratedCourseware(artifact) || workshopSimulation) &&
         ['READY', 'PUBLISHED'].includes(artifact.status) && !this.state.previews[artifactId])
       await this.launchPreview(artifact);
   }

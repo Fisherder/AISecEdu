@@ -437,3 +437,43 @@ test('courseware uses only the phase-specific native tool and reports measured c
   reply = messagesResponse([tool({ pages: [pages[0], { ...pages[1], notes: '<script>bad</script>' }] }, 'compose_courseware')]);
   assert.equal((await request(service, { path: coursewarePath, body: author })).status, 502);
 });
+
+test('workshop uses the official native question tool and resumes from the answer data', async t => {
+  const body = { phase: 'intake', kind: 'deck', brief: '制作三页课件介绍水循环', answers: [], round: 0, pageCount: 3 };
+  const { workshopPath } = await import('./teaching-workshop.mjs');
+  const questions = [{
+    id: 'audience', question: '课件主要面向哪个年级？',
+    options: [{ label: '小学', description: '从生活观察开始' }, { label: '初中', description: '加入过程和数据' }],
+  }];
+  let reply = tool({ questions }, 'ask_user_question');
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    calls.push(JSON.parse(options.body));
+    return messagesResponse([reply]);
+  });
+  const saved = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = 'fixture-key';
+  t.after(() => {
+    if (saved === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = saved;
+  });
+  const engine = await createEngine({ model, baseURL: 'https://offline-fixture.invalid' });
+  t.after(() => engine.close());
+  const service = createService({ secret, engine });
+  const first = await engine.workshopTurn(body, AbortSignal.timeout(2200));
+  assert.deepEqual(first.submission.question, {
+    id: 'audience', text: questions[0].question, choices: ['小学', '初中'],
+    descriptions: ['从生活观察开始', '加入过程和数据'],
+  });
+  assert.ok(calls[0].tools.some(tool => tool.name === 'ask_user_question'));
+  const plan = { title: '一滴水的旅程', audience: '初中学生', objective: '解释自然界中水连续循环的过程',
+    pages: ['认识蒸发', '观察凝结', '理解降水'].map((title, i) => ({
+      title, focus: '用具体例子讨论这一环节的变化', visual: ['diagram', 'comparison', 'chart'][i],
+    })) };
+  reply = tool(plan, 'design_teaching_material');
+  const next = await request(service, { path: workshopPath,
+    body: { ...body, round: 1, answers: [{ question: questions[0].question, answer: '初中' }] } });
+  assert.equal(next.status, 200, JSON.stringify(next.body));
+  assert.deepEqual(next.body.submission.plan, plan);
+  assert.ok(JSON.stringify(calls[1].messages).includes('初中'));
+});

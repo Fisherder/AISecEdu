@@ -24,6 +24,7 @@ import {
 } from './classroom-dialogue.mjs';
 
 import { coursewarePlugin, coursewareSystem, validateCoursewareTurn } from './courseware.mjs';
+import { NativeQuestions, validateWorkshop, workshopPlugin, workshopSystem } from './teaching-workshop.mjs';
 
 const provider = 'deepseek-official';
 
@@ -112,6 +113,7 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
     await ctx.plugin(SessionProjectionRegistry);
     await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false });
     await ctx.plugin(ToolRuntime);
+    await ctx.plugin(NativeQuestions);
     await ctx.plugin({
       name: 'deny-tools',
       inject: ['tools'],
@@ -179,6 +181,14 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
         { role: 'user', content: JSON.stringify(courseware) },
       ], signal, [], { courseware });
     },
+    workshopTurn(input, signal) {
+      const workshop = validateWorkshop(input);
+      if (!workshop) throw new Error('Invalid workshop request');
+      return runTurn([
+        { role: 'system', content: workshopSystem(workshop) },
+        { role: 'user', content: JSON.stringify(workshop) },
+      ], signal, [], { workshop });
+    },
     classroomDialogue(input, signal, sendSpeech) {
       const dialogue = validateClassroomDialogue(input);
       if (!dialogue) throw new ClassroomDialogueError({});
@@ -189,10 +199,11 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
     },
   };
 
-  async function runTurn(messages, signal, images = [], { materials, director, dialogue, sendSpeech, courseware } = {}) {
+  async function runTurn(messages, signal, images = [], { materials, director, dialogue, sendSpeech, courseware, workshop } = {}) {
     const materialReads = new Set();
     const decision = {};
     const submittedCourseware = {};
+    const workshopOutput = {};
     const discussion = { speeches: 0, next: undefined };
     const measured = [];
     let modelAttempts = 0;
@@ -229,13 +240,14 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
         sessionId: SessionId(randomUUID()),
         agentOptions: {
           provider, model,
-          ...(courseware ? { maxTokens: 7800 } : dialogue ? { maxTokens: 4096 } : director ? { maxTokens: 512 } : {}),
+          ...(courseware || workshop ? { maxTokens: 7800 } : dialogue ? { maxTokens: 4096 } : director ? { maxTokens: 512 } : {}),
         },
         signal,
         async setup(scope, agent) {
           if (materials) await scope.plugin(teachingMaterialPlugin(materials, materialReads));
           if (director) await scope.plugin(classroomDirectorPlugin(director.roles.length, decision));
           if (courseware) await scope.plugin(coursewarePlugin(courseware, submittedCourseware));
+          if (workshop) await scope.plugin(workshopPlugin(workshop, workshopOutput));
           if (dialogue) {
             await scope.plugin(classroomDialoguePlugin(dialogue.roles.length, discussion, approveStep, speech => {
               const usage = sumMeasuredUsage(measured);
@@ -251,7 +263,7 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
             if (session !== agent.session) return;
             if (event.type === 'assistant/message') assistant = event.data;
             if (event.type === 'turn/end') finish = event.data.reason.kind;
-            if ((materials || director || dialogue || courseware) &&
+            if ((materials || director || dialogue || courseware || workshop) &&
                 (event.type === 'assistant/message' || event.type === 'assistant/attempt')) {
               modelAttempts += 1;
               const usage = event.data.usage ?? event.data.stream.findLast(record =>
@@ -282,6 +294,13 @@ export async function createEngine({ model, baseURL, attachmentDir }) {
       signal.throwIfAborted();
       if (finish !== 'completed' || assistant === undefined) throw new Error('Model turn failed');
       const { message, usage, stream } = assistant;
+      if (workshop) {
+        const total = sumMeasuredUsage(measured);
+        const stop = stream.findLast(record => record.type === 'chunk' && record.chunk.type === 'finish');
+        if (!workshopOutput.value || modelAttempts !== 1 || measured.length !== 1 || !total ||
+            stop?.chunk.reason.kind !== 'tool-calls') throw Error('Workshop turn did not finish with a measured native action');
+        return { submission: workshopOutput.value, model: message.source.model, usage: total };
+      }
       if (dialogue) {
         const total = sumMeasuredUsage(measured);
         if (!discussion.next || !total || approvedSteps !== modelAttempts || measured.length !== modelAttempts) {
