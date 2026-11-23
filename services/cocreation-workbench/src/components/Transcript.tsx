@@ -692,7 +692,7 @@ export function Welcome() {
   ];
   const scoped = document.getElementById('cocreation-workbench')?.dataset.scopedTeaching === 'true';
   const starters = !scoped ? productionStarters : canStartTeachingProject(state)
-    ? teachingProjects.map((item, index) => ({ ...item, type: 'auto', icon: [Layers, SlidersHorizontal, FileText][index] }))
+    ? teachingProjects.map(item => ({ ...item, type: 'auto' }))
     : [
         {
           title: '教案与讲义', subtitle: '生成可下载的 Word 草稿', icon: FileText, type: 'auto',

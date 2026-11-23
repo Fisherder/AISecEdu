@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { displayTeachingReply, teachingProjectDraft, teachingProjects } from '../src/core/teaching-projects.ts';
 
 test('hides obsolete capability sentences while keeping teaching content', () => {
@@ -13,4 +15,10 @@ test('selecting a new project replaces the previous starter and keeps the teachi
   const [lesson, debate] = teachingProjects;
   const draft = teachingProjectDraft(lesson.prompt, '观察水分');
   assert.equal(teachingProjectDraft(debate.prompt, draft), debate.prompt + '观察水分');
+});
+
+test('every teaching starter has a renderable welcome icon', () => {
+  for (const { title, icon } of teachingProjects) {
+    assert.match(renderToStaticMarkup(createElement(icon)), /^<svg\b/, title);
+  }
 });

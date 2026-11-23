@@ -1,10 +1,16 @@
+import { FileText, Layers, Presentation, SlidersHorizontal, type LucideIcon } from 'lucide-react';
 import type { Artifact, WorkspaceState } from './types';
 
-export const teachingProjects = [
-  { title: '平台教案', subtitle: '比较候选，生成平台成品', prompt: '请生成普通教案候选：' },
-  { title: '课堂辩论', subtitle: '设计辩题、立场与流程', prompt: '请生成普通课堂辩论候选方案：' },
-  { title: '制作课件', subtitle: '生成可编辑的原生幻灯片', prompt: '请制作一份课件：' },
-  { title: '动态仿真', subtitle: '设计可调节、可比较的模拟', prompt: '请制作一个动态仿真：' },
+export const teachingProjects: ReadonlyArray<{
+  title: string;
+  subtitle: string;
+  prompt: string;
+  icon: LucideIcon;
+}> = [
+  { title: '平台教案', icon: FileText, subtitle: '比较候选，生成平台成品', prompt: '请生成普通教案候选：' },
+  { title: '课堂辩论', icon: Layers, subtitle: '设计辩题、立场与流程', prompt: '请生成普通课堂辩论候选方案：' },
+  { title: '制作课件', icon: Presentation, subtitle: '生成可编辑的原生幻灯片', prompt: '请制作一份课件：' },
+  { title: '动态仿真', icon: SlidersHorizontal, subtitle: '设计可调节、可比较的模拟', prompt: '请制作一个动态仿真：' },
 ];
 
 export function isGeneratedCourseware(artifact: Artifact) {

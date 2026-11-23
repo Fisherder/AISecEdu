@@ -105,6 +105,7 @@ lucide-react/dist/esm/icons/pencil.js:
 lucide-react/dist/esm/icons/pin.js:
 lucide-react/dist/esm/icons/play.js:
 lucide-react/dist/esm/icons/plus.js:
+lucide-react/dist/esm/icons/presentation.js:
 lucide-react/dist/esm/icons/refresh-cw.js:
 lucide-react/dist/esm/icons/rotate-ccw.js:
 lucide-react/dist/esm/icons/search.js:
