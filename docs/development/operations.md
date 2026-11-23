@@ -39,6 +39,8 @@ aisecedu-dev resolve 真实任务编号 SUCCEEDED --note '实际命令、退出�
 
 协作代码只在 `source` 的专用分支审查提交。更新只读镜像前确认分支与干净状态，从受信任的 GitHub `develop` 分支 fetch 并核验完整 commit，镜像 HEAD 固定到 `refs/heads/develop`；旧 `source` remote 和准备分支保留为历史参考，镜像保持 root 所有、开发组只读，不使用全员可写的共享 `.git`。
 
+如需在合入前向成员发放已验证的源码，可以在同一只读镜像使用 `refs/team-snapshots/` 下的具名引用。每个引用对应一个固定提交，随附该提交的 CI 链接；下次发放新候选时另建引用。发放前核对 GitHub 的完整提交和预期文件树，发放后用普通开发组权限从新目录显式 fetch、检出并验证只读权限，再复核 `HEAD` 与 `refs/heads/develop`。当前教学候选的引用、校验值和获取命令见[新成员手册](onboarding.md#按需查看完整-dsh-教学候选)。
+
 源码包由 `git archive` 从已提交基线导出，旁边保存 commit 和 SHA-256。不打包私有配置、control、数据库、个人目录或运行数据。若新增文件只在工作目录而未提交，不宣称它已经进入交付包。
 
 协作基线已发布为 GitHub 默认分支 `develop`，普通 PR 统一合入该分支；维护者再安排 `develop` 到 `main` 的发布整合。分支保护要求至少一位非作者审查、禁用强推与删除，必需检查以 GitHub 实际配置为准。源码中的 CI、CODEOWNERS 和 PR 模板不能单独启用保护规则。

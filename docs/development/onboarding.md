@@ -49,6 +49,24 @@ git switch -c feat/yourname/first-task origin/develop
 
 开发目录为 `~/work/aisecedu`。不要到 `/srv/aisecedu-dojo` 或 `/srv/aisecedu-development-volume/aisecedu-dojo` 修改文件、切分支或安装依赖；它们分别挂载给运行中的生产与共享开发平台。
 
+### 按需查看完整 DSH 教学候选
+
+常规任务继续从 `origin/develop` 建分支。要阅读已经通过团队 CI 的 DSH 教学候选，在服务器的个人 clone 中显式取回团队镜像内的固定引用。下面的命令只读取候选，保留当前任务分支与工作文件。
+
+```sh
+git fetch --no-tags baseline refs/team-snapshots/ordinary-teaching-ci-47b383cf
+git rev-parse FETCH_HEAD
+git rev-parse FETCH_HEAD:vendor/deepseek-harness
+```
+
+提交应为 `2fb0cdcfd48236f9ce1585f48432ea7d8d6a94a0`，DSH 子树应为 `6778b1f1e75fde6d62f69d345792bf08e32178d4`，含 21,071 个受版本控制的条目。需要实际浏览全部文件时，可在自己目录建立独立副本。以下命令从 `~/work/aisecedu` 执行。
+
+```sh
+git worktree add --detach ../aisecedu-teaching-2fb0cdcf 2fb0cdcfd48236f9ce1585f48432ea7d8d6a94a0
+```
+
+候选的 GitHub Linux 检查包括教学回归、浏览器和官方 DSH 集成。候选源码的提交与开发站当前运行的提交可以分别核对。[团队 CI](https://github.com/Fisherder/AISecEdu/actions/runs/45088033559) · [仓库审计](https://github.com/Fisherder/AISecEdu/actions/runs/45088033514)
+
 ## 工具链和第一次检查
 
 服务器提供隔离安装的 Node.js 22 和 pnpm 10.28.0，不替换其他项目使用的系统 Node。显式设置本终端 PATH：
@@ -76,9 +94,26 @@ pnpm exec vitest run tests/与你修改对应的测试文件
 
 最后一条是测试路径写法示例，替换为实际存在的文件。依赖安装包含构建步骤，先与维护者协调资源。全仓测试和部分运维脚本会启动环境或写数据库，不能因为名字包含 `test` 或 `verify` 就直接运行。
 
-## 打开共享开发平台
+## 查看服务器上的 develop 实例
 
-在自己电脑另开终端，执行以下命令并保持连接：
+在自己电脑另开终端，用个人 SSH 账号建立转发并保持连接。
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes \
+  -L 127.0.0.1:28081:127.0.0.1:28081 dev_yourname@10.92.35.7
+```
+
+打开 [开发站教师工作台](http://127.0.0.1:28081/teacher)，使用维护者分配的平台测试账号。在 [运行版本](http://127.0.0.1:28081/_aisecedu/version.json) 查看 `branch` 和完整 `commit`。可用下面的命令在个人代码目录查询 GitHub 开发分支的提交号。两者不同时，以版本接口作为当前页面的部署依据。
+
+```sh
+git ls-remote origin refs/heads/develop
+```
+
+课堂运行服务独立启用。2026 年 11 月 23 日核验时，`develop` 站点首页和版本接口均返回 200，课堂健康接口 `/agent-runtime/api/health` 返回 503。
+
+### 已预约的完整联调平台（28080）
+
+任务明确分配到完整联调平台时，在自己的电脑建立下列转发。
 
 ```sh
 ssh -N -o ExitOnForwardFailure=yes \
