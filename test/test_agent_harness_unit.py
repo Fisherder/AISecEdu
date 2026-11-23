@@ -198,6 +198,7 @@ def test_retry_reloads_terminal_state_before_rearming(setup):
     namespace = {
         "TeachingJobs": Job,
         "_single_candidate_materialization": lambda job, result: (None, None),
+        "ordinary_project_queue": SimpleNamespace(configured=lambda: False),
     }
     exec(compile(ast.Module(body=[function], type_ignores=[]), "jobs.py", "exec"), namespace)
     with pytest.raises(ValueError, match="Only failed or canceled"):

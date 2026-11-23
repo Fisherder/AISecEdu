@@ -10,6 +10,7 @@ from .artifacts import content_hash
 from .model_router import UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_PLAN_REVISION_ROUTE
 from .ordinary_lesson_plan import _require_scope
 from .ordinary_slide_layout import split_source_selection
+from .ordinary_project_queue import enabled as scoped_project_enabled
 from .upstream_turn import upstream_enabled
 
 
@@ -149,9 +150,10 @@ def admit(artifact, payload):
     revision = _source(artifact.id, payload["expectedRevision"], artifact.owner_id)
     model = config.HARNESS_DEEPSEEK_MODEL
     _require_scope(artifact.owner_id, artifact.dojo_id, artifact.module_index, None)
-    if (not upstream_enabled() or not model or not _has_receipt(
+    if (not (upstream_enabled() or scoped_project_enabled(artifact.dojo_id)) or not model or not _has_receipt(
             revision, artifact.owner_id, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_PLAN_REVISION_ROUTE,
-        ) or content_hash(revision.content) != revision.content_hash):
+        ) or content_hash(revision.content) != revision.content_hash
+          or (scoped_project_enabled(artifact.dojo_id) and revision.source_refs)):
         raise OrdinaryLessonPlanRevisionError(_CONFLICT)
     _sections(revision, payload)
     return {
@@ -164,7 +166,8 @@ def admit(artifact, payload):
 def _current(job, payload, *, lock=False):
     model = payload.get(MODEL)
     if (job.kind != "artifact.revise" or payload.get("artifactType") != "lesson-plan"
-            or not upstream_enabled() or not model or model != config.HARNESS_DEEPSEEK_MODEL):
+            or not (upstream_enabled() or scoped_project_enabled(job.dojo_id))
+            or not model or model != config.HARNESS_DEEPSEEK_MODEL):
         raise OrdinaryLessonPlanRevisionError(_CONFLICT)
     _require_scope(job.owner_id, job.dojo_id, job.module_index, job.thread_id)
     query = TeachingArtifacts.query.filter_by(
@@ -177,7 +180,8 @@ def _current(job, payload, *, lock=False):
         raise OrdinaryLessonPlanRevisionError(_CONFLICT)
     revision = _source(artifact.id, expected, job.owner_id)
     if (not _has_receipt(revision, job.owner_id, UPSTREAM_LESSON_PLAN_ROUTE, UPSTREAM_LESSON_PLAN_REVISION_ROUTE)
-            or revision.content_hash != payload.get(_HASH) or content_hash(revision.content) != revision.content_hash):
+            or revision.content_hash != payload.get(_HASH) or content_hash(revision.content) != revision.content_hash
+            or (scoped_project_enabled(job.dojo_id) and revision.source_refs)):
         raise OrdinaryLessonPlanRevisionError(_CONFLICT)
     return revision
 

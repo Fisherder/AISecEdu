@@ -214,6 +214,7 @@ def flow(monkeypatch):
     load_source("scope", ns)
     load_source("upstream_turn", ns)
     load_source("artifacts", ns, {"candidate_request_prompt", "content_hash", "artifact_course_teacher"})
+    ns["scoped_project_enabled"] = lambda _: False
     load_source("ordinary_debate", ns)
     load_source("model_router", ns)
 
@@ -434,7 +435,7 @@ def test_manual_retry_rejects_revoked_version_before_requeue(flow):
     job = flow.new_job("artifact.materialize", admitted)
     flow.artifact.current_revision = 2
     flow.session.commit()
-    ns = dict(vars(flow), ordinary_debate=flow)
+    ns = dict(vars(flow), ordinary_debate=flow, ordinary_project_queue=SimpleNamespace(configured=lambda: False))
     load_source("jobs", ns, {"retry_job", "_retry_payload"})
 
     with pytest.raises(ValueError):

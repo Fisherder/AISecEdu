@@ -38,6 +38,7 @@ def setup():
     receipts.query.filter_by.return_value.filter.return_value.first.return_value = object()
     ns.update(
         copy=copy, html=html, _require_scope=permissions, upstream_enabled=enabled,
+        scoped_project_enabled=lambda _: False,
         ModelInvocations=receipts,
         split_source_selection=lambda text: (text, "selected-source" in text),
         content_hash=lambda data: hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest(),

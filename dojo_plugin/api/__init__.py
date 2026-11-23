@@ -3,6 +3,8 @@ from flask import Blueprint, current_app, make_response, request
 from ...dojo_plugin import config
 from flask_restx import Api
 
+from CTFd.models import db
+from ..agent_runtime.ordinary_project_queue import WorkerUnavailable
 from ..utils.request_logging import log_exception
 from .v1.activity import activity_namespace
 from .v1.auth import auth_namespace
@@ -59,6 +61,12 @@ if cors_origin:
 
 
 api_v1 = Api(api, version="v1", doc=current_app.config.get("SWAGGER_UI"))
+
+@api_v1.errorhandler(WorkerUnavailable)
+def task_not_available(error):
+    db.session.rollback()
+    return {"success": False, "error": {"code": "TASK_UNAVAILABLE", "message": str(error)}}, 503
+
 
 @api_v1.errorhandler(Exception)
 def handle_api_exception(error):

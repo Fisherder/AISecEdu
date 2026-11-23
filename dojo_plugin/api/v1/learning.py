@@ -78,7 +78,7 @@ from ...learning.intelligence import (
     new_guide_thread,
     tutor_reply,
 )
-from ...agent_runtime.upstream_turn import UpstreamTurnError
+from ...agent_runtime.upstream_turn import UpstreamTurnError, upstream_enabled
 from ...learning.student_agent import (
     create_personal_study_package,
     personal_study_package_requested,
@@ -3385,11 +3385,12 @@ class LearningGuide(Resource):
             None,
         )
         quick_prompts = [
-            "帮我生成一份关于怎样用证据支持结论的个人学习包。",
             "根据我最近的学习情况，帮我安排下一次 45 分钟练习。",
             "我目前最薄弱的能力是什么？应该怎样补强？",
             "总结我最近几次练习的进步和重复出现的问题。",
         ]
+        if upstream_enabled():
+            quick_prompts.insert(0, "帮我生成一份关于怎样用证据支持结论的个人学习包。")
         if active:
             quick_prompts.insert(
                 0,

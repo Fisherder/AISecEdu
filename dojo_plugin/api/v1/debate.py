@@ -1,4 +1,5 @@
 import datetime
+import os
 import re
 import uuid
 import time
@@ -14,9 +15,11 @@ from CTFd.plugins import bypass_csrf_protection
 from ... import config
 from ...models.debate import DebateAttempts
 from ...models import ModelInvocations, SelfLearningWorkspaces, DojoModules
+from ...agent_runtime import ordinary_project_queue, teacher_dsh_chat
 from ...agent_runtime.artifacts import artifact_course_teacher, artifact_view
 from ...agent_runtime.auth import AgentRuntimeAuthError
 from ...agent_runtime.model_router import route_model
+from ...agent_runtime.ordinary_debate import MODE as ORDINARY_DEBATE_ROUTE
 from ...agent_runtime.scope import ScopeError
 from .teaching import _service_lesson_session, _lesson_artifact, _ok, _error, _body, _require_workspace_capacity
 
@@ -26,6 +29,11 @@ debate_namespace = Namespace("debates", description="学生与 AI 的结构化�
 def _access(artifact_id):
     user, scope, _ = _service_lesson_session()
     artifact = _lesson_artifact(artifact_id, user, scope, allow_published_view=True)
+    if ordinary_project_queue.configured() and (
+        not ordinary_project_queue.enabled(artifact.dojo_id) or scope.dojo_id != artifact.dojo_id
+        or scope.module_index != artifact.module_index or artifact.self_workspace_id is not None
+    ):
+        raise ScopeError("辩论未在当前联调课程开放")
     if scope.module_index is not None and artifact.module_index != scope.module_index:
         raise ScopeError("辩论不属于当前章节")
     if scope.role == "student" and artifact.dojo_id is not None and artifact.module_index is not None:
@@ -34,7 +42,12 @@ def _access(artifact_id):
             raise ScopeError("章节尚未开放")
     if artifact.artifact_type != "debate" or artifact.status in {"ARCHIVED", "DELETED", "GENERATING", "FAILED"}:
         raise ScopeError("辩论活动不存在或尚未就绪")
-    content = (artifact_view(artifact).get("revision") or {}).get("content") or {}
+    revision = artifact_view(artifact).get("revision") or {}
+    if ordinary_project_queue.configured() and (
+        revision.get("sourceRefs") or (revision.get("validation") or {}).get("modelRoute") != ORDINARY_DEBATE_ROUTE
+    ):
+        raise ScopeError("当前开发站仅开放在联调课程生成的普通辩论对练")
+    content = revision.get("content") or {}
     spec = next((item.get("content", {}).get("debate") for item in content.get("lesson", {}).get("artifacts", [])
                  if isinstance(item, dict) and isinstance(item.get("content"), dict) and item["content"].get("debate", {}).get("schema") in {"debate-v1", "debate-v2"}), None)
     if not spec or not 1 <= len(spec.get("rounds", [])) <= 24:
@@ -162,9 +175,14 @@ class DebateActivity(Resource):
             if not isinstance(message, str) or not 1 <= len(message.strip()) <= 12000:
                 raise ValueError("请填写1至12000字的发言")
             message = message.strip()
+            scoped_dialogue = ordinary_project_queue.configured()
+            if scoped_dialogue:
+                message = teacher_dsh_chat.validate_prompt(message)
             attempt = DebateAttempts.query.filter_by(id=str(body.get("attemptId") or ""), artifact_id=artifact.id, user_id=user.id).with_for_update().first()
             if attempt is None:
                 raise ScopeError("辩论记录不存在")
+            if scoped_dialogue and attempt.revision != artifact.current_revision:
+                return _error("活动已有新版本，请按新版本开始一次对练。", 409)
             attempt_id = attempt.id
             controls = _turn_controls(attempt.spec, body) if action == "turn" else {}
             receipt = next((turn for turn in attempt.turns if turn.get("requestId") == key), None)
@@ -203,14 +221,22 @@ class DebateActivity(Resource):
                 payload.update(controls)
                 payload["earlyFinish"] = early_finish
             db.session.commit()
-            response = requests.post(f"{config.AGENT_RUNTIME_INTERNAL_URL}/api/integration/debate/respond",
+            runtime = config.AGENT_RUNTIME_INTERNAL_URL
+            if scoped_dialogue:
+                runtime = os.environ.get("AISECEDU_ORDINARY_PROJECT_RUNTIME_URL", "").rstrip("/")
+                if not runtime:
+                    raise requests.ConnectionError("Ordinary debate runtime is unavailable")
+            response = requests.post(f"{runtime}/api/integration/debate/respond",
                                      headers={"X-AISecEdu-Service-Token": config.AGENT_RUNTIME_SERVICE_SECRET},
-                                     json={"input": payload, "model": model_name, "requestIdentity": f"{attempt.id}:{key}"}, timeout=(5, 145))
+                                     json={"input": payload, "model": model_name, "requestIdentity": f"{attempt.id}:{key}"},
+                                     timeout=(5, 145), **({"allow_redirects": False} if scoped_dialogue else {}))
             response.raise_for_status()
             result = response.json()
             if not result.get("success") or not isinstance(result.get("result"), dict):
                 raise ValueError("AI响应格式不完整，请重试")
             provider, actual_model = _reported_model(result.get("model"))
+            if scoped_dialogue and (provider, actual_model) != ("deepseek", config.HARNESS_DEEPSEEK_MODEL):
+                raise ValueError("辩论回应缺少指定模型的执行回执。")
             attempt = DebateAttempts.query.filter_by(id=attempt_id, user_id=user.id).populate_existing().with_for_update().one()
             if (attempt.pending or {}).get("lease") != lease:
                 return _error("这次回应已过期，请刷新记录后重试", 409)

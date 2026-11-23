@@ -1645,6 +1645,8 @@ def enqueue_job(
         job.payload = ordinary_project_queue.admit(kind, payload, dojo_id)
     if kind in {"candidate.generate", "material.enrich"} and (job.payload or {}).get("scopedOrdinaryProject") != "slide-deck":
         job.payload = _admit_ordinary_teaching_job(job, payload)
+    if ordinary_project_queue.configured():
+        ordinary_project_queue.require_consumer(job, teacher_dsh_chat.PIN)
     db.session.add(job)
     db.session.flush()
     if kind == "agent.chat":
@@ -2074,6 +2076,8 @@ def retry_job(job, user_id, idempotency_token):
     job = TeachingJobs.query.filter_by(id=job.id).with_for_update().populate_existing().first()
     if job is None or job.owner_id != user_id:
         raise PermissionError("Job not found")
+    if ordinary_project_queue.configured():
+        ordinary_project_queue.require_consumer(job, teacher_dsh_chat.PIN)
     token = str(idempotency_token or "").strip()
     if not token or len(token) > 80:
         raise ValueError("A retry idempotency key is required")
@@ -5070,7 +5074,8 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False, ordinary_pro
                     if route["route"] not in ordinary_project_queue.ROUTES or route.get("degraded"):
                         raise PermanentJobError("普通教学项目的指定执行路径不可用。")
                     ordinary_project_queue.require_inputs(runtime_payload)
-                    teacher_dsh_chat.validate_prompt(runtime_payload.get("prompt") or runtime_payload.get("requestPrompt"))
+                    teacher_dsh_chat.validate_prompt(runtime_payload.get("prompt") or runtime_payload.get("requestPrompt")
+                                                     or runtime_payload.get("instruction"))
                     if runtime_payload.get("sourceMaterials") or (runtime_payload.get("materialDossier") or {}).get("materials"):
                         raise PermanentJobError("联调项目包含已保存的课程资料，未发送模型。")
             debate_candidate = job.kind == "candidate.generate" and route.get("route") == UPSTREAM_DEBATE_CANDIDATE_ROUTE

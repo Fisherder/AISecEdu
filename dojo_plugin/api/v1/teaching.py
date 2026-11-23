@@ -6755,6 +6755,9 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                     ordinary_courseware.brief(prompt)
                 else:
                     teacher_dsh_chat.validate_prompt(prompt)
+            elif isinstance(prompt, str) and ordinary_project_queue.unsupported_creation(prompt, body.get("artifactType")):
+                return _error("当前可直接生成平台教案、课堂辩论和交互课件。其他项目请从已开通的课程功能入口创建。",
+                              409, code="PROJECT_UNAVAILABLE")
         text_model = None if readonly_material_turn or project_kind else teacher_dsh_chat.admit(thread, body, mode)
         if text_model:
             mode = "execute" if text_model["formats"] else "ask"
@@ -8174,8 +8177,11 @@ class CandidateSet(Resource):
 
 def _derive_ordinary_debate(user, source, candidate_ids, rows, instruction, count, request_key):
     build_scope(user, role="teacher", dojo_id=source.dojo_id, module_index=source.module_index)
-    if not ordinary_teaching_course(source.dojo_id) or not upstream_enabled() or not config.HARNESS_DEEPSEEK_MODEL:
+    scoped = ordinary_project_queue.configured() and ordinary_project_queue.enabled(source.dojo_id)
+    if not ordinary_teaching_course(source.dojo_id) or not (upstream_enabled() or scoped) or not config.HARNESS_DEEPSEEK_MODEL:
         raise ValueError("本课程的普通辩论生成服务不可用。")
+    if scoped and source.source_refs:
+        raise ValueError("当前联调环境只支持派生未引用课程资料的辩论方案。")
     by_id = {row.id: row for row in rows}
     if (not isinstance(candidate_ids, list) or not 1 <= len(candidate_ids) <= 4
             or any(not isinstance(key, str) or key not in by_id for key in candidate_ids)
@@ -10499,6 +10505,9 @@ class Materials(Resource):
         user = _current_user()
         try:
             _require_teacher(user)
+            if ordinary_project_queue.configured():
+                return _error("当前开发站暂未开放新资料上传及索引，可以继续查看已保存的资料。",
+                              503, code="TASK_UNAVAILABLE")
             upload = request.files.get("file")
             raw_dojo_id = str(request.form.get("dojoId") or "").strip()
             thread_id = str(request.form.get("threadId") or "").strip() or None
@@ -12326,19 +12335,26 @@ class AgentRuntimeLaunch(Resource):
             ].fullmatch(target):
                 return _error("Unsupported preview target", 400, code="INVALID_TARGET")
             if ordinary_project_queue.configured():
-                if role != "teacher" or workspace_id is not None or not target.startswith(("/prep/", "/classroom/")):
+                if workspace_id is not None or not target.startswith(("/prep/", "/classroom/")):
                     raise ScopeError("This development entry only opens ordinary teaching previews")
-                scope = build_scope(user, role="teacher", dojo_id=dojo_id, module_index=module_index)
-                if not ordinary_project_queue.enabled(scope.dojo_id):
-                    raise ScopeError("Teaching previews are not enabled in this course")
                 resource_id = target.rstrip("/").rsplit("/", 1)[-1]
-                if target.startswith("/prep/"):
-                    artifact = artifact_for_user(resource_id, user)
-                    if (artifact.artifact_type not in {"lesson-plan", "debate", "slide-deck"} or artifact.self_workspace_id is not None
-                            or (artifact.dojo_id, artifact.module_index) != (scope.dojo_id, scope.module_index)):
+                if role == "student":
+                    artifact = artifact_for_viewer(resource_id, user)
+                    if (not target.startswith("/prep/") or artifact.artifact_type != "debate"
+                            or artifact.status != "PUBLISHED" or artifact.self_workspace_id is not None
+                            or not ordinary_project_queue.enabled(artifact.dojo_id)):
                         raise ScopeError("Artifact not found")
                 else:
-                    _runtime_viewable_classroom(resource_id, user, scope)
+                    scope = build_scope(user, role="teacher", dojo_id=dojo_id, module_index=module_index)
+                    if not ordinary_project_queue.enabled(scope.dojo_id):
+                        raise ScopeError("Teaching previews are not enabled in this course")
+                    if target.startswith("/prep/"):
+                        artifact = artifact_for_user(resource_id, user)
+                        if (artifact.artifact_type not in {"lesson-plan", "debate", "slide-deck"} or artifact.self_workspace_id is not None
+                                or (artifact.dojo_id, artifact.module_index) != (scope.dojo_id, scope.module_index)):
+                            raise ScopeError("Artifact not found")
+                    else:
+                        _runtime_viewable_classroom(resource_id, user, scope)
             if role == "teacher":
                 _require_teacher(user)
                 if dojo_id is None:

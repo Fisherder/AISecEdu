@@ -74,7 +74,8 @@ def _read(kind, payload, owner_id, dojo_id, module_index, thread_id, *, lock=Fal
         artifact_id=artifact.id, revision=expected, created_by=owner_id,
     ).populate_existing().first()
     _require(revision is not None and isinstance(revision.content, dict)
-             and revision.content_hash == content_hash(revision.content))
+             and revision.content_hash == content_hash(revision.content)
+             and not (scoped_project_enabled(dojo_id) and revision.source_refs))
     pin = {"model": config.HARNESS_DEEPSEEK_MODEL, "kind": kind, "revisionId": revision.id,
            "contentHash": revision.content_hash, "scope": [owner_id, dojo_id, module_index, thread_id]}
     source = {"artifactId": artifact.id, "expectedRevision": expected, "refs": revision.source_refs}

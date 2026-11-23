@@ -355,3 +355,24 @@ def test_scoped_project_prompt_recognizes_creation_in_ordinary_language(prompt, 
     load_source("teacher_documents", craft)
     load_source("ordinary_project_queue", craft)
     assert craft["requested_kind"](prompt) == kind
+
+
+def test_scoped_worker_admits_revisions_with_no_thread_and_rejects_unserved_jobs(monkeypatch):
+    queue = {"ordinary_teaching_course": lambda course: course == 12}
+    load_source("teacher_documents", queue)
+    load_source("ordinary_project_queue", queue)
+    monkeypatch.setenv("AISECEDU_ORDINARY_PROJECTS", "true")
+    for artifact_type, marker in (("lesson-plan", "ordinaryLessonPlanRevisionModel"), ("debate", "ordinaryDebate")):
+        payload = {"artifactType": artifact_type, marker: {"model": "deepseek-flash"}}
+        job = SimpleNamespace(kind="artifact.revise", dojo_id=12, thread_id=None, action_id=None,
+                              payload=queue["admit"]("artifact.revise", payload, 12))
+        queue["require_consumer"](job, "teacherDshText")
+        job.dojo_id = 13
+        with pytest.raises(queue["WorkerUnavailable"]):
+            queue["require_consumer"](job, "teacherDshText")
+        with pytest.raises(ValueError):
+            queue["admit"]("artifact.revise", {**payload, "sourceRefs": [{"id": "saved-material"}]}, 12)
+    unserved = SimpleNamespace(kind="material.analyze", dojo_id=12, thread_id=None, action_id=None,
+                               payload={queue["PIN"]: "debate"})
+    with pytest.raises(queue["WorkerUnavailable"]):
+        queue["require_consumer"](unserved, "teacherDshText")
