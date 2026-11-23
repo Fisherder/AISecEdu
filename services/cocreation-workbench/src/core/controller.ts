@@ -464,6 +464,26 @@ export class WorkbenchController {
       await this.loadThreads();
     });
   }
+  async replaceMessage(threadId: string, messageId: number, content: string, expectedLastMessageId: number) {
+    const epoch = this.epoch;
+    const data = await this.mutate(`/threads/${id(threadId)}/messages/${messageId}`,
+      { content, expectedLastMessageId }, 'PATCH');
+    if (epoch === this.epoch && this.state.thread?.id === threadId) {
+      if (this.state.selectedFile &&
+          !conversationFiles(data.thread.messages).some(file => file.id === this.state.selectedFile?.id))
+        this.togglePanel();
+      const updated = [...(data.thread.harnessJobs || [])];
+      if (data.job && !updated.some(job => job.id === data.job.id)) updated.unshift(data.job);
+      this.patch({
+        thread: data.thread,
+        jobs: [...updated, ...this.state.jobs.filter(job => job.threadId !== threadId)],
+        selectedJob: data.job?.id || null,
+      });
+      this.watchThread(threadId, ++this.epoch);
+      await this.loadJobs(threadId).catch(this.error);
+    }
+    void this.loadThreads().catch(this.error);
+  }
   private mutateMessage(threadId: string, submission: { key: string; body: Data }) {
     return api(`/threads/${id(threadId)}/messages`, {
       method: 'POST',

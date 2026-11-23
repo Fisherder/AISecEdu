@@ -74,6 +74,7 @@ export async function request<T = Data>(
       throw new ApiError(
         reason ||
           payload.message ||
+          (Array.isArray(payload.errors) && typeof payload.errors[0] === 'string' ? payload.errors[0] : '') ||
           (response.status === 401 ? '登录已失效，请重新登录。' : '操作未完成，请稍后重试。'),
         response.status,
         payload.errorCode || payload.error?.code,

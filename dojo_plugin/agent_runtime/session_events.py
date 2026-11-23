@@ -444,6 +444,12 @@ def fold_session_message_events(rows):
     messages = {}
     for row in rows:
         payload = row.payload or {}
+        if row.event_type == 'conversation.rewound':
+            boundary = payload.get('fromMessageId')
+            if type(boundary) is not int or boundary < 1:
+                raise ValueError('Invalid conversation rewind boundary')
+            messages = {key: value for key, value in messages.items() if key < boundary}
+            continue
         if row.event_type in {'thread.baseline', 'projection.checkpoint'}:
             source_messages = payload.get('messages')
             expected_source = (
@@ -549,7 +555,7 @@ def replay_session_messages(thread_id, *, max_batches=10, checkpoint_every=200):
         db.session.query(TeachingAgentSessionEvents)
         .filter_by(thread_id=thread_id)
         .filter(TeachingAgentSessionEvents.event_type.in_(
-            ('message.created', 'message.updated')
+            ('message.created', 'message.updated', 'conversation.rewound')
         ))
     )
     if anchor is not None:

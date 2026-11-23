@@ -2078,6 +2078,8 @@ def retry_job(job, user_id, idempotency_token):
     job = TeachingJobs.query.filter_by(id=job.id).with_for_update().populate_existing().first()
     if job is None or job.owner_id != user_id:
         raise PermissionError("Job not found")
+    if (job.payload or {}).get("supersededByMessageEdit"):
+        raise ValueError("该任务已被重发的消息替换。")
     if ordinary_project_queue.configured():
         ordinary_project_queue.require_consumer(job, teacher_dsh_chat.PIN)
     token = str(idempotency_token or "").strip()

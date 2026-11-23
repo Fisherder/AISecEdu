@@ -11,6 +11,7 @@ import {
   Layers,
   GitBranch,
   Play,
+  Pencil,
   ShieldCheck,
   Sparkles,
   Terminal,
@@ -18,10 +19,11 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { useWorkbench } from '../core/context';
-import { api, id, key, safeLink } from '../core/api';
+import { api, id, key, safeLink, ApiError } from '../core/api';
 import { projectActivity, streamedAnswer } from '../core/events';
 import { classroomDashboardLink, classroomPreparation } from '../core/classroom-preparation';
 import { dateLabel, terminal, type Message, type Data } from '../core/types';
+import { conversationDate, conversationTimeLabel, messageClock, startsTimeGroup } from '../core/conversation-time';
 import { Button, IconButton, Status, Code } from './ui';
 import { CandidateSet } from './CandidateSet';
 import { Composer } from './Composer';
@@ -339,9 +341,19 @@ function Approvals({ message }: { message: Message }) {
     </>
   );
 }
-function MessageView({ message }: { message: Message }) {
+function MessageView({ message, onResent }: { message: Message; onResent: () => void }) {
   const { state, controller: c } = useWorkbench();
   const [copied, setCopied] = useState(false);
+  const [touchActions, setTouchActions] = useState(false);
+  const [editor, setEditor] = useState<{ content: string; last: number } | null>(null);
+  const [editError, setEditError] = useState('');
+  const [resending, setResending] = useState(false);
+  const editField = useRef<HTMLTextAreaElement>(null);
+  const editTrigger = useRef<HTMLButtonElement>(null);
+  const editing = editor !== null;
+  useEffect(() => {
+    if (editing) editField.current?.focus({ preventScroll: true });
+  }, [editing]);
   const [candidates, setCandidates] = useState<string | null>(null);
   const metadata = message.metadata || {};
   const job = state.jobs.find((item) => item.id === metadata.jobId);
@@ -365,26 +377,48 @@ function MessageView({ message }: { message: Message }) {
     .reverse()
     .find((item) => item.kind !== 'message' && item.kind !== 'reasoning');
   const user = message.role === 'user';
+  const time = conversationDate(message.created);
+  const canEdit = user && state.thread?.status === 'ACTIVE' && !metadata.hidden && Boolean(message.content.trim());
+  const validEdit = Boolean(editor?.content.trim() && editor.content.trim() !== message.content.trim());
+  const cancelEdit = () => {
+    setEditor(null);
+    requestAnimationFrame(() => editTrigger.current?.focus({ preventScroll: true }));
+  };
+  const submitEdit = async () => {
+    const thread = state.thread;
+    if (!thread || !editor || !validEdit || resending) return;
+    setResending(true);
+    setEditError('');
+    try {
+      await c.replaceMessage(thread.id, message.id, editor.content.trim(), editor.last);
+      setEditor(null);
+      onResent();
+    } catch (error) {
+      setEditError(error instanceof ApiError ? error.message : '消息暂时无法重发，请重试。');
+    } finally {
+      setResending(false);
+    }
+  };
   return (
     <article
       className={`message ${user ? 'user-message' : 'assistant-message'}`}
       data-message-id={message.id}
+      data-editing={editing || undefined}
+      data-show-actions={touchActions || undefined}
+      aria-label={user ? '你的消息' : undefined}
     >
-      <div className="message-meta">
-        {user ? (
-          <span className="avatar user">
-            {String(state.context.user?.name || '我').slice(0, 1)}
-          </span>
-        ) : (
-          <span className="avatar">
-            <Sparkles size={15} />
-          </span>
-        )}
-        <strong>{user ? '你' : '玄甲'}</strong>
-        <time>{dateLabel(message.created)}</time>
-        {metadata.executionMode === 'plan' && <span className="tag">规划</span>}
-      </div>
-      <div className="message-body">
+      {!user && (
+        <div className="message-meta">
+          <span className="avatar"><Sparkles size={15} /></span>
+          <strong>玄甲</strong>
+          {metadata.executionMode === 'plan' && <span className="tag">规划</span>}
+        </div>
+      )}
+      <div className="message-body" onPointerUp={event => {
+        if (user && !editing && event.pointerType === 'touch' &&
+            event.target instanceof Element && !event.target.closest('a,button,input,textarea'))
+          setTouchActions(value => !value);
+      }}>
         {plan.length > 0 && (
           <details className="plan-block" open={pending || metadata.executionMode === 'plan'}>
             <summary>
@@ -409,7 +443,26 @@ function MessageView({ message }: { message: Message }) {
             <ArrowUpRight size={14} />
           </button>
         )}
-        {text && <RichText text={text} />}
+        {editor ? (
+          <form className="message-editor" onSubmit={event => { event.preventDefault(); void submitEdit(); }}
+            onKeyDown={event => {
+              if (event.nativeEvent.isComposing) return;
+              if (event.key === 'Escape' && !resending) { event.preventDefault(); cancelEdit(); }
+              if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void submitEdit(); }
+            }}>
+            <textarea ref={editField} aria-label="编辑消息" value={editor.content} maxLength={16000}
+              disabled={resending} rows={Math.max(3, Math.min(9, editor.content.split('\n').length + 1))}
+              onChange={event => setEditor({ ...editor, content: event.target.value })} />
+            <p className="message-editor-note">重发会替换这条消息及之后的对话。</p>
+            {editError && <p className="message-editor-error" role="alert">{editError}</p>}
+            <div className="message-editor-actions">
+              <Button type="button" disabled={resending} onClick={cancelEdit}>取消</Button>
+              <Button type="submit" className="primary" disabled={!validEdit || resending}>
+                {resending ? '正在重发' : '重发'}
+              </Button>
+            </div>
+          </form>
+        ) : text && <RichText text={text} />}
         {pending && !job && <p className="quiet pending-text" role="status">正在接收要求…</p>}
         {metadata.executionMode === 'plan' && !pending && !metadata.failed && !metadata.questions?.length && (
           <Button
@@ -491,7 +544,8 @@ function MessageView({ message }: { message: Message }) {
           );
         })}
         {!pending && (
-          <div className="message-actions">
+          <div className="message-actions" hidden={editing}>
+            {user && time && <time dateTime={time.toISOString()} title={conversationTimeLabel(time)}>{messageClock(time)}</time>}
             <IconButton
               label={copied ? '已复制' : '复制消息'}
               onClick={() => {
@@ -506,6 +560,13 @@ function MessageView({ message }: { message: Message }) {
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </IconButton>
+            {canEdit && <IconButton label="编辑并重发消息" onClick={event => {
+              editTrigger.current = event.currentTarget;
+              const last = state.thread?.messages?.at(-1)?.id;
+              if (last === undefined) return;
+              setEditError('');
+              setEditor({ content: message.content, last });
+            }}><Pencil size={14} /></IconButton>}
             {!user && (
               <IconButton
                 label="从当前会话创建分支"
@@ -626,6 +687,25 @@ export function Transcript() {
   const stuck = useRef(true);
   const [away, setAway] = useState(false);
   const messages = state.thread?.messages || [];
+  const visible = messages.filter(message => !message.metadata?.hidden);
+  let previous: Date | undefined;
+  let previousCompleted: Date | undefined;
+  const completedByJob = new Map(state.jobs.map(job => [job.id, job.completed]));
+  const groups = visible.map(message => {
+    const date = conversationDate(message.created);
+    const divider = date && startsTimeGroup(date, previous, previousCompleted) ? date : undefined;
+    if (date) {
+      previous = date;
+      previousCompleted = message.role === 'assistant'
+        ? conversationDate(completedByJob.get(message.metadata?.jobId)) : undefined;
+    }
+    return { message, divider };
+  });
+  const showLatest = () => {
+    stuck.current = true;
+    setAway(false);
+    bottom.current?.scrollIntoView({ block: 'end' });
+  };
   useEffect(() => {
     if (stuck.current) bottom.current?.scrollIntoView({ block: 'end' });
   }, [messages, state.events]);
@@ -647,11 +727,14 @@ export function Transcript() {
         }}
       >
         <div className="transcript">
-          {messages
-            .filter((message) => !message.metadata?.hidden)
-            .map((message) => (
-              <MessageView key={message.id} message={message} />
-            ))}
+          {groups.map(({ message, divider }) => (
+            <div key={message.id}>
+              {divider && <div className="conversation-time-divider">
+                <time dateTime={divider.toISOString()}>{conversationTimeLabel(divider)}</time>
+              </div>}
+              <MessageView message={message} onResent={showLatest} />
+            </div>
+          ))}
           <div ref={bottom} />
         </div>
       </div>

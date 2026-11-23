@@ -1670,7 +1670,7 @@ def _thread_for_owner(thread_id, user):
         id=thread_id,
         user_id=user.id,
     ).first()
-    if thread is None:
+    if thread is None or thread.status == "SUPERSEDED":
         raise ScopeError("Thread not found")
     return thread
 
@@ -6703,11 +6703,28 @@ class TeachingThreadMessages(Resource):
         return submit_teacher_message(_current_user(), thread_id, _body(), request.headers.get("Idempotency-Key"))
 
 
-def submit_teacher_message(user, thread_id, body, request_key=None):
+@teaching_namespace.route("/threads/<string:thread_id>/messages/<int:message_id>")
+class TeachingThreadMessageEdit(Resource):
+    @authed_only
+    def patch(self, thread_id, message_id):
+        body = _body()
+        content, latest = body.get("content"), body.get("expectedLastMessageId")
+        key = request.headers.get("Idempotency-Key")
+        if type(latest) is not int or latest < 1 or not isinstance(content, str) or not content.strip() or not key:
+            return _error("请填写要重发的内容并核对当前对话。")
+        if len(content.strip()) > MAX_MESSAGE_CHARS:
+            return _error(f"Message exceeds {MAX_MESSAGE_CHARS} characters", 413)
+        result = submit_teacher_message(
+            _current_user(), thread_id, {"content": content.strip()}, key, replacement=(message_id, latest),
+        )
+        if result[1] != 202:
+            db.session.rollback()
+        return result
+
+
+def submit_teacher_message(user, thread_id, body, request_key=None, *, replacement=None):
     try:
         from ...agent_runtime.workbench import execution_mode, require_execution_mode
-        readonly_material_turn = ordinary_material_turn.requested(body)
-        mode = execution_mode(body)
         _require_teacher(user)
         thread = _thread_for_owner(thread_id, user)
         thread = TeachingAgentThreads.query.filter_by(id=thread.id, user_id=user.id).with_for_update().populate_existing().one()
@@ -6717,6 +6734,24 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 409,
                 code="THREAD_ARCHIVED",
             )
+        submission_key = _supplied_idempotency(user.id, "thread-message-edit" if replacement else "thread-message", request_key)
+        edit_identity = None
+        if replacement is not None:
+            from ...agent_runtime.message_edits import rewind_message
+
+            message_id, latest = replacement
+            edit_identity = {"messageId": message_id, "expectedLastMessageId": latest,
+                             "contentSha256": hashlib.sha256(body["content"].encode("utf-8")).hexdigest()}
+            existing = TeachingJobs.query.filter_by(owner_id=user.id, idempotency_key=submission_key).first()
+            if existing is not None:
+                if (existing.thread_id != thread.id or (existing.payload or {}).get("messageReplacement") != edit_identity):
+                    raise ConversationConflict("这次重发的编号已被使用，请重新打开编辑。")
+                db.session.commit()
+                return _ok({"thread": _thread_view(thread, include_messages=True), "job": job_view(existing),
+                            "candidateSetId": (existing.payload or {}).get("candidateSetId"), "deduplicated": True}, 202)
+            body = rewind_message(thread, message_id, latest, body["content"])
+        readonly_material_turn = ordinary_material_turn.requested(body)
+        mode = execution_mode(body)
         if readonly_material_turn:
             course_id = body.get("dojoId") if body.get("dojoId") is not None else thread.dojo_id
             module_index = body.get("moduleIndex") if body.get("dojoId") is not None else thread.module_index
@@ -6771,7 +6806,6 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
         continuation = body.get("agentContinuation") is True
         if continuation and mode in {"ask", "plan"}:
             require_execution_mode(body)
-        submission_key = _supplied_idempotency(user.id, "thread-message", request_key)
         wait_for_job_ids = []
         if not continuation:
             existing, wait_for_job_ids = prepare_turn_submission(db.session, thread, body, submission_key)
@@ -7257,6 +7291,10 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                     assistant_text = "已收到补充，将在当前操作结束后的下一个执行边界处理；你可以编辑或撤回。"
                 else:
                     assistant_text = "已排队，前面的任务处理完后会继续；你可以编辑或撤回这条要求。"
+
+        if edit_identity is not None:
+            payload["messageReplacement"] = edit_identity
+            payload["userMessageId"] = user_message.id
 
         assistant = TeachingAgentMessages(
             thread_id=thread.id,
