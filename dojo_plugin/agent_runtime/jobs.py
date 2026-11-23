@@ -2684,8 +2684,6 @@ def _prepare_model_request(job):
 def _runtime_payload(job):
     admitted = accepted_input(job) if job.kind == "agent.chat" and job.thread_id else None
     payload = dict(admitted["payload"] if admitted else (job.payload or {}))
-    if payload.get("scopedOrdinaryProject") == "classroom" and ordinary_project_queue.valid(job):
-        return payload
     if job.kind == "agent.chat" and "ordinaryMaterialQuestion" in payload:
         # The selected references and their redacted excerpts are already frozen.
         # Never expand to fresh course material or load conversation history.
@@ -3606,9 +3604,7 @@ def _invoke_agent_runtime(job, route, payload=None):
         return _invoke_ordinary_material_question(job, route, payload)
     body = _runtime_request_body(job, route, payload)
     if job.kind == "agent.chat" and payload.get("chatBackend") == "upstream":
-        scoped_classroom = (payload.get("scopedOrdinaryProject") == "classroom"
-                            and ordinary_project_queue.valid(job))
-        if not (upstream_enabled() or scoped_classroom):
+        if not upstream_enabled():
             raise PermanentJobError("教学对话服务尚未启用")
         _require_upstream_teacher_scope(job, payload)
         if payload.get("classroomPreparation") and not current_classroom_pin(job, payload):
@@ -5040,6 +5036,15 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False, ordinary_pro
             compact_result = execute_review(job)
         elif job.kind in COMMAND_JOB_KINDS:
             compact_result = execute_command(job)
+        elif ordinary_project_only and (job.payload or {}).get("scopedOrdinaryProject") == "classroom":
+            from .classroom_requests import classroom_confirmation
+
+            payload = request_payload(job)
+            _require_upstream_teacher_scope(job, payload)
+            pin = current_classroom_pin(job, payload)
+            if pin is None:
+                raise PermanentJobError("所选课件的版本、发布状态或课程范围已变化，请重新发起。")
+            compact_result = _persist_result(job, classroom_confirmation(pin))
         elif job.kind == "agent.advance":
             compact_result = advance_turn(job)
         elif job.kind in {"learning.authoring", "learning.solution"}:

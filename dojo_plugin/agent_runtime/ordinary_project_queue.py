@@ -20,7 +20,6 @@ ROUTES = frozenset({
     "upstream-ordinary-debate-candidate",
     "ordinary-debate-harness",
     "upstream-ordinary-lesson-plan-revise",
-    "upstream-teacher-turn",
 })
 
 

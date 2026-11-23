@@ -87,6 +87,10 @@ def studio(monkeypatch):
 
     ns = {
         "config": config, "os": os, "re": __import__("re"), "request": request, "Resource": object,
+        "ordinary_project_queue": SimpleNamespace(
+            configured=lambda: os.getenv("AISECEDU_ORDINARY_PROJECTS") == "true",
+            enabled=lambda course: course == 19,
+        ),
         "ScopeError": scope_error, "AgentRuntimeAuthError": auth_error,
         "require_service_auth": require_service_auth, "verify_session_token": verify_session,
         "assert_capability": lambda scope, capability: capability in scope.capabilities,

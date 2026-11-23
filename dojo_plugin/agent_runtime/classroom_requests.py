@@ -86,23 +86,29 @@ def classroom_request_body(pin, request_body):
     )
 
 
-def classroom_proposal_result(pin, proposal):
-    def reply(answer, accepted=None):
-        mode, intent = ("execute", "operate") if accepted else ("ask", "answer")
-        result = {"answer": answer, "executionMode": mode, "intentDecision": {
-            "version": "teacher-intent-v1", "intent": intent, "executionMode": mode,
-            "clarification": {"state": "not-required"},
-        }}
-        if accepted:
-            result["toolProposals"] = [accepted]
-        return result
+def _reply(answer, proposal=None):
+    mode, intent = ("execute", "operate") if proposal else ("ask", "answer")
+    result = {"answer": answer, "executionMode": mode, "intentDecision": {
+        "version": "teacher-intent-v1", "intent": intent, "executionMode": mode,
+        "clarification": {"state": "not-required"},
+    }}
+    if proposal:
+        result["toolProposals"] = [proposal]
+    return result
 
+
+def classroom_confirmation(pin):
+    """Project the already authorized lesson selection into an approval request."""
+    return _reply(f"所选课件为《{pin['title']}》第 {pin['expectedRevision']} 版，确认后将创建待上课会话。",
+                  {"tool": "classroom.prepare", "arguments": {"artifactId": pin["artifactId"]},
+                   "reason": "使用教师选定的已发布课件准备课堂"})
+
+
+def classroom_proposal_result(pin, proposal):
     if not pin:
-        return reply("请用当前章节已发布课件的准确标题重新发起，例如「请用《植物观察》准备课堂」。"
-                     "如果有重名课件，可以把书名号里的标题换成课件 ID。")
+        return _reply("请用当前章节已发布课件的准确标题重新发起，例如「请用《植物观察》准备课堂」。"
+                      "如果有重名课件，可以把书名号里的标题换成课件 ID。")
     if (not isinstance(proposal, dict) or proposal.get("tool") != "classroom.prepare" or
             not isinstance(proposal.get("arguments"), dict) or proposal["arguments"].get("artifactId") != "selected-deck"):
-        return reply("本轮未取得与所选已发布课件一致的课堂提案。请重新发起准备课堂。")
-    return reply(f"所选课件为《{pin['title']}》第 {pin['expectedRevision']} 版，确认后将创建待上课会话。",
-                 {"tool": "classroom.prepare", "arguments": {"artifactId": pin["artifactId"]},
-                  "reason": "使用教师选定的已发布课件准备课堂"})
+        return _reply("本轮未取得与所选已发布课件一致的课堂提案。请重新发起准备课堂。")
+    return classroom_confirmation(pin)

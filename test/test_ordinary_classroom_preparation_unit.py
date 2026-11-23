@@ -476,7 +476,7 @@ def test_worker_validates_the_accepted_deck_before_journaling_the_approval(prepa
              "AGENT_TOOL_SCHEMAS", "UPSTREAM_APPROVED_TEACHING_TOOLS"}
     namespace = dict(current_classroom_pin=prepared.current_pin, request_payload=lambda job: job.payload,
                      scrub_payload=lambda value, key: value, result_object=json.loads)
-    _source(RUNTIME / "classroom_requests.py", {"classroom_proposal_result"}, namespace)
+    _source(RUNTIME / "classroom_requests.py", {"_reply", "classroom_confirmation", "classroom_proposal_result"}, namespace)
     tree = ast.parse((RUNTIME / "jobs.py").read_text())
     tree.body = [node for node in tree.body if getattr(node, "name", None) in names or
                  (isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) in names)]
