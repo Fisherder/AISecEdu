@@ -1650,6 +1650,7 @@ def enqueue_job(
     db.session.add(job)
     db.session.flush()
     if kind == "agent.chat":
+        payload = job.payload
         if payload.get("harnessVersion"):
             root_id = str(payload.get("harnessRootJobId") or (payload.get("context") or {}).get("agentLoop", {}).get("rootJobId") or job.id)
             job.payload = {**payload, "harnessRootJobId": root_id,

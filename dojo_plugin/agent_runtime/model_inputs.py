@@ -76,6 +76,8 @@ def revise_pending_input(job, payload, *, reason):
     if reason == 'teacher-edit' and payload.get('chatBackend') == 'upstream':
         from .classroom_requests import pin_classroom_request
         payload = pin_classroom_request(payload, job.owner_id, job.dojo_id, job.module_index)
+        if payload.get('scopedOrdinaryProject') == 'classroom' and not payload.get('classroomPreparation'):
+            raise ModelInputError('请保留以当前章节已发布静态课件准备课堂的要求，或撤回后发送新消息。')
     value = {key: _copy(accepted[key]) for key in
              ('version', 'jobId', 'kind', 'idempotencyKey', 'scope')}
     value.update({'origin': reason, 'revision': int(accepted.get('revision') or 0) + 1,
@@ -122,7 +124,8 @@ def freeze_prepared(job, payload, model_route):
         return existing
     fixed = {'prompt', 'phase', 'constraints', 'allowDegraded', 'generationRefinement',
              'userMessageId', 'submissionFingerprint', 'harnessVersion', 'harnessRootJobId',
-             'harnessInternal', 'waitForJobIds', 'dependsOnJobIds', 'chatBackend', 'classroomPreparation'}
+             'harnessInternal', 'waitForJobIds', 'dependsOnJobIds', 'chatBackend', 'classroomPreparation',
+             'scopedOrdinaryProject'}
     if any(payload.get(key) != admitted['payload'].get(key) for key in fixed):
         raise ModelInputError('组装后的模型请求改变了已接收的创作要求。')
     value = {key: _copy(admitted[key]) for key in ('version', 'jobId', 'kind', 'idempotencyKey', 'scope')}

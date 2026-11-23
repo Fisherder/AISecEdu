@@ -12358,7 +12358,7 @@ class AgentRuntimeLaunch(Resource):
                 resource_id = target.rstrip("/").rsplit("/", 1)[-1]
                 if role == "student":
                     artifact = artifact_for_viewer(resource_id, user)
-                    if (not target.startswith("/prep/") or artifact.artifact_type != "debate"
+                    if (not target.startswith("/prep/") or artifact.artifact_type not in {"lesson-plan", "debate", "slide-deck"}
                             or artifact.status != "PUBLISHED" or artifact.self_workspace_id is not None
                             or not ordinary_project_queue.enabled(artifact.dojo_id)):
                         raise ScopeError("Artifact not found")

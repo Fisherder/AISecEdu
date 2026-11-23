@@ -65,7 +65,7 @@ api_v1 = Api(api, version="v1", doc=current_app.config.get("SWAGGER_UI"))
 @api_v1.errorhandler(WorkerUnavailable)
 def task_not_available(error):
     db.session.rollback()
-    return {"success": False, "error": {"code": "TASK_UNAVAILABLE", "message": str(error)}}, 503
+    return {"success": False, "errorCode": "TASK_UNAVAILABLE", "errors": [str(error)]}, 503
 
 
 @api_v1.errorhandler(Exception)

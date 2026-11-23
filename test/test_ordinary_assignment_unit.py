@@ -322,15 +322,18 @@ def test_durable_retry_reuses_prepared_legacy_draft_without_outbound(generation,
     accepted = {"commandId": "command:7", "actionId": 7, "operation": operation}
     actor = SimpleNamespace(id=42, banned=False)
     thread = SimpleNamespace(id=12, status="ACTIVE", dojo_id=g.dojo.dojo_id, module_index=3)
-    job = SimpleNamespace(id=15, owner_id=42, thread_id=12, status="RUNNING", canceled=None)
+    job = SimpleNamespace(id=15, owner_id=42, thread_id=12, status="RUNNING", canceled=None, payload={})
     prepare = Mock()
     apply = Mock(return_value=prepared)
     modules = {
+        "ordinary_replay": {"__path__": []},
+        "ordinary_replay.runtime": {"__path__": []},
         "ordinary_replay.runtime.jobs": {
             "JobCanceled": RuntimeError, "assert_job_lease": lambda job: job,
             "AUTHORING_LEASE_SECONDS": 3600, "_job_cancellation_requested": Mock(),
         },
         "ordinary_replay.runtime.approved_actions": {"apply_action": Mock(), "prepare_action": Mock()},
+        "ordinary_replay.runtime.ordinary_project_queue": {"ACTION_PIN": "approvedOrdinaryAction"},
         "ordinary_replay.runtime.tool_executor": {"apply_teacher_tool": apply, "prepare_assignment": prepare},
         "ordinary_replay.runtime.scope": {"dojo_for_user": Mock(return_value=g.dojo)},
         "ordinary_replay.api.v1.teaching": {"_require_teacher": Mock()},

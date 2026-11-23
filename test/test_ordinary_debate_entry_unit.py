@@ -390,3 +390,28 @@ def test_scoped_approved_actions_cannot_use_general_command_consumer(monkeypatch
     queue["require_consumer"](job, "teacherDshText")
     job.action_id = None
     assert not queue["valid"](job)
+
+
+def test_conversation_admission_freezes_the_scoped_classroom_marker():
+    freeze = MagicMock()
+    jobs = MagicMock(side_effect=lambda **values: SimpleNamespace(id="job", **values))
+    jobs.query.filter_by.return_value.first.return_value = None
+    ns = {
+        "get_trace_id": lambda: "local", "TeachingJobs": jobs, "db": MagicMock(),
+        "TeachingJobOutbox": MagicMock(), "append_job_event": MagicMock(), "freeze_input": freeze,
+        "ordinary_courseware": SimpleNamespace(admit=lambda _job, payload: payload),
+        "pin_classroom_request": lambda payload, *_: {**payload, "classroomPreparation": {"artifactId": "deck"}},
+        "ordinary_project_queue": SimpleNamespace(
+            configured=lambda: True, require_consumer=MagicMock(),
+            admit=lambda _kind, payload, _course: {**payload, "scopedOrdinaryProject": "classroom"},
+        ),
+        "teacher_dsh_chat": SimpleNamespace(PIN="teacherDshText"),
+    }
+    load_source("jobs", ns, {"enqueue_job"})
+    job, created = ns["enqueue_job"](
+        owner_id=1, dojo_id=12, module_index=0, thread_id="thread", kind="agent.chat",
+        idempotency_key="request", payload={"chatBackend": "upstream", "harnessVersion": "v1"}, commit=False,
+    )
+    assert created and job.payload["scopedOrdinaryProject"] == "classroom"
+    assert job.payload["classroomPreparation"] == {"artifactId": "deck"}
+    freeze.assert_called_once_with(job)
