@@ -505,8 +505,16 @@ export class WorkbenchController {
       moduleIndex: moduleIndex !== undefined && moduleIndex !== '' ? Number(moduleIndex) : null,
     });
   }
-  async fork(threadId: string) {
-    const data = await this.mutate(`/threads/${id(threadId)}/fork`);
+  async setReplyFeedback(threadId: string, messageId: number, value: 'positive' | 'negative' | null) {
+    const epoch = this.epoch;
+    await api(`/threads/${id(threadId)}/messages/${messageId}/feedback`, {
+      method: 'PATCH',
+      body: { value },
+    });
+    await this.refreshThread(threadId, epoch);
+  }
+  async fork(threadId: string, sourceMessageId?: number) {
+    const data = await this.mutate(`/threads/${id(threadId)}/fork`, { sourceMessageId });
     await this.loadThreads();
     await this.activate(data.thread.id);
     this.notify('已创建分支，可以尝试另一种方向。');

@@ -54,3 +54,9 @@ node ops/test-workbench-v3-browser.cjs
 向 `PATCH /pwncollege_api/v1/teaching/threads/{threadId}/messages/{messageId}` 提交 `{"content":"新的消息","expectedLastMessageId":42}` 并发送 `Idempotency-Key`。当前教师须拥有会话与源消息。成功时返回 `202` 以及新的消息列表和任务。重发和旧对话移出当前会话在一个事务内提交，旧任务记录仍可用于审计。课程里已经发布的成品和变更可在各自页面管理。旧文件与成品记录仍属于原教师。
 
 会话在编辑期间发生变化或有受影响的任务正在执行时返回 `409`。编辑框保留文字。后续已排队的旧任务在替换时一并取消。
+
+## 回复操作
+
+悬停、键盘聚焦或触屏轻点回复时显示操作和时间。教师可复制回复、提交或撤回评价、使用设备本地语音朗读。更多菜单可从选定的已完成回复创建分支，或打开该回复关联的执行记录。
+
+`PATCH /pwncollege_api/v1/teaching/threads/{threadId}/messages/{messageId}/feedback` 接受 `{"value":"positive"}`、`{"value":"negative"}` 或 `{"value":null}`。只有会话所属教师能评价回复，评价随会话保存。

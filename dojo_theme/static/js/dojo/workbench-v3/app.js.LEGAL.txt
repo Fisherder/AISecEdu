@@ -116,6 +116,9 @@ lucide-react/dist/esm/icons/square-pen.js:
 lucide-react/dist/esm/icons/square.js:
 lucide-react/dist/esm/icons/sun.js:
 lucide-react/dist/esm/icons/terminal.js:
+lucide-react/dist/esm/icons/thumbs-down.js:
+lucide-react/dist/esm/icons/thumbs-up.js:
+lucide-react/dist/esm/icons/volume-2.js:
 lucide-react/dist/esm/icons/wand-sparkles.js:
 lucide-react/dist/esm/icons/wifi-off.js:
 lucide-react/dist/esm/icons/workflow.js:

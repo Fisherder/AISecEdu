@@ -6722,6 +6722,41 @@ class TeachingThreadMessageEdit(Resource):
         return result
 
 
+@teaching_namespace.route("/threads/<string:thread_id>/messages/<int:message_id>/feedback")
+class TeachingThreadReplyFeedback(Resource):
+    @authed_only
+    def patch(self, thread_id, message_id):
+        user = _current_user()
+        _require_teacher(user)
+        body = _body()
+        value = body.get("value")
+        if "value" not in body or value not in (None, "positive", "negative"):
+            return _error("请选择有效的回复评价。")
+
+        thread = (TeachingAgentThreads.query.filter_by(id=thread_id, user_id=user.id)
+                  .filter(TeachingAgentThreads.status != "SUPERSEDED").with_for_update().first())
+        if thread is None:
+            return _error("未找到会话。", 404, code="NOT_FOUND")
+        message = (TeachingAgentMessages.query.filter_by(
+            id=message_id, thread_id=thread.id, user_id=user.id, role="assistant",
+        ).with_for_update().first())
+        if message is None or (message.metadata_json or {}).get("hidden"):
+            db.session.rollback()
+            return _error("未找到这条回复。", 404, code="NOT_FOUND")
+        metadata = dict(message.metadata_json or {})
+        if metadata.get("pending"):
+            db.session.rollback()
+            return _error("请等回复完成后再评价。", 409, code="REPLY_PENDING")
+
+        if value is None:
+            metadata.pop("replyFeedback", None)
+        else:
+            metadata["replyFeedback"] = value
+        message.metadata_json = metadata
+        db.session.commit()
+        return _ok({"messageId": message_id, "feedback": value})
+
+
 def submit_teacher_message(user, thread_id, body, request_key=None, *, replacement=None):
     try:
         from ...agent_runtime.workbench import execution_mode, require_execution_mode

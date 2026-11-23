@@ -10,6 +10,12 @@ import {
   FileText,
   Layers,
   GitBranch,
+  Ellipsis,
+  Activity,
+  ThumbsUp,
+  ThumbsDown,
+  Volume2,
+  Square,
   Play,
   Pencil,
   ShieldCheck,
@@ -23,6 +29,7 @@ import { api, id, key, safeLink, ApiError } from '../core/api';
 import { projectActivity, streamedAnswer } from '../core/events';
 import { classroomDashboardLink, classroomPreparation } from '../core/classroom-preparation';
 import { dateLabel, terminal, type Message, type Data } from '../core/types';
+import { useReplySpeech } from '../core/reply-speech';
 import { conversationDate, conversationTimeLabel, messageClock, startsTimeGroup } from '../core/conversation-time';
 import { Button, IconButton, Status, Code } from './ui';
 import { CandidateSet } from './CandidateSet';
@@ -341,13 +348,96 @@ function Approvals({ message }: { message: Message }) {
     </>
   );
 }
-function MessageView({ message, onResent }: { message: Message; onResent: () => void }) {
+function ReplyActions({ message, jobId, readText, speech }: {
+  message: Message;
+  jobId?: string;
+  readText?: () => string;
+  speech: ReturnType<typeof useReplySpeech>;
+}) {
+  const { state, controller: c } = useWorkbench();
+  const [saving, setSaving] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  const metadata = message.metadata || {};
+  const feedback = metadata.replyFeedback;
+  const speaking = speech.speakingId === message.id;
+  const canFork = !metadata.failed && !['FAILED', 'CANCELED'].includes(metadata.jobStatus);
+  const menuId = `reply-more-${message.id}`;
+  const setFeedback = async (value: 'positive' | 'negative') => {
+    if (!state.thread || saving) return;
+    setSaving(true);
+    try {
+      await c.setReplyFeedback(state.thread.id, message.id, feedback === value ? null : value);
+    } catch (error) {
+      c.error(error);
+    } finally {
+      setSaving(false);
+    }
+  };
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOutside = (event: Event) => {
+      if (menu.current && !event.composedPath().includes(menu.current)) setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside, true);
+    document.addEventListener('focusin', closeOutside, true);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside, true);
+      document.removeEventListener('focusin', closeOutside, true);
+    };
+  }, [menuOpen]);
+  return (
+    <>
+      <IconButton label="有帮助" aria-pressed={feedback === 'positive'} disabled={saving}
+        onClick={() => void setFeedback('positive')}><ThumbsUp size={15} /></IconButton>
+      <IconButton label="需改进" aria-pressed={feedback === 'negative'} disabled={saving}
+        onClick={() => void setFeedback('negative')}><ThumbsDown size={15} /></IconButton>
+      {readText && <IconButton label={speaking ? '停止朗读' : '朗读回复'}
+        title={speech.supported ? (speaking ? '停止朗读' : '朗读回复') : '此浏览器不支持朗读'}
+        disabled={!speech.supported}
+        onClick={() => speech.toggle(message.id, readText())}>
+        {speaking ? <Square size={14} /> : <Volume2 size={15} />}
+      </IconButton>}
+      {(canFork || jobId) && <div className="reply-more" ref={menu}
+        onKeyDown={event => {
+          if (event.key !== 'Escape' || !menuOpen) return;
+          event.preventDefault();
+          setMenuOpen(false);
+          menuTrigger.current?.focus();
+        }}>
+        <button type="button" className="button icon-button" aria-label="更多回复操作" title="更多回复操作"
+          ref={menuTrigger} aria-expanded={menuOpen} aria-controls={menuOpen ? menuId : undefined}
+          onClick={() => setMenuOpen(open => !open)}><Ellipsis size={16} /></button>
+        {menuOpen && <div className="reply-menu" id={menuId} role="group" aria-label="更多回复操作">
+          {canFork && <Button disabled={state.busy} onClick={() => {
+            setMenuOpen(false);
+            const threadId = state.thread?.id;
+            if (threadId) void c.run(() => c.fork(threadId, message.id));
+          }}><GitBranch size={14} />从此回复创建分支</Button>}
+          {jobId && <Button onClick={() => {
+            setMenuOpen(false);
+            menuTrigger.current?.focus();
+            c.selectJob(jobId);
+          }}><Activity size={14} />查看执行记录</Button>}
+        </div>}
+      </div>}
+    </>
+  );
+}
+
+function MessageView({ message, onResent, speech }: {
+  message: Message;
+  onResent: () => void;
+  speech: ReturnType<typeof useReplySpeech>;
+}) {
   const { state, controller: c } = useWorkbench();
   const [copied, setCopied] = useState(false);
   const [touchActions, setTouchActions] = useState(false);
   const [editor, setEditor] = useState<{ content: string; last: number } | null>(null);
   const [editError, setEditError] = useState('');
   const [resending, setResending] = useState(false);
+  const messageBody = useRef<HTMLDivElement>(null);
   const editField = useRef<HTMLTextAreaElement>(null);
   const editTrigger = useRef<HTMLButtonElement>(null);
   const editing = editor !== null;
@@ -377,7 +467,8 @@ function MessageView({ message, onResent }: { message: Message; onResent: () => 
     .reverse()
     .find((item) => item.kind !== 'message' && item.kind !== 'reasoning');
   const user = message.role === 'user';
-  const time = conversationDate(message.created);
+  const time = conversationDate(job && terminal(job) ? job.completed : undefined) || conversationDate(message.created);
+  const timestamp = time && <time dateTime={time.toISOString()} title={conversationTimeLabel(time)}>{messageClock(time)}</time>;
   const canEdit = user && state.thread?.status === 'ACTIVE' && !metadata.hidden && Boolean(message.content.trim());
   const validEdit = Boolean(editor?.content.trim() && editor.content.trim() !== message.content.trim());
   const cancelEdit = () => {
@@ -405,18 +496,11 @@ function MessageView({ message, onResent }: { message: Message; onResent: () => 
       data-message-id={message.id}
       data-editing={editing || undefined}
       data-show-actions={touchActions || undefined}
-      aria-label={user ? '你的消息' : undefined}
+      aria-label={user ? '你的消息' : '玄甲回复'}
     >
-      {!user && (
-        <div className="message-meta">
-          <span className="avatar"><Sparkles size={15} /></span>
-          <strong>玄甲</strong>
-          {metadata.executionMode === 'plan' && <span className="tag">规划</span>}
-        </div>
-      )}
-      <div className="message-body" onPointerUp={event => {
-        if (user && !editing && event.pointerType === 'touch' &&
-            event.target instanceof Element && !event.target.closest('a,button,input,textarea'))
+      <div className="message-body" ref={messageBody} onPointerUp={event => {
+        if (!editing && event.pointerType === 'touch' &&
+            event.target instanceof Element && !event.target.closest('a,button,input,textarea,summary'))
           setTouchActions(value => !value);
       }}>
         {plan.length > 0 && (
@@ -544,8 +628,9 @@ function MessageView({ message, onResent }: { message: Message; onResent: () => 
           );
         })}
         {!pending && (
-          <div className="message-actions" hidden={editing}>
-            {user && time && <time dateTime={time.toISOString()} title={conversationTimeLabel(time)}>{messageClock(time)}</time>}
+          <div className="message-actions" hidden={editing} role="group"
+            aria-label={user ? '消息操作' : '回复操作'}>
+            {user && timestamp}
             <IconButton
               label={copied ? '已复制' : '复制消息'}
               onClick={() => {
@@ -567,14 +652,11 @@ function MessageView({ message, onResent }: { message: Message; onResent: () => 
               setEditError('');
               setEditor({ content: message.content, last });
             }}><Pencil size={14} /></IconButton>}
-            {!user && (
-              <IconButton
-                label="从当前会话创建分支"
-                onClick={() => void c.run(() => c.fork(state.thread!.id))}
-              >
-                <GitBranch size={14} />
-              </IconButton>
-            )}
+            {!user && <>
+              <ReplyActions message={message} jobId={job?.id} speech={speech}
+                readText={text ? () => messageBody.current?.querySelector<HTMLElement>(':scope > .markdown')?.innerText || '' : undefined} />
+              {timestamp}
+            </>}
           </div>
         )}
       </div>
@@ -681,13 +763,18 @@ export function Welcome() {
   );
 }
 export function Transcript() {
-  const { state } = useWorkbench();
+  const { state, controller: c } = useWorkbench();
+  const speech = useReplySpeech(state.thread?.id, c.error);
   const scroll = useRef<HTMLDivElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
   const [away, setAway] = useState(false);
   const messages = state.thread?.messages || [];
   const visible = messages.filter(message => !message.metadata?.hidden);
+  const playingMessageStillVisible = visible.some(message => message.id === speech.speakingId);
+  useEffect(() => {
+    if (speech.speakingId !== null && !playingMessageStillVisible) speech.stop();
+  }, [playingMessageStillVisible, speech.speakingId, speech.stop]);
   let previous: Date | undefined;
   let previousCompleted: Date | undefined;
   const completedByJob = new Map(state.jobs.map(job => [job.id, job.completed]));
@@ -732,7 +819,7 @@ export function Transcript() {
               {divider && <div className="conversation-time-divider">
                 <time dateTime={divider.toISOString()}>{conversationTimeLabel(divider)}</time>
               </div>}
-              <MessageView message={message} onResent={showLatest} />
+              <MessageView message={message} onResent={showLatest} speech={speech} />
             </div>
           ))}
           <div ref={bottom} />
