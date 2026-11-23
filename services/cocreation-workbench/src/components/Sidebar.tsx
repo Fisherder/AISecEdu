@@ -11,15 +11,13 @@ import {
   GitBranch,
   Pencil,
   FolderOpen,
-  Settings2,
   ChevronDown,
   MessageSquare,
   GraduationCap,
-  Sparkles,
 } from 'lucide-react';
 import { useWorkbench } from '../core/context';
 import { Button, IconButton, Dialog } from './ui';
-import { terminal, type Thread } from '../core/types';
+import { dateLabel, terminal, type Thread } from '../core/types';
 
 export function Sidebar() {
   const { state, controller: c } = useWorkbench();
@@ -43,23 +41,20 @@ export function Sidebar() {
           onClick={() => c.patch({ sidebarOpen: false })}
         />
       )}
-      <aside className={`sidebar ${state.sidebarOpen ? 'open' : ''}`} aria-label="会话导航">
-        <header className="brand">
-          <strong><Sparkles size={17} />AI 共创</strong>
-          <IconButton
-            className="mobile-only"
-            label="关闭导航"
-            onClick={() => c.patch({ sidebarOpen: false })}
-          >
-            <PanelLeftClose size={17} />
-          </IconButton>
-        </header>
+      <aside id="workbench-sidebar" className={`sidebar ${state.sidebarOpen ? 'open' : ''}`} aria-label="会话导航">
+        <IconButton
+          className="mobile-only sidebar-close"
+          label="关闭导航"
+          onClick={() => c.patch({ sidebarOpen: false })}
+        >
+          <PanelLeftClose size={17} />
+        </IconButton>
         <div className="sidebar-actions">
           <Button className="new-thread" onClick={() => c.newThread()}>
             <SquarePen size={17} />
             新建会话<kbd>Alt N</kbd>
           </Button>
-          <Button onClick={() => c.patch({ modal: 'search' })}>
+          <Button className="thread-search" onClick={() => c.patch({ modal: 'search' })}>
             <Search size={17} />
             搜索与命令<kbd>⌘ K</kbd>
           </Button>
@@ -114,7 +109,11 @@ export function Sidebar() {
                     title={thread.title}
                   >
                     {thread.pinned ? <Pin size={13} /> : <MessageSquare size={13} />}
-                    <span>{thread.title || '新会话'}</span>
+                    <span className="thread-copy">
+                      <strong>{thread.title || '新会话'}</strong>
+                      {thread.latestMessage && <small>{thread.latestMessage}</small>}
+                    </span>
+                    {thread.updated && <time title={dateLabel(thread.updated)}>{dateLabel(thread.updated).split(' ')[0]}</time>}
                     {state.jobs.some((job) => job.threadId === thread.id && !terminal(job)) && (
                       <i className="live-dot" />
                     )}
@@ -174,15 +173,6 @@ export function Sidebar() {
             </section>
           ))}
         </nav>
-        <footer>
-          <Button onClick={() => c.patch({ modal: 'settings' })}>
-            <Settings2 size={17} />
-            设置
-            <span className="user-initial">
-              {String(state.context.user?.name || '教').slice(0, 1)}
-            </span>
-          </Button>
-        </footer>
       </aside>
       {renaming && (
         <Dialog title="重命名会话" onClose={() => setRenaming(null)}>

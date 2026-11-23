@@ -8,6 +8,7 @@ import {
   Copy,
   Download,
   FileText,
+  Layers,
   GitBranch,
   Play,
   ShieldCheck,
@@ -488,7 +489,7 @@ function MessageView({ message }: { message: Message }) {
 }
 export function Welcome() {
   const { state, controller: c } = useWorkbench();
-  const starters = [
+  const productionStarters = [
     {
       title: '交互演示',
       subtitle: '让学生操作、决策与观察',
@@ -512,54 +513,84 @@ export function Welcome() {
       prompt: '设计一组 CTF 实践题，包含可运行环境、分层提示和验证。主题：',
     },
   ];
+  const scoped = document.getElementById('cocreation-workbench')?.dataset.scopedTeaching === 'true';
+  const starters = scoped
+    ? [
+        {
+          title: '教案与讲义',
+          subtitle: '生成可下载的 Word 草稿',
+          icon: FileText,
+          type: 'auto',
+          prompt: '请生成一份 Word 教案，包含教学目标、课堂活动和小结。主题：',
+        },
+        {
+          title: '课堂练习',
+          subtitle: '编写题目、答案和讲解',
+          icon: SlidersHorizontal,
+          type: 'auto',
+          prompt: '请生成一份 Markdown 课堂练习文档，包含三道题、参考答案和讲解。主题：',
+        },
+        {
+          title: '课件提纲',
+          subtitle: '组织各页重点和讲授顺序',
+          icon: Layers,
+          type: 'auto',
+          prompt: '请制作一份 Word 教学讲义，按五张幻灯片的顺序编排标题、要点和讲解提示。主题：',
+        },
+      ]
+    : productionStarters;
   return (
-    <div className="welcome">
-      <div className="welcome-heading">
-        <span className="welcome-symbol">
-          <Sparkles size={24} />
-        </span>
-        <h1>今天，一起做出什么？</h1>
-        <p>从一个教学想法，到可以直接使用的课堂成品。</p>
+    <div className="conversation">
+      <div className="transcript-scroll">
+        <div className="welcome">
+        <div className="welcome-heading">
+          <span className="welcome-symbol">
+            <Sparkles size={24} />
+          </span>
+          <h1>今天，一起做出什么？</h1>
+          <p>从一个教学想法，到可以直接使用的课堂成品。</p>
+        </div>
+        <div className="starter-grid">
+          {starters.map((item) => (
+            <Button
+              key={item.title}
+              onClick={() => {
+                c.setDraft({ text: item.prompt, artifactType: item.type });
+                window.dispatchEvent(new Event('workbench-focus-composer'));
+              }}
+            >
+              <item.icon size={18} />
+              <span>
+                <strong>{item.title}</strong>
+                <small>{item.subtitle}</small>
+              </span>
+            </Button>
+          ))}
+        </div>
+        <section className="recent-work">
+          <header>
+            <h2>继续创作</h2>
+            <Button onClick={() => c.setPanel('artifacts')}>
+              全部成品
+              <ArrowUpRight size={13} />
+            </Button>
+          </header>
+          {state.artifacts.slice(0, 4).map((artifact) => (
+            <button key={artifact.id} onClick={() => void c.openArtifact(artifact.id).catch(c.error)}>
+              <FileText size={16} />
+              <strong>{artifact.title}</strong>
+              <span>V{artifact.currentRevision}</span>
+              <small>{dateLabel(artifact.updated)}</small>
+              <ArrowUpRight size={14} />
+            </button>
+          ))}
+          {!state.artifacts.length && (
+            <p className="quiet">生成的课件、演示和题目会保存在这里，随时继续修改。</p>
+          )}
+        </section>
+        </div>
       </div>
       <Composer welcome />
-      <div className="starter-grid">
-        {starters.map((item) => (
-          <Button
-            key={item.title}
-            onClick={() => {
-              c.setDraft({ text: item.prompt, artifactType: item.type });
-              window.dispatchEvent(new Event('workbench-focus-composer'));
-            }}
-          >
-            <item.icon size={18} />
-            <span>
-              <strong>{item.title}</strong>
-              <small>{item.subtitle}</small>
-            </span>
-          </Button>
-        ))}
-      </div>
-      <section className="recent-work">
-        <header>
-          <h2>继续创作</h2>
-          <Button onClick={() => c.setPanel('artifacts')}>
-            全部成品
-            <ArrowUpRight size={13} />
-          </Button>
-        </header>
-        {state.artifacts.slice(0, 4).map((artifact) => (
-          <button key={artifact.id} onClick={() => void c.openArtifact(artifact.id).catch(c.error)}>
-            <FileText size={16} />
-            <strong>{artifact.title}</strong>
-            <span>V{artifact.currentRevision}</span>
-            <small>{dateLabel(artifact.updated)}</small>
-            <ArrowUpRight size={14} />
-          </button>
-        ))}
-        {!state.artifacts.length && (
-          <p className="quiet">生成的课件、演示和题目会保存在这里，随时继续修改。</p>
-        )}
-      </section>
     </div>
   );
 }

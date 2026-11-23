@@ -5037,7 +5037,7 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False):
                 if frozen is None:
                     frozen = freeze_prepared(job, payload, model_route)
                 runtime_payload, route = frozen["payload"], frozen["modelRoute"]
-                if route.get("route") != teacher_dsh_chat.ROUTE or runtime_payload != payload:
+                if route != model_route or runtime_payload != payload:
                     raise PermanentJobError("教学问答的输入版本已经变化，请重新发起。")
                 db.session.commit()
             else:

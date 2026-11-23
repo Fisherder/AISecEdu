@@ -6726,7 +6726,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
         from ...agent_runtime import teacher_dsh_chat
         text_model = None if readonly_material_turn else teacher_dsh_chat.admit(thread, body, mode)
         if text_model:
-            mode = "ask"
+            mode = "execute" if text_model["formats"] else "ask"
         requested_action = str(body.get("action") or "").strip().lower()
         continuation = body.get("agentContinuation") is True
         if continuation and mode in {"ask", "plan"}:
@@ -6881,7 +6881,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 module_index=thread.module_index,
             )
 
-        direct_candidates = not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
+        direct_candidates = not text_model and not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
         ordinary_plan = direct_candidates and requests_lesson_plan_candidates(content)
         debate_proposals = direct_candidates and requests_debate_candidates(content)
         ordinary_debate = debate_proposals or bool(
@@ -7123,9 +7123,11 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             job_kind = "agent.chat"
             assistant_text = "正在准备资料问答…"
         elif text_model:
-            payload = {"prompt": content, "executionMode": "ask", teacher_dsh_chat.PIN: text_model}
+            payload = {"prompt": content, "executionMode": mode, teacher_dsh_chat.PIN: text_model["model"]}
+            if text_model["formats"]:
+                payload.update(chatBackend="upstream", **{teacher_dsh_chat.DOCUMENT_FORMATS: text_model["formats"]})
             job_kind = "agent.chat"
-            assistant_text = "正在等待 DSH 教学问答…"
+            assistant_text = "正在准备教学文档…" if text_model["formats"] else "正在准备教学答复…"
         else:
             payload = {
                 "prompt": content,

@@ -28,6 +28,7 @@ export function App() {
   const { state, controller: c } = useWorkbench();
   const [width, setWidth] = useState(c.storage.value('panelWidth', 520));
   const [expanded, setExpanded] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(c.storage.value('sidebarCollapsed', false));
   const drag = useRef<{ x: number; width: number } | null>(null);
   useEffect(() => {
     void c.boot();
@@ -82,7 +83,7 @@ export function App() {
   const course = state.context.teacherDojos?.find((item: any) => item.id === state.thread?.dojoId);
   return (
     <div
-      className={`workbench ${state.panelOpen ? 'has-panel' : ''} ${expanded ? 'expanded-panel' : ''}`}
+      className={`workbench ${state.panelOpen ? 'has-panel' : ''} ${expanded ? 'expanded-panel' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
       data-ready={!state.booting}
       style={{ '--panel-width': `${width}px` } as CSSProperties}
     >
@@ -90,12 +91,27 @@ export function App() {
       <main className="main-pane">
         <header className="workspace-header">
           <IconButton
+            className="desktop-sidebar-toggle"
+            label={sidebarCollapsed ? '展开会话导航' : '收起会话导航'}
+            aria-controls="workbench-sidebar"
+            aria-expanded={!sidebarCollapsed}
+            onClick={() => {
+              setSidebarCollapsed(!sidebarCollapsed);
+              c.storage.set('sidebarCollapsed', !sidebarCollapsed);
+            }}
+          >
+            <PanelLeft size={18} />
+          </IconButton>
+          <IconButton
             className="mobile-only"
             label="打开会话导航"
+            aria-controls="workbench-sidebar"
+            aria-expanded={state.sidebarOpen}
             onClick={() => c.patch({ sidebarOpen: true })}
           >
             <PanelLeft size={18} />
           </IconButton>
+          <span className="agent-mark"><Sparkles size={16} /></span>
           <div className="workspace-breadcrumb">
             <span>{course?.name || '独立创作'}</span>
             <ChevronRight size={12} />

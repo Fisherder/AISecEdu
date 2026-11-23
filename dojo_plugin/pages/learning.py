@@ -513,7 +513,9 @@ def teacher_agent():
     ).first():
         abort(403)
     template = "teacher_agent.html" if request.args.get("view") == "dashboard" else "teacher_workbench.html"
-    return render_template(template, agent_role="teacher", agent_owner_id=user.id)
+    from ..agent_runtime.teacher_dsh_chat import enabled as teacher_dsh_enabled
+    return render_template(template, agent_role="teacher", agent_owner_id=user.id,
+                           scoped_teaching_agent=teacher_dsh_enabled())
 
 
 @learning.route("/teacher/courses")
