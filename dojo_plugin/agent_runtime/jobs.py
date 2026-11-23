@@ -60,6 +60,7 @@ from .artifacts import (
     materialize_candidate,
     replace_generated_candidates,
 )
+from . import teacher_dsh_chat
 from .files import persist_agent_deliverables, public_agent_file
 from .model_router import (
     UPSTREAM_DEBATE_CANDIDATE_ROUTE, UPSTREAM_DEBATE_ROUTE, UPSTREAM_DECK_REVISION_ROUTE,
@@ -1704,6 +1705,8 @@ def publish_pending_outbox(*, job_id=None, limit=100):
             row.last_error = None
             db.session.commit()
             continue
+        if teacher_dsh_chat.PIN in (job.payload or {}):
+            continue
         if not recovery_due(job, datetime.datetime.utcnow()):
             continue
         if turn_wait_state(db.session, job) == "waiting":
@@ -2393,7 +2396,7 @@ def _runtime_job_lease_seconds(job):
     return LEASE_SECONDS
 
 
-def _acquire_job(job_id, worker_id):
+def _acquire_job(job_id, worker_id, *, teacher_text_only=False):
     now = datetime.datetime.utcnow()
     observed = TeachingJobs.query.filter_by(id=job_id).first()
     if observed is not None and observed.kind in {"agent.chat", "agent.advance"} and observed.thread_id:
@@ -2402,8 +2405,17 @@ def _acquire_job(job_id, worker_id):
     if job is None or job.status in {"SUCCEEDED", "FAILED", "CANCELED"}:
         db.session.rollback()
         return None
+    pinned_text = teacher_dsh_chat.PIN in (job.payload or {})
+    if pinned_text != teacher_text_only or (teacher_text_only and job.kind != "agent.chat"):
+        db.session.rollback()
+        return None
     try:
-        restore_input_cache(job, bootstrap=True)
+        if teacher_text_only:
+            admitted = accepted_input(job)
+            if not admitted or teacher_dsh_chat.PIN not in admitted["payload"]:
+                db.session.rollback()
+                return None
+        restore_input_cache(job, bootstrap=not teacher_text_only)
     except ModelInputError as exc:
         job.status, job.stage, job.error = "FAILED", "failed", str(exc)
         job.completed = now
@@ -4979,9 +4991,10 @@ def _finalize_canceled_job(job, message):
     _sync_native_authoring_batch_action(job)
 
 
-def process_job(job_id, *, worker_id=None):
+def process_job(job_id, *, worker_id=None, teacher_text_only=False):
     worker_id = worker_id or _new_worker_id()
-    job = _acquire_job(job_id, worker_id)
+    job = (_acquire_job(job_id, worker_id, teacher_text_only=True)
+           if teacher_text_only else _acquire_job(job_id, worker_id))
     if job is None:
         return False
     # Capture immutable values before any ORM refresh can observe a replacement
@@ -5015,7 +5028,20 @@ def process_job(job_id, *, worker_id=None):
             )
             compact_result = _execute_local_job(job)
         else:
-            runtime_payload, route = _prepare_model_request(job)
+            if teacher_text_only:
+                admitted = accepted_input(job)
+                if not admitted or teacher_dsh_chat.PIN not in admitted["payload"]:
+                    raise PermanentJobError("找不到已接收的教学问答输入。")
+                payload, model_route = teacher_dsh_chat.execution_input(job, admitted["payload"])
+                frozen = prepared_input(job)
+                if frozen is None:
+                    frozen = freeze_prepared(job, payload, model_route)
+                runtime_payload, route = frozen["payload"], frozen["modelRoute"]
+                if route.get("route") != teacher_dsh_chat.ROUTE or runtime_payload != payload:
+                    raise PermanentJobError("教学问答的输入版本已经变化，请重新发起。")
+                db.session.commit()
+            else:
+                runtime_payload, route = _prepare_model_request(job)
             debate_candidate = job.kind == "candidate.generate" and route.get("route") == UPSTREAM_DEBATE_CANDIDATE_ROUTE
             checkpoint = (
                 (job.result or {}).get("_generationCheckpoint")
@@ -5066,11 +5092,14 @@ def process_job(job_id, *, worker_id=None):
                         ),
                     )
                     started = time.monotonic()
-                    response = (
-                        _index_material_on_worker(job, runtime_payload)
-                        if job.kind == "material.analyze" and runtime_payload.get("localExtraction")
-                        else _invoke_agent_runtime(job, route, runtime_payload)
-                    )
+                    if teacher_text_only:
+                        body = _runtime_request_body(job, route, runtime_payload)
+                        _record_runtime_dispatch(job, body, _runtime_json_bytes(body))
+                        response = teacher_dsh_chat.invoke(runtime_payload, route)
+                    elif job.kind == "material.analyze" and runtime_payload.get("localExtraction"):
+                        response = _index_material_on_worker(job, runtime_payload)
+                    else:
+                        response = _invoke_agent_runtime(job, route, runtime_payload)
                     if job.kind == "agent.chat" and job.thread_id:
                         _record_runtime_response(
                             job, _runtime_request_digest(job, route, runtime_payload), response,
@@ -5163,6 +5192,8 @@ def process_job(job_id, *, worker_id=None):
                     else "保存候选与 revision"
                 ),
             )
+            if teacher_text_only:
+                teacher_dsh_chat.execution_input(job, admitted["payload"])
             if debate_candidate:
                 compact_result = _persist_result(job, response["result"], prepared=runtime_payload)
             else:
@@ -5206,7 +5237,8 @@ def process_job(job_id, *, worker_id=None):
         _sync_native_authoring_batch_action(job)
         append_job_event(job, "complete", "SUCCEEDED", "任务完成", compact_result)
         db.session.commit()
-        publish_pending_outbox()
+        if not teacher_text_only:
+            publish_pending_outbox()
         return True
     except JobLeaseLost:
         db.session.rollback()
@@ -5231,7 +5263,8 @@ def process_job(job_id, *, worker_id=None):
                 outbox.published = None
             append_job_event(job, job.stage, "QUEUED", "等待批准" if waiting_approval else "等待操作结果")
         db.session.commit()
-        publish_pending_outbox()
+        if not teacher_text_only:
+            publish_pending_outbox()
         return True
     except JobCanceled as exc:
         db.session.rollback()
@@ -5241,7 +5274,8 @@ def process_job(job_id, *, worker_id=None):
             return True
         _finalize_canceled_job(job, _safe_error(exc))
         db.session.commit()
-        publish_pending_outbox()
+        if not teacher_text_only:
+            publish_pending_outbox()
         return True
     except Exception as exc:
         db.session.rollback()
@@ -5256,7 +5290,8 @@ def process_job(job_id, *, worker_id=None):
         if _job_cancellation_requested(job):
             _finalize_canceled_job(job, "任务已取消；忽略取消期间产生的执行异常")
             db.session.commit()
-            publish_pending_outbox()
+            if not teacher_text_only:
+                publish_pending_outbox()
             return True
         permanent = isinstance(exc, (PermanentJobError, ValueError))
         category = "permanent" if permanent else (
@@ -5341,10 +5376,11 @@ def process_job(job_id, *, worker_id=None):
             except Exception:
                 logger.debug("Could not record failed model invocation", exc_info=True)
         db.session.commit()
-        if retry:
-            publish_pending_outbox(job_id=job.id)
-        else:
-            publish_pending_outbox()
+        if not teacher_text_only:
+            if retry:
+                publish_pending_outbox(job_id=job.id)
+            else:
+                publish_pending_outbox()
         logger.exception("Teaching job %s failed", job_id)
         return True
 
