@@ -1,6 +1,11 @@
 """Admission boundary for ordinary course projects on the development copy."""
 
 import os
+import re
+
+from .teacher_documents import (
+    requests_debate_candidates, requests_explicit_file_delivery, requests_lesson_plan_candidates,
+)
 
 from .upstream_turn import ordinary_teaching_course
 
@@ -20,6 +25,27 @@ def configured():
 
 def enabled(dojo_id):
     return configured() and ordinary_teaching_course(dojo_id)
+
+
+def requested_kind(prompt):
+    if not isinstance(prompt, str):
+        return None
+    prompt = prompt.strip()
+    if requests_explicit_file_delivery(prompt):
+        return None
+    if requests_lesson_plan_candidates(prompt):
+        return "lesson-plan"
+    if requests_debate_candidates(prompt):
+        return "debate"
+    command = re.match(r"^(?:请\s*)?(?:帮我\s*)?(?:生成|制作|写|设计|做)\s*([^，。！？；：:!?;\n]{0,80})", prompt)
+    if not command:
+        return None
+    subject = command[1]
+    if re.search(r"(?:课堂辩论|辩论方案|的辩论|一场辩论)", subject):
+        return "debate"
+    if "教案" in subject:
+        return "lesson-plan"
+    return None
 
 
 def classify(kind, payload):

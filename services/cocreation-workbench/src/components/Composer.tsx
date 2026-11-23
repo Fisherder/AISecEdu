@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useWorkbench } from '../core/context';
 import { hasOnlyMaterialSources, terminal, type PendingTurn } from '../core/types';
+import { canStartTeachingProject, teachingProjectDraft, teachingProjects } from '../core/teaching-projects';
 import { Button, IconButton } from './ui';
 
 function QueueRow({ turn }: { turn: PendingTurn }) {
@@ -100,6 +101,7 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
     !state.loadingThread &&
     !state.uploads.length &&
     !archived;
+  const teachingProjectAvailable = scopedTeaching && canStartTeachingProject(state);
   useEffect(() => {
     if (input.current) {
       input.current.style.height = 'auto';
@@ -205,7 +207,9 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
             placeholder={
               drag
                 ? '松开以添加文件'
-                : '直接提问、描述教学目标，或继续修改已有内容…'
+                : teachingProjectAvailable
+                  ? '描述想做的教案、课堂活动或要修改的内容…'
+                  : '直接提问、描述教学目标，或继续修改已有内容…'
             }
             value={draft.text}
             rows={1}
@@ -273,6 +277,19 @@ export function Composer({ welcome = false }: { welcome?: boolean }) {
                 event.target.value = '';
               }}
             />
+            {teachingProjectAvailable && !welcome && teachingProjects.map(({ title, prompt }) => (
+              <Button
+                key={title}
+                className="teaching-project-button"
+                disabled={state.busy}
+                onClick={() => {
+                  c.setDraft({ text: teachingProjectDraft(prompt, draft.text), artifactType: 'auto', learningPattern: '' });
+                  input.current?.focus();
+                }}
+              >
+                {title}
+              </Button>
+            ))}
             {!scopedTeaching && (
               <select
                 aria-label="学习模式"

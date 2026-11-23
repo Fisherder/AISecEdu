@@ -27,6 +27,7 @@ import { CandidateSet } from './CandidateSet';
 import { Composer } from './Composer';
 import { GenerationConfirmation } from './GenerationConfirmation';
 import { readLocal, writeLocal } from '../core/storage';
+import { canStartTeachingProject, displayTeachingReply, teachingProjects } from '../core/teaching-projects';
 
 export function RichText({ text }: { text: string }) {
   const { controller: c } = useWorkbench();
@@ -326,7 +327,9 @@ function MessageView({ message }: { message: Message }) {
   const plan: any[] = Array.isArray(metadata.plan) ? metadata.plan : [];
   const pending = metadata.pending === true;
   const waitingForAnswers = Boolean(metadata.questions?.length && !metadata.questionReplyJobId && !pending);
-  const text = pending && streamed ? streamed : pending ? '' : message.content;
+  const content = pending && streamed ? streamed : pending ? '' : message.content;
+  const scoped = document.getElementById('cocreation-workbench')?.dataset.scopedTeaching === 'true';
+  const text = scoped && message.role === 'assistant' ? displayTeachingReply(content) : content;
   const latest = [...activity]
     .reverse()
     .find((item) => item.kind !== 'message' && item.kind !== 'reasoning');
@@ -348,9 +351,7 @@ function MessageView({ message }: { message: Message }) {
         )}
         <strong>{user ? '你' : '玄甲'}</strong>
         <time>{dateLabel(message.created)}</time>
-        {['ask', 'plan'].includes(metadata.executionMode) && (
-          <span className="tag">{metadata.executionMode === 'plan' ? '规划' : '问答'}</span>
-        )}
+        {metadata.executionMode === 'plan' && <span className="tag">规划</span>}
       </div>
       <div className="message-body">
         {plan.length > 0 && (
@@ -523,7 +524,9 @@ export function Welcome() {
           type: 'auto',
           prompt: '请生成一份 Word 教案，包含教学目标、课堂活动和小结。主题：',
         },
-        {
+        ...(canStartTeachingProject(state) ? teachingProjects.map((item, index) => ({
+          ...item, type: 'auto', icon: index === 0 ? Layers : SlidersHorizontal,
+        })) : [{
           title: '课堂练习',
           subtitle: '编写题目、答案和讲解',
           icon: SlidersHorizontal,
@@ -536,7 +539,7 @@ export function Welcome() {
           icon: Layers,
           type: 'auto',
           prompt: '请制作一份 Word 教学讲义，按五张幻灯片的顺序编排标题、要点和讲解提示。主题：',
-        },
+        }]),
       ]
     : productionStarters;
   return (
@@ -555,7 +558,7 @@ export function Welcome() {
             <Button
               key={item.title}
               onClick={() => {
-                c.setDraft({ text: item.prompt, artifactType: item.type });
+                c.setDraft({ text: item.prompt, artifactType: item.type, ...(scoped ? { learningPattern: '' } : {}) });
                 window.dispatchEvent(new Event('workbench-focus-composer'));
               }}
             >

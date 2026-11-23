@@ -200,6 +200,11 @@ def _requests_document_delivery(prompt):
     )
 
 
+def requests_explicit_file_delivery(prompt):
+    request = _document_delivery_text(_unquoted_request(prompt))
+    return bool(_DOWNLOAD_REQUEST.search(request) or any(accepted for _, accepted in _format_requests(request)))
+
+
 def requested_document_formats(payload):
     mode = payload.get("executionMode") or "auto"
     context = payload.get("context") or {}

@@ -575,6 +575,11 @@ kbd {
   min-height: 38px;
   flex-wrap: wrap;
 }
+.composer-toolbar .teaching-project-button {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: var(--ae-type-caption);
+}
 .composer-toolbar select {
   border: 0;
   padding: 5px 3px;

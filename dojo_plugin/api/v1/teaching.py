@@ -4332,6 +4332,9 @@ class TeachingContext(Resource):
                     if summary_only
                     else [_dojo_view(dojo) for dojo in teacher_dojos]
                 ),
+                **({"ordinaryProjectCourseIds": [
+                    dojo.dojo_id for dojo in teacher_dojos if ordinary_project_queue.enabled(dojo.dojo_id)
+                ]} if shell_only and ordinary_project_queue.configured() else {}),
                 "studentDojos": [_dojo_view(dojo) for dojo in student_dojos],
                 "activeThread": _thread_view(thread) if thread else None,
                 "learningAttempts": [
@@ -6725,24 +6728,31 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             ordinary_material_turn.require_course(course_scope.dojo_id)
         from ...agent_runtime import teacher_dsh_chat
         selected_course = None
-        scoped_project = False
-        if ordinary_project_queue.configured() and not readonly_material_turn:
+        project_kind = None
+        if ordinary_project_queue.configured() and not readonly_material_turn and mode in {"auto", "execute"}:
             prompt = body.get("content")
-            if isinstance(prompt, str) and mode in {"auto", "execute"} and (
-                requests_lesson_plan_candidates(prompt) or requests_debate_candidates(prompt)
-            ):
+            project_kind = ordinary_project_queue.requested_kind(prompt)
+            if project_kind:
+                if any(body.get(field) for field in (
+                    "sourceRefs", "agentContinuation", "action", "questionReply", "planSourceMessageId",
+                    "generationSelection", "learningPattern",
+                )):
+                    raise ValueError("请直接填写项目要求，移除本轮引用或先完成上一项待确认操作。")
                 course = body.get("dojoId") if body.get("dojoId") is not None else thread.dojo_id
-                if course is None:
-                    raise ValueError("请先为会话选择已开放的联调课程，再生成平台项目。")
                 module = body.get("moduleIndex") if body.get("dojoId") is not None else thread.module_index
+                if course is None:
+                    courses = [dojo for dojo in _teacher_dojos(user, include_modules=True)
+                               if ordinary_project_queue.enabled(dojo.dojo_id)]
+                    if len(courses) != 1:
+                        raise ValueError("请在上下文中选择可生成教学项目的课程。")
+                    course = courses[0].dojo_id
+                    modules = courses[0].modules
+                    module = modules[0].module_index if len(modules) == 1 else None
                 selected_course = build_scope(user, role="teacher", dojo_id=course, module_index=module)
                 if not ordinary_project_queue.enabled(selected_course.dojo_id):
-                    raise ValueError("当前仅联调课程开放普通教学项目生成。")
-                if body.get("sourceRefs") or body.get("agentContinuation"):
-                    raise ValueError("联调课程项目只使用本次输入的普通教学内容。")
+                    raise ValueError("请在上下文中选择已开通普通教学项目的课程。")
                 teacher_dsh_chat.validate_prompt(prompt)
-                scoped_project = True
-        text_model = None if readonly_material_turn or scoped_project else teacher_dsh_chat.admit(thread, body, mode)
+        text_model = None if readonly_material_turn or project_kind else teacher_dsh_chat.admit(thread, body, mode)
         if text_model:
             mode = "execute" if text_model["formats"] else "ask"
         requested_action = str(body.get("action") or "").strip().lower()
@@ -6753,15 +6763,16 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
         wait_for_job_ids = []
         if not continuation:
             existing, wait_for_job_ids = prepare_turn_submission(db.session, thread, body, submission_key)
-            if text_model and existing is None:
-                # Unclaimed legacy work has no consumer on this instance.
-                # It must not block a newly admitted, independently scoped text turn.
+            if (text_model or project_kind) and existing is None and wait_for_job_ids:
+                # Only work served by this instance can delay a scoped turn.
+                pins = [TeachingJobs.payload[teacher_dsh_chat.PIN].as_string().is_not(None)]
+                if ordinary_project_queue.configured():
+                    pins.append(TeachingJobs.payload[ordinary_project_queue.PIN].as_string().is_not(None))
                 wait_for_job_ids = [
                     row.id for row in TeachingJobs.query.filter(
-                        TeachingJobs.id.in_(wait_for_job_ids),
-                        TeachingJobs.payload[teacher_dsh_chat.PIN].as_string().is_not(None),
+                        TeachingJobs.id.in_(wait_for_job_ids), or_(*pins),
                     ).all()
-                ] if wait_for_job_ids else []
+                ]
             if existing is not None:
                 response = _ok({"thread": _thread_view(thread, include_messages=True),
                                 "job": job_view(existing), "candidateSetId": (existing.payload or {}).get("candidateSetId"),
@@ -6878,7 +6889,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                     202,
                 )
 
-        if body.get("dojoId") is not None:
+        if selected_course or body.get("dojoId") is not None:
             scope = selected_course or build_scope(
                 user,
                 role="teacher",
@@ -6900,8 +6911,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             )
 
         direct_candidates = not text_model and not continuation and not question_context and not plan_context and mode in {"auto", "execute"}
-        ordinary_plan = direct_candidates and requests_lesson_plan_candidates(content)
-        debate_proposals = direct_candidates and requests_debate_candidates(content)
+        ordinary_plan = direct_candidates and (project_kind == "lesson-plan" or requests_lesson_plan_candidates(content))
+        debate_proposals = direct_candidates and (project_kind == "debate" or requests_debate_candidates(content))
         ordinary_debate = debate_proposals or bool(
             selected_generation and selected_generation["bundle"]["artifactType"] == "debate"
             and ordinary_teaching_course(thread.dojo_id)
@@ -6910,14 +6921,14 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             raise ValueError("请先选择已开通普通辩论生成的课程。")
         if debate_proposals and body.get("delivery") == "next-step" and wait_for_job_ids:
             raise ConversationConflict("辩论候选需要独立任务，请选择“排队”发送。")
-        if ordinary_debate and (not (upstream_enabled() or scoped_project) or not config.HARNESS_DEEPSEEK_MODEL):
+        if ordinary_debate and (not (upstream_enabled() or project_kind) or not config.HARNESS_DEEPSEEK_MODEL):
             raise ValueError("本课程的辩论生成服务暂未启用。")
         if ordinary_plan:
             if len(content) > 4000:
                 raise ValueError("请将本轮普通教案要求缩减到 4000 字符以内。")
             if not ordinary_teaching_course(thread.dojo_id):
                 raise ValueError("请先选择已开通普通教案生成的课程。")
-            if not (upstream_enabled() or scoped_project) or not config.HARNESS_DEEPSEEK_MODEL:
+            if not (upstream_enabled() or project_kind) or not config.HARNESS_DEEPSEEK_MODEL:
                 raise ValueError("本课程的教学模型暂未启用。")
             if body.get("delivery") == "next-step" and wait_for_job_ids:
                 raise ConversationConflict("制作教案候选需要独立任务，请选择“排队”发送。")
@@ -6977,7 +6988,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 "trace": [],
             }
         else:
-            if text_model or scoped_project:
+            if text_model or project_kind:
                 constraints, source_refs = {}, []
             else:
                 try:
