@@ -77,3 +77,28 @@ def test_teacher_can_choose_visual_types_and_revise_the_preference():
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), "exec"), ns)
     assert ns["_requested_visuals"](["四页课件，放流程关系图、示意数据图表。"]) == ["chart", "diagram"]
     assert ns["_requested_visuals"](["用对比表和折线图。", "不要图表，改用结构图。"]) == ["comparison", "diagram"]
+
+
+def test_workshop_resumes_a_cinematic_job_without_deck_only_fields():
+    source = Path(__file__).resolve().parents[1] / "dojo_plugin/agent_runtime/teaching_workshop.py"
+    ast_nodes = ast.parse(source.read_text()).body
+    reference = {"kind": "cinematic", "profile": "gate-valve", "phase": "intake"}
+    # Stop after the model receives the validated durable input.
+    class ModelReached(Exception):
+        pass
+
+    def turn(_root, _secret, _model, payload):
+        assert payload == reference
+        raise ModelReached
+
+    fixture = ModuleType("_cinematic_fixture.jobs")
+    fixture.PermanentJobError = ValueError
+    fixture.heartbeat = lambda job, **_: job
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setitem(sys.modules, fixture.__name__, fixture)
+        ns = {"__package__": "_cinematic_fixture", "PIN": "workshop", "intake": lambda *_: dict(reference),
+              "_turn": turn, "teacher_dsh_chat": SimpleNamespace(_connection=lambda: ("root", "secret", "model"))}
+        invoke = next(node for node in ast_nodes if getattr(node, "name", None) == "invoke")
+        exec(compile(ast.Module(body=[invoke], type_ignores=[]), str(source), "exec"), ns)
+        with pytest.raises(ModelReached):
+            ns["invoke"](SimpleNamespace(result={}), {"prompt": "制作闸阀三维演示", "workshop": reference})

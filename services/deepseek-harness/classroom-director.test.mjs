@@ -485,3 +485,56 @@ test('workshop uses the official native question tool and resumes from the answe
   assert.equal(denied.status, 502);
   assert.ok(!denied.body.submission);
 });
+
+test('cinematic workshop uses trusted production geometry and requires a matching render receipt', async t => {
+  const { readFile } = await import('node:fs/promises');
+  const reference = JSON.parse(await readFile(new URL(
+    '../agent-runtime/lib/cinematic/reference-scenes/gate-valve.json', import.meta.url))).scene;
+  const title = '闸阀开闭的三维演示';
+  const copy = { title, subtitle: '通过闸板运动观察开度与流道的变化关系。',
+    modelNote: '使用放大后的简化模型解释结构和水流方向。', objectives: ['用闸板位置解释流道何时贯通。'],
+    chapters: reference.chapters.map(chapter => ({ title: chapter.title,
+      caption: '跟随画面的结构标记观察闸板和流道的位置关系。', question: '闸板的位置发生了怎样的变化？',
+    })),
+  };
+  let toolNames;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    toolNames = JSON.parse(options.body).tools.map(item => item.name);
+    return messagesResponse([tool(copy, 'direct_cinematic_lesson')]);
+  });
+  const previousKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = 'fixture-key';
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = previousKey;
+  });
+  const engine = await createEngine({ model, baseURL: 'https://offline-fixture.invalid' });
+  t.after(() => engine.close());
+  const service = createService({ secret, engine });
+  const authored = await request(service, { path: '/v1/teaching-workshop', body: {
+    phase: 'cinematic', kind: 'cinematic', profile: 'gate-valve', brief: '为初中制作闸阀三维演示',
+    answers: [], round: 2, pageCount: 0,
+    plan: { title, audience: '初中学生', objective: '观察闸板如何带动实际流道变化',
+      pages: copy.chapters.map(({ title }) => ({ title, focus: '观察闸板与流道的因果关系', visual: 'scene' })) },
+  } });
+  assert.equal(authored.status, 200, JSON.stringify(authored.body));
+  assert.deepEqual(toolNames, ['direct_cinematic_lesson']);
+  assert.deepEqual(authored.body.submission.cinematic, copy);
+  assert.equal(authored.body.usage.total_tokens, usage.total_tokens);
+
+  const path = '/v1/cinematic-compile';
+  const profile = 'gate-valve';
+  assert.equal((await request(service, { path, authorization: '', body: { profile, copy } })).status, 401);
+  assert.equal((await request(service, { path, body: { profile, copy: { ...copy, html: '<script>' } } })).status, 400);
+  const compiled = await request(service, { path, body: { profile, copy } });
+  assert.equal(compiled.status, 200, JSON.stringify(compiled.body).slice(0, 800));
+  assert.equal(compiled.body.geometrySha256, compiled.body.referenceGeometrySha256);
+  const scene = JSON.parse(compiled.body.sceneWire);
+  assert.equal(scene.nodes.length, reference.nodes.length);
+  assert.equal(scene.chapters.length, 6);
+  assert.equal(scene.duration, reference.duration);
+  assert.match(compiled.body.html, /data-cinematic-runtime=/);
+  assert.equal((await request(service, { path: '/v1/cinematic-proof',
+    body: { sceneWire: compiled.body.sceneWire, receipt: { issues: [], evidence: {} } },
+  })).status, 422);
+});

@@ -55,7 +55,7 @@ def requested_kind(prompt):
     subject = creation_subject(prompt)
     if not subject:
         return None
-    if re.search(r"课件|幻灯片|演示文稿|PPT|仿真|动态模拟|模拟演示|动态演示|交互动画|交互演示|互动演示", subject, re.I):
+    if re.search(r"课件|幻灯片|演示文稿|PPT|三维(?:动画|仿真|演示|模型|场景)|3D\s*(?:动画|仿真|演示|模型|场景)|仿真|动态模拟|模拟演示|动态演示|交互动画|交互演示|互动演示", subject, re.I):
         return "slide-deck"
     if requests_explicit_file_delivery(prompt):
         return None

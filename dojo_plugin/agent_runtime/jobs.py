@@ -2143,7 +2143,8 @@ def retry_job(job, user_id, idempotency_token):
     recovery = (job.result or {}).get("_executionRecovery", {})
     if isinstance(recovery, dict) and isinstance(recovery.get("baseMaxAttempts"), int):
         job.max_attempts = max(1, recovery["baseMaxAttempts"])
-    job.result = {}
+    workshop_checkpoint = (job.result or {}).get("_workshop") if payload.get("teachingWorkshop") else None
+    job.result = {"_workshop": workshop_checkpoint} if workshop_checkpoint else {}
     job.status = "QUEUED"
     job.stage = "queued"
     job.progress = 0
@@ -3872,7 +3873,7 @@ def _workshop_simulation_revision(job):
 
     _, _, revision = target()
     source_hash = revision.content_hash
-    content, usage = teaching_workshop.revise_simulation(job, revision)
+    content, usage, evidence = teaching_workshop.revise_simulation(job, revision)
     job = assert_job_lease(job)
     if _job_cancellation_requested(job):
         raise JobCanceled("教学模拟修改已取消。")
@@ -3891,7 +3892,8 @@ def _workshop_simulation_revision(job):
         status="SUCCEEDED",
     )
     invocation.artifact_revision_id = saved.id
-    saved.validation = {"status": "GENERATED", "modelRoute": invocation.route, "actualModel": model, "degraded": False}
+    saved.validation = {"status": "GENERATED", "modelRoute": invocation.route, "actualModel": model, "degraded": False,
+                        **({"renderEvidence": evidence} if evidence else {})}
     return {"artifactId": artifact.id, "revisionId": saved.id, "revision": saved.revision, "title": artifact.title}
 
 

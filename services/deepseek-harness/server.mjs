@@ -13,9 +13,11 @@ import {
 } from './classroom-dialogue.mjs';
 
 import { coursewarePath, maxCoursewareBytes, validateCoursewareTurn } from './courseware.mjs';
-import { workshopPath, workshopByteLimit, validateWorkshop, WorkshopTurnError } from './teaching-workshop.mjs';
+import { workshopPath, workshopByteLimit, validateWorkshop, validCinematicCopy, WorkshopTurnError } from './teaching-workshop.mjs';
 
 const compilerPath = '/v1/courseware-compile';
+const cinematicCompilerPath = '/v1/cinematic-compile';
+const cinematicProofPath = '/v1/cinematic-proof';
 const maxBodyBytes = 1024 * 1024;
 const maxMessages = 128;
 const maxTurns = 8;
@@ -71,7 +73,7 @@ function validate(value, withImages) {
   return { messages, images };
 }
 
-async function readTurn(request, { withImages, withMaterials, withDirector, withDialogue, withCourseware, withWorkshop, compiling }) {
+async function readTurn(request, { withImages, withMaterials, withDirector, withDialogue, withCourseware, withWorkshop, compiling, cinematic }) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers['content-type'] ?? '')) {
     throw new RequestError(415, 'Expected application/json');
   }
@@ -98,6 +100,7 @@ async function readTurn(request, { withImages, withMaterials, withDirector, with
     }
     return { pages: payload.pages };
   }
+  if (cinematic) return payload;
   if (withCourseware) {
     const courseware = validateCoursewareTurn(payload);
     if (!courseware) throw new RequestError(400, 'Expected a bounded courseware request');
@@ -172,8 +175,11 @@ export function createService({
     const withCourseware = request.url === coursewarePath;
     const withWorkshop = request.url === workshopPath;
     const compiling = request.url === compilerPath;
+    const cinematicCompile = request.url === cinematicCompilerPath;
+    const cinematicProof = request.url === cinematicProofPath;
     if (!imageCapability && (request.method !== 'POST' ||
-        (!withImages && !withMaterials && !withDirector && !withDialogue && !withCourseware && !withWorkshop && !compiling && request.url !== '/v1/turn'))) {
+        (!withImages && !withMaterials && !withDirector && !withDialogue && !withCourseware &&
+          !withWorkshop && !compiling && !cinematicCompile && !cinematicProof && request.url !== '/v1/turn'))) {
       json(response, 404, { error: 'Not found' });
       return;
     }
@@ -203,6 +209,23 @@ export function createService({
     response.once('close', abort);
     const deadline = AbortSignal.timeout(withDialogue || withCourseware || withWorkshop ? dialogueTimeoutMs : timeoutMs);
     try {
+      if (cinematicCompile || cinematicProof) {
+        const input = await readTurn(request, { cinematic: true });
+        if (cinematicCompile && (!input || !validCinematicCopy(input.profile, input.copy))) {
+          throw new RequestError(400, 'Invalid teaching scene input');
+        }
+        if (cinematicProof && (typeof input?.sceneWire !== 'string' || !input.receipt)) {
+          throw new RequestError(400, 'Missing scene or browser inspection');
+        }
+        try {
+          const { compileTeachingCinematic, verifyTeachingCinematic } = await import('./courseware-compiler.mjs');
+          json(response, 200, cinematicCompile ? compileTeachingCinematic(input.profile, input.copy)
+            : verifyTeachingCinematic(input.sceneWire, input.receipt));
+        } catch {
+          throw new RequestError(422, 'Scene or browser proof did not meet the production renderer contract');
+        }
+        return;
+      }
       if (compiling) {
         const { pages } = await readTurn(request, { compiling });
         let slides;
