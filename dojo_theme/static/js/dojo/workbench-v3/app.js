@@ -872,7 +872,7 @@ kbd {
   padding-left: 44px;
   min-width: 0;
 }
-.message-body > .user-message[data-editing='true'] .message-body {
+.user-message[data-editing='true'] .message-body {
   width: min(100%, 640px);
   max-width: 90%;
 }
@@ -910,7 +910,7 @@ kbd {
   justify-content: flex-end;
   gap: 8px;
 }
-.markdown {
+.message-body > .markdown {
   max-width: 71ch;
   padding: 1px 0;
 }
