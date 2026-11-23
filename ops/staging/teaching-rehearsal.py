@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit and check a static, offline Compose amendment for the 28081 development site."""
+"""Check 28081 teaching service wiring and emit the offline rehearsal amendment."""
 
 import argparse
 import copy
@@ -83,9 +83,9 @@ def additions(edge):
 
 
 def render_amendment(edge):
-    lines = ['# Load after the host, DSH and classroom Compose files for rehearsal only.', 'services:']
-    for service, network in additions(edge).items():
-        lines.extend((f'  {service}:', f'    networks: {{{network}: {{}}}}'))
+    lines = ['# Load after teaching-app.compose.yml for rehearsal only.', 'services:']
+    if edge:
+        lines.extend(('  edge:', f'    networks: {{{EDGE_NETWORK}: {{}}}}'))
     lines.extend(('  deepseek-harness:', '    networks: !override [teaching]',
                   '    environment:', f'      DEEPSEEK_BASE_URL: "{FIXTURE_URL}"',
                   '  agent-runtime:', '    environment:', '      DOJO_AI_ENABLED: "false"'))
@@ -97,44 +97,53 @@ def render_amendment(edge):
     return '\n'.join(lines) + '\n'
 
 
+def remove_host_attachments(services, expected):
+    for service, network in expected.items():
+        attached = service_networks(services[service])
+        require(network in attached and attached.pop(network) in ({}, None),
+                'Missing or altered host integration network attachment')
+
+
+def check_teaching_service(name, service, expected_networks):
+    attached = service_networks(service)
+    require(attached.keys() == expected_networks and all(value in ({}, None) for value in attached.values()),
+            'Unexpected teaching service network attachment')
+    require(not any(service.get(key) for key in ('ports', 'external_links', 'links', 'extra_hosts',
+                                                 'privileged', 'devices', 'build', 'pid', 'ipc',
+                                                 'volumes_from', 'use_api_socket', 'cap_add')),
+            'Unexpected teaching service host access or alternate endpoint')
+    require(service.get('pull_policy') == 'never' and service.get('read_only') is True
+            and re.fullmatch(r'sha256:[0-9a-f]{64}|[^\s@]+@sha256:[0-9a-f]{64}', service.get('image', '')),
+            'Teaching services require read-only containers and verified immutable images')
+    expected_mount = [{'type': 'volume', 'source': 'classroom-data', 'target': '/app/data'}]
+    require([{key: mount.get(key) for key in ('type', 'source', 'target')} for mount in service.get('volumes', [])]
+            == (expected_mount if name == 'agent-runtime' else []), 'Unexpected teaching service volume')
+
+
+def check_internal_bridge(network, name):
+    require(network.get('internal') is True and network.get('name') == f'{PROJECT}_{name}'
+            and not network.get('ipam') and network.get('driver', 'bridge') == 'bridge'
+            and network.keys() <= {'internal', 'name', 'ipam', 'driver'},
+            'Teaching networks must be isolated project-local bridges')
+
+
 def check_candidate(base, candidate, edge):
     original = copy.deepcopy(candidate)
     services = original['services']
     require(services.keys() == HOST_SERVICES | TEACHING_NETWORKS.keys(),
             'Expected the four host services plus DSH, classroom and inspector')
-    for service, network in additions(edge).items():
-        attached = service_networks(services[service])
-        require(network in attached and attached.pop(network) in ({}, None),
-                'Missing or altered host integration network attachment')
+    remove_host_attachments(services, additions(edge))
     for name, expected in TEACHING_NETWORKS.items():
         service = services.pop(name)
-        attached = service_networks(service)
         if name == 'agent-runtime' and edge:
             expected = expected | {EDGE_NETWORK}
-        require(attached.keys() == expected and all(value in ({}, None) for value in attached.values()),
-                'Unexpected teaching service network attachment')
-        require(not any(service.get(key) for key in ('ports', 'external_links', 'links', 'extra_hosts',
-                                                     'privileged', 'devices', 'build', 'pid', 'ipc',
-                                                     'volumes_from', 'use_api_socket', 'cap_add')),
-                'Unexpected teaching service host access or alternate endpoint')
-        require(service.get('pull_policy') == 'never' and service.get('read_only') is True
-                and re.fullmatch(r'sha256:[0-9a-f]{64}|[^\s@]+@sha256:[0-9a-f]{64}', service.get('image', '')),
-                'Teaching services require read-only containers and verified immutable images')
-        expected_mount = [{'type': 'volume', 'source': 'classroom-data', 'target': '/app/data'}]
-        mounts = service.get('volumes', [])
-        require([{key: mount.get(key) for key in ('type', 'source', 'target')} for mount in mounts]
-                == (expected_mount if name == 'agent-runtime' else []),
-                'Unexpected teaching service volume')
+        check_teaching_service(name, service, expected)
         environment = service.get('environment', {})
         require(all(environment.get(key) == value for key, value in REHEARSAL_ENVIRONMENT[name].items()),
                 'Unexpected classroom endpoints, AI setting or DSH loopback fixture')
     new_networks = {'teaching', 'classroom-render'} | ({EDGE_NETWORK} if edge else set())
     for name in new_networks:
-        network = original['networks'].pop(name, {})
-        require(network.get('internal') is True and network.get('name') == f'{PROJECT}_{name}'
-                and not network.get('ipam') and network.get('driver', 'bridge') == 'bridge'
-                and network.keys() <= {'internal', 'name', 'ipam', 'driver'},
-                'Rehearsal networks must be isolated project-local bridges')
+        check_internal_bridge(original['networks'].pop(name, {}), name)
     volume = original['volumes'].pop('classroom-data', {})
     require(volume == {'name': f'{PROJECT}_classroom-data'}, 'Unexpected classroom data volume')
     if 'volumes' not in base and not original['volumes']:
@@ -143,18 +152,49 @@ def check_candidate(base, candidate, edge):
             'Candidate changes the original host configuration or adds resources outside rehearsal')
 
 
+def check_app_connection(reference, candidate):
+    services = reference['services']
+    require(services.keys() == HOST_SERVICES | TEACHING_NETWORKS.keys(),
+            'Expected the four host services plus DSH, classroom and inspector')
+    networks = reference['networks']
+    check_baseline({
+        'services': {name: services[name] for name in HOST_SERVICES},
+        'networks': {name: config for name, config in networks.items()
+                     if name not in {'teaching', 'classroom-render', 'model-egress'}},
+        'volumes': {name: config for name, config in reference.get('volumes', {}).items()
+                    if name != 'classroom-data'},
+    })
+    for name in ('teaching', 'classroom-render'):
+        check_internal_bridge(networks[name], name)
+    for name, expected in TEACHING_NETWORKS.items():
+        if name == 'deepseek-harness' and 'model-egress' in networks:
+            expected = expected | {'model-egress'}
+        check_teaching_service(name, services[name], expected)
+    original = copy.deepcopy(candidate)
+    remove_host_attachments(original['services'], {'app': 'teaching'})
+    require(original == reference, 'App connection changed more than its teaching network attachment')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--edge', action='store_true', help='Allow edge to reach classroom on a separate private network')
-    parser.add_argument('base', type=Path, help='Rendered baseline from docker compose config --format json --no-env-resolution')
+    parser.add_argument('--check-app-connection', action='store_true',
+                        help='Verify the only change to the rendered reference is the app teaching attachment')
+    parser.add_argument('base', type=Path, help='Rendered baseline or reference, before the amendment')
     parser.add_argument('candidate', nargs='?', type=Path, help='Rendered merged JSON to validate instead of printing the amendment')
     args = parser.parse_args()
+    if args.check_app_connection and (args.edge or args.candidate is None):
+        parser.error('--check-app-connection requires two rendered configs and does not take --edge')
     try:
         base = load_config(args.base)
-        check_baseline(base)
-        if args.candidate is None:
+        if args.check_app_connection:
+            check_app_connection(base, load_config(args.candidate))
+            print('Verified 28081 app teaching network attachment')
+        elif args.candidate is None:
+            check_baseline(base)
             print(render_amendment(args.edge), end='')
         else:
+            check_baseline(base)
             check_candidate(base, load_config(args.candidate), args.edge)
             print('Verified static 28081 rehearsal configuration')
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:

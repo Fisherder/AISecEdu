@@ -132,7 +132,9 @@ class HarnessClientContract(unittest.TestCase):
                 else:
                     self.fail("The teaching service did not start")
                 context = {"request": "解释本课学习目标", "scope": "合成课程"}
-                with patch.dict(os.environ, HARNESS_INTERNAL_URL=url, HARNESS_SERVICE_SECRET="fixture-service"):
+                # Only the configured DSH service may receive the internal teaching request.
+                with patch.dict(os.environ, HARNESS_INTERNAL_URL=url, HARNESS_SERVICE_SECRET="fixture-service",
+                                http_proxy="http://127.0.0.1:1", no_proxy="", NO_PROXY=""):
                     reply = client.invoke_turn(client.request_body("教学助手", context))
                 self.assertEqual(reply, {"text": "教学回执", "model": "fixture", "usage": {
                     "prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}})

@@ -85,9 +85,34 @@ def service(monkeypatch):
     response = MagicMock()
     response.__enter__.return_value = response
     response.status_code = 200
-    post = MagicMock(return_value=response)
-    monkeypatch.setattr(turn.requests, "post", post)
-    return post, response
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.post.return_value = response
+    monkeypatch.setattr(turn.requests, "Session", lambda: session)
+    return session.post, response
+
+
+@pytest.mark.parametrize("private", [False, True])
+def test_internal_transport_preserves_the_configured_ca_bundle(monkeypatch, service, private):
+    post, response = service
+    response.json.return_value = {"text": "教学回复", "model": "fixture"}
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/school/teaching-ca.pem")
+    if private:
+        turn.invoke_ordinary_grading_turn("课程评分", {}, connection=("https://school.invalid", "fixture"))
+    else:
+        turn.invoke_turn(turn.request_body("教学顾问", {}))
+    session = turn.requests.Session()
+    assert session.trust_env is False
+    assert session.verify == "/school/teaching-ca.pem"
+    post.assert_called_once()
+
+
+def test_missing_grading_ca_is_a_configuration_error(service):
+    post, _ = service
+    post.side_effect = OSError("fixture CA file is missing")
+    with pytest.raises(turn.UpstreamTurnError, match="信任证书") as failure:
+        turn.invoke_ordinary_grading_turn("课程评分", {}, connection=("https://school.invalid", "fixture"))
+    assert failure.value.category == "permanent"
 
 
 def test_turn_sends_only_messages_and_returns_measured_usage(service):

@@ -106,12 +106,7 @@ def ordinary_grading_connection(base_url, token):
 def invoke_ordinary_grading_turn(system_prompt, context, *, connection):
     if connection is None:
         raise UpstreamTurnError("校内评分服务尚未配置", category="permanent")
-    with requests.Session() as session:
-        session.trust_env = False
-        return _send_turn(
-            request_body(system_prompt, context), "/v1/turn", 1024 * 1024,
-            connection=connection, post=session.post,
-        )
+    return _send_turn(request_body(system_prompt, context), "/v1/turn", 1024 * 1024, connection=connection)
 
 
 MATERIAL_TURN_PATH = "/v1/teaching-material-turn"
@@ -160,15 +155,12 @@ def invoke_teaching_image_turn(body, image):
     return _send_turn({**body, "images": [image]}, "/v1/teaching-image-turn", 4 * 1024 * 1024)
 
 
-def _send_turn(body, path, limit, encoded=None, *, connection=None, post=None):
+def _send_turn(body, path, limit, encoded=None, *, connection=None):
     if connection is None:
-        connection = (
-            os.environ.get("HARNESS_INTERNAL_URL", "").strip().rstrip("/"),
-            os.environ.get("HARNESS_SERVICE_SECRET", ""),
-        )
-    base_url, secret = connection
-    if post is None:
-        post = requests.post
+        base_url = os.environ.get("HARNESS_INTERNAL_URL", "").strip().rstrip("/")
+        secret = os.environ.get("HARNESS_SERVICE_SECRET", "")
+    else:
+        base_url, secret = connection
     if not base_url or not secret:
         raise UpstreamTurnError("教学对话服务尚未配置", category="permanent")
     if encoded is None:
@@ -176,32 +168,38 @@ def _send_turn(body, path, limit, encoded=None, *, connection=None, post=None):
     if len(encoded) > limit:
         raise UpstreamTurnError("教学对话资料超出服务容量，请减少本轮引用的资料", category="permanent")
     try:
-        with post(
-            f"{base_url}{path}",
-            headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/json"},
-            data=encoded,
-            timeout=(8, 95),
-            allow_redirects=False,
-        ) as response:
-            status = response.status_code
-            if not 200 <= status < 300:
-                transient = status in {408, 425, 429} or 500 <= status < 600
-                model, usage = _material_failure_receipt(response) if (
-                    path == MATERIAL_TURN_PATH and status in {502, 504}
-                ) else (None, None)
-                raise UpstreamTurnError(
-                    f"教学对话服务返回 HTTP {status}",
-                    category="service" if transient else "permanent",
-                    retry_after=response.headers.get("Retry-After", 0) if transient else 0,
-                    model=model, usage=usage,
-                )
-            result = response.json()
+        with requests.Session() as session:
+            # Keep the internal Bearer credential and course material on the configured connection.
+            session.trust_env = False
+            session.verify = os.getenv("REQUESTS_CA_BUNDLE") or os.getenv("CURL_CA_BUNDLE") or True
+            with session.post(
+                f"{base_url}{path}",
+                headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/json"},
+                data=encoded,
+                timeout=(8, 95),
+                allow_redirects=False,
+            ) as response:
+                status = response.status_code
+                if not 200 <= status < 300:
+                    transient = status in {408, 425, 429} or 500 <= status < 600
+                    model, usage = _material_failure_receipt(response) if (
+                        path == MATERIAL_TURN_PATH and status in {502, 504}
+                    ) else (None, None)
+                    raise UpstreamTurnError(
+                        f"教学对话服务返回 HTTP {status}",
+                        category="service" if transient else "permanent",
+                        retry_after=response.headers.get("Retry-After", 0) if transient else 0,
+                        model=model, usage=usage,
+                    )
+                result = response.json()
     except requests.Timeout:
         raise UpstreamTurnError("教学对话服务请求超时") from None
     except UpstreamTurnError:
         raise
     except (requests.RequestException, ValueError):
         raise UpstreamTurnError("教学对话服务请求失败") from None
+    except OSError:
+        raise UpstreamTurnError("无法读取教学服务配置的信任证书", category="permanent") from None
     if not isinstance(result, dict):
         raise UpstreamTurnError("教学对话服务返回格式无效")
     text, model = result.get("text"), result.get("model")

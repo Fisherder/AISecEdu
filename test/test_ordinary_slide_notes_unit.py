@@ -239,7 +239,7 @@ def test_existing_harness_transport_posts_only_selected_visible_fields(flow, mon
     client_response.status_code = 200
     client_response.json.return_value = jobs["invoke_turn"].return_value
     post = MagicMock(return_value=client_response)
-    monkeypatch.setattr(turn.requests, "post", post)
+    monkeypatch.setattr(turn.requests.Session, "post", post)
     monkeypatch.setenv("HARNESS_INTERNAL_URL", "http://harness.invalid")
     monkeypatch.setenv("HARNESS_SERVICE_SECRET", "fixture-only")
     jobs["invoke_turn"] = turn.invoke_turn

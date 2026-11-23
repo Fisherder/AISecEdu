@@ -82,7 +82,7 @@ def generation(monkeypatch):
             return self.payload
 
     post = Mock()
-    monkeypatch.setattr(client.requests, "post", post)
+    monkeypatch.setattr(client.requests.Session, "post", post)
     dojo = SimpleNamespace(
         dojo_id=-12053, id="synthetic-math", name="数学", modules=[SimpleNamespace(module_index=3)],
     )
