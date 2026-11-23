@@ -222,6 +222,29 @@ def _slide(page, index, style, goal):
             "content": {"studio": studio}}
 
 
+def _compile_slides(root, secret, slides):
+    from .jobs import PermanentJobError, RuntimeJobError
+
+    try:
+        with requests.Session() as client:
+            client.trust_env = False
+            response = client.post(
+                root + "/v1/courseware-compile",
+                json={"pages": [slide["content"]["studio"] for slide in slides]},
+                headers={"Authorization": f"Bearer {secret}"}, allow_redirects=False, timeout=(5, 12),
+            )
+            if response.status_code == 422:
+                raise PermanentJobError("生成的课件未通过原生画布校验，请重新生成。")
+            response.raise_for_status()
+            compiled = response.json().get("slides")
+    except requests.RequestException:
+        raise RuntimeJobError("原生课件编译服务暂不可用。", category="service") from None
+    if (not isinstance(compiled, list) or len(compiled) != len(slides)
+            or any(not isinstance(page.get("elements"), list) or not page["elements"] for page in compiled)):
+        raise PermanentJobError("课件编译未返回完整的可编辑画布。")
+    return [{**slide, "content": content} for slide, content in zip(slides, compiled, strict=True)]
+
+
 def invoke(job, body, route):
     from .jobs import PermanentJobError, RuntimeJobError
 
@@ -259,6 +282,7 @@ def invoke(job, body, route):
     else:
         selection = body["selection"]
         slides = [_slide(page, index, body["style"], selection["goal"]) for index, page in enumerate(returned["pages"])]
+        slides = _compile_slides(root, secret, slides)
         result = {"content": {
             "schema": "aisecedu.global-agent.artifact.v1", "artifactType": "slide-deck",
             "renderer": "agent-runtime-stage", PIN: CONTRACT,

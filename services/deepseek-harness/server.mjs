@@ -14,6 +14,7 @@ import {
 
 import { coursewarePath, maxCoursewareBytes, validateCoursewareTurn } from './courseware.mjs';
 
+const compilerPath = '/v1/courseware-compile';
 const maxBodyBytes = 1024 * 1024;
 const maxMessages = 128;
 const maxTurns = 8;
@@ -69,7 +70,7 @@ function validate(value, withImages) {
   return { messages, images };
 }
 
-async function readTurn(request, { withImages, withMaterials, withDirector, withDialogue, withCourseware }) {
+async function readTurn(request, { withImages, withMaterials, withDirector, withDialogue, withCourseware, compiling }) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers['content-type'] ?? '')) {
     throw new RequestError(415, 'Expected application/json');
   }
@@ -89,6 +90,12 @@ async function readTurn(request, { withImages, withMaterials, withDirector, with
     payload = JSON.parse(utf8.decode(Buffer.concat(chunks)));
   } catch {
     throw new RequestError(400, 'Invalid JSON');
+  }
+  if (compiling) {
+    if (!payload || Object.keys(payload).length !== 1 || !Array.isArray(payload.pages)) {
+      throw new RequestError(400, 'Expected native courseware pages');
+    }
+    return { pages: payload.pages };
   }
   if (withCourseware) {
     const courseware = validateCoursewareTurn(payload);
@@ -157,8 +164,9 @@ export function createService({
     const withDirector = request.url === directorTurnPath;
     const withDialogue = request.url === dialoguePath;
     const withCourseware = request.url === coursewarePath;
+    const compiling = request.url === compilerPath;
     if (!imageCapability && (request.method !== 'POST' ||
-        (!withImages && !withMaterials && !withDirector && !withDialogue && !withCourseware && request.url !== '/v1/turn'))) {
+        (!withImages && !withMaterials && !withDirector && !withDialogue && !withCourseware && !compiling && request.url !== '/v1/turn'))) {
       json(response, 404, { error: 'Not found' });
       return;
     }
@@ -188,6 +196,18 @@ export function createService({
     response.once('close', abort);
     const deadline = AbortSignal.timeout(withDialogue || withCourseware ? dialogueTimeoutMs : timeoutMs);
     try {
+      if (compiling) {
+        const { pages } = await readTurn(request, { compiling });
+        let slides;
+        try {
+          const { compileTeachingSlides } = await import('./courseware-compiler.mjs');
+          slides = compileTeachingSlides(pages);
+        } catch {
+          throw new RequestError(422, 'Invalid native courseware');
+        }
+        json(response, 200, { slides });
+        return;
+      }
       const { messages, images, question, materials, director, dialogue, courseware } = await readTurn(request, {
         withImages, withMaterials, withDirector, withDialogue, withCourseware,
       });

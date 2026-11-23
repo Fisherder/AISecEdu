@@ -57,3 +57,9 @@ tool arguments and returns structured teaching data plus a measured model
 receipt. AISecEdu owns confirmation, artifact persistence, live preview, and
 revision history. The plugin never receives platform credentials and has no
 execution, workspace, file, or networking tools.
+
+The internal /v1/courseware-compile endpoint uses the same native slide compiler
+as the existing Courseware Studio. It has no model call and produces editable
+canvas elements. Rebuild its checked-in bundle with
+bash ops/build-teaching-courseware-compiler.sh after installing the agent-runtime
+and co-creation workspace dependencies.
