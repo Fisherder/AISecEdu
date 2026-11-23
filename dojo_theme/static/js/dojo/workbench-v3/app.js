@@ -2675,6 +2675,8 @@ kbd {
 @media (min-width: 821px) {
   .workbench.has-panel.has-file-preview {
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 4px minmax(340px, min(var(--panel-width), 53vw));
+  }  .workbench.sidebar-collapsed.has-panel.has-file-preview {
+    grid-template-columns: minmax(0, 1fr) 4px minmax(340px, min(var(--panel-width), 53vw));
   }
 }
 @media (min-width: 721px) and (max-width: 820px) {
