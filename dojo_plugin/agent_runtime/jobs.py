@@ -4261,6 +4261,7 @@ def _persist_result(job, result, *, prepared=None):
             instruction=instruction,
         ).first()
         pinned_debate = "ordinaryDebate" in (job.payload or {})
+        native_courseware = (job.payload or {}).get("scopedOrdinaryProject") == "slide-deck"
         content = ordinary_debate.content_for_save(job, result) if pinned_debate else result.get("content")
         if existing:
             return {
@@ -4277,7 +4278,7 @@ def _persist_result(job, result, *, prepared=None):
             expected_revision=int(job.payload.get("expectedRevision")),
             instruction=instruction,
             content=content,
-            commit=not (scoped or pinned_debate or (job.payload or {}).get("scopedOrdinaryProject") == "slide-deck"),
+            commit=not (scoped or pinned_debate or native_courseware),
         )
         artifact = TeachingArtifacts.query.filter_by(id=artifact.id).first()
         artifact.status = "READY"
@@ -4311,11 +4312,16 @@ def _persist_result(job, result, *, prepared=None):
             else None
         )
         if candidate_set and candidate_set.thread_id:
+            next_action = (
+                "打开成品卡片，在课件工作室分步演示、编辑和保存。"
+                if native_courseware
+                else "可以打开详情预览、继续用自然语言修改，或提交发布。"
+            )
             message = TeachingAgentMessages(
                 thread_id=candidate_set.thread_id,
                 user_id=job.owner_id,
                 role="assistant",
-                content=f"“{artifact.title}”已生成完成。可以打开详情预览、继续用自然语言修改，或提交发布。",
+                content=f"“{artifact.title}”已生成完成。{next_action}",
                 metadata_json={"jobId": job.id, "artifactId": artifact.id},
             )
             db.session.add(message)
@@ -4330,6 +4336,7 @@ def _persist_result(job, result, *, prepared=None):
                     state={
                         "status": "READY",
                         "artifactType": artifact.artifact_type,
+                        **({"title": artifact.title} if native_courseware else {}),
                         "revision": revision.revision,
                         "sourceCoverage": len(revision.source_refs or []),
                         "qualityCheck": (revision.validation or {}).get("status"),
@@ -4338,7 +4345,7 @@ def _persist_result(job, result, *, prepared=None):
                         "degraded": bool(invocation.degraded) if invocation else False,
                         "updated": datetime.datetime.utcnow().isoformat() + "Z",
                     },
-                    actions=["open", "revise", "validate", "request-publish"],
+                    actions=["open"] if native_courseware else ["open", "revise", "validate", "request-publish"],
                 )
             )
         db.session.commit()
