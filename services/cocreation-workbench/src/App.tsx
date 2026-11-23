@@ -20,6 +20,7 @@ import { Transcript } from './components/Transcript';
 import { TaskCenter } from './components/TaskCenter';
 import { Dialogs } from './components/Dialogs';
 import { ArtifactPanel } from './panels/ArtifactPanel';
+import { FilePreview } from './panels/FilePreview';
 import { ActivityPanel } from './panels/ActivityPanel';
 import { ContextPanel } from './panels/ContextPanel';
 import { Button, IconButton } from './components/ui';
@@ -27,6 +28,7 @@ import { Button, IconButton } from './components/ui';
 export function App() {
   const { state, controller: c } = useWorkbench();
   const [width, setWidth] = useState(c.storage.value('panelWidth', 520));
+  const [fileWidth, setFileWidth] = useState(c.storage.value('filePreviewWidth', Math.round(window.innerWidth * 0.44)));
   const [expanded, setExpanded] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(c.storage.value('sidebarCollapsed', false));
   const drag = useRef<{ x: number; width: number } | null>(null);
@@ -80,12 +82,37 @@ export function App() {
       window.removeEventListener('popstate', onPop);
     };
   }, [c]);
+  const previewFile = state.panel === 'files' ? state.selectedFile : null;
+  const panelWidth = previewFile ? fileWidth : width;
+  const storageKey = previewFile ? 'filePreviewWidth' : 'panelWidth';
+  const updateWidth = previewFile ? setFileWidth : setWidth;
+  const panelMaximum = () => {
+    const viewport = window.innerWidth;
+    const space = viewport - (sidebarCollapsed ? 360 : 610);
+    const limit = previewFile ? viewport * (viewport <= 820 ? 0.52 : 0.53) : space;
+    return Math.max(340, Math.min(space, Math.floor(limit)));
+  };
+  const closePanel = () => { c.togglePanel(); setExpanded(false); };
+
+  useEffect(() => { if (!state.panelOpen) setExpanded(false); }, [state.panelOpen]);
+
+  useEffect(() => {
+    if (!state.panelOpen || !previewFile || state.modal || state.sidebarOpen) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (expanded) setExpanded(false);
+      else c.togglePanel();
+    };
+    window.addEventListener('keydown', onEscape);
+    return () => window.removeEventListener('keydown', onEscape);
+  }, [c, expanded, previewFile, state.modal, state.panelOpen, state.sidebarOpen]);
+
   const course = state.context.teacherDojos?.find((item: any) => item.id === state.thread?.dojoId);
   return (
     <div
-      className={`workbench ${state.panelOpen ? 'has-panel' : ''} ${expanded ? 'expanded-panel' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
+      className={`workbench ${state.panelOpen ? 'has-panel' : ''} ${expanded && state.panelOpen ? 'expanded-panel' : ''} ${previewFile ? 'has-file-preview' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
       data-ready={!state.booting}
-      style={{ '--panel-width': `${width}px` } as CSSProperties}
+      style={{ '--panel-width': `${panelWidth}px` } as CSSProperties}
     >
       <Sidebar />
       <main className="main-pane">
@@ -171,7 +198,8 @@ export function App() {
         <nav className="mobile-panel-nav" aria-label="移动工作区">
           <Button
             onClick={() => {
-              c.patch({ panelOpen: false, taskCenter: false });
+              if (state.panelOpen) closePanel();
+              c.patch({ taskCenter: false });
             }}
           >
             对话
@@ -197,33 +225,30 @@ export function App() {
             role="separator"
             aria-label="调整工作区宽度"
             aria-orientation="vertical"
-            aria-valuenow={width}
+            aria-valuenow={Math.min(panelMaximum(), Math.max(340, panelWidth))}
             aria-valuemin={340}
-            aria-valuemax={Math.max(340, window.innerWidth - 630)}
+            aria-valuemax={panelMaximum()}
             tabIndex={0}
             onKeyDown={(event) => {
               if (['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) {
                 event.preventDefault();
                 const value =
                   event.key === 'Home'
-                    ? 520
-                    : Math.min(
-                        window.innerWidth - 630,
-                        Math.max(340, width + (event.key === 'ArrowLeft' ? 32 : -32)),
-                      );
-                setWidth(value);
-                c.storage.set('panelWidth', value);
+                    ? Math.min(panelMaximum(), previewFile ? Math.round(window.innerWidth * 0.44) : 520)
+                    : Math.min(panelMaximum(), Math.max(340, panelWidth + (event.key === 'ArrowLeft' ? 32 : -32)));
+                updateWidth(value);
+                c.storage.set(storageKey, value);
               }
             }}
             onPointerDown={(event) => {
-              drag.current = { x: event.clientX, width };
+              drag.current = { x: event.clientX, width: event.currentTarget.nextElementSibling?.getBoundingClientRect().width || panelWidth };
               event.currentTarget.setPointerCapture(event.pointerId);
             }}
             onPointerMove={(event) => {
               if (drag.current)
-                setWidth(
+                updateWidth(
                   Math.min(
-                    Math.max(340, window.innerWidth - 630),
+                    panelMaximum(),
                     Math.max(340, drag.current.width + drag.current.x - event.clientX),
                   ),
                 );
@@ -231,13 +256,18 @@ export function App() {
             onPointerUp={(event) => {
               drag.current = null;
               event.currentTarget.releasePointerCapture(event.pointerId);
-              c.storage.set('panelWidth', width);
+              const actual = event.currentTarget.nextElementSibling?.getBoundingClientRect().width || panelWidth;
+              c.storage.set(storageKey, Math.round(actual));
             }}
             onPointerCancel={() => {
               drag.current = null;
             }}
           />
-          <aside className="work-area" aria-label="成品与执行工作区">
+          <aside className="work-area" id={previewFile ? 'workbench-file-preview' : undefined}
+            aria-label={previewFile ? '对话文件预览' : '成品与执行工作区'}>
+            {previewFile ? (
+              <FilePreview file={previewFile} expanded={expanded} onExpand={() => setExpanded(!expanded)} onClose={closePanel} />
+            ) : <>
             <header className="panel-header">
               <div role="tablist" aria-label="工作区页面">
                 {(
@@ -267,10 +297,7 @@ export function App() {
               </IconButton>
               <IconButton
                 label="关闭工作区"
-                onClick={() => {
-                  c.togglePanel();
-                  setExpanded(false);
-                }}
+                onClick={closePanel}
               >
                 <X size={16} />
               </IconButton>
@@ -284,6 +311,7 @@ export function App() {
             <div className="panel-content" hidden={state.panel !== 'context'}>
               <ContextPanel />
             </div>
+            </>}
           </aside>
         </>
       )}

@@ -27,10 +27,12 @@ import { CandidateSet } from './CandidateSet';
 import { Composer } from './Composer';
 import { GenerationConfirmation } from './GenerationConfirmation';
 import { readLocal, writeLocal } from '../core/storage';
+import { FileGlyph } from '../panels/FilePreview';
+import { asConversationFile, conversationFiles, fileFormatLabel, fileSize, fileUrl } from '../core/conversation-files';
 import { canStartTeachingProject, displayTeachingReply, teachingProjects } from '../core/teaching-projects';
 
 export function RichText({ text }: { text: string }) {
-  const { controller: c } = useWorkbench();
+  const { controller: c, state } = useWorkbench();
   return (
     <div className="markdown">
       <Markdown
@@ -43,6 +45,13 @@ export function RichText({ text }: { text: string }) {
               target="_blank"
               rel="noopener noreferrer"
               onClick={(event) => {
+                if (event.button || event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+                const linkedFile = href && conversationFiles(state.thread?.messages).find(file => href === fileUrl(file));
+                if (linkedFile) {
+                  event.preventDefault();
+                  c.openFile(linkedFile);
+                  return;
+                }
                 const match = href?.match(/^\/teacher\/artifacts\/([^?#/]+)/);
                 if (match) {
                   event.preventDefault();
@@ -458,20 +467,29 @@ function MessageView({ message }: { message: Message }) {
             </button>
           );
         })}
-        {(metadata.files || []).map(
-          (file: Data) =>
-            safeLink(file.downloadUrl) && (
-              <a
-                className="file-result"
-                key={file.id || file.downloadUrl}
-                href={safeLink(file.downloadUrl)}
-                download={file.filename}
-              >
-                <Download size={16} />
-                {file.filename}
-              </a>
-            ),
-        )}
+        {(metadata.files || []).map((value: Data) => {
+          const file = asConversationFile(value);
+          if (!file) {
+            const href = safeLink(value.downloadUrl);
+            return href && <a className="file-result" key={value.id || href} href={href}
+              download={value.filename}><Download size={16} />{value.filename}</a>;
+          }
+          const active = state.panel === 'files' && state.panelOpen && state.selectedFile?.id === file.id;
+          return (
+            <div className="conversation-file" key={file.id} data-active={active}>
+              <button type="button" className="conversation-file-open" aria-label={`预览 ${file.filename}`}
+                aria-expanded={active} aria-controls={active ? "workbench-file-preview" : undefined} onClick={() => c.openFile(file)}>
+                <span className="conversation-file-icon"><FileGlyph format={file.format} /></span>
+                <span className="conversation-file-name">
+                  <strong title={file.filename}>{file.filename}</strong>
+                  <small>{fileFormatLabel(file.format)}{file.size > 0 ? ` · ${fileSize(file.size)}` : ''}</small>
+                </span>
+              </button>
+              <a className="button icon-button" href={fileUrl(file)} download={file.filename}
+                aria-label={`下载 ${file.filename}`} title="下载原文件"><Download size={16} /></a>
+            </div>
+          );
+        })}
         {!pending && (
           <div className="message-actions">
             <IconButton

@@ -1113,7 +1113,7 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
     stored = job_namespace["_persist_result"](job, result["result"])
     assert stored["requiresAction"] is False
     assert [file["format"] for file in stored["files"]] == ["docx", "md"]
-    assert stored["answer"] == "教学文档草稿已生成，可通过下方链接下载。"
+    assert stored["answer"] == "教学文档草稿已生成，可打开预览或下载。"
     assert stored["materialModelCoverage"] == json.loads(wire_requests[0]["messages"][-1]["content"])["materialModelCoverage"]
     assert existing_message.metadata_json["materialModelCoverage"] == stored["materialModelCoverage"]
     assert job_namespace["_persist_result"](job, result["result"])["files"] == stored["files"]
@@ -1122,6 +1122,7 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
     public_files = existing_message.metadata_json["files"]
     assert all("storageKey" not in file for file in public_files)
 
+    preview_namespace = load("dojo_plugin/agent_runtime/file_preview.py", {})
     tree = ast.parse((ROOT / "dojo_plugin/api/v1/teaching.py").read_text())
     helper = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_job_for_user")
     endpoint = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TeachingJobFile")
@@ -1134,7 +1135,11 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
         "Resource": object, "TeachingJobs": Job, "ScopeError": ScopeError,
         "_current_user": lambda: SimpleNamespace(id=int(request.headers["Fixture-User"])),
         "public_agent_file": files.public_agent_file, "agent_file_path": files.agent_file_path,
-        "send_file": send_file, "_error": lambda _message, status, **_: ("missing", status),
+        "send_file": send_file, "request": request,
+        "_ok": lambda data: ({"success": True, "data": data}, 200),
+        "_error": lambda _message, status, **_: ("missing", status),
+        **{name: getattr(preview_namespace, name) for name in
+           ("PreviewTooLarge", "PreviewUnavailable", "preview_manifest", "preview_page", "preview_html")},
     }
     exec(compile(tree, "teaching.py", "exec"), route_namespace)
     app = Flask(__name__)
@@ -1166,6 +1171,17 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
             assert display_title.replace("\\", "\\\\") in owner_download.text
             assert "&lt;b&gt;是文本&lt;/b&gt;" in owner_download.text
             assert "العربية \u2067示例\u2069" in owner_download.text
+
+    markdown_url = public_files[1]["downloadUrl"]
+    preview = browser.get(markdown_url + "?view=preview", headers={"Fixture-User": "7"})
+    assert preview.headers["Cache-Control"] == "private, no-store"
+    assert preview.headers["X-Content-Type-Options"] == "nosniff"
+    assert preview.json["data"]["kind"] == "markdown"
+    assert "## 观察目标" in preview.json["data"]["text"]
+    for view in ("preview", "html", "page&page=1"):
+        assert browser.get(markdown_url + "?view=" + view, headers={"Fixture-User": "8"}).status_code == 404
+    assert browser.get(markdown_url + "?view=html", headers={"Fixture-User": "7"}).status_code == 404
+    assert browser.get(markdown_url + "?view=page&page=0", headers={"Fixture-User": "7"}).status_code == 404
 
     # Historical metadata can contain overrides. Download naming is independent of stored bytes and digest.
     original = stored["files"][0]

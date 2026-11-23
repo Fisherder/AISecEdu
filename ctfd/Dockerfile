@@ -31,6 +31,7 @@ RUN apt-get update \
         git \
         openssh-client \
         catdoc \
+        libreoffice-writer \
         libreoffice-impress \
         fonts-noto-cjk \
         poppler-utils \

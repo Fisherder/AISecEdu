@@ -1,6 +1,7 @@
 import { api, request, id, key, ApiError } from './api';
 import { blankDraft, WorkspaceStorage } from './storage';
 import { mergeEvents } from './events';
+import { conversationFiles, type ConversationFile } from './conversation-files';
 import { displayTeachingReply, isGeneratedCourseware } from './teaching-projects';
 import { classroomPreparation, classroomSessionId, matchingClassroomDecision } from './classroom-preparation';
 import {
@@ -53,6 +54,7 @@ export class WorkbenchController {
       draft: this.storage.draft(null),
       uploads: [],
       panel: 'artifacts',
+      selectedFile: null,
       panelOpen: window.innerWidth > 720 && this.storage.value('panelOpen', false),
       sidebarOpen: false,
       taskCenter: false,
@@ -121,7 +123,7 @@ export class WorkbenchController {
         history.replaceState({}, '', clean);
       }
       const artifact = new URLSearchParams(location.search).get('artifact');
-      if (artifact) await this.openArtifact(artifact);
+      if (artifact && !this.state.selectedFile) await this.openArtifact(artifact);
       await this.loadJobs();
       if (new URLSearchParams(location.search).get('tasks') === '1') {
         this.patch({ taskCenter: true });
@@ -144,11 +146,27 @@ export class WorkbenchController {
     this.storage.save(this.state.thread?.id || null, draft);
     this.patch({ draft });
   }
-  setPanel(panel: WorkspaceState['panel']) {
-    this.patch({ panel, panelOpen: true, taskCenter: false });
+  setPanel(panel: Exclude<WorkspaceState['panel'], 'files'>) {
+    if (this.state.selectedFile) this.updateFileUrl(null);
+    this.patch({ panel, panelOpen: true, selectedFile: null, taskCenter: false });
     this.storage.set('panelOpen', true);
   }
+  openFile(file: ConversationFile, updateUrl = true) {
+    this.patch({ panel: 'files', panelOpen: true, selectedFile: file, taskCenter: false });
+    if (updateUrl) this.updateFileUrl(file.id);
+  }
+  private updateFileUrl(fileId: string | null) {
+    const url = new URL(location.href);
+    if (fileId) url.searchParams.set('file', fileId);
+    else url.searchParams.delete('file');
+    if (location.href !== url.href) history.replaceState(history.state, '', url);
+  }
   togglePanel() {
+    if (this.state.panel === 'files') {
+      this.updateFileUrl(null);
+      this.patch({ panel: 'artifacts', panelOpen: false, selectedFile: null });
+      return;
+    }
     this.storage.set('panelOpen', !this.state.panelOpen);
     this.patch({ panelOpen: !this.state.panelOpen });
   }
@@ -169,6 +187,7 @@ export class WorkbenchController {
     void this.loadThreads(query, archived).catch(this.error);
   }
   newThread() {
+    if (this.state.panel === 'files') this.togglePanel();
     this.epoch++;
     this.watch?.abort();
     this.pendingSubmit = null;
@@ -188,6 +207,7 @@ export class WorkbenchController {
     const url = new URL(location.href);
     url.searchParams.set('view', 'conversation');
     url.searchParams.delete('artifact');
+    url.searchParams.delete('file');
     url.searchParams.delete('newProject');
     url.searchParams.delete('tasks');
     if (threadId) url.searchParams.set('thread', threadId);
@@ -195,6 +215,8 @@ export class WorkbenchController {
     if (location.href !== url.href) history[replace ? 'replaceState' : 'pushState']({}, '', url);
   }
   async activate(threadId: string, navigate = true) {
+    const fileId = navigate ? null : new URLSearchParams(location.search).get('file');
+    if (this.state.panel === 'files') this.patch({ panel: 'artifacts', panelOpen: false, selectedFile: null });
     const epoch = ++this.epoch;
     this.watch?.abort();
     this.pendingSubmit = null;
@@ -214,6 +236,11 @@ export class WorkbenchController {
         selectedJob: thread.harnessJobs?.[0]?.id || null,
       });
       if (navigate) this.updateUrl(threadId);
+      else if (fileId) {
+        const file = conversationFiles(thread.messages).find(item => item.id === fileId);
+        if (file) this.openFile(file, false);
+        else this.updateFileUrl(null);
+      }
       this.watchThread(threadId, epoch);
       await this.loadJobs(threadId);
     } finally {

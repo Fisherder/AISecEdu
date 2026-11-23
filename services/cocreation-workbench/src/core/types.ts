@@ -1,6 +1,8 @@
+import type { ConversationFile } from './conversation-files';
+
 export type Data = Record<string, any>;
 export type Mode = 'auto';
-export type Panel = 'artifacts' | 'activity' | 'context';
+export type Panel = 'artifacts' | 'activity' | 'context' | 'files';
 export interface Message {
   id: number;
   role: string;
@@ -116,6 +118,7 @@ export interface WorkspaceState {
   skills: Data[];
   draft: Draft;
   uploads: Upload[];
+  selectedFile: ConversationFile | null;
   panel: Panel;
   panelOpen: boolean;
   sidebarOpen: boolean;

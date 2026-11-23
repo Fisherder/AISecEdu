@@ -68,6 +68,7 @@ lucide-react/dist/esm/icons/book-open.js:
 lucide-react/dist/esm/icons/brain-circuit.js:
 lucide-react/dist/esm/icons/check.js:
 lucide-react/dist/esm/icons/chevron-down.js:
+lucide-react/dist/esm/icons/chevron-left.js:
 lucide-react/dist/esm/icons/chevron-right.js:
 lucide-react/dist/esm/icons/circle-alert.js:
 lucide-react/dist/esm/icons/circle.js:
@@ -80,6 +81,7 @@ lucide-react/dist/esm/icons/ellipsis.js:
 lucide-react/dist/esm/icons/external-link.js:
 lucide-react/dist/esm/icons/eye.js:
 lucide-react/dist/esm/icons/file-code-corner.js:
+lucide-react/dist/esm/icons/file-spreadsheet.js:
 lucide-react/dist/esm/icons/file-text.js:
 lucide-react/dist/esm/icons/folder-open.js:
 lucide-react/dist/esm/icons/funnel.js:

@@ -4029,7 +4029,7 @@ def _persist_result(job, result, *, prepared=None):
         ]
         answer = _agent_answer(result)
         if is_upstream_document and public_files:
-            answer = "教学文档草稿已生成，可通过下方链接下载。"
+            answer = "教学文档草稿已生成，可打开预览或下载。"
         if (job.payload or {}).get("chatBackend") == "upstream" and result.get("toolProposals"):
             if tool_proposals:
                 answer = "请核对下方操作和参数，审批通过后才会提交。\n\n" + answer

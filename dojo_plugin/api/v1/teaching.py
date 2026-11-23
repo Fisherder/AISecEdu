@@ -145,6 +145,7 @@ from ...agent_runtime.auth import (
     verify_session_token,
 )
 from ...agent_runtime.files import agent_file_path, public_agent_file
+from ...agent_runtime.file_preview import PreviewTooLarge, PreviewUnavailable, preview_html, preview_manifest, preview_page
 from ...agent_runtime.skills import (
     builtin_catalog,
     create_skill,
@@ -7200,7 +7201,11 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
         elif text_model:
             payload = {"prompt": content, "executionMode": mode, teacher_dsh_chat.PIN: text_model["model"]}
             if text_model["formats"]:
-                payload.update(chatBackend="upstream", **{teacher_dsh_chat.DOCUMENT_FORMATS: text_model["formats"]})
+                payload.update(
+                    chatBackend="upstream",
+                    context={"platformFacts": {"scope": {"dojoId": thread.dojo_id, "moduleIndex": thread.module_index}}},
+                    **{teacher_dsh_chat.DOCUMENT_FORMATS: text_model["formats"]},
+                )
             job_kind = "agent.chat"
             assistant_text = "正在准备教学文档…" if text_model["formats"] else "正在准备教学答复…"
         else:
@@ -10275,15 +10280,29 @@ class TeachingJobFile(Resource):
             public_file = public_agent_file(file_value)
             if public_file is None:
                 raise ScopeError("Generated file not found")
-            response = send_file(
-                agent_file_path(file_value),
-                mimetype=public_file["mimeType"],
-                as_attachment=True,
-                download_name=public_file["filename"],
-                conditional=True,
-                max_age=0,
-            )
+            source = agent_file_path(file_value)
+            view = request.args.get("view")
+            try:
+                if view == "preview":
+                    response = _ok(preview_manifest(source, public_file))
+                elif view == "page":
+                    response = preview_page(source, public_file, request.args.get("page", ""))
+                elif view == "html":
+                    response = preview_html(source, public_file)
+                elif view is None:
+                    response = send_file(source, mimetype=public_file["mimeType"], as_attachment=True,
+                                         download_name=public_file["filename"], conditional=True, max_age=0)
+                else:
+                    raise ValueError("Unknown file view")
+            except PreviewTooLarge as exc:
+                response = _error(str(exc), 422, code="PREVIEW_LIMIT")
+            except PreviewUnavailable as exc:
+                response = _error(str(exc), 503, code="PREVIEW_UNAVAILABLE")
+            if isinstance(response, tuple):
+                payload, status = response
+                return payload, status, {"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
             response.headers["Cache-Control"] = "private, no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
             return response
         except (ScopeError, ValueError):
             return _error("Generated file not found", 404, code="NOT_FOUND")
