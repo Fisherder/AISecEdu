@@ -463,7 +463,7 @@ function MessageView({ message }: { message: Message }) {
               label={copied ? '已复制' : '复制消息'}
               onClick={() => {
                 void navigator.clipboard
-                  .writeText(message.content)
+                  .writeText(text)
                   .then(() => {
                     setCopied(true);
                     setTimeout(() => setCopied(false), 1600);

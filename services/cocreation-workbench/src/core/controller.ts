@@ -1,6 +1,7 @@
 import { api, request, id, key, ApiError } from './api';
 import { blankDraft, WorkspaceStorage } from './storage';
 import { mergeEvents } from './events';
+import { displayTeachingReply } from './teaching-projects';
 import { classroomPreparation, classroomSessionId, matchingClassroomDecision } from './classroom-preparation';
 import {
   hasOnlyMaterialSources,
@@ -155,8 +156,13 @@ export class WorkbenchController {
     const data = await api(
       `/threads?limit=200&view=${archived ? 'archived' : 'active'}&q=${id(query)}`,
     );
-    if (query === this.state.threadFilter && archived === this.state.archived)
-      this.patch({ threads: data.threads || [] });
+    if (query === this.state.threadFilter && archived === this.state.archived) {
+      const threads: Thread[] = data.threads || [];
+      const scoped = document.getElementById('cocreation-workbench')?.dataset.scopedTeaching === 'true';
+      this.patch({ threads: scoped ? threads.map((thread) => thread.latestMessage
+        ? { ...thread, latestMessage: displayTeachingReply(thread.latestMessage) }
+        : thread) : threads });
+    }
   }
   filterThreads(query: string, archived = this.state.archived) {
     this.patch({ threadFilter: query, archived });
