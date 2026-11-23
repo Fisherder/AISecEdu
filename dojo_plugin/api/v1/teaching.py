@@ -7223,7 +7223,8 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             assistant_text = "正在准备教学对话回复…"
 
         if job_kind == "agent.chat":
-            payload["harnessVersion"] = HARNESS_VERSION
+            if not scoped_classroom:
+                payload["harnessVersion"] = HARNESS_VERSION
             if not continuation:
                 payload["submissionFingerprint"] = submission_fingerprint(body)
                 payload["userMessageId"] = user_message.id

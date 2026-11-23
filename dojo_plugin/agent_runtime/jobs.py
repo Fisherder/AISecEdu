@@ -3954,6 +3954,9 @@ def _persist_result(job, result, *, prepared=None):
             )
         message = None
         if job.thread_id:
+            harness_managed = bool((job.payload or {}).get("harnessVersion")) and (
+                (job.payload or {}).get("scopedOrdinaryProject") != "classroom"
+            )
             message = _agent_message_for_job(job)
             if message is None:
                 message = TeachingAgentMessages(
@@ -3993,10 +3996,10 @@ def _persist_result(job, result, *, prepared=None):
                 "agentLoopDepth": int(agent_loop.get("depth") or 0),
                 "agentLoopTrace": agent_loop.get("trace") or [],
                 "agentRootJobId": str(agent_loop.get("rootJobId") or job.id),
-                "harnessManaged": bool((job.payload or {}).get("harnessVersion")),
+                "harnessManaged": harness_managed,
                 "taskListHidden": bool((job.payload or {}).get("harnessInternal")),
             }
-            if (job.payload or {}).get("harnessVersion") and tool_proposals and not generation_options and not result.get("questions"):
+            if harness_managed and tool_proposals and not generation_options and not result.get("questions"):
                 driver, _ = enqueue_job(
                     owner_id=job.owner_id, thread_id=job.thread_id, dojo_id=job.dojo_id,
                     module_index=job.module_index, kind="agent.advance",
