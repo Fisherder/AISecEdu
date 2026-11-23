@@ -7122,6 +7122,10 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             }
             job_kind = "agent.chat"
             assistant_text = "正在准备资料问答…"
+        elif text_model:
+            payload = {"prompt": content, "executionMode": "ask", teacher_dsh_chat.PIN: text_model}
+            job_kind = "agent.chat"
+            assistant_text = "正在等待 DSH 教学问答…"
         else:
             payload = {
                 "prompt": content,
@@ -7153,9 +7157,6 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 payload["chatBackend"] = "upstream"
             assistant_text = "正在准备教学对话回复…"
 
-        if text_model:
-            payload = {"prompt": content, "executionMode": "ask", teacher_dsh_chat.PIN: text_model}
-            assistant_text = "正在等待 DSH 教学问答…"
         if job_kind == "agent.chat":
             payload["harnessVersion"] = HARNESS_VERSION
             if not continuation:
