@@ -174,20 +174,26 @@ def run_ready_jobs():
     from CTFd.models import db
     from ..models import TeachingJobs
     from .jobs import process_job
+    from . import ordinary_project_queue
     from .conversation import turn_wait_state
     from .reliability import recovery_due
 
     if not enabled():
         return
     now = datetime.datetime.utcnow()
+    text_turn = (TeachingJobs.kind == "agent.chat") & TeachingJobs.payload[PIN].as_string().is_not(None)
+    selector = text_turn
+    if ordinary_project_queue.configured():
+        selector = or_(text_turn, TeachingJobs.payload[ordinary_project_queue.PIN].as_string().is_not(None))
     jobs = TeachingJobs.query.filter(
-        TeachingJobs.kind == "agent.chat", TeachingJobs.payload[PIN].as_string().is_not(None),
+        selector,
         or_(TeachingJobs.status.in_(("QUEUED", "CANCEL_REQUESTED")),
             (TeachingJobs.status == "RUNNING") & (TeachingJobs.lease_expires <= now)),
     ).order_by(TeachingJobs.created, TeachingJobs.id).all()
     for job in jobs:
         if recovery_due(job, now) and turn_wait_state(db.session, job) != "waiting":
             job_id = job.id
+            project = ordinary_project_queue.PIN in (job.payload or {})
             db.session.rollback()
-            process_job(job_id, teacher_text_only=True)
+            process_job(job_id, ordinary_project_only=project, teacher_text_only=not project)
     db.session.rollback()

@@ -187,7 +187,7 @@ from ...agent_runtime.model_journal import ModelJournalError, record_model_event
 from ...agent_runtime.project_collection import project_collection_view
 from ...agent_runtime.reliability import public_recovery
 from ...agent_runtime.teacher_documents import requests_debate_candidates, requests_lesson_plan_candidates
-from ...agent_runtime import ordinary_lesson_plan_revision, ordinary_material_turn, ordinary_slide_notes
+from ...agent_runtime import ordinary_lesson_plan_revision, ordinary_material_turn, ordinary_project_queue, ordinary_slide_notes
 from ...agent_runtime.upstream_turn import ordinary_teaching_course, ordinary_teaching_image_allowed, upstream_enabled
 from ...agent_runtime.scope import (
     ScopeError,
@@ -6724,7 +6724,25 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 raise ScopeError("所选课程或章节不在当前教师授权范围。") from None
             ordinary_material_turn.require_course(course_scope.dojo_id)
         from ...agent_runtime import teacher_dsh_chat
-        text_model = None if readonly_material_turn else teacher_dsh_chat.admit(thread, body, mode)
+        selected_course = None
+        scoped_project = False
+        if ordinary_project_queue.configured() and not readonly_material_turn:
+            prompt = body.get("content")
+            if isinstance(prompt, str) and mode in {"auto", "execute"} and (
+                requests_lesson_plan_candidates(prompt) or requests_debate_candidates(prompt)
+            ):
+                course = body.get("dojoId") if body.get("dojoId") is not None else thread.dojo_id
+                if course is None:
+                    raise ValueError("请先为会话选择已开放的联调课程，再生成平台项目。")
+                module = body.get("moduleIndex") if body.get("dojoId") is not None else thread.module_index
+                selected_course = build_scope(user, role="teacher", dojo_id=course, module_index=module)
+                if not ordinary_project_queue.enabled(selected_course.dojo_id):
+                    raise ValueError("当前仅联调课程开放普通教学项目生成。")
+                if body.get("sourceRefs") or body.get("agentContinuation"):
+                    raise ValueError("联调课程项目只使用本次输入的普通教学内容。")
+                teacher_dsh_chat.validate_prompt(prompt)
+                scoped_project = True
+        text_model = None if readonly_material_turn or scoped_project else teacher_dsh_chat.admit(thread, body, mode)
         if text_model:
             mode = "execute" if text_model["formats"] else "ask"
         requested_action = str(body.get("action") or "").strip().lower()
@@ -6861,7 +6879,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 )
 
         if body.get("dojoId") is not None:
-            scope = build_scope(
+            scope = selected_course or build_scope(
                 user,
                 role="teacher",
                 dojo_id=body.get("dojoId"),
@@ -6892,14 +6910,14 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
             raise ValueError("请先选择已开通普通辩论生成的课程。")
         if debate_proposals and body.get("delivery") == "next-step" and wait_for_job_ids:
             raise ConversationConflict("辩论候选需要独立任务，请选择“排队”发送。")
-        if ordinary_debate and (not upstream_enabled() or not config.HARNESS_DEEPSEEK_MODEL):
+        if ordinary_debate and (not (upstream_enabled() or scoped_project) or not config.HARNESS_DEEPSEEK_MODEL):
             raise ValueError("本课程的辩论生成服务暂未启用。")
         if ordinary_plan:
             if len(content) > 4000:
                 raise ValueError("请将本轮普通教案要求缩减到 4000 字符以内。")
             if not ordinary_teaching_course(thread.dojo_id):
                 raise ValueError("请先选择已开通普通教案生成的课程。")
-            if not upstream_enabled() or not config.HARNESS_DEEPSEEK_MODEL:
+            if not (upstream_enabled() or scoped_project) or not config.HARNESS_DEEPSEEK_MODEL:
                 raise ValueError("本课程的教学模型暂未启用。")
             if body.get("delivery") == "next-step" and wait_for_job_ids:
                 raise ConversationConflict("制作教案候选需要独立任务，请选择“排队”发送。")
@@ -6959,7 +6977,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None):
                 "trace": [],
             }
         else:
-            if text_model:
+            if text_model or scoped_project:
                 constraints, source_refs = {}, []
             else:
                 try:
@@ -12279,6 +12297,20 @@ class AgentRuntimeLaunch(Resource):
                 role
             ].fullmatch(target):
                 return _error("Unsupported preview target", 400, code="INVALID_TARGET")
+            if ordinary_project_queue.configured():
+                if role != "teacher" or workspace_id is not None or not target.startswith(("/prep/", "/classroom/")):
+                    raise ScopeError("This development entry only opens ordinary teaching previews")
+                scope = build_scope(user, role="teacher", dojo_id=dojo_id, module_index=module_index)
+                if not ordinary_project_queue.enabled(scope.dojo_id):
+                    raise ScopeError("Teaching previews are not enabled in this course")
+                resource_id = target.rstrip("/").rsplit("/", 1)[-1]
+                if target.startswith("/prep/"):
+                    artifact = artifact_for_user(resource_id, user)
+                    if (artifact.artifact_type not in {"lesson-plan", "debate"} or artifact.self_workspace_id is not None
+                            or (artifact.dojo_id, artifact.module_index) != (scope.dojo_id, scope.module_index)):
+                        raise ScopeError("Artifact not found")
+                else:
+                    _runtime_viewable_classroom(resource_id, user, scope)
             if role == "teacher":
                 _require_teacher(user)
                 if dojo_id is None:
@@ -12441,7 +12473,11 @@ class AgentRuntimeUsage(Resource):
                 return _ok({"accepted": True, "deduplicated": True})
             workspace = None
             quota_exceeded = False
-            if scope.role == "student":
+            scoped_classroom = (
+                source == "chat-adapter-stream" and scope.workspace_id is None
+                and scope.module_index is not None and ordinary_project_queue.enabled(scope.dojo_id)
+            )
+            if scope.role == "student" and not scoped_classroom:
                 workspace = _service_scoped_workspace(user, scope, lock=True)
                 limit = int((workspace.quota or {}).get("modelTokens", 0))
                 if tokens and limit > 0:
@@ -13098,13 +13134,19 @@ class AgentRuntimeOrdinaryClassroomChatContext(Resource):
         try:
             user, scope, _ = _service_session("session:view")
             if classroom_id.startswith("study_"):
+                if ordinary_project_queue.configured():
+                    raise ScopeError("Classroom dialogue requires a verified ordinary classroom")
                 artifact = _runtime_personal_classroom_artifact(classroom_id, user, scope)
                 _classroom_lesson(artifact)
                 return _ok({"ordinary": False})
             session = _runtime_viewable_classroom(classroom_id, user, scope)
+            if ordinary_project_queue.configured() and not ordinary_project_queue.enabled(session.dojo_id):
+                raise ScopeError("Classroom dialogue is not enabled in this course")
             context = ordinary_classroom_chat_context(
                 session, request.args.get("sceneId"), include_ready=scope.role == "teacher",
             )
+            if (ordinary_project_queue.configured() and (not context or not context.get("ordinary"))):
+                raise ScopeError("Classroom dialogue requires a verified ordinary classroom")
             if context is None or (context["ordinary"] and scope.role == "student" and (
                 scope.workspace_id or scope.dojo_id != session.dojo_id or scope.module_index != session.module_index
             )):

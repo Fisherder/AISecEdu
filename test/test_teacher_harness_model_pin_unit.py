@@ -191,6 +191,7 @@ def ordinary_jobs(router):
         "TeachingJobs": jobs, "TeachingJobOutbox": SimpleNamespace, "TeachingMaterialRevisions": revision,
         "db": SimpleNamespace(session=MagicMock()), "append_job_event": MagicMock(),
         "get_trace_id": lambda: None, "uuid": uuid, "config": router["config"], "route_model": router["route_model"],
+        "ordinary_project_queue": SimpleNamespace(configured=lambda: False, enabled=lambda _: False),
         "_ordinary_teaching_job_scope": MagicMock(), "upstream_enabled": MagicMock(return_value=True),
         "ordinary_debate_candidate": SimpleNamespace(explicit=lambda payload: payload.get("debate") is True,
                                                      admit=lambda payload, *_: payload),

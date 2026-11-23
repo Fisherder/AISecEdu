@@ -302,6 +302,7 @@ def test_teacher_submission_rejects_unavailable_course_and_enqueues_minimal_inpu
     enqueue = MagicMock(side_effect=lambda **kw: (SimpleNamespace(id="job", status="QUEUED", kind=kw["kind"], payload=kw["payload"]), True))
     route = {
         "__package__": pkg + ".api.v1", "db": db, "datetime": datetime,
+        "ordinary_project_queue": SimpleNamespace(configured=lambda: False),
         "ordinary_material_turn": SimpleNamespace(**namespace),
         "_require_teacher": MagicMock(), "_thread_for_owner": lambda *_: thread,
         "TeachingAgentThreads": threads, "ScopeError": scope_error,

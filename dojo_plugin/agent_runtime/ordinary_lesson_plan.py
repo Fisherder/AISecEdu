@@ -19,6 +19,7 @@ from ..models import (
 from .artifacts import candidate_request_prompt, content_hash
 from .materials import build_course_material_context, course_material_grounding_requested
 from .scope import ScopeError, build_scope
+from .ordinary_project_queue import enabled as scoped_project_enabled
 from .upstream_turn import ordinary_teaching_course, upstream_enabled
 
 
@@ -157,7 +158,7 @@ def admit(payload, owner_id, dojo_id, module_index, thread_id):
         return clean
     artifact, candidate, candidate_set, revision = _selection(clean, owner_id, dojo_id, module_index, thread_id)
     receipt = _generation_receipt(candidate_set, clean.get("parentGenerationJobId"))
-    if not upstream_enabled() or not config.HARNESS_DEEPSEEK_MODEL:
+    if not (upstream_enabled() or scoped_project_enabled(dojo_id)) or not config.HARNESS_DEEPSEEK_MODEL:
         raise OrdinaryLessonPlanError("普通教案服务暂未启用，请联系课程管理员后重新发起。")
     prompt = candidate_request_prompt(candidate_set)
     return {
@@ -183,7 +184,7 @@ def pinned(payload):
 
 def prepare(job, payload):
     pin = payload.get(_PIN)
-    if (not isinstance(pin, dict) or not upstream_enabled() or not pin.get("model")
+    if (not isinstance(pin, dict) or not (upstream_enabled() or scoped_project_enabled(job.dojo_id)) or not pin.get("model")
             or pin["model"] != config.HARNESS_DEEPSEEK_MODEL):
         raise OrdinaryLessonPlanError("普通教案服务或指定模型已变化，请重新发起生成。")
     artifact, candidate, candidate_set, revision = _selection(
@@ -274,7 +275,7 @@ def admit_generation(payload, owner_id, dojo_id, module_index, thread_id):
     model = payload.get(GENERATION_MODEL)
     if (not model or model != config.HARNESS_DEEPSEEK_MODEL or candidate_set is None
             or payload.get("generationReason") != GENERATION_REASON or payload.get("artifactType") != "lesson-plan"
-            or payload.get("workspaceId") or not ordinary_teaching_course(dojo_id) or not upstream_enabled()):
+            or payload.get("workspaceId") or not ordinary_teaching_course(dojo_id) or not (upstream_enabled() or scoped_project_enabled(dojo_id))):
         raise OrdinaryLessonPlanError("普通教案候选服务或指定模型已变化，请重新发起。")
     _require_scope(owner_id, dojo_id, module_index, thread_id)
     candidate_set.request_json = {**(candidate_set.request_json or {}), _GENERATION_PIN: model}

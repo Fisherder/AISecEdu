@@ -525,7 +525,8 @@ def test_outbox_scans_past_blocked_page_without_starving_ready_tools(setup):
                  "db": SimpleNamespace(session=session), "turn_wait_state": c.turn_wait_state,
                  "_redis": lambda: SimpleNamespace(xadd=lambda stream, body, **kw: published.append(json.loads(body["data"])["job_id"])),
                  "_stream_for_job": lambda _: "test", "recovery_due": reliability.recovery_due,
-                 "teacher_dsh_chat": SimpleNamespace(PIN="teacherDshText")}
+                 "teacher_dsh_chat": SimpleNamespace(PIN="teacherDshText"),
+                 "ordinary_project_queue": SimpleNamespace(PIN="scopedOrdinaryProject")}
     exec(compile(ast.Module(body=selected, type_ignores=[]), "jobs.py", "exec"), namespace)
     assert namespace["publish_pending_outbox"](limit=1) == 1
     assert published == ["ready-tool"]
@@ -1220,6 +1221,7 @@ def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_target
 
     namespace = {
         "ordinary_slide_layout": SimpleNamespace(pinned=policy["pinned"]),
+        "ordinary_project_queue": SimpleNamespace(configured=lambda: False, enabled=lambda _: False),
         "ordinary_teaching_course": turn.ordinary_teaching_course, "re": re, "upstream_enabled": lambda: True,
         "ordinary_slide_wording_request": turn.ordinary_slide_wording_request,
         "_harness_courseware_authorized": lambda job, payload: False, "PermanentJobError": RuntimeError,

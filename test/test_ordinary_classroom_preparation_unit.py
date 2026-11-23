@@ -263,6 +263,7 @@ def prepared(monkeypatch, rendered_chart):
         db=SimpleNamespace(session=db), TeachingAgentThreads=Thread, TeachingJobs=Job,
         TeachingAgentMessages=Message, TeachingArtifacts=Artifact, TeachingArtifactRevisions=Revision,
         Users=User, TeachingSessions=Session, TeachingAgentActions=Action,
+        ordinary_project_queue=SimpleNamespace(configured=lambda: False),
         ordinary_teaching_course=lambda course_id: submission.course_enabled and course_id == -21,
         _current_user=lambda: db.get(User, submission.actor_id),
         _require_teacher=require_teacher, build_scope=scope, _body=lambda: request.get_json(),

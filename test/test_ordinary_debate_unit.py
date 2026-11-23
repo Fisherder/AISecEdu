@@ -393,7 +393,7 @@ def test_old_jobs_and_unlisted_jobs_have_no_ordinary_marker(flow, monkeypatch):
 def test_revision_api_surfaces_admission_rejection_without_creating_a_job(flow):
     errors = type("SlideFixtureError", (ValueError,), {})
 
-    ns = dict(vars(flow))
+    ns = dict(vars(flow), ordinary_project_queue=SimpleNamespace(configured=lambda: False))
     ns.update(
         ordinary_debate=flow, uuid=uuid, IntegrityError=IntegrityError, get_trace_id=lambda: "LOCAL",
         append_job_event=lambda *_: None, publish_pending_outbox=lambda **_: None,

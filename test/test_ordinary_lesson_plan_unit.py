@@ -65,6 +65,7 @@ def flow():
         "re": __import__("re"),
         "hashlib": hashlib,
         "config": SimpleNamespace(HARNESS_DEEPSEEK_MODEL="fixture-model"),
+        "scoped_project_enabled": lambda _: False,
         "upstream_enabled": MagicMock(return_value=True),
         "ordinary_teaching_course": lambda course: course == 19,
         "course_material_grounding_requested": lambda _: False,

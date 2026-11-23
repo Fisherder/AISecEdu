@@ -60,7 +60,7 @@ from .artifacts import (
     materialize_candidate,
     replace_generated_candidates,
 )
-from . import teacher_dsh_chat
+from . import ordinary_project_queue, teacher_dsh_chat
 from .files import persist_agent_deliverables, public_agent_file
 from .model_router import (
     UPSTREAM_DEBATE_CANDIDATE_ROUTE, UPSTREAM_DEBATE_ROUTE, UPSTREAM_DECK_REVISION_ROUTE,
@@ -1610,6 +1610,8 @@ def enqueue_job(
         payload = ordinary_debate.admit(kind, payload, owner_id, dojo_id, module_index, thread_id)
     if kind == "artifact.materialize":
         payload = ordinary_lesson_plan.admit(payload, owner_id, dojo_id, module_index, thread_id)
+    if ordinary_project_queue.configured():
+        payload = ordinary_project_queue.admit(kind, payload, dojo_id)
 
     if (kind == "artifact.revise" and payload.get("artifactType") == "slide-deck"
             and not payload.get("workspaceId") and ordinary_slide_wording_request(payload.get("instruction"))
@@ -1705,7 +1707,7 @@ def publish_pending_outbox(*, job_id=None, limit=100):
             row.last_error = None
             db.session.commit()
             continue
-        if teacher_dsh_chat.PIN in (job.payload or {}):
+        if teacher_dsh_chat.PIN in (job.payload or {}) or ordinary_project_queue.PIN in (job.payload or {}):
             continue
         if not recovery_due(job, datetime.datetime.utcnow()):
             continue
@@ -2396,7 +2398,7 @@ def _runtime_job_lease_seconds(job):
     return LEASE_SECONDS
 
 
-def _acquire_job(job_id, worker_id, *, teacher_text_only=False):
+def _acquire_job(job_id, worker_id, *, teacher_text_only=False, ordinary_project_only=False):
     now = datetime.datetime.utcnow()
     observed = TeachingJobs.query.filter_by(id=job_id).first()
     if observed is not None and observed.kind in {"agent.chat", "agent.advance"} and observed.thread_id:
@@ -2406,7 +2408,10 @@ def _acquire_job(job_id, worker_id, *, teacher_text_only=False):
         db.session.rollback()
         return None
     pinned_text = teacher_dsh_chat.PIN in (job.payload or {})
-    if pinned_text != teacher_text_only or (teacher_text_only and job.kind != "agent.chat"):
+    pinned_project = ordinary_project_queue.PIN in (job.payload or {})
+    if (pinned_text != teacher_text_only or (teacher_text_only and job.kind != "agent.chat")
+            or pinned_project != ordinary_project_only
+            or (ordinary_project_only and not ordinary_project_queue.valid(job))):
         db.session.rollback()
         return None
     try:
@@ -2898,7 +2903,8 @@ def _harness_courseware_authorized(job, payload):
 def _ordinary_teaching_job_scope(job, payload, *, require_upstream=True):
     if (
         job.kind not in {"candidate.generate", "material.enrich", "artifact.revise"}
-        or job.dojo_id is None or payload.get("workspaceId") or (require_upstream and not upstream_enabled())
+        or job.dojo_id is None or payload.get("workspaceId")
+        or (require_upstream and not (upstream_enabled() or ordinary_project_queue.enabled(job.dojo_id)))
     ):
         return None
     if not ordinary_teaching_course(job.dojo_id):
@@ -3642,7 +3648,7 @@ def _invoke_agent_runtime(job, route, payload=None):
         request_kwargs["allow_redirects"] = False
         request_kwargs["headers"]["Accept"] = "application/json"
     if endpoint in {
-        "ordinary-slide-layout", "ordinary-deck-revision", "ordinary-debate", "ordinary-debate-candidate",
+        "ordinary-lesson-plan", "ordinary-slide-layout", "ordinary-deck-revision", "ordinary-debate", "ordinary-debate-candidate",
         "ordinary-lesson-plan-revise",
     }:
         request_kwargs["allow_redirects"] = False
@@ -4991,10 +4997,15 @@ def _finalize_canceled_job(job, message):
     _sync_native_authoring_batch_action(job)
 
 
-def process_job(job_id, *, worker_id=None, teacher_text_only=False):
+def process_job(job_id, *, worker_id=None, teacher_text_only=False, ordinary_project_only=False):
     worker_id = worker_id or _new_worker_id()
-    job = (_acquire_job(job_id, worker_id, teacher_text_only=True)
-           if teacher_text_only else _acquire_job(job_id, worker_id))
+    scoped_worker = teacher_text_only or ordinary_project_only
+    if teacher_text_only:
+        job = _acquire_job(job_id, worker_id, teacher_text_only=True)
+    elif ordinary_project_only:
+        job = _acquire_job(job_id, worker_id, ordinary_project_only=True)
+    else:
+        job = _acquire_job(job_id, worker_id)
     if job is None:
         return False
     # Capture immutable values before any ORM refresh can observe a replacement
@@ -5041,7 +5052,16 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False):
                     raise PermanentJobError("教学问答的输入版本已经变化，请重新发起。")
                 db.session.commit()
             else:
+                if ordinary_project_only:
+                    ordinary_project_queue.require_inputs(job.payload or {})
                 runtime_payload, route = _prepare_model_request(job)
+                if ordinary_project_only:
+                    if route["route"] not in ordinary_project_queue.ROUTES or route.get("degraded"):
+                        raise PermanentJobError("普通教学项目的指定执行路径不可用。")
+                    ordinary_project_queue.require_inputs(runtime_payload)
+                    teacher_dsh_chat.validate_prompt(runtime_payload.get("prompt") or runtime_payload.get("requestPrompt"))
+                    if runtime_payload.get("sourceMaterials") or (runtime_payload.get("materialDossier") or {}).get("materials"):
+                        raise PermanentJobError("联调项目包含已保存的课程资料，未发送模型。")
             debate_candidate = job.kind == "candidate.generate" and route.get("route") == UPSTREAM_DEBATE_CANDIDATE_ROUTE
             checkpoint = (
                 (job.result or {}).get("_generationCheckpoint")
@@ -5237,7 +5257,7 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False):
         _sync_native_authoring_batch_action(job)
         append_job_event(job, "complete", "SUCCEEDED", "任务完成", compact_result)
         db.session.commit()
-        if not teacher_text_only:
+        if not scoped_worker:
             publish_pending_outbox()
         return True
     except JobLeaseLost:
@@ -5263,7 +5283,7 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False):
                 outbox.published = None
             append_job_event(job, job.stage, "QUEUED", "等待批准" if waiting_approval else "等待操作结果")
         db.session.commit()
-        if not teacher_text_only:
+        if not scoped_worker:
             publish_pending_outbox()
         return True
     except JobCanceled as exc:
@@ -5274,7 +5294,7 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False):
             return True
         _finalize_canceled_job(job, _safe_error(exc))
         db.session.commit()
-        if not teacher_text_only:
+        if not scoped_worker:
             publish_pending_outbox()
         return True
     except Exception as exc:
@@ -5290,7 +5310,7 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False):
         if _job_cancellation_requested(job):
             _finalize_canceled_job(job, "任务已取消；忽略取消期间产生的执行异常")
             db.session.commit()
-            if not teacher_text_only:
+            if not scoped_worker:
                 publish_pending_outbox()
             return True
         permanent = isinstance(exc, (PermanentJobError, ValueError))
@@ -5376,7 +5396,7 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False):
             except Exception:
                 logger.debug("Could not record failed model invocation", exc_info=True)
         db.session.commit()
-        if not teacher_text_only:
+        if not scoped_worker:
             if retry:
                 publish_pending_outbox(job_id=job.id)
             else:

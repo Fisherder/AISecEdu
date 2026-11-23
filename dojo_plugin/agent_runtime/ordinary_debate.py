@@ -15,6 +15,7 @@ from ..models import (
 from .artifacts import candidate_request_prompt, content_hash
 from .materials import build_course_material_context, course_material_grounding_requested
 from .scope import ScopeError, build_scope
+from .ordinary_project_queue import enabled as scoped_project_enabled
 from .upstream_turn import ordinary_teaching_course, upstream_enabled
 
 
@@ -52,7 +53,7 @@ def _debate_item(content):
 
 
 def _read(kind, payload, owner_id, dojo_id, module_index, thread_id, *, lock=False):
-    _require(kind in _KINDS and ordinary_teaching_course(dojo_id) and upstream_enabled()
+    _require(kind in _KINDS and ordinary_teaching_course(dojo_id) and (upstream_enabled() or scoped_project_enabled(dojo_id))
              and config.HARNESS_DEEPSEEK_MODEL and not payload.get("workspaceId"))
     owner = Users.query.filter_by(id=owner_id).populate_existing().first()
     _require(owner is not None)

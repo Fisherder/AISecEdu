@@ -104,7 +104,7 @@ def entry(flow, monkeypatch):
         }
 
     request = SimpleNamespace(headers={"Idempotency-Key": "derive-http"}, body={})
-    route = dict(vars(flow))
+    route = dict(vars(flow), ordinary_project_queue=SimpleNamespace(configured=lambda: False))
     route.update(
         __package__=package + ".api.v1",
         Resource=object, request=request, _body=lambda: request.body, _current_user=lambda: flow.user,
