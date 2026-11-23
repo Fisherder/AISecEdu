@@ -54,6 +54,7 @@ def entry(flow, monkeypatch):
     load_source("workbench", mode)
     package = "debate_entry_fixture"
     monkeypatch.setitem(sys.modules, package + ".agent_runtime.workbench", SimpleNamespace(**mode))
+    monkeypatch.setitem(sys.modules, package + ".agent_runtime", SimpleNamespace(teacher_dsh_chat=SimpleNamespace(admit=lambda *_: None)))
     record_generation = MagicMock()
     monkeypatch.setitem(sys.modules, package + ".agent_runtime.generation_events",
                         SimpleNamespace(record_generation=record_generation))

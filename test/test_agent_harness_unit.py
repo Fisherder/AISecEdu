@@ -510,7 +510,12 @@ def test_outbox_scans_past_blocked_page_without_starving_ready_tools(setup):
     for index in range(105):
         session.add(Job(id=f"waiting-{index}", owner_id=7, thread_id=thread.id, payload={"waitForJobIds": ["running"]}))
         session.add(Outbox(id=index + 1, job_id=f"waiting-{index}", payload={"job_id": f"waiting-{index}"}))
-    session.add_all([Job(id="ready-tool", owner_id=7, thread_id=thread.id), Outbox(id=106, job_id="ready-tool", payload={"job_id": "ready-tool"})])
+    session.add_all([
+        Job(id="teacher-text", owner_id=7, thread_id=thread.id, kind="agent.chat", payload={"teacherDshText": "deepseek-flash"}),
+        Outbox(id=106, job_id="teacher-text", payload={"job_id": "teacher-text"}),
+        Job(id="ready-tool", owner_id=7, thread_id=thread.id),
+        Outbox(id=107, job_id="ready-tool", payload={"job_id": "ready-tool"}),
+    ])
     session.commit()
     published = []
     tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text())
@@ -519,11 +524,12 @@ def test_outbox_scans_past_blocked_page_without_starving_ready_tools(setup):
                  "request_payload": importlib.import_module('harness_fixture.agent_runtime.model_inputs').request_payload,
                  "db": SimpleNamespace(session=session), "turn_wait_state": c.turn_wait_state,
                  "_redis": lambda: SimpleNamespace(xadd=lambda stream, body, **kw: published.append(json.loads(body["data"])["job_id"])),
-                 "_stream_for_job": lambda _: "test", "recovery_due": reliability.recovery_due}
+                 "_stream_for_job": lambda _: "test", "recovery_due": reliability.recovery_due,
+                 "teacher_dsh_chat": SimpleNamespace(PIN="teacherDshText")}
     exec(compile(ast.Module(body=selected, type_ignores=[]), "jobs.py", "exec"), namespace)
     assert namespace["publish_pending_outbox"](limit=1) == 1
     assert published == ["ready-tool"]
-    assert session.query(Outbox).filter(Outbox.published.is_(None)).count() == 105
+    assert session.query(Outbox).filter(Outbox.published.is_(None)).count() == 106
 
 
 def attempt_functions(session, **extra):

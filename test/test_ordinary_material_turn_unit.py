@@ -293,6 +293,7 @@ def test_teacher_submission_rejects_unavailable_course_and_enqueues_minimal_inpu
     worker_mode = {}
     source("workbench", worker_mode)
     monkeypatch.setitem(sys.modules, pkg + ".agent_runtime.workbench", SimpleNamespace(**worker_mode))
+    monkeypatch.setitem(sys.modules, pkg + ".agent_runtime", SimpleNamespace(teacher_dsh_chat=SimpleNamespace(admit=lambda *_: None)))
     thread = SimpleNamespace(id="thread", status="ACTIVE", dojo_id=18, module_index=0, title="科学观察")
     scope_error = type("ScopeError", (ValueError,), {})
     db = MagicMock()
@@ -363,6 +364,7 @@ def test_teacher_message_and_job_keep_only_ordered_tool_read_indices(flow, monke
     mode = {}
     source("workbench", mode)
     monkeypatch.setitem(sys.modules, pkg + ".agent_runtime.workbench", SimpleNamespace(**mode))
+    monkeypatch.setitem(sys.modules, pkg + ".agent_runtime", SimpleNamespace(teacher_dsh_chat=SimpleNamespace(admit=lambda *_: None)))
     message = SimpleNamespace(content="", metadata_json={})
     job.thread_id, job.id = "thread", "job"
     cards = MagicMock()

@@ -136,9 +136,9 @@ def invoke(payload, route):
         raise PermanentJobError("教学问答收到无效的 DSH 回执。")
     answer = redact_text(result["text"], 16000).strip()
     usage = result.get("usage")
-    usage_fields = {"prompt_tokens", "completion_tokens", "total_tokens"}
-    if (not answer or not isinstance(usage, dict) or set(usage) != usage_fields
-            or any(type(value) is not int or value < 0 for value in usage.values())
+    usage_fields = ("prompt_tokens", "completion_tokens", "total_tokens")
+    if (not answer or not isinstance(usage, dict)
+            or any(type(usage.get(key)) is not int or usage[key] < 0 for key in usage_fields)
             or usage["total_tokens"] <= 0
             or usage["total_tokens"] != usage["prompt_tokens"] + usage["completion_tokens"]):
         raise PermanentJobError("教学问答收到不完整的 DSH 回执。")
