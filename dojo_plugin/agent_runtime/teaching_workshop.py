@@ -336,7 +336,7 @@ def revise_simulation(job, revision):
 
 
 def invoke(job, payload):
-    from .jobs import PermanentJobError, heartbeat
+    from .jobs import PermanentJobError, RuntimeJobError, heartbeat
 
     root, secret, model = teacher_dsh_chat._connection()
     body = payload[PIN]
@@ -395,7 +395,16 @@ def invoke(job, payload):
         title = plan["title"]
     elif stage == "cinematic":
         job = heartbeat(job, stage="render-review", progress=91, message="正在校验三维镜头与播放操作")
-        artifact, check = _cinematic_artifact(root, secret, body["profile"], parts[0])
+        try:
+            artifact, check = _cinematic_artifact(root, secret, body["profile"], parts[0])
+        except RuntimeJobError as exc:
+            if exc.category == "quality":
+                # A render or contract failure needs a fresh scene on retry.
+                from CTFd.models import db
+
+                job.result = {**job.result, "_workshop": {**job.result["_workshop"], "parts": []}}
+                db.session.commit()
+            raise
         artifacts, evidence, title = [artifact], [check], artifact["title"]
     else:
         artifacts = [_simulation_artifact(parts[0])]

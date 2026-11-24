@@ -95,6 +95,7 @@ def test_workshop_resumes_a_cinematic_job_without_deck_only_fields():
 
     fixture = ModuleType("_cinematic_fixture.jobs")
     fixture.PermanentJobError = ValueError
+    fixture.RuntimeJobError = RuntimeError
     fixture.heartbeat = lambda job, **_: job
     with pytest.MonkeyPatch.context() as patch:
         patch.setitem(sys.modules, fixture.__name__, fixture)

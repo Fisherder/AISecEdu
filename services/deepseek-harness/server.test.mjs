@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { createEngine } from './engine.mjs';
 import { createService, validateProviderURL } from './server.mjs';
+import { validCinematicCopy } from './teaching-workshop.mjs';
 
 test('reports effective teaching image capability only with service authorization', async (t) => {
   for (const allowImages of [true, false]) {
@@ -377,4 +378,27 @@ test('one request-scoped native reader grounds the next official model step and 
   assert.equal(plain.status, 200);
   assert.equal(observed.at(-1).tools?.length ?? 0, 0);
   assert.equal((await plain.json()).materialReads, undefined);
+});
+
+test('generated teaching scenes require chapter focus and motion to reference real actors', () => {
+  const scene = {
+    title: '观察插针如何对准插座',
+    subtitle: '从对齐到拔出，逐步观察方形插针和插座的位置关系。',
+    modelNote: '采用便于课堂观察的简化模型展示装配动作。',
+    objectives: ['认识插针与插座之间的相对位置。'],
+    chapters: ['观察结构', '对齐孔位', '插入定位', '沿轴拔出'].map(title => ({
+      title, caption: '从当前角度观察插针与底座之间的位置关系。', question: '', focus: 'pin',
+    })),
+    actors: ['base', 'pin', 'socket', 'collar', 'rim'].map(id => ({
+      id, label: '演示部件', detail: '这个部件用来帮助观察三维装配过程。', shape: 'box',
+      color: '#1244DD', position: [0, 0, 0], size: [1, 1, 1], parent: '', surface: 'plain',
+    })),
+    movement: [{ actor: 'pin', waypoints: [[0, 0, 0], [0, 1, 0], [0, 2, 0], [0, 0, 0]] }],
+  };
+  assert.equal(validCinematicCopy('primitives', scene), true);
+  scene.chapters[0].focus = '插针与底座的位置关系';
+  assert.equal(validCinematicCopy('primitives', scene), false);
+  scene.chapters[0].focus = 'pin';
+  scene.movement[0].actor = 'missing';
+  assert.equal(validCinematicCopy('primitives', scene), false);
 });

@@ -98,8 +98,14 @@ function valid(schema, value) {
 
 export function validCinematicCopy(profile, copy) {
   if (!profiles.includes(profile) || !valid(cinematicSchema(profile), copy)) return false;
-  return profile !== 'primitives' || copy.actors.every(actor =>
-    /^[a-z][a-z0-9_-]{0,23}$/.test(actor.id) && /^#[a-f0-9]{6}$/i.test(actor.color));
+  if (profile !== 'primitives') return true;
+  const actorIds = new Set(copy.actors.map(actor => actor.id));
+  return actorIds.size === copy.actors.length &&
+    copy.actors.every(actor => /^[a-z][a-z0-9_-]{0,23}$/.test(actor.id) && /^#[a-f0-9]{6}$/i.test(actor.color)) &&
+    copy.chapters.every(chapter => actorIds.has(chapter.focus)) &&
+    new Set(copy.movement.map(track => track.actor)).size === copy.movement.length &&
+    copy.movement.every(track => actorIds.has(track.actor) && track.waypoints.length === copy.chapters.length &&
+      new Set(track.waypoints.map(position => JSON.stringify(position))).size > 1);
 }
 
 function nativeSchema(schema) {
@@ -178,6 +184,9 @@ export function workshopSystem(input) {
       ? (input.pageCount ? `课件设计必须恰好有 ${input.pageCount} 页。` :
         '没有给出页数时使用4至6页，至少安排概念建立、实例、活动和收束。')
       : '',
+    input.phase === 'intake' && input.kind === 'cinematic' && input.round === 0
+      ? '先确认演示对象。遇到有歧义的物件简称（例如“方针”），用提问工具区分具体含义，例如连接器的方形插针、表示方向的指针或教师自定义的物件。等对象明确后再询问学段或课堂操作。'
+      : '',
     input.phase === 'intake' && input.kind === 'cinematic'
       ? (referenceChapters[input.profile]
         ? `围绕现有三维模型组织 ${referenceChapters[input.profile]} 个章节，按实际结构与运动顺序。`
@@ -214,7 +223,7 @@ export function workshopSystem(input) {
       ? '围绕月球近似圆轨道的五章讲解。初态、四分之一、二分之一、四分之三和完整一圈各一章。画面显示地球、月球、轨道和进度控制，不生成月相、影子或真实尺寸。'
       : '',
     input.phase === 'cinematic' && input.profile === 'primitives'
-      ? '使用 4 至 6 章、5 至 8 个有真实含义的立体实体，至少两项有教学意义的部件从属关系、一个有意义的表面纹理。实体 id 用英文小写。parent 为空表示根节点，有父节点的坐标相对父节点。每个运动物体为各章提供三维位置。不要添加无关部件。'
+      ? '以教师在 answers 中确认的对象和操作为准。优先使用4章、5个有实际含义的部件和1条运动轨迹，按教学需要增加。至少包含两项有意义的部件从属关系与一种表面纹理。实体 id 用英文小写。章节 focus 和轨迹 actor 必须填 actors 中的英文 id，例如 pin，不要填“观察插针”或照抄方案里的描述。根节点的 parent 为空，子部件的位置相对父节点。运动轨迹每章给一个坐标且至少改变一次。直接调用制作工具。'
       : '',
     '调用提问工具时只提交 questions 数组，页面会保存问题并等待真实回答。',
     '一次只能调用一个工具。用中文。',
@@ -270,7 +279,12 @@ export function workshopPlugin(input, produced) {
               (referenceChapters[input.profile]
                 ? value.pages.length !== referenceChapters[input.profile]
                 : value.pages.length < 4 || value.pages.length > 6)) throw Error('Invalid cinematic chapter map');
-          if (input.phase === 'cinematic' && !validCinematicCopy(input.profile, value)) throw Error('Invalid teaching scene');
+          if (input.phase === 'cinematic' && !validCinematicCopy(input.profile, value)) {
+            produced.rejection = 'OUTPUT_SHAPE';
+            throw Error(input.profile === 'primitives'
+              ? 'Check scene fields. Each chapter.focus and movement.actor must match an actors[].id. Supply one waypoint per chapter per moving actor, with at least two distinct positions.'
+              : 'Invalid teaching scene');
+          }
           if (input.phase === 'deck-page' && input.plan.pages[input.page].visual === 'chart' &&
               new Set(value.rows.map(row => row.value)).size < 2) throw Error('A chart requires distinct observation values');
           if (input.phase === 'deck-page' && value.expression &&
