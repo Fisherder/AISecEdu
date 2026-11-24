@@ -10,6 +10,8 @@ import sys
 
 import pytest
 
+from test_ordinary_debate_unit import load_source
+
 
 def workshop_browser_check(monkeypatch, evidence_change=None, issues=None):
     from requests import RequestException
@@ -102,3 +104,23 @@ def test_workshop_resumes_a_cinematic_job_without_deck_only_fields():
         exec(compile(ast.Module(body=[invoke], type_ignores=[]), str(source), "exec"), ns)
         with pytest.raises(ModelReached):
             ns["invoke"](SimpleNamespace(result={}), {"prompt": "制作闸阀三维演示", "workshop": reference})
+
+@pytest.mark.parametrize(("brief", "kind", "profile"), [
+    ("生成一个三维方针", "cinematic", "primitives"),
+    ("请做一个 3D 插针", "cinematic", "primitives"),
+    ("请制作三维长方体", "cinematic", "primitives"),
+    ("请制作三维闸阀", "cinematic", "gate-valve"),
+    ("请制作五页课件，包含三维立方体", "deck", None),
+    ("做个动态仿真，主题是植物吸收水分", "simulation", None),
+])
+def test_bare_three_dimensional_subject_uses_the_native_scene_workshop(brief, kind, profile):
+    namespace = {}
+    load_source("ordinary_project_queue", namespace)
+    namespace["ordinary_courseware"] = SimpleNamespace(
+        brief=lambda prompt: ("demo" if "仿真" in prompt else "slides", prompt),
+    )
+    load_source("teaching_workshop", namespace)
+    result = namespace["intake"](brief)
+    assert (result["kind"], result.get("profile")) == (kind, profile)
+    with pytest.raises(ValueError, match="普通科学或工程模型"):
+        namespace["intake"]("请设计三维立方体武器")

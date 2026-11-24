@@ -59,6 +59,8 @@ def requested_kind(prompt):
         return "slide-deck"
     if requests_explicit_file_delivery(prompt):
         return None
+    if names_cinematic_object(subject):
+        return "slide-deck"
     if re.search(r"(?:课堂辩论|辩论方案|的辩论|一场辩论)", subject):
         return "debate"
     if "教案" in subject:
@@ -73,6 +75,12 @@ def creation_subject(prompt):
         prompt.strip(),
     )
     return command[1] if command else ""
+
+
+def names_cinematic_object(subject):
+    # Teachers can name the object instead of saying “三维演示” or “3D 模型”.
+    return bool(re.search(r"三维|(?<![a-z0-9])3D(?![a-z0-9])", subject, re.I)
+                and not re.search(r"教案|辩论|作业|测验|题库|题组|流程探究|实验工作区|文章|论文|报告|说明书|图纸", subject))
 
 
 def unsupported_creation(prompt, artifact_type=None):

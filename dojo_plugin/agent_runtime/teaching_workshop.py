@@ -10,6 +10,7 @@ import requests
 
 from .. import config
 from . import ordinary_courseware, teacher_dsh_chat
+from .ordinary_project_queue import creation_subject, names_cinematic_object
 
 PIN = "teachingWorkshop"
 CONTRACT = "teaching-workshop-v1"
@@ -27,7 +28,7 @@ _CINEMATIC_TOPICS = {
     "gate-valve": re.compile(r"闸阀|闸板阀|gate valve", re.I),
     "processor-package": re.compile(r"处理器封装|芯片封装|CPU封装|processor package", re.I),
     "earth-moon": re.compile(r"地月系统|地月运动|月球.{0,10}(?:公转|绕地)|(?:公转|绕地).{0,10}月球"),
-    "primitives": re.compile(r"几何|立方|球体|坐标|物理|光学|透镜|单摆|杠杆|液面|半径|投影"),
+    "primitives": re.compile(r"几何|立方|长方体|球体|坐标|物理|光学|透镜|单摆|杠杆|液面|半径|投影|方针|插针|引脚|排针|针脚|指针"),
 }
 _VISUAL_WORDS = {
     "chart": r"图表|柱状图|折线图|统计图|条形图",
@@ -60,7 +61,8 @@ def intake(brief, context=None):
     questions = [{"question": ordinary_courseware.brief(row["question"])[1][:180],
                   "answer": ordinary_courseware.brief(row["answer"])[1][:750]} for row in answer_rows]
     texts = [clean, *(row["answer"] for row in questions)]
-    if _CINEMATIC_REQUEST.search(clean) and not re.search(r"课件|幻灯片|演示文稿|PPT", clean, re.I):
+    if (not re.search(r"课件|幻灯片|演示文稿|PPT", clean, re.I)
+            and (_CINEMATIC_REQUEST.search(clean) or names_cinematic_object(creation_subject(clean)))):
         if any(_CINEMATIC_EXCLUDED.search(text) for text in texts):
             raise ValueError("请选择可用普通科学或工程模型表达的课堂三维主题。")
         profile = next((key for key, topic in _CINEMATIC_TOPICS.items() if topic.search(clean)), None)

@@ -6834,7 +6834,7 @@ def submit_teacher_message(user, thread_id, body, request_key=None, *, replaceme
                 else:
                     teacher_dsh_chat.validate_prompt(prompt)
             elif isinstance(prompt, str) and ordinary_project_queue.unsupported_creation(prompt, body.get("artifactType")):
-                return _error("当前可直接生成平台教案、课堂辩论和交互课件。其他项目请从已开通的课程功能入口创建。",
+                return _error("当前可直接生成平台教案、课堂辩论、交互课件、动态仿真和课堂三维演示。作业等项目请从对应课程入口创建。",
                               409, code="PROJECT_UNAVAILABLE")
         workshop = project_kind == "slide-deck"
         text_model = None if readonly_material_turn or project_kind or scoped_reply else teacher_dsh_chat.admit(thread, body, mode)
