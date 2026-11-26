@@ -564,6 +564,23 @@ def test_teacher_tool_admission_binds_assignment_sources_to_owned_completed_chat
             jobs.query.filter_by.assert_called_once_with(id="chat-a", owner_id=17, thread_id="thread-a", kind="agent.chat", status="SUCCEEDED")
 
 
+def test_validate_question_accepts_string_list_checks():
+    sources = quiz.select_sources(materials(), "包过滤 规则 顺序")
+    item_with_list = question()
+    item_with_list["config"]["checks"] = ["理解边界校验", "识别超限处理"]
+    validated = quiz.validate_question(item_with_list, sources, normalize)
+    assert validated["config"]["checks"] == "理解边界校验；识别超限处理"
+
+    item_with_str = question()
+    item_with_str["config"]["checks"] = "掌握规则顺序与默认策略"
+    assert quiz.validate_question(item_with_str, sources, normalize)["config"]["checks"] == "掌握规则顺序与默认策略"
+
+    for bad_checks in ([], [123], ["  "], {"a": 1}, ["x" * 60] * 4):
+        bad_item = question()
+        bad_item["config"]["checks"] = bad_checks
+        rejects(lambda: quiz.validate_question(bad_item, sources, normalize))
+
+
 if __name__ == "__main__":
     suite = unittest.TestSuite(unittest.FunctionTestCase(value) for name, value in list(globals().items())
                                if name.startswith("test_") and callable(value))
