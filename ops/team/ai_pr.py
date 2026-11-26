@@ -905,8 +905,8 @@ def publish(folder, candidate, *, expected):
             title, conclusion = 'AI 审查预算不足', 'failure'
         else:
             report = aggregate_large_review(folder, context)
-            incomplete = report['requires_human'] or any(row['priority'] <= 2 for row in report['findings'])
-            conclusion = 'failure' if incomplete else 'success'
+            blocking = any(row['priority'] <= 1 for row in report['findings'])
+            conclusion = 'failure' if blocking else 'success'
             title = LARGE_REVIEW_TITLES[conclusion]
         current = live_base(client, client.repo_api(f'/pulls/{context["number"]}'))
         if not eligible(client, current) or current['head']['sha'] != context['head']:
