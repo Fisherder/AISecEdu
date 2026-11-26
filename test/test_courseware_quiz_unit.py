@@ -223,6 +223,18 @@ def test_model_errors_are_bounded_and_do_not_echo_provider_secrets():
     assert call.call_count == 1
 
 
+def test_disabled_or_empty_model_reply_fails_as_model_unavailable_immediately():
+    call = Mock(return_value=None)
+    error = rejects(lambda: run(call), "MODEL_UNAVAILABLE")
+    assert error.report["modelCalls"] == 1
+    assert call.call_count == 1
+
+    review_none = Mock(side_effect=[{"items": [question()]}, None])
+    review_error = rejects(lambda: run(review_none), "MODEL_UNAVAILABLE")
+    assert review_error.report["modelCalls"] == 2
+    assert review_none.call_count == 2
+
+
 def test_wall_clock_budget_rejects_late_results_and_reaches_transport():
     now = [0]
     def call(system, payload, **kwargs):
@@ -496,6 +508,20 @@ def test_teacher_job_forwards_material_refs_and_retains_thread_scope_checks():
     scope["generate_assignment_payload"].reset_mock()
     rejects(lambda: scope["prepare_assignment"](operation, user, "thread-a"))
     scope["generate_assignment_payload"].assert_not_called()
+
+
+def test_assignment_generate_schema_allows_question_types_without_source_refs():
+    tree = ast.parse((ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text(encoding="utf-8"))
+    schemas_node = next(
+        node.value for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "AGENT_TOOL_SCHEMAS" for target in node.targets)
+    )
+    schemas = ast.literal_eval(schemas_node)
+    risk, allowed = schemas["assignment.generate"]
+    assert risk == "R1"
+    assert "questionTypes" in allowed
+    assert "sourceRefs" not in allowed
 
 
 def test_teacher_tool_admission_binds_assignment_sources_to_owned_completed_chat_job():

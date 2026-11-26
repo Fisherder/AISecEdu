@@ -8,7 +8,7 @@
 
 新增模块只接收平台已有材料索引，未增加上传、OCR 或页码选择器。材料须属于当前用户，且位于目标课程或用户自己的未归课材料中；归属另一课程的材料由现有查询拒绝。索引与分析必须完整，材料版本和 SHA-256 必须匹配。教师可在测验编辑页逐题展开原文依据，查看材料名、分块序号和版本。分块序号从 0 开始，不等于 PDF 页码。
 
-首版支持 `MULTIPLE_CHOICE`（单选）、`TRUE_FALSE`（判断）、`SHORT_ANSWER`（简答）。内部适配原项目的 `single`、`judgment`、`short`；填空、辩论及配套实践题不在本模式内。若需严格限定题型，下面的直接生成 API 支持 `questionTypes`；现有对话工具仍使用自己的参数合同。
+首版支持 `MULTIPLE_CHOICE`（单选）、`TRUE_FALSE`（判断）、`SHORT_ANSWER`（简答）。内部适配原项目的 `single`、`judgment`、`short`；填空、辩论及配套实践题不在本模式内。若需严格限定题型，直接生成 API 与教师对话 `assignment.generate` 工具白名单均支持 `questionTypes`（`sourceRefs` 仍由服务端从 `sourceJobId` 绑定，不开放为工具参数）。
 
 ## 直接生成 API
 
@@ -65,7 +65,7 @@
 | 422 `INVALID_TYPES` | 不支持的题型，或在课件模式混入实践题；拆分任务 |
 | 422 `MATERIALS_NOT_READY` | 读取后的材料索引、版本或原文不完整；重新处理材料 |
 | 422 `INSUFFICIENT_QUESTIONS` | 规定轮次内合格独立题不足；调整材料、题数或要求后重试 |
-| 422 `MODEL_UNAVAILABLE` | 模型调用失败；修复服务配置或稍后重试 |
+| 422 `MODEL_UNAVAILABLE` | 模型服务未启用、调用返回空或失败；修复服务配置或稍后重试 |
 | 422 `GENERATION_TIMEOUT` | 总预算耗尽；缩小请求后重试 |
 | 422 `REVIEW_FAILED` | 独立审校或审校后的最终证据检查未通过；调整请求 |
 | 400 `INVALID_REQUEST` | 常规参数错误，或现有材料服务报告无权读取、版本不匹配、索引未就绪 |

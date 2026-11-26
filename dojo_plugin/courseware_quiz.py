@@ -241,6 +241,8 @@ def generate_courseware_quiz(*, material_context, context, count, prompt, model,
         result = call_model(system, payload, **{**kwargs, "attempts": 1, "total_timeout_seconds": remaining})
         if clock() - started >= TOTAL_SECONDS:
             raise CoursewareQuizError("GENERATION_TIMEOUT", "课件出题超过总时限，请调整范围后重试。", report=report)
+        if result is None:
+            raise CoursewareQuizError("MODEL_UNAVAILABLE", "模型服务未启用或暂时不可用，未生成可发布草稿，请稍后重试。", report=report)
         return result
 
     generated = {}
