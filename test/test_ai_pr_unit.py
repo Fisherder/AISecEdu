@@ -1178,6 +1178,10 @@ def test_large_publication_binds_every_report_and_cannot_repair_or_auto_approve(
               'head': {'sha': head, 'ref': 'feat/member/task', 'repo': {'full_name': 'Fisherder/AISecEdu'}}}
         with patch.object(ai, 'LARGE_DIFF_CHUNK_BYTES', 5):
             chunks = [row for row, _ in ai.large_diff_chunks(b'abcdefghij')]
+        chunks[1]['locations'] = [{
+            'file': 'example.py', 'patch_line': 1, 'old_line': None, 'new_line': 1,
+            'partial_line': False, 'head_lines': [1, 3], 'anchor': 1,
+        }]
         evidence = {'chunks': chunks, 'application_paths': 1, 'vendor': []}
         context = {'mode': 'large_review', 'number': 1, 'head': head, 'base': base, 'branch': 'feat/member/task',
                    'large_review': evidence, 'blocked_reason': '', 'failures': [],
@@ -1232,13 +1236,31 @@ def test_large_publication_binds_every_report_and_cannot_repair_or_auto_approve(
             record.reset_mock()
             comment.reset_mock()
             publish()
-            assert record.call_args.args[2:4] == ('completed', ai.LARGE_REVIEW_TITLES['failure'])
-            assert record.call_args.args[-1] == 'failure'
+            assert record.call_args.args[2:4] == ('completed', ai.LARGE_REVIEW_TITLES['success'])
+            assert record.call_args.args[-1] == 'success'
             assert record.call_args.kwargs['external_id'] == context['large_review_key']
             comment.assert_called_once()
             published = comment.call_args.args[2]
             assert published['requires_human'] is True
             assert '需要人工核对的分段：2' in published['human_reason']
+
+            p2 = {'priority': 2, 'file': 'example.py', 'line': 1, 'message': '次要建议'}
+            add(1, review={**report(), 'findings': [p2]})
+            record.reset_mock()
+            comment.reset_mock()
+            publish()
+            assert record.call_args.args[2:4] == ('completed', ai.LARGE_REVIEW_TITLES['success'])
+            assert record.call_args.args[-1] == 'success'
+            assert comment.call_args.args[2]['findings'] == [p2]
+
+            p1 = {'priority': 1, 'file': 'example.py', 'line': 2, 'message': '严重缺陷'}
+            add(1, review={**report(), 'findings': [p1]})
+            record.reset_mock()
+            comment.reset_mock()
+            publish()
+            assert record.call_args.args[2:4] == ('completed', ai.LARGE_REVIEW_TITLES['failure'])
+            assert record.call_args.args[-1] == 'failure'
+            assert comment.call_args.args[2]['findings'] == [p1]
 
             (folder / 'repair.patch').write_text('malicious artifact')
             rejects(publish)
