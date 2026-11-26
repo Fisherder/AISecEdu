@@ -14,10 +14,14 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 
+TEXT_SUFFIXES = {
+    ".md", ".markdown", ".txt", ".csv", ".json",
+    ".py", ".c", ".h", ".cpp", ".js", ".ts", ".yaml", ".yml",
+}
 LOCAL_SUFFIXES = {
     ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
-}
+} | TEXT_SUFFIXES
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 MAX_TEXT_CHARS = 950_000
 MAX_XML_BYTES = 16 * 1024 * 1024
@@ -299,6 +303,11 @@ def extract_local_text(filename, raw):
         raise ValueError("该资料类型不支持本地文本提取。")
     if suffix in IMAGE_SUFFIXES:
         text = _ocr(raw)
+    elif suffix in TEXT_SUFFIXES:
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("utf-8", errors="replace")
     elif suffix == ".pdf":
         text = _pdf_text(raw)
     elif suffix == ".ppt":
@@ -321,7 +330,7 @@ def extract_local_text(filename, raw):
             body = re.sub(r"(?m)^第 \d+ 页$", "", text)
             if _visible_characters(body) < max(80, page_count * 6):
                 text = _legacy_presentation_text(raw, ".pptx")
-    text = text.replace("\x00", "").strip()
+    text = text.lstrip("\ufeff").replace("\x00", "").strip()
     if not text:
         raise ValueError("资料已保存，但未找到可识别的文字。请提供带文字的版本，或在消息中补充图片内容。")
     if len(text) > MAX_TEXT_CHARS:

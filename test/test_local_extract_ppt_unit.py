@@ -103,3 +103,29 @@ def test_worker_index_rejects_substituted_or_external_source(extractor, monkeypa
             mime_type="text/plain", size=source.stat().st_size,
             sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
         )
+
+
+def test_markdown_and_text_sources_extract_locally_and_index_completely(extractor, tmp_path):
+    content = "\ufeff# 防火墙实验\n默认策略应在规则列表末尾生效。"
+    raw = content.encode("utf-8")
+    assert extractor.locally_extractable("notes.md")
+    assert extractor.locally_extractable("README.txt")
+    extracted = extractor.extract_local_text("notes.md", raw)
+    assert extracted == "# 防火墙实验\n默认策略应在规则列表末尾生效。"
+
+    source = tmp_path / "17" / "1757748045" / "notes.md"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(raw)
+    response = extractor.index_verified_local_source(
+        root=tmp_path,
+        storage_key="17/1757748045/notes.md",
+        filename="notes.md",
+        mime_type="text/plain",
+        size=len(raw),
+        sha256=hashlib.sha256(raw).hexdigest(),
+    )
+    coverage = response["result"]["analysis"]["coverage"]
+    assert coverage["analysisVersion"] == "source-index-v1"
+    assert coverage["complete"] is True
+    assert coverage["indexedCharacters"] == len(extracted)
+    assert "".join(chunk["content"] for chunk in response["result"]["chunks"]) == extracted

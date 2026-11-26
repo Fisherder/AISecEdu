@@ -113,6 +113,12 @@ def classify(kind, payload):
         return "lesson-plan"
     if kind in {"artifact.materialize", "artifact.revise"} and payload.get("artifactType") == "debate" and payload.get("ordinaryDebate"):
         return "debate"
+    if kind == "material.analyze" and payload.get("localExtraction") is True:
+        return "material-index"
+    if (kind == "courseware.quiz.generate"
+            and isinstance(payload.get("coursewareQuizRequest"), dict)
+            and payload["coursewareQuizRequest"].get("sourceRefs") is not None):
+        return "courseware-quiz"
     return None
 
 
@@ -133,7 +139,8 @@ def require_inputs(payload):
 def valid(job):
     payload = job.payload or {}
     project = classify(job.kind, payload)
-    return (enabled(job.dojo_id) and (job.thread_id or job.kind == "artifact.revise")
+    return (enabled(job.dojo_id)
+            and (job.thread_id or job.kind == "artifact.revise" or project in {"material-index", "courseware-quiz"})
             and bool(job.action_id) == (project == "approved-action")
             and project is not None and payload.get(PIN) == project)
 

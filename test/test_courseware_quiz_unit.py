@@ -636,6 +636,267 @@ def test_validate_question_accepts_string_list_checks():
         rejects(lambda: quiz.validate_question(bad_item, sources, normalize))
 
 
+def test_web_without_dsh_secret_delegates_allowed_courseware_quiz_to_worker():
+    import types
+
+    user = SimpleNamespace(id=17)
+    allowed_dojo = SimpleNamespace(dojo_id=1757748045, id="test-course", name="联调测试课程")
+    snapshot_dojo = SimpleNamespace(dojo_id=999, id="snapshot-course", name="快照课程")
+    delegated_payload = {"title": "委托生成测验", "items": [normalize(question(), 0)]}
+    run_scoped = Mock(return_value=delegated_payload)
+    fake_pkg = types.ModuleType("CTFd.plugins.dojo_plugin.agent_runtime")
+    fake_mod = types.ModuleType("CTFd.plugins.dojo_plugin.agent_runtime.courseware_quiz_worker")
+    fake_mod.run_scoped_courseware_quiz = run_scoped
+
+    scope = platform(
+        DOJO_AI_ENABLED=False, DOJO_AI_API_KEY="",
+        ordinary_teaching_course=lambda cid: cid == 1757748045,
+        model_json=Mock(return_value=None),
+    )
+    # Attach a fake package so relative `from .agent_runtime.courseware_quiz_worker import ...` resolves in the AST namespace.
+    import sys
+    parent_pkg = types.ModuleType("coursework_test_pkg")
+    parent_pkg.__path__ = []
+    fake_pkg.__path__ = []
+    scope["__package__"] = "coursework_test_pkg"
+    with patch.dict(sys.modules, {
+        "coursework_test_pkg": parent_pkg,
+        "coursework_test_pkg.agent_runtime": fake_pkg,
+        "coursework_test_pkg.agent_runtime.courseware_quiz_worker": fake_mod,
+    }):
+        with patch.dict(os.environ, {
+            "AISECEDU_ORDINARY_PROJECTS": "true",
+            "HARNESS_INTERNAL_URL": "http://deepseek-harness:3081",
+            "HARNESS_SERVICE_SECRET": "",
+        }, clear=False):
+            result = scope["generate_assignment_payload"](teacher_request(), allowed_dojo, user=user)
+            assert result is delegated_payload
+            run_scoped.assert_called_once()
+
+            run_scoped.reset_mock()
+            rejects(lambda: scope["generate_assignment_payload"](teacher_request(), snapshot_dojo, user=user), "MODEL_UNAVAILABLE")
+            run_scoped.assert_not_called()
+
+        with patch.dict(os.environ, {
+            "AISECEDU_ORDINARY_PROJECTS": "true",
+            "HARNESS_INTERNAL_URL": "http://deepseek-harness:3081",
+            "HARNESS_SERVICE_SECRET": "worker-secret",
+        }, clear=False):
+            dsh_replies = [
+                {"text": json.dumps({"title": "DSH直连", "items": [question()]}, ensure_ascii=False), "model": "deepseek-flash"},
+                {"text": json.dumps({"issues": [], "replacements": []}), "model": "deepseek-flash"},
+            ]
+            worker_scope = platform(
+                DOJO_AI_ENABLED=False, DOJO_AI_API_KEY="",
+                ordinary_teaching_course=lambda cid: cid == 1757748045,
+                invoke_turn=Mock(side_effect=dsh_replies),
+            )
+            worker_scope["__package__"] = "coursework_test_pkg"
+            with patch.dict(os.environ, {"AISECEDU_TEACHER_DSH_TEXT": "true"}, clear=False):
+                worker_result = worker_scope["generate_assignment_payload"](teacher_request(), allowed_dojo, user=user)
+            assert worker_result["settings"]["generation"]["model"] == "deepseek-flash"
+            run_scoped.assert_not_called()
+
+
+def test_courseware_quiz_worker_polling_and_error_propagation():
+    import sys, types
+
+    worker_source = (ROOT / "dojo_plugin/agent_runtime/courseware_quiz_worker.py").read_text(encoding="utf-8")
+    tree = ast.parse(worker_source)
+    funcs = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    request_fields_assign = next(
+        node for node in tree.body
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "_REQUEST_FIELDS"
+    )
+    scope_err = type("ScopeError", (ValueError,), {})
+    for outcome in ("success", "courseware_error", "scope_error", "value_error", "failed", "timeout"):
+        job_row = SimpleNamespace(id="job-quiz-1", status="QUEUED", result=None)
+        if outcome == "success":
+            final_row = SimpleNamespace(id="job-quiz-1", status="SUCCEEDED", result={"payload": {"title": "OK", "items": []}})
+        elif outcome == "courseware_error":
+            final_row = SimpleNamespace(id="job-quiz-1", status="SUCCEEDED", result={
+                "coursewareError": {"code": "INSUFFICIENT_QUESTIONS", "message": "题量不足", "report": {"requestedCount": 2, "acceptedCount": 1, "rounds": 2}},
+            })
+        elif outcome == "scope_error":
+            final_row = SimpleNamespace(id="job-quiz-1", status="SUCCEEDED", result={"scopeError": "forbidden"})
+        elif outcome == "value_error":
+            final_row = SimpleNamespace(id="job-quiz-1", status="SUCCEEDED", result={"valueError": "bad request"})
+        elif outcome == "failed":
+            final_row = SimpleNamespace(id="job-quiz-1", status="FAILED", result={})
+        else:
+            final_row = SimpleNamespace(id="job-quiz-1", status="QUEUED", result=None)
+
+        teaching_jobs = MagicMock()
+        if outcome == "timeout":
+            teaching_jobs.query.filter_by.return_value.first.return_value = final_row
+        else:
+            teaching_jobs.query.filter_by.return_value.first.side_effect = [job_row, final_row]
+
+        enqueue_job = Mock(return_value=(SimpleNamespace(id="job-quiz-1"), True))
+        jobs_mod = types.ModuleType("worker_test_pkg.agent_runtime.jobs")
+        jobs_mod.enqueue_job = enqueue_job
+        pkg_root = types.ModuleType("worker_test_pkg")
+        pkg_root.__path__ = []
+        pkg_runtime = types.ModuleType("worker_test_pkg.agent_runtime")
+        pkg_runtime.__path__ = []
+        coursework_mod = types.ModuleType("worker_test_pkg.coursework")
+        coursework_mod.generate_assignment_payload = Mock(return_value={"title": "WorkerGenerated", "items": []})
+        users_model = MagicMock()
+        dojos_model = MagicMock()
+        users_model.query.filter_by.return_value.first.return_value = SimpleNamespace(id=17)
+        dojos_model.query.filter_by.return_value.first.return_value = SimpleNamespace(dojo_id=1757748045, id="course", name="联调")
+
+        ns = {
+            "__package__": "worker_test_pkg.agent_runtime",
+            "secrets": __import__("secrets"),
+            "time": SimpleNamespace(monotonic=Mock(side_effect=[0.0, 0.1, 0.2, 2.0]), sleep=Mock()),
+            "Users": users_model,
+            "Dojos": dojos_model,
+            "db": MagicMock(),
+            "CoursewareQuizError": quiz.CoursewareQuizError,
+            "TeachingJobs": teaching_jobs,
+            "ordinary_project_queue": SimpleNamespace(enabled=lambda cid: cid == 1757748045),
+            "ScopeError": scope_err,
+            "dojo_for_user": Mock(),
+        }
+        exec(compile(ast.Module(body=[request_fields_assign, funcs["run_scoped_courseware_quiz"], funcs["execute_scoped_courseware_quiz"]], type_ignores=[]), "courseware_quiz_worker.py", "exec"), ns)
+
+        with patch.dict(sys.modules, {
+            "worker_test_pkg": pkg_root,
+            "worker_test_pkg.agent_runtime": pkg_runtime,
+            "worker_test_pkg.agent_runtime.jobs": jobs_mod,
+            "worker_test_pkg.coursework": coursework_mod,
+        }):
+            dojo = SimpleNamespace(dojo_id=1757748045, id="course", name="联调")
+            user = SimpleNamespace(id=17)
+            if outcome == "success":
+                assert ns["run_scoped_courseware_quiz"](teacher_request(), dojo, user, timeout_seconds=1.0, poll_interval=0) == {"title": "OK", "items": []}
+                assert enqueue_job.call_args.kwargs["kind"] == "courseware.quiz.generate"
+                assert enqueue_job.call_args.kwargs["payload"]["taskListHidden"] is True
+            elif outcome == "courseware_error":
+                rejects(lambda: ns["run_scoped_courseware_quiz"](teacher_request(), dojo, user, timeout_seconds=1.0, poll_interval=0), "INSUFFICIENT_QUESTIONS")
+            elif outcome == "scope_error":
+                with unittest.TestCase().assertRaises(scope_err):
+                    ns["run_scoped_courseware_quiz"](teacher_request(), dojo, user, timeout_seconds=1.0, poll_interval=0)
+            elif outcome == "value_error":
+                with unittest.TestCase().assertRaisesRegex(ValueError, "bad request"):
+                    ns["run_scoped_courseware_quiz"](teacher_request(), dojo, user, timeout_seconds=1.0, poll_interval=0)
+            else:
+                rejects(lambda: ns["run_scoped_courseware_quiz"](teacher_request(), dojo, user, timeout_seconds=1.0, poll_interval=0), "MODEL_UNAVAILABLE")
+
+            worker_out = ns["execute_scoped_courseware_quiz"](SimpleNamespace(
+                dojo_id=1757748045, owner_id=17, payload={"coursewareQuizRequest": teacher_request()},
+            ))
+            if outcome == "success":
+                assert worker_out == {"payload": {"title": "WorkerGenerated", "items": []}}
+
+        if outcome == "success":
+            coursework_mod.generate_assignment_payload.side_effect = quiz.CoursewareQuizError(
+                "INSUFFICIENT_QUESTIONS", "shortfall", report={"requestedCount": 2, "acceptedCount": 1, "rounds": 2, "rejections": [QUOTE]},
+            )
+            with patch.dict(sys.modules, {
+                "worker_test_pkg": pkg_root,
+                "worker_test_pkg.agent_runtime": pkg_runtime,
+                "worker_test_pkg.coursework": coursework_mod,
+            }):
+                err_out = ns["execute_scoped_courseware_quiz"](SimpleNamespace(
+                    dojo_id=1757748045, owner_id=17, payload={"coursewareQuizRequest": teacher_request()},
+                ))
+            assert err_out["coursewareError"]["code"] == "INSUFFICIENT_QUESTIONS"
+            assert "rejections" not in err_out["coursewareError"]["report"]
+            assert QUOTE not in str(err_out)
+
+
+def test_scoped_material_index_skips_enrich_and_process_job_handles_worker_lanes():
+    jobs_src = (ROOT / "dojo_plugin/agent_runtime/jobs.py").read_text(encoding="utf-8")
+    tree = ast.parse(jobs_src)
+    persist_fn = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_persist_result")
+
+    material = SimpleNamespace(id="mat-1", status="UPLOADED")
+    revision = SimpleNamespace(id="rev-1", revision=1, status="PENDING", metadata_json={})
+    chunks_query = MagicMock()
+    rev_id_query = MagicMock()
+    rev_id_query.filter_by.return_value.order_by.return_value.limit.return_value.scalar.return_value = "rev-1"
+    db_mock = MagicMock()
+    db_mock.session.query.return_value = rev_id_query
+
+    enqueue_calls = []
+    for configured_flag in (True, False):
+        enqueue_calls.clear()
+        material.status = "UPLOADED"
+        revision.status = "PENDING"
+        revision.metadata_json = {}
+        rev_query = MagicMock()
+        rev_query.filter_by.return_value.first.return_value = revision
+        mat_query = MagicMock()
+        mat_query.filter_by.return_value.first.return_value = material
+        ns = {
+            "TeachingMaterials": SimpleNamespace(query=mat_query),
+            "TeachingMaterialRevisions": SimpleNamespace(
+                query=rev_query, id="col-id", revision=SimpleNamespace(desc=lambda: "col-rev-desc"),
+            ),
+            "TeachingMaterialChunks": MagicMock(query=chunks_query, side_effect=lambda **kw: kw),
+            "MATERIAL_INDEX_VERSION": "source-index-v1",
+            "MATERIAL_ANALYSIS_VERSION": "source-analysis-v1",
+            "PermanentJobError": ValueError,
+            "db": db_mock,
+            "ordinary_project_queue": SimpleNamespace(configured=lambda: configured_flag),
+            "enqueue_job": lambda **kw: enqueue_calls.append(kw),
+        }
+        exec(compile(ast.Module(body=[persist_fn], type_ignores=[]), "jobs.py", "exec"), ns)
+        ns["_persist_result"](
+            SimpleNamespace(kind="material.analyze", owner_id=17, dojo_id=1757748045, payload={"materialId": "mat-1", "revisionId": "rev-1"}),
+            {
+                "chunks": [{"content": "正文片段", "sourceType": "document", "sourceLocator": {"offset": 0}, "metadata": {}}],
+                "analysis": {"coverage": {"complete": True, "analysisVersion": "source-index-v1", "extractedCharacters": 4, "indexedCharacters": 4}},
+            },
+        )
+        assert material.status == "READY"
+        assert (len(enqueue_calls) == 0) if configured_flag else (enqueue_calls[0]["kind"] == "material.enrich")
+
+    process_fn = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "process_job")
+    process_src = ast.get_source_segment(jobs_src, process_fn)
+    assert '== "material-index"' in process_src
+    assert '== "courseware-quiz"' in process_src
+    assert "execute_scoped_courseware_quiz" in process_src
+
+
+def test_scoped_materials_post_allows_ordinary_course_and_blocks_others():
+    import io, pathlib
+
+    scope_err = type("ScopeError", (ValueError,), {})
+    for scenario in ("snapshot_course", "unsupported_format", "allowed_markdown"):
+        upload = SimpleNamespace(
+            filename="lesson.pdf" if scenario == "unsupported_format" else "notes.md",
+            stream=io.BytesIO(b""),
+            mimetype="text/markdown",
+        )
+        dojo_id = 999 if scenario == "snapshot_course" else 1757748045
+        scope = extracted_method(
+            "dojo_plugin/api/v1/teaching.py", "Materials", "post",
+            _current_user=lambda: SimpleNamespace(id=17),
+            _require_teacher=lambda _u: None,
+            request=SimpleNamespace(files={"file": upload}, form={"dojoId": str(dojo_id)}),
+            ordinary_project_queue=SimpleNamespace(configured=lambda: True, enabled=lambda cid: cid == 1757748045),
+            _error=lambda msg, status=400, code="INVALID": ({"code": code, "error": str(msg)}, status),
+            _thread_for_owner=lambda *_a: None,
+            TeachingAgentThreads=MagicMock(),
+            db=MagicMock(),
+            dojo_for_user=lambda _u, cid, teacher=True: SimpleNamespace(dojo_id=int(cid)),
+            ScopeError=scope_err,
+            MAX_UPLOAD_BYTES=1024 * 1024,
+            pathlib=pathlib,
+            ALLOWED_MATERIAL_SUFFIXES={".md", ".markdown", ".txt", ".pdf"},
+            locally_extractable=lambda name: name.endswith(".md"),
+        )
+        resp, status = scope["post"](None)
+        if scenario in ("snapshot_course", "unsupported_format"):
+            assert status == 503
+            assert resp["code"] == "TASK_UNAVAILABLE"
+        else:
+            assert status == 415  # Empty file rejected after passing scoped 503 admission gates.
+
+
 if __name__ == "__main__":
     suite = unittest.TestSuite(unittest.FunctionTestCase(value) for name, value in list(globals().items())
                                if name.startswith("test_") and callable(value))

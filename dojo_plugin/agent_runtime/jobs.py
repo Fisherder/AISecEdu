@@ -1591,7 +1591,7 @@ def enqueue_job(
     publish=True,
     commit=True,
 ):
-    if kind in {"material.analyze", "material.enrich"}:
+    if kind in {"material.analyze", "material.enrich", "courseware.quiz.generate"}:
         payload = {**payload, "taskListHidden": True}
     existing = TeachingJobs.query.filter_by(idempotency_key=idempotency_key).first()
     if existing:
@@ -4527,7 +4527,7 @@ def _persist_result(job, result, *, prepared=None):
         )
         if latest_revision_id == revision.id:
             material.status = "READY"
-        if coverage.get("analysisVersion") == MATERIAL_INDEX_VERSION:
+        if coverage.get("analysisVersion") == MATERIAL_INDEX_VERSION and not ordinary_project_queue.configured():
             enqueue_job(
                 owner_id=job.owner_id,
                 kind="material.enrich",
@@ -5156,6 +5156,16 @@ def process_job(job_id, *, worker_id=None, teacher_text_only=False, ordinary_pro
             if pin is None:
                 raise PermanentJobError("所选课件的版本、发布状态或课程范围已变化，请重新发起。")
             compact_result = _persist_result(job, classroom_confirmation(pin))
+        elif ordinary_project_only and (job.payload or {}).get("scopedOrdinaryProject") == "material-index":
+            job = heartbeat(job, stage="extracting", progress=25, message="正在提取课程资料文本并建立索引")
+            response = _index_material_on_worker(job, job.payload or {})
+            job = _owned_job_attempt(job_id, identity)
+            compact_result = _persist_result(job, response["result"])
+        elif ordinary_project_only and (job.payload or {}).get("scopedOrdinaryProject") == "courseware-quiz":
+            from .courseware_quiz_worker import execute_scoped_courseware_quiz
+
+            job = heartbeat(job, stage="generating", progress=25, message="正在依据课件生成测验题")
+            compact_result = execute_scoped_courseware_quiz(job)
         elif job.kind == "agent.advance":
             compact_result = advance_turn(job)
         elif job.kind in {"learning.authoring", "learning.solution"}:

@@ -10640,9 +10640,6 @@ class Materials(Resource):
         user = _current_user()
         try:
             _require_teacher(user)
-            if ordinary_project_queue.configured():
-                return _error("当前开发站暂未开放新资料上传及索引，可以继续查看已保存的资料。",
-                              503, code="TASK_UNAVAILABLE")
             upload = request.files.get("file")
             raw_dojo_id = str(request.form.get("dojoId") or "").strip()
             thread_id = str(request.form.get("threadId") or "").strip() or None
@@ -10675,8 +10672,18 @@ class Materials(Resource):
                 if raw_dojo_id
                 else None
             )
+            if dojo is None and thread is not None and thread.dojo_id is not None:
+                dojo = dojo_for_user(user, thread.dojo_id, teacher=True)
             if not conversation_upload and dojo is None:
                 raise ValueError("课程中心上传必须指定目标课程。")
+            if ordinary_project_queue.configured() and (
+                dojo is None or not ordinary_project_queue.enabled(dojo.dojo_id)
+            ):
+                return _error(
+                    "当前开发站仅开放联调课程的新资料上传及索引，可以继续查看已保存的资料。",
+                    503,
+                    code="TASK_UNAVAILABLE",
+                )
             if thread and dojo and thread.dojo_id not in {None, dojo.dojo_id}:
                 raise ScopeError("Thread and material course scopes differ")
             if thread and dojo and thread.dojo_id is None:
@@ -10687,6 +10694,12 @@ class Materials(Resource):
             suffix = pathlib.Path(upload.filename).suffix.lower()
             if suffix not in ALLOWED_MATERIAL_SUFFIXES:
                 return _error("不支持这种文件格式。", 415)
+            if ordinary_project_queue.configured() and not locally_extractable(upload.filename):
+                return _error(
+                    "当前开发站暂不支持该文件格式的本地索引。",
+                    503,
+                    code="TASK_UNAVAILABLE",
+                )
             if not raw or not _valid_material_signature(suffix, raw):
                 return _error("文件内容与扩展名不一致，请检查文件后重试。", 415)
             security_scan = _scan_material_security(suffix, raw)

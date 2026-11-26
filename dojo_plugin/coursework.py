@@ -692,6 +692,18 @@ def _generate_courseware_payload(body, dojo, user, count, kind, pass_percent, st
     prompt = str(body.get("prompt") or body.get("description") or "").strip()[:12000]
     materials = build_course_material_context(owner_id=user.id, dojo_id=dojo.dojo_id,
                                               prompt=prompt, source_refs=refs, require_complete=True)
+    if (
+        not (DOJO_AI_ENABLED and DOJO_AI_API_KEY)
+        and not (
+            (os.environ.get("HARNESS_INTERNAL_URL") or "").strip()
+            and (os.environ.get("HARNESS_SERVICE_SECRET") or "")
+        )
+        and os.environ.get("AISECEDU_ORDINARY_PROJECTS") == "true"
+        and ordinary_teaching_course(dojo.dojo_id)
+    ):
+        from .agent_runtime.courseware_quiz_worker import run_scoped_courseware_quiz
+
+        return run_scoped_courseware_quiz(body, dojo, user)
     call_model, model_state = _courseware_model_caller(dojo.dojo_id)
     result = generate_courseware_quiz(
         material_context=materials,

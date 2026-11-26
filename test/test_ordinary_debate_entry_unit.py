@@ -420,3 +420,44 @@ def test_conversation_admission_freezes_the_scoped_classroom_marker():
     assert created and job.payload["scopedOrdinaryProject"] == "classroom"
     assert job.payload["classroomPreparation"] == {"artifactId": "deck"}
     freeze.assert_called_once_with(job)
+
+
+def test_scoped_worker_admits_material_index_and_courseware_quiz_for_allowed_course(monkeypatch):
+    queue = {"ordinary_teaching_course": lambda course: course == 12}
+    load_source("teacher_documents", queue)
+    load_source("ordinary_project_queue", queue)
+    monkeypatch.setenv("AISECEDU_ORDINARY_PROJECTS", "true")
+
+    index_payload = {"materialId": "m-1", "revisionId": "r-1", "localExtraction": True}
+    index_job = SimpleNamespace(
+        kind="material.analyze", dojo_id=12, thread_id=None, action_id=None,
+        payload=queue["admit"]("material.analyze", index_payload, 12),
+    )
+    assert index_job.payload[queue["PIN"]] == "material-index"
+    queue["require_consumer"](index_job, "teacherDshText")
+
+    index_job.dojo_id = 13
+    with pytest.raises(queue["WorkerUnavailable"]):
+        queue["require_consumer"](index_job, "teacherDshText")
+
+    missing_local = SimpleNamespace(
+        kind="material.analyze", dojo_id=12, thread_id=None, action_id=None,
+        payload=queue["admit"]("material.analyze", {"materialId": "m-1", "localExtraction": False}, 12),
+    )
+    with pytest.raises(queue["WorkerUnavailable"]):
+        queue["require_consumer"](missing_local, "teacherDshText")
+
+    quiz_payload = {"coursewareQuizRequest": {"prompt": "根据课件出题", "sourceRefs": [{"type": "material", "id": "m-1"}]}}
+    quiz_job = SimpleNamespace(
+        kind="courseware.quiz.generate", dojo_id=12, thread_id=None, action_id=None,
+        payload=queue["admit"]("courseware.quiz.generate", quiz_payload, 12),
+    )
+    assert quiz_job.payload[queue["PIN"]] == "courseware-quiz"
+    queue["require_consumer"](quiz_job, "teacherDshText")
+
+    quiz_job.dojo_id = 13
+    with pytest.raises(queue["WorkerUnavailable"]):
+        queue["require_consumer"](quiz_job, "teacherDshText")
+
+    with pytest.raises(ValueError):
+        queue["admit"]("courseware.quiz.generate", {**quiz_payload, "workspaceId": "ws-1"}, 12)
