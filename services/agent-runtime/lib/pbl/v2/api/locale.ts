@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
 import { supportedLocales } from '@/lib/i18n/locales';
+import { translateServer } from '@/lib/i18n/server';
 import { defaultLocale } from '@/lib/i18n/types';
 import type { PBLProjectV2 } from '../types';
 
@@ -25,7 +26,5 @@ export type InstructorErrorKey = 'unsupportedQuestion' | 'unreadableReply' | 'un
 
 export async function instructorErrorMessage(project: PBLProjectV2, key: InstructorErrorKey): Promise<string> {
   const locale = supportedLocaleCodes.has(project.language) ? project.language : defaultLocale;
-  const { default: i18n } = await import('@/lib/i18n/config');
-  await i18n.loadLanguages(locale);
-  return i18n.t(`pbl.v2.instructorErrors.${key}`, { lng: locale });
+  return translateServer(locale, `pbl.v2.instructorErrors.${key}`);
 }
