@@ -206,6 +206,7 @@ AGENT_TOOL_SCHEMAS = {
             "kind",
             "moduleIndex",
             "questionCount",
+            "questionTypes",
             "difficulty",
             "availableFrom",
             "dueAt",

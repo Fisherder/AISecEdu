@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block stylesheets %}<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/teacher-assignment.css', v='frontend-restored-20261001-1') }}">{% endblock %}
+{% block stylesheets %}<link rel="stylesheet" href="{{ url_for('views.themes_beta', path='css/teacher-assignment.css', v='courseware-quiz-20261103-1') }}">{% endblock %}
 {% block content %}
 <main id="teacher-assignment" class="assignment-editor" data-assignment-id="{{ assignment.id }}">
   <header><div><a id="assignment-course-link" href="/teacher/courses">返回课程题目</a><h1 id="assignment-heading">{{ assignment.title }}</h1><p id="assignment-meta">正在读取测验或作业…</p></div><a href="{{ url_for('pwncollege_learning.teacher_material_library', sourceKind='assignment', sourceId=assignment.id) }}">存入素材库</a></header>
@@ -20,4 +20,4 @@
   <section id="assignment-delivery" class="assignment-panel" hidden><h2>发布给当前课程</h2><p>从素材库加入的内容先保存为草稿。确认说明和题目无误，并先发布所有配套内容，再发布此任务。</p><div class="assignment-delivery-actions"><button id="assignment-publish" type="button">确认发布给学生</button><button id="assignment-close" type="button" hidden>结束本次任务</button><a id="assignment-student-link" hidden>打开学生页面</a></div></section>
 </main>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script><script src="{{ url_for('views.themes_beta', path='js/dojo/teacher-assignment.js', v='frontend-restored-20261001-1') }}"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('views.themes', path='js/dojo/learning-common.js') }}"></script><script src="{{ url_for('views.themes_beta', path='js/dojo/teacher-assignment.js', v='courseware-quiz-20261103-1') }}"></script>{% endblock %}

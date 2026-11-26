@@ -11,8 +11,11 @@ def prepare_assignment(operation, user, thread_id):
     request = dict(operation['arguments'])
     if request.get('moduleIndex') is None:
         request['moduleIndex'] = scope['moduleIndex']
+    material_refs = [ref for ref in operation.get('sourceRefs') or [] if isinstance(ref, dict) and ref.get('type') == 'material']
+    if material_refs:
+        request['sourceRefs'] = material_refs
     db.session.commit()
-    return generate_assignment_payload(request, dojo)
+    return generate_assignment_payload(request, dojo, user=user)
 
 def apply_teacher_tool(job, operation, action, user, thread, dojo, *, prepared=None):
     from .tool_registry import ToolContext, execute_handler
