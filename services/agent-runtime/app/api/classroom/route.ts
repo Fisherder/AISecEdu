@@ -8,8 +8,12 @@ import {
   readClassroom,
 } from '@/lib/server/classroom-storage';
 import { createLogger } from '@/lib/logger';
+import { resolvePrincipal } from '@/lib/server/auth/session';
+import { getDb } from '@/lib/server/db';
+import { ensureAppSchema } from '@/lib/server/schema';
 
 const log = createLogger('Classroom API');
+const personalStudyPrefix = 'personal_study_';
 
 export async function POST(request: NextRequest) {
   let stageId: string | undefined;
@@ -17,7 +21,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { stage, scenes } = body;
-    stageId = stage?.id;
+    stageId = typeof stage?.id === 'string' ? stage.id : undefined;
     sceneCount = scenes?.length;
 
     if (!stage || !scenes) {
@@ -28,7 +32,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const id = stage.id || randomUUID();
+    if (stage.id != null && typeof stage.id !== 'string') {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, 'Classroom identifier must be text');
+    }
+    const id = stageId || randomUUID();
+    if (id.startsWith(personalStudyPrefix)) {
+      return apiError(API_ERROR_CODES.FORBIDDEN, 403, 'Personal classroom cannot be overwritten');
+    }
     const baseUrl = buildRequestOrigin(request);
 
     const persisted = await persistClassroom({ id, stage: { ...stage, id }, scenes }, baseUrl);
@@ -62,6 +72,22 @@ export async function GET(request: NextRequest) {
 
     if (!isValidClassroomId(id)) {
       return apiError(API_ERROR_CODES.INVALID_REQUEST, 400, 'Invalid classroom id');
+    }
+
+    if (id.startsWith(personalStudyPrefix)) {
+      const principal = await resolvePrincipal(request);
+      if (principal?.role !== 'student') {
+        return apiError(API_ERROR_CODES.INVALID_REQUEST, 404, 'Classroom not found');
+      }
+      const db = await getDb();
+      await ensureAppSchema(db);
+      const owner = await db.query(
+        'SELECT 1 FROM app_classrooms WHERE id = $1 AND owner_key = $2',
+        [id, principal.learnerKey],
+      );
+      if (!owner.rows.length) {
+        return apiError(API_ERROR_CODES.INVALID_REQUEST, 404, 'Classroom not found');
+      }
     }
 
     const classroom = await readClassroom(id);

@@ -17,10 +17,10 @@ import type { NextRequest } from 'next/server';
 
 import { createLogger } from '@/lib/logger';
 import { apiError } from '@/lib/server/api-response';
-import { resolveModelFromRequest } from '@/lib/server/resolve-model';
+import { resolveInstructorRuntime } from '@/lib/pbl/v2/api/instructor-runtime';
 
 import { createSSEResponse } from '@/lib/pbl/v2/api/sse';
-import { applyRequestLocaleToProject } from '@/lib/pbl/v2/api/locale';
+import { applyRequestLocaleToProject, instructorErrorMessage } from '@/lib/pbl/v2/api/locale';
 import { runInstructorTurn, type InstructorPhase } from '@/lib/pbl/v2/agents/instructor';
 import type { PBLProjectV2 } from '@/lib/pbl/v2/types';
 
@@ -32,7 +32,7 @@ interface InstructorRequest {
   project: PBLProjectV2;
   userMessage: string;
   /** Optional override; defaults to 'instructing'. */
-  phase?: InstructorPhase;
+  phase?: InstructorPhase | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -50,25 +50,28 @@ export async function POST(req: NextRequest) {
     return apiError('MISSING_REQUIRED_FIELD', 400, '`userMessage` is required.');
   }
 
-  let resolved;
+  if (body.phase != null && !['greeting', 'setup', 'instructing'].includes(body.phase)) {
+    return apiError('INVALID_REQUEST', 400, 'Invalid instructor phase.');
+  }
+
+  let runtime;
   try {
-    resolved = await resolveModelFromRequest(req, body, 'pbl-v2-runtime:instructor');
+    runtime = await resolveInstructorRuntime(req, body, 'pbl-v2-runtime:instructor');
   } catch (err) {
     log.error('Model resolution failed:', err);
     return apiError('INVALID_REQUEST', 400, err instanceof Error ? err.message : String(err));
   }
 
-  const { model, thinkingConfig } = resolved;
-  const phase = body.phase ?? 'instructing';
   applyRequestLocaleToProject(req, body.project);
+  if (!runtime) return apiError('UPSTREAM_ERROR', 503, await instructorErrorMessage(body.project, 'unavailable'));
+  const phase = body.phase ?? 'instructing';
 
   return createSSEResponse(
     runInstructorTurn({
       project: body.project,
       userMessage: body.userMessage,
       phase,
-      languageModel: model,
-      thinkingConfig,
+      ...runtime,
       signal: req.signal,
     }),
     { signal: req.signal },

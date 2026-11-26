@@ -15,6 +15,9 @@ import {
   writeDraftRecovery,
 } from '@/lib/quiz/persistence';
 import type { QuestionResult } from '@/lib/quiz/grading';
+import { gradeQuizForReview } from '@/lib/quiz/short-answer';
+import { persistQuizSubmission, quizViewStateFromAttempt } from '@/lib/quiz/view-state';
+import type { QuizQuestion } from '@/lib/types/stage';
 
 const values = new Map<string, string>();
 const localStorageStub = {
@@ -317,6 +320,72 @@ describe('quiz runtime authoritative reads', () => {
       answers: { q1: ['A', 'B'] },
     });
     expect(localStorageStub.getItem(ANSWERS_KEY_PREFIX + 'quiz-1')).toBeNull();
+  });
+
+  it.each([{ choice: 'A' }, { choice: 'A', short: '  ' }])(
+    'preserves a legacy submission with an unanswered short answer without scoring it',
+    async (answers) => {
+      const store = makeStore();
+      const runtimeDeps = deps(store, 'learner-a');
+      localStorageStub.setItem(ANSWERS_KEY_PREFIX + 'quiz-1', JSON.stringify(answers));
+      const questions: QuizQuestion[] = [
+        { id: 'choice', type: 'single', question: 'Select the observation.', answer: ['A'] },
+        { id: 'short', type: 'short_answer', question: 'Explain how you measured the leaves.' },
+      ];
+      const fetchGrade = vi.fn();
+      vi.stubGlobal('fetch', fetchGrade);
+
+      const input = { stageId: 'stage-1', sceneId: 'quiz-1' };
+      const loaded = await loadQuizAttemptState(input, runtimeDeps);
+      expect(loaded.state).toMatchObject({ phase: 'submitted', status: 'active', answers });
+      const hydrated = quizViewStateFromAttempt(loaded.state, questions);
+      expect(hydrated).toEqual({ phase: 'grading_unsupported', answers, results: [] });
+      expect(await gradeQuizForReview(questions, hydrated.answers, 'en-US')).toEqual({
+        status: 'unsupported',
+      });
+      expect(fetchGrade).not.toHaveBeenCalled();
+      expect((await loadQuizAttemptState(input, runtimeDeps)).state).toEqual(loaded.state);
+    },
+  );
+
+  it('retains zero-for-blank eligibility for a new submission after reopening', async () => {
+    const store = makeStore();
+    const runtimeDeps = deps(store, 'learner-a');
+    const input = { stageId: 'stage-1', sceneId: 'quiz-1' };
+    const { attemptId } = await loadQuizAttemptState(input, runtimeDeps);
+    const answers = { choice: 'A', answered: '我记录了三片叶子。' };
+    const questions: QuizQuestion[] = [
+      { id: 'choice', type: 'single', question: 'Select the observation.', answer: ['A'] },
+      { id: 'blank', type: 'short_answer', question: 'Explain how you measured the leaves.' },
+      { id: 'answered', type: 'short_answer', question: 'What did you record?' },
+    ];
+    await persistQuizSubmission({ ...input, attemptId, answers }, {
+      recordPhase: record => recordQuizAttempt(record, runtimeDeps),
+    });
+    // Repeating the submission from a client without the marker cannot clear it.
+    await recordQuizAttempt({ ...input, attemptId, phase: 'submitted', answers }, runtimeDeps);
+
+    const loaded = await loadQuizAttemptState(input, runtimeDeps);
+    const hydrated = quizViewStateFromAttempt(loaded.state, questions);
+    expect(hydrated).toEqual({ phase: 'grading_pending', answers, results: [], allowBlankShortAnswers: true });
+
+    const grader = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ score: 1, comment: '记录清楚。' }));
+    vi.stubGlobal('fetch', grader);
+    expect(await gradeQuizForReview(questions, hydrated.answers, 'en-US', undefined, {
+      allowBlankShortAnswers: hydrated.allowBlankShortAnswers,
+    })).toEqual({
+      status: 'graded',
+      results: [
+        { questionId: 'choice', correct: true, status: 'correct', earned: 1 },
+        { questionId: 'blank', correct: false, status: 'incorrect', earned: 0 },
+        { questionId: 'answered', correct: true, status: 'correct', earned: 1, aiComment: '记录清楚。' },
+      ],
+    });
+    expect(grader).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(grader.mock.calls[0][1]?.body))).toMatchObject({
+      question: 'What did you record?', userAnswer: answers.answered,
+    });
+    expect((await loadQuizAttemptState(input, runtimeDeps)).state?.answers).toEqual(answers);
   });
 
   it.each([

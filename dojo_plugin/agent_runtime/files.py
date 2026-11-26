@@ -24,14 +24,19 @@ MIME_TYPES = {
 }
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MIN_HTML_BODY_CHARS = 24
+_BIDI_CONTROLS = str.maketrans("", "", "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
 
 
 def _text(value, limit=200000):
     return str(value or "").replace("\x00", "")[:limit]
 
 
+def _display_title(value, limit):
+    return str(value or "").replace("\x00", "").translate(_BIDI_CONTROLS)[:limit].strip()
+
+
 def _clean_filename(value, file_format):
-    filename = pathlib.PurePath(_text(value, 240)).name
+    filename = pathlib.PurePath(_display_title(value, 240)).name
     filename = re.sub(r"[\\/:*?\"<>|\x00-\x1f\x7f]+", "-", filename)
     filename = re.sub(r"\s+", " ", filename).strip(" .-")[:220]
     if not filename:
@@ -379,7 +384,7 @@ def _docx_body(deliverable):
     return "".join(nodes)
 
 
-def render_docx(deliverable):
+def render_docx(deliverable, *, created_at=None):
     body = _docx_body(deliverable)
     document_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -397,7 +402,7 @@ def render_docx(deliverable):
 <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/><w:spacing w:before="260" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/><w:spacing w:before="220" w:after="100"/></w:pPr><w:rPr><w:b/><w:sz w:val="23"/></w:rPr></w:style>
 </w:styles>"""
-    timestamp = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    timestamp = (created_at or datetime.datetime.utcnow()).replace(microsecond=0).isoformat() + "Z"
     core_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>{_xml_text(deliverable.get("title") or deliverable.get("filename"))}</dc:title><dc:creator>玄甲</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">{timestamp}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">{timestamp}</dcterms:modified></cp:coreProperties>"""
     entries = {
@@ -412,7 +417,7 @@ def render_docx(deliverable):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, value in entries.items():
-            archive.writestr(name, value.encode("utf-8"))
+            archive.writestr(zipfile.ZipInfo(name), value.encode("utf-8"), compress_type=zipfile.ZIP_DEFLATED)
     return output.getvalue()
 
 
@@ -470,18 +475,22 @@ def _render_notebook(deliverable):
     return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
-def render_deliverable(deliverable):
+def render_deliverable(deliverable, *, created_at=None):
     if not isinstance(deliverable, dict):
         raise ValueError("Deliverable must be an object")
     file_format = _text(deliverable.get("format"), 16).strip().lower()
     if file_format not in SUPPORTED_FORMATS:
         raise ValueError("Unsupported deliverable format")
     filename = _clean_filename(deliverable.get("filename"), file_format)
+    title = _display_title(deliverable.get("title"), 500)
     document = _document(deliverable.get("document"))
+    if file_format in {"docx", "md", "txt", "html"} and "title" in document:
+        document = {**document, "title": _display_title(document["title"], 500)}
+    deliverable = {**deliverable, "title": title, "document": document}
     content = deliverable.get("content")
     data = deliverable.get("data")
     if file_format == "docx":
-        rendered = render_docx(deliverable)
+        rendered = render_docx(deliverable, created_at=created_at)
     elif file_format == "md":
         rendered = (
             _text(content)
@@ -494,7 +503,7 @@ def render_deliverable(deliverable):
         ).encode("utf-8")
     elif file_format == "html":
         html_source = (
-            _normalize_html_content(content, deliverable.get("title") or filename)
+            _normalize_html_content(content, title or filename)
             if isinstance(content, str) and content.strip()
             else document_to_html(document)
         )
@@ -516,7 +525,7 @@ def render_deliverable(deliverable):
         "format": file_format,
         "mime_type": MIME_TYPES[file_format],
         "content": rendered,
-        "title": _text(deliverable.get("title") or filename, 240).strip() or filename,
+        "title": title[:240].strip() or filename,
     }
 
 
@@ -544,7 +553,8 @@ def _public_download_url(job_id, file_id):
 def persist_agent_deliverables(job, deliverables):
     if not isinstance(deliverables, list):
         return []
-    rendered_deliverables = [render_deliverable(item) for item in deliverables[:4]]
+    created_at = getattr(job, "created", None)
+    rendered_deliverables = [render_deliverable(item, created_at=created_at) for item in deliverables[:4]]
     stored = []
     for ordinal, rendered in enumerate(rendered_deliverables):
         digest = hashlib.sha256(rendered["content"]).hexdigest()
@@ -613,11 +623,12 @@ def public_agent_file(value):
         return None
     if size <= 0 or size > MAX_FILE_BYTES:
         return None
+    filename = filename.translate(_BIDI_CONTROLS).strip() or f"教学文件.{file_format}"
     return {
         "id": file_id,
         "jobId": job_id,
         "filename": filename,
-        "title": str(value.get("title") or filename)[:240],
+        "title": _display_title(value.get("title"), 240) or filename,
         "format": file_format,
         "mimeType": MIME_TYPES[file_format],
         "size": size,

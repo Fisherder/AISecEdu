@@ -11,6 +11,92 @@ on:
 permissions:
   contents: read
 jobs:
+  harness-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify pinned source and build the teaching runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          upstream_tree=$(gh api repos/deepseek-ai/deepseek-harness/git/commits/3f321d32bfe382212a8ed8785c1d47a5a300aa23 --jq .tree.sha)
+          test "$(git cat-file -t HEAD:vendor/deepseek-harness)" = tree
+          test "$(git rev-parse HEAD:vendor/deepseek-harness)" = "$upstream_tree"
+          docker build -f services/deepseek-harness/Dockerfile --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" -t aisecedu-harness-test .
+          container=$(docker create aisecedu-harness-test)
+          trap 'docker rm "$container" >/dev/null' EXIT
+          docker cp "$container:/opt/deepseek-harness" "$RUNNER_TEMP/image-dsh"
+          diff --no-dereference --brief --recursive vendor/deepseek-harness "$RUNNER_TEMP/image-dsh"
+          test "$(docker run --rm --network none --read-only --tmpfs /tmp -e DSH_HOME=/tmp/dsh aisecedu-harness-test dsh --version)" = "0.2.2-rc.4"
+      - name: Exercise the official agent loop with the local model fixture
+        run: docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges aisecedu-harness-test node --test
+      - name: Verify the unmodified official Web UI in an offline container
+        run: >
+          docker run --rm -i --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=256m
+          --tmpfs /home/node:rw,nosuid,nodev,uid=1000,gid=1000,mode=0700,size=64m
+          --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges -w /tmp -e DSH_HOME=/tmp/dsh
+          aisecedu-harness-test node --input-type=module < test/harness_release_ui.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Send a teaching request across the real Python and Node clients
+        run: |
+          npm ci --prefix services/deepseek-harness --ignore-scripts --omit=dev --no-audit --no-fund
+          python -m pip install -r ops/team/requirements.txt
+          python test/harness_client_contract.py
+      - name: Package the verified teaching image for isolated acceptance
+        if: github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(fromJSON('["opened", "reopened", "synchronize", "ready_for_review"]'), github.event.action)
+        run: |
+          mkdir -p "$RUNNER_TEMP/teaching-image"
+          image="aisecedu/harness-acceptance:$GITHUB_SHA"
+          docker tag aisecedu-harness-test "$image"
+          docker save "$image" | gzip -1 > "$RUNNER_TEMP/teaching-image/harness.tar.gz"
+          git rev-parse HEAD > "$RUNNER_TEMP/teaching-image/tested-commit"
+          cd "$RUNNER_TEMP/teaching-image"
+          sha256sum harness.tar.gz tested-commit > SHA256SUMS
+      - name: Keep the image for the development acceptance window
+        if: github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(fromJSON('["opened", "reopened", "synchronize", "ready_for_review"]'), github.event.action)
+        uses: actions/upload-artifact@v4
+        with:
+          name: teaching-image-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/teaching-image
+          compression-level: 0
+          retention-days: 2
+  classroom-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: services/agent-runtime
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: services/agent-runtime/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: services/agent-runtime/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Type-check the entire runtime and show all historical diagnostics
+        run: python3 ../../ops/team/check_agent_runtime_types.py
+      - name: Exercise teaching contracts with synthetic data
+        run: >
+          pnpm exec vitest run tests/lib/chat tests/chat tests/pbl/question-turn.test.ts
+          tests/pbl/v2/instructor-harness-route.test.ts tests/pbl/v2/evaluator.test.ts tests/pbl/v2/runtime-model-pin.test.ts tests/pbl/v2/runtime-llm-entry.test.ts
+          tests/lib/server/debate-harness-route.test.ts tests/lib/server/student-teaching-routes.test.ts
+          tests/lib/orchestration/state-context.test.ts tests/integration/harness-courseware-job.test.ts
+          tests/integration/ordinary-teaching-jobs.test.ts tests/quiz
+          tests/ai/provider-transport-journal.test.ts tests/security/integrated-middleware-policy.test.ts
   contributor-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -25,6 +111,12 @@ jobs:
         with:
           node-version: '22'
       - run: make dev-check
+      - name: Test the teaching client, durable jobs and course catalogue
+        run: |
+          python -m pip install -r ops/team/requirements.txt
+          python -m pytest -q test/test_upstream_teaching_turn_unit.py test/test_teaching_image_auth_unit.py test/test_agent_harness_unit.py test/test_tutor_teaching_turn_unit.py test/test_guide_teaching_turn_unit.py test/test_student_personal_study_package_unit.py test/test_course_catalog_unit.py
+      - name: Verify cross-course navigation in desktop and mobile viewports
+        run: CHROME_BIN="$(command -v google-chrome)" node test/browser/teacher-course-navigation.mjs
       - name: Courseware editor browser component checks
         if: hashFiles('test/browser/courseware-quiz-editor.cjs') != ''
         env:

@@ -1,6 +1,8 @@
 import type { QuestionResult } from '@/lib/quiz/grading';
 import type { QuizAnswers } from '@/lib/quiz/persistence';
 import type { QuizAttemptState, QuizAttemptWriter, QuizDraftInput } from '@/lib/quiz/runtime';
+import { isQuizGradingUnsupported } from '@/lib/quiz/short-answer';
+import type { QuizQuestion } from '@/lib/types/stage';
 
 export type QuizRuntimeGate =
   | { status: 'loading' }
@@ -62,24 +64,40 @@ export async function persistQuizSubmission(
   input: QuizDraftInput,
   writer: Pick<QuizAttemptWriter, 'recordPhase'>,
 ): Promise<void> {
-  await writer.recordPhase({ ...input, phase: 'submitted' });
+  await writer.recordPhase({ ...input, phase: 'submitted', allowBlankShortAnswers: true });
 }
 
 export async function persistQuizReview(
   input: QuizDraftInput & { results: QuestionResult[] },
   writer: Pick<QuizAttemptWriter, 'recordPhase'>,
 ): Promise<void> {
-  await writer.recordPhase({ ...input, phase: 'reviewed' });
+  await writer.recordPhase({ ...input, phase: 'reviewed', requireCurrentSubmission: true });
+}
+
+export function canSubmitQuizAnswers(
+  questions: QuizQuestion[],
+  answers: QuizAnswers,
+  allowBlankShortAnswers = false,
+): boolean {
+  return questions.every((question) => {
+    if (question.type === 'short_answer' && allowBlankShortAnswers) return true;
+    const answer = answers[question.id];
+    if (!answer) return false;
+    if (Array.isArray(answer)) return answer.length > 0;
+    return answer.trim().length > 0;
+  });
 }
 
 export interface QuizViewHydratedState {
-  phase: 'not_started' | 'answering' | 'reviewing';
+  phase: 'not_started' | 'answering' | 'grading_pending' | 'grading_unsupported' | 'reviewing';
   answers: QuizAnswers;
+  allowBlankShortAnswers?: true;
   results: QuestionResult[];
 }
 
 export function quizViewStateFromAttempt(
   state: QuizAttemptState | undefined,
+  questions: QuizQuestion[],
 ): QuizViewHydratedState {
   if (!state) return { phase: 'not_started', answers: {}, results: [] };
   if (state.phase === 'reviewed') {
@@ -87,6 +105,16 @@ export function quizViewStateFromAttempt(
       phase: 'reviewing',
       answers: state.answers,
       results: state.results ?? [],
+      ...(state.allowBlankShortAnswers ? { allowBlankShortAnswers: true } : {}),
+    };
+  }
+  if (state.phase === 'submitted') {
+    const phase = isQuizGradingUnsupported(questions, state.answers, state.allowBlankShortAnswers)
+      ? 'grading_unsupported'
+      : 'grading_pending';
+    return {
+      phase, answers: state.answers, results: [],
+      ...(state.allowBlankShortAnswers ? { allowBlankShortAnswers: true } : {}),
     };
   }
   if (state.phase === 'draft' && Object.keys(state.answers).length === 0) {

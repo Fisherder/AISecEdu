@@ -96,6 +96,11 @@ case "$ACTION" in
             profiles+=("main" "workspace")
         fi
 
+        if [[ "$WORKSPACE_NODE" -eq 0 && -n "${HARNESS_DEEPSEEK_API_KEY:-}" ]]; then
+            case "$(printf %s "${DOJO_AI_ENABLED:-auto}" | tr A-Z a-z)" in
+                1|true|yes|auto) profiles+=(harness) ;;
+            esac
+        fi
         [ "${ENABLE_SPLUNK}" = "true" ] && profiles+=("splunk")
 
         args=(--env-file=/data/config.env)
@@ -130,9 +135,18 @@ case "$ACTION" in
 
     # HELP: backup: does a dojo db backup into the `/data/backups` directory.
     "backup")
+        set -e
         mkdir -p /data/backups
-        BACKUP_PATH="/data/backups/db-$(date -Iseconds).dump"
-        docker exec db pg_dump -Fc > "$BACKUP_PATH"
+        backup_timestamp=$(date -Iseconds)
+        staged_backup=$(mktemp "/data/backups/.db-${backup_timestamp}.XXXXXX")
+        trap 'rm -f -- "$staged_backup"' EXIT
+        docker exec db pg_dump -Fc --dbname="${DB_NAME:?DB_NAME must be set}" > "$staged_backup"
+        if [ ! -s "$staged_backup" ]; then
+            echo "Error: database backup is empty" >&2
+            exit 1
+        fi
+        BACKUP_PATH="/data/backups/${staged_backup##*/.}.dump"
+        ln -- "$staged_backup" "$BACKUP_PATH"
         echo "Created backup at $BACKUP_PATH"
         ;;
 
@@ -140,21 +154,22 @@ case "$ACTION" in
     "restore")
         BACKUP_PATH="/data/backups/$1"
         if [ -f "$BACKUP_PATH" ]; then
-            docker exec -i db pg_restore --clean --if-exists --dbname="$DB_NAME" < "$BACKUP_PATH"
+            docker exec -i db pg_restore --single-transaction --clean --if-exists --dbname="${DB_NAME:?DB_NAME must be set}" < "$BACKUP_PATH"
         else
             echo "Error: missing file to restore from" >&2
+            exit 1
         fi
         ;;
 
     # HELP: cloud-backup: upload the last day's worth of cloud backups to S3, but encrypt it at rest
     "cloud-backup")
+        set -eo pipefail
         [ -z ${BACKUP_AES_KEY_FILE+x} ]  && (echo "To use cloud backup, BACKUP_AES_KEY_FILE must be set"; exit -1)
-        [ -f $BACKUP_AES_KEY_FILE ] || (echo "To use cloud backup, BACKUP_AES_KEY_FILE must be set to a file, but is $BACKUP_AES_KEY_FILE instead"; exit -1)
+        [ -f "$BACKUP_AES_KEY_FILE" ] || (echo "To use cloud backup, BACKUP_AES_KEY_FILE must be set to a file, but is $BACKUP_AES_KEY_FILE instead"; exit -1)
         [ -z ${S3_BACKUP_BUCKET+x} ] && (echo "To use cloud backup, S3_BACKUP_BUCKET must be set to the S3 bucket to use"; exit -1)
-        set -e
-        for f in $(find /data/backups -mtime -1 -type f)
-        do
-            BACKUP_FILENAME="$(basename $f).enc"
+        find /data/backups -mtime -1 -type f ! -name '.db-*' -print0 |
+        while IFS= read -r -d '' f; do
+            BACKUP_FILENAME="${f##*/}.enc"
             OUT_FILE="/tmp/$BACKUP_FILENAME"
             openssl enc -in "$f" -out "$OUT_FILE" -e -aes256 -pbkdf2 -kfile "$BACKUP_AES_KEY_FILE"
             echo "created encrypted $OUT_FILE"

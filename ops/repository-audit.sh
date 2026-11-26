@@ -67,7 +67,7 @@ while IFS= read -r -d '' source_path; do
             ;;
         .env|*/.env|.env.*|*/.env.*)
             case "$path" in
-                *.env.example|*/.env.example) ;;
+                *.env.example|*/.env.example|vendor/deepseek-harness/apps/desktop/.env.macos.example|vendor/deepseek-harness/apps/desktop/.env.windows.example) ;;
                 *) fail "local environment file is tracked: $path" ;;
             esac
             ;;

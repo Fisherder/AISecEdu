@@ -118,7 +118,9 @@
     "softClosing": "Continuar discussão",
     "error": {
       "emptyAgentResponses": "Os agentes retornaram respostas vazias; a discussão foi interrompida. Tente novamente ou verifique as configurações do modelo.",
-      "streamInterrupted": "O fluxo de dados terminou inesperadamente; a discussão não foi concluída. Por favor, tente novamente."
+      "streamInterrupted": "O fluxo de dados terminou inesperadamente; a discussão não foi concluída. Por favor, tente novamente.",
+      "invalidDirectorDecision": "O diretor da sala de aula retornou uma decisão inválida.",
+      "directorInterrupted": "Esta rodada da aula terminou antes do previsto. Você pode continuar fazendo perguntas."
     },
     "tabs": {
       "lecture": "Anotações",
@@ -551,6 +553,11 @@
     "submitAnswers": "Enviar Respostas",
     "aiGrading": "A IA está corrigindo...",
     "aiGradingWait": "Aguarde, analisando suas respostas",
+    "gradingPending": "Correção pendente",
+    "gradingPendingDetail": "Suas respostas foram salvas. Tente novamente para concluir a correção.",
+    "gradingUnsupported": "Correção automática indisponível",
+    "gradingUnsupportedDetail": "Suas respostas foram salvas. Pergunte ao professor como este questionário pode ser corrigido.",
+    "retryGrading": "Tentar corrigir novamente",
     "quizReport": "Relatório do Questionário",
     "retry": "Tentar novamente"
   },
@@ -642,6 +649,12 @@
       }
     },
     "v2": {
+      "instructorErrors": {
+        "unsupportedQuestion": "Faça uma pergunta sobre o conteúdo sem anexar registros de experimentos ou dados privados.",
+        "unreadableReply": "Não foi possível ler a resposta do tutor do projeto.",
+        "unsupportedReply": "O tutor do projeto retornou uma ação didática não compatível.",
+        "unavailable": "O tutor do projeto está temporariamente indisponível."
+      },
       "hero": {
         "title": "Project-Based Learning",
         "stage": "Stages",
@@ -761,6 +774,8 @@
         "pdfNoText": "No extractable text found in this PDF.",
         "imageUploadFailed": "Failed to upload image: {{error}}",
         "imageTooLargeNoStorage": "Image too large to attach without storage configured (max 2 MB locally).",
+        "imageCaptionForEvaluation": "Adicione uma descrição para a avaliação ou escolha enviar uma nova imagem didática se o curso permitir.",
+        "sendNewTeachingImage": "Envie a imagem didática recém-selecionada para o modelo externo nesta avaliação. Os anexos salvos ficam no histórico de entregas.",
         "imageNeedsCaptionNoVision": "The current model can't read images. Add a text description of the image before submitting, or switch to a vision-capable model in Settings.",
         "unsupportedFileType": "Unsupported file type. Only text files (.txt, .md, .csv, .json, .py, …) and PDF are accepted.",
         "pasteTab": "Paste text / image",

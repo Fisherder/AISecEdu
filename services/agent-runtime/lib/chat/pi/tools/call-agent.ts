@@ -2,8 +2,6 @@ import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { Type, type Static } from 'typebox';
 import type { LanguageModel } from 'ai';
 import { nanoid } from 'nanoid';
-import { buildAgent } from '@/lib/agent/runtime/build-agent';
-import { createCallLlmStreamFn } from '@/lib/agent/runtime/stream-fn';
 import {
   createParserState,
   finalizeParser,
@@ -14,6 +12,8 @@ import {
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import type { AgentTurnSummary, WhiteboardActionRecord } from '@/lib/orchestration/types';
 import type { ThinkingConfig } from '@/lib/types/provider';
+import { recordHarnessUsage, type HarnessTurn } from '@/lib/server/agent-harness/classroom-turn';
+import { convertMessagesToOpenAI } from '@/lib/orchestration/summarizers/message-converter';
 import type { DirectorSceneEvidenceMetadata } from './read-scene';
 import type { DirectorWebEvidenceMetadata } from './web-search';
 import type { ParsedAction, StatelessChatRequest } from '@/lib/types/chat';
@@ -504,10 +504,11 @@ export function buildCallAgentTool(opts: {
   body: StatelessChatRequest;
   agentConfigs: AgentConfig[];
   send: SendEvent;
-  languageModel: LanguageModel;
+  languageModel?: LanguageModel;
+  harnessTurn?: HarnessTurn;
   onAgentDone: (summary: AgentTurnSummary) => void;
   onActionDone: (record?: WhiteboardActionRecord) => void;
-  thinkingConfig: ThinkingConfig;
+  thinkingConfig?: ThinkingConfig;
   maxOutputTokens?: number;
   abortSignal: AbortSignal;
   maxAgentTurns: number;
@@ -621,6 +622,11 @@ export function buildCallAgentTool(opts: {
         };
       }
 
+      const { harnessTurn, languageModel } = opts;
+      if (!harnessTurn && !languageModel) {
+        throw new Error('Classroom role model is unavailable');
+      }
+
       // Evidence is request-scoped and belongs to exactly one valid child delegation.
       // Take it before starting/building the child so any downstream failure cannot
       // leak the packet to a later agent.
@@ -679,33 +685,20 @@ export function buildCallAgentTool(opts: {
       });
       const childToolsByName = new Map(childTools.map((tool) => [tool.name, tool]));
 
-      const child = buildAgent({
-        streamFn: createCallLlmStreamFn({
-          languageModel: opts.languageModel,
-          source: 'pi-chat-child',
-          thinkingConfig: opts.thinkingConfig,
-          maxOutputTokens: opts.maxOutputTokens,
-          abortSignal: childAbort.signal,
-        }),
-        systemPrompt: buildChildPrompt(
-          opts.body,
-          agent,
-          opts.getAgentResponses(),
-          opts.getWhiteboardLedger(),
-          childTools.map((tool) => tool.name),
-        ),
-        tools: [],
-        allowedToolNames: new Set(),
-        history: toHistoryMessages(opts.body.messages),
+      const systemPrompt = buildChildPrompt(
+        opts.body,
+        agent,
+        opts.getAgentResponses(),
+        opts.getWhiteboardLedger(),
+        childTools.map((tool) => tool.name),
+      );
+      const prompt = buildChildTurnPrompt(params.instruction, agent.role, {
+        scene: sceneEvidence?.content,
+        web: webEvidence?.content,
       });
-
       const parserState = createParserState();
-      const unsubscribe = child.subscribe(async (event) => {
-        const delta = getAssistantTextDelta(event);
-        if (!delta) return;
-        sawStructuredOutput = sawStructuredOutput || delta.includes('[');
-        const result = parseStructuredChunk(delta, parserState);
-        await processParseResult({
+      const process = (result: ParseResult) =>
+        processParseResult({
           result,
           messageId,
           send: opts.send,
@@ -716,45 +709,71 @@ export function buildCallAgentTool(opts: {
           },
           warn,
         });
-      });
+      const onText = (delta: string) => {
+        sawStructuredOutput ||= delta.includes('[');
+        return process(parseStructuredChunk(delta, parserState));
+      };
 
+      let rawText = '';
       let childErrored = false;
+      let unsubscribe: (() => void) | undefined;
       try {
-        await child.prompt(
-          buildChildTurnPrompt(params.instruction, agent.role, {
-            scene: sceneEvidence?.content,
-            web: webEvidence?.content,
-          }),
-        );
-        await child.waitForIdle();
+        opts.abortSignal.throwIfAborted();
+        signal?.throwIfAborted();
+        if (harnessTurn) {
+          const result = await harnessTurn(
+            [
+              { role: 'system', content: systemPrompt },
+              ...convertMessagesToOpenAI(opts.body.messages.slice(-12), agent.id),
+              { role: 'user', content: prompt },
+            ],
+            childAbort.signal,
+          );
+          await recordHarnessUsage(result, 'pi-chat-child');
+          rawText = result.text;
+          await onText(result.text);
+        } else if (languageModel) {
+          const [{ buildAgent }, { createCallLlmStreamFn }] = await Promise.all([
+            import('@/lib/agent/runtime/build-agent'),
+            import('@/lib/agent/runtime/stream-fn'),
+          ]);
+          const child = buildAgent({
+            streamFn: createCallLlmStreamFn({
+              languageModel,
+              source: 'pi-chat-child',
+              thinkingConfig: opts.thinkingConfig,
+              maxOutputTokens: opts.maxOutputTokens,
+              abortSignal: childAbort.signal,
+            }),
+            systemPrompt,
+            tools: [],
+            allowedToolNames: new Set(),
+            history: toHistoryMessages(opts.body.messages),
+          });
+          unsubscribe = child.subscribe(async (event) => {
+            const delta = getAssistantTextDelta(event);
+            if (delta) await onText(delta);
+          });
+          await child.prompt(prompt);
+          await child.waitForIdle();
+          rawText = extractLastAssistantText(child.state.messages);
+        }
       } catch (error) {
-        // Propagate genuine aborts; otherwise treat a failed child run as an empty turn
-        // so it still records via onAgentDone below (counts toward the turn/retry budget)
-        // instead of throwing out of execute and skipping the counter.
-        if (opts.abortSignal.aborted || signal?.aborted) throw error;
         childErrored = true;
+        if (opts.abortSignal.aborted || signal?.aborted || harnessTurn) throw error;
       } finally {
-        unsubscribe();
+        unsubscribe?.();
         opts.abortSignal.removeEventListener('abort', abortChild);
         signal?.removeEventListener('abort', abortChild);
+        if (harnessTurn && childErrored) {
+          await opts.send({ type: 'agent_end', data: { messageId, agentId: agent.id } });
+        }
       }
 
-      await processParseResult({
-        result: finalizeParser(parserState),
-        messageId,
-        send: opts.send,
-        toolsByName: childToolsByName,
-        body: opts.body,
-        appendText: (content) => {
-          text += content;
-        },
-        warn,
-      });
+      await process(finalizeParser(parserState));
 
       const emittedText = text.trim();
-      const fallbackText = sawStructuredOutput
-        ? ''
-        : sanitizeVisibleSpeech(extractLastAssistantText(child.state.messages)).trim();
+      const fallbackText = sawStructuredOutput ? '' : sanitizeVisibleSpeech(rawText).trim();
       // Bug 2 guard: only count a turn as real teaching when it produced genuine
       // visible speech. Two distinct sources need different trust levels:
       //   - `emittedText`: already streamed through processParseResult, where every

@@ -14,12 +14,10 @@
 
 import { NextRequest } from 'next/server';
 import { statelessGenerate } from '@/lib/orchestration/stateless-generate';
-import { isProviderKeyRequired } from '@/lib/ai/providers';
 import type { StatelessChatRequest, StatelessEvent } from '@/lib/types/chat';
 import { apiError } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
-import { resolveModel } from '@/lib/server/resolve-model';
-import type { ThinkingConfig } from '@/lib/types/provider';
+import { createClassroomTurn } from '@/lib/server/agent-harness/classroom-turn';
 const log = createLogger('Chat API');
 
 // Allow streaming responses up to 60 seconds
@@ -33,22 +31,17 @@ export const maxDuration = 60;
  * {
  *   messages: UIMessage[],
  *   storeState: { stage, scenes, currentSceneId, mode },
- *   config: { agentIds, sessionType? },
- *   apiKey: string,
- *   baseUrl?: string,
- *   model?: string
+ *   config: { agentIds, sessionType? }
  * }
  *
  * Response: SSE stream of StatelessEvent
  */
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
-  let chatModel: string | undefined;
   let chatMessageCount: number | undefined;
 
   try {
     const body: StatelessChatRequest = await req.json();
-    chatModel = body.model;
     chatMessageCount = body.messages?.length;
 
     // Validate required fields
@@ -64,25 +57,8 @@ export async function POST(req: NextRequest) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing required field: config.agentIds');
     }
 
-    const {
-      model: languageModel,
-      apiKey: resolvedApiKey,
-      providerId,
-      thinkingConfig: resolvedThinking,
-    } = await resolveModel({
-      modelString: body.model,
-      stage: 'chat-adapter',
-      apiKey: body.apiKey,
-      baseUrl: body.baseUrl,
-      providerType: body.providerType,
-      // Let resolveModel arbitrate thinking too: a routed chat-adapter's thinking
-      // wins, an unrouted one honors this client thinking (see resolve-model.ts).
-      thinkingConfig: body.thinkingConfig ?? body.thinking,
-    });
-
-    if (isProviderKeyRequired(providerId) && !resolvedApiKey) {
-      return apiError('MISSING_API_KEY', 401, 'API Key is required');
-    }
+    const runTurn = createClassroomTurn();
+    if (!runTurn) return apiError('UPSTREAM_ERROR', 503, '课堂对话服务尚未配置。');
 
     log.info('Processing request');
     log.info(
@@ -122,22 +98,8 @@ export async function POST(req: NextRequest) {
       try {
         startHeartbeat();
 
-        // Use the resolved thinking (route-pinned for a routed chat-adapter,
-        // else the client's). Default to disabled for low-latency chat.
-        const thinkingConfig: ThinkingConfig = resolvedThinking ?? {
-          mode: 'disabled',
-          enabled: false,
-        };
-
-        const generator = statelessGenerate(
-          {
-            ...body,
-            apiKey: resolvedApiKey,
-          },
-          signal,
-          languageModel,
-          thinkingConfig,
-        );
+        const deadline = AbortSignal.any([signal, AbortSignal.timeout(55_000)]);
+        const generator = statelessGenerate(body, deadline, runTurn);
 
         for await (const event of generator) {
           if (signal.aborted) {
@@ -166,7 +128,7 @@ export async function POST(req: NextRequest) {
         }
 
         log.error(
-          `Chat stream error [model=${body.model ?? 'unknown'}, agents=${body.config?.agentIds?.length ?? 0}, messages=${body.messages?.length ?? 0}]:`,
+          `Chat stream error [agents=${body.config?.agentIds?.length ?? 0}, messages=${body.messages?.length ?? 0}]:`,
           error,
         );
 
@@ -194,10 +156,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    log.error(
-      `Chat request failed [model=${chatModel ?? 'unknown'}, messages=${chatMessageCount ?? 0}]:`,
-      error,
-    );
+    log.error(`Chat request failed [messages=${chatMessageCount ?? 0}]:`, error);
     return apiError(
       'INTERNAL_ERROR',
       500,

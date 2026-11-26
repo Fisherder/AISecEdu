@@ -177,14 +177,16 @@ test.describe('Quiz content surface (#657)', () => {
       },
     ]);
 
-    // Deterministic AI grading for the short-answer question.
-    await page.route('**/api/quiz-grade', (route) =>
-      route.fulfill({
-        status: 200,
+    let gradingRequests = 0;
+    await page.route('**/api/quiz-grade', (route) => {
+      gradingRequests += 1;
+      const first = gradingRequests === 1;
+      return route.fulfill({
+        status: first ? 503 : 200,
         contentType: 'application/json',
-        body: JSON.stringify({ score: 1, comment: 'Well phrased.' }),
-      }),
-    );
+        body: JSON.stringify(first ? { success: false } : { score: 1, comment: 'Well phrased.' }),
+      });
+    });
 
     const classroom = new ClassroomPage(page);
     await classroom.goto(STAGE);
@@ -252,7 +254,11 @@ test.describe('Quiz content surface (#657)', () => {
     await expect(submit).toBeEnabled();
     await submit.click();
 
-    // Grading completes → reviewing. All three correct → 3 / 3.
+    await expect(page.getByText('Grading pending')).toBeVisible();
+    await expect(page.getByText('Quiz Report')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Retry grading' }).click();
+
+    // The saved submission is graded on retry. All three answers are correct.
     await expect(page.getByText('/ 3')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText(/3\s+correct/i)).toBeVisible();
 

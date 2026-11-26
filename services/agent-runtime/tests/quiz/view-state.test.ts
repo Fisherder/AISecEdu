@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  canSubmitQuizAnswers,
   createQuizViewLifetime,
   isQuizRuntimeReady,
   persistQuizReview,
@@ -10,31 +11,37 @@ import {
 } from '@/lib/quiz/view-state';
 
 describe('quiz view runtime hydration', () => {
-  it('hydrates a draft or submission back into answering', () => {
+  it('hydrates a draft back into answering', () => {
     expect(
-      quizViewStateFromAttempt({
-        sessionId: 'attempt-1',
-        status: 'active',
-        phase: 'draft',
-        answers: { q1: 'A' },
-      }),
+      quizViewStateFromAttempt(
+        {
+          sessionId: 'attempt-1',
+          status: 'active',
+          phase: 'draft',
+          answers: { q1: 'A' },
+        },
+        [],
+      ),
     ).toEqual({ phase: 'answering', answers: { q1: 'A' }, results: [] });
   });
 
   it('hydrates reviewed empty results into reviewing', () => {
     expect(
-      quizViewStateFromAttempt({
-        sessionId: 'attempt-1',
-        status: 'completed',
-        phase: 'reviewed',
-        answers: { q1: 'A' },
-        results: [],
-      }),
+      quizViewStateFromAttempt(
+        {
+          sessionId: 'attempt-1',
+          status: 'completed',
+          phase: 'reviewed',
+          answers: { q1: 'A' },
+          results: [],
+        },
+        [],
+      ),
     ).toEqual({ phase: 'reviewing', answers: { q1: 'A' }, results: [] });
   });
 
   it('uses a clean cover when no attempt exists', () => {
-    expect(quizViewStateFromAttempt(undefined)).toEqual({
+    expect(quizViewStateFromAttempt(undefined, [])).toEqual({
       phase: 'not_started',
       answers: {},
       results: [],
@@ -43,12 +50,15 @@ describe('quiz view runtime hydration', () => {
 
   it('uses the cover for a persisted empty retry marker', () => {
     expect(
-      quizViewStateFromAttempt({
-        sessionId: 'attempt-1:retry:1',
-        status: 'active',
-        phase: 'draft',
-        answers: {},
-      }),
+      quizViewStateFromAttempt(
+        {
+          sessionId: 'attempt-1:retry:1',
+          status: 'active',
+          phase: 'draft',
+          answers: {},
+        },
+        [],
+      ),
     ).toEqual({ phase: 'not_started', answers: {}, results: [] });
   });
 
@@ -125,8 +135,8 @@ describe('quiz view runtime hydration', () => {
     await Promise.resolve();
 
     expect(calls).toEqual([
-      { ...base, phase: 'submitted' },
-      { ...base, phase: 'reviewed', results: [] },
+      { ...base, phase: 'submitted', allowBlankShortAnswers: true },
+      { ...base, phase: 'reviewed', results: [], requireCurrentSubmission: true },
     ]);
     expect(settled).toBe(false);
 
@@ -168,5 +178,27 @@ describe('quiz view runtime hydration', () => {
 
     expect(onSuccess).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledExactlyOnceWith(error);
+  });
+
+  it('requires non-blank short answers before initial submit while keeping hydrated blank submissions gradable', () => {
+    const questions = [
+      { id: 'c1', type: 'single' as const, question: 'Pick A', options: [], answer: ['A'] },
+      { id: 's1', type: 'short_answer' as const, question: 'Explain why', answer: [] },
+    ];
+    expect(canSubmitQuizAnswers(questions, { c1: 'A' })).toBe(false);
+    expect(canSubmitQuizAnswers(questions, { c1: 'A', s1: '   ' })).toBe(false);
+    expect(canSubmitQuizAnswers(questions, { c1: 'A', s1: 'Because of x' })).toBe(true);
+    expect(canSubmitQuizAnswers(questions, { c1: 'A' }, true)).toBe(true);
+    expect(
+      quizViewStateFromAttempt(
+        { sessionId: 'a1', status: 'completed', phase: 'reviewed', answers: { c1: 'A' }, allowBlankShortAnswers: true, results: [] },
+        questions,
+      ),
+    ).toEqual({
+      phase: 'reviewing',
+      answers: { c1: 'A' },
+      allowBlankShortAnswers: true,
+      results: [],
+    });
   });
 });

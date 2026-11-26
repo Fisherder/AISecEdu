@@ -15,13 +15,13 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/hooks/use-i18n';
-import { getCurrentModelConfig } from '@/lib/utils/model-config';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('QuizView');
 import type { QuizQuestion } from '@/lib/types/stage';
 import { SpeechButton } from '@/components/audio/speech-button';
-import { gradeChoiceQuestions, isShortAnswer, type QuestionResult } from '@/lib/quiz/grading';
+import type { QuestionResult } from '@/lib/quiz/grading';
+import { gradeQuizForReview } from '@/lib/quiz/short-answer';
 import { renderQuizMathText } from '@/lib/quiz/math-text';
 import { writeDraftRecovery } from '@/lib/quiz/persistence';
 import {
@@ -31,6 +31,7 @@ import {
   type QuizAttemptWriter,
 } from '@/lib/quiz/runtime';
 import {
+  canSubmitQuizAnswers,
   createQuizViewLifetime,
   isQuizRuntimeReady,
   persistQuizReview,
@@ -44,7 +45,7 @@ import {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type Phase = 'not_started' | 'answering' | 'submitting' | 'grading' | 'reviewing';
+type Phase = 'not_started' | 'answering' | 'submitting' | 'grading' | 'grading_pending' | 'grading_unsupported' | 'reviewing';
 
 interface QuizViewProps {
   readonly questions: QuizQuestion[];
@@ -88,61 +89,6 @@ const QuizMathText = memo(function QuizMathText({
     </span>
   );
 });
-
-/** Call /api/quiz-grade for a single short-answer question. */
-async function gradeShortAnswerQuestion(
-  q: QuizQuestion,
-  userAnswer: string,
-  language: string,
-): Promise<QuestionResult> {
-  const pts = q.points ?? 1;
-  try {
-    const modelConfig = getCurrentModelConfig();
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'x-model': modelConfig.modelString,
-      'x-api-key': modelConfig.apiKey,
-    };
-    if (modelConfig.baseUrl) headers['x-base-url'] = modelConfig.baseUrl;
-    if (modelConfig.providerType) headers['x-provider-type'] = modelConfig.providerType;
-
-    const res = await fetch('/api/quiz-grade', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        question: q.question,
-        userAnswer,
-        points: pts,
-        commentPrompt: q.commentPrompt,
-        language,
-      }),
-    });
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = (await res.json()) as { score: number; comment: string };
-    const earned = Math.max(0, Math.min(pts, data.score));
-    return {
-      questionId: q.id,
-      correct: earned >= pts * 0.8,
-      status: earned >= pts * 0.8 ? 'correct' : 'incorrect',
-      earned,
-      aiComment: data.comment,
-    };
-  } catch (err) {
-    log.error('[quiz-view] AI grading failed for', q.id, err);
-    // Fallback: give half credit
-    return {
-      questionId: q.id,
-      correct: null,
-      status: 'incorrect',
-      earned: Math.round(pts * 0.5),
-      aiComment:
-        language === 'zh-CN'
-          ? '评分服务暂时不可用，已给予基础分。'
-          : 'Grading service unavailable. Base score given.',
-    };
-  }
-}
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
@@ -705,6 +651,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
   const [runtimeGate, setRuntimeGate] = useState<QuizRuntimeGate>({ status: 'loading' });
   const [hydrationVersion, setHydrationVersion] = useState(0);
   const [retrying, setRetrying] = useState(false);
+  const [allowBlankShortAnswers, setAllowBlankShortAnswers] = useState(false);
   const viewLifetimeRef = useRef<QuizViewLifetime | null>(null);
   viewLifetimeRef.current ??= createQuizViewLifetime();
   const viewLifetime = viewLifetimeRef.current;
@@ -727,10 +674,11 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     void loadQuizAttemptState({ stageId, sceneId })
       .then(({ attemptId: nextAttemptId, state }) => {
         if (cancelled) return;
-        const next = quizViewStateFromAttempt(state);
+        const next = quizViewStateFromAttempt(state, questions);
         setPhase(next.phase);
         setAnswers(next.answers);
         setResults(next.results);
+        setAllowBlankShortAnswers(next.allowBlankShortAnswers === true);
         setRuntimeGate({ status: 'ready', attemptId: nextAttemptId });
       })
       .catch((error) => {
@@ -742,7 +690,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
       viewLifetime.invalidate();
       void runtimeWriter.flushDraft();
     };
-  }, [hydrationVersion, runtimeWriter, sceneId, stageId, viewLifetime]);
+  }, [hydrationVersion, questions, runtimeWriter, sceneId, stageId, viewLifetime]);
 
   const attemptId = isQuizRuntimeReady(runtimeGate) ? runtimeGate.attemptId : null;
 
@@ -751,14 +699,10 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     [questions],
   );
 
-  const allAnswered = useMemo(() => {
-    return questions.every((q) => {
-      const a = answers[q.id];
-      if (!a) return false;
-      if (Array.isArray(a)) return a.length > 0;
-      return (a as string).trim().length > 0;
-    });
-  }, [questions, answers]);
+  const canSubmit = useMemo(
+    () => canSubmitQuizAnswers(questions, answers, allowBlankShortAnswers),
+    [questions, answers, allowBlankShortAnswers],
+  );
 
   const handleSetAnswer = useCallback(
     (questionId: string, value: string | string[]) => {
@@ -785,7 +729,10 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     await runQuizPersistenceTransition(
       () => persistQuizSubmission({ stageId, sceneId, attemptId, answers }, runtimeWriter),
       viewLifetime,
-      () => setPhase('grading'),
+      () => {
+        setAllowBlankShortAnswers(true);
+        setPhase('grading');
+      },
       (error) => {
         log.warn('Failed to persist quiz submission:', error);
         setRuntimeGate({ status: 'error' });
@@ -793,31 +740,19 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     );
   }, [attemptId, answers, runtimeWriter, sceneId, stageId, viewLifetime]);
 
-  // When entering grading phase, grade choice questions locally + call API for short-answer
   useEffect(() => {
     if (phase !== 'grading') return;
+    const controller = new AbortController();
     let cancelled = false;
 
     (async () => {
-      // 1. Grade choice questions locally (instant)
-      const choiceResults = gradeChoiceQuestions(questions, answers);
-
-      // 2. Grade short-answer questions via AI API (parallel)
-      const shortAnswerQs = questions.filter(isShortAnswer);
-      const aiResults = await Promise.all(
-        shortAnswerQs.map((q) =>
-          gradeShortAnswerQuestion(q, (answers[q.id] as string) ?? '', locale),
-        ),
-      );
-
+      const grading = await gradeQuizForReview(questions, answers, locale, controller.signal, { allowBlankShortAnswers });
       if (cancelled) return;
-
-      // 3. Merge results in original question order
-      const allResultsMap = new Map<string, QuestionResult>();
-      for (const r of [...choiceResults, ...aiResults]) {
-        allResultsMap.set(r.questionId, r);
+      if (grading.status !== 'graded') {
+        setPhase(grading.status === 'unsupported' ? 'grading_unsupported' : 'grading_pending');
+        return;
       }
-      const ordered = questions.map((q) => allResultsMap.get(q.id)!).filter(Boolean);
+      const ordered = grading.results;
 
       if (!attemptId) {
         setRuntimeGate({ status: 'error' });
@@ -830,7 +765,12 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
         );
       } catch (error) {
         log.warn('Failed to persist quiz review:', error);
-        if (!cancelled) setRuntimeGate({ status: 'error' });
+        if (cancelled) return;
+        if (error instanceof QuizRetryProgressedError) {
+          setHydrationVersion((version) => version + 1);
+          return;
+        }
+        setPhase('grading_pending');
         return;
       }
       if (cancelled) return;
@@ -851,8 +791,9 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [phase, questions, answers, locale, sceneId, stageId, attemptId, runtimeWriter]);
+  }, [allowBlankShortAnswers, phase, questions, answers, locale, sceneId, stageId, attemptId, runtimeWriter]);
 
   const handleRetry = useCallback(async () => {
     if (!attemptId || retrying) return;
@@ -865,7 +806,9 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
         setPhase('not_started');
         setAnswers({});
         setResults([]);
+        setAllowBlankShortAnswers(false);
         setRetrying(false);
+        setHydrationVersion((version) => version + 1);
       },
       (error) => {
         log.warn('Failed to persist quiz retry:', error);
@@ -879,15 +822,18 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     );
   }, [attemptId, retrying, runtimeWriter, sceneId, stageId, viewLifetime]);
 
-  const earnedScore = useMemo(() => results.reduce((sum, r) => sum + r.earned, 0), [results]);
-
   const resultMap = useMemo(() => {
-    const map: Record<string, QuestionResult> = {};
-    results.forEach((r) => {
-      map[r.questionId] = r;
-    });
-    return map;
-  }, [results]);
+    const validResults: Record<string, QuestionResult> = {};
+    for (const result of results) {
+      const question = questions.find((item) => item.id === result.questionId);
+      if (question && Number.isFinite(result.earned) && result.earned >= 0 && result.earned <= (question.points ?? 1)) {
+        validResults[result.questionId] = result;
+      }
+    }
+    return validResults;
+  }, [questions, results]);
+  const reviewedResults = questions.map((question) => resultMap[question.id]).filter(Boolean);
+  const earnedScore = reviewedResults.reduce((sum, result) => sum + result.earned, 0);
 
   if (runtimeGate.status === 'error') {
     return (
@@ -960,10 +906,10 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
               <button
                 type="button"
                 onClick={() => void handleSubmit()}
-                disabled={!allAnswered}
+                disabled={!canSubmit}
                 className={cn(
                   'px-4 py-1.5 rounded-lg text-xs font-medium transition-all',
-                  allAnswered
+                  canSubmit
                     ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white shadow-sm hover:shadow-md hover:shadow-violet-200/50 dark:hover:shadow-violet-900/50 active:scale-[0.97]'
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed',
                 )}
@@ -1048,6 +994,27 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
           </motion.div>
         )}
 
+        {(phase === 'grading_pending' || phase === 'grading_unsupported') && (
+          <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+            <p className="text-base font-semibold text-gray-700 dark:text-gray-200">
+              {t(phase === 'grading_pending' ? 'quiz.gradingPending' : 'quiz.gradingUnsupported')}
+            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {t(phase === 'grading_pending' ? 'quiz.gradingPendingDetail' : 'quiz.gradingUnsupportedDetail')}
+            </p>
+            {phase === 'grading_pending' && (
+              <button
+                type="button"
+                onClick={() => setPhase('grading')}
+                className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700"
+              >
+                <RotateCcw className="h-4 w-4" />
+                {t('quiz.retryGrading')}
+              </button>
+            )}
+          </div>
+        )}
+
         {phase === 'reviewing' && (
           <motion.div
             key="reviewing"
@@ -1076,7 +1043,26 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
 
             {/* Results */}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-              <ScoreBanner score={earnedScore} total={totalPoints} results={results} />
+              {reviewedResults.length === questions.length ? (
+                <ScoreBanner score={earnedScore} total={totalPoints} results={reviewedResults} />
+              ) : (
+                <div role="status" className="flex items-center justify-between gap-3 rounded-xl border border-amber-200/80 bg-amber-50/70 px-4 py-3 dark:border-amber-800/60 dark:bg-amber-950/30">
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    {t('quiz.gradingPending')}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAllowBlankShortAnswers(true);
+                      setPhase('grading');
+                    }}
+                    className="flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    {t('quiz.retryGrading')}
+                  </button>
+                </div>
+              )}
 
               {questions.map((q, i) => {
                 const r = resultMap[q.id];

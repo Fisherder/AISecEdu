@@ -118,7 +118,9 @@
     "softClosing": "토론 계속하기",
     "error": {
       "emptyAgentResponses": "에이전트가 빈 응답을 반환하여 토론이 중단되었습니다. 다시 시도하거나 모델 설정을 확인하세요.",
-      "streamInterrupted": "스트림이 예기치 않게 종료되어 토론이 완료되지 않았습니다. 다시 시도해 주세요."
+      "streamInterrupted": "스트림이 예기치 않게 종료되어 토론이 완료되지 않았습니다. 다시 시도해 주세요.",
+      "invalidDirectorDecision": "수업 진행자가 잘못된 결정을 반환했습니다.",
+      "directorInterrupted": "이번 수업 대화가 일찍 종료되었습니다. 계속 질문할 수 있습니다."
     },
     "tabs": {
       "lecture": "노트",
@@ -551,6 +553,11 @@
     "submitAnswers": "답변 제출",
     "aiGrading": "AI가 채점 중...",
     "aiGradingWait": "잠시만 기다려주세요, 답변을 분석하고 있어요",
+    "gradingPending": "채점 대기 중",
+    "gradingPendingDetail": "답변을 저장했습니다. 다시 시도하여 채점을 완료하세요.",
+    "gradingUnsupported": "자동 채점을 사용할 수 없습니다",
+    "gradingUnsupportedDetail": "답변이 저장되었습니다. 이 퀴즈의 채점 방법을 선생님에게 확인하세요.",
+    "retryGrading": "채점 다시 시도",
     "quizReport": "퀴즈 결과",
     "retry": "다시 풀기"
   },
@@ -642,6 +649,12 @@
       }
     },
     "v2": {
+      "instructorErrors": {
+        "unsupportedQuestion": "일반 학습 질문을 입력해 주세요. 실험 기록이나 개인 정보는 첨부하지 마세요.",
+        "unreadableReply": "프로젝트 튜터의 응답을 읽을 수 없습니다.",
+        "unsupportedReply": "프로젝트 튜터가 지원되지 않는 학습 동작을 반환했습니다.",
+        "unavailable": "프로젝트 튜터를 일시적으로 이용할 수 없습니다."
+      },
       "hero": {
         "title": "Project-Based Learning",
         "stage": "Stages",
@@ -761,6 +774,8 @@
         "pdfNoText": "No extractable text found in this PDF.",
         "imageUploadFailed": "Failed to upload image: {{error}}",
         "imageTooLargeNoStorage": "Image too large to attach without storage configured (max 2 MB locally).",
+        "imageCaptionForEvaluation": "평가용 설명을 입력하세요. 과정에서 허용하는 경우 이번에 새로 선택한 학습 이미지를 보낼 수도 있습니다.",
+        "sendNewTeachingImage": "이번에 새로 선택한 학습 이미지를 평가를 위해 외부 모델로 보냅니다. 저장된 첨부 파일은 제출 기록에 남습니다.",
         "imageNeedsCaptionNoVision": "The current model can't read images. Add a text description of the image before submitting, or switch to a vision-capable model in Settings.",
         "unsupportedFileType": "Unsupported file type. Only text files (.txt, .md, .csv, .json, .py, …) and PDF are accepted.",
         "pasteTab": "Paste text / image",

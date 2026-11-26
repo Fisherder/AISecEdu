@@ -47,6 +47,7 @@ import { createLogger } from '@/lib/logger';
 import { streamLLM } from '@/lib/ai/llm';
 import { buildVisionUserContent } from '@/lib/generation/prompt-formatters';
 import type { ThinkingConfig } from '@/lib/types/provider';
+import { recordHarnessUsage, type HarnessTurn } from '@/lib/server/agent-harness/classroom-turn';
 
 import type {
   PBLEvaluation,
@@ -80,19 +81,22 @@ export interface RunTaskEvaluationArgs {
   project: PBLProjectV2;
   milestoneId: string;
   microtaskId: string;
-  languageModel: LanguageModel;
+  harnessTurn?: HarnessTurn;
+  languageModel?: LanguageModel;
   thinkingConfig?: ThinkingConfig;
   recentChatSummary?: string;
   /** True when the resolved model can read images. Gates whether an image
    *  submission is sent multimodally (else it degrades to text-only eval). */
   hasVision?: boolean;
   signal?: AbortSignal;
+  newTeachingImageCaption?: string;
 }
 
 export interface RunMilestoneEvaluationArgs {
   project: PBLProjectV2;
   milestoneId: string;
-  languageModel: LanguageModel;
+  harnessTurn?: HarnessTurn;
+  languageModel?: LanguageModel;
   thinkingConfig?: ThinkingConfig;
   recentChatSummary?: string;
   signal?: AbortSignal;
@@ -100,7 +104,8 @@ export interface RunMilestoneEvaluationArgs {
 
 export interface RunFinalEvaluationArgs {
   project: PBLProjectV2;
-  languageModel: LanguageModel;
+  harnessTurn?: HarnessTurn;
+  languageModel?: LanguageModel;
   thinkingConfig?: ThinkingConfig;
   recentChatSummary?: string;
   signal?: AbortSignal;
@@ -117,7 +122,8 @@ interface RunSharedArgs {
   milestoneId?: string;
   systemPrompt: string;
   userPrompt: string;
-  languageModel: LanguageModel;
+  harnessTurn?: HarnessTurn;
+  languageModel?: LanguageModel;
   thinkingConfig?: ThinkingConfig;
   /** When set (image submission + vision-capable model), the user turn is sent
    *  as a multimodal message carrying this image instead of a plain prompt.
@@ -134,6 +140,7 @@ async function* runShared(args: RunSharedArgs): AsyncGenerator<PBLSSEEvent, void
     milestoneId,
     systemPrompt,
     userPrompt,
+    harnessTurn,
     languageModel,
     thinkingConfig,
     visionImageSrc,
@@ -152,75 +159,92 @@ async function* runShared(args: RunSharedArgs): AsyncGenerator<PBLSSEEvent, void
   const isMilestone = kind === 'milestone';
   let lastSanitizedLength = 0;
   try {
-    const result = streamLLM(
-      {
-        model: languageModel,
-        system: systemPrompt,
-        // Image submission on a vision-capable model → send the picture as a
-        // multimodal user turn (reusing OpenMAIC's buildVisionUserContent).
-        // Everything else keeps the plain text prompt unchanged.
-        ...(visionImageSrc
-          ? {
-              messages: [
-                {
-                  role: 'user' as const,
-                  content: buildVisionUserContent(userPrompt, [
-                    { id: 'submission', src: visionImageSrc },
-                  ]),
-                },
-              ],
-            }
-          : { prompt: userPrompt }),
-        ...(signal ? { abortSignal: signal } : {}),
-      },
-      `pbl-v2-evaluator-${kind}`,
-      thinkingConfig,
-    );
-    for await (const part of result.fullStream) {
-      switch (part.type) {
-        case 'text-delta': {
-          // AI SDK 6.x uses `text` for the chunk content; fall back to
-          // legacy `textDelta` for safety with older provider shims.
-          const delta =
-            (part as unknown as { text?: string; textDelta?: string }).text ??
-            (part as unknown as { textDelta?: string }).textDelta ??
-            '';
-          if (delta) {
-            fullText += delta;
-            if (!shouldStreamTokens) {
-              break;
-            }
-            if (isMilestone) {
-              const sanitized = sanitizeMilestoneEvaluationFeedback(fullText);
-              const next = sanitized.slice(lastSanitizedLength);
-              if (next) {
-                yield { type: 'token', delta: next };
-                lastSanitizedLength = sanitized.length;
-              }
-              // When sanitized is shorter than fullText the LLM has
-              // started a disallowed section — stop yielding tokens
-              // but keep accumulating so the final evaluation still
-              // gets the complete text for structured-tail parsing.
-            } else {
-              yield { type: 'token', delta };
-            }
-          }
-          break;
-        }
-        case 'error': {
-          const errAny = (part as unknown as { error?: unknown }).error;
-          yield {
-            type: 'error',
-            code: 'LLM_ERROR',
-            message: errAny instanceof Error ? errAny.message : String(errAny ?? 'LLM error'),
-          };
-          yield { type: 'done' };
-          return;
-        }
-        case 'finish':
-        default:
-          break;
+    if (harnessTurn) {
+      if (visionImageSrc) {
+        throw new Error('Harness evaluation does not accept visionImageSrc directly');
       }
+      const result = await harnessTurn(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        signal,
+      );
+      await recordHarnessUsage(result, `pbl-v2-evaluator-${kind}`);
+      fullText = result.text;
+    } else if (languageModel) {
+      const result = streamLLM(
+        {
+          model: languageModel,
+          system: systemPrompt,
+          // Image submission on a vision-capable model → send the picture as a
+          // multimodal user turn (reusing OpenMAIC's buildVisionUserContent).
+          // Everything else keeps the plain text prompt unchanged.
+          ...(visionImageSrc
+            ? {
+                messages: [
+                  {
+                    role: 'user' as const,
+                    content: buildVisionUserContent(userPrompt, [
+                      { id: 'submission', src: visionImageSrc },
+                    ]),
+                  },
+                ],
+              }
+            : { prompt: userPrompt }),
+          ...(signal ? { abortSignal: signal } : {}),
+        },
+        `pbl-v2-evaluator-${kind}`,
+        thinkingConfig,
+      );
+      for await (const part of result.fullStream) {
+        switch (part.type) {
+          case 'text-delta': {
+            // AI SDK 6.x uses `text` for the chunk content; fall back to
+            // legacy `textDelta` for safety with older provider shims.
+            const delta =
+              (part as unknown as { text?: string; textDelta?: string }).text ??
+              (part as unknown as { textDelta?: string }).textDelta ??
+              '';
+            if (delta) {
+              fullText += delta;
+              if (!shouldStreamTokens) {
+                break;
+              }
+              if (isMilestone) {
+                const sanitized = sanitizeMilestoneEvaluationFeedback(fullText);
+                const next = sanitized.slice(lastSanitizedLength);
+                if (next) {
+                  yield { type: 'token', delta: next };
+                  lastSanitizedLength = sanitized.length;
+                }
+                // When sanitized is shorter than fullText the LLM has
+                // started a disallowed section — stop yielding tokens
+                // but keep accumulating so the final evaluation still
+                // gets the complete text for structured-tail parsing.
+              } else {
+                yield { type: 'token', delta };
+              }
+            }
+            break;
+          }
+          case 'error': {
+            const errAny = (part as unknown as { error?: unknown }).error;
+            yield {
+              type: 'error',
+              code: 'LLM_ERROR',
+              message: errAny instanceof Error ? errAny.message : String(errAny ?? 'LLM error'),
+            };
+            yield { type: 'done' };
+            return;
+          }
+          case 'finish':
+          default:
+            break;
+        }
+      }
+    } else {
+      throw new Error('PBL evaluator model is unavailable');
     }
   } catch (err) {
     log.warn(`Evaluator turn threw: ${err instanceof Error ? err.message : String(err)}`);
@@ -325,6 +349,7 @@ export async function* runTaskEvaluation(
     project,
     milestoneId,
     microtaskId,
+    harnessTurn,
     languageModel,
     thinkingConfig,
     recentChatSummary,
@@ -343,12 +368,13 @@ export async function* runTaskEvaluation(
   const { milestone, microtask } = lookup;
   const { system, user } = buildTaskEvalPrompt(project, milestone, microtask, {
     recentChatSummary,
+    newTeachingImageCaption: args.newTeachingImageCaption,
   });
   // Image submission + vision-capable model → grade the picture itself.
   // Otherwise (text/PDF, or a non-vision model) keep the text-only path.
   const latest = latestSubmissionForMicrotask(project, microtaskId);
   const visionImageSrc =
-    args.hasVision && latest?.fileUrl && (latest.mimeType?.startsWith('image/') ?? false)
+    !harnessTurn && args.hasVision && latest?.fileUrl && (latest.mimeType?.startsWith('image/') ?? false)
       ? latest.fileUrl
       : undefined;
   log.info(
@@ -361,6 +387,7 @@ export async function* runTaskEvaluation(
     milestoneId,
     systemPrompt: system,
     userPrompt: user,
+    harnessTurn,
     languageModel,
     thinkingConfig,
     visionImageSrc,
@@ -373,7 +400,15 @@ export async function* runTaskEvaluation(
 export async function* runMilestoneEvaluation(
   args: RunMilestoneEvaluationArgs,
 ): AsyncGenerator<PBLSSEEvent, void, void> {
-  const { project, milestoneId, languageModel, thinkingConfig, recentChatSummary, signal } = args;
+  const {
+    project,
+    milestoneId,
+    harnessTurn,
+    languageModel,
+    thinkingConfig,
+    recentChatSummary,
+    signal,
+  } = args;
   const milestone = project.milestones.find((m) => m.id === milestoneId);
   if (!milestone) {
     yield {
@@ -394,6 +429,7 @@ export async function* runMilestoneEvaluation(
     milestoneId,
     systemPrompt: system,
     userPrompt: user,
+    harnessTurn,
     languageModel,
     thinkingConfig,
     signal,
@@ -405,7 +441,7 @@ export async function* runMilestoneEvaluation(
 export async function* runFinalEvaluation(
   args: RunFinalEvaluationArgs,
 ): AsyncGenerator<PBLSSEEvent, void, void> {
-  const { project, languageModel, thinkingConfig, recentChatSummary, signal } = args;
+  const { project, harnessTurn, languageModel, thinkingConfig, recentChatSummary, signal } = args;
   const { system, user } = buildFinalEvalPrompt(project, { recentChatSummary });
   log.info(`Final eval start: project=${project.title.slice(0, 40)}`);
   for await (const ev of runShared({
@@ -413,6 +449,7 @@ export async function* runFinalEvaluation(
     kind: 'final',
     systemPrompt: system,
     userPrompt: user,
+    harnessTurn,
     languageModel,
     thinkingConfig,
     signal,

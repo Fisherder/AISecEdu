@@ -118,7 +118,9 @@
     "softClosing": "Continue discussion",
     "error": {
       "emptyAgentResponses": "Agents returned empty responses; discussion stopped. Try again or check your model settings.",
-      "streamInterrupted": "Stream ended unexpectedly; discussion didn't complete. Please try again."
+      "streamInterrupted": "Stream ended unexpectedly; discussion didn't complete. Please try again.",
+      "invalidDirectorDecision": "The classroom director returned an invalid decision.",
+      "directorInterrupted": "This classroom turn ended early. You can keep asking questions."
     },
     "tabs": {
       "lecture": "Notes",
@@ -551,6 +553,11 @@
     "submitAnswers": "Submit Answers",
     "aiGrading": "AI is grading...",
     "aiGradingWait": "Please wait, analyzing your answers",
+    "gradingPending": "Grading pending",
+    "gradingPendingDetail": "Your answers are saved. Try again to complete grading.",
+    "gradingUnsupported": "Automatic grading unavailable",
+    "gradingUnsupportedDetail": "Your answers are saved. Ask your teacher how this quiz can be graded.",
+    "retryGrading": "Retry grading",
     "quizReport": "Quiz Report",
     "retry": "Retry"
   },
@@ -642,6 +649,12 @@
       }
     },
     "v2": {
+      "instructorErrors": {
+        "unsupportedQuestion": "Ask a regular learning question without experiment logs or private data.",
+        "unreadableReply": "The project tutor returned an unreadable reply.",
+        "unsupportedReply": "The project tutor returned an unsupported teaching action.",
+        "unavailable": "The project tutor is temporarily unavailable."
+      },
       "hero": {
         "title": "Project-Based Learning",
         "stage": "Stages",
@@ -761,6 +774,8 @@
         "pdfNoText": "No extractable text found in this PDF.",
         "imageUploadFailed": "Failed to upload image: {{error}}",
         "imageTooLargeNoStorage": "Image too large to attach without storage configured (max 2 MB locally).",
+        "imageCaptionForEvaluation": "Add a text description for evaluation, or explicitly choose to send a new teaching image if your course allows it.",
+        "sendNewTeachingImage": "Send the newly selected teaching image to the external model for this evaluation. Saved attachments stay in the submission history.",
         "imageNeedsCaptionNoVision": "The current model can't read images. Add a text description of the image before submitting, or switch to a vision-capable model in Settings.",
         "unsupportedFileType": "Unsupported file type. Only text files (.txt, .md, .csv, .json, .py, …) and PDF are accepted.",
         "pasteTab": "Paste text / image",

@@ -120,6 +120,12 @@ configured_dojo_host="$(sed -n 's/^DOJO_HOST=//p' /data/.config.env)"
 define GLOBAL_AGENT_RUNTIME_PUBLIC_ORIGIN "https://${configured_dojo_host}/agent-runtime"
 define AISECEDU_PUBLIC_ORIGIN "https://${configured_dojo_host}"
 define GLOBAL_AGENT_RUNTIME_FRAME_ANCESTORS "https://${configured_dojo_host} http://${configured_dojo_host}" source-list
+define HARNESS_DEEPSEEK_API_KEY
+define HARNESS_DEEPSEEK_BASE_URL https://api.deepseek.com/anthropic
+define HARNESS_DEEPSEEK_MODEL deepseek-flash
+define HARNESS_DEEPSEEK_IMAGE_INPUT auto
+define HARNESS_ORDINARY_TEACHING_COURSE_IDS
+define HARNESS_SERVICE_SECRET "$(openssl rand -hex 32)"
 define GLOBAL_AGENT_RUNTIME_DATA_VOLUME pwncollege_agent-runtime-data
 
 mv /data/.config.env /data/config.env

@@ -118,7 +118,9 @@
     "softClosing": "Continuar debate",
     "error": {
       "emptyAgentResponses": "Los agentes devolvieron respuestas vacías; el debate se detuvo. Inténtalo de nuevo o revisa la configuración de tu modelo.",
-      "streamInterrupted": "El streaming terminó inesperadamente; el debate no se completó. Inténtalo de nuevo."
+      "streamInterrupted": "El streaming terminó inesperadamente; el debate no se completó. Inténtalo de nuevo.",
+      "invalidDirectorDecision": "El director del aula devolvió una decisión no válida.",
+      "directorInterrupted": "Este turno de clase terminó antes de tiempo. Puedes seguir haciendo preguntas."
     },
     "tabs": {
       "lecture": "Notas",
@@ -551,6 +553,11 @@
     "submitAnswers": "Enviar respuestas",
     "aiGrading": "La IA está calificando...",
     "aiGradingWait": "Espera un momento, analizando tus respuestas",
+    "gradingPending": "Calificación pendiente",
+    "gradingPendingDetail": "Tus respuestas se guardaron. Reintenta para completar la calificación.",
+    "gradingUnsupported": "Calificación automática no disponible",
+    "gradingUnsupportedDetail": "Tus respuestas se guardaron. Pregunta a tu docente cómo se puede calificar este cuestionario.",
+    "retryGrading": "Reintentar calificación",
     "quizReport": "Reporte del cuestionario",
     "retry": "Reintentar"
   },
@@ -642,6 +649,12 @@
       }
     },
     "v2": {
+      "instructorErrors": {
+        "unsupportedQuestion": "Haz una pregunta sobre el tema sin adjuntar registros de experimentos ni datos privados.",
+        "unreadableReply": "No se pudo leer la respuesta del tutor del proyecto.",
+        "unsupportedReply": "El tutor del proyecto devolvió una acción didáctica no compatible.",
+        "unavailable": "El tutor del proyecto no está disponible por el momento."
+      },
       "hero": {
         "title": "Aprendizaje basado en proyectos",
         "stage": "Etapas",
@@ -761,6 +774,8 @@
         "pdfNoText": "No se encontró texto extraíble en este PDF.",
         "imageUploadFailed": "No se pudo subir la imagen: {{error}}",
         "imageTooLargeNoStorage": "La imagen es demasiado grande para adjuntarla sin almacenamiento configurado (máx. 2 MB en local).",
+        "imageCaptionForEvaluation": "Agrega una descripción para la evaluación o elige enviar una imagen educativa nueva si tu curso lo permite.",
+        "sendNewTeachingImage": "Envía la imagen educativa que acabas de elegir al modelo externo para esta evaluación. Los archivos guardados permanecen en el historial de entregas.",
         "imageNeedsCaptionNoVision": "El modelo actual no puede leer imágenes. Agrega una descripción de texto de la imagen antes de entregar, o cambia a un modelo con visión en Configuración.",
         "unsupportedFileType": "Tipo de archivo no compatible. Solo se aceptan archivos de texto (.txt, .md, .csv, .json, .py, …) y PDF.",
         "pasteTab": "Pegar texto / imagen",

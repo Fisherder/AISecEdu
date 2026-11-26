@@ -348,6 +348,7 @@ describe('runPiSingleRequest', () => {
           vi.fn(),
           { current: vi.fn() },
           (key) => key,
+          'en-US',
           onResponseAccepted,
         ),
       ).rejects.toThrow('network down');
@@ -405,6 +406,7 @@ describe('runPiSingleRequest', () => {
         vi.fn(),
         { current: vi.fn() },
         (key) => key,
+        'en-US',
         onResponseAccepted,
       );
     } finally {

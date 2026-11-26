@@ -11,6 +11,7 @@
 | 开通成员、管理基线、安排验收 | [维护者操作手册](development/operations.md) |
 | 查看已经完成的准备及接入项 | [准备与验收记录](development/preparation-20261028.md) |
 | 理解系统边界 | [架构](architecture.md)、[全局智能体](global-agent-architecture.md) |
+| 核对开发版各 AI 入口、权限、配置与回归测试 | [DeepSeek Harness 迁移与平台审查](development/harness-migration.md) |
 | 使用现有完整开发平台 | [开发环境与版本推广](generation-development-workflow.md) |
 | 编写或维护题目与作业 | [分层出题规范](../dojo_plugin/authoring_standards/README.md) |
 

@@ -7,6 +7,14 @@ from ..models import TeachingAgentEventOutbox
 
 
 PROVIDER_EVENT_TYPES = frozenset({"provider.request", "provider.response", "provider.chunk", "provider.finished"})
+SUPPORTED_PROVIDER_JOURNAL_VERSIONS = (1, 2)
+METADATA_FIELDS = {
+    "provider.request": {"providerId", "providerType", "modelId", "url", "method", "headers", "byteLength", "bodySha256"},
+    "provider.response": {"status", "headers", "bodySemantics"},
+    "provider.chunk": {"chunkNumber", "offset", "byteLength", "prefixSha256"},
+    "provider.finished": {"status", "chunksCount", "byteLength", "bodySha256", "errorType"},
+}
+COMMON_METADATA_FIELDS = {"parentCallId", "transportNumber", "journalVersion"}
 SAFE_HEADERS = frozenset({
     "accept", "content-type", "content-length", "content-encoding", "anthropic-version",
     "anthropic-beta", "api-version", "x-request-id", "request-id", "openai-processing-ms", "retry-after",
@@ -28,6 +36,14 @@ def _headers(value):
     )
 
 
+def _digest(value):
+    return isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value) is not None
+
+
+def _transport_version(detail):
+    return detail.get("journalVersion", 1)
+
+
 def decode_provider_bytes(detail, maximum):
     encoded = detail.get("bodyBase64")
     if not isinstance(encoded, str) or len(encoded) > ((maximum + 2) // 3) * 4:
@@ -46,6 +62,11 @@ def decode_provider_bytes(detail, maximum):
 
 
 def validate_provider_event(job_id, attempt, call_id, event_type, detail):
+    version = _transport_version(detail)
+    if not _integer(version, 1, 2):
+        _error("Invalid provider journal version", 400)
+    if version == 2 and detail.keys() - COMMON_METADATA_FIELDS - METADATA_FIELDS[event_type]:
+        _error("Unexpected provider journal metadata field", 400)
     parent = detail.get("parentCallId")
     number = detail.get("transportNumber")
     if (
@@ -70,29 +91,39 @@ def validate_provider_event(job_id, attempt, call_id, event_type, detail):
         if (
             parts is None or parts.scheme not in {"http", "https"} or not parts.hostname
             or parts.username or parts.password or parts.fragment or not safe_query
-            or not _headers(detail.get("headers")) or detail.get("bodyEncoding") != "base64"
+            or not _headers(detail.get("headers")) or (version == 1 and detail.get("bodyEncoding") != "base64")
             or detail.get("method") != "POST"
             or any(not isinstance(detail.get(key), str) or not detail[key] or len(detail[key]) > 256
                    for key in ("providerId", "providerType", "modelId"))
         ):
             _error("Invalid provider request envelope", 400)
-        decode_provider_bytes(detail, 4 * 1024 * 1024)
+        if version == 1:
+            decode_provider_bytes(detail, 4 * 1024 * 1024)
+        elif not _integer(detail.get("byteLength"), 0, 4 * 1024 * 1024) or not _digest(detail.get("bodySha256")):
+            _error("Invalid provider request fingerprint", 400)
     elif event_type == "provider.response":
         if (
             not _integer(detail.get("status"), 100, 599) or not _headers(detail.get("headers"))
-            or detail.get("bodyEncoding") != "base64" or detail.get("bodySemantics") != "fetch-decoded-body"
+            or (version == 1 and detail.get("bodyEncoding") != "base64")
+            or detail.get("bodySemantics") != "fetch-decoded-body"
         ):
             _error("Invalid provider response envelope", 400)
     elif event_type == "provider.chunk":
         if not _integer(detail.get("chunkNumber"), 1, 4096) or not _integer(detail.get("offset"), 0, 32 * 1024 * 1024):
             _error("Invalid provider chunk position", 400)
-        if not decode_provider_bytes(detail, 64 * 1024):
-            _error("Empty provider chunk", 400)
+        if version == 1:
+            if not decode_provider_bytes(detail, 64 * 1024):
+                _error("Empty provider chunk", 400)
+        elif not _integer(detail.get("byteLength"), 1, 64 * 1024) or not _digest(detail.get("prefixSha256")):
+            _error("Invalid provider chunk fingerprint", 400)
     elif (
         detail.get("status") not in {"completed", "failed", "cancelled"}
         or not _integer(detail.get("chunksCount"), 0, 4096)
         or not _integer(detail.get("byteLength"), 0, 32 * 1024 * 1024)
-        or not isinstance(detail.get("bodySha256"), str) or not re.fullmatch(r"[a-f0-9]{64}", detail["bodySha256"])
+        or not _digest(detail.get("bodySha256"))
+        or (version == 2 and "errorType" in detail and (
+            not isinstance(detail["errorType"], str) or not re.fullmatch(r"[a-zA-Z0-9_]{1,64}", detail["errorType"])
+        ))
     ):
         _error("Invalid provider transport outcome", 400)
     return transport_id
@@ -104,28 +135,34 @@ def _event(thread_id, kind, call_id):
     ).first()
 
 
-def provider_prefix(thread_id, transport_id):
+def provider_prefix(thread_id, transport_id, version):
     rows = TeachingAgentEventOutbox.query.filter_by(thread_id=thread_id, event_type="provider.chunk").filter(
         TeachingAgentEventOutbox.payload["callId"].astext.startswith(transport_id + ":chunk:"),
     ).all()
     ordered = sorted(rows, key=lambda row: row.payload["detail"]["chunkNumber"])
     digest = hashlib.sha256()
+    prefix_digest = digest.hexdigest()
     byte_length = 0
     for index, row in enumerate(ordered, 1):
         detail = row.payload["detail"]
-        if detail["chunkNumber"] != index or detail["offset"] != byte_length:
+        if detail["chunkNumber"] != index or detail["offset"] != byte_length or _transport_version(detail) != version:
             _error("Provider chunk journal is incomplete")
-        data = decode_provider_bytes(detail, 64 * 1024)
-        digest.update(data)
-        byte_length += len(data)
-    return {"chunksCount": len(rows), "byteLength": byte_length, "bodySha256": digest.hexdigest()}
+        if version == 1:
+            raw = decode_provider_bytes(detail, 64 * 1024)
+            digest.update(raw)
+            byte_length += len(raw)
+        else:
+            prefix_digest = detail["prefixSha256"]
+            byte_length += detail["byteLength"]
+    return {"chunksCount": len(rows), "byteLength": byte_length,
+            "bodySha256": digest.hexdigest() if version == 1 else prefix_digest}
 
 
 def validate_provider_chain(job, call_id, event_type, detail, transport_id):
     from .model_journal import MODEL_TERMINAL_TYPES
     parent = detail["parentCallId"]
     requested = _event(job.thread_id, "model.requested", parent)
-    if requested is None or requested.payload.get("detail", {}).get("transportJournalVersion") != 1:
+    if requested is None or requested.payload.get("detail", {}).get("transportJournalVersion") != _transport_version(detail):
         _error("Parent model request has no provider transport journal")
     if TeachingAgentEventOutbox.query.filter(
         TeachingAgentEventOutbox.thread_id == job.thread_id,
@@ -152,9 +189,9 @@ def validate_provider_chain(job, call_id, event_type, detail, transport_id):
     elif event_type == "provider.finished":
         if detail["status"] == "completed" and response is None:
             _error("Complete provider transport has no response")
-        prefix = provider_prefix(job.thread_id, transport_id)
+        prefix = provider_prefix(job.thread_id, transport_id, _transport_version(detail))
         if any(detail[key] != value for key, value in prefix.items()):
-            _error("Provider outcome does not match the recorded bytes")
+            _error("Provider outcome does not match the recorded response")
 
 
 def require_finished_provider_calls(job, parent):
@@ -182,5 +219,6 @@ def canceled_provider_details(job):
             yield transport_id, {
                 "parentCallId": original["parentCallId"], "transportNumber": original["transportNumber"],
                 "status": "cancelled", "terminationSource": "job-cancellation", "providerOutcomeKnown": False,
-                **provider_prefix(job.thread_id, transport_id),
+                **({"journalVersion": 2} if _transport_version(original) == 2 else {}),
+                **provider_prefix(job.thread_id, transport_id, _transport_version(original)),
             }

@@ -16,10 +16,10 @@ import type { NextRequest } from 'next/server';
 
 import { createLogger } from '@/lib/logger';
 import { apiError } from '@/lib/server/api-response';
-import { resolveModelFromRequest } from '@/lib/server/resolve-model';
+import { resolveInstructorRuntime } from '@/lib/pbl/v2/api/instructor-runtime';
 
 import { createSSEResponse } from '@/lib/pbl/v2/api/sse';
-import { applyRequestLocaleToProject } from '@/lib/pbl/v2/api/locale';
+import { applyRequestLocaleToProject, instructorErrorMessage } from '@/lib/pbl/v2/api/locale';
 import { runInstructorTurn } from '@/lib/pbl/v2/agents/instructor';
 import { applyQuizSignalsToProject } from '@/lib/pbl/v2/operations/quiz-snapshot';
 import type { PBLProjectV2, PriorQuizResult } from '@/lib/pbl/v2/types';
@@ -52,16 +52,16 @@ export async function POST(req: NextRequest) {
     return apiError('INVALID_REQUEST', 400, "`phase` must be 'greeting' or 'setup'.");
   }
 
-  let resolved;
+  let runtime;
   try {
-    resolved = await resolveModelFromRequest(req, body, 'pbl-v2-runtime:open-task');
+    runtime = await resolveInstructorRuntime(req, body, 'pbl-v2-runtime:open-task');
   } catch (err) {
     log.error('Model resolution failed:', err);
     return apiError('INVALID_REQUEST', 400, err instanceof Error ? err.message : String(err));
   }
 
-  const { model, thinkingConfig } = resolved;
   applyRequestLocaleToProject(req, body.project);
+  if (!runtime) return apiError('UPSTREAM_ERROR', 503, await instructorErrorMessage(body.project, 'unavailable'));
 
   // Stage 2 (pre-play) recalibration: fold prior-quiz accuracy into
   // the adaptive engine before the Instructor turn runs. Only fires
@@ -84,8 +84,7 @@ export async function POST(req: NextRequest) {
       project: body.project,
       userMessage: '',
       phase: body.phase,
-      languageModel: model,
-      thinkingConfig,
+      ...runtime,
       signal: req.signal,
     }),
     { signal: req.signal },

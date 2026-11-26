@@ -62,7 +62,7 @@ export function buildTaskEvalPrompt(
   project: PBLProjectV2,
   milestone: PBLMilestone,
   task: PBLMicrotask,
-  opts: { recentChatSummary?: string } = {},
+  opts: { recentChatSummary?: string; newTeachingImageCaption?: string } = {},
 ): EvalPromptPair {
   const language = resolveLanguage(project);
   const system = loadPBLV2Prompt('evaluator-task', { language });
@@ -85,15 +85,23 @@ export function buildTaskEvalPrompt(
   if (task.hints?.length) {
     sections.push('## Hints that were given\n' + task.hints.map((h) => `- ${h}`).join('\n'));
   }
-  const submissions = summarizeLatestSubmissionForMicrotask(project, task.id);
-  if (submissions) {
-    sections.push(
-      [
-        '## What the learner produced in the latest submission',
-        'Grade this latest submission only. Earlier drafts are context, not evidence to re-score.',
-        submissions,
-      ].join('\n'),
-    );
+  if (opts.newTeachingImageCaption !== undefined) {
+    sections.push([
+      '## Newly supplied teaching image',
+      'Evaluate the image supplied in this turn. It is not an attachment from the saved submission history.',
+      opts.newTeachingImageCaption,
+    ].filter(Boolean).join('\n'));
+  } else {
+    const submissions = summarizeLatestSubmissionForMicrotask(project, task.id);
+    if (submissions) {
+      sections.push(
+        [
+          '## What the learner produced in the latest submission',
+          'Grade this latest submission only. Earlier drafts are context, not evidence to re-score.',
+          submissions,
+        ].join('\n'),
+      );
+    }
   }
   const previousTaskEvals = listEvaluationsForMicrotask(project, task.id)
     .filter((e) => e.kind === 'task')

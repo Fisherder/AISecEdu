@@ -28,9 +28,15 @@
 
 import type { NextRequest } from 'next/server';
 
-import { createLogger } from '@/lib/logger';
 import { apiError } from '@/lib/server/api-response';
-import { resolveModelFromRequest } from '@/lib/server/resolve-model';
+import {
+  createHarnessTurn,
+  createTeachingImageTurn,
+  hasHarnessTeachingImageCapability,
+  MAX_TEACHING_IMAGE_BYTES,
+  type TeachingTurnImage,
+} from '@/lib/server/agent-harness/classroom-turn';
+import { latestSubmissionForMicrotask } from '@/lib/pbl/v2/operations/submission';
 
 import { createSSEResponse } from '@/lib/pbl/v2/api/sse';
 import {
@@ -42,8 +48,6 @@ import type { PBLProjectV2 } from '@/lib/pbl/v2/types';
 
 export const maxDuration = 300;
 
-const log = createLogger('PBL v2 Evaluate API');
-
 type EvalKind = 'task' | 'milestone' | 'final';
 
 interface EvaluateRequest {
@@ -52,6 +56,53 @@ interface EvaluateRequest {
   milestoneId?: string;
   microtaskId?: string;
   recentChatSummary?: string;
+  selectedSubmissionImage?: unknown;
+  newTeachingImage?: { dataUrl: string; consent: true; caption?: string };
+}
+
+function parseSelectedImage(value: unknown): TeachingTurnImage | undefined {
+  if (typeof value !== 'string' || value.length > (MAX_TEACHING_IMAGE_BYTES * 4) / 3 + 64) return;
+  const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match || match[2].length % 4 !== 0) return;
+  const image = { mediaType: match[1] as TeachingTurnImage['mediaType'], data: match[2] };
+  if (Buffer.byteLength(image.data, 'base64') > MAX_TEACHING_IMAGE_BYTES) return;
+  return image;
+}
+
+async function canSendNewTeachingImage(req: NextRequest): Promise<boolean> {
+  if (!/^(1|true|yes)$/i.test(process.env.AISECEDU_INTEGRATED?.trim() || '')) return false;
+  const sessionToken = req.cookies.get('aisecedu_agent_runtime')?.value;
+  const secret = process.env.AISECEDU_SERVICE_SECRET;
+  const origin = process.env.AISECEDU_INTERNAL_URL?.replace(/\/$/, '');
+  if (!sessionToken || !secret || !origin) return false;
+  try {
+    const res = await fetch(`${origin}/pwncollege_api/v1/teaching/runtime/introspect`, {
+      method: 'POST',
+      headers: { 'X-AISecEdu-Service-Token': secret, Authorization: `Bearer ${sessionToken}` },
+      cache: 'no-store',
+      redirect: 'error',
+      signal: AbortSignal.any([req.signal, AbortSignal.timeout(5000)]),
+    });
+    if (!res.ok) return false;
+    const { data } = await res.json();
+    return data?.active === true && data.ordinaryTeachingImageAllowed === true &&
+      Number.isSafeInteger(data.user?.id) && data.user.id > 0 &&
+      data.scope?.user_id === data.user.id &&
+      Number.isSafeInteger(data.scope.dojo_id);
+  } catch {
+    return false;
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    return Response.json(
+      { allowed: await canSendNewTeachingImage(req) && await hasHarnessTeachingImageCapability(req.signal) },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
+  } catch {
+    return Response.json({ allowed: false }, { headers: { 'Cache-Control': 'no-store' } });
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -79,15 +130,36 @@ export async function POST(req: NextRequest) {
     return apiError('MISSING_REQUIRED_FIELD', 400, "kind='milestone' requires milestoneId.");
   }
 
-  let resolved;
-  try {
-    resolved = await resolveModelFromRequest(req, body, 'pbl-v2-runtime:evaluate');
-  } catch (err) {
-    log.error('Model resolution failed:', err);
-    return apiError('INVALID_REQUEST', 400, err instanceof Error ? err.message : String(err));
+  const harnessTurn = createHarnessTurn();
+  if (!harnessTurn) return apiError('UPSTREAM_ERROR', 503, '项目评价服务尚未配置。');
+
+  const submission =
+    body.kind === 'task' && body.microtaskId && Array.isArray(body.project.submissions)
+      ? latestSubmissionForMicrotask(body.project, body.microtaskId)
+      : undefined;
+  const imageSubmission = submission?.kind === 'file' && submission.mimeType?.startsWith('image/');
+  let taskTurn = harnessTurn;
+  let newTeachingImageCaption: string | undefined;
+  if (body.selectedSubmissionImage !== undefined) {
+    return apiError('INVALID_REQUEST', 400, '历史附件仅供查看。若课程允许发送教学图片，请在本轮重新选择图片并确认发送。');
   }
-  const { model, thinkingConfig, modelInfo } = resolved;
-  const hasVision = !!modelInfo?.capabilities?.vision;
+  if (body.newTeachingImage !== undefined) {
+    if (!await canSendNewTeachingImage(req)) {
+      return apiError('FORBIDDEN', 403, '当前会话没有发送教学图片的课程权限。请提交文字说明。');
+    }
+    const image = parseSelectedImage(body.newTeachingImage?.dataUrl);
+    if (body.kind !== 'task' || body.project.scenario || body.newTeachingImage?.consent !== true || !image) {
+      return apiError('INVALID_REQUEST', 400, '请确认发送本轮新选的普通教学图片。');
+    }
+    const imageTurn = createTeachingImageTurn(image);
+    if (!imageTurn) return apiError('UPSTREAM_ERROR', 503, '项目评价服务尚未配置。');
+    taskTurn = imageTurn;
+    newTeachingImageCaption = typeof body.newTeachingImage.caption === 'string'
+      ? body.newTeachingImage.caption.trim().slice(0, 2000)
+      : '';
+  } else if (imageSubmission && !submission.content?.trim()) {
+    return apiError('INVALID_REQUEST', 415, '请提供可供评价的文字说明，或在有权限的课程中明确选择发送本轮新图。');
+  }
 
   if (body.kind === 'task') {
     return createSSEResponse(
@@ -95,10 +167,9 @@ export async function POST(req: NextRequest) {
         project: body.project,
         milestoneId: body.milestoneId!,
         microtaskId: body.microtaskId!,
-        languageModel: model,
-        thinkingConfig,
+        harnessTurn: taskTurn,
+        newTeachingImageCaption,
         recentChatSummary: body.recentChatSummary,
-        hasVision,
         signal: req.signal,
       }),
       { signal: req.signal },
@@ -109,8 +180,7 @@ export async function POST(req: NextRequest) {
       runMilestoneEvaluation({
         project: body.project,
         milestoneId: body.milestoneId!,
-        languageModel: model,
-        thinkingConfig,
+        harnessTurn,
         recentChatSummary: body.recentChatSummary,
         signal: req.signal,
       }),
@@ -121,8 +191,7 @@ export async function POST(req: NextRequest) {
   return createSSEResponse(
     runFinalEvaluation({
       project: body.project,
-      languageModel: model,
-      thinkingConfig,
+      harnessTurn,
       recentChatSummary: body.recentChatSummary,
       signal: req.signal,
     }),

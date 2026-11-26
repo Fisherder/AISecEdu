@@ -2,23 +2,24 @@
  * Pi Director Chat API Endpoint
  *
  * POST /api/chat/pi - parallel PoC path for running the in-class multi-agent
- * chain as a single server-side pi agent loop.
+ * chain through bounded Harness turns and classroom display actions.
  */
 
 import { NextRequest } from 'next/server';
-import { isProviderKeyRequired } from '@/lib/ai/providers';
-import { isPiChatEnabled, isPiWebSearchEnabled } from '@/lib/config/feature-flags';
+import { isPiChatEnabled } from '@/lib/config/feature-flags';
+import { supportedLocales } from '@/lib/i18n/locales';
+import { translateServer } from '@/lib/i18n/server';
+import { defaultLocale } from '@/lib/i18n/types';
 import { createLogger } from '@/lib/logger';
 import {
   getPiMaxActionsPerAgent,
   getPiMaxAgentTurns,
   resolveAgentConfigs,
 } from '@/lib/chat/pi/config';
-import { runPiDirectorLoop } from '@/lib/chat/pi/director-loop';
+import { runHarnessClassroom } from '@/lib/chat/pi/harness-classroom';
 import type { SendEvent } from '@/lib/chat/pi/types';
-import { resolveModel } from '@/lib/server/resolve-model';
+import { createHarnessTurn } from '@/lib/server/agent-harness/classroom-turn';
 import { apiError } from '@/lib/server/api-response';
-import type { ThinkingConfig } from '@/lib/types/provider';
 import type { StatelessChatRequest } from '@/lib/types/chat';
 
 const log = createLogger('Pi Chat API');
@@ -31,12 +32,10 @@ export async function POST(req: NextRequest) {
   }
 
   const encoder = new TextEncoder();
-  let chatModel: string | undefined;
   let chatMessageCount: number | undefined;
 
   try {
     const body: StatelessChatRequest = await req.json();
-    chatModel = body.model;
     chatMessageCount = body.messages?.length;
 
     if (!body.messages || !Array.isArray(body.messages)) {
@@ -65,27 +64,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const {
-      model: languageModel,
-      apiKey: resolvedApiKey,
-      providerId,
-      modelInfo,
-      thinkingConfig: resolvedThinkingConfig,
-    } = await resolveModel({
-      modelString: body.model,
-      stage: 'chat-adapter',
-      apiKey: body.apiKey,
-      baseUrl: body.baseUrl,
-      providerType: body.providerType,
-      // Let resolveModel arbitrate thinking too: a routed chat-adapter's thinking
-      // wins, an unrouted one honors this client thinking (see resolve-model.ts).
-      thinkingConfig: body.thinkingConfig ?? body.thinking,
-    });
-
-    if (isProviderKeyRequired(providerId) && !resolvedApiKey) {
-      return apiError('MISSING_API_KEY', 401, 'API Key is required');
-    }
-
     const agentConfigs = resolveAgentConfigs(body);
     const resolvedAgentIds = new Set(agentConfigs.map((agent) => agent.id));
     const unresolvedAgentIds = agentIds.filter((id) => !resolvedAgentIds.has(id));
@@ -104,20 +82,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const { currentSceneId, scenes } = body.storeState;
+    const currentScene = Array.isArray(scenes) ? scenes.find(scene => scene?.id === currentSceneId) : undefined;
+    if (currentScene && currentScene.type !== 'slide' && currentScene.type !== 'quiz') {
+      return apiError('INVALID_REQUEST', 422, '当前页面不支持课堂对话。请选择幻灯片或测验后重试。');
+    }
+
+    const runTurn = createHarnessTurn();
+    if (!runTurn) return apiError('UPSTREAM_ERROR', 503, '课堂对话服务尚未配置。');
+
     const signal = req.signal;
-    const abortController = new AbortController();
-    signal.addEventListener('abort', () => abortController.abort(), { once: true });
+    const deadline = AbortSignal.any([signal, AbortSignal.timeout(275_000)]);
 
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
 
     const send: SendEvent = async (event) => {
       await writer.write(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-    };
-
-    const thinkingConfig: ThinkingConfig = resolvedThinkingConfig ?? {
-      mode: 'disabled',
-      enabled: false,
     };
 
     const maxAgentTurns = getPiMaxAgentTurns(body);
@@ -145,20 +126,30 @@ export async function POST(req: NextRequest) {
       try {
         startHeartbeat();
 
-        await runPiDirectorLoop({
+        const uiLocale = req.headers.get('x-user-locale')?.trim();
+        const browserLanguage = req.headers.get('accept-language')?.split(/[,;]/, 1)[0].trim().toLowerCase();
+        const locale = supportedLocales.find(({ code }) => code === uiLocale)?.code
+          ?? supportedLocales.find(({ code }) => code.toLowerCase() === browserLanguage)?.code
+          ?? supportedLocales.find(({ code }) => code.split('-')[0] === browserLanguage?.split('-')[0])?.code
+          ?? defaultLocale;
+        const [invalidDecision, interrupted] = await Promise.all([
+          translateServer(locale, 'chat.error.invalidDirectorDecision'),
+          translateServer(locale, 'chat.error.directorInterrupted'),
+        ]);
+
+        await runHarnessClassroom({
           body,
           agentConfigs,
           send,
-          languageModel,
-          thinkingConfig,
-          maxOutputTokens: modelInfo?.outputWindow,
-          contextWindow: modelInfo?.contextWindow,
-          abortSignal: abortController.signal,
-          signal,
+          runTurn,
+          signal: deadline,
+          messages: {
+            invalidDecision,
+            interrupted,
+          },
           maxAgentTurns,
           maxActionsPerAgent,
           enableWhiteboardTools,
-          enableWebSearch: isPiWebSearchEnabled(),
         });
 
         if (signal.aborted) {
@@ -202,10 +193,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    log.error(
-      `Pi chat request failed [model=${chatModel ?? 'unknown'}, messages=${chatMessageCount ?? 0}]:`,
-      error,
-    );
+    log.error(`Pi chat request failed [messages=${chatMessageCount ?? 0}]:`, error);
     return apiError(
       'INTERNAL_ERROR',
       500,
