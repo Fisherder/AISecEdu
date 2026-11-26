@@ -41,6 +41,8 @@ def generation(monkeypatch):
         "review_generated_assignment": quality.review_generated_assignment,
         "DojoChallenges": Mock(),
         "DOJO_AI_AUTHORING_PLAN_MODEL": "old-configured-model",
+        "CoursewareQuizError": type("CoursewareQuizError", (ValueError,), {}),
+        "_generate_courseware_payload": Mock(return_value={"moduleIndex": 3, "items": [], "settings": {"generation": {"mode": "COURSEWARE"}}}),
         "model_json": Mock(),
         "_fallback_generated_items": Mock(side_effect=AssertionError("fallback is forbidden")),
         **{name: getattr(client, name) for name in (
@@ -307,7 +309,11 @@ def test_durable_assignment_route_is_pinned_at_admission(generation, monkeypatch
         payload = ns["prepare_assignment"](operation, actor, 12)
         assert payload["moduleIndex"] == 3
         assert g.post.call_count == (2 if case == "ordinary" else 0)
-        assert g.ns["model_json"].call_count == (0 if case == "ordinary" else 2)
+        if case == "material":
+            assert g.ns["_generate_courseware_payload"].call_count == 1
+            assert g.ns["model_json"].call_count == 0
+        else:
+            assert g.ns["model_json"].call_count == (0 if case == "ordinary" else 2)
     resolve_dojo.assert_called_once_with(actor, g.dojo.dojo_id, teacher=True)
 
 

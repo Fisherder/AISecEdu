@@ -15,8 +15,11 @@ def prepare_assignment(operation, user, thread_id):
     route = operation.get('assignmentAuthoringRoute', LEGACY_ASSIGNMENT_ROUTE)
     if route == ORDINARY_ASSIGNMENT_ROUTE:
         validate_module(dojo, scope['moduleIndex'])
+    material_refs = [ref for ref in operation.get('sourceRefs') or [] if isinstance(ref, dict) and ref.get('type') == 'material']
+    if material_refs:
+        request['sourceRefs'] = material_refs
     db.session.commit()
-    return generate_assignment_payload(request, dojo, authoring_route=route)
+    return generate_assignment_payload(request, dojo, user=user, authoring_route=route)
 
 def apply_teacher_tool(job, operation, action, user, thread, dojo, *, prepared=None):
     from .tool_registry import ToolContext, execute_handler

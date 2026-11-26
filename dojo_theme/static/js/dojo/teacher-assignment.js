@@ -31,7 +31,12 @@
     if (item.artifactId) deps.push(`<a href="/teacher/artifacts/${encodeURIComponent(item.artifactId)}">检查配套教学内容</a>`);
     if (config.libraryPracticeDraftId) deps.push(`<a href="/teacher/courses?dojo=${encodeURIComponent(assignment.dojoReferenceId)}&tab=questions&selectedId=${encodeURIComponent(config.libraryPracticeDraftId)}">检查配套实践题</a>`);
     if (item.challenge?.href) deps.push(`<a href="${escape(item.challenge.href)}">打开实践环境</a>`);
-    return `<section class="assignment-question" data-assignment-item="${index}"><h3>${index + 1}. ${escape(item.title)}</h3>${deps.length ? `<div class="assignment-dependencies">${deps.join(" · ")}<br><small>配套草稿需要单独通过原系统发布检查。</small></div>` : ""}<fieldset ${locked ? "disabled" : ""}><label for="${prefix}-title">题目名称<input id="${prefix}-title" data-item-field="title" maxlength="240" required value="${escape(item.title)}"></label><label>题面<textarea data-item-field="prompt" rows="4" maxlength="16000">${escape(item.prompt || "")}</textarea></label><label>分值<input data-item-field="points" type="number" min="0.1" max="1000" step="0.1" required value="${Number(item.points)}"></label>${answer}</fieldset></section>`;
+    const evidence = config.coursewareEvidence;
+    let evidenceHtml = "";
+    if (evidence && typeof evidence.quote === "string") {
+      evidenceHtml = `<details class="assignment-evidence"><summary>查看课件原文依据</summary><p>${escape(evidence.title || "课程材料")} · 原文分块 ${escape(String(evidence.ordinal))}</p><blockquote>${escape(evidence.quote)}</blockquote><small>材料版本：${escape(evidence.revisionId || "")}</small></details>`;
+    }
+    return `<section class="assignment-question" data-assignment-item="${index}"><h3>${index + 1}. ${escape(item.title)}</h3>${deps.length ? `<div class="assignment-dependencies">${deps.join(" · ")}<br><small>配套草稿需要单独通过原系统发布检查。</small></div>` : ""}${evidenceHtml}<fieldset ${locked ? "disabled" : ""}><label for="${prefix}-title">题目名称<input id="${prefix}-title" data-item-field="title" maxlength="240" required value="${escape(item.title)}"></label><label>题面<textarea data-item-field="prompt" rows="4" maxlength="16000">${escape(item.prompt || "")}</textarea></label><label>分值<input data-item-field="points" type="number" min="0.1" max="1000" step="0.1" required value="${Number(item.points)}"></label>${answer}</fieldset></section>`;
   }
   function render() {
     const a = assignment;
@@ -49,6 +54,12 @@
     $("assignment-items").innerHTML = a.items.map((item,index) => question(item,index,started)).join("");
     $("assignment-items-save").hidden = started;
     $("assignment-edit-hint").textContent = started ? "已有学生开始作答，题目与答案已锁定；仍可查看和调整任务说明。" : "这里修改的是当前课程中的内容，不影响素材库或原课程。参考答案仅供教师编辑。";
+    const groundingAudit = a.settings?.generation?.groundingAudit;
+    if (groundingAudit?.status === "STALE") {
+      $("assignment-edit-hint").textContent += " 题目或说明已修改，生成时的审查已过期；发布前请重新核对答案与课件依据。";
+    } else if (groundingAudit?.status === "VALIDATED") {
+      $("assignment-edit-hint").textContent += " 原文引用与模型审校已完成，仍需教师核对教学质量。";
+    }
     $("assignment-publish").hidden = a.status === "PUBLISHED";
     $("assignment-publish").textContent = a.status === "CLOSED" ? "重新开放给学生" : "确认发布给学生";
     $("assignment-close").hidden = a.status !== "PUBLISHED";

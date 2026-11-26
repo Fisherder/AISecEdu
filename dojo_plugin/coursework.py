@@ -1,18 +1,28 @@
 import datetime
+import json
 import math
+import os
 import re
 
 from CTFd.models import Solves, db
 
 from .config import (
+    DOJO_AI_API_KEY,
     DOJO_AI_AUTHORING_PLAN_MODEL,
+    DOJO_AI_ENABLED,
     DOJO_AI_GRADER_MODEL,
     DOJO_ORDINARY_GRADING_COURSE_IDS,
     DOJO_ORDINARY_GRADING_HARNESS_TOKEN,
     DOJO_ORDINARY_GRADING_HARNESS_URL,
     DOJO_ORDINARY_GRADING_MODE,
 )
-from .agent_runtime.upstream_turn import ordinary_grading_connection
+from .agent_runtime.upstream_turn import (
+    invoke_turn,
+    ordinary_grading_connection,
+    ordinary_teaching_course,
+    request_body,
+    result_object,
+)
 from .learning.intelligence import model_json
 from .learning.grading import build_open_grade_questions, map_open_grade_rows
 from .learning.private_grading import (
@@ -39,6 +49,8 @@ from .coursework_ordinary import (
     use_ordinary_assignment,
 )
 from .coursework_quality import review_generated_assignment
+from .courseware_quiz import CoursewareQuizError, generate_courseware_quiz, items_fingerprint, mark_review_stale, validate_source_refs
+from .agent_runtime.materials import build_course_material_context
 from .authoring_standards import resolve as resolve_standards, prompt as standards_prompt, provenance as standards_provenance
 
 
@@ -626,6 +638,89 @@ def _generated_item(raw, position):
     }
 
 
+def _courseware_model_caller(dojo_id):
+    """Select the scoped model caller for courseware quiz generation.
+
+    Uses native ``model_json`` when direct AI credentials are enabled, otherwise
+    routes allowed ordinary teaching courses with ``AISECEDU_TEACHER_DSH_TEXT=true``
+    through the local DeepSeek Harness ``/v1/turn`` endpoint so copied snapshot
+    courses fail closed as ``MODEL_UNAVAILABLE``.
+    """
+    model_state = {"model": DOJO_AI_AUTHORING_PLAN_MODEL}
+    if DOJO_AI_ENABLED and DOJO_AI_API_KEY:
+        return model_json, model_state
+    base_url = (os.environ.get("HARNESS_INTERNAL_URL") or "").strip()
+    secret = os.environ.get("HARNESS_SERVICE_SECRET") or ""
+    teacher_dsh_text = (os.environ.get("AISECEDU_TEACHER_DSH_TEXT") or "").strip().lower() == "true"
+    if ordinary_teaching_course(dojo_id) and teacher_dsh_text and base_url and secret:
+        def call_dsh(system, payload, **kwargs):
+            turn = invoke_turn(request_body(system, payload))
+            model_state["model"] = turn["model"]
+            text = turn["text"].strip()
+            try:
+                return result_object(text)
+            except ValueError:
+                match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+                if match:
+                    try:
+                        parsed = json.loads(match.group(1).strip())
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except ValueError:
+                        pass
+                start, end = text.find("{"), text.rfind("}")
+                if 0 <= start < end:
+                    try:
+                        parsed = json.loads(text[start:end + 1])
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except ValueError:
+                        pass
+                return {}
+        return call_dsh, model_state
+    return model_json, model_state
+
+
+def _generate_courseware_payload(body, dojo, user, count, kind, pass_percent, standards):
+    if user is None:
+        raise ScopeError("Courseware generation requires an authenticated teacher")
+    dojo_for_user(user, dojo.dojo_id, teacher=True)
+    module_index = validate_module(dojo, body.get("moduleIndex"))
+    refs = validate_source_refs(body["sourceRefs"])
+    if body.get("challengeIds"):
+        raise CoursewareQuizError("INVALID_TYPES", "课件模式仅生成知识测验，配套实践题请单独添加。")
+    prompt = str(body.get("prompt") or body.get("description") or "").strip()[:12000]
+    materials = build_course_material_context(owner_id=user.id, dojo_id=dojo.dojo_id,
+                                              prompt=prompt, source_refs=refs, require_complete=True)
+    call_model, model_state = _courseware_model_caller(dojo.dojo_id)
+    result = generate_courseware_quiz(
+        material_context=materials,
+        context={"course": dojo.name or dojo.id, "moduleIndex": module_index, "difficulty": body.get("difficulty") or "INTERMEDIATE"},
+        count=count, prompt=prompt, model=model_state["model"],
+        call_model=call_model, normalize_item=_generated_item, review_assignment=review_generated_assignment,
+        standards_text=standards_prompt(standards),
+        **({"question_types": body["questionTypes"]} if "questionTypes" in body else {}),
+    )
+    return {
+        "title": (result.get("title") or str(body.get("title") or "") or f"{dojo.name or dojo.id} · 课件测验")[:240],
+        "kind": kind, "moduleIndex": module_index,
+        "description": result.get("description") or "基于所选课程材料的知识测验。",
+        "instructions": result.get("instructions") or "按题目要求作答；单选和判断仅需选择答案，简答按题目评分细则作答。",
+        "availableFrom": body.get("availableFrom"), "dueAt": body.get("dueAt"),
+        "settings": {
+            "allowLate": bool(body.get("allowLate", True)), "allowResubmit": bool(body.get("allowResubmit", True)),
+            "passPercent": max(0, min(100, pass_percent)), "authoringStandards": standards,
+            "generation": {
+                "mode": "COURSEWARE", "model": model_state["model"], "fallback": False,
+                "requestedQuestionCount": count, "generatedQuestionCount": len(result["items"]),
+                "modelGeneratedQuestionCount": len(result["items"]), "sourceRefs": result["sourceRefs"],
+                "qualityReview": result["qualityReview"], "groundingAudit": result["groundingAudit"],
+            },
+        },
+        "items": result["items"],
+    }
+
+
 def assignment_authoring_route(dojo_id, body, *, source_refs=None):
     if "sourceRefs" in body or "questionTypes" in body or any(
         isinstance(ref, dict) and ref.get("type") == "material" for ref in (source_refs or [])
@@ -640,8 +735,8 @@ def assignment_authoring_route(dojo_id, body, *, source_refs=None):
     return LEGACY_ASSIGNMENT_ROUTE
 
 
-def generate_assignment_payload(body, dojo, *, authoring_route=None):
-    """Generate one assignment draft with the course-appropriate authoring route."""
+def generate_assignment_payload(body, dojo, *, user=None, authoring_route=None):
+    """Generate one assignment draft; explicit materials require reviewed evidence."""
 
     prompt = str(body.get("prompt") or body.get("description") or "").strip()
     if not prompt:
@@ -682,6 +777,12 @@ def generate_assignment_payload(body, dojo, *, authoring_route=None):
         authoring_route = assignment_authoring_route(dojo.dojo_id, body)
     if authoring_route not in {LEGACY_ASSIGNMENT_ROUTE, ORDINARY_ASSIGNMENT_ROUTE}:
         raise ValueError("未知的作业生成服务")
+    if "sourceRefs" in body:
+        if authoring_route == ORDINARY_ASSIGNMENT_ROUTE:
+            raise CoursewareQuizError("INVALID_SOURCES", "课件出题不能使用普通作业生成路由。")
+        return _generate_courseware_payload(body, dojo, user, count, kind, pass_percent, standards)
+    if "questionTypes" in body:
+        raise CoursewareQuizError("INVALID_SOURCES", "指定课件题型时必须同时选择 sourceRefs 材料。")
     ordinary = authoring_route == ORDINARY_ASSIGNMENT_ROUTE
     if ordinary and not use_ordinary_assignment(dojo.dojo_id, kind, raw_challenge_ids):
         raise ValueError("当前课程或作业已不符合普通作业生成条件，请重新确认")
@@ -899,6 +1000,12 @@ def delete_assignment(assignment, user):
 def update_assignment(assignment, body, user):
     if "expectedUpdated" in body and body["expectedUpdated"] != timestamp(assignment.updated):
         raise ValueError("内容已在其他页面更新，请刷新后再修改，避免覆盖他人的改动。")
+    generation = (assignment.settings or {}).get("generation") or {}
+    grounded = generation.get("mode") == "COURSEWARE"
+    instructions_changed = grounded and any(field in body and body[field] != getattr(assignment, field)
+                                           for field in ("title", "description", "instructions"))
+    if grounded and isinstance(body.get("settings"), dict) and "generation" in body["settings"]:
+        raise ValueError("生成审查记录由服务端维护，不能通过编辑设置替换。")
     if "title" in body:
         title = str(body.get("title") or "").strip()
         if not title or len(title) > 240:
@@ -932,6 +1039,11 @@ def update_assignment(assignment, body, user):
         if TeachingAssignmentSubmissions.query.filter_by(assignment_id=assignment.id).count():
             raise ValueError("Items cannot be replaced after students have started the assignment")
         replace_items(assignment, body.get("items"))
+    if grounded and ("items" in body or instructions_changed):
+        items = [{"type": item.item_type, "title": item.title, "prompt": item.prompt,
+                  "points": float(item.points), "config": item.config} for item in assignment.items]
+        if instructions_changed or items_fingerprint(items) != (generation.get("groundingAudit") or {}).get("reviewedItemsSha256"):
+            assignment.settings = {**assignment.settings, "generation": mark_review_stale(generation)}
     assignment.updated = utcnow()
     db.session.add(
         LearningAuditEvents(
