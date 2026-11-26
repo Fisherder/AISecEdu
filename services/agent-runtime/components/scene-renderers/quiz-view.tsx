@@ -31,6 +31,7 @@ import {
   type QuizAttemptWriter,
 } from '@/lib/quiz/runtime';
 import {
+  canSubmitQuizAnswers,
   createQuizViewLifetime,
   isQuizRuntimeReady,
   persistQuizReview,
@@ -698,15 +699,10 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
     [questions],
   );
 
-  const canSubmit = useMemo(() => {
-    return questions.every((q) => {
-      if (q.type === 'short_answer') return true;
-      const a = answers[q.id];
-      if (!a) return false;
-      if (Array.isArray(a)) return a.length > 0;
-      return (a as string).trim().length > 0;
-    });
-  }, [questions, answers]);
+  const canSubmit = useMemo(
+    () => canSubmitQuizAnswers(questions, answers, allowBlankShortAnswers),
+    [questions, answers, allowBlankShortAnswers],
+  );
 
   const handleSetAnswer = useCallback(
     (questionId: string, value: string | string[]) => {
@@ -810,6 +806,7 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
         setPhase('not_started');
         setAnswers({});
         setResults([]);
+        setAllowBlankShortAnswers(false);
         setRetrying(false);
         setHydrationVersion((version) => version + 1);
       },
@@ -1049,9 +1046,22 @@ export function QuizView({ questions, sceneId, stageId }: QuizViewProps) {
               {reviewedResults.length === questions.length ? (
                 <ScoreBanner score={earnedScore} total={totalPoints} results={reviewedResults} />
               ) : (
-                <p role="status" className="text-sm text-gray-500 dark:text-gray-400">
-                  {t('quiz.gradingPending')}
-                </p>
+                <div role="status" className="flex items-center justify-between gap-3 rounded-xl border border-amber-200/80 bg-amber-50/70 px-4 py-3 dark:border-amber-800/60 dark:bg-amber-950/30">
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    {t('quiz.gradingPending')}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAllowBlankShortAnswers(true);
+                      setPhase('grading');
+                    }}
+                    className="flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    {t('quiz.retryGrading')}
+                  </button>
+                </div>
               )}
 
               {questions.map((q, i) => {

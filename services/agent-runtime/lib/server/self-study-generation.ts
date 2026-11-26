@@ -295,7 +295,6 @@ export async function createStudentSelfStudyPackage(
       ? capability
       : null;
     const planningInput = buildSelfStudyPlanningInput(request, { ...insight, weakestCapability });
-    requireSelfStudyRequestText(planningInput.description ?? '');
     req.signal.throwIfAborted();
     const runTurn = createHarnessTurn();
     if (!runTurn) throw new Error('Self-study Harness is unavailable');

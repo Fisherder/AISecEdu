@@ -817,6 +817,9 @@ def test_harness_courseware_requires_an_owned_nonpersonal_teacher_course_artifac
     assert namespace["dojo_for_user"](admin, 2, teacher=True).dojo_id == 2
     namespace["Users"] = table(id=admin.id, type=admin.type)
     assert eligible(SimpleNamespace(**job), payload)
+    namespace["Users"] = table(id=admin.id, type=admin.type, banned=True)
+    assert not eligible(SimpleNamespace(**job), payload)
+    namespace["Users"] = table(id=admin.id, type=admin.type)
     namespace["TeachingArtifacts"] = table(id="artifact", owner_id=9, dojo_id=2,
                                            artifact_type="slide-deck", self_workspace_id=None)
     assert not eligible(SimpleNamespace(**job), payload)
@@ -1104,9 +1107,15 @@ def test_upstream_teacher_documents_reach_the_real_private_download_handler(setu
     tree = ast.parse((ROOT / "dojo_plugin/api/v1/teaching.py").read_text())
     tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_job_for_user"
                  or isinstance(node, ast.ClassDef) and node.name == "TeachingJobFile"]
-    endpoint = tree.body[-1]
+    endpoint = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "TeachingJobFile"
+    )
     endpoint.decorator_list = []
-    endpoint.body[0].decorator_list = []
+    next(
+        node for node in endpoint.body
+        if isinstance(node, ast.FunctionDef) and node.name == "get"
+    ).decorator_list = []
     route_namespace = {
         "Resource": object, "TeachingJobs": Job, "ScopeError": ScopeError,
         "_current_user": lambda: SimpleNamespace(id=int(request.headers["Fixture-User"])),
@@ -1223,6 +1232,11 @@ def test_ordinary_teaching_jobs_require_configured_course_and_owned_typed_target
     assert scope(create, candidate) == "candidate-plan"
     assert scope(enrich, material) == "material-summary"
     assert scope(revise, slide) == "slide-wording"
+    namespace["Users"] = table(id=7, type="admin", banned=True)
+    assert scope(create, candidate) is None
+    assert scope(enrich, material) is None
+    assert scope(revise, slide) is None
+    namespace["Users"] = table(id=7, type="admin")
     assert scope(enrich, {**material, "revisionId": "another-material-revision"}) is None
     monkeypatch.setenv("HARNESS_ORDINARY_TEACHING_COURSE_IDS", "3")
     assert scope(create, candidate) is None

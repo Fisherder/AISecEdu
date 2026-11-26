@@ -158,6 +158,7 @@ export async function recordHarnessUsage(result: HarnessTurnResult, source: stri
   const { recordUsage } = await import('@/lib/server/usage-storage');
   const cacheReadTokens = result.usage.cache_read_input_tokens ?? 0;
   const cacheCreationTokens = result.usage.cache_creation_input_tokens ?? 0;
+  // recordUsage() catches storage and platform-reporting errors internally (best-effort); keep mock rejections observable for route tests.
   await recordUsage({
     source,
     providerId: 'deepseek',

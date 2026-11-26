@@ -207,4 +207,15 @@ describe('standalone ordinary self-study generation', () => {
     expect(mocks.publish).not.toHaveBeenCalled();
   });
 
+  it('skips capability labels matching ordinary-text filters without rejecting derived planning descriptions', async () => {
+    mocks.learningContext.mockResolvedValue({
+      insight: { ...insight, weakestCapability: { label: '终端日志分析', score: 25 } },
+    });
+    mocks.turn.mockResolvedValue({ model: 'fixture', text: JSON.stringify(content) });
+    const response = await POST(httpRequest());
+    expect(response.status).toBe(201);
+    const packet = mocks.turn.mock.calls[0][0];
+    expect(packet[1].content).not.toContain('终端日志分析');
+  });
+
 });

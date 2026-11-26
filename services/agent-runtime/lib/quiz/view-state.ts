@@ -74,6 +74,20 @@ export async function persistQuizReview(
   await writer.recordPhase({ ...input, phase: 'reviewed', requireCurrentSubmission: true });
 }
 
+export function canSubmitQuizAnswers(
+  questions: QuizQuestion[],
+  answers: QuizAnswers,
+  allowBlankShortAnswers = false,
+): boolean {
+  return questions.every((question) => {
+    if (question.type === 'short_answer' && allowBlankShortAnswers) return true;
+    const answer = answers[question.id];
+    if (!answer) return false;
+    if (Array.isArray(answer)) return answer.length > 0;
+    return answer.trim().length > 0;
+  });
+}
+
 export interface QuizViewHydratedState {
   phase: 'not_started' | 'answering' | 'grading_pending' | 'grading_unsupported' | 'reviewing';
   answers: QuizAnswers;
@@ -91,6 +105,7 @@ export function quizViewStateFromAttempt(
       phase: 'reviewing',
       answers: state.answers,
       results: state.results ?? [],
+      ...(state.allowBlankShortAnswers ? { allowBlankShortAnswers: true } : {}),
     };
   }
   if (state.phase === 'submitted') {

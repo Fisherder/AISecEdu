@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  canSubmitQuizAnswers,
   createQuizViewLifetime,
   isQuizRuntimeReady,
   persistQuizReview,
@@ -177,5 +178,27 @@ describe('quiz view runtime hydration', () => {
 
     expect(onSuccess).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledExactlyOnceWith(error);
+  });
+
+  it('requires non-blank short answers before initial submit while keeping hydrated blank submissions gradable', () => {
+    const questions = [
+      { id: 'c1', type: 'single' as const, question: 'Pick A', options: [], answer: ['A'] },
+      { id: 's1', type: 'short_answer' as const, question: 'Explain why', answer: [] },
+    ];
+    expect(canSubmitQuizAnswers(questions, { c1: 'A' })).toBe(false);
+    expect(canSubmitQuizAnswers(questions, { c1: 'A', s1: '   ' })).toBe(false);
+    expect(canSubmitQuizAnswers(questions, { c1: 'A', s1: 'Because of x' })).toBe(true);
+    expect(canSubmitQuizAnswers(questions, { c1: 'A' }, true)).toBe(true);
+    expect(
+      quizViewStateFromAttempt(
+        { sessionId: 'a1', status: 'completed', phase: 'reviewed', answers: { c1: 'A' }, allowBlankShortAnswers: true, results: [] },
+        questions,
+      ),
+    ).toEqual({
+      phase: 'reviewing',
+      answers: { c1: 'A' },
+      allowBlankShortAnswers: true,
+      results: [],
+    });
   });
 });

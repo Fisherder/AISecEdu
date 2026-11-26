@@ -2776,8 +2776,10 @@ def _harness_courseware_authorized(job, payload):
     ).first()
     if artifact is None:
         return False
+    # Mirror scope.dojo_for_user(..., teacher=True) for active non-banned platform
+    # admins and course DojoAdmins while still binding the job to owner_id/dojo_id.
     owner = Users.query.filter_by(id=job.owner_id).first()
-    return bool(owner and (
+    return bool(owner and not getattr(owner, "banned", False) and (
         owner.type == "admin" or DojoAdmins.query.filter_by(
             dojo_id=job.dojo_id, user_id=job.owner_id,
         ).first() is not None
@@ -2792,10 +2794,14 @@ def _ordinary_teaching_job_scope(job, payload):
         return None
     if not ordinary_teaching_course(job.dojo_id):
         return None
+    # Same teacher-scope parity as scope.dojo_for_user(..., teacher=True), scoped
+    # to non-banned owners and configured ordinary-teaching courses.
     owner = Users.query.filter_by(id=job.owner_id).first()
-    if not owner or (owner.type != "admin" and not DojoAdmins.query.filter_by(
-        dojo_id=job.dojo_id, user_id=job.owner_id,
-    ).first()):
+    if not owner or getattr(owner, "banned", False) or (
+        owner.type != "admin" and not DojoAdmins.query.filter_by(
+            dojo_id=job.dojo_id, user_id=job.owner_id,
+        ).first()
+    ):
         return None
     if job.kind == "candidate.generate":
         artifact_type = payload.get("artifactType")

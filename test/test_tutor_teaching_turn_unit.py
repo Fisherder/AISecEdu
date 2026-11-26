@@ -181,8 +181,17 @@ def test_online_tutor_omits_observations_from_an_unverified_chain(tutor):
     public_context = json.loads(packet["messages"][-1]["content"])
     assert public_context["verifiedObservations"] == []
     assert unverified_note not in json.dumps(packet)
+    assert "已保存学习反思" not in json.dumps(packet)
     assert result["context"]["evidenceEvents"] == 0
     assert RAW_ENVIRONMENT not in json.dumps(packet)
+
+
+def test_online_tutor_forwards_observations_only_from_a_verified_chain(tutor):
+    tutor.verify_evidence_chain.return_value = {"valid": True}
+    tutor.call("如何确定下一步学习目标？")
+    packet = tutor.invoke_turn.call_args.args[0]
+    public_context = json.loads(packet["messages"][-1]["content"])
+    assert public_context["verifiedObservations"] == ["已保存学习反思"]
 
 
 @pytest.mark.parametrize(("active_id", "client_id", "allowed"), [
