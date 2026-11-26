@@ -872,7 +872,7 @@ def tutor_reply(attempt, user, question, challenge_profile=None):
                     answer, blocked, blocked_reason = fallback, True, "OVERLONG_HINT"
             model, usage = response["model"], response["usage"]
             provider = "MODEL_BLOCKED" if blocked else "MODEL"
-        except (ValueError, TypeError, KeyError) as exception:
+        except (UpstreamTurnError, ValueError, TypeError, KeyError) as exception:
             error = str(exception)[:500]
             answer = fallback
             provider = "MODEL_UNAVAILABLE"

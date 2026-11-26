@@ -1763,6 +1763,9 @@ export async function* runInstructorTurn(
       throw new OrdinaryInstructorError('unavailable');
     }
   } catch (err) {
+    if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+      throw err;
+    }
     log.warn(`Instructor turn threw: ${err instanceof Error ? err.message : String(err)}`);
     const message = err instanceof OrdinaryInstructorError || harnessTurn
       ? await instructorErrorMessage(project, err instanceof OrdinaryInstructorError ? err.key : 'unavailable')

@@ -148,10 +148,12 @@ def provider_prefix(thread_id, transport_id, version):
         if detail["chunkNumber"] != index or detail["offset"] != byte_length or _transport_version(detail) != version:
             _error("Provider chunk journal is incomplete")
         if version == 1:
-            digest.update(decode_provider_bytes(detail, 64 * 1024))
+            raw = decode_provider_bytes(detail, 64 * 1024)
+            digest.update(raw)
+            byte_length += len(raw)
         else:
             prefix_digest = detail["prefixSha256"]
-        byte_length += detail["byteLength"]
+            byte_length += detail["byteLength"]
     return {"chunksCount": len(rows), "byteLength": byte_length,
             "bodySha256": digest.hexdigest() if version == 1 else prefix_digest}
 

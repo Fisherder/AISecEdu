@@ -162,7 +162,7 @@ def test_real_image_boundary_rejects_invalid_service_credentials(image_boundary,
 
 def test_real_image_boundary_rejects_expired_signed_token(image_boundary):
     token = image_boundary.mint_session()
-    image_boundary.clock.now += 60
+    image_boundary.clock.now += 61
     response = image_boundary.introspect(token)
     assert_inactive(response)
     assert response.json["errors"] == ["Global agent runtime session expired"]

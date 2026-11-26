@@ -72,29 +72,36 @@ describe('PBL v2 runtime routes forward MODEL_ROUTES stages', () => {
     vi.stubEnv('DOJO_AI_ENABLED', 'true');
     vi.stubEnv('HARNESS_INTERNAL_URL', 'http://harness.invalid:3081');
     vi.stubEnv('HARNESS_SERVICE_SECRET', 'fixture');
-    const { POST } = await import('@/app/api/pbl/v2/evaluate/route');
-    const response = await POST(
-      makeRequest({
-        project: {
-          submissions: [
-            {
-              id: 's1',
-              kind: 'file',
-              microtaskId: 't1',
-              fileUrl: '/image.png',
-              mimeType: 'image/png',
-            },
-          ],
-        },
-        kind: 'task',
-        milestoneId: 'm1',
-        microtaskId: 't1',
-        apiKey: 'browser-key',
-        baseUrl: 'https://browser.invalid',
-      }),
-    );
-    expect(response.status).toBe(415);
-    expect(mocks.resolveModelFromRequest).not.toHaveBeenCalled();
+    const fetchSpy = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const { POST } = await import('@/app/api/pbl/v2/evaluate/route');
+      const response = await POST(
+        makeRequest({
+          project: {
+            submissions: [
+              {
+                id: 's1',
+                kind: 'file',
+                microtaskId: 't1',
+                fileUrl: '/image.png',
+                mimeType: 'image/png',
+              },
+            ],
+          },
+          kind: 'task',
+          milestoneId: 'm1',
+          microtaskId: 't1',
+          apiKey: 'browser-key',
+          baseUrl: 'https://browser.invalid',
+        }),
+      );
+      expect(response.status).toBe(415);
+      expect(mocks.resolveModelFromRequest).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('scenario open-task keeps its separate runtime stage', async () => {

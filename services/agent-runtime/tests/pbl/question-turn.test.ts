@@ -140,6 +140,7 @@ describe('PBL ordinary questioning', () => {
       expect(response.status).toBe(503);
       expect(await response.text()).not.toContain('fixture-only');
       expect(log).toHaveBeenCalledOnce();
+      expect(log.mock.calls[0]).toHaveLength(1);
       const logged = String(log.mock.calls[0][0]);
       expect(logged).toContain('PBL chat turn failed');
       expect(logged).not.toMatch(/fixture-only|怎样澄清项目目标|课堂助教/);

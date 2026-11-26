@@ -56,6 +56,8 @@ describe('concept short-answer grading', () => {
 
   it.each([
     'model did not return JSON',
+    'First {"score":3,"comment":"A"} and second {"score":2,"comment":"B"}',
+    '```json\n{"score":3,"comment":"A"}\n```\n```json\n{"score":2,"comment":"B"}\n```',
     '{"score":"3","comment":"Feedback"}',
     '{"score":null,"comment":"Feedback"}',
     '{"score":1e999,"comment":"Feedback"}',
@@ -65,6 +67,17 @@ describe('concept short-answer grading', () => {
     const result = await POST(request({ question, userAnswer, points }));
     expect(result.status).toBe(503);
     expect(await result.json()).not.toHaveProperty('score');
+    expect(harness.recordHarnessUsage).toHaveBeenCalledOnce();
+  });
+
+  it('extracts a single JSON grade object wrapped in brief prose', async () => {
+    harness.runTurn.mockResolvedValue({
+      ...response,
+      text: `Here is the grade: {"score":3,"comment":"${feedback}"}`,
+    });
+    const result = await POST(request({ question, userAnswer, points }));
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ success: true, score: 3, comment: feedback });
     expect(harness.recordHarnessUsage).toHaveBeenCalledOnce();
   });
 

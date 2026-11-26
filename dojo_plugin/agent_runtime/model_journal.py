@@ -33,6 +33,7 @@ MODEL_AUDIT_FIELDS = {
     "model.step": {"parentCallId", "stepNumber", "finishReason", "usage", "toolCallCount", "toolResultCount"},
     "model.settled": {"finishReason", "usage", "totalUsage", "stepsCount"},
     "model.failed": {"source", "attempt", "errorType", "retryable"},
+    "model.cancelled": {"terminationSource", "reason"},
 }
 USAGE_FIELDS = {
     "inputTokens", "outputTokens", "totalTokens", "inputTokenDetails", "outputTokenDetails",
@@ -50,7 +51,10 @@ class ModelJournalError(ValueError):
 
 
 def validate_model_audit_metadata(event_type, detail):
-    if detail.keys() - MODEL_AUDIT_FIELDS[event_type]:
+    allowed = MODEL_AUDIT_FIELDS.get(event_type)
+    if allowed is None:
+        raise ModelJournalError("Unsupported model audit event")
+    if detail.keys() - allowed:
         raise ModelJournalError("Unexpected model audit metadata field")
     for field in ("usage", "totalUsage"):
         if field not in detail:

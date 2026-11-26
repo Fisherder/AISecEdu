@@ -3416,7 +3416,10 @@ class LearningGuide(Resource):
                         "package": "个人学习包已生成。打开下方卡片即可阅读讲解和完成文字自检。",
                         "handout": "学习讲义已生成。打开下方卡片即可阅读。",
                         "self_check": "概念自检已生成。打开下方卡片即可作答。",
-                    }[package["studyProduct"]]
+                    }.get(
+                        package.get("studyProduct"),
+                        "个人学习包已生成。打开下方卡片即可阅读讲解和完成文字自检。",
+                    )
                 except UpstreamTurnError:
                     study_package_reply = "学习包服务暂时不可用。请求已保存在对话中，请稍后重试。"
                 except (ScopeError, ValueError):

@@ -165,6 +165,9 @@ def test_job_cancellation_event_is_owned_by_reconciliation(setup):
     assert journal.record_model_event(job.id, {
         "type": "model.failed", "attemptCount": 1, "callId": call_id, "detail": {},
     }) == {"accepted": True, "ignored": True, "terminalType": "model.cancelled"}
+    journal.validate_model_audit_metadata("model.cancelled", detail)
+    with pytest.raises(journal.ModelJournalError, match="Unsupported model audit event"):
+        journal.validate_model_audit_metadata("model.unknown", {})
 
 
 def test_cancel_reloads_terminal_state_before_mutation(setup):
@@ -747,6 +750,10 @@ def test_provider_audit_records_only_fingerprints_and_compatible_legacy_retries(
         **legacy_common, "status": "completed", "chunksCount": 1, "byteLength": 1, "bodySha256": legacy_chunk["bodySha256"],
     })["accepted"]
     assert record("model.settled", legacy_parent, {"text": "synthetic historic result"})["accepted"]
+    provider_journal = importlib.import_module("harness_fixture.agent_runtime.provider_journal")
+    assert provider_journal.provider_prefix(thread.id, legacy_transport, 1) == {
+        "chunksCount": 1, "byteLength": 1, "bodySha256": legacy_chunk["bodySha256"],
+    }
 
 
 def test_canceling_provider_audit_uses_the_last_committed_response_fingerprint(setup):

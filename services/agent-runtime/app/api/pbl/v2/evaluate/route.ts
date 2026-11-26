@@ -95,10 +95,14 @@ async function canSendNewTeachingImage(req: NextRequest): Promise<boolean> {
 }
 
 export async function GET(req: NextRequest) {
-  return Response.json(
-    { allowed: await canSendNewTeachingImage(req) && await hasHarnessTeachingImageCapability(req.signal) },
-    { headers: { 'Cache-Control': 'no-store' } },
-  );
+  try {
+    return Response.json(
+      { allowed: await canSendNewTeachingImage(req) && await hasHarnessTeachingImageCapability(req.signal) },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
+  } catch {
+    return Response.json({ allowed: false }, { headers: { 'Cache-Control': 'no-store' } });
+  }
 }
 
 export async function POST(req: NextRequest) {

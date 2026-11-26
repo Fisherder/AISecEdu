@@ -259,6 +259,11 @@ export async function POST(req: NextRequest) {
         error instanceof SelfStudyGenerationError
           ? error.publicMessage
           : '内容生成暂时失败，请稍后重试';
+      trace.push({
+        label: `创建${product}`,
+        detail: reason,
+        status: 'completed',
+      });
       reply = studyPackageReply(`本次${product}没有生成。学习目标已保留。${reason}。`, decision.reply, message);
     }
   }

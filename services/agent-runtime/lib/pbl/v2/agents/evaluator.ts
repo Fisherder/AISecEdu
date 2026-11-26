@@ -160,6 +160,9 @@ async function* runShared(args: RunSharedArgs): AsyncGenerator<PBLSSEEvent, void
   let lastSanitizedLength = 0;
   try {
     if (harnessTurn) {
+      if (visionImageSrc) {
+        throw new Error('Harness evaluation does not accept visionImageSrc directly');
+      }
       const result = await harnessTurn(
         [
           { role: 'system', content: systemPrompt },
@@ -371,7 +374,7 @@ export async function* runTaskEvaluation(
   // Otherwise (text/PDF, or a non-vision model) keep the text-only path.
   const latest = latestSubmissionForMicrotask(project, microtaskId);
   const visionImageSrc =
-    args.hasVision && latest?.fileUrl && (latest.mimeType?.startsWith('image/') ?? false)
+    !harnessTurn && args.hasVision && latest?.fileUrl && (latest.mimeType?.startsWith('image/') ?? false)
       ? latest.fileUrl
       : undefined;
   log.info(

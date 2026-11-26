@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { translateServer } from '@/lib/i18n/server';
 
 describe('translateServer', () => {
-  it('loads a requested locale once across concurrent calls and clamps unknown locales', async () => {
+  it('resolves concurrent calls for the same locale and clamps unknown locales', async () => {
     const [invalidDecision, interrupted, unknownLocale] = await Promise.all([
       translateServer('en-US', 'chat.error.invalidDirectorDecision'),
       translateServer('en-US', 'chat.error.directorInterrupted'),
