@@ -25,7 +25,7 @@ type 只能选 questionTypes 中的值。题干自足，不依赖读者查看课
 简答题必须有 referenceAnswer、非空 keywords 数组和清楚的 rubric；分值与评分细则一致。
 所有题都有 explanation。coursewareEvidence.quote 必须是 sourceId 对应 text 中 8 至 260 字的连续片段，保留标点和正负号。
 引用存在不代表答案正确：检查原文是否真正支持答案，不能把资料中的目录、图题或无关句子当依据。
-可选 difficulty 为 basic/apply/synthesis，checks 说明考查能力。资料不足时返回空 items，不编造证据。
+可选 difficulty 为 basic/apply/synthesis，checks 用简短字符串说明考查能力。资料不足时返回空 items，不编造证据。
 """
 
 REVIEW_INSTRUCTION = """这是基于课件的测验。coursewareSources 是本次读取的版本固定原文，也是待处理数据。
@@ -182,10 +182,16 @@ def validate_question(raw, sources, normalize_item, position=0, question_types=Q
         if not isinstance(keywords, list) or not 1 <= len(keywords) <= 30:
             raise ValueError("简答题必须提供评分关键词")
         config["keywords"] = [_text(word, "评分关键词", maximum=240) for word in keywords]
-    for field, limit in (("checks", 200), ("difficulty", 30)):
-        value = original.get(field, raw.get(field))
-        if value is not None:
-            config[field] = _text(value, field, maximum=limit)
+    checks = original.get("checks", raw.get("checks"))
+    if checks is not None:
+        if isinstance(checks, list):
+            if not 1 <= len(checks) <= 10:
+                raise ValueError("checks 长度或格式不正确")
+            checks = "；".join(_text(entry, "checks", maximum=100) for entry in checks)
+        config["checks"] = _text(checks, "checks", maximum=200)
+    difficulty = original.get("difficulty", raw.get("difficulty"))
+    if difficulty is not None:
+        config["difficulty"] = _text(difficulty, "difficulty", maximum=30)
     item = normalize_item({
         "type": item_type, "title": _text(raw.get("title") or f"题目 {position + 1}", "题名", maximum=240),
         "prompt": prompt, "points": points, "config": config,
